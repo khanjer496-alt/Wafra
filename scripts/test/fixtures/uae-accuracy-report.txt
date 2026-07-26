@@ -1,0 +1,133 @@
+#1 (seen 15x):
+Purchase of AED 96.00 with Debit Card ending 4502 at URBANCLAP TECHNOLOGIES, DUBAI. Avl Balance is AED 258.91.
+
+#2 (seen 11x):
+Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit Card ending with 4110. Available limit AED 59,797.61.
+
+#3 (seen 11x):
+Payment for GINNYS PLUS TRADING of AED 5.25 has been made using Credit Card ending with
+ 4110. Available limit AED 64,648.00.
+
+#6 (seen 6x):
+Debit Card Purchase  
+Card XXXX5083
+AED 10.00
+DUBAI INTEGRATED ECONODUBAI           AE 
+03/02/26 14:26 
+Balance AED 9774.87
+
+#8 (seen 6x):
+Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card ending with
+ 4110. Available limit AED 63,155.07.
+
+#10 (seen 5x):
+From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. Your available balance is AED 1,430.28
+
+#13 (seen 4x):
+Debit Card Purchase  
+Card XXXX5083
+AED 53.58
+MARK AND SAVE         Dubai           AE 
+19/02/26 15:45 
+Balance AED 1780.67
+
+#15 (seen 4x):
+Debit Card Purchase 
+Debit Account XXXX7001 
+Card XXXX5083 
+AED 29.00 
+FRIENDS AVENUE CATERINDUBAI           AE 
+14/10/25 14:14 
+Available Balance AED 1047.24
+
+#17 (seen 4x):
+From HSBC: 24JAN24 LIME*RIDE COST Purchase from 041-340***-001 AED 32.00- by Card Ending with 6737. Your available balance is AED 485.20
+
+#21 (seen 4x):
+AED 7,000.00 has been debited from your account no. 095XXX13XXX01 TO LIV FROM EMERGENCY FUNDS. The available balance is AED 7,939.20.
+
+#29 (seen 3x):
+From HSBC: 27SEP24 ZIINA* CLENTIZER96 Purchase from 041-340***-001 AED 103.95- by Card Ending with 6737. Your available balance is AED 7,604.23
+
+#36 (seen 3x):
+AED 4,000.00 has been debited from your account no. 096XXX13XXX 0007 RULE TRANSFER TO EMERGENCY FUNDS WITH ONE-SHOT SAV. The available balance is AED 4,000.95.
+
+#42 (seen 2x):
+Debit Card Purchase  
+Card XXXX5083
+AED 378.00
+Ziina  *CLEANTIZER SERDubai           AE 
+01/05/26 22:19 
+Balance AED 8202.35
+
+#44 (seen 2x):
+Debit Card Purchase  
+Card XXXX5083
+AED 756.00
+Ziina                 Dubai           AE 
+29/12/25 17:47 
+Balance AED ····5193.16
+
+#65 (seen 2x):
+Purchase of AED 33.00 with Debit Card ending 4502 at LIME*TEMP HOLD, +····3345. Avl Balance is AED 68.89.
+
+#93 (seen 1x):
+Debit Card Purchase  
+Card XXXX5083
+AED 450.45
+e& Digital App        Abu Dhabi       AE 
+27/06/26 11:43 
+Balance AED ····3038.72
+
+#101 (seen 1x):
+Debit Card Purchase  
+Card XXXX5083
+AED 59.00
+····8730 TGI FRIDAYS DUBADUBAI           AE 
+19/05/26 14:02 
+Balance AED 1920.62
+
+#102 (seen 1x):
+Debit Card Purchase  
+Card XXXX5083
+AED 8.25
+POS*Madinat Aljaddaf GDubai           AE 
+10/05/26 00:11 
+Balance AED 3656.48
+
+#108 (seen 1x):
+Debit Card Purchase  
+Card XXXX5083
+AED 134.00
+TAP*CASA PONS         Dubai           AE 
+31/03/26 15:47 
+Balance AED 6002.98
+
+#137 (seen 1x):
+Debit Card Purchase  
+Card XXXX5083
+AED 49.99
+GOOGLE*FINART AI EXPE G.CO/HELPPAY#CA US 
+13/12/25 11:59 
+Balance AED 6576.11
+
+#163 (seen 1x):
+From HSBC: 08SEP25 PAYPAL *CXIANGHUI01L Purchase from 041-340***-001 AED 259.40- by Card Ending with 6737. Your available balance is AED 7.03
+
+#192 (seen 1x):
+From HSBC: 09JUN25 LinkedInPreC *····8106 Purchase from 041-340***-001 AED 188.99- by Card Ending with 6737. Your available balance is AED 2,907.89
+
+#218 (seen 1x):
+Your Credit Card ending *** 6383 was used for AED 231.95 at BUSINESS HUB GOVERNMEN. Your available limit is AED 1659.58
+
+#225 (seen 1x):
+Your Credit Card ending *** 6383 was used for AED ····0710.00 at MSPLUS DOCUMENTS CL.... Your available limit is AED 3019.69
+
+#241 (seen 1x):
+Purchase of AED 3.70 with Debit Card ending 4502 at CANVA* PAAAAGKXBV6MRRQ, +····3388. Avl Balance is AED 2.87.  Pls refer stmt for exact amt.
+
+#288 (seen 1x):
+From HSBC: 12JUL24 GlobalE /HoneyLove Purchase from 041-340***-001 AED 316.80- by Card Ending with 6737. Your available balance is AED 8,721.31
+
+#346 (seen 1x):
+We've issued your refund of 58.89 AED for your cancelled order.

@@ -15,6 +15,7 @@ function t(name, msg, expect) {
       if (expect.type !== undefined && p.type !== expect.type) errs.push(`type ${p.type} != ${expect.type}`);
       if (expect.category !== undefined && p.categoryGuess !== expect.category) errs.push(`cat ${p.categoryGuess} != ${expect.category}`);
       if (expect.date !== undefined && p.date !== expect.date) errs.push(`date ${p.date} != ${expect.date}`);
+      if (expect.transfer !== undefined && p.transferHint !== expect.transfer) errs.push(`transfer ${p.transferHint} != ${expect.transfer}`);
     }
   }
   if (errs.length) { fail++; console.log(`✗ ${name}\n    ${errs.join('\n    ')}`); }
@@ -982,6 +983,88 @@ t('leap day parses',
 t('29 Feb in a non-leap year is rejected',
   'Purchase of AED 10.00 with Credit Card ending 4833 at LULU on 29/02/2025',
   { date: null });
+
+// ── Formats from a second user's inbox (a 346-message accuracy report) ──
+// Every case below was in that report because the parser could not read it.
+
+// The single biggest family: the payee sits BEFORE the amount, with none of
+// the prepositions the merchant matcher looks for. 32 messages arrived titled
+// "Card purchase" and could never group into a merchant.
+t('payment-for names the payee, not "Card purchase"',
+  'Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit Card ending with 4110. Available limit AED 59,797.61.',
+  { merchant: 'Ginnys Plus Trading', amountFils: 225, type: 'expense' });
+
+t('payment-for survives the newline banks put before the card number',
+  'Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card ending with\n 4110. Available limit AED 63,155.07.',
+  { merchant: 'Caribou Coffee', amountFils: 2600, category: 'dining' });
+
+t('payment-for keeps a descriptor with punctuation in it',
+  'Payment for ENOC SITE - 49/6915 of AED 108.01 has been made using Credit Card ending with 4110. Available limit AED 65,810.74.',
+  { merchant: 'ENOC Site - 49/6915', amountFils: 10801, category: 'transport' });
+
+// The acquirer descriptor is a fixed-width field, so the city is glued onto a
+// truncated name with no separator at all.
+t('glued city is stripped off a truncated descriptor',
+  'Debit Card Purchase\nCard XXXX5083\nAED 29.00\nFRIENDS AVENUE CATERINDUBAI           AE \n14/10/25 14:14 \nAvailable Balance AED 1047.24',
+  { merchant: 'Friends Avenue', amountFils: 2900, category: 'dining', date: '2025-10-14' });
+
+t('stripping the glued city keeps the last letter of the name',
+  'Debit Card Purchase\nCard XXXX5083\nAED 10.00\nDUBAI INTEGRATED ECONODUBAI           AE \n03/02/26 14:26 \nBalance AED 9774.87',
+  { merchant: 'Dubai Integrated Economic Zones', amountFils: 1000, date: '2026-02-03' });
+
+t('two glued places both come off',
+  'Debit Card Purchase\nCard XXXX5083\nAED 59.00\n····8730 TGI FRIDAYS DUBADUBAI           AE \n19/05/26 14:02 \nBalance AED 1920.62',
+  { merchant: 'TGI Fridays', amountFils: 5900, category: 'dining' });
+
+t('gateway prefix is not the merchant',
+  'Debit Card Purchase\nCard XXXX5083\nAED 378.00\nZiina  *CLEANTIZER SERDubai           AE \n01/05/26 22:19 \nBalance AED 8202.35',
+  { merchant: 'Cleantizer', amountFils: 37800 });
+
+t('the same merchant from HSBC resolves to the same name',
+  'From HSBC: 27SEP24 ZIINA* CLENTIZER96 Purchase from 041-340***-001 AED 103.95- by Card Ending with 6737. Your available balance is AED 7,604.23',
+  { merchant: 'Cleantizer', amountFils: 10395 });
+
+t('a truncated HSBC descriptor resolves to the same name as the full one',
+  'From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. Your available balance is AED 1,430.28',
+  { merchant: 'Dubai Integrated Economic Zones', amountFils: 1000 });
+
+t('one merchant, three spellings, one name',
+  'Purchase of AED 96.00 with Debit Card ending 4502 at URBANCLAP TECHNOLOGIES, DUBAI. Avl Balance is AED 258.91.',
+  { merchant: 'UrbanClap', amountFils: 9600 });
+
+t('Google bills through a help URL, not a location',
+  'Debit Card Purchase\nCard XXXX5083\nAED 49.99\nGOOGLE*FINART AI EXPE G.CO/HELPPAY#CA US \n13/12/25 11:59 \nBalance AED 6576.11',
+  { merchant: 'Finart Ai Expe', amountFils: 4999, category: 'entertainment' });
+
+// A savings pot has a name, and the name is rarely the word "savings".
+t('a named savings pot is a transfer, not AED 7,000 of spending',
+  'AED 7,000.00 has been debited from your account no. 095XXX13XXX01 TO LIV FROM EMERGENCY FUNDS. The available balance is AED 7,939.20.',
+  { merchant: 'Savings transfer', amountFils: 700000, transfer: true });
+
+t('an automated savings rule is a transfer too',
+  'AED 4,000.00 has been debited from your account no. 096XXX13XXX 0007 RULE TRANSFER TO EMERGENCY FUNDS WITH ONE-SHOT SAV. The available balance is AED 4,000.95.',
+  { merchant: 'Savings transfer', amountFils: 400000, transfer: true });
+
+t('a refund says so',
+  "We've issued your refund of 58.89 AED for your cancelled order.",
+  { merchant: 'Refund', type: 'income', amountFils: 5889 });
+
+t("Etisalat's own app is telecom, not Other",
+  'Debit Card Purchase\nCard XXXX5083\nAED 450.45\ne& Digital App        Abu Dhabi       AE \n27/06/26 11:43 \nBalance AED ····3038.72',
+  { merchant: 'E& Digital App', category: 'telecom' });
+
+t('a truncated government descriptor still reads as government',
+  'Your Credit Card ending *** 6383 was used for AED 231.95 at BUSINESS HUB GOVERNMEN. Your available limit is AED 1659.58',
+  { category: 'government', amountFils: 23195 });
+
+t('Lime scooters are transport under any of their three descriptors',
+  'Purchase of AED 33.00 with Debit Card ending 4502 at LIME*TEMP HOLD, +····3345. Avl Balance is AED 68.89.',
+  { merchant: 'Lime', category: 'transport', amountFils: 3300 });
+
+// A masked amount stays unreadable: a fragment of a figure is not the figure.
+t('a masked amount is still refused, not guessed',
+  'Your Credit Card ending *** 6383 was used for AED ····0710.00 at MSPLUS DOCUMENTS CL.... Your available limit is AED 3019.69',
+  null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -75,6 +75,7 @@ let TOTAL_DUE_RE = /x^/;
 let OUTSTANDING_RE = /x^/;
 let CARD_PAYMENT_RE = /x^/;
 let DEBIT_WORDS = /x^/;
+let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
 let FX_SUFFIX_RE = /x^/;
 let compiledForMarket = '';
@@ -101,6 +102,13 @@ function ensureCurrencyPatterns(): void {
     `\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   CARD_PAYMENT_RE = new RegExp(
     `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\s+)?(?:credit\\s+)?card|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?credit\\s+card|received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card|thank you for (?:your )?payment.*card|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`, 'i');
+  // "Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit
+  // Card ending with 4110." The payee sits BEFORE the amount with none of the
+  // prepositions MERCHANT_RE looks for, so every message in this format
+  // arrived titled "Card purchase" — a third of one user's unread report, and
+  // rows that could never group into a merchant or a subscription.
+  PAYMENT_FOR_RE = new RegExp(
+    `payment\\s+for\\s+([A-Za-z0-9][^\\n]{1,48}?)\\s+of\\s+(?:${CUR})\\s*[\\d,]`, 'i');
   DEBIT_WORDS = new RegExp(
     `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|was used|charged`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
@@ -214,6 +222,58 @@ const LINE_DATE_RE = /^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/;
 const TRAILING_PLACE_RE =
   /\s+(?:DXB|DUBAI|ABU DHABI|SHARJAH|AJMAN|ARE|UAE|FRA|USA|GBR|DEU|NLD|ESP|ITA|IRL|SGP|HKG|IND|SAU|KSA|LUX|CAN|AUS|CHE|SWE|POL|JPN|RIYADH|JEDDAH|QAT|GHA|KWT|BHR|OMN|JOR|LBN|EGY|TUR|THA|MYS|KOR|CHN|PAK|LKA|PHL|BGD|ZAF|KEN|NGA|MAR|GRC|PRT|BEL|AUT|DNK|NOR|FIN|CZE|RUS|BRA|MEX|NZL|VNM|IDN|TWN|MCO|LIE)$/i;
 
+/**
+ * Emirates and cities acquirers append to the descriptor field.
+ *
+ * The stray-letter allowance only applies when the place is SEPARATED from
+ * the name ("AL NIMAR AL ABYADHd SHARJAH" — acquirer corruption). Allowing it
+ * on a glued place ate the real last character of every truncated name:
+ * "FRIENDS AVENUE CATERINDUBAI" came back as "Friends Avenue Cateri".
+ */
+const PLACE_TAIL_RE =
+  /(?:[-\s]+[A-Za-z]?)?(?:DXB|DUBAI|ABU ?DHABI|SHARJAH|AJMAN|FUJAIRAH|UMM AL QUWAIN|AL AIN|RAK)$/i;
+
+/**
+ * Strips the noise an acquirer wraps around a merchant name.
+ *
+ * The descriptor is a fixed-width field, so the city is regularly glued
+ * straight onto a truncated name with no separator at all — "DUBAI INTEGRATED
+ * ECONODUBAI", "FRIENDS AVENUE CATERINDUBAI", "Ziina  *CLEANTIZER SERDubai".
+ * Splitting only on whitespace left the emirate inside the merchant, so the
+ * same shop arrived under a different name from every bank that reported it
+ * and no merchant override could ever cover them all.
+ */
+function cleanDescriptor(name: string): string {
+  let out = name
+    .replace(/\s*\([^)]*\)?\s*/g, ' ') // "noon Food(Noon ECommerce)" → "noon Food"
+    // Leading acquirer terminal id, masked on export: "····8730 TGI FRIDAYS".
+    .replace(/^[·•X]{2,}\d*\s+/i, '')
+    .replace(/^(?:pos|tap|wl|sq|alp|eig|web|google|paypal|apl|amzn|mamo|ziina)\s*\*\s*/i, '')
+    // Google bills through a help URL, not a location: "GOOGLE*FINART AI EXPE
+    // G.CO/HELPPAY#CA US".
+    .replace(/\s+G\.CO\/\S+(?:\s+[A-Za-z]{2,3})?$/i, '')
+    .replace(TERMINAL_ID_RE, '') // "BLOOMFIELD TREAT-····5814"
+    .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '') // "MUZZ LTD +····1111"
+    .replace(/[-\s]*\b(?:AE|ARE|UAE|BH|BHR|SA|KSA|US|USA|GB|IN)$/i, '')
+    .trim();
+  // Peel repeatedly: "TGI FRIDAYS DUBADUBAI" carries two. Never peel a name
+  // down to nothing — a shop really can be called Dubai something.
+  let prev = '';
+  let peeledPlace = false;
+  while (prev !== out) {
+    prev = out;
+    const peeled = out.replace(PLACE_TAIL_RE, '').trim();
+    if (peeled !== out && (peeled.match(/[A-Za-z]/g) ?? []).length >= 3) {
+      out = peeled;
+      peeledPlace = true;
+    }
+  }
+  // "AL NIMAR AL ABYADHdSHARJAH" → the lone lowercase letter left behind by
+  // the peel is acquirer corruption, not the end of the name.
+  if (peeledPlace && /[A-Z][a-z]$/.test(out)) out = out.slice(0, -1).trim();
+  return out.replace(/(?:\s+COM|\.com)$/i, '').trim();
+}
+
 function merchantFromLines(raw: string): string {
   if (!raw.includes('\n')) return '';
   const codes = [
@@ -246,9 +306,7 @@ function merchantFromLines(raw: string): string {
       prev = cleaned;
       cleaned = cleaned.replace(TRAILING_PLACE_RE, '');
     }
-    cleaned = cleaned
-      .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '')
-      .replace(TERMINAL_ID_RE, '').replace(/(?:\s+COM|\.com)$/i, '').trim();
+    cleaned = cleanDescriptor(cleaned);
     if (cleaned.length >= 2 && cleaned.length <= 48) return cleaned;
   }
   return '';
@@ -263,11 +321,22 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // fall through every other rule into "other". These three phrasings are
   // specific to standing debt instructions, not to utility direct debits.
   [/\bDD\s+instal?lments?\b|\bDDR\s+Reference\b|Direct\s+Debit\s+Service\s+Instructions?|\b(?:loan|finance|emi)\s+instal?lment\b|\b(?:car|auto|vehicle|home|personal|mortgage)\s+(?:loan|finance)\b|\bloan\s+(?:repayment|account|a\/c)\b|\binstal?lment\s+(?:due|paid|debited)\b/i, 'loan'],
+  // UAE merchants read off a real 300-message accuracy report. Acquirers
+  // truncate the descriptor to 20-22 characters, so several of these
+  // deliberately match the stub the bank sends ("CATERIN", "GOVERNMEN",
+  // "NATIONAL PAR") rather than the merchant's full legal name.
+  [/caribou|caffe\s*nero|\bpeets?\b|tgi\s*fridays?|\btgif\b|cinnabon|cravia|bakemart|manazil al sham|al bait al shami|qalat trablus|alfatayir|aldumashqi|raydan|sultan saray|koshari|cookie dealer|malfoof|flurya|little neighborhood|friends\s?avenue|friendsavenue|caterin|chocolala|rabbash|arwa cake|cake n more|roti bhai|al tarbouch|buffalo\s+(?:jumeira|mirdif|wings)|cheese\s?cake|widerange fish|25 hours f and b/i, 'dining'],
+  [/hyper\s?ramez|lavender al madina|mark and save|fresh good day|almed retail/i, 'groceries'],
+  [/max fashion|\bmax\b(?!imum|\s*(?:limit|amount))|new yorker|lefties|la senza|victoria\s?s secret|\bkoton\b|ardene|lovisa|\blevis\b|\bcider\b|mumuso|whsmith|rivoli|malabar gold|l'?oreal|stradivarius|genzy trendz|nice style|honeylove|globale/i, 'shopping'],
+  [/alphamed|wellfit|pilates|\bwatsons?\b|oriana/i, 'health'],
+  [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b|valtrans|\bcar\s*par\b|golden bay car|yellow line car|smart green line car/i, 'transport'],
+  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|\bfresha\b|adobe|\bcanva\b|linkedin/i, 'entertainment'],
+  [/\bunigaz\b/i, 'utilities'],
   [/carrefour|lulu|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
   [/talabat|deliveroo|zomato|noon food|careem food|eateasy|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
   [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts/i, 'transport'],
   [/dewa|sewa|fewa|addc|aadc|empower|lootah|tabreed|btu\b|chilled water|electricity|water|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder/i, 'utilities'],
-  [/etisalat|\be&\b|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
+  [/etisalat|\be&(?![a-z])|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
   [/rent|ejari|landlord/i, 'rent'],
   [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun ?& ?sand|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|salon|barber|spa\b|beauty|laundry|dry ?clean|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|washmen|hairdress|house ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya/i, 'shopping'],
   [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic/i, 'health'],
@@ -310,7 +379,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity/i, 'other'],
   // Government sits AFTER transport/utilities so traffic fines, RTA and SEWA
   // keep their more specific buckets.
-  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bded\b/i, 'government'],
+  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bded\b|governmen|muncipal/i, 'government'],
   [/salary|payroll|wages/i, 'salary'],
   // Structural fallbacks — what the merchant IS, when no brand matched.
   // These sit last so brand rules always win.
@@ -399,6 +468,37 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/github/i, 'GitHub'],
   [/telegram/i, 'Telegram Premium'],
   [/xbox\s*game\s*pass/i, 'Xbox Game Pass'],
+  // UAE names seen under three spellings each across HSBC, Liv and ENBD
+  // descriptors. Canonicalising them is what lets one merchant override — and
+  // subscription detection — cover all of them at once.
+  [/urban\s?clap|urban company/i, 'UrbanClap'],
+  [/justlife/i, 'Justlife'],
+  [/cleantizer|clentizer/i, 'Cleantizer'],
+  [/hellochef/i, 'HelloChef'],
+  [/dubai integrated eco/i, 'Dubai Integrated Economic Zones'],
+  [/friends\s?avenue|friendsavenue/i, 'Friends Avenue'],
+  [/manazil al sham/i, 'Manazil Al Sham'],
+  [/valtrans/i, 'Valtrans'],
+  [/mark and save/i, 'Mark & Save'],
+  [/hyper\s?ramez/i, 'Hyper Ramez'],
+  [/almed retail/i, 'Almed Retail'],
+  [/arabian unigaz|\bunigaz\b/i, 'Arabian Unigaz'],
+  [/little neighborhood/i, 'Little Neighborhood'],
+  [/tgi\s*fridays?|\btgif\b/i, 'TGI Fridays'],
+  [/caribou/i, 'Caribou Coffee'],
+  [/caffe\s*nero/i, 'Caffe Nero'],
+  [/new yorker/i, 'New Yorker'],
+  [/lefties/i, 'Lefties'],
+  [/mumuso/i, 'Mumuso'],
+  [/laura beauty/i, 'Laura Beauty Salon'],
+  [/ginnys plus/i, 'Ginnys Plus Trading'],
+  [/al faan al raqi/i, 'Al Faan Al Raqi'],
+  [/global village/i, 'Global Village'],
+  [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b/i, 'Lime'],
+  [/splitwise/i, 'Splitwise'],
+  [/camscanner/i, 'CamScanner'],
+  [/pixocial/i, 'Pixocial'],
+  [/honeylove/i, 'HoneyLove'],
   [/playstation\s*plus|psn\s*plus/i, 'PlayStation Plus'],
 ];
 
@@ -415,6 +515,7 @@ export const STRUCTURAL_TITLES = new Set([
   'Parking',
   'Outgoing transfer',
   'Incoming transfer',
+  'Refund',
   'Inward remittance',
   'Bank transfer',
   'Card payment',
@@ -980,22 +1081,14 @@ export function parseSms(
     merchant = billMatch ? billMatch[1].trim() : extractMerchant(raw, MERCHANT_RE);
   } else {
     merchant = extractMerchant(raw, MERCHANT_RE);
+    if (!merchant) {
+      const paymentFor = raw.match(PAYMENT_FOR_RE);
+      if (paymentFor) merchant = paymentFor[1].trim();
+    }
   }
   let transferHint = !isBillDue && TRANSFER_HINT_RE.test(raw);
   descriptor = merchant;
-  merchant = merchant
-    .replace(/\s*\([^)]*\)?\s*/g, ' ') // "noon Food(Noon ECommerce)" → "noon Food"
-    .replace(TERMINAL_ID_RE, '') // "BLOOMFIELD TREAT-····5814" → "BLOOMFIELD TREAT"
-    .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '') // "MUZZ LTD +····1111" → "MUZZ LTD"
-    // Trailing place, with or without a country code, and with or without a
-    // space: "AL NIMAR AL ABYADHdSHARJAH- AE" is one descriptor the acquirer
-    // ran together, and the emirate is not part of the shop's name.
-    .replace(/[-\s]*\b(?:AE|ARE|UAE)$/i, '')
-    // The lone lowercase letter in "AL NIMAR AL ABYADHdSHARJAH" is acquirer
-    // corruption, not part of the name — leaving it split one shop into two.
-    .replace(/[-\s]*[a-z]?(?:DXB|DUBAI|ABU ?DHABI|SHARJAH|AJMAN|FUJAIRAH|RAK)$/i, '')
-    .replace(/(?:\s+COM|\.com)$/i, '') // "NOON COM" / "noon.com" → "NOON"
-    .trim();
+  merchant = cleanDescriptor(merchant);
   // HSBC embeds the merchant BEFORE the verb:
   //   "From HSBC: 30AUG23 MINISTRY OF HUMAN RE Purchase from 041-..."
   if (!merchant) {
@@ -1022,7 +1115,16 @@ export function parseSms(
   // "RULE TRANSFER TO SAVINGS WITH ONE-SHOT SAVING" — an automated sweep into
   // the user's own savings pot. It is the clearest possible self-transfer, and
   // three of them were being counted as spending.
-  if (!isBillDue && /transfer to savings|savings? (?:rule|goal|pot|plan)\b|round-?up saving/i.test(raw)) {
+  if (
+    !isBillDue &&
+    // A savings pot has a NAME, and the name is rarely the word "savings":
+    // Liv calls its default one "Emergency Funds" and sweeps into it with a
+    // "RULE TRANSFER". Two of those, at AED 7,000 and AED 4,000, were being
+    // counted as a month's spending.
+    /transfer to savings|savings? (?:rule|goal|pot|plan)\b|round-?up saving|\brule\s+transfer\b|one-?shot\s+sav|\bemergency\s+funds?\b/i.test(
+      raw,
+    )
+  ) {
     merchant = 'Savings transfer';
     structuralMerchant = true;
     transferHint = true;
@@ -1067,7 +1169,9 @@ export function parseSms(
     merchant = service ?? (isBillDue
       ? 'Bill payment'
       : type === 'income'
-        ? DEPOSIT_RE.test(raw)
+        ? /\brefund(?:ed)?\b/i.test(raw)
+          ? 'Refund'
+          : DEPOSIT_RE.test(raw)
           ? 'Cash deposit'
           : /inward\s+remittance/i.test(raw)
             ? 'Inward remittance'
