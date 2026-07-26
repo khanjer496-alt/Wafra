@@ -119,7 +119,11 @@ jobs:
             fi
             echo "Signing with the upload keystore from secrets (alias: $alias_name)."
             # Same fingerprint every run means every APK installs over the last.
-            fp="$(keytool -list -keystore android/app/wafra-upload.jks -storepass "$store_password" -alias "$alias_name" 2>/dev/null | grep -i 'SHA256:' | head -1)"
+            # "|| true" matters: set -o pipefail turns a grep that matches
+            # nothing into a failed pipeline, which killed the whole build on
+            # a purely cosmetic line. keytool prints "Certificate fingerprint
+            # (SHA-256):", not "SHA256:", so the original grep never matched.
+            fp="$(keytool -list -v -keystore android/app/wafra-upload.jks -storepass "$store_password" -alias "$alias_name" 2>/dev/null | grep -i 'SHA256' | head -1 || true)"
             echo "### ✅ Signed with the upload key" >> "$GITHUB_STEP_SUMMARY"
             echo "Installs over the previous build. \`$fp\`" >> "$GITHUB_STEP_SUMMARY"
           else
