@@ -47,7 +47,7 @@ import {
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { t } from '@/lib/i18n';
-import { buildInsights, summarizeMonth } from '@/lib/insights';
+import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -434,7 +434,12 @@ export default function HomeScreen() {
             live={live}
             netFils={summary.incomeFils - summary.expenseFils}
             incomeFils={summary.incomeFils}
-            expenseFils={summary.expenseFils}
+            // The same figure Flow prints above the category split, from the
+            // same helper. These two are one tap apart and were a dirham
+            // different — Home rounded the raw sum once, Flow totalled its
+            // rows as shown. Both were right by their own rule, which is no
+            // help to anyone looking at both.
+            expenseFils={composition(summary).totalFils}
           />
 
           {!isProActive(state) && (

@@ -141,7 +141,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
           />
         </View>
         <ThemedText type="nano" style={{ color: '#8C857A' }}>
-          Paid {formatAmount(paid, { decimals: false })} / of{' '}
+          Paid {formatAmount(paid, { decimals: false })} of{' '}
           {formatAmount(due.totalDueFils, { decimals: false })}
           {/* Only the bank knows the minimum. When it never stated one, say
               nothing rather than quote the app's own 5% guess back as "Min". */}

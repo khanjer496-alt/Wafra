@@ -137,11 +137,15 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             {friendlyDate(transaction.date, toISODate(new Date()))}
           </ThemedText>
         </View>
+        {/* Decimals on. This sheet exists to answer "what exactly was this",
+            and it sat above an edit field showing 72.73 while itself reading
+            −73. Lists round; the place you go to check does not. */}
         <Money
           fils={transaction.amountFils}
           type="sheetAmount"
           sign={income ? 'plus' : 'minus'}
           prefix={false}
+          decimals
           color={income ? theme.income : theme.text}
           style={styles.headAmount}
         />

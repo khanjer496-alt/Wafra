@@ -80,5 +80,12 @@ export function onRampColor(hex: string): string {
   const to = (i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
   const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   const luminance = 0.2126 * lin(to(0)) + 0.7152 * lin(to(2)) + 0.0722 * lin(to(4));
-  return luminance > 0.4 ? '#16130F' : '#F2EFE8';
+  // 0.18, not 0.4. The two inks cross over where their contrasts are equal:
+  //   (L + 0.05) / (Link + 0.05) = (Lpaper + 0.05) / (L + 0.05)
+  // which with these two colours solves to L ≈ 0.177. Picking 0.4 by eye left
+  // every step between the two — the middle of the ramp, where most categories
+  // land — with the wrong ink: the mint #57B894 carried pale ink at 2.10:1,
+  // under the 3:1 a glyph needs. At 0.18 the worst step on either ramp is
+  // 3.99:1.
+  return luminance > 0.18 ? '#16130F' : '#F2EFE8';
 }

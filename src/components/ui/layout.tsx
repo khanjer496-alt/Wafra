@@ -8,8 +8,18 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
- * Section enter: translateY 10 → 0 over 320ms, staggered 40ms per section.
+ * Section enter: fade and rise over 320ms, staggered 40ms per section.
  * `index` is the section's position on the screen, not a delay in ms.
+ *
+ * No `.withInitialValues()`. It was here to shorten the rise to 10px, and on
+ * the web renderer it left the view at `position: absolute` and never returned
+ * it to flow when the component re-rendered mid-animation. Every section of
+ * the SMS import screen then stacked at the same offset: the parse result was
+ * painted directly over the paste box, the instructions and both buttons, all
+ * unreadable. This was the only `withInitialValues` in the app, and every
+ * screen using a plain `FadeInDown` was unaffected — so Section now uses the
+ * same plain form as the rest. A slightly longer rise is not worth a screen
+ * that cannot be read.
  */
 export function Section({
   index = 0,
@@ -19,9 +29,7 @@ export function Section({
 }: ViewProps & { index?: number }) {
   return (
     <Animated.View
-      entering={FadeInDown.delay(index * Motion.sectionStagger)
-        .duration(Motion.sectionEnter)
-        .withInitialValues({ transform: [{ translateY: 10 }] })}
+      entering={FadeInDown.delay(index * Motion.sectionStagger).duration(Motion.sectionEnter)}
       style={style}
       {...rest}>
       {children}

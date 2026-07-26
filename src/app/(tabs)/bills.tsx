@@ -121,7 +121,10 @@ export default function BillsScreen() {
     const accounts = [...new Set(txs.map((t) => t.accountId))]
       .map((id) => state.accounts.find((a) => a.id === id))
       .filter((a): a is NonNullable<typeof a> => a != null);
-    const totalFils = txs.reduce((s, t) => s + t.amountFils, 0);
+    // Totalled as the history rows below are shown. Rounding the raw sum once
+    // put "AED 222" over four rows of 56 — the same defect the Flow heading
+    // had, in the same sheet as the rows that disprove it.
+    const totalFils = totalAsShown(txs.map((t) => t.amountFils));
     const sortedAmounts = txs.map((t) => t.amountFils).sort((a, b) => a - b);
     const medianFils = sortedAmounts[Math.floor(sortedAmounts.length / 2)];
     return { txs, firstISO, accounts, totalFils, medianFils };
@@ -262,10 +265,14 @@ export default function BillsScreen() {
                 </View>
               )}
             </View>
+            {/* Three facts did not fit beside the Remind me pill, so every
+                row ellipsised mid-sentence: "next 21 A…". The last charge is
+                the one the user can look up in the sheet; what leaves next is
+                the one they cannot. */}
             <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
               {sub.status === 'stopped'
-                ? `stopped · last charged ${shortDate(sub.lastChargedISO)}`
-                : `${sub.cadence} · last ${shortDate(sub.lastChargedISO)} · ${
+                ? `stopped · last ${shortDate(sub.lastChargedISO)}`
+                : `${sub.cadence} · ${
                     next >= 0
                       ? `next ${shortDate(sub.nextExpectedISO)} (${next}d)`
                       : `expected ${-next}d ago`
@@ -631,7 +638,11 @@ export default function BillsScreen() {
                       </ThemedText>
                     </View>
                   </View>
-                  <Pressable onPress={() => setDetail(null)}>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Close"
+                    hitSlop={8}
+                    onPress={() => setDetail(null)}>
                     <Icon name="close" size={20} color={theme.textSecondary} />
                   </Pressable>
                 </View>
@@ -639,7 +650,7 @@ export default function BillsScreen() {
                 {/* Lifetime facts */}
                 <View style={styles.factRow}>
                   <View style={styles.fact}>
-                    <ThemedText type="micro" themeColor="textSecondary">
+                    <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
                       {detail.category === 'loan' ? t('payingFor') : t('subscribedFor')}
                     </ThemedText>
                     <ThemedText type="smallBold">{subscribedFor(detailData.firstISO)}</ThemedText>
@@ -648,7 +659,7 @@ export default function BillsScreen() {
                     </ThemedText>
                   </View>
                   <View style={styles.fact}>
-                    <ThemedText type="micro" themeColor="textSecondary">
+                    <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
                       {detail.category === 'loan' ? t('payments') : t('charges')}
                     </ThemedText>
                     <ThemedText type="smallBold" tabular>
@@ -656,7 +667,7 @@ export default function BillsScreen() {
                     </ThemedText>
                   </View>
                   <View style={styles.fact}>
-                    <ThemedText type="micro" themeColor="textSecondary">
+                    <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
                       {t('totalPaid')}
                     </ThemedText>
                     <ThemedText type="smallBold" tabular>
@@ -939,6 +950,8 @@ const styles = StyleSheet.create({
   rowRight: {
     alignItems: 'flex-end',
     gap: 2,
+    // Never let the Remind me pill claim more than a third of the row.
+    maxWidth: '38%',
   },
   badge: {
     paddingHorizontal: 6,
@@ -1041,10 +1054,18 @@ const styles = StyleSheet.create({
   factRow: {
     flexDirection: 'row',
     gap: Spacing.three,
+    // Top-aligned, so a two-line caption ("Subscribed for") does not push its
+    // own value a line below the other two and break the shared baseline.
+    alignItems: 'flex-start',
   },
   fact: {
     flex: 1,
     gap: 2,
+  },
+  // The caption sits above the figure and must reserve the taller of the
+  // three, or the column that wraps drops out of line with its neighbours.
+  factLabel: {
+    minHeight: 28,
   },
   paidWith: {
     gap: 2,

@@ -1,5 +1,5 @@
 import { getCategory } from '@/lib/categories';
-import { formatAED } from '@/lib/format';
+import { formatAED, totalAsShown } from '@/lib/format';
 import {
   elapsedDays,
   inPeriod,
@@ -21,6 +21,44 @@ export interface MonthSummary {
   incomeFils: number;
   expenseFils: number;
   byCategory: { category: CategoryId; totalFils: number; share: number }[];
+}
+
+/** Beyond five slices the ramp stops being readable, so the tail is pooled. */
+export const MAX_COMPOSITION_SLICES = 5;
+
+/**
+ * The month's spending broken into the slices Flow draws, and the total of
+ * those slices AS THEY ARE SHOWN.
+ *
+ * Both parts live here because they have to agree with each other and with
+ * Home. Flow's heading is printed above the slices, so it has to total them
+ * at the precision they are drawn at; Home's "Out" cell is the same quantity
+ * one tap away, and was rounding the raw sum once. The two came out a dirham
+ * apart — each correct by its own rule, and plainly contradictory to anyone
+ * who looked at both. One rule, one place.
+ */
+export function composition(
+  summary: MonthSummary,
+  maxSlices = MAX_COMPOSITION_SLICES,
+): { slices: { key: string; category: CategoryId | null; totalFils: number; share: number }[]; totalFils: number } {
+  const head: { key: string; category: CategoryId | null; totalFils: number; share: number }[] =
+    summary.byCategory.slice(0, maxSlices).map((c) => ({
+      key: c.category as string,
+      category: c.category,
+      totalFils: c.totalFils,
+      share: c.share,
+    }));
+  const tail = summary.byCategory.slice(maxSlices);
+  if (tail.length > 0) {
+    const totalFils = tail.reduce((sum, c) => sum + c.totalFils, 0);
+    head.push({
+      key: 'rest',
+      category: null,
+      totalFils,
+      share: summary.expenseFils > 0 ? totalFils / summary.expenseFils : 0,
+    });
+  }
+  return { slices: head, totalFils: totalAsShown(head.map((h) => h.totalFils)) };
 }
 
 export function summarizeMonth(transactions: Transaction[], period: PeriodLike): MonthSummary {

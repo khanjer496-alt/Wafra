@@ -75,6 +75,8 @@ export default function AddTransactionScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.header}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
               onPress={() => router.back()}
               style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>
               <Icon name="close" size={18} color={theme.text} />

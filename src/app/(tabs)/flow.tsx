@@ -33,9 +33,8 @@ import {
   monthKey,
   monthLabel,
   shiftMonthKey,
-  totalAsShown,
 } from '@/lib/format';
-import { buildInsights, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
+import { buildInsights, composition, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
@@ -70,30 +69,22 @@ export default function FlowScreen() {
     [state.transactions, state.budgets, period, now, state.notSubscriptions],
   );
 
-  /** Top five categories plus an "everything else" slice. */
-  const slices = useMemo(() => {
-    const head = summary.byCategory.slice(0, MAX_SLICES).map((c, i) => ({
-      key: c.category as string,
-      label: getCategory(c.category).label,
-      icon: getCategory(c.category).icon as IconName,
-      totalFils: c.totalFils,
-      share: c.share,
-      color: rampColor(i, dark),
-    }));
-    const tail = summary.byCategory.slice(MAX_SLICES);
-    if (tail.length > 0) {
-      const totalFils = tail.reduce((s, c) => s + c.totalFils, 0);
-      head.push({
-        key: 'rest',
-        label: `${tail.length} more`,
-        icon: 'sliders' as IconName,
-        totalFils,
-        share: summary.expenseFils > 0 ? totalFils / summary.expenseFils : 0,
-        color: dark ? '#2A2620' : '#D9D3C6',
-      });
-    }
-    return head;
-  }, [summary, dark]);
+  /**
+   * Top five categories plus an "everything else" slice. The split and its
+   * total live in `insights.ts` so Home's "Out" cell reports the same figure —
+   * they were a dirham apart, one tap from each other.
+   */
+  const comp = useMemo(() => composition(summary), [summary]);
+  const slices = useMemo(
+    () =>
+      comp.slices.map((c, i) => ({
+        ...c,
+        label: c.category ? getCategory(c.category).label : `${summary.byCategory.length - MAX_SLICES} more`,
+        icon: (c.category ? getCategory(c.category).icon : 'sliders') as IconName,
+        color: c.category ? rampColor(i, dark) : dark ? '#2A2620' : '#D9D3C6',
+      })),
+    [comp, summary.byCategory.length, dark],
+  );
 
   const limits = useMemo(
     () =>
@@ -143,8 +134,12 @@ export default function FlowScreen() {
   // What the six months averaged, in minus out. The header figure the chart is
   // there to support: six pairs of bars answer "which month", this answers
   // "and overall?".
+  // Over the months that HAVE a ledger. Dividing by six when two of them
+  // predate the user's first entry reported an average nobody lived: four
+  // months averaging +7.4k came out as "+5k avg".
+  const trendMonths = trend.filter((m) => m.income > 0 || m.expense > 0);
   const trendAvg = Math.round(
-    trend.reduce((sum, m) => sum + (m.income - m.expense), 0) / (trend.length || 1),
+    trendMonths.reduce((sum, m) => sum + (m.income - m.expense), 0) / (trendMonths.length || 1),
   );
 
   return (
@@ -166,7 +161,7 @@ export default function FlowScreen() {
                   — so rounding once here and again per row made the column
                   visibly fail to add up: three categories of AED 10.50 each
                   read 11 · 11 · 11 under a heading of 32. */}
-              {formatAED(totalAsShown(slices.map((x) => x.totalFils)), { decimals: false })}
+              {formatAED(comp.totalFils, { decimals: false })}
             </ThemedText>
             {totalLimit > 0 ? (
               <>
@@ -326,6 +321,7 @@ export default function FlowScreen() {
             <View style={styles.trend}>
               {trend.map((m) => {
                 const current = m.key === key;
+                const empty = m.income === 0 && m.expense === 0;
                 return (
                   <View key={m.key} style={styles.trendCol}>
                     {/* A bar you cannot read a number off is a shape, not a
@@ -334,19 +330,41 @@ export default function FlowScreen() {
                         once above the column — in first, out second, each in
                         its bar's colour, which is what ties number to bar. */}
                     <View style={styles.trendValues}>
+                      {empty ? (
+                        // Nothing was recorded that month. Two 2%-floor stubs
+                        // labelled "0 0" claim a month of perfect balance;
+                        // a dash says there is no answer, which is the truth.
+                        <ThemedText type="nano" tabular themeColor="textTertiary" style={styles.trendValue}>
+                          —
+                        </ThemedText>
+                      ) : (
+                        <>
                       <ThemedText type="nano" tabular style={[styles.trendValue, { color: theme.primary }]}>
                         {formatCompactAED(m.income)}
                       </ThemedText>
-                      <ThemedText type="nano" tabular themeColor="textTertiary" style={styles.trendValue}>
+                      <ThemedText
+                        type="nano"
+                        tabular
+                        style={[
+                          styles.trendValue,
+                          // Tied to its own bar, as the in figure is. Leaving
+                          // it textTertiary made it the same grey as the month
+                          // label below, so on the current column a red bar
+                          // sat under a grey number and only half the pair
+                          // was legible as a pair.
+                          { color: current ? theme.expense : dark ? '#8A7E76' : '#9B8C84' },
+                        ]}>
                         {formatCompactAED(m.expense)}
                       </ThemedText>
+                      </>
+                      )}
                     </View>
                     <View style={styles.trendBars}>
                       <View
                         style={[
                           styles.trendBar,
                           {
-                            height: `${Math.max(2, (m.income / trendMax) * 100)}%`,
+                            height: `${empty ? 0 : Math.max(2, (m.income / trendMax) * 100)}%`,
                             backgroundColor: theme.primary,
                           },
                         ]}
@@ -355,7 +373,7 @@ export default function FlowScreen() {
                         style={[
                           styles.trendBar,
                           {
-                            height: `${Math.max(2, (m.expense / trendMax) * 100)}%`,
+                            height: `${empty ? 0 : Math.max(2, (m.expense / trendMax) * 100)}%`,
                             backgroundColor: current
                               ? theme.expense
                               : dark

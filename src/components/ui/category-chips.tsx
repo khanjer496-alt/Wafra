@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -35,12 +35,40 @@ export function CategoryChips({
   const isOn = (id: CategoryId) =>
     selected instanceof Set ? selected.has(id) : selected === id;
 
+  /**
+   * Scroll the selected chip into view.
+   *
+   * Opening a Shopping entry showed Groceries, Dining, Transport, Utilities
+   * and nothing selected — the current category was off the right edge, so the
+   * editor looked like it had lost the value it was editing. Each chip reports
+   * its own offset as it lays out; the single-selection case scrolls to it.
+   */
+  const scroller = useRef<ScrollView>(null);
+  const offsets = useRef(new Map<CategoryId, number>());
+  const single = selected instanceof Set ? null : selected;
+
+  const remember = useCallback((id: CategoryId, x: number) => {
+    offsets.current.set(id, x);
+  }, []);
+
+  useEffect(() => {
+    if (layout !== 'scroll' || !single) return;
+    // After layout, or the offset is not there yet on first render.
+    const id = setTimeout(() => {
+      const x = offsets.current.get(single);
+      if (x === undefined) return;
+      scroller.current?.scrollTo({ x: Math.max(0, x - 16), animated: false });
+    }, 0);
+    return () => clearTimeout(id);
+  }, [single, layout]);
+
   const chips = categories.map((c) => {
     const on = isOn(c.id);
     return (
       <Pressable
         key={c.id}
         onPress={() => onToggle(c.id)}
+        onLayout={(e) => remember(c.id, e.nativeEvent.layout.x)}
         accessibilityRole="button"
         accessibilityState={{ selected: on }}
         style={[
@@ -62,6 +90,7 @@ export function CategoryChips({
 
   return (
     <ScrollView
+      ref={scroller}
       horizontal
       showsHorizontalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
