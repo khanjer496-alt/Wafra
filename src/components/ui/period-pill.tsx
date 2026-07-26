@@ -23,6 +23,7 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityLabel={`Reporting period: ${periodLabel(period)}. Tap to change.`}
       style={({ pressed }) => [
         styles.pill,
         {

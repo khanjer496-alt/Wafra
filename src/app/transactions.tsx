@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { TransactionEditSheet } from '@/components/transaction-edit-sheet';
+import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { TransactionRow } from '@/components/transaction-row';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
@@ -201,6 +201,8 @@ export default function TransactionsScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
             onPress={() => router.back()}
             style={[styles.backBtn, { backgroundColor: theme.backgroundSelected }]}>
             <Icon name="chevron-left" size={18} color={theme.text} />
@@ -549,7 +551,7 @@ export default function TransactionsScreen() {
         </Pressable>
       </Modal>
 
-      <TransactionEditSheet transaction={editing} onClose={() => setEditing(null)} />
+      <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
     </ThemedView>
   );
 }

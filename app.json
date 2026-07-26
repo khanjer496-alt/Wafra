@@ -12,7 +12,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0B1210",
+        "backgroundColor": "#14120F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -34,11 +34,26 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0B1210",
+          "backgroundColor": "#14120F",
           "android": {
             "image": "./assets/images/splash-icon.png",
-            "imageWidth": 120
+            "imageWidth": 170
           }
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Geist-Regular.ttf",
+            "./assets/fonts/Geist-Medium.ttf",
+            "./assets/fonts/Geist-SemiBold.ttf",
+            "./assets/fonts/GeistMono-Regular.ttf",
+            "./assets/fonts/GeistMono-Medium.ttf",
+            "./assets/fonts/GeistMono-SemiBold.ttf",
+            "./assets/fonts/NotoKufiArabic-Regular.ttf",
+            "./assets/fonts/NotoKufiArabic-Bold.ttf"
+          ]
         }
       ],
       "@react-native-community/datetimepicker"

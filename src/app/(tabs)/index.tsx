@@ -25,8 +25,11 @@ import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TransactionRow } from '@/components/transaction-row';
+import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { CardPaymentSheet } from '@/components/card-payment-sheet';
+import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { CountUpAmount } from '@/components/ui/count-up';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
@@ -40,10 +43,8 @@ import {
   requestSmsPermission,
   scanInbox,
 } from '@/lib/auto-import';
-import { billsForMonth } from '@/lib/bills';
-import { openDues } from '@/lib/cards';
-import { getCategory } from '@/lib/categories';
-import { formatAED, formatAmount, formatCompactAED, shortDate, toISODate } from '@/lib/format';
+import { daysPhrase, leavingSoon, outgoingTotalFils, type Outgoing } from '@/lib/leaving-soon';
+import { formatAED, formatAmount, formatCompactAED, shortDate } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import { buildInsights, summarizeMonth } from '@/lib/insights';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
@@ -51,13 +52,8 @@ import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
-import {
-  activeSubscriptions,
-  daysUntilNext,
-  detectSubscriptions,
-  trueSubscriptions,
-} from '@/lib/subscriptions';
-import type { AppState } from '@/lib/types';
+import { type Subscription } from '@/lib/subscriptions';
+import type { AppState, CardDue, Transaction } from '@/lib/types';
 
 // Once per app session: auto-import + notification sync.
 let autoImportRan = false;
@@ -65,12 +61,6 @@ let autoImportRan = false;
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
 
-/** `now` plus n days as an ISO date, for rows that only carry a day count. */
-function shiftDays(now: Date, days: number): string {
-  const d = new Date(now);
-  d.setDate(d.getDate() + days);
-  return toISODate(d);
-}
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
 
@@ -159,125 +149,65 @@ function Hero({
 
 /* ── Leaving soon ─────────────────────────────────────────────────────── */
 
-interface Leaving {
-  id: string;
-  icon: IconName;
-  title: string;
-  dateISO: string;
-  daysLeft: number;
-  amountFils: number;
-  urgent: boolean;
-  href: string;
-}
-
-function LeavingSoon({ state, now }: { state: AppState; now: Date }) {
+/**
+ * The merge itself lives in `@/lib/leaving-soon` so it can be unit-tested and
+ * reused; this is only its presentation.
+ *
+ * A row opens the sheet for the thing it names rather than navigating to a
+ * screen: "what do I owe on this card" is a question about one statement, and
+ * answering it by dropping the user on Wallet made them find it again.
+ */
+function LeavingSoon({
+  state,
+  now,
+  onOpen,
+}: {
+  state: AppState;
+  now: Date;
+  onOpen: (item: Outgoing) => void;
+}) {
   const theme = useTheme();
-  const router = useRouter();
-
-  const items = useMemo<Leaving[]>(() => {
-    const out: Leaving[] = [];
-
-    for (const { due, status, daysLeft, remainingFils } of openDues(state, now)) {
-      const account = state.accounts.find((a) => a.id === due.accountId);
-      out.push({
-        id: `due-${due.id}`,
-        icon: 'wallet',
-        title: `${account?.name ?? 'Card'} payment`,
-        dateISO: due.dueDate,
-        daysLeft,
-        amountFils: remainingFils,
-        urgent: status === 'urgent' || status === 'overdue',
-        href: '/wallet',
-      });
-    }
-
-    for (const { bill, status, daysLeft } of billsForMonth(state.bills, state.transactions, now)) {
-      if (status === 'paid') continue;
-      out.push({
-        id: `bill-${bill.id}`,
-        icon: getCategory(bill.category).icon,
-        title: bill.title,
-        // A bill carries a day-of-month, not a date; `daysLeft` already
-        // resolved it against this month, so walk forward from today.
-        dateISO: shiftDays(now, daysLeft),
-        daysLeft,
-        amountFils: bill.amountFils,
-        urgent: status === 'overdue' || status === 'due-soon',
-        href: '/bills',
-      });
-    }
-
-    const subs = activeSubscriptions(
-      trueSubscriptions(detectSubscriptions(state.transactions, state.notSubscriptions)),
-    );
-    for (const s of subs) {
-      const daysLeft = daysUntilNext(s, now);
-      if (daysLeft < 0) continue;
-      // A subscription already tracked as a bill would otherwise appear twice.
-      if (state.bills.some((b) => b.title.toLowerCase() === s.title.toLowerCase())) continue;
-      out.push({
-        id: `sub-${s.title}`,
-        icon: 'repeat',
-        title: s.title,
-        dateISO: s.nextExpectedISO,
-        daysLeft,
-        // What actually left last time, not the average — a tier change makes
-        // the average wrong in exactly the month it matters.
-        amountFils: s.lastAmountFils,
-        urgent: false,
-        href: '/bills',
-      });
-    }
-
-    return out
-      .filter((x) => x.daysLeft <= HORIZON_DAYS)
-      .sort((a, b) => a.daysLeft - b.daysLeft);
-  }, [state, now]);
-
+  const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
 
-  const total = items.reduce((s, x) => s + x.amountFils, 0);
   const shown = items.slice(0, 3);
 
   return (
     <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
       <SectionHeader
         title={`Leaving in ${HORIZON_DAYS} days`}
-        right={formatAED(total, { decimals: false })}
+        right={formatAED(outgoingTotalFils(items), { decimals: false })}
       />
-      {shown.map((x, i) => (
-        <Pressable
-          key={x.id}
-          onPress={() => router.push(x.href)}
-          style={[
-            styles.leaveRow,
-            i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-          ]}>
-          <Icon name={x.icon} size={17} color={x.urgent ? theme.expense : theme.text} />
-          <View style={styles.leaveText}>
-            <ThemedText type="small" numberOfLines={1}>
-              {x.title}
+      {shown.map((x, i) => {
+        const alarming = x.overdue || x.urgent;
+        return (
+          <Pressable
+            key={x.id}
+            accessibilityRole="button"
+            accessibilityLabel={x.title}
+            onPress={() => onOpen(x)}
+            style={[
+              styles.leaveRow,
+              i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+            ]}>
+            <Icon name={x.icon} size={17} color={alarming ? theme.expense : theme.text} />
+            <View style={styles.leaveText}>
+              <ThemedText type="small" numberOfLines={1}>
+                {x.title}
+              </ThemedText>
+              <ThemedText
+                type="meta"
+                themeColor={x.overdue ? undefined : 'textTertiary'}
+                style={x.overdue ? { color: theme.expense } : undefined}>
+                {shortDate(x.dateISO)} · {daysPhrase(x.daysLeft)}
+              </ThemedText>
+            </View>
+            <ThemedText type="small" tabular style={x.overdue ? { color: theme.expense } : undefined}>
+              {formatAmount(x.amountFils, { decimals: false })}
             </ThemedText>
-            <ThemedText
-              type="meta"
-              themeColor={x.urgent ? undefined : 'textTertiary'}
-              style={x.urgent ? { color: theme.expense } : undefined}>
-              {shortDate(x.dateISO)} ·{' '}
-              {x.daysLeft < 0
-                ? `${-x.daysLeft} day${x.daysLeft === -1 ? '' : 's'} overdue`
-                : x.daysLeft === 0
-                  ? 'today'
-                  : `in ${x.daysLeft} day${x.daysLeft === 1 ? '' : 's'}`}
-            </ThemedText>
-          </View>
-          <ThemedText
-            type="small"
-            tabular
-            style={x.urgent ? { color: theme.expense } : undefined}>
-            {formatAmount(x.amountFils, { decimals: false })}
-          </ThemedText>
-        </Pressable>
-      ))}
+          </Pressable>
+        );
+      })}
     </Animated.View>
   );
 }
@@ -338,6 +268,23 @@ export default function HomeScreen() {
   const [needsPermission, setNeedsPermission] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
+  const [entry, setEntry] = useState<Transaction | null>(null);
+  const [cardDue, setCardDue] = useState<CardDue | null>(null);
+  const [recurring, setRecurring] = useState<Subscription | null>(null);
+
+  /** A dated outgoing opens the sheet for whatever kind of thing it is. */
+  const openOutgoing = useCallback(
+    (item: Outgoing) => {
+      if (item.kind === 'card' && item.dueId) {
+        setCardDue(state.cardDues.find((d) => d.id === item.dueId) ?? null);
+      } else if (item.subscription) {
+        setRecurring(item.subscription);
+      } else {
+        router.push('/bills');
+      }
+    },
+    [state.cardDues, router],
+  );
 
   const summary = useMemo(
     () => summarizeMonth(state.transactions, period),
@@ -518,7 +465,7 @@ export default function HomeScreen() {
             </Animated.View>
           )}
 
-          <LeavingSoon state={state} now={now} />
+          <LeavingSoon state={state} now={now} onOpen={openOutgoing} />
 
           <UnreadFormatsPrompt state={state} />
 
@@ -539,7 +486,7 @@ export default function HomeScreen() {
                 <TransactionRow
                   transaction={tx}
                   account={state.accounts.find((a) => a.id === tx.accountId)}
-                  onPress={() => router.push('/transactions')}
+                  onPress={() => setEntry(tx)}
                 />
               </View>
             ))}
@@ -559,6 +506,9 @@ export default function HomeScreen() {
         </ScrollView>
       </SafeAreaView>
       <PeriodSheet visible={periodSheetOpen} onClose={() => setPeriodSheetOpen(false)} />
+      <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
+      <CardPaymentSheet due={cardDue} onClose={() => setCardDue(null)} />
+      <BillDetailSheet subscription={recurring} onClose={() => setRecurring(null)} />
     </ThemedView>
   );
 }

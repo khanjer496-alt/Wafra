@@ -2,6 +2,7 @@ const fmt = require('./build/format');
 const bills = require('./build/bills');
 const insights = require('./build/insights');
 const seed = require('./build/seed');
+const leaving = require('./build/leaving-soon');
 
 let pass = 0, fail = 0;
 function eq(name, actual, expected) {
@@ -702,6 +703,64 @@ for (const title of [
   seenMarks.set(key, title);
 }
 ok(`brand marks: every mark is 1-3 chars, hex-coloured and distinguishable${markClash ? ` (${markClash})` : ''}`, markShapeOk);
+
+// ── leaving soon ──
+// Home used to answer "what leaves next" three times in three orders; this is
+// the single merged list behind it.
+const lsToday = new Date(2026, 6, 18); // 18 Jul 2026
+const lsBase = {
+  hydrated: true,
+  accounts: [
+    { id: 'card1', name: 'FAB Credit Card', kind: 'card', openingFils: 0, color: '#000', cardType: 'credit' },
+  ],
+  transactions: [],
+  budgets: [],
+  bills: [],
+  cardDues: [],
+  goals: [],
+  merchantOverrides: {},
+  accountHints: {},
+  notSubscriptions: [],
+  lastScanTs: 0,
+  onboarded: true,
+  userName: 'there',
+  appLock: false,
+  remindersOn: true,
+  monthStartDay: 1,
+  pro: true,
+  trialStartTs: 0,
+  marketId: 'AE',
+  language: 'en',
+};
+
+const lsDueState = {
+  ...lsBase,
+  cardDues: [
+    { id: 'd1', accountId: 'card1', totalDueFils: 100000, minDueFils: 20000, dueDate: '2026-07-22', paidFils: 0 },
+  ],
+  bills: [{ id: 'b1', title: 'DEWA', category: 'utilities', amountFils: 45000, dueDay: 25, paidMonths: [] }],
+};
+const lsRows = leaving.leavingSoon(lsDueState, lsToday);
+eq('leavingSoon merges dues and bills', lsRows.length, 2);
+eq('leavingSoon sorts by how soon', lsRows.map((r) => r.kind), ['card', 'bill']);
+eq('leavingSoon totals the window', leaving.outgoingTotalFils(lsRows), 145000);
+
+// The window is a real cut-off, not a sort key.
+eq('leavingSoon drops anything past the window',
+  leaving.leavingSoon(lsDueState, lsToday, { withinDays: 5 }).length, 1);
+eq('leavingSoon can ask for one kind',
+  leaving.leavingSoon(lsDueState, lsToday, { kinds: ['bill'] }).map((r) => r.kind), ['bill']);
+
+// A statement past its pay-by date still has to show, and show as late.
+const lsLate = leaving.leavingSoon(
+  { ...lsDueState, cardDues: [{ ...lsDueState.cardDues[0], dueDate: '2026-07-15' }] },
+  lsToday,
+);
+ok('leavingSoon keeps an overdue statement', lsLate.some((r) => r.overdue && r.kind === 'card'));
+eq('daysPhrase late', leaving.daysPhrase(-3), '3 days late');
+eq('daysPhrase today', leaving.daysPhrase(0), 'today');
+eq('daysPhrase tomorrow', leaving.daysPhrase(1), 'tomorrow');
+eq('daysPhrase future', leaving.daysPhrase(5), 'in 5 days');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

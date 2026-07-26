@@ -1,15 +1,16 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Row, ScreenHeader, Section } from '@/components/ui/layout';
+import { Money } from '@/components/ui/money';
+import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { formatAED } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import {
   isBillingAvailable,
@@ -29,14 +30,17 @@ const FEATURES: { icon: IconName; titleKey: Parameters<typeof t>[0]; textKey: Pa
   { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
 ];
 
-/** Wafra Pro paywall. Purchases run through Google Play Billing on the
- *  Play build; side-load builds explain that and stay functional via the
- *  founder unlock in Settings. */
+/**
+ * Wafra Pro paywall. Purchases run through Google Play Billing on the Play
+ * build; side-load builds explain that and stay functional via the founder
+ * unlock in Settings.
+ */
 export default function ProScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { state, setPro } = useStore();
   const [plan, setPlan] = useState<ProPlan>('yearly');
+  const trial = trialDaysLeft(state);
 
   const buy = async () => {
     if (!isBillingAvailable()) {
@@ -62,110 +66,90 @@ export default function ProScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => router.back()}
-            style={[styles.backBtn, { backgroundColor: theme.backgroundSelected }]}>
-            <Icon name="chevron-left" size={18} color={theme.text} />
-          </Pressable>
-          <View style={styles.backBtn} />
+        <View style={styles.headerWrap}>
+          <ScreenHeader title="Wafra Pro" onBack={() => router.back()} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Animated.View entering={FadeInDown.duration(350)} style={styles.hero}>
-            {/* Founder unlock: long-press the diamond (side-load builds). */}
+          <Section index={0} style={styles.hero}>
+            {/* Founder unlock: long-press the mark (side-load builds). */}
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Wafra Pro"
               delayLongPress={700}
               onLongPress={() => {
                 const next = !state.pro;
                 setPro(next);
                 Alert.alert(
                   next ? 'Founder mode' : 'Founder mode off',
-                  next
-                    ? 'Wafra Pro unlocked on this device.'
-                    : 'Wafra Pro disabled on this device.',
+                  next ? 'Wafra Pro unlocked on this device.' : 'Wafra Pro disabled on this device.',
                 );
-              }}
-              style={[styles.crown, { backgroundColor: `${theme.gold}22` }]}>
-              <Icon name="diamond" size={30} color={theme.gold} strokeWidth={1.8} />
+              }}>
+              <Icon name="diamond" size={30} color={theme.warning} />
             </Pressable>
             <ThemedText type="title">Wafra Pro</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary" style={styles.heroText}>
+            <ThemedText type="default" themeColor="textSecondary">
               {state.pro
                 ? t('proActiveThanks')
-                : trialDaysLeft(state) > 0
-                  ? `Everything is free for your first ${TRIAL_DAYS} days — ${trialDaysLeft(state)} day${trialDaysLeft(state) === 1 ? '' : 's'} left. Keep it going:`
+                : trial > 0
+                  ? `Everything is free for your first ${TRIAL_DAYS} days — ${trial} day${trial === 1 ? '' : 's'} left. Keep it going:`
                   : t('trialEndedPaywall')}
             </ThemedText>
-            {!state.pro && trialDaysLeft(state) > 0 && (
-              <View style={[styles.trialChip, { backgroundColor: `${theme.primary}1c` }]}>
-                <ThemedText type="micro" style={{ color: theme.primary, fontWeight: '700' }}>
-                  {t('freeTrialActive')}
-                </ThemedText>
-              </View>
+            {!state.pro && trial > 0 && (
+              <ThemedText type="nano" style={{ color: theme.primary }}>
+                {t('freeTrialActive')}
+              </ThemedText>
             )}
-          </Animated.View>
+          </Section>
 
-          <View style={styles.features}>
+          <Section index={1}>
             {FEATURES.map((f, i) => (
-              <Animated.View
-                key={f.titleKey}
-                entering={FadeInDown.delay(80 + i * 60).duration(300)}
-                style={styles.feature}>
-                <View style={[styles.featureIcon, { backgroundColor: theme.backgroundSelected }]}>
-                  <Icon name={f.icon} size={17} color={theme.primary} strokeWidth={1.9} />
+              <Row key={f.titleKey} last={i === FEATURES.length - 1}>
+                <View style={styles.featureIcon}>
+                  <Icon name={f.icon} size={19} color={theme.textSecondary} />
                 </View>
-                <View style={styles.featureInfo}>
-                  <ThemedText type="smallBold">{t(f.titleKey)}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
+                <View style={styles.featureText}>
+                  <ThemedText type="small">{t(f.titleKey)}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
                     {t(f.textKey)}
                   </ThemedText>
                 </View>
-              </Animated.View>
+              </Row>
             ))}
-          </View>
+          </Section>
 
           {!state.pro && (
-            <>
+            <Section index={2} style={styles.buy}>
               <View style={styles.plans}>
                 {(['yearly', 'monthly'] as ProPlan[]).map((p) => {
                   const selected = plan === p;
                   return (
                     <Pressable
                       key={p}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
                       onPress={() => setPlan(p)}
                       style={[
                         styles.plan,
                         {
-                          backgroundColor: selected ? `${theme.primary}14` : theme.card,
-                          borderColor: selected ? theme.primary : theme.cardBorder,
+                          backgroundColor: selected ? theme.primarySoft : 'transparent',
+                          borderColor: selected ? theme.primaryBorder : theme.cardBorder,
                         },
                       ]}>
-                      <ThemedText type="micro" themeColor="textSecondary">
+                      <ThemedText type="micro" themeColor="textTertiary">
                         {p === 'yearly' ? t('yearly') : t('monthly')}
                       </ThemedText>
-                      <ThemedText type="subtitle" tabular style={{ fontWeight: '800' }}>
-                        {formatAED(PRO_PRICES[p].fils)}
-                      </ThemedText>
-                      <ThemedText type="micro" themeColor="textSecondary">
+                      <Money fils={PRO_PRICES[p].fils} type="subtitle" decimals />
+                      <ThemedText type="meta" themeColor="textTertiary">
                         {p === 'yearly' ? t('perYear') : t('perMonth')}
                       </ThemedText>
                     </Pressable>
                   );
                 })}
               </View>
-
-              <Pressable onPress={buy} style={[styles.cta, { backgroundColor: theme.primary }]}>
-                <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                  {t('getPro')}
-                </ThemedText>
-              </Pressable>
-              <Pressable onPress={restore} style={styles.restore}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {t('restorePurchase')}
-                </ThemedText>
-              </Pressable>
-            </>
+              <Button label={t('getPro')} onPress={buy} />
+              <Button variant="ghost" label={t('restorePurchase')} onPress={restore} />
+            </Section>
           )}
         </ScrollView>
       </SafeAreaView>
@@ -183,83 +167,40 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerWrap: {
+    paddingHorizontal: ScreenPadding,
   },
   content: {
-    padding: Spacing.three,
+    paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.six,
-    gap: Spacing.four,
+    gap: Spacing.four + 2,
   },
   hero: {
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  crown: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  heroText: {
-    textAlign: 'center',
-    maxWidth: 300,
-  },
-  trialChip: {
-    paddingHorizontal: Spacing.two + 2,
-    paddingVertical: Spacing.one,
-    borderRadius: Radius.full,
-  },
-  features: {
-    gap: Spacing.three,
-  },
-  feature: {
-    flexDirection: 'row',
-    gap: Spacing.two + 2,
     alignItems: 'flex-start',
+    gap: Spacing.two + 2,
+    paddingTop: Spacing.two,
   },
   featureIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: Radius.sm,
+    width: 30,
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  featureInfo: {
+  featureText: {
     flex: 1,
-    gap: 2,
+    gap: Spacing.half,
+  },
+  buy: {
+    gap: Spacing.two + 2,
   },
   plans: {
     flexDirection: 'row',
-    gap: Spacing.two,
+    gap: Spacing.two + 2,
   },
   plan: {
     flex: 1,
-    borderRadius: Radius.md,
-    borderWidth: 1.5,
+    borderRadius: Radius.sheet,
+    borderWidth: 1,
     padding: Spacing.three,
-    gap: 4,
-    alignItems: 'center',
-  },
-  cta: {
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.three + 2,
-    alignItems: 'center',
-  },
-  restore: {
-    alignItems: 'center',
-    paddingVertical: Spacing.one,
+    gap: Spacing.two - 2,
+    alignItems: 'flex-start',
   },
 });

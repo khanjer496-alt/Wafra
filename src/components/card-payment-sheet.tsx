@@ -1,0 +1,214 @@
+import React, { useMemo } from 'react';
+import { Alert, StyleSheet, View } from 'react-native';
+
+import { ThemedText } from '@/components/themed-text';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { Button } from '@/components/ui/controls';
+import { LabelTable } from '@/components/ui/layout';
+import { Money } from '@/components/ui/money';
+import { Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { dueWithStatus, duePaidFils } from '@/lib/cards';
+import { formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
+import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
+import { useStore } from '@/lib/store';
+import type { CardDue } from '@/lib/types';
+
+interface CardPaymentSheetProps {
+  /** The statement to settle, or null to keep the sheet closed. */
+  due: CardDue | null;
+  onClose: () => void;
+}
+
+/**
+ * One credit-card statement.
+ *
+ * The dark block is the only solid dark surface in light mode, because a card
+ * is a physical object and this is the face of it. Everything on it comes from
+ * the data model: there is no credit limit and no APR in it, so there is no
+ * utilisation ring and no interest projection here either.
+ */
+export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
+  const theme = useTheme();
+  const { state, payCardDue } = useStore();
+  const now = useMemo(() => new Date(), []);
+  const todayISO = toISODate(now);
+
+  const data = useMemo(() => {
+    if (!due) return null;
+    const status = dueWithStatus(state, due, now);
+    const paid = duePaidFils(state, due);
+    const account = state.accounts.find((a) => a.id === due.accountId);
+
+    // What this card has been charged in the current month, which is the
+    // figure the next statement is being built from.
+    const key = monthKey(now);
+    let monthFils = 0;
+    let charges = 0;
+    for (const t of state.transactions) {
+      if (t.accountId !== due.accountId || t.isTransfer || t.type !== 'expense') continue;
+      if (monthKey(t.date) !== key) continue;
+      monthFils += t.amountFils;
+      charges += 1;
+    }
+
+    const payments = state.transactions.filter(
+      (t) => t.accountId === due.accountId && t.isTransfer && t.type === 'income',
+    ).length;
+
+    return { status, paid, account, monthFils, charges, payments };
+  }, [due, state, now]);
+
+  if (!due || !data) return null;
+
+  const { status, paid, account, monthFils, charges, payments } = data;
+  const paidShare = due.totalDueFils > 0 ? paid / due.totalDueFils : 0;
+
+  const markPaid = () => {
+    const name = account?.name ?? 'Card';
+    Alert.alert(
+      'Mark this statement paid?',
+      `Files a ${formatAmount(status.remainingFils)} payment to ${name} today.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark paid',
+          onPress: () => {
+            payCardDue(
+              due.id,
+              status.remainingFils,
+              {
+                type: 'income',
+                amountFils: status.remainingFils,
+                category: 'other',
+                accountId: due.accountId,
+                title: `${name} payment`,
+                date: todayISO,
+                source: 'manual',
+                isTransfer: true,
+              },
+              true,
+            );
+            onClose();
+          },
+        },
+      ],
+    );
+  };
+
+  const remindMe = async () => {
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      Alert.alert(
+        'Notifications are off',
+        'Wafra needs notification permission to remind you before a payment is due.',
+      );
+      return;
+    }
+    await syncPaymentReminders(state);
+    Alert.alert('Reminder set', `You'll hear about this two days before ${shortDate(due.dueDate)}.`);
+  };
+
+  return (
+    <BottomSheet visible onClose={onClose} title="Card payment due">
+      <View style={styles.card}>
+        <View style={styles.cardHead}>
+          <ThemedText type="micro" style={{ color: '#8C857A' }}>
+            Still owed
+          </ThemedText>
+          <ThemedText type="nano" style={{ color: theme.expense }}>
+            Due {shortDate(due.dueDate)} ·{' '}
+            {status.daysLeft < 0 ? `${-status.daysLeft}d late` : `${status.daysLeft}d`}
+          </ThemedText>
+        </View>
+        <Money
+          fils={status.remainingFils}
+          type="sheetAmount"
+          prefix={false}
+          color="#F2EFE8"
+        />
+        <View style={styles.track}>
+          <View
+            style={[
+              styles.fill,
+              { width: `${Math.round(Math.min(1, Math.max(0, paidShare)) * 100)}%` },
+            ]}
+          />
+        </View>
+        <ThemedText type="nano" style={{ color: '#8C857A' }}>
+          Paid {formatAmount(paid, { decimals: false })} / of{' '}
+          {formatAmount(due.totalDueFils, { decimals: false })} · Min{' '}
+          {formatAmount(due.minDueFils, { decimals: false })}
+        </ThemedText>
+        {status.belowMinimum && (
+          <ThemedText type="meta" style={{ color: theme.expense }}>
+            Still under the minimum due.
+          </ThemedText>
+        )}
+      </View>
+
+      <LabelTable
+        rows={[
+          {
+            label: 'Card',
+            value: <ThemedText type="small">{account?.name ?? 'Card'}</ThemedText>,
+          },
+          {
+            label: 'This month',
+            value: (
+              <ThemedText type="small" tabular>
+                {formatAmount(monthFils, { decimals: false })} across {charges} charge
+                {charges === 1 ? '' : 's'}
+              </ThemedText>
+            ),
+          },
+          {
+            label: 'Matched',
+            value: (
+              <ThemedText type="default" themeColor="textSecondary">
+                {payments === 0
+                  ? 'No payment to this card has been detected yet.'
+                  : `${payments} payment${payments === 1 ? '' : 's'} on this card, walked oldest-first into the oldest statement each could belong to. An overpayment spills onto the next one.`}
+              </ThemedText>
+            ),
+          },
+        ]}
+      />
+
+      <View style={styles.actions}>
+        <Button inline label="Mark paid" onPress={markPaid} />
+        <Button inline variant="outline" label="Remind me" onPress={remindMe} />
+      </View>
+    </BottomSheet>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: '#16130F',
+    borderRadius: 16,
+    padding: Spacing.three + 2,
+    gap: Spacing.two + 2,
+  },
+  cardHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  track: {
+    height: 5,
+    borderRadius: Radius.full,
+    backgroundColor: '#302C25',
+    overflow: 'hidden',
+  },
+  fill: {
+    height: '100%',
+    borderRadius: Radius.full,
+    backgroundColor: '#57B894',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: Spacing.two + 2,
+  },
+});

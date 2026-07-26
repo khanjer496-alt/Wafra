@@ -2,13 +2,24 @@
 
     npx expo export --platform web --output-dir /tmp/wafra-web
     python3 -m http.server 8126 --directory /tmp/wafra-web &
-    node scripts/e2e/e2e-smoke.mjs    # every screen: import page, paywall, trial expiry, founder unlock
+    node scripts/e2e/e2e-smoke.mjs    # every screen and detail sheet, import
+                                      #   page, paywall, trial expiry, founder unlock
     node scripts/e2e/e2e-period.mjs   # period selector correctness across screens
 
 Both expect the app on http://localhost:8126 and chromium at
 /opt/pw-browsers/chromium (set executablePath for other machines).
 Native-only paths (SMS inbox scan, notification listener) cannot run on
 web — cover changes to those with unit tests in scripts/test/.
+
+Two matching notes, both learned the hard way:
+
+- Caps labels are a CSS `text-transform`, so the DOM text is still title case.
+  A **string** passed to `getByText` matches case-insensitively; a **regex**
+  does not unless you write `/i`.
+- Every screen stays mounted behind the current one, so `.last()` on a text or
+  label match often lands on a hidden screen. Both suites hit-test with
+  `elementFromPoint` and click only what is actually on top; tabs are reached
+  by `getByRole('tab')`.
 
 ## Known: hydration error on a cold route load (not ours)
 

@@ -128,7 +128,11 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             <ThemedText type="micro" themeColor="textTertiary">
               {picked ? `${getCategory(picked).label} limit` : 'New limit'}
             </ThemedText>
-            <Pressable onPress={onClose} hitSlop={10}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={onClose}
+              hitSlop={10}>
               <Icon name="close" size={18} color={theme.textSecondary} />
             </Pressable>
           </View>
