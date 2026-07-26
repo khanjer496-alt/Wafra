@@ -1,17 +1,19 @@
 import { useRouter } from 'expo-router';
 import React, { useMemo } from 'react';
-import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { ScrollView, Share, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Row, ScreenHeader, Section } from '@/components/ui/layout';
+import { Money } from '@/components/ui/money';
+import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormats } from '@/lib/accuracy';
-import { formatAED } from '@/lib/format';
-import { t } from '@/lib/i18n';
 import { getCategory } from '@/lib/categories';
+import { t } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
@@ -46,61 +48,51 @@ export default function AccuracyScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => router.back()}
-            style={[styles.backBtn, { backgroundColor: theme.backgroundSelected }]}>
-            <Icon name="chevron-left" size={18} color={theme.text} />
-          </Pressable>
-          <ThemedText type="heading">{t('improveAccuracy')}</ThemedText>
-          <View style={styles.backBtn} />
+        <View style={styles.headerWrap}>
+          <ScreenHeader title={t('improveAccuracy')} onBack={() => router.back()} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <ThemedText type="small" themeColor="textSecondary">
-            {t('improveAccuracyHint')}
-          </ThemedText>
-
-          {rows.length > 0 && (
-            <Pressable onPress={shareAll} style={[styles.shareBtn, { backgroundColor: theme.primary }]}>
-              <Icon name="upload" size={16} color={theme.onPrimary} />
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-                {t('shareUnrecognized')} ({rows.length})
-              </ThemedText>
-            </Pressable>
-          )}
+          <Section index={0} style={styles.intro}>
+            <ThemedText type="default" themeColor="textSecondary">
+              {t('improveAccuracyHint')}
+            </ThemedText>
+            {rows.length > 0 && (
+              <Button
+                label={`${t('shareUnrecognized')} · ${rows.length}`}
+                icon="upload"
+                onPress={shareAll}
+              />
+            )}
+          </Section>
 
           {rows.map((r, i) => (
-            <View
-              key={i}
-              style={[styles.card, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
-              <View style={styles.cardTop}>
-                <ThemedText type="smallBold" numberOfLines={1} style={styles.cardTitle}>
-                  {r.title}
+            <Row key={i} last={i === rows.length - 1} style={styles.formatRow}>
+              <View style={styles.formatInner}>
+                <View style={styles.formatTop}>
+                  <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
+                    {r.title}
+                  </ThemedText>
+                  <Money fils={r.amountFils} prefix={false} />
+                </View>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('readAs')} {r.category} · seen {r.count}×
                 </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" tabular>
-                  {r.count}x · {formatAED(r.amountFils, { decimals: false })}
+                <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
+                  {maskDigits(r.raw)}
                 </ThemedText>
               </View>
-              <ThemedText type="micro" themeColor="textSecondary">
-                {t('readAs')} {r.category}
-              </ThemedText>
-              <ThemedText type="small" style={styles.rawText}>
-                {maskDigits(r.raw)}
-              </ThemedText>
-            </View>
+            </Row>
           ))}
 
           {rows.length === 0 && (
-            <View style={styles.empty}>
-              <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
-                <Icon name="check" size={26} color={theme.income} strokeWidth={2} />
-              </View>
-              <ThemedText type="smallBold">{t('noUnrecognized')}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
+            <Section index={1} style={styles.empty}>
+              <Icon name="check" size={26} color={theme.income} strokeWidth={2.1} />
+              <ThemedText type="small">{t('noUnrecognized')}</ThemedText>
+              <ThemedText type="default" themeColor="textSecondary">
                 {t('noUnrecognizedText')}
               </ThemedText>
-            </View>
+            </Section>
           )}
         </ScrollView>
       </SafeAreaView>
@@ -118,65 +110,40 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerWrap: {
+    paddingHorizontal: ScreenPadding,
   },
   content: {
-    padding: Spacing.three,
+    paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.six,
-    gap: Spacing.three,
   },
-  shareBtn: {
+  intro: {
+    gap: Spacing.three - 2,
+    paddingBottom: Spacing.four,
+  },
+  formatRow: {
+    paddingVertical: Spacing.three - 2,
+  },
+  formatInner: {
+    flex: 1,
+    gap: Spacing.two - 2,
+  },
+  formatTop: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.three,
-  },
-  card: {
-    borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: Spacing.three,
-    gap: Spacing.one,
-  },
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
-  cardTitle: {
+  formatTitle: {
     flexShrink: 1,
   },
-  rawText: {
-    opacity: 0.85,
+  raw: {
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   empty: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.two,
-    paddingVertical: Spacing.six,
-  },
-  emptyIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    textAlign: 'center',
-    maxWidth: 300,
+    paddingVertical: Spacing.five,
   },
 });

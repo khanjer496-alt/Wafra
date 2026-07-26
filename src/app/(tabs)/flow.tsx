@@ -235,6 +235,8 @@ export default function FlowScreen() {
                 return (
                   <Pressable
                     key={budget.category}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${getCategory(budget.category).label} limit`}
                     onPress={() => setLimitFor(budget.category)}
                     style={[
                       styles.limit,

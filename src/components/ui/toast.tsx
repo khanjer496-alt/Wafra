@@ -4,8 +4,11 @@ import Animated, { Easing, FadeOutDown, SlideInDown } from 'react-native-reanima
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Radius, Spacing } from '@/constants/theme';
+import { Icon } from '@/components/ui/icon';
+import { EASE, Motion, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+
+const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
 export interface ToastAction {
   label: string;
@@ -27,6 +30,12 @@ export function useToast(): ToastContextValue {
   return useContext(ToastContext);
 }
 
+/**
+ * The success bar: solid ink, a mint check, and its undo.
+ *
+ * It is the loudest surface in the app on purpose — an undo with a deadline
+ * has to be seen before the deadline passes.
+ */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -49,27 +58,26 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       {toast && (
         <Animated.View
-          entering={SlideInDown.duration(320).easing(Easing.out(Easing.exp))}
+          entering={SlideInDown.duration(Motion.sheet).easing(EASING)}
           exiting={FadeOutDown.duration(200)}
-          style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) + 96 }]}
+          // Clears the floating tab bar rather than sitting under it.
+          style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) + 84 }]}
           pointerEvents="box-none">
-          <View
-            style={[
-              styles.toast,
-              { backgroundColor: theme.backgroundSelected, borderColor: theme.cardBorder },
-            ]}>
+          <View style={styles.toast}>
+            <Icon name="check" size={16} color={theme.primary} strokeWidth={2.1} />
             <ThemedText type="small" style={styles.message} numberOfLines={2}>
               {toast.message}
             </ThemedText>
             {toast.actions.map((a) => (
               <Pressable
                 key={a.label}
+                accessibilityRole="button"
                 onPress={() => {
                   dismiss();
                   a.onPress();
                 }}
                 hitSlop={6}>
-                <ThemedText type="smallBold" style={{ color: theme.primary }}>
+                <ThemedText type="nano" style={{ color: theme.primary }}>
                   {a.label}
                 </ThemedText>
               </Pressable>
@@ -91,20 +99,21 @@ const styles = StyleSheet.create({
   toast: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
+    gap: Spacing.three - 4,
     maxWidth: 480,
     marginHorizontal: Spacing.three,
-    borderRadius: Radius.md + 2,
-    borderWidth: StyleSheet.hairlineWidth,
+    backgroundColor: '#16130F',
+    borderRadius: 13,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
+    paddingVertical: Spacing.three - 2,
+    shadowColor: '#16130F',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
   },
   message: {
     flexShrink: 1,
+    color: '#F2EFE8',
   },
 });

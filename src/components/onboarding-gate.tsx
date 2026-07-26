@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WafraLogo } from '@/components/wafra-logo';
-import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
+import { Button } from '@/components/ui/controls';
+import { Icon, type IconName } from '@/components/ui/icon';
+import { WafraMark } from '@/components/wafra-logo';
+import { Colors, Fonts, ScreenPadding, Spacing } from '@/constants/theme';
 import {
   buildImportPlan,
   isSmsScanningAvailable,
@@ -19,15 +17,29 @@ import {
 import { requestNotificationPermission } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 
-type Step = 'welcome' | 'permissions' | 'scanning' | 'choose';
+type Step = 'welcome' | 'scanning' | 'choose';
+
+/** Onboarding is night mode regardless of the OS theme: the first screen sets
+ *  the tone, and the mark is at its strongest on charcoal. */
+const night = Colors.dark;
+
+const POINTS: [IconName, string, string][] = [
+  [
+    'mail',
+    'Reads SMS, files the spend',
+    'Only messages from your bank are opened; the rest are never touched',
+  ],
+  ['calendar', 'Warns before the money leaves', 'Card dues, DEWA, rent, and quiet subscriptions'],
+  ['lock', 'There is no server', 'Nothing to breach, nothing to sell, nothing to sync'],
+];
 
 /**
- * First-run flow: welcome → permissions → full-history scan (or sample data).
- * Rendered as an opaque overlay ABOVE the app (never unmounting the router's
- * Stack — swapping the navigator out corrupts expo-router's route state).
+ * First run: read the inbox, or start with sample data.
+ *
+ * Rendered as an opaque overlay ABOVE the app rather than instead of it —
+ * swapping the navigator out corrupts expo-router's route state.
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
-  const theme = useTheme();
   const { state, importBatch, setOnboarded, loadDemoData } = useStore();
   const [step, setStep] = useState<Step>('welcome');
   const [progress, setProgress] = useState({ scanned: 0, found: 0 });
@@ -55,145 +67,117 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const finish = () => setOnboarded();
-
   if (!showOverlay) return <>{children}</>;
 
   return (
     <View style={styles.container}>
       <View style={styles.hidden}>{children}</View>
-      <ThemedView style={[StyleSheet.absoluteFillObject, styles.root]}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        {step === 'welcome' && (
-          <Animated.View entering={FadeIn.duration(400)} style={styles.body}>
-            <View style={styles.hero}>
-              <WafraLogo markSize={64} />
-              <ThemedText type="heading" style={styles.center}>
-                Know where it goes. Watch it grow.
-              </ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" style={styles.center}>
-                Your money in AED, tracked automatically. Everything stays on this phone.
-              </ThemedText>
-            </View>
-            <View style={styles.points}>
-              {(
-                [
-                  ['mail', 'Reads bank SMS to log spending, cards, and salary by itself'],
-                  ['calendar', 'Tracks bills, credit card dues, and subscriptions with reminders'],
-                  ['chart', 'Explains where your money goes in plain language'],
-                ] as [import('@/components/ui/icon').IconName, string][]
-              ).map(([icon, text]) => (
-                <View key={text} style={styles.pointRow}>
-                  <View style={[styles.pointIcon, { backgroundColor: `${theme.primary}1a` }]}>
-                    <Icon name={icon} size={17} color={theme.primary} strokeWidth={1.8} />
+      <View style={[StyleSheet.absoluteFillObject, styles.root]}>
+        <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+          {step === 'welcome' && (
+            <Animated.View entering={FadeIn.duration(400)} style={styles.body}>
+              <View style={styles.top}>
+                <WafraMark size={44} color={night.primary} />
+                <ThemedText style={styles.headline}>
+                  Your bank already texts you. Wafra reads it.
+                </ThemedText>
+                <ThemedText style={styles.sub}>
+                  Every ENBD, FAB, and du alert becomes a filed transaction. On device, in AED, with
+                  no account to create.
+                </ThemedText>
+              </View>
+
+              <View style={styles.points}>
+                {POINTS.map(([icon, title, detail], i) => (
+                  <View
+                    key={title}
+                    style={[styles.point, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth }]}>
+                    <View style={styles.pointIcon}>
+                      <Icon name={icon} size={19} color={night.textSecondary} />
+                    </View>
+                    <View style={styles.pointText}>
+                      <ThemedText style={styles.pointTitle}>{title}</ThemedText>
+                      <ThemedText style={styles.pointDetail}>{detail}</ThemedText>
+                    </View>
                   </View>
-                  <ThemedText type="small" style={styles.pointText}>
-                    {text}
-                  </ThemedText>
+                ))}
+              </View>
+
+              <View style={styles.actions}>
+                <Button
+                  label={isSmsScanningAvailable() ? 'Read my inbox' : 'Continue'}
+                  onPress={() => (isSmsScanningAvailable() ? startScan() : setStep('choose'))}
+                  labelColor={night.onPrimary}
+                  style={{ backgroundColor: night.primary }}
+                />
+                <Button
+                  variant="ghost"
+                  label="Start with sample data"
+                  onPress={loadDemoData}
+                  labelColor={night.text}
+                  style={styles.ghost}
+                />
+              </View>
+            </Animated.View>
+          )}
+
+          {step === 'scanning' && (
+            <Animated.View entering={FadeIn.duration(300)} style={styles.body}>
+              <View style={styles.top}>
+                <WafraMark size={44} color={night.primary} />
+                <ThemedText style={styles.headline}>
+                  {result ? 'Your history is in.' : 'Reading your inbox.'}
+                </ThemedText>
+                <ThemedText style={styles.sub}>
+                  {result
+                    ? `${result.tx} entr${result.tx === 1 ? 'y' : 'ies'} filed${result.accounts > 0 ? ` · ${result.accounts} card${result.accounts === 1 ? '' : 's'} found` : ''}. Nothing left the phone.`
+                    : `${progress.scanned} messages read · ${progress.found} matched.`}
+                </ThemedText>
+              </View>
+
+              {result && (
+                <View style={styles.actions}>
+                  <Button
+                    label="Open Wafra"
+                    onPress={setOnboarded}
+                    labelColor={night.onPrimary}
+                    style={{ backgroundColor: night.primary }}
+                  />
                 </View>
-              ))}
-            </View>
-            <Pressable
-              onPress={() => setStep(isSmsScanningAvailable() ? 'permissions' : 'choose')}
-              style={[styles.cta, { backgroundColor: theme.primary }]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                {t('getStarted')}
-              </ThemedText>
-            </Pressable>
-          </Animated.View>
-        )}
+              )}
+            </Animated.View>
+          )}
 
-        {step === 'permissions' && (
-          <Animated.View entering={FadeInDown.duration(350)} style={styles.body}>
-            <View style={styles.hero}>
-              <View style={[styles.bigIcon, { backgroundColor: `${theme.primary}1a` }]}>
-                <Icon name="lock" size={30} color={theme.primary} strokeWidth={1.7} />
+          {step === 'choose' && (
+            <Animated.View entering={FadeInDown.duration(350)} style={styles.body}>
+              <View style={styles.top}>
+                <WafraMark size={44} color={night.primary} />
+                <ThemedText style={styles.headline}>Start somewhere.</ThemedText>
+                <ThemedText style={styles.sub}>
+                  {Platform.OS === 'web'
+                    ? 'Reading SMS works in the Android app. Pick a starting point:'
+                    : 'You can read your inbox later from Wallet.'}
+                </ThemedText>
               </View>
-              <ThemedText type="subtitle" style={styles.center}>
-                Two permissions, zero cloud
-              </ThemedText>
-              <ThemedText type="default" themeColor="textSecondary" style={styles.center}>
-                SMS access lets Wafra read bank alerts and build your full transaction history.
-                Notifications remind you before bills and card payments are due. Nothing ever
-                leaves your phone: there is no server.
-              </ThemedText>
-            </View>
-            <View style={styles.stack}>
-              <Pressable onPress={startScan} style={[styles.cta, { backgroundColor: theme.primary }]}>
-                <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                  Allow and scan my inbox
-                </ThemedText>
-              </Pressable>
-              <Pressable onPress={() => setStep('choose')} style={styles.ghostBtn}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  Skip for now
-                </ThemedText>
-              </Pressable>
-            </View>
-          </Animated.View>
-        )}
-
-        {step === 'scanning' && (
-          <Animated.View entering={FadeIn.duration(300)} style={styles.body}>
-            <View style={styles.hero}>
-              <View style={[styles.bigIcon, { backgroundColor: `${theme.primary}1a` }]}>
-                <Icon name={result ? 'check' : 'repeat'} size={30} color={theme.primary} strokeWidth={1.7} />
+              <View style={styles.actions}>
+                <Button
+                  label="Start with sample data"
+                  onPress={loadDemoData}
+                  labelColor={night.onPrimary}
+                  style={{ backgroundColor: night.primary }}
+                />
+                <Button
+                  variant="ghost"
+                  label="Start empty"
+                  onPress={setOnboarded}
+                  labelColor={night.text}
+                  style={styles.ghost}
+                />
               </View>
-              <ThemedText type="subtitle" style={styles.center}>
-                {result ? 'All set' : 'Reading your history'}
-              </ThemedText>
-              <ThemedText type="default" themeColor="textSecondary" style={styles.center} tabular>
-                {result
-                  ? `${result.tx} transactions imported${result.accounts > 0 ? ` · ${result.accounts} cards discovered` : ''}`
-                  : `${progress.scanned} messages scanned · ${progress.found} matches`}
-              </ThemedText>
-            </View>
-            {result && (
-              <Pressable onPress={finish} style={[styles.cta, { backgroundColor: theme.primary }]}>
-                <Icon name="check" size={18} color={theme.onPrimary} strokeWidth={2.6} />
-                <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                  Open Wafra
-                </ThemedText>
-              </Pressable>
-            )}
-          </Animated.View>
-        )}
-
-        {step === 'choose' && (
-          <Animated.View entering={FadeInDown.duration(350)} style={styles.body}>
-            <View style={styles.hero}>
-              <View style={[styles.bigIcon, { backgroundColor: `${theme.primary}1a` }]}>
-                <Icon name="target" size={30} color={theme.primary} strokeWidth={1.7} />
-              </View>
-              <ThemedText type="subtitle" style={styles.center}>
-                How do you want to start?
-              </ThemedText>
-              <ThemedText type="default" themeColor="textSecondary" style={styles.center}>
-                {Platform.OS === 'web'
-                  ? 'SMS scanning works on the Android app. Pick a starting point:'
-                  : 'You can scan your inbox later from Wallet.'}
-              </ThemedText>
-            </View>
-            <View style={styles.stack}>
-              <Pressable
-                onPress={() => {
-                  loadDemoData();
-                }}
-                style={[styles.cta, { backgroundColor: theme.primary }]}>
-                <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                  {t('exploreSample')}
-                </ThemedText>
-              </Pressable>
-              <Pressable onPress={finish} style={styles.ghostBtn}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  Start empty
-                </ThemedText>
-              </Pressable>
-            </View>
-          </Animated.View>
-        )}
-      </SafeAreaView>
-      </ThemedView>
+            </Animated.View>
+          )}
+        </SafeAreaView>
+      </View>
     </View>
   );
 }
@@ -209,6 +193,7 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     alignItems: 'center',
+    backgroundColor: night.background,
   },
   safe: {
     flex: 1,
@@ -217,59 +202,65 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    padding: Spacing.four,
+    paddingHorizontal: ScreenPadding,
+    paddingBottom: Spacing.four,
+    // Left-aligned, not centred: this reads as a statement, not a poster.
+    alignItems: 'stretch',
     justifyContent: 'space-between',
-    paddingBottom: Spacing.five,
   },
-  hero: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+  top: {
+    paddingTop: Spacing.six,
     gap: Spacing.three,
-    paddingHorizontal: Spacing.two,
   },
-  bigIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+  headline: {
+    fontFamily: Fonts.sansSemi,
+    fontSize: 32,
+    lineHeight: 37,
+    letterSpacing: -1.12,
+    color: night.text,
+    maxWidth: 320,
   },
-  center: {
-    textAlign: 'center',
+  sub: {
+    fontFamily: Fonts.sans,
+    fontSize: 14,
+    lineHeight: 21,
+    color: night.textSecondary,
   },
   points: {
-    gap: Spacing.three,
     paddingVertical: Spacing.four,
   },
-  pointRow: {
+  point: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
+    gap: Spacing.three - 2,
+    paddingVertical: Spacing.three,
+    borderTopColor: night.cardBorder,
   },
   pointIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 30,
     alignItems: 'center',
-    justifyContent: 'center',
   },
   pointText: {
     flex: 1,
+    gap: 2,
   },
-  stack: {
-    gap: Spacing.two,
+  pointTitle: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 14.5,
+    lineHeight: 19,
+    color: night.text,
   },
-  cta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.two,
-    borderRadius: Radius.md + 2,
-    paddingVertical: Spacing.three + 2,
+  pointDetail: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    lineHeight: 17,
+    color: night.textTertiary,
   },
-  ghostBtn: {
-    alignItems: 'center',
-    paddingVertical: Spacing.two + 2,
+  actions: {
+    gap: Spacing.two + 2,
+  },
+  ghost: {
+    borderWidth: 1,
+    borderColor: night.cardBorderStrong,
   },
 });

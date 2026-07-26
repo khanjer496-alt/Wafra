@@ -1,4 +1,5 @@
-// Focused E2E: global period selector reflects on Home, Analytics, Transactions, Budgets.
+// Focused E2E: the global reporting period reflects on Home, Flow, and
+// Activity, and survives a reload.
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:8126';
@@ -8,8 +9,8 @@ const ok = (name, cond) => {
   else { fail++; console.log(`✗ ${name}`); }
 };
 
-// Router keeps hidden screens mounted; hit-test so we only return an element
-// that is actually on top at its own center point.
+// The router keeps hidden screens mounted; hit-test so we only return an
+// element that is actually on top at its own centre point.
 async function visibleText(page, text, timeout = 8000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -32,13 +33,41 @@ async function visibleText(page, text, timeout = 8000) {
   return null;
 }
 
-async function tapText(page, text) {
+async function tapText(page, text, settle = 800) {
   console.log(`  → tap ${text}`);
   const el = await visibleText(page, text);
   if (!el) throw new Error(`not found: ${text}`);
   await el.scrollIntoViewIfNeeded();
   await el.click({ timeout: 8000 });
+  await page.waitForTimeout(settle);
 }
+
+/** Several mounted screens can share a label; click the one on top. */
+async function tapLabel(page, label, settle = 900) {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    for (const el of await page.getByLabel(label).all()) {
+      const onTop = await el.evaluate((node) => {
+        const r = node.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return false;
+        const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return !!top && (node.contains(top) || top.contains(node));
+      }).catch(() => false);
+      if (onTop) {
+        await el.click({ timeout: 8000 });
+        await page.waitForTimeout(settle);
+        return;
+      }
+    }
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`no visible control labelled: ${label}`);
+}
+
+const tapTab = async (page, label) => {
+  await page.getByRole('tab', { name: label }).click({ timeout: 8000 });
+  await page.waitForTimeout(1300);
+};
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
@@ -46,92 +75,60 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
-
-// Onboarding: welcome → (choose) → sample data
-const getStarted = await visibleText(page, 'Get started', 4000);
-if (getStarted) {
-  await getStarted.click();
-  await page.waitForTimeout(500);
-  const sample = await visibleText(page, 'Explore with sample data', 4000);
-  if (sample) {
-    await sample.scrollIntoViewIfNeeded();
-    await sample.click();
-  }
-  await page.waitForTimeout(1000);
-}
-
-// 1) Home shows the period chip with the current month and live balance (no end-of caption)
-const nowLabel = new Date().toLocaleString('en', { month: 'short' });
-ok('home: period chip shows current month', !!(await visibleText(page, nowLabel)));
-ok('home: hero shows live net caption', !!(await visibleText(page, 'so far this month')));
-
-// 2) Open the period sheet from Home, choose Last month
-await tapText(page, nowLabel);
-ok('sheet: reporting period sheet opens', !!(await visibleText(page, 'Reporting period')));
-await tapText(page, 'Last month');
-await page.waitForTimeout(600);
-const prevShort = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return d.toLocaleString('en', { month: 'short' }); })();
-ok('home: past month hero caption names the month', !!(await visibleText(page, `in ${prevShort}`)));
-
-// 3) Analytics follows the same period
-await tapText(page, 'Insights');
-await page.waitForTimeout(600);
-const prev = new Date(); prev.setDate(1); prev.setMonth(prev.getMonth() - 1);
-const prevLabel = prev.toLocaleString('en', { month: 'long' });
-ok('stats: title shows selected past month', !!(await visibleText(page, prevLabel)));
-ok('stats: Spent label replaces Projected', !!(await visibleText(page, 'Spent')));
-
-// 4) Switch to All time from Analytics title
-await tapText(page, 'Tap to change period');
-await tapText(page, 'All time');
-await page.waitForTimeout(600);
-ok('stats: all-time title', !!(await visibleText(page, 'All time')));
-
-// 5) Budgets falls back to current month in non-month mode
-await tapText(page, 'Budgets');
-await page.waitForTimeout(600);
-const thisMonthLong = new Date().toLocaleString('en', { month: 'long' });
-ok('budgets: non-month period falls back to current month', !!(await visibleText(page, thisMonthLong)));
-
-// 6) Year mode via sheet on Home + transactions default scope
-await tapText(page, 'Home');
-await page.waitForTimeout(400);
-await tapText(page, 'Good ');  // greeting sits inside the period-chip pressable
-await tapText(page, 'This year');
-await page.waitForTimeout(600);
-const yr = String(new Date().getFullYear());
-ok('home: year chip active', !!(await visibleText(page, yr)));
-
-await tapText(page, 'See all');
-await page.waitForTimeout(800);
-ok('transactions: summary shows selected year scope', !!(await visibleText(page, `· ${yr}`)));
-await page.goBack();
-await page.waitForTimeout(600);
-
-// 7) Home In tap-through opens transactions filtered to income
-await tapText(page, 'In AED');
-await page.waitForTimeout(800);
-ok('transactions: In deep-link applies a filter', !!(await visibleText(page, '1 filter')));
-await page.goBack();
-await page.waitForTimeout(600);
-
-// 8) Cashflow bar tap jumps the period to that month
-await tapText(page, 'Insights');
-await page.waitForTimeout(600);
-const twoBack = new Date(); twoBack.setDate(1); twoBack.setMonth(twoBack.getMonth() - 2);
-const twoBackShort = twoBack.toLocaleString('en', { month: 'short' });
-const twoBackLong = twoBack.toLocaleString('en', { month: 'long' });
-const cashflow = await visibleText(page, 'Cashflow');
-if (cashflow) await cashflow.scrollIntoViewIfNeeded();
-await tapText(page, twoBackShort);
-await page.waitForTimeout(700);
-ok('stats: tapping a cashflow bar opens that month', !!(await visibleText(page, twoBackLong)));
-
-// 9) Persistence: reloading must NOT show onboarding again (chunked storage)
-await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
-ok('persistence: reload keeps onboarded state', !(await visibleText(page, 'Get started', 2500)));
-ok('persistence: reload keeps data (hero caption present)', !!(await visibleText(page, 'so far this month')));
+const sample = await visibleText(page, 'Start with sample data', 6000);
+if (sample) { await sample.click(); await page.waitForTimeout(2200); }
+
+const shortMonth = (offset = 0) => {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offset);
+  return d.toLocaleString('en', { month: 'short' });
+};
+
+// 1) Home opens on the current month, live.
+ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
+ok('home: hero reads live', !!(await visibleText(page, /SAVED SO FAR|OVERSPENT SO FAR/i)));
+
+// 2) The pill opens the sheet; Last month re-scopes the hero.
+await tapLabel(page, /Reporting period/, 1200);
+ok('sheet: reporting period opens', !!(await visibleText(page, 'REPORTING PERIOD')));
+await tapText(page, 'LAST MONTH', 1200);
+ok('home: past month names itself in the hero', !!(await visibleText(page, `in ${shortMonth(-1)}`)));
+
+// 3) Flow follows the same period.
+await tapTab(page, 'Flow');
+ok('flow: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
+ok('flow: subtitle states the out total', !!(await visibleText(page, /^Out /)));
+
+// 4) All time from Flow's own pill.
+await tapLabel(page, /Reporting period/, 1200);
+await tapText(page, 'ALL TIME', 1200);
+ok('flow: all time applies', !!(await visibleText(page, 'All time')));
+
+// 5) Year mode from Home, and Activity inherits the scope.
+await tapTab(page, 'Home');
+await tapLabel(page, /Reporting period/, 1200);
+await tapText(page, 'THIS YEAR', 1200);
+const yr = String(new Date().getFullYear());
+ok('home: year mode applies', !!(await visibleText(page, yr)));
+
+await tapLabel(page, 'See all', 1600);
+ok('activity: header carries the selected scope', !!(await visibleText(page, `· ${yr}`)));
+await tapLabel(page, 'Back', 1200);
+
+// 6) Home's Out cell deep-links to Activity, pre-filtered to spending. Caps
+// are a CSS transform, so the DOM text is still "Out".
+await tapText(page, /^Out$/, 1600);
+ok('activity: Out deep-link arrives pre-filtered', !!(await visibleText(page, /\d+ filters?/i)));
+await tapLabel(page, 'Back', 1200);
+
+// 7) Persistence: a reload must not show onboarding again (chunked storage).
+await page.goto(BASE, { waitUntil: 'networkidle' });
+await page.waitForTimeout(2000);
+ok('persistence: reload keeps onboarded state',
+  !(await visibleText(page, 'Your bank already texts you', 2500)));
+ok('persistence: reload keeps the ledger', !!(await visibleText(page, /LEAVING SOON|TODAY/i)));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

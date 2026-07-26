@@ -139,6 +139,19 @@ export const Elevation = {
 } as const;
 
 /** Every scroller pads to this so the floating bar never covers the last row. */
+/** `cubic-bezier(0.16, 1, 0.3, 1)` everywhere — no linear, no bounce. */
+export const EASE = [0.16, 1, 0.3, 1] as const;
+
+/** Durations in ms. Transform and opacity only. */
+export const Motion = {
+  rowPress: 220,
+  sectionEnter: 320,
+  sectionStagger: 40,
+  sheet: 420,
+  countUp: 900,
+  pulse: 2800,
+} as const;
+
 export const ScreenPadding = 22;
 
 export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;

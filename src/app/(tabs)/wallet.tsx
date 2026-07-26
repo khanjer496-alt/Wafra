@@ -17,7 +17,7 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BankAvatar } from '@/components/ui/bank-avatar';
+import { AccountTile } from '@/components/ui/tile';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
@@ -390,10 +390,7 @@ export default function WalletScreen() {
                         styles.accountRow,
                         i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                       ]}>
-                      <BankAvatar
-                        name={account.bankName ?? account.name}
-                        color={account.color}
-                      />
+                      <AccountTile account={account} />
                       <View style={styles.accountInfo}>
                         <ThemedText type="default" numberOfLines={1}>
                           {cardTitle(account.name)}
@@ -447,11 +444,7 @@ export default function WalletScreen() {
                       styles.accountRow,
                       i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                     ]}>
-                    <BankAvatar
-                      name={account.bankName ?? account.name}
-                      color={account.color}
-                      icon={meta.icon}
-                    />
+                    <AccountTile account={account} />
                     <View style={styles.accountInfo}>
                       <ThemedText type="default" numberOfLines={1}>
                         {account.name}
@@ -510,11 +503,7 @@ export default function WalletScreen() {
                         styles.inactiveRow,
                         i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                       ]}>
-                      <BankAvatar
-                        name={account.bankName ?? account.name}
-                        color={account.color}
-                        icon={account.cardType ? 'wallet' : KIND_META[account.kind].icon}
-                      />
+                      <AccountTile account={account} />
                       <View style={styles.accountInfo}>
                         <ThemedText type="default" numberOfLines={1}>
                           {account.name}
@@ -601,9 +590,14 @@ export default function WalletScreen() {
 
           {/* Where the numbers above came from. The claim that nothing leaves
               the phone is worth stating on the screen that shows balances,
-              not only in Settings. SMS reading is Android-only, so on any
-              other platform this block would be a lie. */}
-          {isSmsScanningAvailable() && (
+              not only in Settings.
+
+              SMS reading is Android-only, so the scan claim only appears
+              where scanning is real. The block itself still does, because
+              pasting a bank alert by hand works on every platform and this
+              is the only route to the screen that accepts one — gating the
+              whole block left iOS and web with no way in at all. */}
+          {(
             <Pressable
               onPress={() => router.push('/import-sms')}
               style={({ pressed }) => [
@@ -616,13 +610,16 @@ export default function WalletScreen() {
               <Icon name="mail" size={17} color={theme.textSecondary} />
               <View style={styles.scanText}>
                 <ThemedText type="small">
-                  {state.lastScanTs > 0
-                    ? `Inbox scanned ${relativeSince(state.lastScanTs, now)}`
-                    : 'Inbox not read yet'}
+                  {!isSmsScanningAvailable()
+                    ? 'Paste a bank message'
+                    : state.lastScanTs > 0
+                      ? `Inbox scanned ${relativeSince(state.lastScanTs, now)}`
+                      : 'Inbox not read yet'}
                 </ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary" tabular>
-                  {smsCount} entr{smsCount === 1 ? 'y' : 'ies'} read on this device · nothing
-                  uploaded
+                  {!isSmsScanningAvailable()
+                    ? 'Reading the inbox needs the Android app; pasting works anywhere'
+                    : `${smsCount} entr${smsCount === 1 ? 'y' : 'ies'} read on this device · nothing uploaded`}
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />
