@@ -157,6 +157,17 @@ export function TransactionEditSheet({ transaction, onClose }: TransactionEditSh
             />
           </View>
 
+          {/* A transfer has no spending category — it settles a balance rather
+              than buying anything, and it is excluded from every total. Asking
+              for one and showing "Other" selected made a correctly handled card
+              payment look miscategorised. */}
+          {isTransfer ? (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.transferNote}>
+              Transfers have no category — this moves money between your own
+              accounts rather than spending it.
+            </ThemedText>
+          ) : (
+            <>
           <ThemedText type="micro" themeColor="textSecondary">Category</ThemedText>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
             {categories.map((c) => (
@@ -177,6 +188,8 @@ export function TransactionEditSheet({ transaction, onClose }: TransactionEditSh
               </Pressable>
             ))}
           </ScrollView>
+            </>
+          )}
 
           <ThemedText type="micro" themeColor="textSecondary">Account</ThemedText>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
@@ -289,6 +302,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingVertical: Spacing.two + 4,
   },
+  transferNote: { paddingVertical: 2 },
   chipRow: {
     gap: Spacing.two,
   },
