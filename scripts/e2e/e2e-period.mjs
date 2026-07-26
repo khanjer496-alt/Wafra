@@ -18,6 +18,22 @@ async function visibleText(page, text, timeout = 8000) {
     for (const el of els.reverse()) {
       if (!(await el.isVisible().catch(() => false))) continue;
       await el.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+      // scrollIntoViewIfNeeded does the MINIMAL scroll, which parks the
+      // element flush with the bottom edge — underneath the floating tab bar,
+      // where the hit test below correctly reports it as covered. Nudge the
+      // scroller until it clears that strip, the same as a user would.
+      await el.evaluate((node) => {
+        const BAR = 120;
+        for (let i = 0; i < 4; i++) {
+          const r = node.getBoundingClientRect();
+          const over = r.bottom - (window.innerHeight - BAR);
+          if (over <= 0) break;
+          let p = node.parentElement;
+          while (p && !(p.scrollHeight > p.clientHeight + 4 && p.clientHeight > 200)) p = p.parentElement;
+          if (!p) break;
+          p.scrollTop += over + 12;
+        }
+      }).catch(() => {});
       const onTop = await el.evaluate((node) => {
         const r = node.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return false;
@@ -47,6 +63,21 @@ async function tapLabel(page, label, settle = 900) {
   const deadline = Date.now() + 8000;
   while (Date.now() < deadline) {
     for (const el of await page.getByLabel(label).all()) {
+      // Same two-step as visibleText: a control can sit off screen or under
+      // the floating tab bar, and neither means it is missing.
+      await el.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+      await el.evaluate((node) => {
+        const BAR = 120;
+        for (let i = 0; i < 4; i++) {
+          const r = node.getBoundingClientRect();
+          const over = r.bottom - (window.innerHeight - BAR);
+          if (over <= 0) break;
+          let p = node.parentElement;
+          while (p && !(p.scrollHeight > p.clientHeight + 4 && p.clientHeight > 200)) p = p.parentElement;
+          if (!p) break;
+          p.scrollTop += over + 12;
+        }
+      }).catch(() => {});
       const onTop = await el.evaluate((node) => {
         const r = node.getBoundingClientRect();
         if (r.width === 0 || r.height === 0) return false;

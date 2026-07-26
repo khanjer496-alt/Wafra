@@ -24,14 +24,22 @@ import { t } from '@/lib/i18n';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
-import { formatAED, monthKey, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import {
+  formatAED,
+  monthKey,
+  parseAmountToFils,
+  shortDate,
+  toISODate,
+  totalAsShown,
+} from '@/lib/format';
 import {
   activeSubscriptions,
+  billCommitments,
   detectSubscriptions,
   daysUntilNext,
   fixedCommitments,
+  otherCommitments,
   stoppedSubscriptions,
-  subscriptionsMonthlyTotal,
   trueSubscriptions,
   type Subscription,
 } from '@/lib/subscriptions';
@@ -81,11 +89,18 @@ export default function BillsScreen() {
     () => allCommitments.filter((s) => s.category === 'loan'),
     [allCommitments],
   );
+  // And so does a grocer. "Everything that recurs and is not a subscription"
+  // was one bucket wearing the utilities heading, which is how a fish shop and
+  // a furniture store came to be listed as monthly bills.
   const commitments = useMemo(
-    () => allCommitments.filter((s) => s.category !== 'loan'),
+    () => billCommitments(allCommitments).filter((s) => s.category !== 'loan'),
     [allCommitments],
   );
-  const subsTotal = subscriptionsMonthlyTotal(subs);
+  const otherRepeats = useMemo(() => otherCommitments(allCommitments), [allCommitments]);
+  // Rounded per row, because it is printed directly above those rows and has
+  // to equal them. `subscriptionsMonthlyTotal` stays the figure for anything
+  // that does arithmetic with it.
+  const subsTotal = totalAsShown(subs.map((s) => s.monthlyEquivalentFils));
   const trackedTitles = useMemo(
     () => new Set(state.bills.map((b) => b.title.toLowerCase())),
     [state.bills],
@@ -318,7 +333,9 @@ export default function BillsScreen() {
                 ? `${t('subscriptionsSeg')} ${subs.length}`
                 : s === 'cards'
                   ? `${t('cardsSeg')} ${dues.length}`
-                  : `${t('utilitiesSeg')} ${loans.length + commitments.length + rows.length}`;
+                  : `${t('utilitiesSeg')} ${
+                      loans.length + commitments.length + otherRepeats.length + rows.length
+                    }`;
             return (
               <Pressable
                 key={s}
@@ -489,8 +506,25 @@ export default function BillsScreen() {
                 </View>
               )}
 
+              {otherRepeats.length > 0 && (
+                <View style={commitments.length > 0 ? styles.commitBlock : styles.utilitiesBlock}>
+                  <ThemedText type="micro" themeColor="textSecondary">
+                    {t('otherRecurringHeader')}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {t('otherRecurringHint')}
+                  </ThemedText>
+                  <View>{otherRepeats.map((sub, i) => renderRecurringRow(sub, i))}</View>
+                </View>
+              )}
+
               {rows.length > 0 && (
-                <View style={commitments.length > 0 ? styles.commitBlock : undefined}>
+                <View
+                  style={
+                    commitments.length > 0 || otherRepeats.length > 0
+                      ? styles.commitBlock
+                      : undefined
+                  }>
                   <ThemedText type="micro" themeColor="textSecondary">
                     {t('remindersSeg')}
                   </ThemedText>
@@ -539,7 +573,10 @@ export default function BillsScreen() {
                   Long-press a reminder to delete it.
                 </ThemedText>
               )}
-              {rows.length === 0 && commitments.length === 0 && (
+              {rows.length === 0 &&
+                commitments.length === 0 &&
+                loans.length === 0 &&
+                otherRepeats.length === 0 && (
                 <View style={styles.empty}>
                   <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
                     <Icon name="calendar" size={26} color={theme.textSecondary} strokeWidth={1.7} />

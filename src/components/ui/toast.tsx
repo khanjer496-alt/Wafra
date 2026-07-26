@@ -63,7 +63,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           // Clears the floating tab bar rather than sitting under it.
           style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) + 84 }]}
           pointerEvents="box-none">
-          <View style={styles.toast}>
+          {/* The fill is a near-black by design, which in the dark theme is
+              also the page. Floating over a list it read as loose text lying on
+              top of a row rather than a surface above it, so it carries its own
+              hairline and a heavier shadow — the two things that say "this is
+              in front" when the fill cannot. */}
+          <View
+            style={[
+              styles.toast,
+              { borderColor: theme.cardBorderStrong, shadowColor: '#000' },
+            ]}>
             <Icon name="check" size={16} color={theme.primary} strokeWidth={2.1} />
             <ThemedText type="small" style={styles.message} numberOfLines={2}>
               {toast.message}
@@ -104,13 +113,13 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.three,
     backgroundColor: '#16130F',
     borderRadius: 13,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three - 2,
-    shadowColor: '#16130F',
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowOpacity: 0.4,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
   message: {
     flexShrink: 1,

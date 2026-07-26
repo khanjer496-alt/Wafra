@@ -12,15 +12,40 @@ function groupThousands(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-/** Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234". */
+/**
+ * Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234".
+ *
+ * When the decimals are hidden the whole part is ROUNDED, not truncated.
+ * Truncating showed a AED 76.99 subscription as "AED 76", and — worse — made
+ * lists stop adding up: four rows each losing up to a dirham sat under a total
+ * that had rounded once, so Bills printed AED 1,025/mo above rows totalling
+ * 1,022. Rounding each row leaves at most half a dirham of drift per row
+ * instead of a whole one, and in the common case none at all.
+ */
 export function formatAmount(fils: number, opts?: { decimals?: boolean }): string {
   const abs = Math.abs(Math.round(fils));
-  const whole = Math.floor(abs / 100);
   const cents = abs % 100;
   const showDecimals = opts?.decimals ?? cents !== 0;
+  const whole = showDecimals ? Math.floor(abs / 100) : Math.round(abs / 100);
   const sign = fils < 0 ? '-' : '';
   const base = `${sign}${groupThousands(whole)}`;
   return showDecimals ? `${base}.${String(cents).padStart(2, '0')}` : base;
+}
+
+/**
+ * Total of a set of amounts as a reader would add them up on screen.
+ *
+ * A total printed above a list has to equal that list. Summing the raw fils
+ * and rounding once does not: each row is rounded on its own, so the total
+ * lands up to half a dirham per row away from what the rows say. Rounding each
+ * row first — the same rounding `formatAmount` will apply to it — makes the
+ * column add up, which is the only property a heading like "AED 1,025/mo"
+ * above four rows is actually claiming.
+ *
+ * For arithmetic, not display: keep using the raw fils.
+ */
+export function totalAsShown(values: number[]): number {
+  return values.reduce((sum, v) => sum + Math.round(v / 100) * 100, 0);
 }
 
 /** "AED 1,234.56" — currency symbol follows the active market. */

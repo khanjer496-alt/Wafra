@@ -271,6 +271,11 @@ function cleanDescriptor(name: string): string {
   // "AL NIMAR AL ABYADHdSHARJAH" → the lone lowercase letter left behind by
   // the peel is acquirer corruption, not the end of the name.
   if (peeledPlace && /[A-Z][a-z]$/.test(out)) out = out.slice(0, -1).trim();
+  // A reference label the number was stripped from is not part of the name:
+  // "FBINTER NO.-991" leaves "Fbinter No", "MOBILE NO." leaves "Mobile No".
+  // Only ever a trailing word, and never the whole of one — "NO FRILLS" keeps
+  // its first word because there is something after it.
+  out = out.replace(/\s+(?:no|ref|id|acct?|a\/c)\.?$/i, '').trim();
   return out.replace(/(?:\s+COM|\.com)$/i, '').trim();
 }
 
@@ -539,6 +544,14 @@ const ACRONYMS = new Set([
   'RTA', 'KFC', 'FAB', 'DEWA', 'SEWA', 'FEWA', 'ADCB', 'ENBD', 'ENOC', 'ADNOC',
   'VOX', 'PSN', 'NMC', 'DXB', 'AUH', 'HSBC', 'CBD', 'RAK', 'DIB', 'ATM', 'NOL', 'OSN',
 ]);
+
+/**
+ * The vocabulary a bank SMS uses about itself. None of these is ever a
+ * merchant, so a pattern that captures the words before an account or
+ * reference number has to reject them however well the rest of it matched.
+ */
+const BANK_NOUN_RE =
+  /^(?:a\/?c|acc(?:t|ount)?|card|cheque|check|ref(?:erence)?|txn|transaction|trn|iban|mobile|phone|consumer|customer|policy|invoice|bill|receipt|order|file|id|serial|batch|voucher|contract|loan|instal?ment|emi|application|request|service|registration|plate|traffic|fine|permit|licen[cs]e|visa|passport|emirates id|no)$/i;
 
 function titleCase(s: string): string {
   return s
@@ -909,12 +922,27 @@ export function parseSms(
   // Utility direct debits name the biller before the account: "AED 1,938.41
   // has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765".
   // Without this the row title fell back to the generic "Card purchase".
+  //
+  // The capture is only a run of capitals, so on its own it also matches the
+  // ordinary furniture of a bank SMS — REF NO., ACCOUNT NO., CHEQUE NO. — and
+  // the words before an account reference in a transfer alert. Two guards keep
+  // it to real billers: the name has to be one the app already recognizes, and
+  // an unrecognized one no longer gets called a utility.
+  //
+  // That fallback never helped a genuine biller: SEWA, DEWA and Etisalat all
+  // categorize themselves. It only fired on names the app could not place, so
+  // every hit was wrong. It is what put a fish shop, a furniture store and a
+  // transfer beneficiary under "Utilities & fixed bills" — and, because that
+  // category also unlocks the bill-shaped detection path in subscriptions.ts,
+  // what turned three of them into standing monthly bills.
   const billerRef = raw.match(/\b([A-Z][A-Z ]{2,20}?)\s+NO\.?\s*[-:]\s*[\dX·]/);
-  if (billerRef) {
-    const amountFils = amountWithFx(raw, false);
+  if (billerRef && !BANK_NOUN_RE.test(billerRef[1].trim())) {
+    const payee = billerRef[1].trim();
+    const named = normalizeServiceName(payee);
+    const category = guessCategory(payee, 'expense', overrides, named ?? titleCase(payee));
+    const amountFils = category === 'other' && !named ? null : amountWithFx(raw, false);
     if (amountFils) {
-      const payee = billerRef[1].trim();
-      const merchant = normalizeServiceName(payee) ?? titleCase(payee);
+      const merchant = named ?? titleCase(payee);
       return {
         kind: 'transaction',
         type: CREDIT_WORDS.test(raw) && !DEBIT_WORDS.test(raw) ? 'income' : 'expense',
@@ -927,9 +955,7 @@ export function parseSms(
         transferHint: false,
         snapshotFils,
         snapshotKind,
-        categoryGuess: guessCategory(payee, 'expense', overrides, merchant) === 'other'
-          ? 'utilities'
-          : guessCategory(payee, 'expense', overrides, merchant),
+        categoryGuess: category,
         raw,
       };
     }

@@ -19,13 +19,22 @@ import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
-import { getCategory, rampColor } from '@/lib/categories';
-import { daysInMonth, formatAED, formatAmount, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { getCategory, onRampColor, rampColor } from '@/lib/categories';
+import {
+  daysInMonth,
+  formatAED,
+  formatAmount,
+  formatCompactAED,
+  monthKey,
+  monthLabel,
+  shiftMonthKey,
+} from '@/lib/format';
 import { buildInsights, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
 import { isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -66,6 +75,7 @@ export default function FlowScreen() {
     const head = summary.byCategory.slice(0, MAX_SLICES).map((c, i) => ({
       key: c.category as string,
       label: getCategory(c.category).label,
+      icon: getCategory(c.category).icon as IconName,
       totalFils: c.totalFils,
       share: c.share,
       color: rampColor(i, dark),
@@ -76,6 +86,7 @@ export default function FlowScreen() {
       head.push({
         key: 'rest',
         label: `${tail.length} more`,
+        icon: 'sliders' as IconName,
         totalFils,
         share: summary.expenseFils > 0 ? totalFils / summary.expenseFils : 0,
         color: dark ? '#2A2620' : '#D9D3C6',
@@ -121,6 +132,12 @@ export default function FlowScreen() {
   }, [state.transactions, key]);
 
   const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
+  // What the six months averaged, in minus out. The header figure the chart is
+  // there to support: six pairs of bars answer "which month", this answers
+  // "and overall?".
+  const trendAvg = Math.round(
+    trend.reduce((sum, m) => sum + (m.income - m.expense), 0) / (trend.length || 1),
+  );
 
   return (
     <ThemedView style={styles.root}>
@@ -183,7 +200,14 @@ export default function FlowScreen() {
                       styles.compRow,
                       i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                     ]}>
-                    <View style={[styles.swatch, { backgroundColor: s.color }]} />
+                    {/* The swatch carries the glyph. An 8px dot said only
+                        "this row is the third segment"; the same square at 26px
+                        with the category's mark says which category that is,
+                        and the bar above stays legible because the tint is
+                        still exactly the segment's step of the ramp. */}
+                    <View style={[styles.compTile, { backgroundColor: s.color }]}>
+                      <Icon name={s.icon} size={15} color={onRampColor(s.color)} strokeWidth={1.8} />
+                    </View>
                     <ThemedText type="small" style={styles.compLabel} numberOfLines={1}>
                       {s.label}
                     </ThemedText>
@@ -282,12 +306,28 @@ export default function FlowScreen() {
 
           {/* ── In vs out ── */}
           <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
-            <SectionHeader title="In vs out · 6 months" />
+            <SectionHeader
+              title="In vs out · 6 months"
+              right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} avg`}
+            />
             <View style={styles.trend}>
               {trend.map((m) => {
                 const current = m.key === key;
                 return (
                   <View key={m.key} style={styles.trendCol}>
+                    {/* A bar you cannot read a number off is a shape, not a
+                        figure. A 14px bar cannot carry its own label without
+                        colliding with its neighbour, so the pair is written
+                        once above the column — in first, out second, each in
+                        its bar's colour, which is what ties number to bar. */}
+                    <View style={styles.trendValues}>
+                      <ThemedText type="nano" tabular style={[styles.trendValue, { color: theme.primary }]}>
+                        {formatCompactAED(m.income)}
+                      </ThemedText>
+                      <ThemedText type="nano" tabular themeColor="textTertiary" style={styles.trendValue}>
+                        {formatCompactAED(m.expense)}
+                      </ThemedText>
+                    </View>
                     <View style={styles.trendBars}>
                       <View
                         style={[
@@ -375,7 +415,13 @@ const styles = StyleSheet.create({
     gap: Spacing.two + 2,
     paddingVertical: 11,
   },
-  swatch: { width: 8, height: 8, borderRadius: 2 },
+  compTile: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   compLabel: { flex: 1 },
   compFigure: { minWidth: 62, textAlign: 'right' },
 
@@ -395,8 +441,11 @@ const styles = StyleSheet.create({
   },
   limitTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
 
-  trend: { flexDirection: 'row', gap: Spacing.two, height: 118 + 18 },
-  trendCol: { flex: 1, gap: Spacing.two },
+  // The extra 16 at the top is headroom for the value sitting above the
+  // tallest bar, which would otherwise be clipped by the row.
+  // 118 of bars, plus a line for the figures above and the month below.
+  trend: { flexDirection: 'row', gap: Spacing.two, height: 118 + 18 + 14, marginTop: Spacing.three },
+  trendCol: { flex: 1, gap: Spacing.one },
   trendBars: {
     flex: 1,
     flexDirection: 'row',
@@ -409,6 +458,20 @@ const styles = StyleSheet.create({
     maxWidth: 14,
     borderTopLeftRadius: 3,
     borderTopRightRadius: 3,
+  },
+  trendValues: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 5,
+  },
+  // `nano` is 10.5px with 1.05 of tracking and a caps transform — right for a
+  // section label, far too wide here: at column width it truncated "13.5k" to
+  // "1…". These three overrides are the whole reason the style exists.
+  trendValue: {
+    fontSize: 8.5,
+    lineHeight: 12,
+    letterSpacing: 0,
+    textTransform: 'none',
   },
   trendLabel: { textAlign: 'center' },
 

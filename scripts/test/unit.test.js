@@ -18,8 +18,20 @@ function ok(name, cond, detail = '') {
 // ── format ──
 eq('formatAED with cents', fmt.formatAED(123456), 'AED 1,234.56');
 eq('formatAED whole drops decimals', fmt.formatAED(120000), 'AED 1,200');
-eq('formatAED forced no decimals rounds', fmt.formatAED(123456, { decimals: false }), 'AED 1,234');
+eq('formatAED forced no decimals rounds up', fmt.formatAED(123456, { decimals: false }), 'AED 1,235');
+eq('formatAED forced no decimals rounds down', fmt.formatAED(123449, { decimals: false }), 'AED 1,234');
+eq('formatAED forced no decimals keeps a near-whole figure', fmt.formatAED(7699, { decimals: false }), 'AED 77');
 eq('formatAED negative', fmt.formatAED(-50000), 'AED -500');
+// Bills prints a total above the rows it totals. Truncating each row made the
+// two disagree by a dirham per row: AED 1,025/mo over rows adding to 1,022.
+{
+  const read = (fils) => Number(fmt.formatAmount(fils, { decimals: false }).replace(/,/g, ''));
+  const rows = [77123, 15340, 7399, 2540];
+  const shown = rows.reduce((a, r) => a + read(r), 0);
+  eq('rows add up to their own total', shown, read(fmt.totalAsShown(rows)));
+  eq('totalAsShown of nothing', fmt.totalAsShown([]), 0);
+  eq('totalAsShown keeps whole amounts exact', fmt.totalAsShown([50000, 25000]), 75000);
+}
 eq('formatAED millions grouping', fmt.formatAED(123456789), 'AED 1,234,567.89');
 eq('parseAmountToFils decimal', fmt.parseAmountToFils('12.5'), 1250);
 eq('parseAmountToFils with junk chars', fmt.parseAmountToFils('AED 1,234.56'), 123456);
@@ -152,6 +164,32 @@ ok('groups: commitments never count in trueSubscriptions',
   subsLib.trueSubscriptions(supplier).length === 0);
 ok('groups: commitments listed under fixedCommitments',
   subsLib.fixedCommitments(supplier).length === 2);
+ok('groups: a supplier is not a bill',
+  subsLib.billCommitments(supplier).length === 0);
+ok('groups: a supplier is an other repeat payment',
+  subsLib.otherCommitments(supplier).length === 2);
+ok('groups: rent and DEWA are bills',
+  subsLib.billCommitments(rentSubs).length === 2);
+ok('groups: rent and DEWA are not other repeat payments',
+  subsLib.otherCommitments(rentSubs).length === 0);
+
+// A merchant the parser mislabelled "utilities" used to skip the amount gate
+// outright, so two unrelated payments a month apart became a standing bill at
+// whatever the bigger one was. One shop was listed at AED 20,918/mo.
+const wildBill = subsLib.detectSubscriptions([
+  subTx('Fishbasket', '2026-06-03', 2091800, 'utilities'),
+  subTx('Fishbasket', '2026-07-03', 12000, 'utilities'),
+]);
+ok('bills: two unrelated amounts are not a monthly bill', wildBill.length === 0);
+
+// A real utility still varies month to month and must survive.
+const realBill = subsLib.detectSubscriptions([
+  subTx('SEWA', '2026-05-25', 28000, 'utilities'),
+  subTx('SEWA', '2026-06-25', 45000, 'utilities'),
+  subTx('SEWA', '2026-07-25', 31000, 'utilities'),
+]);
+ok('bills: a swinging utility bill is still detected',
+  realBill.length === 1 && realBill[0].group === 'utility');
 
 // User dismissals remove a merchant from detection everywhere
 const dismissed = subsLib.detectSubscriptions(
@@ -225,6 +263,45 @@ ok('openDues: dues stale past 30d overdue decay away',
   !guardOpen.some(d => d.due.id === 'g3'));
 ok('openDues: recent overdue credit due still shows',
   guardOpen.some(d => d.due.id === 'g1' && d.status === 'overdue'));
+
+// The same statement stored twice — a reminder SMS read as a fresh statement —
+// listed the card twice on Home and counted it twice in the total.
+const twinState = {
+  ...guardState,
+  cardDues: [
+    ...guardState.cardDues,
+    { id: 'g1b', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
+  ],
+};
+const twinOpen = cardsGuardLib.openDues(twinState, new Date(2026, 6, 24));
+ok('openDues: one statement per account and due date',
+  twinOpen.filter(d => d.due.accountId === 'cc' && d.due.dueDate === '2026-07-10').length === 1);
+ok('openDues: the copy still owing the most wins',
+  cardsGuardLib
+    .openDues(
+      {
+        ...guardState,
+        cardDues: [
+          { id: 'p1', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 400000 },
+          { id: 'p2', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
+        ],
+      },
+      new Date(2026, 6, 24),
+    )
+    .every(d => d.remainingFils === 406100));
+// Two genuinely different statements on one card must both survive.
+ok('openDues: different due dates are different statements',
+  cardsGuardLib
+    .openDues(
+      {
+        ...guardState,
+        cardDues: [
+          { id: 'd1', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
+          { id: 'd2', accountId: 'cc', totalDueFils: 120000, minDueFils: 6000, dueDate: '2026-07-28', paidFils: 0 },
+        ],
+      },
+      new Date(2026, 6, 24),
+    ).length === 2);
 
 // Archived (hidden) cards drop out of dues too
 const archivedState = {

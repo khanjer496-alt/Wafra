@@ -31,6 +31,7 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { CountUpAmount } from '@/components/ui/count-up';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
@@ -43,8 +44,8 @@ import {
   requestSmsPermission,
   scanInbox,
 } from '@/lib/auto-import';
-import { daysPhrase, leavingSoon, outgoingTotalFils, type Outgoing } from '@/lib/leaving-soon';
-import { formatAED, formatAmount, formatCompactAED, shortDate } from '@/lib/format';
+import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
+import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import { buildInsights, summarizeMonth } from '@/lib/insights';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
@@ -167,16 +168,30 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
+  const router = useRouter();
   const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
 
+  // The heading used to say "Leaving in 9 days" over the total of everything
+  // in the list — including statements 28 days overdue, which have not been
+  // leaving in nine days for a month. And only three rows were ever drawn, so
+  // AED 70,976 sat above rows adding to 15,785 with nothing to say where the
+  // rest of it was.
+  //
+  // The total still covers the whole list, because "what is about to leave my
+  // account" is the useful number and truncating it to three rows would be a
+  // different lie. Two things make it legible instead: the heading admits the
+  // overdue items are in there, and the remainder is stated below the rows so
+  // the column reconciles.
   const shown = items.slice(0, 3);
+  const late = items.filter((x) => x.overdue).length;
+  const hidden = items.length - shown.length;
 
   return (
     <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
       <SectionHeader
-        title={`Leaving in ${HORIZON_DAYS} days`}
-        right={formatAED(outgoingTotalFils(items), { decimals: false })}
+        title={late > 0 ? `Overdue and leaving in ${HORIZON_DAYS} days` : `Leaving in ${HORIZON_DAYS} days`}
+        right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
       />
       {shown.map((x, i) => {
         const alarming = x.overdue || x.urgent;
@@ -208,6 +223,28 @@ function LeavingSoon({
           </Pressable>
         );
       })}
+      {hidden > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`See all ${items.length} upcoming payments`}
+          onPress={() => router.push('/bills')}
+          style={[
+            styles.leaveRow,
+            { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          ]}>
+          <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+          <View style={styles.leaveText}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {hidden} more
+            </ThemedText>
+          </View>
+          <ThemedText type="small" tabular themeColor="textSecondary">
+            {formatAmount(totalAsShown(items.slice(3).map((x) => x.amountFils)), {
+              decimals: false,
+            })}
+          </ThemedText>
+        </Pressable>
+      )}
     </Animated.View>
   );
 }
@@ -490,7 +527,14 @@ export default function HomeScreen() {
                 />
               </View>
             ))}
-            {today.length === 0 && (
+            {/* Reading the ledger back off disk takes long enough to paint,
+                and an unhydrated store is indistinguishable from an empty one.
+                The screen was announcing "No entries in this period yet" over
+                AED 0 and then replacing it with a real month — telling the user
+                their data was gone, every cold start. Skeletons until the store
+                says it has looked. */}
+            {!state.hydrated && today.length === 0 && <SkeletonRows count={4} height={44} />}
+            {state.hydrated && today.length === 0 && (
               <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
                 <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
                   AED 0

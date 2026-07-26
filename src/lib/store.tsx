@@ -11,6 +11,7 @@ import React, {
 } from 'react';
 
 import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
+import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import { detectMarketId, setActiveMarket } from '@/lib/markets';
 import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/seed';
@@ -44,6 +45,7 @@ const EMPTY_STATE: AppState = {
   userName: 'there',
   appLock: false,
   monthStartDay: 1,
+  themePreference: 'system',
   pro: false,
   trialStartTs: 0,
   marketId: '',
@@ -95,6 +97,7 @@ type Action =
   | { type: 'deleteGoal'; id: string }
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setMonthStartDay'; day: number }
+  | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; language: string }
@@ -113,6 +116,7 @@ function reducer(state: AppState, action: Action): AppState {
       // Month grouping is computed all over the app; sync the global before
       // anything renders against the hydrated state.
       applyMonthStartDay(next.monthStartDay || 1);
+      applyThemePreference(next.themePreference);
       // The free Pro trial clock starts the first time the app ever opens.
       if (!next.trialStartTs) next.trialStartTs = Date.now();
       // Localize automatically: country pack from the device locale, once.
@@ -130,6 +134,12 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setUiLanguage':
       setLanguage(action.language === 'ar' ? 'ar' : 'en');
       return { ...state, language: action.language };
+    case 'setThemePreference': {
+      // Applied here as well as on hydrate, so the palette turns over on the
+      // same tick the setting is written rather than on the next launch.
+      applyThemePreference(action.preference);
+      return { ...state, themePreference: action.preference };
+    }
     case 'setMonthStartDay': {
       const day = Math.min(28, Math.max(1, Math.round(action.day) || 1));
       applyMonthStartDay(day);
@@ -365,6 +375,7 @@ interface StoreValue {
   deleteGoal: (id: string) => void;
   setAppLock: (enabled: boolean) => void;
   setMonthStartDay: (day: number) => void;
+  setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
   setMarket: (id: string) => void;
   setUiLanguage: (language: string) => void;
@@ -764,6 +775,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setOnboarded' });
   }, []);
 
+  const setThemePreference = useCallback((preference: string) => {
+    dispatch({ type: 'setThemePreference', preference });
+  }, []);
+
   const setMonthStartDay = useCallback((day: number) => {
     dispatch({ type: 'setMonthStartDay', day });
   }, []);
@@ -832,6 +847,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       setAppLock,
       setMonthStartDay,
+      setThemePreference,
       setPro,
       setMarket,
       setUiLanguage,
@@ -866,6 +882,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       setAppLock,
       setMonthStartDay,
+      setThemePreference,
       setPro,
       setMarket,
       setUiLanguage,

@@ -123,7 +123,17 @@ export function detectSubscriptions(
     const mid = median(amounts);
     if (mid <= 0) continue;
     const stable = amounts.every((a) => a >= mid * 0.85 && a <= mid * 1.15);
-    if (!stable && !known && !billLike) continue;
+    // A bill varies, but it varies like a bill. Waiving the ±15% gate for
+    // anything the parser called a utility waived it entirely, so a merchant
+    // that happened to be charged twice a month apart became a standing
+    // monthly commitment at whatever the larger charge was — one shop was
+    // listed at AED 20,918/mo on two unrelated payments.
+    //
+    // Same band the outlier guard below already uses: a third to triple the
+    // median. SEWA at 280 one month and 450 the next passes; two payments that
+    // have nothing to do with each other do not.
+    const billShaped = amounts.every((a) => a >= mid / 3 && a <= mid * 3);
+    if (!stable && !known && !(billLike && billShaped)) continue;
 
     // Known merchants skip the stability gate, which let a single misparsed
     // charge set the price: one bad row put Canva on the list at AED 18,313 a
@@ -246,6 +256,26 @@ export function stoppedSubscriptions(subs: Subscription[]): Subscription[] {
 /** Rent + utilities/telecom recurring commitments. */
 export function fixedCommitments(subs: Subscription[]): Subscription[] {
   return subs.filter((s) => s.group !== 'subscription');
+}
+
+/**
+ * The bills proper: rent, utilities, telecom, loans. What a "fixed bills"
+ * heading promises.
+ */
+export function billCommitments(subs: Subscription[]): Subscription[] {
+  return subs.filter(
+    (s) => s.group === 'utility' || s.group === 'housing' || s.category === 'loan',
+  );
+}
+
+/**
+ * Everything else that recurs: a supplier, a school, a shop visited on a
+ * cycle, a standing transfer to a person. Real, worth listing, and not a
+ * utility — filing a grocer under "Utilities & fixed bills" reads as a bug
+ * even when the recurrence is genuine.
+ */
+export function otherCommitments(subs: Subscription[]): Subscription[] {
+  return subs.filter((s) => s.group === 'commitment' && s.category !== 'loan');
 }
 
 /** Days until the next expected charge; negative if the date passed. */

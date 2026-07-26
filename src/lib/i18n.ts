@@ -69,6 +69,11 @@ const S = {
   stoppedSubsHint: { en: 'No charges for over two cycles — most likely cancelled.', ar: 'لا توجد عمليات خصم لدورتين — على الأغلب ملغاة.' },
   utilitiesHeader: { en: 'Utilities & fixed bills', ar: 'المرافق والفواتير الثابتة' },
   loansHeader: { en: 'Loans & instalments', ar: 'القروض والأقساط' },
+  otherRecurringHeader: { en: 'Other repeat payments', ar: 'مدفوعات متكررة أخرى' },
+  otherRecurringHint: {
+    en: 'Places you pay on a regular cycle. Not bills — long-press one to stop tracking it.',
+    ar: 'جهات تدفع لها بشكل منتظم. ليست فواتير — اضغط مطولاً لإيقاف تتبعها.',
+  },
   loansHint: { en: 'Fixed repayments detected from your bank messages. Wafra shows what you have paid so far — it cannot see the loan term or balance.', ar: 'أقساط ثابتة مكتشفة من رسائل البنك. يعرض وفرة ما دفعته حتى الآن فقط — لا يمكنه معرفة مدة القرض أو رصيده.' },
   paidSoFar: { en: 'Paid so far', ar: 'المدفوع حتى الآن' },
   payingFor: { en: 'Paying for', ar: 'يُدفع منذ' },

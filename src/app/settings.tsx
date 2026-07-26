@@ -25,7 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Toggle } from '@/components/ui/controls';
+import { Segmented, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { WafraMark } from '@/components/wafra-logo';
@@ -38,6 +38,7 @@ import { t } from '@/lib/i18n';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
+import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 
 /** The reporting month can start on any day that exists in February. */
@@ -62,7 +63,13 @@ export default function SettingsScreen() {
     exportBackup,
     restoreBackup,
     clearAll,
+    setThemePreference,
   } = useStore();
+
+  const themeChoice: ThemePreference =
+    state.themePreference === 'light' || state.themePreference === 'dark'
+      ? state.themePreference
+      : 'system';
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
   const [smsGranted, setSmsGranted] = useState(false);
@@ -358,6 +365,32 @@ export default function SettingsScreen() {
           </Section>
 
           <Section index={2}>
+            <SectionHeader title="Appearance" />
+            <Block>
+              {/* The handoff said to follow the OS and offer no picker. That is
+                  the right default and it stays the default — but "follow the
+                  OS" is not a choice a user can make, it is the absence of one,
+                  and a money app gets read in bed and in sunlight on the same
+                  day. System stays first and stays selected until it is
+                  changed. */}
+              <Segmented
+                segments={[
+                  { value: 'system', label: 'System' },
+                  { value: 'light', label: 'Light' },
+                  { value: 'dark', label: 'Dark' },
+                ]}
+                value={themeChoice}
+                onChange={setThemePreference}
+              />
+              <ThemedText type="meta" themeColor="textTertiary">
+                {themeChoice === 'system'
+                  ? 'Following your phone. Wafra turns over when it does.'
+                  : `Pinned to ${themeChoice}, whatever your phone is set to.`}
+              </ThemedText>
+            </Block>
+          </Section>
+
+          <Section index={3}>
             <SectionHeader title="Privacy" />
             {switchRow(
               'App lock',
@@ -385,7 +418,7 @@ export default function SettingsScreen() {
             </Row>
           </Section>
 
-          <Section index={3}>
+          <Section index={4}>
             <SectionHeader title="Region" />
             {linkRow(
               'Country pack',
@@ -400,7 +433,7 @@ export default function SettingsScreen() {
             )}
           </Section>
 
-          <Section index={4}>
+          <Section index={5}>
             <SectionHeader title="Data" />
             {linkRow('Back up as JSON', null, gated(backupJson))}
             {linkRow('Restore from a backup file', null, gated(restoreFromFile))}
@@ -415,7 +448,7 @@ export default function SettingsScreen() {
             {linkRow('Erase everything on this phone', null, confirmErase, true, true)}
           </Section>
 
-          <Section index={5} style={styles.about}>
+          <Section index={6} style={styles.about}>
             <Pressable accessibilityRole="button" accessibilityLabel="Wafra" onPress={onLogoTap}>
               <WafraMark size={34} />
             </Pressable>

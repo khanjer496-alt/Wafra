@@ -111,11 +111,27 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
-  return state.cardDues
+  const open = state.cardDues
     .filter((d) => creditIds.has(d.accountId))
     .map((d) => dueWithStatus(state, d, today))
     .filter((d) => d.status !== 'settled' && d.daysLeft >= -STALE_OVERDUE_DAYS)
     .sort((a, b) => a.daysLeft - b.daysLeft);
+
+  // One statement, one row. A card has a single statement per due date, so two
+  // records that agree on the account and the date are the same statement
+  // stored twice — a reminder SMS read as a fresh statement, or state written
+  // before importBatch collapsed dues per account. Home was listing the same
+  // Emirates NBD statement twice and counting it twice in the total.
+  //
+  // The larger balance wins: a due and its reminder can disagree, and the one
+  // still owing more is the one that has not been paid down.
+  const byStatement = new Map<string, DueWithStatus>();
+  for (const d of open) {
+    const key = `${d.due.accountId}|${d.due.dueDate}`;
+    const seen = byStatement.get(key);
+    if (!seen || d.remainingFils > seen.remainingFils) byStatement.set(key, d);
+  }
+  return [...byStatement.values()].sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
 /**

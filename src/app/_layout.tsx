@@ -74,7 +74,10 @@ export default function RootLayout() {
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
-            <Stack.Screen name="bills" options={{ animation: 'slide_from_right' }} />
+            {/* No `bills` screen here: it is a tab now, and src/app/bills.tsx is
+                gone. Declaring a name with no file behind it left a route that
+                resolved to nothing, so every push to /bills — the Leaving soon
+                rows, the subscription insight — landed on Unmatched Route. */}
             <Stack.Screen name="cards" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
           </Stack>

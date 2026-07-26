@@ -683,6 +683,22 @@ t('etisalat direct debit reads as telecom',
   'AED 681.45 has been debited from your account no. 095-XXX11XXX-01 ETISALAT NO.-1849. The available balance is AED 1,961.35.',
   { merchant: 'Etisalat', category: 'telecom' });
 
+// The biller-reference path reads the capitals before an account number. On
+// its own that is also every reference label a bank prints, and an unmatched
+// name used to be *called* a utility — which is how a fish shop, a furniture
+// store and a transfer beneficiary became standing monthly bills.
+t('an unrecognized name before a reference number is not a utility',
+  'AED 20,918.00 has been debited from your account no. 095-XXX11XXX-01 FISHBASKET NO.-8765.',
+  { category: 'other' });
+
+t('a reference label is never the merchant',
+  'Your card ending 1234 was used for AED 100.00 at CARREFOUR HYPERMARKET DUBAI. ACCOUNT NO.-556677',
+  { merchant: 'Carrefour Hypermarket', category: 'groceries' });
+
+t('a stripped reference label is trimmed off the name',
+  'Dear Customer, AED 627.00 paid to FBINTER NO.-991 from card ending 1234.',
+  { merchant: 'Fbinter' });
+
 t('a fee schedule is not a transaction',
   'Branch Teller Services are charged at AED 52.5 per transaction. Enjoy free banking at 430 ATMs across the UAE, including 190 CDMs.',
   null);

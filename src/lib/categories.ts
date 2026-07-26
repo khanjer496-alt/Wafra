@@ -60,3 +60,18 @@ export function rampColor(index: number, dark: boolean): string {
   const ramp = CATEGORY_RAMP[dark ? 'dark' : 'light'];
   return ramp[Math.min(index, ramp.length - 1)];
 }
+
+/**
+ * Ink that stays readable on a ramp step.
+ *
+ * The ramp spans from a deep green to a pale mint, so a single fixed ink works
+ * at one end and disappears at the other. Relative luminance picks the side:
+ * the same two inks the rest of the system uses, never a third colour.
+ */
+export function onRampColor(hex: string): string {
+  const h = hex.replace('#', '');
+  const to = (i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const luminance = 0.2126 * lin(to(0)) + 0.7152 * lin(to(2)) + 0.0722 * lin(to(4));
+  return luminance > 0.4 ? '#16130F' : '#F2EFE8';
+}

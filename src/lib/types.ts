@@ -160,4 +160,6 @@ export interface AppState {
   marketId: string;
   /** UI language ('en' | 'ar'). Auto-detected on first launch. */
   language: string;
+  /** Palette choice: 'system' follows the OS, 'light'/'dark' pin it. */
+  themePreference: string;
 }
