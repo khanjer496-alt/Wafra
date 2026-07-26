@@ -17,6 +17,7 @@ import { ThemedView } from '@/components/themed-view';
 import { TransactionEditSheet } from '@/components/transaction-edit-sheet';
 import { TransactionRow } from '@/components/transaction-row';
 import { Icon } from '@/components/ui/icon';
+import { CategoryChips } from '@/components/ui/category-chips';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
@@ -480,27 +481,11 @@ export default function TransactionsScreen() {
             </ScrollView>
 
             <ThemedText type="micro" themeColor="textSecondary">Categories</ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowScroll}>
-              {EXPENSE_CATEGORIES.map((c) => (
-                <Pressable
-                  key={c.id}
-                  onPress={() => toggleCategory(c.id)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: filters.categories.has(c.id)
-                        ? `${c.color}2c`
-                        : theme.backgroundSelected,
-                      borderColor: filters.categories.has(c.id) ? c.color : 'transparent',
-                    },
-                  ]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <Icon name={c.icon} size={13} color={c.color} />
-                    <ThemedText type="small">{c.label}</ThemedText>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <CategoryChips
+              categories={EXPENSE_CATEGORIES}
+              selected={filters.categories}
+              onToggle={toggleCategory}
+            />
 
             <View style={styles.sheetSplit}>
               <View style={styles.sheetCol}>

@@ -3,10 +3,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spacing } from '@/constants/theme';
 
 /**
- * Height of the floating pill in tab-bar.tsx: vertical padding (2×8) plus a
- * tab's icon well (30), its gap (2), its label (14) and its own padding (2×4).
+ * Height of the floating bar in tab-bar.tsx: vertical padding (2×8) plus the
+ * tallest child, which is the 46px add button — a tab column comes to 21 icon
+ * + 3 gap + 14 label + 2×4 padding = 46 as well, by design.
  */
-export const TAB_BAR_HEIGHT = 70;
+export const TAB_BAR_HEIGHT = 62;
 
 /**
  * Bottom padding a tab screen's scroll content needs so the floating tab bar

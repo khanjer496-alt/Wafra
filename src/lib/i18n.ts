@@ -13,10 +13,11 @@ export type Lang = 'en' | 'ar';
 const S = {
   // Tabs
   tabHome: { en: 'Home', ar: 'الرئيسية' },
-  tabInsights: { en: 'Insights', ar: 'التحليلات' },
+  // Insights and Budgets were two views of the same month; Flow is the merge.
+  tabFlow: { en: 'Flow', ar: 'التدفق' },
   tabBills: { en: 'Bills', ar: 'الفواتير' },
-  tabBudgets: { en: 'Budgets', ar: 'الميزانيات' },
   tabWallet: { en: 'Wallet', ar: 'المحفظة' },
+  tabAdd: { en: 'Add an entry', ar: 'إضافة عملية' },
 
   // Common actions
   cancel: { en: 'Cancel', ar: 'إلغاء' },

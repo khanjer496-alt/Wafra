@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
+import { CategoryChips } from '@/components/ui/category-chips';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
@@ -130,28 +131,12 @@ export default function AddTransactionScreen() {
             {/* Category grid */}
             <View style={styles.fieldBlock}>
               <ThemedText type="small" themeColor="textSecondary">Category</ThemedText>
-              <View style={styles.catGrid}>
-                {categories.map((c) => {
-                  const active = category === c.id;
-                  return (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => setCategory(c.id)}
-                      style={[
-                        styles.catChip,
-                        {
-                          backgroundColor: active ? `${c.color}2c` : theme.backgroundElement,
-                          borderColor: active ? c.color : theme.cardBorder,
-                        },
-                      ]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <Icon name={c.icon} size={13} color={c.color} />
-                    <ThemedText type="small">{c.label}</ThemedText>
-                  </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <CategoryChips
+                categories={categories}
+                selected={category}
+                onToggle={setCategory}
+                layout="wrap"
+              />
             </View>
 
             {/* Account */}

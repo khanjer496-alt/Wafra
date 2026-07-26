@@ -11,6 +11,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { CategoryChips } from '@/components/ui/category-chips';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/categories';
@@ -169,25 +170,7 @@ export function TransactionEditSheet({ transaction, onClose }: TransactionEditSh
           ) : (
             <>
           <ThemedText type="micro" themeColor="textSecondary">Category</ThemedText>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-            {categories.map((c) => (
-              <Pressable
-                key={c.id}
-                onPress={() => setCategory(c.id)}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: category === c.id ? `${c.color}2c` : theme.backgroundSelected,
-                    borderColor: category === c.id ? c.color : 'transparent',
-                  },
-                ]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <Icon name={c.icon} size={13} color={c.color} />
-                    <ThemedText type="small">{c.label}</ThemedText>
-                  </View>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <CategoryChips categories={categories} selected={category} onToggle={setCategory} />
             </>
           )}
 

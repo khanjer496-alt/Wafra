@@ -6,7 +6,7 @@ import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
-import { formatAED } from '@/lib/format';
+import { formatAmount } from '@/lib/format';
 import type { Account, Transaction } from '@/lib/types';
 
 interface TransactionRowProps {
@@ -15,6 +15,12 @@ interface TransactionRowProps {
   onPress?: () => void;
 }
 
+/**
+ * One entry: the mark, what it was, what it cost.
+ *
+ * Only money in is coloured. An expense row painted red says "something is
+ * wrong" about a cup of coffee — and when every row says it, none of them do.
+ */
 export function TransactionRow({ transaction, account, onPress }: TransactionRowProps) {
   const theme = useTheme();
   const meta = getCategory(transaction.category);
@@ -23,17 +29,20 @@ export function TransactionRow({ transaction, account, onPress }: TransactionRow
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed && { opacity: 0.7 }]}>
-      <MerchantAvatar title={transaction.title} category={transaction.category} />
+      style={({ pressed }) => [styles.row, pressed && { transform: [{ scale: 0.985 }] }]}>
+      <MerchantAvatar title={transaction.title} category={transaction.category} size={34} />
       <View style={styles.middle}>
-        <ThemedText numberOfLines={1}>{transaction.title}</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+        <ThemedText type="small" numberOfLines={1}>
+          {transaction.title}
+        </ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
           {transaction.isTransfer ? 'Transfer' : meta.label}
           {account ? ` · ${account.name}` : ''}
         </ThemedText>
       </View>
-      <ThemedText tabular style={{ color: isIncome ? theme.income : theme.text, fontWeight: '700' }}>
-        {isIncome ? '+' : '−'}{formatAED(transaction.amountFils, { decimals: false })}
+      <ThemedText type="small" tabular style={{ color: isIncome ? theme.income : theme.text }}>
+        {isIncome ? '+' : '−'}
+        {formatAmount(transaction.amountFils, { decimals: false })}
       </ThemedText>
     </Pressable>
   );
@@ -43,8 +52,8 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
-    paddingVertical: Spacing.two + 2,
+    gap: Spacing.two + 4,
+    paddingVertical: 11,
   },
   middle: {
     flex: 1,

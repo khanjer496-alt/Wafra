@@ -1,12 +1,18 @@
 /**
- * Home v3 — rebuilt from scratch as composed sections.
+ * Home — am I ahead or behind, and what is about to leave?
  *
- * Layout contract:
- *   Hero (period net) → dues → insights rail → subscriptions line →
- *   upcoming bills (live month only) → budgets (month mode only) → recent.
- * Money semantics: the hero is IN minus OUT for the selected period; real
- * account balances live in Wallet. Dues/subscriptions describe NOW and stay
- * visible in every period.
+ * Order: period row → hero → in/out split → one written insight → Leaving soon
+ * → Today.
+ *
+ * Two things this screen deliberately no longer does. It does not carry a
+ * budget snapshot: that was a third copy of bars that already exist on Flow and
+ * inside every limit. And it does not carry a five-card insight carousel —
+ * five observations sat side by side is a list nobody reads, so one sentence
+ * gets the space and the rest live on Flow.
+ *
+ * "Leaving soon" is the merge of what used to be three separate sections: card
+ * dues, bills, and subscriptions. The user does not think of those as three
+ * kinds of thing. They are all money that leaves on a date.
  */
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
@@ -15,20 +21,18 @@ import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } fro
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
-
-import { InsightCard } from '@/components/insight-card';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TransactionRow } from '@/components/transaction-row';
 import { CountUpAmount } from '@/components/ui/count-up';
-import { Icon } from '@/components/ui/icon';
-import { ProgressBar } from '@/components/ui/progress-bar';
+import { Icon, type IconName } from '@/components/ui/icon';
+import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { useToast } from '@/components/ui/toast';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
+import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
 import {
   buildImportPlan,
   hasSmsPermission,
@@ -39,64 +43,33 @@ import {
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
-import { formatAED, formatCompactAED, greetingForHour, shortDate } from '@/lib/format';
-import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import { buildInsights, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
-import { isProActive } from '@/lib/purchases';
+import { formatAED, formatAmount, formatCompactAED, shortDate, toISODate } from '@/lib/format';
+import { t } from '@/lib/i18n';
+import { buildInsights, summarizeMonth } from '@/lib/insights';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
+import { isProActive } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import {
   activeSubscriptions,
-  detectSubscriptions,
   daysUntilNext,
-  subscriptionsMonthlyTotal,
+  detectSubscriptions,
   trueSubscriptions,
-  type Subscription,
 } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
-
 
 // Once per app session: auto-import + notification sync.
 let autoImportRan = false;
 
-/* ── Section scaffolding ─────────────────────────────────────────────── */
+/** How far ahead "leaving soon" looks. Beyond this it is not soon. */
+const HORIZON_DAYS = 9;
 
-function Section({
-  title,
-  action,
-  onAction,
-  icon,
-  delay,
-  children,
-}: {
-  title: string;
-  action?: string;
-  onAction?: () => void;
-  icon?: React.ComponentProps<typeof Icon>['name'];
-  delay: number;
-  children: React.ReactNode;
-}) {
-  const theme = useTheme();
-  return (
-    <Animated.View entering={FadeInDown.delay(delay).duration(350)} style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <View style={styles.sectionTitleRow}>
-          {icon && <Icon name={icon} size={16} color={theme.gold} />}
-          <ThemedText type="micro" themeColor="textSecondary">
-            {title}
-          </ThemedText>
-        </View>
-        {action && (
-          <ThemedText type="small" themeColor="textSecondary" onPress={onAction}>
-            {action}
-          </ThemedText>
-        )}
-      </View>
-      {children}
-    </Animated.View>
-  );
+/** `now` plus n days as an ISO date, for rows that only carry a day count. */
+function shiftDays(now: Date, days: number): string {
+  const d = new Date(now);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
 }
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
@@ -107,71 +80,76 @@ function Hero({
   netFils,
   incomeFils,
   expenseFils,
-  onOpenPeriod,
 }: {
   period: Period;
   live: boolean;
   netFils: number;
   incomeFils: number;
   expenseFils: number;
-  onOpenPeriod: () => void;
 }) {
   const theme = useTheme();
   const router = useRouter();
+
   const caption =
     (netFils >= 0 ? t('saved') : t('overspent')) +
     ' ' +
-    (live ? t('soFarThisMonth') : period.mode === 'all' ? t('allTime') : `${t('inWord')} ${periodLabel(period)}`) +
+    (live
+      ? t('soFarThisMonth')
+      : period.mode === 'all'
+        ? t('allTime')
+        : `${t('inWord')} ${periodLabel(period)}`) +
     ` · ${t('inMinusOut')}`;
 
   return (
-    <Animated.View entering={FadeInDown.duration(350)} style={styles.hero}>
-      <View style={styles.heroTopRow}>
-        <Pressable onPress={onOpenPeriod} hitSlop={8} style={styles.periodChipWrap}>
-          <ThemedText type="small" themeColor="textSecondary">
-            {greetingForHour(new Date().getHours())} ·{' '}
-          </ThemedText>
-          <ThemedText
-            type="small"
-            style={{ color: live ? theme.textSecondary : theme.primary, fontWeight: '700' }}>
-            {periodLabel(period)}
-          </ThemedText>
-          <Icon name="chevron-right" size={12} color={theme.textSecondary} />
-        </Pressable>
-        <Pressable onPress={() => router.push('/stats')} hitSlop={8}>
-          <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-            {t('report')}
-          </ThemedText>
-        </Pressable>
-      </View>
-
-      {Math.abs(netFils) >= 1_000_000_000 ? (
-        <ThemedText type="display" tabular>
-          {netFils < 0 ? '−' : ''}AED {formatCompactAED(netFils)}
-        </ThemedText>
-      ) : (
-        <CountUpAmount fils={netFils} type="display" />
-      )}
-      <ThemedText type="micro" themeColor="textSecondary">
+    <Animated.View entering={FadeInDown.duration(320)}>
+      <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
 
-      <View style={styles.heroStats}>
+      {/* No card, no background. The figure IS the top of the screen. */}
+      {Math.abs(netFils) >= 1_000_000_000 ? (
+        <ThemedText type="display" tabular>
+          <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
+            AED{' '}
+          </ThemedText>
+          {netFils < 0 ? '−' : ''}
+          {formatCompactAED(netFils)}
+        </ThemedText>
+      ) : (
+        <View style={styles.heroRow}>
+          <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
+            AED
+          </ThemedText>
+          <CountUpAmount fils={netFils} type="display" prefix="" durationMs={900} />
+        </View>
+      )}
+
+      {/* Two cells divided by rules rather than boxed — the split is a
+          continuation of the hero, not a separate component. */}
+      <View style={styles.split}>
         {(
           [
             ['In', incomeFils, theme.income, '/transactions?type=income'],
             ['Out', expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
-        ).map(([label, fils, color, href]) => (
-          <Pressable key={label} onPress={() => router.push(href)} hitSlop={6} style={styles.heroStat}>
-            <View style={[styles.heroDot, { backgroundColor: color }]} />
-            <ThemedText type="small" themeColor="textSecondary">
-              {label}{' '}
-              <ThemedText type="smallBold" tabular style={{ color }}>
-                {formatAED(fils, { decimals: false })}
+        ).map(([label, fils, color, href], i) => (
+          <Pressable
+            key={label}
+            onPress={() => router.push(href)}
+            style={[
+              styles.splitCell,
+              { borderTopColor: theme.cardBorder },
+              i === 1 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.cardBorder },
+            ]}>
+            <View style={styles.splitTop}>
+              <View style={[styles.dot, { backgroundColor: color }]} />
+              <ThemedText type="nano" themeColor="textTertiary">
+                {label}
               </ThemedText>
+            </View>
+            <ThemedText type="small" tabular style={styles.splitFigure}>
+              {formatAmount(fils, { decimals: false })}
             </ThemedText>
-            <Icon name="chevron-right" size={11} color={theme.textSecondary} />
           </Pressable>
         ))}
       </View>
@@ -179,80 +157,138 @@ function Hero({
   );
 }
 
-/* ── Dues ─────────────────────────────────────────────────────────────── */
+/* ── Leaving soon ─────────────────────────────────────────────────────── */
 
-function DuesSection({ state, now }: { state: AppState; now: Date }) {
-  const theme = useTheme();
-  const router = useRouter();
-  const dues = useMemo(() => openDues(state, now), [state, now]);
-  if (dues.length === 0) return null;
-  return (
-    <Section title={t('cardPayments')} action={t('tabWallet')} onAction={() => router.push('/wallet')} delay={60}>
-      {dues.slice(0, 2).map(({ due, status, daysLeft, remainingFils }) => {
-        const account = state.accounts.find((a) => a.id === due.accountId);
-        const urgent = status === 'urgent' || status === 'overdue';
-        return (
-          <Pressable key={due.id} onPress={() => router.push('/wallet')} style={styles.lineRow}>
-            <View style={styles.lineTitle}>
-              <Icon name="wallet" size={14} color={theme.textSecondary} />
-              <ThemedText type="small" numberOfLines={1} style={{ flexShrink: 1 }}>
-                {account?.name ?? 'Card'}
-              </ThemedText>
-            </View>
-            <ThemedText type="small" style={{ color: urgent ? theme.expense : theme.textSecondary }}>
-              {status === 'overdue' ? `${-daysLeft}d overdue` : `pay by ${shortDate(due.dueDate)}`}
-            </ThemedText>
-            <ThemedText
-              type="smallBold"
-              tabular
-              style={[styles.lineAmount, urgent && { color: theme.expense }]}>
-              {formatAED(remainingFils, { decimals: false })}
-            </ThemedText>
-          </Pressable>
-        );
-      })}
-    </Section>
-  );
+interface Leaving {
+  id: string;
+  icon: IconName;
+  title: string;
+  dateISO: string;
+  daysLeft: number;
+  amountFils: number;
+  urgent: boolean;
+  href: string;
 }
 
-/* ── Subscriptions line ──────────────────────────────────────────────── */
-
-function SubscriptionsLine({ subs, now }: { subs: Subscription[]; now: Date }) {
-  const router = useRouter();
+function LeavingSoon({ state, now }: { state: AppState; now: Date }) {
   const theme = useTheme();
-  const next = useMemo(() => {
-    const upcoming = subs
-      .map((s) => ({ s, d: daysUntilNext(s, now) }))
-      .filter((x) => x.d >= 0)
-      .sort((a, b) => a.d - b.d);
-    return upcoming[0] ?? null;
-  }, [subs, now]);
-  if (subs.length === 0) return null;
+  const router = useRouter();
+
+  const items = useMemo<Leaving[]>(() => {
+    const out: Leaving[] = [];
+
+    for (const { due, status, daysLeft, remainingFils } of openDues(state, now)) {
+      const account = state.accounts.find((a) => a.id === due.accountId);
+      out.push({
+        id: `due-${due.id}`,
+        icon: 'wallet',
+        title: `${account?.name ?? 'Card'} payment`,
+        dateISO: due.dueDate,
+        daysLeft,
+        amountFils: remainingFils,
+        urgent: status === 'urgent' || status === 'overdue',
+        href: '/wallet',
+      });
+    }
+
+    for (const { bill, status, daysLeft } of billsForMonth(state.bills, state.transactions, now)) {
+      if (status === 'paid') continue;
+      out.push({
+        id: `bill-${bill.id}`,
+        icon: getCategory(bill.category).icon,
+        title: bill.title,
+        // A bill carries a day-of-month, not a date; `daysLeft` already
+        // resolved it against this month, so walk forward from today.
+        dateISO: shiftDays(now, daysLeft),
+        daysLeft,
+        amountFils: bill.amountFils,
+        urgent: status === 'overdue' || status === 'due-soon',
+        href: '/bills',
+      });
+    }
+
+    const subs = activeSubscriptions(
+      trueSubscriptions(detectSubscriptions(state.transactions, state.notSubscriptions)),
+    );
+    for (const s of subs) {
+      const daysLeft = daysUntilNext(s, now);
+      if (daysLeft < 0) continue;
+      // A subscription already tracked as a bill would otherwise appear twice.
+      if (state.bills.some((b) => b.title.toLowerCase() === s.title.toLowerCase())) continue;
+      out.push({
+        id: `sub-${s.title}`,
+        icon: 'repeat',
+        title: s.title,
+        dateISO: s.nextExpectedISO,
+        daysLeft,
+        // What actually left last time, not the average — a tier change makes
+        // the average wrong in exactly the month it matters.
+        amountFils: s.lastAmountFils,
+        urgent: false,
+        href: '/bills',
+      });
+    }
+
+    return out
+      .filter((x) => x.daysLeft <= HORIZON_DAYS)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [state, now]);
+
+  if (items.length === 0) return null;
+
+  const total = items.reduce((s, x) => s + x.amountFils, 0);
+  const shown = items.slice(0, 3);
+
   return (
-    <Animated.View entering={FadeInDown.delay(140).duration(350)}>
-      <Pressable onPress={() => router.push('/bills')} style={styles.subsRow}>
-        <Icon name="repeat" size={14} color={theme.textSecondary} />
-        <ThemedText type="small">
-          {subs.length} {subs.length === 1 ? t('subscriptionWord') : t('subscriptionsWord')}
-        </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.subsNext}>
-          {next ? `${next.s.title} in ${next.d}d` : ''}
-        </ThemedText>
-        <ThemedText type="smallBold" tabular>
-          {formatAED(subscriptionsMonthlyTotal(subs), { decimals: false })}/mo
-        </ThemedText>
-      </Pressable>
+    <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
+      <SectionHeader
+        title={`Leaving in ${HORIZON_DAYS} days`}
+        right={formatAED(total, { decimals: false })}
+      />
+      {shown.map((x, i) => (
+        <Pressable
+          key={x.id}
+          onPress={() => router.push(x.href)}
+          style={[
+            styles.leaveRow,
+            i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          ]}>
+          <Icon name={x.icon} size={17} color={x.urgent ? theme.expense : theme.text} />
+          <View style={styles.leaveText}>
+            <ThemedText type="small" numberOfLines={1}>
+              {x.title}
+            </ThemedText>
+            <ThemedText
+              type="meta"
+              themeColor={x.urgent ? undefined : 'textTertiary'}
+              style={x.urgent ? { color: theme.expense } : undefined}>
+              {shortDate(x.dateISO)} ·{' '}
+              {x.daysLeft < 0
+                ? `${-x.daysLeft} day${x.daysLeft === -1 ? '' : 's'} overdue`
+                : x.daysLeft === 0
+                  ? 'today'
+                  : `in ${x.daysLeft} day${x.daysLeft === 1 ? '' : 's'}`}
+            </ThemedText>
+          </View>
+          <ThemedText
+            type="small"
+            tabular
+            style={x.urgent ? { color: theme.expense } : undefined}>
+            {formatAmount(x.amountFils, { decimals: false })}
+          </ThemedText>
+        </Pressable>
+      ))}
     </Animated.View>
   );
 }
 
-/* ── Upcoming bills (live month only) ─────────────────────────────────── */
+/* ── Unread SMS formats ───────────────────────────────────────────────── */
 
 /**
- * The parser only improves if the formats it misreads come back to us, and
- * the report screen was buried in Settings where nobody found it. This
- * surfaces once enough distinct formats have piled up to be worth a tap, and
- * says how many rows it would fix so the ask is concrete rather than a chore.
+ * The parser only improves if the formats it misreads come back to us, and the
+ * report screen was buried in Settings where nobody found it. This surfaces
+ * once enough distinct formats have piled up to be worth a tap, and says how
+ * many so the ask is concrete rather than a chore.
  */
 function UnreadFormatsPrompt({ state }: { state: AppState }) {
   const theme = useTheme();
@@ -266,119 +302,23 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
       accessibilityLabel={`Report ${formats} unrecognised bank message formats`}
       onPress={() => router.push('/accuracy')}
       style={({ pressed }) => [
-        styles.reportRow,
+        styles.notice,
         {
           borderColor: theme.cardBorder,
-          backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+          backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
         },
       ]}>
-      <View style={[styles.reportIcon, { backgroundColor: `${theme.warning}1f` }]}>
-        <Icon name="search" size={16} color={theme.warning} strokeWidth={1.9} />
-      </View>
-      <View style={styles.reportText}>
-        <ThemedText type="smallBold">
+      <Icon name="search" size={17} color={theme.warning} />
+      <View style={styles.noticeText}>
+        <ThemedText type="small">
           {formats} message {formats === 1 ? 'format' : 'formats'} we couldn&apos;t read
         </ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">
+        <ThemedText type="meta" themeColor="textTertiary">
           Send them over and they get recognised next release. Digits are masked.
         </ThemedText>
       </View>
-      <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+      <Icon name="chevron-right" size={16} color={theme.textTertiary} />
     </Pressable>
-  );
-}
-
-function BillsSection({ state, now }: { state: AppState; now: Date }) {
-  const theme = useTheme();
-  const router = useRouter();
-  const upcoming = useMemo(
-    () =>
-      billsForMonth(state.bills, state.transactions, now)
-        .filter((b) => b.status !== 'paid')
-        .slice(0, 3),
-    [state.bills, state.transactions, now],
-  );
-  if (upcoming.length === 0) return null;
-  return (
-    <Section title={t('upcomingBills')} action={t('manage')} onAction={() => router.push('/bills')} delay={180}>
-      {upcoming.map(({ bill, status, daysLeft }) => (
-        <Pressable key={bill.id} onPress={() => router.push('/bills')} style={styles.lineRow}>
-          <View style={styles.lineTitle}>
-            <Icon
-              name={getCategory(bill.category).icon}
-              size={14}
-              color={getCategory(bill.category).color}
-            />
-            <ThemedText type="small" numberOfLines={1} style={{ flexShrink: 1 }}>
-              {bill.title}
-            </ThemedText>
-          </View>
-          <ThemedText
-            type="small"
-            style={{
-              color:
-                status === 'overdue'
-                  ? theme.expense
-                  : status === 'due-soon'
-                    ? theme.warning
-                    : theme.textSecondary,
-            }}>
-            {status === 'overdue' ? `${-daysLeft}d overdue` : daysLeft === 0 ? 'today' : `in ${daysLeft}d`}
-          </ThemedText>
-          <ThemedText type="smallBold" tabular style={styles.lineAmount}>
-            {formatAED(bill.amountFils, { decimals: false })}
-          </ThemedText>
-        </Pressable>
-      ))}
-    </Section>
-  );
-}
-
-/* ── Budgets snapshot (month mode only) ──────────────────────────────── */
-
-function BudgetsSection({ state, period }: { state: AppState; period: Period }) {
-  const theme = useTheme();
-  const router = useRouter();
-  const top = useMemo(
-    () =>
-      state.budgets
-        .map((b) => ({
-          budget: b,
-          spent: spentInMonthForCategory(state.transactions, period, b.category),
-        }))
-        .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils)
-        .slice(0, 3),
-    [state.budgets, state.transactions, period],
-  );
-  if (top.length === 0) return null;
-  return (
-    <Section title={t('budgetsSection')} action={t('manage')} onAction={() => router.push('/budgets')} delay={220}>
-      {top.map(({ budget, spent }) => {
-        const meta = getCategory(budget.category);
-        const ratio = spent / budget.limitFils;
-        return (
-          <View key={budget.category} style={styles.budgetRow}>
-            <View style={styles.budgetTop}>
-              <View style={styles.lineTitle}>
-                <Icon name={meta.icon} size={14} color={meta.color} />
-                <ThemedText type="small">{meta.label}</ThemedText>
-              </View>
-              <ThemedText type="small" themeColor="textSecondary" tabular>
-                {formatAED(spent, { decimals: false })} /{' '}
-                {formatAED(budget.limitFils, { decimals: false })}
-              </ThemedText>
-            </View>
-            {/* Matches the Budgets tab: the bar encodes budget health, never
-                the category's identity color. */}
-            <ProgressBar
-              ratio={ratio}
-              color={ratio >= 1 ? theme.expense : ratio >= 0.85 ? theme.warning : theme.primary}
-              height={5}
-            />
-          </View>
-        );
-      })}
-    </Section>
   );
 }
 
@@ -386,7 +326,7 @@ function BudgetsSection({ state, period }: { state: AppState; period: Period }) 
 
 export default function HomeScreen() {
   const theme = useTheme();
-  const tabBarClearance = useTabBarClearance();
+  const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
   const { state, importBatch, undoBatch } = useStore();
@@ -397,26 +337,28 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
+  const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
 
   const summary = useMemo(
     () => summarizeMonth(state.transactions, period),
     [state.transactions, period],
   );
-  const insights = useMemo(
-    () =>
-      buildInsights(state.transactions, state.budgets, period, now, state.notSubscriptions).slice(0, 5),
-    [state.transactions, state.budgets, period, now, state.notSubscriptions],
-  );
-  const recent = useMemo(
-    () => state.transactions.filter((t) => !t.isTransfer && inPeriod(t.date, period)).slice(0, 5),
+
+  // One insight, not five. The rest are on Flow.
+  const insight = useMemo(() => {
+    const all = buildInsights(
+      state.transactions,
+      state.budgets,
+      period,
+      now,
+      state.notSubscriptions,
+    );
+    return all.find((i) => i.id !== dismissedInsight) ?? null;
+  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, dismissedInsight]);
+
+  const today = useMemo(
+    () => state.transactions.filter((t) => !t.isTransfer && inPeriod(t.date, period)).slice(0, 6),
     [state.transactions, period],
-  );
-  const subs = useMemo(
-    () =>
-      activeSubscriptions(
-        trueSubscriptions(detectSubscriptions(state.transactions, state.notSubscriptions)),
-      ),
-    [state.transactions, state.notSubscriptions],
   );
 
   const runAutoImport = useCallback(
@@ -486,111 +428,134 @@ export default function HomeScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]}
+          contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
           }>
+          <View style={styles.topRow}>
+            <PeriodPill onPress={() => setPeriodSheetOpen(true)} />
+            <View style={styles.topActions}>
+              <IconButton
+                name="search"
+                label={t('seeAll')}
+                onPress={() => router.push('/transactions')}
+              />
+              <IconButton name="sliders" label="Settings" onPress={() => router.push('/settings')} />
+            </View>
+          </View>
+
           <Hero
             period={period}
             live={live}
             netFils={summary.incomeFils - summary.expenseFils}
             incomeFils={summary.incomeFils}
             expenseFils={summary.expenseFils}
-            onOpenPeriod={() => setPeriodSheetOpen(true)}
           />
 
           {!isProActive(state) && (
-            <Animated.View entering={FadeInDown.duration(350)}>
-              <Pressable
-                onPress={() => router.push('/pro')}
-                style={[styles.permissionRow, { borderColor: theme.gold }]}>
-                <Icon name="diamond" size={18} color={theme.gold} />
-                <View style={styles.permissionText}>
-                  <ThemedText type="smallBold">{t('trialEndedBanner')}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {t('trialEndedBannerSub')}
-                  </ThemedText>
-                </View>
-                <Icon name="chevron-right" size={16} color={theme.textSecondary} />
-              </Pressable>
-            </Animated.View>
+            <Pressable
+              onPress={() => router.push('/pro')}
+              style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+              <Icon name="diamond" size={17} color={theme.warning} />
+              <View style={styles.noticeText}>
+                <ThemedText type="small">{t('trialEndedBanner')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('trialEndedBannerSub')}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Pressable>
           )}
 
           {needsPermission && isProActive(state) && (
-            <Animated.View entering={FadeInDown.duration(350)}>
-              <Pressable
-                onPress={() => runAutoImport(true)}
-                style={[styles.permissionRow, { borderColor: theme.primary }]}>
-                <Icon name="spark" size={18} color={theme.primary} />
-                <View style={styles.permissionText}>
-                  <ThemedText type="smallBold">{t('turnOnTracking')}</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {t('trackingPrivacy')}
+            <Pressable
+              onPress={() => runAutoImport(true)}
+              style={[styles.notice, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
+              <Icon name="spark" size={17} color={theme.primary} />
+              <View style={styles.noticeText}>
+                <ThemedText type="small">{t('turnOnTracking')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('trackingPrivacy')}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Pressable>
+          )}
+
+          {/* One sentence, with somewhere to go. A carousel of five of these
+              was five things to skim and nothing to act on. */}
+          {insight && (
+            <Animated.View
+              entering={FadeInDown.delay(40).duration(320)}
+              style={[
+                styles.insight,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+              ]}>
+              <Icon name={insight.icon} size={17} color={theme.warning} />
+              <ThemedText type="small" style={styles.insightTitle}>
+                {insight.title}
+              </ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary">
+                {insight.body}
+              </ThemedText>
+              <View style={styles.insightActions}>
+                <Pressable
+                  onPress={() => router.push(insight.href ?? '/flow')}
+                  style={[styles.btn, { backgroundColor: theme.primary }]}>
+                  <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                    See the breakdown
                   </ThemedText>
-                </View>
-                <Icon name="chevron-right" size={16} color={theme.textSecondary} />
-              </Pressable>
+                </Pressable>
+                <Pressable
+                  onPress={() => setDismissedInsight(insight.id)}
+                  style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
+                  <ThemedText type="nano" themeColor="textSecondary">
+                    Dismiss
+                  </ThemedText>
+                </Pressable>
+              </View>
             </Animated.View>
           )}
 
-          <DuesSection state={state} now={now} />
-
-          {insights.length > 0 && (
-            <Section
-              title={t('insightsSection')}
-              icon="spark"
-              action={t('allWord')}
-              onAction={() => router.push('/stats')}
-              delay={100}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.insightScroll}>
-                {insights.map((insight) => (
-                  <InsightCard key={insight.id} insight={insight} width={230} />
-                ))}
-              </ScrollView>
-            </Section>
-          )}
-
-          <SubscriptionsLine subs={subs} now={now} />
+          <LeavingSoon state={state} now={now} />
 
           <UnreadFormatsPrompt state={state} />
 
-          {live && <BillsSection state={state} now={now} />}
-          {period.mode === 'month' && <BudgetsSection state={state} period={period} />}
-
-          <Section
-            title={t('recentActivity')}
-            action={t('seeAll')}
-            onAction={() => router.push('/transactions')}
-            delay={260}>
-            <View>
-              {recent.map((t, i) => (
-                <View
-                  key={t.id}
-                  style={
-                    i > 0
-                      ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }
-                      : undefined
-                  }>
-                  <TransactionRow
-                    transaction={t}
-                    account={state.accounts.find((a) => a.id === t.accountId)}
-                    onPress={() => router.push('/transactions')}
-                  />
-                </View>
-              ))}
-              {recent.length === 0 && (
-                <View style={styles.emptyRecent}>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    Nothing yet. Tap + to add a transaction, or pull down to scan your SMS.
-                  </ThemedText>
-                </View>
-              )}
-            </View>
-          </Section>
+          <Animated.View entering={FadeInDown.delay(120).duration(320)} style={styles.section}>
+            <SectionHeader
+              title={live ? t('recentActivity') : periodLabel(period)}
+              right="ALL ACTIVITY"
+              onPressRight={() => router.push('/transactions')}
+            />
+            {today.map((tx, i) => (
+              <View
+                key={tx.id}
+                style={
+                  i > 0
+                    ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }
+                    : undefined
+                }>
+                <TransactionRow
+                  transaction={tx}
+                  account={state.accounts.find((a) => a.id === tx.accountId)}
+                  onPress={() => router.push('/transactions')}
+                />
+              </View>
+            ))}
+            {today.length === 0 && (
+              <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
+                <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
+                  AED 0
+                </ThemedText>
+                <ThemedText type="small">No entries in this period yet</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>
+                  Pull down to read your inbox, or add the last thing you paid for — one entry is
+                  enough to start the month.
+                </ThemedText>
+              </View>
+            )}
+          </Animated.View>
         </ScrollView>
       </SafeAreaView>
       <PeriodSheet visible={periodSheetOpen} onClose={() => setPeriodSheetOpen(false)} />
@@ -599,130 +564,82 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  content: {
-    padding: Spacing.three,
-    gap: Spacing.four,
-  },
-  hero: {
-    gap: Spacing.one,
-    paddingTop: Spacing.two,
-  },
-  heroTopRow: {
+  root: { flex: 1, alignItems: 'center' },
+  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
+  content: { paddingHorizontal: ScreenPadding, paddingTop: Spacing.three },
+
+  topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: Spacing.four,
   },
-  periodChipWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  heroStats: {
-    flexDirection: 'row',
-    gap: Spacing.four,
-    marginTop: Spacing.one,
-  },
-  heroStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  heroDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  permissionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    borderWidth: 1,
-    borderRadius: Radius.md,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + 4,
-  },
-  permissionText: {
+  topActions: { flexDirection: 'row', gap: Spacing.two },
+
+  heroLabel: { marginBottom: Spacing.two },
+  heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  aed: { fontSize: 15, lineHeight: 20 },
+  split: { flexDirection: 'row', marginTop: Spacing.four },
+  splitCell: {
     flex: 1,
-    gap: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 11,
+    paddingBottom: Spacing.two,
+    paddingRight: Spacing.three,
+    paddingLeft: 0,
+    gap: 5,
   },
-  section: {
-    gap: Spacing.two,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sectionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one + 2,
-  },
-  lineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingVertical: Spacing.one + 2,
-  },
-  lineTitle: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  lineAmount: {
-    minWidth: 84,
-    textAlign: 'right',
-  },
-  reportRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    padding: Spacing.three,
-    borderRadius: Radius.md,
+  splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  splitFigure: { fontSize: 17, lineHeight: 22 },
+  dot: { width: 5, height: 5, borderRadius: 3 },
+
+  section: { marginTop: Spacing.five },
+
+  insight: {
+    marginTop: Spacing.four,
     borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: 18,
+    gap: 6,
   },
-  reportIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: Radius.sm,
+  insightTitle: { marginTop: Spacing.one },
+  insightActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
+  btn: {
+    borderRadius: Radius.tile,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  reportText: {
-    flex: 1,
-    gap: 1,
-  },
-  insightScroll: {
-    gap: Spacing.two,
-    paddingRight: Spacing.three,
-  },
-  subsRow: {
+
+  notice: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
+    gap: Spacing.two + 2,
+    marginTop: Spacing.four,
+    padding: Spacing.three,
+    borderRadius: Radius.sheet,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  subsNext: {
-    flex: 1,
-  },
-  budgetRow: {
-    gap: Spacing.one + 1,
-    paddingVertical: Spacing.one,
-  },
-  budgetTop: {
+  noticeText: { flex: 1, gap: 1 },
+
+  leaveRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: Spacing.two + 4,
+    paddingVertical: 13,
   },
-  emptyRecent: {
-    paddingVertical: Spacing.three,
+  leaveText: { flex: 1, gap: 1 },
+
+  empty: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: Radius.sheet + 2,
+    padding: Spacing.four,
+    gap: 6,
+    alignItems: 'flex-start',
   },
+  emptyFigure: { opacity: 0.35, marginBottom: Spacing.two },
+  emptyBody: { maxWidth: 320 },
 });

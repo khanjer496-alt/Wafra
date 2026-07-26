@@ -44,7 +44,8 @@ export type IconName =
   | 'sun'
   | 'leaf'
   | 'download'
-  | 'upload';
+  | 'upload'
+  | 'fingerprint';
 
 interface IconProps {
   name: IconName;
@@ -53,8 +54,15 @@ interface IconProps {
   strokeWidth?: number;
 }
 
-/** Hand-rolled stroke icon set, 24x24 viewBox. No icon fonts, no emojis. */
-export function Icon({ name, size = 24, color = '#fff', strokeWidth = 2 }: IconProps) {
+/**
+ * Hand-rolled stroke icon set, 24x24 viewBox. No icon fonts, no emojis.
+ *
+ * 1.8 is the house weight — heavy enough to hold at 14px, light enough that a
+ * list of glyphs reads as texture rather than as a row of buttons. The only
+ * place it goes up is an active tab (2.1), where weight is doing the work that
+ * a filled tile used to do.
+ */
+export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' } as const;
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
@@ -329,6 +337,16 @@ export function Icon({ name, size = 24, color = '#fff', strokeWidth = 2 }: IconP
           <Line {...p} x1={12} y1={14} x2={12} y2={4} />
           <Path {...p} d="M7.5 8 L12 3.5 16.5 8" />
           <Path {...p} d="M4.5 19.5 H19.5" />
+        </>
+      )}
+      {/* Concentric ridges rather than a literal print: it has to stay legible
+          at 38px inside the Android unlock target. */}
+      {name === 'fingerprint' && (
+        <>
+          <Path {...p} d="M3.5 11.5 a8.5 8.5 0 0 1 17 0 v2" />
+          <Path {...p} d="M6.8 12 a5.2 5.2 0 0 1 10.4 0 v3.4 q0 1.8 -0.5 3.4" />
+          <Path {...p} d="M10 12.2 a2 2 0 0 1 4 0 v3.6 q0 2.4 -0.9 4.6" />
+          <Path {...p} d="M6.9 17.5 q-0.6 1.9 -1.8 3.4" />
         </>
       )}
     </Svg>

@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { Radius } from '@/constants/theme';
 import { brandMarkFor } from '@/lib/brand-marks';
 import type { CategoryId } from '@/lib/types';
 
@@ -22,10 +23,11 @@ interface MerchantAvatarProps {
  * reason this app parses SMS on-device at all. Bundled marks work offline, on
  * first launch, and leak nothing.
  *
- * The circle is shared with the category fallback so a list of mixed known
- * and unknown merchants still reads as one column.
+ * The tile is shared with the category fallback so a list of mixed known and
+ * unknown merchants still reads as one column. A brand keeps its own colour —
+ * that is the one thing a mark is for — but the shape is the app's.
  */
-export function MerchantAvatar({ title, category, size = 44 }: MerchantAvatarProps) {
+export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarProps) {
   const brand = brandMarkFor(title);
   if (!brand) return <CategoryAvatar category={category} size={size} />;
 
@@ -35,20 +37,20 @@ export function MerchantAvatar({ title, category, size = 44 }: MerchantAvatarPro
   return (
     <View
       style={[
-        styles.circle,
+        styles.tile,
         {
           width: size,
           height: size,
-          borderRadius: size / 2,
-          backgroundColor: `${brand.color}22`,
+          borderRadius: size >= 40 ? Radius.control : Radius.tile,
+          backgroundColor: `${brand.color}1c`,
         },
       ]}>
       <ThemedText
+        type="smallBold"
         style={{
           color: brand.color,
           fontSize: Math.round(size * scale),
           lineHeight: Math.round(size * scale * 1.15),
-          fontWeight: '800',
           letterSpacing: brand.mark.length > 1 ? -0.2 : 0,
         }}>
         {brand.mark}
@@ -58,7 +60,7 @@ export function MerchantAvatar({ title, category, size = 44 }: MerchantAvatarPro
 }
 
 const styles = StyleSheet.create({
-  circle: {
+  tile: {
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -1,45 +1,54 @@
-import { Platform, StyleSheet, Text, type TextProps } from 'react-native';
+import { StyleSheet, Text, type TextProps, type TextStyle } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
+export type TextType =
+  | 'default'
+  | 'display'
+  | 'amount'
+  | 'sheetAmount'
+  | 'title'
+  | 'heading'
+  | 'small'
+  | 'smallBold'
+  | 'meta'
+  | 'micro'
+  | 'nano'
+  | 'subtitle'
+  | 'link'
+  | 'linkPrimary'
+  | 'code';
+
 export type ThemedTextProps = TextProps & {
-  type?:
-    | 'default'
-    | 'display'
-    | 'title'
-    | 'heading'
-    | 'small'
-    | 'smallBold'
-    | 'micro'
-    | 'subtitle'
-    | 'link'
-    | 'linkPrimary'
-    | 'code';
+  type?: TextType;
   themeColor?: ThemeColor;
-  /** Tabular numerals so amounts align in columns. Use on every money figure. */
+  /**
+   * Marks this as a money figure. Beyond tabular numerals it swaps the family
+   * to Geist Mono at the same weight — the design rule is that the mono face
+   * carries every figure in the app, and routing it through the prop that
+   * already flags a figure means no call site has to be touched twice.
+   */
   tabular?: boolean;
 };
 
-export function ThemedText({ style, type = 'default', themeColor, tabular, ...rest }: ThemedTextProps) {
+export function ThemedText({
+  style,
+  type = 'default',
+  themeColor,
+  tabular,
+  ...rest
+}: ThemedTextProps) {
   const theme = useTheme();
+  const color = themeColor ?? (type === 'linkPrimary' ? 'primary' : 'text');
 
   return (
     <Text
       style={[
-        { color: theme[themeColor ?? 'text'] },
-        type === 'default' && styles.default,
-        type === 'display' && styles.display,
-        type === 'title' && styles.title,
-        type === 'heading' && styles.heading,
-        type === 'small' && styles.small,
-        type === 'smallBold' && styles.smallBold,
-        type === 'micro' && styles.micro,
-        type === 'subtitle' && styles.subtitle,
-        type === 'link' && styles.link,
-        type === 'linkPrimary' && styles.linkPrimary,
-        type === 'code' && styles.code,
+        { color: theme[color] },
+        styles[type],
         tabular && styles.tabular,
+        tabular && { fontFamily: MONO_FOR_WEIGHT[WEIGHT_OF[type]] },
         style,
       ]}
       {...rest}
@@ -47,64 +56,133 @@ export function ThemedText({ style, type = 'default', themeColor, tabular, ...re
   );
 }
 
-// Scale ratio ≥1.25 between steps: 11 → 13 → 15 → 19 → 24 → 30 → 44
-const styles = StyleSheet.create({
-  micro: {
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: 600,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+/**
+ * Which weight tier each type sits at, so `tabular` can pick the matching mono
+ * cut. Android silently ignores `fontWeight` on a bundled family, so weight is
+ * only ever expressed as a family name.
+ */
+const WEIGHT_OF: Record<TextType, 'regular' | 'medium' | 'semi'> = {
+  default: 'regular',
+  display: 'semi',
+  amount: 'semi',
+  sheetAmount: 'semi',
+  title: 'semi',
+  heading: 'semi',
+  small: 'medium',
+  smallBold: 'semi',
+  meta: 'regular',
+  micro: 'medium',
+  nano: 'medium',
+  subtitle: 'semi',
+  link: 'medium',
+  linkPrimary: 'medium',
+  code: 'regular',
+};
+
+const MONO_FOR_WEIGHT = {
+  regular: Fonts.mono,
+  medium: Fonts.monoMedium,
+  semi: Fonts.monoSemi,
+} as const;
+
+// Tracking is given in ems by the design; at these sizes that lands on the
+// pixel values below.
+const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
+  /** Hero amount — the one figure a screen exists to show. */
+  display: {
+    fontFamily: Fonts.monoSemi,
+    fontSize: 46,
+    lineHeight: 46,
+    letterSpacing: -1.4,
   },
-  small: {
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: 500,
+  /** Screen amount: Wallet net worth, a card's outstanding. */
+  amount: {
+    fontFamily: Fonts.monoSemi,
+    fontSize: 40,
+    lineHeight: 40,
+    letterSpacing: -1.2,
   },
-  smallBold: {
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: 700,
+  /** The figure inside a bottom sheet. */
+  sheetAmount: {
+    fontFamily: Fonts.monoSemi,
+    fontSize: 34,
+    lineHeight: 38,
+    letterSpacing: -0.7,
   },
-  default: {
-    fontSize: 15,
+  /** Screen title. */
+  title: {
+    fontFamily: Fonts.sansSemi,
+    fontSize: 27,
+    lineHeight: 27,
+    letterSpacing: -0.86,
+  },
+  /** Sheet title, and any heading that sits above a divided list. */
+  subtitle: {
+    fontFamily: Fonts.sansSemi,
+    fontSize: 18,
     lineHeight: 22,
-    fontWeight: 500,
+    letterSpacing: -0.36,
   },
   heading: {
-    fontSize: 19,
-    lineHeight: 25,
-    fontWeight: 700,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 20,
+    lineHeight: 26,
+    letterSpacing: -0.4,
   },
-  subtitle: {
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: 700,
+  /** Body copy. */
+  default: {
+    fontFamily: Fonts.sans,
+    fontSize: 14,
+    lineHeight: 21,
   },
-  title: {
-    fontSize: 30,
-    lineHeight: 37,
-    fontWeight: 800,
+  /** Row title. */
+  small: {
+    fontFamily: Fonts.sansMedium,
+    fontSize: 14.5,
+    lineHeight: 19,
   },
-  display: {
-    fontSize: 44,
-    lineHeight: 52,
-    fontWeight: 800,
-    letterSpacing: -1,
+  /** Row title that carries weight, and — with `tabular` — the row figure. */
+  smallBold: {
+    fontFamily: Fonts.sansSemi,
+    fontSize: 14.5,
+    lineHeight: 19,
+  },
+  /** The second line of a row: category, account, date. */
+  meta: {
+    fontFamily: Fonts.sans,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  /** Caps section label. */
+  micro: {
+    fontFamily: Fonts.monoMedium,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: 1.32,
+    textTransform: 'uppercase',
+  },
+  /** The smallest caps label — chart axes, tab labels, urgency tags. */
+  nano: {
+    fontFamily: Fonts.monoMedium,
+    fontSize: 10.5,
+    lineHeight: 14,
+    letterSpacing: 1.05,
+    textTransform: 'uppercase',
   },
   link: {
-    lineHeight: 30,
+    fontFamily: Fonts.sansMedium,
     fontSize: 14,
+    lineHeight: 21,
   },
   linkPrimary: {
-    lineHeight: 30,
+    fontFamily: Fonts.sansMedium,
     fontSize: 14,
-    color: '#3c87f7',
+    lineHeight: 21,
   },
   code: {
     fontFamily: Fonts.mono,
-    fontWeight: Platform.select({ android: 700 }) ?? 500,
     fontSize: 12,
+    lineHeight: 18,
   },
   tabular: {
     fontVariant: ['tabular-nums'],

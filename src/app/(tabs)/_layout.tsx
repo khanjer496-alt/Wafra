@@ -9,9 +9,8 @@ export default function TabsLayout() {
       screenOptions={{ headerShown: false }}
       tabBar={(props) => <WafraTabBar {...props} />}>
       <Tabs.Screen name="index" />
-      <Tabs.Screen name="stats" />
+      <Tabs.Screen name="flow" />
       <Tabs.Screen name="bills" />
-      <Tabs.Screen name="budgets" />
       <Tabs.Screen name="wallet" />
     </Tabs>
   );

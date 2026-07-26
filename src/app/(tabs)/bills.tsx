@@ -15,6 +15,7 @@ import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
+import { CategoryChips } from '@/components/ui/category-chips';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -746,25 +747,11 @@ export default function BillsScreen() {
               </View>
             </View>
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catPicker}>
-              {EXPENSE_CATEGORIES.map((c) => (
-                <Pressable
-                  key={c.id}
-                  onPress={() => setCategory(c.id)}
-                  style={[
-                    styles.catChip,
-                    {
-                      backgroundColor: category === c.id ? `${c.color}2c` : theme.backgroundSelected,
-                      borderColor: category === c.id ? c.color : 'transparent',
-                    },
-                  ]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <Icon name={c.icon} size={13} color={c.color} />
-                    <ThemedText type="small">{c.label}</ThemedText>
-                  </View>
-                </Pressable>
-              ))}
-            </ScrollView>
+            <CategoryChips
+              categories={EXPENSE_CATEGORIES}
+              selected={category}
+              onToggle={setCategory}
+            />
 
             <Pressable
               onPress={saveBill}
