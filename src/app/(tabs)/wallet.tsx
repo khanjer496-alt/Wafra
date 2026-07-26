@@ -17,7 +17,7 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BankAvatar } from '@/components/ui/bank-avatar';
+import { AccountTile } from '@/components/ui/tile';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
@@ -390,10 +390,7 @@ export default function WalletScreen() {
                         styles.accountRow,
                         i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                       ]}>
-                      <BankAvatar
-                        name={account.bankName ?? account.name}
-                        color={account.color}
-                      />
+                      <AccountTile account={account} />
                       <View style={styles.accountInfo}>
                         <ThemedText type="default" numberOfLines={1}>
                           {cardTitle(account.name)}
@@ -447,11 +444,7 @@ export default function WalletScreen() {
                       styles.accountRow,
                       i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                     ]}>
-                    <BankAvatar
-                      name={account.bankName ?? account.name}
-                      color={account.color}
-                      icon={meta.icon}
-                    />
+                    <AccountTile account={account} />
                     <View style={styles.accountInfo}>
                       <ThemedText type="default" numberOfLines={1}>
                         {account.name}
@@ -510,11 +503,7 @@ export default function WalletScreen() {
                         styles.inactiveRow,
                         i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                       ]}>
-                      <BankAvatar
-                        name={account.bankName ?? account.name}
-                        color={account.color}
-                        icon={account.cardType ? 'wallet' : KIND_META[account.kind].icon}
-                      />
+                      <AccountTile account={account} />
                       <View style={styles.accountInfo}>
                         <ThemedText type="default" numberOfLines={1}>
                           {account.name}

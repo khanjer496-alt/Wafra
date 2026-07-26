@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
+import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 interface WafraMarkProps {
@@ -10,7 +11,13 @@ interface WafraMarkProps {
   color?: string;
 }
 
-/** The Wafra mark: a W whose final stroke rises into an arrow — it ends up. */
+/**
+ * The Wafra mark: a W whose final stroke rises into an arrow — it ends up.
+ *
+ * One colour, always. No second colour inside the path, no glow, no gradient,
+ * no rotation. Minimum sizes: 16px alone, 96px with the wordmark, 120px with
+ * وفرة. Clear space is half the mark's height on all four sides.
+ */
 export function WafraMark({ size = 40, color }: WafraMarkProps) {
   const theme = useTheme();
   const stroke = color ?? theme.primary;
@@ -39,18 +46,46 @@ export function WafraMark({ size = 40, color }: WafraMarkProps) {
 interface WafraLogoProps {
   markSize?: number;
   showWordmark?: boolean;
+  showArabic?: boolean;
+  align?: 'center' | 'flex-start';
 }
 
-/** Mark + wordmark lockup: Wafra with وفرة as the secondary script. */
-export function WafraLogo({ markSize = 44, showWordmark = true }: WafraLogoProps) {
+/** Mark + wordmark lockup: Wafra, with وفرة as the secondary script. */
+export function WafraLogo({
+  markSize = 44,
+  showWordmark = true,
+  showArabic = true,
+  align = 'center',
+}: WafraLogoProps) {
   const theme = useTheme();
+  const wordSize = Math.round(markSize * 0.62);
   return (
-    <View style={styles.lockup}>
+    <View style={[styles.lockup, { alignItems: align }]}>
       <WafraMark size={markSize} />
       {showWordmark && (
-        <View style={styles.words}>
-          <ThemedText style={[styles.wordmark, { color: theme.text }]}>Wafra</ThemedText>
-          <ThemedText style={[styles.script, { color: theme.textSecondary }]}>وفرة</ThemedText>
+        <View style={{ alignItems: align }}>
+          <ThemedText
+            style={{
+              fontFamily: Fonts.sansSemi,
+              fontSize: wordSize,
+              lineHeight: Math.round(wordSize * 1.2),
+              letterSpacing: wordSize * -0.035,
+              color: theme.text,
+            }}>
+            Wafra
+          </ThemedText>
+          {showArabic && (
+            <ThemedText
+              style={{
+                // ~52% of the Latin cap height keeps the second script quiet.
+                fontFamily: Fonts.arabic,
+                fontSize: Math.round(wordSize * 0.52),
+                lineHeight: Math.round(wordSize * 0.85),
+                color: theme.textSecondary,
+              }}>
+              وفرة
+            </ThemedText>
+          )}
         </View>
       )}
     </View>
@@ -59,22 +94,6 @@ export function WafraLogo({ markSize = 44, showWordmark = true }: WafraLogoProps
 
 const styles = StyleSheet.create({
   lockup: {
-    alignItems: 'center',
-    gap: 10,
-  },
-  words: {
-    alignItems: 'center',
-    gap: 0,
-  },
-  wordmark: {
-    fontSize: 28,
-    lineHeight: 34,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  script: {
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '600',
+    gap: Spacing.two + 2,
   },
 });

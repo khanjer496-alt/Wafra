@@ -2,81 +2,82 @@ import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { ThemedText } from '@/components/themed-text';
-import { Card } from '@/components/ui/card';
 import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { RichSentence } from '@/components/ui/rich-sentence';
+import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { Insight } from '@/lib/insights';
 
 interface InsightCardProps {
   insight: Insight;
-  width?: number;
 }
 
-export function InsightCard({ insight, width }: InsightCardProps) {
+/**
+ * One written observation.
+ *
+ * It used to be a card with an alpha-tinted icon bubble, which put a second
+ * surface and a second tint inside a list that is already a list. It is a row
+ * now: the glyph carries the tone, the sentence carries the finding, and the
+ * figures inside it are set in the mono face so they stay scannable without
+ * being pulled into a column they do not deserve.
+ */
+export function InsightCard({ insight }: InsightCardProps) {
   const theme = useTheme();
   const router = useRouter();
-  const accent =
+
+  const tone =
     insight.tone === 'warning'
       ? theme.warning
       : insight.tone === 'positive'
         ? theme.income
-        : theme.primary;
+        : theme.textSecondary;
 
-  const content = (
-    <Card style={[styles.card, width !== undefined && { width }]}>
-      <View style={styles.header}>
-        <View style={[styles.iconBubble, { backgroundColor: `${accent}1e` }]}>
-          <Icon name={insight.icon} size={18} color={accent} strokeWidth={1.8} />
-        </View>
-        <View style={styles.headerRight}>
-          <View style={[styles.dot, { backgroundColor: accent }]} />
-          {insight.href && (
-            <Icon name="chevron-right" size={13} color={theme.textSecondary} />
-          )}
-        </View>
+  const body = (
+    <View style={styles.row}>
+      <View style={styles.glyph}>
+        <Icon name={insight.icon} size={18} color={tone} />
       </View>
-      <ThemedText type="smallBold" numberOfLines={2}>
-        {insight.title}
-      </ThemedText>
-      <ThemedText type="small" themeColor="textSecondary" style={styles.body}>
-        {insight.body}
-      </ThemedText>
-    </Card>
+      <View style={styles.text}>
+        <RichSentence text={`${insight.title}. ${insight.body}`} />
+      </View>
+      {insight.href && <Icon name="chevron-right" size={15} color={theme.textTertiary} />}
+    </View>
   );
 
-  if (!insight.href) return content;
-  return <Pressable onPress={() => router.push(insight.href!)}>{content}</Pressable>;
+  if (!insight.href) {
+    return <View style={[styles.wrap, { borderTopColor: theme.cardBorder }]}>{body}</View>;
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={insight.title}
+      onPress={() => router.push(insight.href!)}
+      style={({ pressed }) => [
+        styles.wrap,
+        { borderTopColor: theme.cardBorder },
+        pressed && { transform: [{ scale: 0.985 }] },
+      ]}>
+      {body}
+    </Pressable>
+  );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    gap: Spacing.two,
+  wrap: {
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  header: {
+  row: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.three - 2,
+    paddingVertical: Spacing.three - 3,
+  },
+  glyph: {
+    width: 22,
     alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingTop: 2,
   },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one + 2,
-  },
-  iconBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  body: {
-    flexShrink: 1,
+  text: {
+    flex: 1,
   },
 });
