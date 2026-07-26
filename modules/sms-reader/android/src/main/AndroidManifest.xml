@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Fires on delivery, so a bank alert is captured as it lands rather than
+         on the next app open. android:permission restricts the broadcast to
+         the system, so no other app can inject fake transactions. -->
+    <receiver
+      android:name="expo.modules.smsreader.SmsDeliveryReceiver"
+      android:exported="true"
+      android:permission="android.permission.BROADCAST_SMS">
+      <intent-filter>
+        <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+      </intent-filter>
+    </receiver>
+  </application>
+</manifest>

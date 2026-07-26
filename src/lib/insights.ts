@@ -1,0 +1,274 @@
+import { getCategory } from '@/lib/categories';
+import { formatAED } from '@/lib/format';
+import {
+  elapsedDays,
+  inPeriod,
+  isCurrentMonth,
+  periodLabel,
+  previousPeriod,
+  toPeriod,
+  type PeriodLike,
+} from '@/lib/period';
+import {
+  activeSubscriptions,
+  detectSubscriptions,
+  subscriptionsMonthlyTotal,
+  trueSubscriptions,
+} from '@/lib/subscriptions';
+import type { Budget, CategoryId, Transaction } from '@/lib/types';
+
+export interface MonthSummary {
+  incomeFils: number;
+  expenseFils: number;
+  byCategory: { category: CategoryId; totalFils: number; share: number }[];
+}
+
+export function summarizeMonth(transactions: Transaction[], period: PeriodLike): MonthSummary {
+  let incomeFils = 0;
+  let expenseFils = 0;
+  const catTotals = new Map<CategoryId, number>();
+
+  for (const t of transactions) {
+    if (t.isTransfer) continue; // card payments move money, they aren't income/spending
+    if (!inPeriod(t.date, period)) continue;
+    if (t.type === 'income') {
+      incomeFils += t.amountFils;
+    } else {
+      expenseFils += t.amountFils;
+      catTotals.set(t.category, (catTotals.get(t.category) ?? 0) + t.amountFils);
+    }
+  }
+
+  const byCategory = [...catTotals.entries()]
+    .map(([category, totalFils]) => ({
+      category,
+      totalFils,
+      share: expenseFils > 0 ? totalFils / expenseFils : 0,
+    }))
+    .sort((a, b) => b.totalFils - a.totalFils);
+
+  return { incomeFils, expenseFils, byCategory };
+}
+
+export function spentInMonthForCategory(
+  transactions: Transaction[],
+  period: PeriodLike,
+  category: CategoryId,
+): number {
+  let total = 0;
+  for (const t of transactions) {
+    if (t.isTransfer) continue;
+    if (t.type === 'expense' && t.category === category && inPeriod(t.date, period)) {
+      total += t.amountFils;
+    }
+  }
+  return total;
+}
+
+export type InsightTone = 'positive' | 'warning' | 'neutral';
+
+export interface Insight {
+  id: string;
+  tone: InsightTone;
+  icon: import('@/components/ui/icon').IconName;
+  title: string;
+  body: string;
+  /** Where tapping the insight takes you (the screen to act on it). */
+  href?: string;
+}
+
+/**
+ * The analysis engine: turns the raw ledger into a ranked list of plain-language
+ * observations about the selected month.
+ */
+export function buildInsights(
+  transactions: Transaction[],
+  budgets: Budget[],
+  periodLike: PeriodLike,
+  today: Date,
+  notSubscriptions: string[] = [],
+): Insight[] {
+  const insights: Insight[] = [];
+  const period = toPeriod(periodLike);
+  const current = summarizeMonth(transactions, period);
+  const prev = previousPeriod(period);
+  const previous = prev ? summarizeMonth(transactions, prev) : { incomeFils: 0, expenseFils: 0, byCategory: [] };
+  const live = isCurrentMonth(period, today);
+  const isMonthMode = period.mode === 'month';
+  const dayOfMonth = Math.max(1, elapsedDays(period, today, transactions));
+  const totalDaysInPeriod =
+    period.mode === 'month'
+      ? Number(new Date(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)), 0).getDate())
+      : dayOfMonth;
+
+  // Change vs the previous period (pace projection only mid-current-month)
+  if (prev && previous.expenseFils > 0 && current.expenseFils > 0) {
+    if (live) {
+      const pace = current.expenseFils / dayOfMonth;
+      const projected = pace * totalDaysInPeriod;
+      const delta = (projected - previous.expenseFils) / previous.expenseFils;
+      if (Math.abs(delta) >= 0.08) {
+        const pct = Math.round(Math.abs(delta) * 100);
+        insights.push({
+          id: 'pace',
+          tone: delta > 0 ? 'warning' : 'positive',
+          icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
+          title: delta > 0 ? `Trending ${pct}% higher` : `Trending ${pct}% lower`,
+          body: `At today's pace you'll spend about ${formatAED(Math.round(projected), { decimals: false })} this month, vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+        });
+      }
+    } else {
+      const delta = (current.expenseFils - previous.expenseFils) / previous.expenseFils;
+      if (Math.abs(delta) >= 0.05) {
+        const pct = Math.round(Math.abs(delta) * 100);
+        insights.push({
+          id: 'mom',
+          tone: delta > 0 ? 'warning' : 'positive',
+          icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
+          title: `Spent ${pct}% ${delta > 0 ? 'more' : 'less'}`,
+          body: `${formatAED(current.expenseFils, { decimals: false })} vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+        });
+      }
+    }
+  }
+
+  // Budget alerts (budgets are monthly — skip in year/range/all views)
+  for (const b of isMonthMode ? budgets : []) {
+    const spent = spentInMonthForCategory(transactions, period, b.category);
+    if (b.limitFils <= 0) continue;
+    const ratio = spent / b.limitFils;
+    const cat = getCategory(b.category);
+    if (ratio >= 1) {
+      insights.push({
+        id: `budget-over-${b.category}`,
+        tone: 'warning',
+        icon: 'alert',
+        title: `${cat.label} budget exceeded`,
+        body: `${formatAED(spent, { decimals: false })} spent of your ${formatAED(b.limitFils, { decimals: false })} limit.`,
+      });
+    } else if (ratio >= 0.85 && live) {
+      insights.push({
+        id: `budget-near-${b.category}`,
+        tone: 'warning',
+        icon: 'alert',
+        title: `${cat.label} almost at limit`,
+        body: `${Math.round(ratio * 100)}% used — ${formatAED(b.limitFils - spent, { decimals: false })} left for the month.`,
+      });
+    }
+  }
+
+  // Top category concentration (rent and business costs aren't lifestyle spending)
+  const top = current.byCategory.filter((c) => c.category !== 'rent' && c.category !== 'business')[0];
+  if (top && top.share >= 0.15) {
+    const cat = getCategory(top.category);
+    insights.push({
+      id: 'top-category',
+      tone: 'neutral',
+      icon: cat.icon,
+      title: `${cat.label} leads your spending`,
+      body: `${formatAED(top.totalFils, { decimals: false })} — ${Math.round(top.share * 100)}% of this month's expenses.`,
+    });
+  }
+
+  // Savings rate
+  if (current.incomeFils > 0) {
+    const rate = (current.incomeFils - current.expenseFils) / current.incomeFils;
+    if (rate >= 0.2) {
+      insights.push({
+        id: 'savings',
+        tone: 'positive',
+        icon: 'leaf',
+        title: `Saving ${Math.round(rate * 100)}% of income`,
+        body: `${formatAED(current.incomeFils - current.expenseFils, { decimals: false })} kept aside${live ? ' so far this month' : ''}. Keep it up!`,
+      });
+    } else if (rate < 0) {
+      insights.push({
+        id: 'overspend',
+        tone: 'warning',
+        icon: 'alert',
+        title: 'Spending exceeds income',
+        body: `Expenses are ${formatAED(current.expenseFils - current.incomeFils, { decimals: false })} above income${isMonthMode ? ' this month' : ' in this period'}.`,
+      });
+    }
+  }
+
+  // Largest single expense
+  let largest: Transaction | null = null;
+  for (const t of transactions) {
+    if (t.isTransfer) continue;
+    if (t.type === 'expense' && inPeriod(t.date, period) && t.category !== 'rent' && t.category !== 'business') {
+      if (!largest || t.amountFils > largest.amountFils) largest = t;
+    }
+  }
+  if (largest && largest.amountFils >= 20_000) {
+    insights.push({
+      id: 'largest',
+      tone: 'neutral',
+      icon: 'diamond',
+      title: 'Biggest purchase',
+      body: `${largest.title} — ${formatAED(largest.amountFils, { decimals: false })} on ${largest.date.slice(8)}/${largest.date.slice(5, 7)}.`,
+    });
+  }
+
+  // Subscription load + price increases (true subscriptions only — rent and
+  // utilities are fixed commitments, not cancellable services)
+  const subs = activeSubscriptions(
+    trueSubscriptions(detectSubscriptions(transactions, notSubscriptions, today)),
+  );
+  if (subs.length >= 2) {
+    const monthly = subscriptionsMonthlyTotal(subs);
+    if (isMonthMode && current.incomeFils > 0 && monthly / current.incomeFils >= 0.08) {
+      insights.push({
+        id: 'subs-load',
+        tone: 'warning',
+        icon: 'repeat',
+        title: `${subs.length} subscriptions cost ${formatAED(monthly, { decimals: false })}/mo`,
+        body: `That's ${Math.round((monthly / current.incomeFils) * 100)}% of this month's income. Review them in Bills.`,
+      });
+    } else {
+      insights.push({
+        id: 'subs-total',
+        tone: 'neutral',
+        icon: 'repeat',
+        title: `${subs.length} active subscriptions`,
+        body: `About ${formatAED(monthly, { decimals: false })} per month combined.`,
+      });
+    }
+  }
+  const increased = subs.find((s) => s.priceIncreased);
+  if (increased) {
+    insights.push({
+      id: `price-up-${increased.title}`,
+      tone: 'warning',
+      icon: 'arrow-up-right',
+      title: `${increased.title} got pricier`,
+      body: `Last charge ${formatAED(increased.lastAmountFils, { decimals: false })} vs the usual ${formatAED(increased.avgAmountFils, { decimals: false })}.`,
+    });
+  }
+
+  // Average daily spend
+  if (current.expenseFils > 0 && dayOfMonth > 0) {
+    insights.push({
+      id: 'daily',
+      tone: 'neutral',
+      icon: 'sun',
+      title: 'Daily average',
+      body: `You spend about ${formatAED(Math.round(current.expenseFils / dayOfMonth), { decimals: false })} per day${isMonthMode ? ' this month' : ' in this period'}.`,
+    });
+  }
+
+  // Every insight leads somewhere actionable.
+  for (const i of insights) {
+    i.href = i.id.startsWith('budget-')
+      ? '/budgets'
+      : i.id.startsWith('subs-') || i.id.startsWith('price-up')
+        ? '/bills'
+        : i.id === 'largest' || i.id === 'overspend'
+          ? '/transactions'
+          : '/stats';
+  }
+
+  const toneRank: Record<InsightTone, number> = { warning: 0, positive: 1, neutral: 2 };
+  insights.sort((a, b) => toneRank[a.tone] - toneRank[b.tone]);
+  return insights;
+}

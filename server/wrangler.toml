@@ -1,0 +1,24 @@
+name = "wafra-relay"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+# The parser is imported from the app's own src/lib, so esbuild must be able to
+# see outside this directory.
+[build]
+command = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wafra"
+# Replace with the id printed by: npx wrangler d1 create wafra
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# Nightly sweep of expired queue rows and long-dead devices.
+[triggers]
+crons = ["17 3 * * *"]
+
+[observability]
+enabled = true
+# Message text is never logged, but keeping sampling explicit means nobody
+# later assumes logs are a place to debug parsing from.
+head_sampling_rate = 0.1

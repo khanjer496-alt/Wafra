@@ -1,0 +1,15 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- User must enable this listener explicitly in system settings
+         (Special app access → Notification access). -->
+    <service
+      android:name="expo.modules.notificationreader.BankNotificationListenerService"
+      android:exported="false"
+      android:label="Wafra bank alerts"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>

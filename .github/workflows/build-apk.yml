@@ -1,0 +1,207 @@
+name: Build Android APK
+
+# A release build costs ~18 runner minutes; the free tier is 2,000 a month,
+# and building on every push to the working branch burned the whole allowance
+# in a month — after which nothing builds at all until the reset.
+#
+# So: CI (typecheck, lint, tests, ~2 min) still runs on every push and is what
+# actually guards the code. A full APK is built when someone asks for one, or
+# on main. That is also how it gets used — an installable build matters when
+# you are about to install it, not on every intermediate commit.
+on:
+  workflow_dispatch:
+    inputs:
+      bundle:
+        description: 'Also build the Play Store bundle (.aab) — adds ~5 min'
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'scripts/test/**'
+
+# A push during a build was already cancelling it, but only after the runner
+# had burned 15 minutes on Gradle. Making it explicit kills the superseded run
+# immediately instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # playwright is a devDependency for the e2e scripts; this build never
+      # launches a browser, so skip the browser download during npm ci.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Play rejects a versionCode it has seen before, and app.json pins it at
+      # 1 forever. The run number only ever increases, so every build is
+      # uploadable without anyone remembering to bump a file.
+      - name: Stamp versionCode from the run number
+        run: |
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            app.expo.android = app.expo.android || {};
+            app.expo.android.versionCode = Number(process.env.GITHUB_RUN_NUMBER);
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+            console.log('versionCode =', app.expo.android.versionCode);
+          "
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Sign releases with the Play upload key. Required repo secrets:
+      #
+      #   WAFRA_KEYSTORE_B64        base64 of wafra-upload.jks (base64 -w0)
+      #   WAFRA_KEYSTORE_PASSWORD   its store password
+      #   WAFRA_KEY_PASSWORD        key password (optional; defaults to store)
+      #   WAFRA_KEY_ALIAS           key alias   (optional; defaults to wafra)
+      #
+      # Credentials reach Gradle as ORG_GRADLE_PROJECT_* properties, so they
+      # are never written into build.gradle or any other file in the
+      # workspace. Without the keystore secret a throwaway key is generated
+      # with a random per-run password so builds stay green; those APKs
+      # cannot update a side-loaded install (uninstall/reinstall) and cannot
+      # be uploaded to Play.
+      - name: Configure release signing
+        env:
+          KEYSTORE_B64: ${{ secrets.WAFRA_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.WAFRA_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.WAFRA_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.WAFRA_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          alias_name="${KEY_ALIAS:-wafra}"
+
+          if [ -n "$KEYSTORE_B64" ]; then
+            if [ -z "$KEYSTORE_PASSWORD" ]; then
+              echo "::error::WAFRA_KEYSTORE_B64 is set but WAFRA_KEYSTORE_PASSWORD is not."
+              exit 1
+            fi
+            printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > android/app/wafra-upload.jks
+            store_password="$KEYSTORE_PASSWORD"
+            key_password="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+            # Fail here with something actionable rather than deep inside Gradle.
+            if ! keytool -list -keystore android/app/wafra-upload.jks \
+                 -storepass "$store_password" -alias "$alias_name" >/dev/null 2>&1; then
+              echo "::error::Keystore did not open with WAFRA_KEYSTORE_PASSWORD, or it has no '$alias_name' alias. Check the secrets (WAFRA_KEY_ALIAS overrides the alias)."
+              exit 1
+            fi
+            echo "Signing with the upload keystore from secrets (alias: $alias_name)."
+            # Same fingerprint every run means every APK installs over the last.
+            fp="$(keytool -list -keystore android/app/wafra-upload.jks -storepass "$store_password" -alias "$alias_name" 2>/dev/null | grep -i 'SHA256:' | head -1)"
+            echo "### ✅ Signed with the upload key" >> "$GITHUB_STEP_SUMMARY"
+            echo "Installs over the previous build. \`$fp\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            store_password="$(openssl rand -base64 24)"
+            key_password="$store_password"
+            echo "::add-mask::$store_password"
+            keytool -genkeypair -v -keystore android/app/wafra-upload.jks \
+              -alias "$alias_name" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$store_password" -keypass "$key_password" \
+              -dname "CN=Wafra, OU=Wafra, O=Wafra, L=Dubai, C=AE"
+            echo "::warning::WAFRA_KEYSTORE_B64 not set - signed with a throwaway key."
+            # A log line is easy to miss, and missing it costs a reinstall on
+            # every single build: Android refuses an update whose signature
+            # changed, and this branch mints a new key each run.
+            {
+              echo "### ⚠️ Signed with a throwaway key"
+              echo
+              echo "\`WAFRA_KEYSTORE_B64\` is not set, so this run generated a new"
+              echo "signing key. **This APK cannot install over a previous one** —"
+              echo "Android will ask you to uninstall first — and it cannot be"
+              echo "uploaded to Play."
+              echo
+              echo "Fix once: set the \`WAFRA_KEYSTORE_B64\` and"
+              echo "\`WAFRA_KEYSTORE_PASSWORD\` repository secrets."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          # Gradle reads ORG_GRADLE_PROJECT_<name> as project property <name>.
+          echo "::add-mask::$key_password"
+          {
+            echo "ORG_GRADLE_PROJECT_wafraStorePassword=$store_password"
+            echo "ORG_GRADLE_PROJECT_wafraKeyPassword=$key_password"
+            echo "ORG_GRADLE_PROJECT_wafraKeyAlias=$alias_name"
+          } >> "$GITHUB_ENV"
+
+          cat >> android/app/build.gradle <<'EOG'
+
+          android {
+              signingConfigs {
+                  upload {
+                      storeFile file('wafra-upload.jks')
+                      storePassword project.property('wafraStorePassword')
+                      keyAlias project.property('wafraKeyAlias')
+                      keyPassword project.property('wafraKeyPassword')
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.upload
+                  }
+              }
+          }
+          EOG
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      # Only needed to upload to Play, which is not what most builds are for.
+      - name: Build Play Store bundle (AAB)
+        if: inputs.bundle || github.ref == 'refs/heads/main'
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Rename outputs
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk wafra.apk
+          if [ -f android/app/build/outputs/bundle/release/app-release.aab ]; then
+            cp android/app/build/outputs/bundle/release/app-release.aab wafra.aab
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-apk
+          path: wafra.apk
+          retention-days: 30
+
+      - name: Upload Play bundle artifact
+        if: inputs.bundle || github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafra-aab
+          path: wafra.aab
+          retention-days: 30
