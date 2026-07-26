@@ -821,6 +821,20 @@ if (inbound && inbound.type === 'income' && inbound.transferHint === false) {
   pass++; console.log('\u2713 an unnamed incoming transfer still counts as income');
 } else { fail++; console.log('\u2717 an unnamed incoming transfer still counts as income', JSON.stringify(inbound && { m: inbound.merchant, t: inbound.type, h: inbound.transferHint })); }
 
+// "Centre" is a shop in a UAE descriptor far more often than not — but only
+// once the rules that own the other kinds of centre have had their turn.
+for (const [descriptor, category] of [
+  ['CITY NAS CENTER', 'shopping'],
+  ['COSMO CENTER', 'shopping'],
+  ['DELTA CENTRE TR LLC SP', 'shopping'],
+  ['MEDICAL CENTER DUBAI', 'health'],
+  ['CAR CENTRE SERVICES', 'transport'],
+]) {
+  t(`${descriptor} reads as ${category}`,
+    `Purchase of AED 50.00 with Debit Card ending 4733 at ${descriptor}, DUBAI. Avl Balance is AED 100.00.`,
+    { category });
+}
+
 // Food and grocery words the acquirer truncates or misspells. Each is a common
 // noun — "cafteria", "barbecua", "burgr", "ice cre" — not a claim about a
 // particular shop, which is why they are safe where a shop name is not.

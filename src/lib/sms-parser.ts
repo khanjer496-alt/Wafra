@@ -316,7 +316,11 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // These sit last so brand rules always win.
   [/hypermarket|supermarket|superm\w*|hyperm\w*|mini ?mart?\b|\bmart\b|grocer|baqala|coop\b|co-?op|vegetables|\bfruits?\b|butcher|fish market|meat\b|roastery|adnoc oasis|zoom\b|7-?11|7-?eleven|circle k|last chance|day to day|gala\b|west zone|foodstuff|tawfeer|tawpeek|vending|\bmarket\b|\bsupe\w*\b|sprmkt|spmkt|\bsprm\b|\bsmkt\b|now ?now|\bviva\b|smart seven|mazraat|janata|aswaaq|plus point|\bspices?\b|\bdates? (?:llc|tr|trading)\b|\bgro\b|\bgroc\b|\bhymkt\b|hypermkt|\bfoodstuff|nuts? (?:tr|llc)\b|\bbakala|dairy|\bmeats?\b/i, 'groceries'],
   [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b/i, 'dining'],
-  [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments|textile|readymade|footwear|shoes|optical shop/i, 'shopping'],
+  // "Centre" sits here, in the structural fallbacks, rather than with the
+  // brands: a medical centre is health and a car centre is transport, and both
+  // of those rules run earlier. By the time anything reaches this line, the
+  // only centres left are the retail kind.
+  [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments|textile|readymade|footwear|shoes|optical shop|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b/i, 'shopping'],
 ];
 
 export function guessCategory(
