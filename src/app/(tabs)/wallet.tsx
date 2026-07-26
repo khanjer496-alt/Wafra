@@ -19,12 +19,24 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BankAvatar } from '@/components/ui/bank-avatar';
 import { Icon } from '@/components/ui/icon';
+import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
+import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues } from '@/lib/cards';
-import { cardTitle, formatAED, monthKey, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { netWorthSeries } from '@/lib/analytics';
+import {
+  cardTitle,
+  formatAED,
+  formatAmount,
+  monthKey,
+  monthLabel,
+  parseAmountToFils,
+  shortDate,
+  toISODate,
+} from '@/lib/format';
 import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
 
@@ -41,6 +53,17 @@ const GOAL_ICONS: import('@/components/ui/icon').IconName[] = [
 ];
 const isIconName = (v: string): v is (typeof GOAL_ICONS)[number] =>
   (GOAL_ICONS as string[]).includes(v);
+
+/** "4 minutes ago", "yesterday" — a timestamp nobody has to decode. */
+function relativeSince(ts: number, now: Date): string {
+  const mins = Math.max(0, Math.round((now.getTime() - ts) / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
 
 export default function WalletScreen() {
   const theme = useTheme();
@@ -65,6 +88,17 @@ export default function WalletScreen() {
 
   // Scans every transaction once per account, so it is kept off the render path.
   const total = useMemo(() => netWorthFils(state), [state]);
+
+  /**
+   * Movement since the start of the six-month window. A single figure with no
+   * direction is a number; with a direction it is an answer.
+   */
+  const worthChange = useMemo(() => {
+    const series = netWorthSeries(state);
+    if (series.length < 2) return null;
+    const first = series[0];
+    return { fils: total - first.fils, since: monthLabel(first.key, true) };
+  }, [state, total]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const duesTotalFils = useMemo(
     () => dues.reduce((sum, d) => sum + d.remainingFils, 0),
@@ -93,6 +127,11 @@ export default function WalletScreen() {
     [state, now],
   );
   // This month's spend per account, for the per-card line.
+  const smsCount = useMemo(
+    () => state.transactions.filter((tx) => tx.source === 'sms').length,
+    [state.transactions],
+  );
+
   const monthSpendByAccount = useMemo(() => {
     const key = monthKey(now);
     const map = new Map<string, number>();
@@ -206,35 +245,55 @@ export default function WalletScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]} showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow}>
-            <View>
-              <ThemedText type="title">{t('walletTitle')}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" tabular>
-                {t('netWorth')} {formatAED(total, { decimals: false })}
-              </ThemedText>
-            </View>
+            <ThemedText type="title">{t('walletTitle')}</ThemedText>
             <View style={styles.headerActions}>
-              <Pressable
+              <IconButton
+                name="sliders"
+                label="Settings"
                 onPress={() => router.push('/settings')}
-                style={[styles.addBtn, { backgroundColor: theme.backgroundSelected }]}>
-                <Icon name="sliders" size={18} color={theme.text} strokeWidth={1.9} />
-              </Pressable>
+              />
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="New account"
                 onPress={() => setAdderVisible(true)}
                 style={[styles.addBtn, { backgroundColor: theme.primary }]}>
-                <Icon name="plus" size={20} color={theme.onPrimary} strokeWidth={2.4} />
+                <Icon name="plus" size={19} color={theme.onPrimary} strokeWidth={2.2} />
               </Pressable>
             </View>
+          </View>
+
+          {/* The one figure this screen exists to show. */}
+          <View style={styles.worth}>
+            <ThemedText type="micro" themeColor="textTertiary">
+              {t('netWorth')}
+            </ThemedText>
+            <View style={styles.worthRow}>
+              <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
+                AED
+              </ThemedText>
+              <ThemedText type="amount" tabular>
+                {formatAmount(total, { decimals: false })}
+              </ThemedText>
+            </View>
+            {worthChange && (
+              <ThemedText
+                type="meta"
+                tabular
+                style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
+                {worthChange.fils >= 0 ? '+' : '−'}
+                {formatAmount(Math.abs(worthChange.fils), { decimals: false })} since{' '}
+                {worthChange.since}
+              </ThemedText>
+            )}
           </View>
 
           {/* Card dues */}
           {dues.length > 0 && (
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <ThemedText type="micro" themeColor="textSecondary">{t('cardPaymentsDue')}</ThemedText>
-                <ThemedText type="micro" themeColor="textSecondary" tabular>
-                  {formatAED(duesTotalFils, { decimals: false })} total
-                </ThemedText>
-              </View>
+              <SectionHeader
+                title={t('cardPaymentsDue')}
+                right={`${formatAED(duesTotalFils, { decimals: false })} total`}
+              />
               {dues.map(({ due, status, daysLeft, remainingFils, belowMinimum }, i) => {
                 const account = state.accounts.find((a) => a.id === due.accountId);
                 const urgent = status === 'urgent' || status === 'overdue';
@@ -294,7 +353,7 @@ export default function WalletScreen() {
                               transform: [{ scale: pressed ? 0.97 : 1 }],
                             },
                           ]}>
-                          <ThemedText type="micro" style={{ color: theme.primary, fontWeight: '700' }}>
+                          <ThemedText type="nano" style={{ color: theme.primary }}>
                             Mark paid
                           </ThemedText>
                         </Pressable>
@@ -309,16 +368,11 @@ export default function WalletScreen() {
           {/* Cards */}
           {cards.length > 0 && (
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <ThemedText type="micro" themeColor="textSecondary">
-                  {t('cardsHeader')} ({cards.length})
-                </ThemedText>
-                <Pressable onPress={() => router.push('/cards')}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                    {t('seeAll')}
-                  </ThemedText>
-                </Pressable>
-              </View>
+              <SectionHeader
+                title={`${t('cardsHeader')} (${cards.length})`}
+                right={t('seeAll')}
+                onPressRight={() => router.push('/cards')}
+              />
               <View>
                 {cards.map((account, i) => {
                   const isCredit = account.cardType === 'credit';
@@ -379,7 +433,7 @@ export default function WalletScreen() {
 
           {/* Accounts */}
           <View style={styles.section}>
-            <ThemedText type="micro" themeColor="textSecondary">{t('accountsHeader')}</ThemedText>
+            <SectionHeader title={t('accountsHeader')} />
             <View>
               {nonCardAccounts.map((account, i) => {
                 const balance = reliableBalanceFils(state, account);
@@ -481,14 +535,11 @@ export default function WalletScreen() {
 
           {/* Goals */}
           <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <ThemedText type="micro" themeColor="textSecondary">{t('goalsHeader')}</ThemedText>
-              <Pressable onPress={() => setGoalVisible(true)}>
-                <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                  {t('newGoal')}
-                </ThemedText>
-              </Pressable>
-            </View>
+            <SectionHeader
+              title={t('goalsHeader')}
+              right={t('newGoal')}
+              onPressRight={() => setGoalVisible(true)}
+            />
             {state.goals.map((goal) => {
               const ratio = goal.targetFils > 0 ? goal.savedFils / goal.targetFils : 0;
               return (
@@ -507,15 +558,19 @@ export default function WalletScreen() {
                       <Icon
                         name={isIconName(goal.emoji) ? goal.emoji : 'target'}
                         size={14}
-                        color={theme.gold}
+                        color={theme.textSecondary}
                       />
                       <ThemedText type="small">{goal.title}</ThemedText>
                     </View>
-                    <ThemedText type="small" themeColor="textSecondary" tabular>
-                      {formatAED(goal.savedFils, { decimals: false })} / {formatAED(goal.targetFils, { decimals: false })}
+                    <ThemedText type="small" tabular>
+                      {formatAmount(goal.savedFils, { decimals: false })}
+                      <ThemedText type="meta" themeColor="textTertiary" tabular>
+                        {'  / '}
+                        {formatAmount(goal.targetFils, { decimals: false })}
+                      </ThemedText>
                     </ThemedText>
                   </View>
-                  <ProgressBar ratio={ratio} color={ratio >= 1 ? theme.income : theme.gold} height={6} />
+                  <ProgressBar ratio={ratio} color={ratio >= 1 ? theme.income : theme.primary} height={6} />
                 </Pressable>
               );
             })}
@@ -530,8 +585,8 @@ export default function WalletScreen() {
                     backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
                   },
                 ]}>
-                <View style={[styles.goalEmptyIcon, { backgroundColor: `${theme.gold}1f` }]}>
-                  <Icon name="target" size={17} color={theme.gold} strokeWidth={1.8} />
+                <View style={[styles.goalEmptyIcon, { backgroundColor: theme.primarySoft }]}>
+                  <Icon name="target" size={17} color={theme.primary} strokeWidth={1.8} />
                 </View>
                 <View style={styles.accountInfo}>
                   <ThemedText type="smallBold">Set a savings goal</ThemedText>
@@ -544,6 +599,35 @@ export default function WalletScreen() {
             )}
           </View>
 
+          {/* Where the numbers above came from. The claim that nothing leaves
+              the phone is worth stating on the screen that shows balances,
+              not only in Settings. SMS reading is Android-only, so on any
+              other platform this block would be a lie. */}
+          {isSmsScanningAvailable() && (
+            <Pressable
+              onPress={() => router.push('/import-sms')}
+              style={({ pressed }) => [
+                styles.scan,
+                {
+                  borderColor: theme.cardBorder,
+                  backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                },
+              ]}>
+              <Icon name="mail" size={17} color={theme.textSecondary} />
+              <View style={styles.scanText}>
+                <ThemedText type="small">
+                  {state.lastScanTs > 0
+                    ? `Inbox scanned ${relativeSince(state.lastScanTs, now)}`
+                    : 'Inbox not read yet'}
+                </ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary" tabular>
+                  {smsCount} entr{smsCount === 1 ? 'y' : 'ies'} read on this device · nothing
+                  uploaded
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Pressable>
+          )}
         </ScrollView>
       </SafeAreaView>
 
@@ -705,9 +789,22 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
   },
   content: {
-    padding: Spacing.three,
-    gap: Spacing.four,
+    paddingHorizontal: ScreenPadding,
+    paddingTop: Spacing.three,
+    gap: Spacing.five,
   },
+  worth: { gap: Spacing.two, marginTop: -Spacing.two },
+  worthRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  aed: { fontSize: 15, lineHeight: 20 },
+  scan: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+    padding: Spacing.three,
+    borderRadius: Radius.sheet,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  scanText: { flex: 1, gap: 1 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -718,9 +815,9 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   addBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: Radius.sm + 2,
+    width: 34,
+    height: 34,
+    borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
   },

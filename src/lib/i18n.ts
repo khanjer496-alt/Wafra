@@ -53,11 +53,11 @@ const S = {
   // Bills
   billsTitle: { en: 'Bills', ar: 'الفواتير' },
   billsSubtitle: { en: 'Dues, subscriptions and utilities', ar: 'مستحقات واشتراكات وفواتير' },
-  subscriptionsSeg: { en: 'Subscriptions', ar: 'الاشتراكات' },
+  subscriptionsSeg: { en: 'Subs', ar: 'اشتراكات' },
   remindersSeg: { en: 'Reminders', ar: 'التذكيرات' },
-  cardsSeg: { en: 'Cards due', ar: 'مستحقات البطاقات' },
+  cardsSeg: { en: 'Cards', ar: 'بطاقات' },
   seeAllCategoryTx: { en: 'See all transactions', ar: 'عرض كل العمليات' },
-  utilitiesSeg: { en: 'Bills', ar: 'الفواتير' },
+  utilitiesSeg: { en: 'Fixed', ar: 'ثابتة' },
   noCardDues: { en: 'No card payments due', ar: 'لا مستحقات على البطاقات' },
   noCardDuesText: {
     en: 'When your bank sends a statement SMS, the amount and pay-by date show up here.',

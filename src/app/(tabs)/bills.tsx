@@ -17,7 +17,8 @@ import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
@@ -41,6 +42,7 @@ type Segment = 'subscriptions' | 'cards' | 'utilities';
 
 export default function BillsScreen() {
   const theme = useTheme();
+  const clearance = useTabBarClearance();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue } = useStore();
 
   const now = useMemo(() => new Date(), []);
@@ -231,7 +233,7 @@ export default function BillsScreen() {
             styles.row,
             i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
           ]}>
-          <MerchantAvatar title={sub.title} category={sub.category} size={42} />
+          <MerchantAvatar title={sub.title} category={sub.category} size={36} />
           <View style={styles.rowInfo}>
             <View style={styles.rowTitleLine}>
               <ThemedText type="default" numberOfLines={1} style={styles.rowTitle}>
@@ -281,7 +283,7 @@ export default function BillsScreen() {
                     transform: [{ scale: pressed ? 0.97 : 1 }],
                   },
                 ]}>
-                <ThemedText type="micro" style={{ color: theme.primary, fontWeight: '700' }}>
+                <ThemedText type="nano" style={{ color: theme.primary }}>
                   Remind me
                 </ThemedText>
               </Pressable>
@@ -313,19 +315,27 @@ export default function BillsScreen() {
           {(['subscriptions', 'cards', 'utilities'] as Segment[]).map((s) => {
             const label =
               s === 'subscriptions'
-                ? `${t('subscriptionsSeg')} (${subs.length})`
+                ? `${t('subscriptionsSeg')} ${subs.length}`
                 : s === 'cards'
-                  ? `${t('cardsSeg')} (${dues.length})`
-                  : `${t('utilitiesSeg')} (${loans.length + commitments.length + rows.length})`;
+                  ? `${t('cardsSeg')} ${dues.length}`
+                  : `${t('utilitiesSeg')} ${loans.length + commitments.length + rows.length}`;
             return (
               <Pressable
                 key={s}
                 onPress={() => setSegment(s)}
-                style={[styles.segmentItem, segment === s && { backgroundColor: theme.card }]}>
+                style={[
+                  styles.segmentItem,
+                  segment === s && {
+                    backgroundColor: theme.backgroundElement,
+                    borderColor: theme.cardBorder,
+                    borderWidth: StyleSheet.hairlineWidth,
+                  },
+                ]}>
                 <ThemedText
-                  type="smallBold"
+                  type="nano"
                   numberOfLines={1}
-                  themeColor={segment === s ? 'text' : 'textSecondary'}>
+                  tabular
+                  themeColor={segment === s ? 'text' : 'textTertiary'}>
                   {label}
                 </ThemedText>
               </Pressable>
@@ -333,7 +343,9 @@ export default function BillsScreen() {
           })}
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
+          showsVerticalScrollIndicator={false}>
           {/* Credit-card statement dues live in their own tab. */}
           {segment === 'cards' && (
             <>
@@ -795,33 +807,33 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: ScreenPadding,
     paddingVertical: Spacing.two,
   },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
   },
   segment: {
     flexDirection: 'row',
-    marginHorizontal: Spacing.three,
-    borderRadius: Radius.md,
+    marginHorizontal: ScreenPadding,
+    borderRadius: 11,
     padding: 3,
     gap: 3,
   },
   segmentItem: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: Spacing.two + 2,
-    borderRadius: Radius.md - 3,
+    justifyContent: 'center',
+    paddingVertical: 9,
+    borderRadius: 8,
   },
   content: {
-    padding: Spacing.three,
-    paddingTop: Spacing.two,
-    paddingBottom: 110,
+    paddingHorizontal: ScreenPadding,
+    paddingTop: Spacing.three,
   },
   duesBlock: {
     gap: Spacing.one,
