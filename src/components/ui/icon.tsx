@@ -43,6 +43,8 @@ export type IconName =
   | 'diamond'
   | 'sun'
   | 'leaf'
+  | 'scissors'
+  | 'tools'
   | 'download'
   | 'upload'
   | 'fingerprint';
@@ -323,6 +325,26 @@ export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: Ico
         <>
           <Path {...p} d="M6 19.5 C5.5 11 11 4.5 20 4 c0.8 9 -5 15 -14 15.5 Z" />
           <Path {...p} d="M6 19.5 C9 14 13 10 17.5 7" />
+        </>
+      )}
+      {/* Personal care: a pair of scissors. Grooming is the one spend the
+          whole category is recognized by. */}
+      {name === 'scissors' && (
+        <>
+          <Circle {...p} cx={6.5} cy={17.5} r={2.5} />
+          <Circle {...p} cx={6.5} cy={6.5} r={2.5} />
+          <Line {...p} x1={8.6} y1={8} x2={19} y2={19.5} />
+          <Line {...p} x1={8.6} y1={16} x2={19} y2={4.5} />
+        </>
+      )}
+      {/* Home services: a spanner. Cleaning, repairs, the maid — work done to
+          the home rather than rent paid for it. */}
+      {name === 'tools' && (
+        <>
+          <Path
+            {...p}
+            d="M15.2 3.6 a5 5 0 0 0 -5.6 7.4 L3.6 17 a2 2 0 0 0 2.8 2.8 l6-6 a5 5 0 0 0 7.4 -5.6 l-3.1 3.1 -2.9 -0.6 -0.6 -2.9 Z"
+          />
         </>
       )}
       {name === 'download' && (
