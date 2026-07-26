@@ -142,8 +142,22 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'setMonthStartDay': {
       const day = Math.min(28, Math.max(1, Math.round(action.day) || 1));
+      if (day === state.monthStartDay) return state;
       applyMonthStartDay(day);
-      return { ...state, monthStartDay: day };
+      // A new array identity for the transactions, deliberately.
+      //
+      // This setting reshapes every month boundary in the app, but it lives in
+      // a module-global that `monthKey` reads at call time — nothing about
+      // `state.transactions` changes when it moves. Every figure memoised on
+      // `[state.transactions, period]` therefore kept its old value: Home's
+      // hero still showed the calendar month's saving while Leaving soon,
+      // memoised on `[state]`, had already switched to the salary month. Two
+      // panels of one screen, two definitions of "this month", until a
+      // transaction was added or the app restarted.
+      //
+      // Copying the array is what tells those memos the world moved. It is
+      // O(n) once, on a setting the user changes approximately never.
+      return { ...state, monthStartDay: day, transactions: [...state.transactions] };
     }
     case 'addTransaction':
       return { ...state, transactions: sortTxs([action.transaction, ...state.transactions]) };
@@ -909,8 +923,12 @@ export { accountBalanceFils, netWorthFils, reliableBalanceFils } from './balance
 
 /** Net worth as of end-of-day on the given ISO date. */
 export function netWorthAtDate(state: AppState, dateISO: string): number {
-  let total = state.accounts.reduce((sum, a) => sum + a.openingFils, 0);
+  // Same two rules as netWorthSeries: hidden accounts are not part of net
+  // worth, and a transfer between your own accounts moves nothing.
+  const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
+  let total = state.accounts.reduce((sum, a) => (a.archived ? sum : sum + a.openingFils), 0);
   for (const t of state.transactions) {
+    if (t.isTransfer || !live.has(t.accountId)) continue;
     if (t.date > dateISO) continue;
     total += t.type === 'income' ? t.amountFils : -t.amountFils;
   }

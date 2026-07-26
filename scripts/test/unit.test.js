@@ -59,6 +59,29 @@ eq('bill due-soon (today)', bills.billsForMonth([mkBill(18)], [], today)[0].stat
 eq('bill due-soon (5d)', bills.billsForMonth([mkBill(23)], [], today)[0].status, 'due-soon');
 eq('bill upcoming', bills.billsForMonth([mkBill(30)], [], today)[0].status, 'upcoming');
 eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Date(2026, 5, 15))[0].daysLeft, 15);
+
+// A money month starting on a salary day spans two calendar months, so the
+// paid flag (keyed to the money month) and the countdown (calendar
+// arithmetic) were describing different months.
+{
+  fmt.setMonthStartDay(25);
+  // Money month '2026-06' runs 25 Jun – 24 Jul. Today 20 Jul is inside it.
+  const t = new Date(2026, 6, 20);
+  eq('money month: a day-28 bill belongs to the June money month',
+    bills.dueDateInMonth('2026-06', 28), '2026-06-28');
+  eq('money month: a day-3 bill falls in the second calendar month',
+    bills.dueDateInMonth('2026-06', 3), '2026-07-03');
+  eq('money month: day 31 clamps to a day that exists',
+    bills.dueDateInMonth('2026-01', 31), '2026-01-31');
+  // The bug: due 28th, paid 28 June, viewed 20 July. It read "Paid" (money
+  // month 2026-06) while counting down 8 days to 28 JULY, a different month.
+  const paidRow = bills.billsForMonth([mkBill(28, ['2026-06'])], [], t)[0];
+  ok('money month: a bill paid this money month stays paid', paidRow.status === 'paid');
+  eq('money month: and its date is the one it was paid on, not next month',
+    paidRow.dueISO, '2026-06-28');
+  ok('money month: its countdown agrees with that date', paidRow.daysLeft === -22);
+  fmt.setMonthStartDay(1);
+}
 ok('bills sorted most urgent first',
   bills.billsForMonth([mkBill(30), mkBill(5), mkBill(20)], [], today).map(r => r.status).join() === 'overdue,due-soon,upcoming');
 
@@ -983,6 +1006,51 @@ const orphanPaid = {
 };
 ok('stale: a stale statement that gets paid leaves openDues',
   lifeLib.openDues(orphanPaid, new Date(2026, 6, 24)).length === 0);
+
+// ── net worth: one definition, not two ──
+// Wallet subtracted the SERIES start from the HEADLINE total, which count
+// different things. Hiding an account moved the "since Feb" line by that
+// account's whole balance, and a card payment (an income-side transfer)
+// raised the series out of nothing.
+{
+  const nwState = {
+    accounts: [
+      { id: 'bank', name: 'Bank', kind: 'bank', openingFils: 1000000, color: '#fff' },
+      { id: 'cc', name: 'Card', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff' },
+      { id: 'old', name: 'Hidden', kind: 'bank', openingFils: 2000000, color: '#fff', archived: true },
+    ],
+    transactions: [],
+    cardDues: [],
+    bills: [],
+    budgets: [],
+    goals: [],
+  };
+  const base = an.netWorthSeries(nwState);
+  eq('net worth: an archived account contributes nothing',
+    base[0].fils, 1000000);
+
+  const withTransfer = {
+    ...nwState,
+    transactions: [
+      { id: 't1', type: 'income', amountFils: 300000, category: 'other', accountId: 'cc',
+        title: 'Card payment', date: '2026-07-02', source: 'manual', isTransfer: true },
+    ],
+  };
+  const after = an.netWorthSeries(withTransfer);
+  ok('net worth: paying a card does not create money',
+    after[after.length - 1].fils === base[base.length - 1].fils);
+
+  const withSpend = {
+    ...nwState,
+    transactions: [
+      { id: 't2', type: 'expense', amountFils: 50000, category: 'dining', accountId: 'bank',
+        title: 'Dinner', date: '2026-07-02', source: 'manual' },
+    ],
+  };
+  const spent = an.netWorthSeries(withSpend);
+  ok('net worth: real spending still moves it',
+    spent[spent.length - 1].fils === base[base.length - 1].fils - 50000);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -155,6 +155,17 @@ export default function TransactionsScreen() {
     [filtered],
   );
 
+  // Transfers are listed — they are real records and the user wants to find
+  // them — but they are money moving between your own accounts, so they do
+  // not count toward a total. The two were silently disagreeing: Home's
+  // "In AED 25,000" links here, a AED 3,000 card payment is an income-side
+  // transfer, and the header read 25,000 above rows summing to 28,000. The
+  // rule is stated now rather than left for the user to work out.
+  const transfersShown = useMemo(
+    () => filtered.filter((t) => t.isTransfer).length,
+    [filtered],
+  );
+
   const sections = useMemo<DaySection[]>(() => {
     if (filters.sort === 'largest') {
       return [{ title: 'Largest first', totalFils: totalShown, data: filtered }];
@@ -263,6 +274,9 @@ export default function TransactionsScreen() {
                 ? ` · ${periodLabel(period)}`
                 : ''}
               {activeFilterCount > 0 ? ` · ${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'}` : ''}
+              {transfersShown > 0
+                ? ` · ${transfersShown} transfer${transfersShown === 1 ? '' : 's'} not counted`
+                : ''}
             </ThemedText>
             <View style={styles.summaryRight}>
               <ThemedText

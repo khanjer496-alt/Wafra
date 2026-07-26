@@ -273,9 +273,20 @@ export default function BillsScreen() {
             </ThemedText>
           </View>
           <View style={styles.rowRight}>
+            {/* The monthly equivalent, because the heading above this list is
+                a monthly total and a column has to add up to its own heading.
+                A yearly charge of AED 2,399 printed raw under a heading of
+                "AED 256/mo" was two different quantities in one table. The
+                actual charge is not lost — it is on the line below, with the
+                cadence that explains it. */}
             <ThemedText type="smallBold" tabular>
-              {formatAED(sub.avgAmountFils, { decimals: false })}
+              {formatAED(sub.monthlyEquivalentFils, { decimals: false })}
             </ThemedText>
+            {sub.cadence !== 'monthly' && sub.status !== 'stopped' && (
+              <ThemedText type="nano" themeColor="textTertiary" tabular>
+                {formatAED(sub.avgAmountFils, { decimals: false })}/{sub.cadence === 'yearly' ? 'yr' : 'wk'}
+              </ThemedText>
+            )}
             {!tracked && sub.status !== 'stopped' && (
               <Pressable
                 accessibilityRole="button"

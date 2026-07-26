@@ -69,16 +69,32 @@ export function dayOfWeekSpend(transactions: Transaction[], period: PeriodLike):
   return buckets;
 }
 
-/** Net worth at the end of each of the last `months` months (oldest first). */
+/**
+ * Net worth at the end of each of the last `months` months (oldest first).
+ *
+ * Two things this must agree with the rest of the app about, and did not:
+ *
+ * Archived accounts are excluded, as they are in `netWorthFils`. Including
+ * their opening balance here while the headline figure excluded it meant
+ * hiding a dead card moved the "since February" line by that card's whole
+ * balance — the user hid an account and was told they had lost the money.
+ *
+ * Transfers do not move net worth. Paying AED 3,000 off a card is stored as
+ * an income-side transfer on the card account, so counting it raised the
+ * series by 3,000 out of nothing every time a card payment was imported.
+ * Money moving between your own accounts is not money arriving.
+ */
 export function netWorthSeries(state: AppState, months = 6): { key: string; fils: number }[] {
   const nowKey = monthKey(new Date());
-  const opening = state.accounts.reduce((s, a) => s + a.openingFils, 0);
+  const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
+  const opening = state.accounts.reduce((s, a) => (a.archived ? s : s + a.openingFils), 0);
   const keys: string[] = [];
   for (let i = months - 1; i >= 0; i--) keys.push(shiftMonthKey(nowKey, -i));
 
   return keys.map((key) => {
     let fils = opening;
     for (const t of state.transactions) {
+      if (t.isTransfer || !live.has(t.accountId)) continue;
       if (monthKey(t.date) > key) continue;
       fils += t.type === 'income' ? t.amountFils : -t.amountFils;
     }

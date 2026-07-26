@@ -106,7 +106,12 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       return;
     }
     await syncPaymentReminders(state);
-    Alert.alert('Reminder set', `You'll hear about this two days before ${shortDate(due.dueDate)}.`);
+    // The scheduler puts card dues at three days out and again on the day
+    // (notifications.ts). Promising two days was a number nothing produced.
+    Alert.alert(
+      'Reminder set',
+      `You'll hear about this three days before ${shortDate(due.dueDate)}, and again on the day.`,
+    );
   };
 
   return (

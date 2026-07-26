@@ -97,8 +97,14 @@ export default function WalletScreen() {
     const series = netWorthSeries(state);
     if (series.length < 2) return null;
     const first = series[0];
-    return { fils: total - first.fils, since: monthLabel(first.key, true) };
-  }, [state, total]);
+    // Both ends come from the series. Subtracting the headline `total` from
+    // it was subtracting two different definitions of net worth: the headline
+    // counts only bank-quoted balances on live accounts, the series counts
+    // opening balances plus every transaction. The difference between them is
+    // not a movement — it is the gap between two ways of measuring.
+    const last = series[series.length - 1];
+    return { fils: last.fils - first.fils, since: monthLabel(first.key, true) };
+  }, [state]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const duesTotalFils = useMemo(
     () => dues.reduce((sum, d) => sum + d.remainingFils, 0),

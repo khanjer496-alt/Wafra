@@ -88,7 +88,12 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
       return;
     }
     await syncPaymentReminders(state);
-    Alert.alert('Reminder set', `You'll hear about this two days before ${shortDate(subscription.nextExpectedISO)}.`);
+    // Subscriptions are scheduled one day out, with the body "renews
+    // tomorrow". Two days was never scheduled by anything.
+    Alert.alert(
+      'Reminder set',
+      `You'll hear about this the day before ${shortDate(subscription.nextExpectedISO)}.`,
+    );
   };
 
   const notRecurring = () => {
@@ -142,7 +147,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
       />
 
       <View style={styles.actions}>
-        <Button inline label="Remind me 2d before" onPress={remindMe} />
+        <Button inline label="Remind me the day before" onPress={remindMe} />
         <Button inline variant="outline" label="Not recurring" onPress={notRecurring} />
       </View>
     </BottomSheet>

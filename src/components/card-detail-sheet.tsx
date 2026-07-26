@@ -36,10 +36,14 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       .filter((d) => d.accountId === account.id)
       .slice()
       .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
-    // Every transfer on a credit card is a payment INTO it — you cannot spend
-    // out of a card by transfer.
+    // A payment into the card is an income-side transfer. The direction test
+    // matters: `auto-import` also stamps `isTransfer` on expense rows whose
+    // message carried a transfer hint, so dropping it counted an outgoing
+    // AED 2,000 as two thousand paid TOWARD the card. This is the same filter
+    // `allocatePayments` uses, and the two have to agree or this sheet
+    // contradicts every other screen.
     const payments = state.transactions
-      .filter((t) => t.accountId === account.id && t.isTransfer)
+      .filter((t) => t.accountId === account.id && t.isTransfer && t.type === 'income')
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     const paidTotal = payments.reduce((s, t) => s + t.amountFils, 0);
     // A payment that arrived by SMS is a transfer on the card, not a write to

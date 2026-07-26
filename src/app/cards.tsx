@@ -14,7 +14,7 @@ import { AccountTile } from '@/components/ui/tile';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
-import { monthKey, parseAmountToFils, shortDate } from '@/lib/format';
+import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
@@ -149,19 +149,21 @@ export default function CardsScreen() {
             prefix={false}
             color={due && (due.status === 'overdue' || due.status === 'urgent') ? theme.expense : theme.text}
           />
-          {limitLeft !== null ? (
-            <ThemedText type="nano" themeColor="textTertiary">
-              {Math.round(limitLeft / 100).toLocaleString()} left
-            </ThemedText>
-          ) : (
-            <ThemedText
-              type="nano"
-              themeColor="textTertiary"
-              onPress={isCredit ? () => askCreditLimit(card) : undefined}
-              style={isCredit ? { color: theme.primary } : undefined}>
-              {outstanding !== null ? 'Outstanding' : isCredit ? 'Set limit' : 'This month'}
-            </ThemedText>
-          )}
+          {/* The caption has to name the figure ABOVE it, and those are two
+              independent facts: the bank may quote headroom without ever
+              quoting an outstanding balance. When it does, the big figure
+              falls back to this month's spend — and captioning that
+              "15,000 left" read as a balance of 3,200 against an 18,200
+              limit. The caption says which figure it is first, and headroom
+              rides along after it. */}
+          <ThemedText
+            type="nano"
+            themeColor="textTertiary"
+            onPress={isCredit && limitLeft === null ? () => askCreditLimit(card) : undefined}
+            style={isCredit && limitLeft === null ? { color: theme.primary } : undefined}>
+            {outstanding !== null ? 'Outstanding' : isCredit && limitLeft === null ? 'Set limit' : 'This month'}
+            {limitLeft !== null ? ` · ${formatAmount(limitLeft, { decimals: false })} left` : ''}
+          </ThemedText>
         </View>
       </Row>
     );
