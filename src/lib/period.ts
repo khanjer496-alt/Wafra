@@ -89,6 +89,43 @@ function dayOfYear(d: Date): number {
 }
 
 /**
+ * How long the period is in total, elapsed or not — the denominator for "how
+ * far through it are we".
+ *
+ * Not `daysInMonth`: a money month that starts on the 25th spans two calendar
+ * months, so its length is the gap between its own start and end, which is
+ * what `monthStartISO`/`monthEndISO` already encode.
+ */
+export function daysInPeriod(p: PeriodLike, today: Date): number {
+  const period = toPeriod(p);
+  switch (period.mode) {
+    case 'month':
+      return (
+        Math.round(
+          (new Date(`${monthEndISO(period.key)}T12:00:00`).getTime() -
+            new Date(`${monthStartISO(period.key)}T12:00:00`).getTime()) /
+            86400000,
+        ) + 1
+      );
+    case 'year': {
+      const y = period.year;
+      return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
+    }
+    case 'range':
+      return (
+        Math.round(
+          (new Date(`${period.to}T12:00:00`).getTime() -
+            new Date(`${period.from}T12:00:00`).getTime()) /
+            86400000,
+        ) + 1
+      );
+    default:
+      // 'all' has no fixed length; its elapsed span is its length.
+      return Math.max(1, elapsedDays(period, today, []));
+  }
+}
+
+/**
  * Days the period has actually covered so far — the denominator for daily
  * averages. Future days never count; 'all' measures from the earliest entry.
  */

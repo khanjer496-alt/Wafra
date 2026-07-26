@@ -387,8 +387,18 @@ export default function ImportSmsScreen() {
 
         {plan !== null && !scanning && (plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0) && (
           <View style={styles.footer}>
+            {/* The button appears for dues and healed rows too, so labelling
+                it from txCount alone offered to "File 0 entries" after a scan
+                that found only statement reminders. Name what is actually
+                about to be filed. */}
             <Button
-              label={`File ${plan.txCount} entr${plan.txCount === 1 ? 'y' : 'ies'}`}
+              label={
+                plan.txCount > 0
+                  ? `File ${plan.txCount} entr${plan.txCount === 1 ? 'y' : 'ies'}`
+                  : plan.dueCount > 0
+                    ? `File ${plan.dueCount} card due${plan.dueCount === 1 ? '' : 's'}`
+                    : `Fix ${plan.healedCount} entr${plan.healedCount === 1 ? 'y' : 'ies'}`
+              }
               onPress={applyPlan}
             />
           </View>

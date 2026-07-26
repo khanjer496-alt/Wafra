@@ -43,7 +43,13 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     if (!transaction) return;
     setEditing(false);
     setTitle(transaction.title);
-    setAmountText(formatAmount(transaction.amountFils, { decimals: false }).replace(/,/g, ''));
+    // The FULL amount, fils included. Seeding the field from the display
+    // string — which hides the fils — meant opening an entry and saving any
+    // other change rewrote its amount: AED 76.99 came back as 77, and the row
+    // was stamped userEdited, so no re-parse could ever heal it. Below a
+    // dirham it was worse; 0.49 seeded "0", which fails validation, and the
+    // entry could not be saved at all.
+    setAmountText(formatAmount(transaction.amountFils, { decimals: true }).replace(/,/g, ''));
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);

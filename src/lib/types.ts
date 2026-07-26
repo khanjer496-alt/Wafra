@@ -9,6 +9,10 @@ export type CategoryId =
   | 'rent'
   | 'shopping'
   | 'health'
+  /** Salons, barbers, spa, nails, laundry — spend on yourself, not on a shop. */
+  | 'personal-care'
+  /** Cleaning, maintenance, the maid, moving, pest control — work on the home. */
+  | 'home-services'
   | 'education'
   | 'travel'
   | 'entertainment'
@@ -114,6 +118,12 @@ export interface CardDue {
   accountId: string;
   totalDueFils: number;
   minDueFils: number;
+  /**
+   * True when no minimum was stated in the SMS and `minDueFils` is a fallback
+   * estimate. The bank's terms decide the real minimum; without one quoted,
+   * the app must not tell the user it knows what theirs is.
+   */
+  minDueEstimated?: boolean;
   /** ISO date the payment is due by. */
   dueDate: string;
   /** Fils paid toward this due so far. */

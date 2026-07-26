@@ -27,16 +27,16 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory, onRampColor, rampColor } from '@/lib/categories';
 import {
-  daysInMonth,
   formatAED,
   formatAmount,
   formatCompactAED,
   monthKey,
   monthLabel,
   shiftMonthKey,
+  totalAsShown,
 } from '@/lib/format';
 import { buildInsights, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
-import { isCurrentMonth } from '@/lib/period';
+import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
@@ -112,8 +112,16 @@ export default function FlowScreen() {
   // "out 11,375 of 5,400 in limits", which reads as a catastrophic overrun
   // when the truth is that rent simply has no limit set.
   const limitedSpend = limits.reduce((s, r) => s + r.spent, 0);
-  const monthShare = live ? Math.min(1, now.getDate() / daysInMonth(key)) : 1;
-  const daysLeft = live ? Math.max(0, daysInMonth(key) - now.getDate()) : 0;
+  // How far through the MONEY month we are, not the calendar one. `getDate()`
+  // is the calendar day, so with a salary-day start of the 25th, 26 July —
+  // day two of a month running 25 Jul to 24 Aug — reported "84% of the month
+  // gone" and "5 days left". insights.ts already had this right via
+  // elapsedDays, so the same screen was carrying both answers, and the "faster
+  // than the month" verdict on every limit was driven off the wrong one.
+  const monthDays = live ? Math.max(1, daysInPeriod(period, now)) : 1;
+  const elapsed = live ? Math.max(1, elapsedDays(period, now, state.transactions)) : monthDays;
+  const monthShare = live ? Math.min(1, elapsed / monthDays) : 1;
+  const daysLeft = live ? Math.max(0, monthDays - elapsed) : 0;
 
   /** In and out for the six months ending at the selected one. */
   const trend = useMemo(() => {
@@ -153,7 +161,12 @@ export default function FlowScreen() {
           <ThemedText type="meta" themeColor="textSecondary" style={styles.subtitle}>
             Out{' '}
             <ThemedText type="meta" tabular>
-              {formatAED(summary.expenseFils, { decimals: false })}
+              {/* Totalled as the rows below are shown. The composition list
+                  covers 100% of this figure — the tail is pooled into "N more"
+                  — so rounding once here and again per row made the column
+                  visibly fail to add up: three categories of AED 10.50 each
+                  read 11 · 11 · 11 under a heading of 32. */}
+              {formatAED(totalAsShown(slices.map((x) => x.totalFils)), { decimals: false })}
             </ThemedText>
             {totalLimit > 0 ? (
               <>

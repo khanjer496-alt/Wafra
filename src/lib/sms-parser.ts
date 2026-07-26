@@ -343,7 +343,21 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/dewa|sewa|fewa|addc|aadc|empower|lootah|tabreed|btu\b|chilled water|electricity|water|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder/i, 'utilities'],
   [/etisalat|\be&(?![a-z])|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
   [/rent|ejari|landlord/i, 'rent'],
-  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun ?& ?sand|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|salon|barber|spa\b|beauty|laundry|dry ?clean|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|washmen|hairdress|house ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya/i, 'shopping'],
+  // Personal care and home services. Neither had a category, so a corpus full
+  // of cleaners and salons piled into "other" — one cleaning company alone
+  // appeared 15 times. Brand names first, then what the business IS.
+  //
+  // `salon`, `barber`, `spa`, `beauty`, `laundry`, `dry clean`, `hairdress`
+  // and `washmen` came off the shopping rule above to get here. Shopping ran
+  // first, so it was already claiming all of them: a haircut and a laundry
+  // pickup were both filed as retail, which is why the gap did not show up as
+  // "other" and went unnoticed. They are services, not purchases, and a limit
+  // on Shopping should not move because someone had their hair cut.
+  [/urbanclap|urban ?clap|justlife|just ?life|helpling|matic services|home ?maids?|maids? ?in ?minutes|cleantizer|clentizer|\bfixat\b|servicemarket|service ?market|hitches ?(?:&|and) ?glitches/i, 'home-services'],
+  [/\bcleanin|\bcleaner|\blaundr|dry ?clean|\bironing\b|housekeep|house ?maid|maid ?service|pest ?control|handyman|\bplumb|\belectrician|\bac (?:service|repair|clean)|\bcarpent|\bmovers?\b|packers?(?: ?(?:&|and)? ?movers)?\b|deep ?clean|car ?wash/i, 'home-services'],
+  [/fresha|\bglamb\b|\bnstyle\b|tips ?(?:&|and) ?toes|sisters? beauty|laura ?beauty|\bbeautyland\b|pastels? ?salon|\bzenora\b|the ?nail ?spa/i, 'personal-care'],
+  [/\bsalo{1,2}n\b|\bbarber|\bspa\b|\bnails?\b|\bhair(?:cut|dress|\s?studio)|\bbeauty\b|\bgrooming\b|\bmassage\b|\bmani ?cure|\bpedi ?cure|\bwaxing\b|\bthreading\b|\btattoo\b|cosmetic ?(?:centre|center|clinic)/i, 'personal-care'],
+  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun ?& ?sand|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|house ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya/i, 'shopping'],
   [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic/i, 'health'],
   [/school|university|college|tuition|academy|nursery|kindergarten|\bgems\b|taaleem|kumon|udemy|coursera|coursra|skillshare|training (?:center|centre)|institute/i, 'education'],
   [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport companion|dayuse|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight/i, 'travel'],
@@ -384,7 +398,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity/i, 'other'],
   // Government sits AFTER transport/utilities so traffic fines, RTA and SEWA
   // keep their more specific buckets.
-  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bded\b|governmen|muncipal/i, 'government'],
+  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco|\bded\b|governmen|muncipal/i, 'government'],
   [/salary|payroll|wages/i, 'salary'],
   // Structural fallbacks — what the merchant IS, when no brand matched.
   // These sit last so brand rules always win.
@@ -709,6 +723,71 @@ const MONTH_NAMES: Record<string, number> = {
 };
 // ADCB style: "due by Jul 19 2026"
 const MONTH_DATE_RE = /\b(?:on|by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+
+/**
+ * Dates a statement introduces with PAY-BY language, as opposed to the date it
+ * says it was generated on.
+ *
+ * `extractDate` takes the first date it can read, and "on" introduces the
+ * generation date as readily as the deadline: "Total amount due AED 1,500.
+ * Generated on 30/12/2026. Please pay by Jul 19 2027" filed the due on
+ * 30 December — the statement date, seven months before the money was owed.
+ * Every statement of that shape landed weeks early, and the Bills tab, the
+ * overdue status and the payment-matching window are all built on this figure.
+ *
+ * A stated deadline therefore beats any other date in the message. Only the
+ * statement branch uses this: on a purchase, "on <date>" IS the date, and the
+ * "statement due on 27/07" footer such messages carry must keep losing to the
+ * transaction's own timestamp.
+ */
+const DUE_BY_NUMERIC_RE = /\b(?:by|before)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+const DUE_BY_NAMED_RE = /\b(?:by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+// "the payment due date of your FAB Credit Card ending with 4833 is 06-07-2026"
+// — the due phrase and its date sit either side of the card clause, so the
+// bridge between them is bounded rather than adjacent, and has to tolerate the
+// digits in that clause. The anchor is the two-word "due date", which the
+// amount phrasings ("total amount due AED ...") do not contain, and what
+// follows must look like a date, so no amount can be read as one.
+const DUE_PHRASE_NUMERIC_RE =
+  /\b(?:payment\s+)?due\s+date\b[^\n]{0,60}?\b(?:is|on|:)\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+const DUE_PHRASE_NAMED_RE =
+  /\b(?:payment\s+)?due\s+date\b[^\n]{0,60}?\b(?:is|on|:)\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+
+function namedDate(monthWord: string, day: string, year: string): string | null {
+  const month = MONTH_NAMES[monthWord.slice(0, 3).toLowerCase()];
+  return month ? isoDate(Number(year), month, Number(day)) : null;
+}
+
+/**
+ * The date a statement says it must be paid by, or null when it states none.
+ * Callers fall back to `extractDate` so a statement that only carries one date
+ * still reads exactly as it did before.
+ */
+function extractDueDate(raw: string): string | null {
+  // An explicit "due date ... is X" is the most specific claim in the message.
+  const phrase = raw.match(DUE_PHRASE_NUMERIC_RE);
+  if (phrase) {
+    const iso = numericDate(phrase[1], phrase[2], phrase[3]);
+    if (iso) return iso;
+  }
+  const phraseNamed = raw.match(DUE_PHRASE_NAMED_RE);
+  if (phraseNamed) {
+    const iso = namedDate(phraseNamed[1], phraseNamed[2], phraseNamed[3]);
+    if (iso) return iso;
+  }
+  // "pay by X" / "is due by X" / "minimum due AED 162.00 by 05/08/2026".
+  const by = raw.match(DUE_BY_NUMERIC_RE);
+  if (by) {
+    const iso = numericDate(by[1], by[2], by[3]);
+    if (iso) return iso;
+  }
+  const byNamed = raw.match(DUE_BY_NAMED_RE);
+  if (byNamed) {
+    const iso = namedDate(byNamed[1], byNamed[2], byNamed[3]);
+    if (iso) return iso;
+  }
+  return null;
+}
 
 /**
  * ISO string for a date that actually exists. A day past the end of its month
@@ -1054,13 +1133,17 @@ export function parseSms(
       : amountWithFx(raw, true);
     if (!amountFils) return null;
     const minMatch = raw.match(MIN_DUE_RE);
+    // A stated pay-by date beats every other date in the message, including
+    // the one the statement says it was generated on. `date` is the whole
+    // statement's date downstream: it becomes CardDue.dueDate.
+    const dueDate = extractDueDate(raw) ?? date;
     return {
       kind: 'cardStatement',
       type: 'expense',
       amountFils,
       merchant: `Card •${card.last4}`,
-      date,
-      dueDay: date ? Number(date.slice(8)) : null,
+      date: dueDate,
+      dueDay: dueDate ? Number(dueDate.slice(8)) : null,
       minDueFils: minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null,
       card: { ...card, kind: 'credit' },
       transferHint: false,

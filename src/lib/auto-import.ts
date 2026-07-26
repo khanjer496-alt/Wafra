@@ -282,7 +282,11 @@ export function buildImportPlan(
       newDues.push({
         accountId,
         totalDueFils: p.amountFils,
+        // 5% is a common UAE card minimum, but it is not this card's minimum
+        // unless the bank said so. Kept as a placeholder for the progress
+        // bar's sake, flagged so nothing quotes it back as a figure.
         minDueFils: p.minDueFils ?? Math.round(p.amountFils * 0.05),
+        minDueEstimated: p.minDueFils === null ? true : undefined,
         dueDate: p.date,
         paidFils: 0,
       });

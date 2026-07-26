@@ -9,6 +9,7 @@ import { Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { duePaidFils } from '@/lib/cards';
 import { shortDate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
@@ -41,11 +42,22 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       .filter((t) => t.accountId === account.id && t.isTransfer)
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     const paidTotal = payments.reduce((s, t) => s + t.amountFils, 0);
-    const open = statements.filter((d) => !d.settledAt && d.paidFils < d.totalDueFils);
-    const outstanding = open.reduce((s, d) => s + Math.max(0, d.totalDueFils - d.paidFils), 0);
+    // A payment that arrived by SMS is a transfer on the card, not a write to
+    // paidFils — that field only moves for a manual "Mark paid". Reading it
+    // raw showed a statement the bank had already confirmed paid as "0% paid"
+    // and kept its full balance in "Still owed". duePaidFils is the figure
+    // that accounts for both, and it is what every other screen uses.
+    const paidOf = new Map(statements.map((d) => [d.id, duePaidFils(state, d)] as const));
+    const open = statements.filter(
+      (d) => !d.settledAt && (paidOf.get(d.id) ?? 0) < d.totalDueFils,
+    );
+    const outstanding = open.reduce(
+      (s, d) => s + Math.max(0, d.totalDueFils - (paidOf.get(d.id) ?? 0)),
+      0,
+    );
     const billed = open.reduce((s, d) => s + d.totalDueFils, 0);
-    return { statements, payments, paidTotal, outstanding, billed, openCount: open.length };
-  }, [account, state.cardDues, state.transactions]);
+    return { statements, payments, paidTotal, outstanding, billed, paidOf, openCount: open.length };
+  }, [account, state]);
 
   if (!account || !data) return null;
 
@@ -92,7 +104,8 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
           </ThemedText>
         ) : (
           data.statements.map((d, i) => {
-            const settled = !!d.settledAt || d.paidFils >= d.totalDueFils;
+            const paid = data.paidOf.get(d.id) ?? 0;
+            const settled = !!d.settledAt || paid >= d.totalDueFils;
             return (
               <Row key={d.id} last={i === data.statements.length - 1}>
                 <View
@@ -101,7 +114,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
                 <View style={styles.rowText}>
                   <ThemedText type="small">Due {shortDate(d.dueDate)}</ThemedText>
                   <ThemedText type="meta" themeColor="textTertiary" tabular>
-                    {settled ? 'Settled' : `${Math.round((d.paidFils / d.totalDueFils) * 100)}% paid`}
+                    {settled ? 'Settled' : `${Math.round((paid / d.totalDueFils) * 100)}% paid`}
                   </ThemedText>
                 </View>
                 <Money fils={d.totalDueFils} prefix={false} />

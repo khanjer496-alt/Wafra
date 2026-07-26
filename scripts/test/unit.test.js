@@ -22,6 +22,9 @@ eq('formatAED forced no decimals rounds up', fmt.formatAED(123456, { decimals: f
 eq('formatAED forced no decimals rounds down', fmt.formatAED(123449, { decimals: false }), 'AED 1,234');
 eq('formatAED forced no decimals keeps a near-whole figure', fmt.formatAED(7699, { decimals: false }), 'AED 77');
 eq('formatAED negative', fmt.formatAED(-50000), 'AED -500');
+// A net of -20 fils rounds to zero; "AED -0" is not a figure.
+eq('formatAED sub-dirham negative is not -0', fmt.formatAED(-20, { decimals: false }), 'AED 0');
+eq('formatAED sub-dirham negative keeps its sign with decimals', fmt.formatAED(-20), 'AED -0.20');
 // Bills prints a total above the rows it totals. Truncating each row made the
 // two disagree by a dirham per row: AED 1,025/mo over rows adding to 1,022.
 {
@@ -838,6 +841,148 @@ eq('daysPhrase late', leaving.daysPhrase(-3), '3 days late');
 eq('daysPhrase today', leaving.daysPhrase(0), 'today');
 eq('daysPhrase tomorrow', leaving.daysPhrase(1), 'tomorrow');
 eq('daysPhrase future', leaving.daysPhrase(5), 'in 5 days');
+
+// ── The whole statement lifecycle: billed → part-paid → paid → settled ──
+// Each stage asserts what the app TELLS the user, because every one of these
+// figures is shown: the outstanding total, the "under your minimum" warning,
+// and whether the card still appears as owing anything at all.
+const lifeLib = require('./build/cards');
+const lifeAccount = {
+  id: 'cc1', name: 'ENBD Credit Card', kind: 'card', cardType: 'credit',
+  last4: '8575', openingFils: 0, color: '#fff',
+};
+// One statement: AED 3,240 due 24 Jul, bank-stated minimum AED 162.
+const lifeDue = {
+  id: 'st1', accountId: 'cc1', totalDueFils: 324000, minDueFils: 16200,
+  dueDate: '2026-07-24', paidFils: 0,
+};
+const cardPayment = (id, amountFils, date) => ({
+  id, type: 'income', isTransfer: true, accountId: 'cc1', amountFils, date,
+  category: 'other', title: 'Card •8575 payment', source: 'sms',
+});
+const lifeState = (payments, due = lifeDue) => ({
+  accounts: [lifeAccount], cardDues: [due], transactions: payments,
+});
+
+// 1. Statement arrives, nothing paid.
+const l1 = lifeState([]);
+const l1s = lifeLib.dueWithStatus(l1, lifeDue, new Date(2026, 6, 20));
+ok('lifecycle: a fresh statement owes its full total',
+  l1s.remainingFils === 324000 && l1s.status === 'upcoming');
+ok('lifecycle: a fresh statement is below its stated minimum', l1s.belowMinimum === true);
+ok('lifecycle: a fresh statement is open', lifeLib.openDues(l1, new Date(2026, 6, 20)).length === 1);
+
+// 2. Partial payment — AED 2,000 of 3,240. Above the minimum, still owing.
+const l2 = lifeState([cardPayment('p1', 200000, '2026-07-18')]);
+ok('lifecycle: a partial payment reduces the due, not settles it',
+  lifeLib.duePaidFils(l2, lifeDue) === 200000);
+const l2s = lifeLib.dueWithStatus(l2, lifeDue, new Date(2026, 6, 20));
+ok('lifecycle: the partial remainder is total minus payment', l2s.remainingFils === 124000);
+ok('lifecycle: a partial payment over the minimum clears the warning',
+  l2s.belowMinimum === false && l2s.status === 'upcoming');
+ok('lifecycle: a part-paid statement is still open',
+  lifeLib.openDues(l2, new Date(2026, 6, 20)).length === 1);
+
+// A payment under the stated minimum must still say so.
+const l2min = lifeState([cardPayment('p1', 10000, '2026-07-18')]);
+ok('lifecycle: a payment under the stated minimum still warns',
+  lifeLib.dueWithStatus(l2min, lifeDue, new Date(2026, 6, 20)).belowMinimum === true);
+
+// 3. The rest arrives — AED 1,240 more. Now fully paid.
+const l3 = lifeState([
+  cardPayment('p1', 200000, '2026-07-18'),
+  cardPayment('p2', 124000, '2026-07-22'),
+]);
+ok('lifecycle: both payments together cover the statement',
+  lifeLib.duePaidFils(l3, lifeDue) === 324000);
+const l3s = lifeLib.dueWithStatus(l3, lifeDue, new Date(2026, 6, 23));
+ok('lifecycle: a fully-paid statement owes nothing and reads settled',
+  l3s.remainingFils === 0 && l3s.status === 'settled');
+ok('lifecycle: a settled statement never reports below-minimum', l3s.belowMinimum === false);
+ok('lifecycle: a fully-paid statement leaves openDues',
+  lifeLib.openDues(l3, new Date(2026, 6, 23)).length === 0);
+
+// 4. settledAt (set by "Mark paid") settles regardless of the arithmetic, and
+//    keeps the statement out of the open list.
+const l4due = { ...lifeDue, settledAt: '2026-07-24T09:00:00Z' };
+const l4 = lifeState([], l4due);
+ok('lifecycle: settledAt settles a statement on its own',
+  lifeLib.dueWithStatus(l4, l4due, new Date(2026, 6, 25)).status === 'settled');
+ok('lifecycle: a settledAt statement leaves openDues',
+  lifeLib.openDues(l4, new Date(2026, 6, 25)).length === 0);
+
+// Overpaying one statement must still not settle the next — the rule the
+// allocation window exists to protect.
+const twoStatements = {
+  accounts: [lifeAccount],
+  cardDues: [
+    lifeDue,
+    { id: 'st2', accountId: 'cc1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-24', paidFils: 0 },
+  ],
+  transactions: [cardPayment('p1', 324000, '2026-07-22')],
+};
+ok('lifecycle: settling July does not settle August',
+  lifeLib.duePaidFils(twoStatements, twoStatements.cardDues[0]) === 324000 &&
+  lifeLib.duePaidFils(twoStatements, twoStatements.cardDues[1]) === 0);
+ok('lifecycle: August stays open after July is settled',
+  lifeLib.openDues(twoStatements, new Date(2026, 6, 25)).length === 1);
+
+// ── An estimated minimum is never presented as a minimum ──
+// The import bridge fills minDueFils with 5% when the bank stated none. That
+// figure drives "Still under the minimum due", a claim about the bank's terms.
+const estDue = {
+  id: 'est', accountId: 'cc1', totalDueFils: 324000, minDueFils: 16200,
+  dueDate: '2026-07-24', paidFils: 0, minDueEstimated: true,
+};
+const estState = lifeState([], estDue);
+const estStatus = lifeLib.dueWithStatus(estState, estDue, new Date(2026, 6, 20));
+ok('minimum: an estimated minimum is flagged as not known',
+  estStatus.minimumKnown === false);
+ok('minimum: an estimated minimum never claims the user is below it',
+  estStatus.belowMinimum === false);
+const statedStatus = lifeLib.dueWithStatus(lifeState([]), lifeDue, new Date(2026, 6, 20));
+ok('minimum: a bank-stated minimum is known and still warns',
+  statedStatus.minimumKnown === true && statedStatus.belowMinimum === true);
+ok('minimum: an estimate changes nothing about what is owed',
+  estStatus.remainingFils === 324000);
+
+// ── A long-overdue statement is only dropped when something replaced it ──
+// Dropping on age alone made a real unpaid debt disappear with no trace.
+const oldDue = {
+  id: 'old', accountId: 'cc1', totalDueFils: 50000, minDueFils: 2500,
+  dueDate: '2026-05-01', paidFils: 0,
+};
+const orphan = { accounts: [lifeAccount], cardDues: [oldDue], transactions: [] };
+const orphanOpen = lifeLib.openDues(orphan, new Date(2026, 6, 24));
+ok('stale: an unpaid statement with no successor survives, not vanishes',
+  orphanOpen.length === 1 && orphanOpen[0].due.id === 'old');
+ok('stale: the surviving statement is flagged stale, not passed off as current',
+  orphanOpen[0].stale === true && orphanOpen[0].status === 'overdue');
+ok('stale: the surviving statement still reports what is owed',
+  orphanOpen[0].remainingFils === 50000);
+
+// A later statement on the same card genuinely supersedes it.
+const superseded = {
+  accounts: [lifeAccount],
+  cardDues: [oldDue, lifeDue],
+  transactions: [],
+};
+const supersededOpen = lifeLib.openDues(superseded, new Date(2026, 6, 24));
+ok('stale: a superseded statement is dropped',
+  !supersededOpen.some((d) => d.due.id === 'old'));
+ok('stale: the statement that replaced it remains',
+  supersededOpen.length === 1 && supersededOpen[0].due.id === 'st1');
+ok('stale: a current statement is never flagged stale',
+  supersededOpen[0].stale === false);
+
+// Paying an orphaned stale statement still removes it — stale is about age,
+// settled is about money, and money wins.
+const orphanPaid = {
+  accounts: [lifeAccount], cardDues: [oldDue],
+  transactions: [cardPayment('p1', 50000, '2026-04-25')],
+};
+ok('stale: a stale statement that gets paid leaves openDues',
+  lifeLib.openDues(orphanPaid, new Date(2026, 6, 24)).length === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

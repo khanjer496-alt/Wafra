@@ -644,9 +644,11 @@ t('ride app classifies as transport',
   'Purchase of AED 18.00 at YANGO RIDES DUBAI with Debit Card ending 1234',
   { category: 'transport' });
 
-t('salon classifies as shopping (personal care)',
+// This test's own name recorded the gap: a salon was filed as shopping
+// because there was nowhere else for it to go. There is now.
+t('a salon is personal care, not shopping',
   'Purchase of AED 120.00 at SUGAR LOUNGE SALON with Credit Card ending 1234',
-  { category: 'shopping' });
+  { category: 'personal-care' });
 
 t('gym membership classifies as health',
   'Purchase of AED 350.00 at GYMNATION FITNESS with Credit Card ending 1234',
@@ -1046,7 +1048,50 @@ t('a truncated HSBC descriptor resolves to the same name as the full one',
 
 t('one merchant, three spellings, one name',
   'Purchase of AED 96.00 with Debit Card ending 4502 at URBANCLAP TECHNOLOGIES, DUBAI. Avl Balance is AED 258.91.',
-  { merchant: 'UrbanClap', amountFils: 9600 });
+  { merchant: 'UrbanClap', amountFils: 9600, category: 'home-services' });
+
+// Home services and personal care had no category to go to, so a corpus full
+// of cleaners and salons piled into "other" — 44 of 94 occurrences before
+// these rules, 13 after.
+t('a cleaning company is a home service',
+  'Payment for CLEANTIZER CLEANING SERVICES of AED 350.00 has been made using Credit Card ending with 4110. Available limit AED 59,797.61.',
+  { merchant: 'Cleantizer', category: 'home-services' });
+
+t('what the business is, when no brand matches',
+  'Purchase of AED 180.00 with Debit Card ending 4502 at AL SAFA LAUNDRY, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'home-services' });
+
+t('movers are a home service, not transport',
+  'Purchase of AED 1,200.00 with Debit Card ending 4502 at SWIFT PACKERS AND MOVERS, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'home-services' });
+
+t('a salon is personal care',
+  'Purchase of AED 120.00 with Debit Card ending 4502 at ROYAL GENTS SALOON, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'personal-care' });
+
+t('a barber is personal care, not shopping',
+  'Purchase of AED 65.00 with Debit Card ending 4502 at THE BARBER SHOP DXB, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'personal-care' });
+
+// A free-zone authority is a government body. The pattern matched "economic
+// depart" and DED but not "economic zone", so the largest government payee in
+// the corpus read as "other" eleven times.
+t('a free-zone authority is government',
+  'From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. Your available balance is AED 1,430.28',
+  { merchant: 'Dubai Integrated Economic Zones', category: 'government' });
+
+t('DMCC is government, not dining',
+  'Purchase of AED 550.00 with Debit Card ending 4502 at DMCC FREE ZONE AUTHORITY, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'government' });
+
+// The generic rules must not swallow neighbours that merely share a word.
+t('a laundry detergent aisle is still groceries',
+  'Purchase of AED 42.00 with Debit Card ending 4502 at CARREFOUR HYPERMARKET, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'groceries' });
+
+t('a spa hotel stay is still travel',
+  'Purchase of AED 900.00 with Debit Card ending 4502 at ANANTARA RESORT HOTEL, DUBAI. Avl Balance is AED 258.91.',
+  { category: 'travel' });
 
 t('Google bills through a help URL, not a location',
   'Debit Card Purchase\nCard XXXX5083\nAED 49.99\nGOOGLE*FINART AI EXPE G.CO/HELPPAY#CA US \n13/12/25 11:59 \nBalance AED 6576.11',
@@ -1081,6 +1126,79 @@ t('Lime scooters are transport under any of their three descriptors',
 t('a masked amount is still refused, not guessed',
   'Your Credit Card ending *** 6383 was used for AED ····0710.00 at MSPLUS DOCUMENTS CL.... Your available limit is AED 3019.69',
   null);
+
+// ── A statement's STATED pay-by date beats the date it was generated on ──
+// The parsed date becomes CardDue.dueDate, so reading the generation date
+// filed the statement weeks (here, months) before the money was actually owed
+// and the Bills tab, the overdue badge and payment matching all inherited it.
+t('a stated pay-by date beats the generation date',
+  'Your ADCB Credit Card 1234 statement. Total amount due AED 1,500.00. Generated on 30/12/2026. Please pay by Jul 19 2027.',
+  { kind: 'cardStatement', amountFils: 150000, date: '2027-07-19' });
+
+t('a numeric pay-by date beats a numeric generation date',
+  'Your Credit Card ending 4821 statement is generated on 04/07/2026. Total due AED 3,240.00, minimum due AED 162.00. Please pay by 24/07/2026.',
+  { kind: 'cardStatement', amountFils: 324000, date: '2026-07-24' });
+
+// The due phrase and its date sit either side of the card clause here, so the
+// bridge between them has to span it without wandering onto another figure.
+t('FAB "payment due date of your card ... is <date>" still reads the due date',
+  'Dear Customer, the payment due date of your FAB Credit Card ending with 4833 is 06-07-2026. The total amount due is AED 8,144.40 and the Minimum due amount is AED 407.22. Please ignore the message, if already paid.',
+  { kind: 'cardStatement', amountFils: 814440, date: '2026-07-06' });
+
+// The FAB shape above reads correctly even from the plain date extractor,
+// because its due date is the only date present. Put a generation date in
+// front of it and only a due-anchored read gets the right answer.
+t('FAB due-date phrasing beats a generation date placed before it',
+  'Dear Customer, your statement was generated on 01-07-2026. The payment due date of your FAB Credit Card ending with 4833 is 06-07-2026. The total amount due is AED 8,144.40 and the Minimum due amount is AED 407.22.',
+  { kind: 'cardStatement', amountFils: 814440, date: '2026-07-06' });
+
+t('ADCB "is due by <Mon DD YYYY>" is unchanged',
+  'Min payment of AED100.00 on your Cr.Card XXX7720 is due by Jul 19 2026. Total billed amt is AED1174.49. Pls ignore this message if already paid.',
+  { kind: 'cardStatement', amountFils: 117449, date: '2026-07-19' });
+
+t('a statement carrying only one date still reads it',
+  'Statement generated. Total due AED 3,240.00, minimum due AED 162.00 by 05/08/2026 on your card ending 8573',
+  { kind: 'cardStatement', date: '2026-08-05' });
+
+// Due-date preference is confined to the statement branch. On a purchase, the
+// transaction's own timestamp must keep beating the "statement due on <date>"
+// footer the same message carries — otherwise every charge on these cards
+// would be filed on its statement's pay-by date instead of the day it happened.
+t('a purchase with a statement-due footer still dates from the purchase',
+  'Credit Card Purchase\nCard No XXXX4711\nAED 16.00\nMawgif DUBAI ARE\n03/07/26 15:51\nAvl Bal AED 9693.97\nJuly statement due on 27/07/2026',
+  { kind: 'transaction', amountFils: 1600, date: '2026-07-03' });
+
+t('a purchase with a "payment due date is" footer still dates from the purchase',
+  'Credit Card Purchase \nCard No XXXX9960 \nAED 353.00 \nMinistry of Interior AUH ARE \n20/02/25 20:37 \nAvailable Balance AED 2535.22 Your February statement payment due date is 26/02/2025',
+  { kind: 'transaction', amountFils: 35300, date: '2025-02-20' });
+
+// ── Card payments are settlements, not spending ──
+t('a payment received on a card is a cardPayment transfer',
+  'Payment of AED 2,000.00 received on your card ending 8575. Thank you.',
+  { kind: 'cardPayment', amountFils: 200000, transfer: true, category: 'other' });
+
+t('a payment received towards a credit card is a cardPayment transfer',
+  'Payment of AED 3,240.00 has been received towards your Credit Card ending 4821.',
+  { kind: 'cardPayment', amountFils: 324000, transfer: true });
+
+// The card a payment lands on decides which statement it settles.
+const payCard = parseSms('Payment of AED 2,000.00 received on your card ending 8575. Thank you.');
+if (payCard && payCard.card && payCard.card.last4 === '8575' && payCard.card.kind === 'credit') {
+  pass++; console.log('✓ a card payment is attributed to the card it names');
+} else {
+  fail++; console.log('✗ a card payment is attributed to the card it names',
+    JSON.stringify(payCard && payCard.card));
+}
+
+// A statement that quotes no minimum must report null, never a percentage —
+// the import bridge is what decides whether to estimate, and it flags it.
+const noMin = parseSms('Your Credit Card ending 4821 statement is generated. Total due AED 3,240.00. Please pay by 24/07/2026.');
+if (noMin && noMin.kind === 'cardStatement' && noMin.minDueFils === null) {
+  pass++; console.log('✓ an unstated minimum parses as null, not a guess');
+} else {
+  fail++; console.log('✗ an unstated minimum parses as null, not a guess',
+    JSON.stringify(noMin && { k: noMin.kind, min: noMin.minDueFils }));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

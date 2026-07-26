@@ -25,6 +25,13 @@ export const CATEGORIES: CategoryMeta[] = [
   { id: 'rent', label: 'Rent', icon: 'home', type: 'expense' },
   { id: 'shopping', label: 'Shopping', icon: 'bag', type: 'expense' },
   { id: 'health', label: 'Health', icon: 'heart', type: 'expense' },
+  // Two categories the app had no home for. Running the accuracy corpus, 44 of
+  // 94 message occurrences landed in "other", and the largest single block was
+  // home and personal services — one cleaning company alone accounted for 15.
+  // They are separate because they are separate habits: one is grooming, the
+  // other is upkeep, and a limit on one says nothing about the other.
+  { id: 'personal-care', label: 'Personal care', icon: 'scissors', type: 'expense' },
+  { id: 'home-services', label: 'Home services', icon: 'tools', type: 'expense' },
   { id: 'education', label: 'Education', icon: 'cap', type: 'expense' },
   { id: 'travel', label: 'Travel', icon: 'plane', type: 'expense' },
   { id: 'entertainment', label: 'Entertainment', icon: 'play', type: 'expense' },

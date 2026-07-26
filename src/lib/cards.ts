@@ -10,8 +10,13 @@ export interface DueWithStatus {
   daysLeft: number;
   /** What is still owed on this statement after payments. */
   remainingFils: number;
-  /** True while payments are below the statement's minimum due. */
+  /** True while payments are below a minimum the bank actually stated. */
   belowMinimum: boolean;
+  /** False when the bank never stated a minimum, so `due.minDueFils` is a
+   *  fallback estimate rather than a figure. Never present it as one. */
+  minimumKnown: boolean;
+  /** Long overdue and kept only because no later statement replaced it. */
+  stale: boolean;
 }
 
 /**
@@ -76,7 +81,13 @@ function shiftISO(iso: string, days: number): string {
   return toISODate(d);
 }
 
-export function dueWithStatus(state: AppState, due: CardDue, today: Date): DueWithStatus {
+export function dueWithStatus(
+  state: AppState,
+  due: CardDue,
+  today: Date,
+  /** Set by openDues, which knows whether a later statement superseded this. */
+  stale = false,
+): DueWithStatus {
   const todayISO = toISODate(today);
   const paid = duePaidFils(state, due);
   const remainingFils = Math.max(0, due.totalDueFils - paid);
@@ -92,29 +103,69 @@ export function dueWithStatus(state: AppState, due: CardDue, today: Date): DueWi
   else if (daysLeft <= 3) status = 'urgent';
   else status = 'upcoming';
 
+  // A minimum the bank never stated is an estimate, and "you are under your
+  // minimum due" is a claim about the bank's terms. Making that claim from a
+  // percentage the app invented tells the user they are about to incur a late
+  // fee on a figure no bank ever quoted, so an estimate never triggers it.
+  const minimumKnown = !due.minDueEstimated;
+
   return {
     due,
     status,
     daysLeft,
     remainingFils,
-    belowMinimum: paid < due.minDueFils && status !== 'settled',
+    belowMinimum: minimumKnown && paid < due.minDueFils && status !== 'settled',
+    minimumKnown,
+    stale: stale && status !== 'settled',
   };
 }
 
-/** How long an unpaid due stays actionable. Past this it is stale history —
- *  the bank has issued a new statement (which replaces it) or it was paid
- *  through a channel that never texted us. Nagging forever helps nobody. */
+/** How long an unpaid due stays actionable before it needs a reason to stay. */
 const STALE_OVERDUE_DAYS = 30;
 
-/** Open dues (not settled, on credit cards, not stale), most urgent first. */
+/**
+ * Open dues (not settled, on credit cards), most urgent first.
+ *
+ * A month-old unpaid statement used to be dropped outright, on the theory that
+ * the bank had since issued a new one that replaced it. That theory is only
+ * true when a newer statement actually exists — and when it did not, the app
+ * quietly stopped showing a debt the user still owed, with no trace anywhere
+ * that it had decided to stop mentioning it.
+ *
+ * So the supersession is now checked rather than assumed: an old statement
+ * goes only when a later one on the same card has taken over. Otherwise it
+ * survives, flagged `stale`, and the caller can present it as old news instead
+ * of the app pretending it never happened. Cards that have gone silent
+ * altogether are handled by `isInactiveAccount`, not by hiding their debts.
+ */
 export function openDues(state: AppState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
+  // Latest statement date per card, to tell "replaced" from "still owed".
+  const newestByAccount = new Map<string, string>();
+  for (const d of state.cardDues) {
+    const seen = newestByAccount.get(d.accountId);
+    if (!seen || d.dueDate > seen) newestByAccount.set(d.accountId, d.dueDate);
+  }
+
   const open = state.cardDues
     .filter((d) => creditIds.has(d.accountId))
-    .map((d) => dueWithStatus(state, d, today))
-    .filter((d) => d.status !== 'settled' && d.daysLeft >= -STALE_OVERDUE_DAYS)
+    .map((d) => {
+      const daysLeft = Math.round(
+        (new Date(`${d.dueDate}T12:00:00`).getTime() -
+          new Date(`${toISODate(today)}T12:00:00`).getTime()) /
+          86400000,
+      );
+      const superseded = (newestByAccount.get(d.accountId) ?? d.dueDate) > d.dueDate;
+      return dueWithStatus(state, d, today, daysLeft < -STALE_OVERDUE_DAYS && !superseded);
+    })
+    .filter(
+      (d) =>
+        d.status !== 'settled' &&
+        // Long overdue AND replaced by a later statement: genuinely history.
+        (d.daysLeft >= -STALE_OVERDUE_DAYS || d.stale),
+    )
     .sort((a, b) => a.daysLeft - b.daysLeft);
 
   // One statement, one row. A card has a single statement per due date, so two

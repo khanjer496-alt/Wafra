@@ -7,9 +7,9 @@ import { SectionHeader } from '@/components/ui/period-pill';
 import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { daysInMonth, formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
+import { formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
-import { inPeriod } from '@/lib/period';
+import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 
@@ -54,11 +54,19 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     [state.transactions, key, picked],
   );
 
-  /** What this category has cost over the three months ending in `key`. */
+  /**
+   * What this category has cost over the three COMPLETE months before `key`.
+   *
+   * It used to average the current month in and still divide by three. On the
+   * 2nd of the month that is two days of spending dragging a three-month
+   * average down by a third: dining steady at AED 2,000 a month suggested a
+   * limit of 1,400, and the chip that says "your 3-month average" was offering
+   * a number the user had never once spent under.
+   */
   const threeMonthAverage = useMemo(() => {
     if (!picked) return 0;
     let total = 0;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 1; i <= 3; i++) {
       total += spentInMonthForCategory(state.transactions, shiftMonthKey(key, -i), picked);
     }
     return Math.round(total / 3);
@@ -86,7 +94,14 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   const limitFils = parseAmountToFils(text);
   const ratio = limitFils ? spent / limitFils : 0;
   const over = ratio >= 1;
-  const daysLeft = Math.max(0, daysInMonth(key) - new Date().getDate());
+  // Only a live month has days left. `key` is whatever month Flow was
+  // showing, so on a March period in July this counted down inside a month
+  // that ended four months ago — "AED 400 left with 5 days still to go."
+  const now = useMemo(() => new Date(), []);
+  const live = isCurrentMonth({ mode: 'month', key }, now);
+  const daysLeft = live
+    ? Math.max(0, daysInPeriod({ mode: 'month', key }, now) - elapsedDays({ mode: 'month', key }, now, state.transactions))
+    : 0;
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];

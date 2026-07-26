@@ -27,7 +27,11 @@ export function formatAmount(fils: number, opts?: { decimals?: boolean }): strin
   const cents = abs % 100;
   const showDecimals = opts?.decimals ?? cents !== 0;
   const whole = showDecimals ? Math.floor(abs / 100) : Math.round(abs / 100);
-  const sign = fils < 0 ? '-' : '';
+  // Take the sign from what is actually printed, not from the input. A net of
+  // −20 fils rounds to zero at whole-dirham precision, and "AED -0" under
+  // "Overspent so far this month" is not a number anyone recognizes — the
+  // hero sweeps through it every time the month crosses breakeven.
+  const sign = fils < 0 && (whole > 0 || (showDecimals && cents > 0)) ? '-' : '';
   const base = `${sign}${groupThousands(whole)}`;
   return showDecimals ? `${base}.${String(cents).padStart(2, '0')}` : base;
 }
