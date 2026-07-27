@@ -1517,6 +1517,27 @@ export function parseSms(
     };
   }
 
+  // A card statement with no digits in it is still a statement.
+  //
+  // Without a card there is nothing to attach a due to, so this fell through
+  // to the generic path — and an ADCB "statement is ready. Total due AED
+  // 714.74, minimum due AED 100.00" imported as INCOME of 714.74, filed as
+  // business revenue. A message announcing a bill must never become money
+  // moving, in either direction, however little else we can tell about it.
+  //
+  // Deliberately narrow: it demands the words "credit card" or "card
+  // statement", so a utility bill that happens to say "total amount due"
+  // still reaches the billDue path it belongs to.
+  if (
+    !card &&
+    /\bcredit\s*card\b|\bcard\s+statement\b/i.test(raw) &&
+    STATEMENT_RE.test(raw) &&
+    BILL_DUE_WORDS.test(raw) &&
+    !STATEMENT_TXN_BLOCK_RE.test(raw)
+  ) {
+    return null;
+  }
+
   // Credit-card statement with dues. Statements only exist for credit cards.
   // Purchase-style verbs mean this is a transaction with a "statement due"
   // footer, not the statement itself ("if already paid" footers must NOT

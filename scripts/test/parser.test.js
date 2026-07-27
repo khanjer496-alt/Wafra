@@ -1693,5 +1693,28 @@ t('a bare "hold of" hold is still refused',
   'A hold of AED 500.00 has been placed on your Credit Card ending 1234.',
   null);
 
+// ── a statement is never money moving ──
+//
+// A card statement with no digits in it had nothing to attach a due to, so it
+// fell through to the generic path: "Your ADCB credit card statement is
+// ready. Total due AED 714.74" imported as INCOME of 714.74, filed as
+// business revenue. A message announcing a bill must never become money
+// moving, in either direction, however little else can be told about it.
+t('statement with no card digits is refused',
+  'Your ADCB credit card statement is ready. Total due AED 714.74, minimum due AED 100.00, due on 18/08/2026.',
+  null);
+t('statement with no card digits is refused (FAB wording)',
+  'Your FAB Credit Card statement is ready. Total amount due AED 8,909.00, minimum due AED 445.00, payment due date 14/07/2026.',
+  null);
+// Narrow on purpose: a utility bill that says "total amount due" is a real
+// bill reminder and must still reach the billDue path.
+t('a utility bill saying total amount due is still a bill',
+  'Your DEWA bill: total amount due AED 300.00, due on 15/07/2026.',
+  { kind: 'billDue' });
+// And a statement that DOES name its card is unaffected.
+t('a statement naming its card still reads as one',
+  'Dear Customer, your FAB Credit Card XXXX3324 statement: Minimum Amount Due AED 445.00. Payment Due Date 14/07/2026.',
+  { kind: 'cardStatement' });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
