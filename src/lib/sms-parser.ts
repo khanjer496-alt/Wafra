@@ -1154,7 +1154,12 @@ export function parseSms(
       const amountFils = amountWithFx(raw, false);
       if (!amountFils) return null;
       return {
-        kind: 'transaction',
+        // `cardPayment`, not `transaction`. This is the same event the branch
+        // above reads, and only `cardPayment` is turned into an income-side
+        // transfer on import — which is the only shape `allocatePayments`
+        // credits. As a plain transaction the payment could never settle the
+        // statement it just paid, and the card would go on reading as owed.
+        kind: 'cardPayment',
         type: 'expense',
         amountFils,
         merchant: `Card •${masked[1]} payment`,
