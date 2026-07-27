@@ -20,7 +20,7 @@ export interface ParsedCard {
  * the whole inbox instead of the tail. Existing rows are not duplicated —
  * `seenSms` recognizes them by fingerprint — they are healed in place.
  */
-export const PARSER_VERSION = 3;
+export const PARSER_VERSION = 4;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -82,7 +82,49 @@ const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent
 const OTP_RE = /\botp\b|one[\s-]?time\s+(?:password|pin|code)|verification code|auth(?:oris|oriz)ation code|do not share|never share/i;
 /** Pre-auth holds are not postings; the real charge arrives as its own SMS. */
 const PREAUTH_RE = /pre-?auth|amount\s+(?:has been\s+)?blocked|hold\s+(?:of|amount|placed)|temporary\s+hold/i;
-const DECLINED_RE = /declin|unsuccessful|insufficient|reversed|could not be (?:processed|completed)|has failed/i;
+const DECLINED_RE = /declin|unsuccessful|insufficient|could not be (?:processed|completed)|has failed/i;
+/**
+ * "Reversed" is two different events wearing one word.
+ *
+ * At the terminal it means the transaction failed and no money moved: nothing
+ * to import, which is why the word sat in DECLINED_RE. Afterwards it means the
+ * bank has taken a charge BACK and put the money in the account — a chargeback
+ * on a fraudulent purchase is exactly this — and that is money arriving.
+ *
+ * The blanket refusal discarded the second kind. The cost is not a missing
+ * row: the fraudulent charge is already in the ledger, the credit that undoes
+ * it never lands, and the user is charged for the fraud twice — once by the
+ * criminal and once by us. It cannot be healed either, because a refused
+ * message leaves no row to heal; only a full re-read recovers it, which is
+ * what PARSER_VERSION is for.
+ *
+ * The discriminator is the wording the refund path ALREADY reads as income —
+ * no new vocabulary, and deliberately not CREDIT_WORDS, whose bare `credit`
+ * matches the "Credit Card" in nearly every message the bank sends.
+ */
+const REVERSED_RE = /\breversed\b/i;
+/** A refund reverses spending: money coming back IN. */
+const REFUNDED_TO_RE = /refunded to your (?:card|account)/i;
+/** "credited to your account" settles the direction on its own. */
+const CREDITED_IN_RE = /credited to your (?:account|a\/c)\b/i;
+/**
+ * The two wordings above, generalised over both nouns: what the file already
+ * reads as money coming back, said about a card as readily as an account.
+ *
+ * ONLY ever consulted alongside `reversed`, and that gate is what makes it
+ * safe. On its own "credited to your Credit Card" is what a card SETTLEMENT
+ * says — money going out to pay a bill — and reading it as income anywhere
+ * else would undo the cardPayment branch. A message that says both `reversed`
+ * and `credited to your card` is a chargeback, which is the shape that
+ * matters here: the fraud was on a credit card, so the credit that undoes it
+ * lands on the card and not on an account.
+ */
+const CAME_BACK_RE =
+  /(?:refunded|credited)\s+(?:back\s+)?to\s+your\s+(?:\w+\s+)?(?:card|account|a\/c)\b/i;
+/** A reversal that says the money came back — a chargeback, not a decline. */
+function reversedCredit(raw: string): boolean {
+  return REVERSED_RE.test(raw) && CAME_BACK_RE.test(raw);
+}
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
 /**
@@ -634,7 +676,9 @@ function categoryOf(
   // interest/profit are offsets, not revenue, so they stay out of Business.
   if (type === 'income') {
     if (/salary|payroll|wages/i.test(text)) return { id: 'salary', deliberate: true };
-    if (/refund|reversal|cashback|\binterest\b|\bprofit\b/i.test(text)) {
+    // `revers(al|ed)`: the rule named one inflection of a word and missed the
+    // other, so a chargeback credit read as business REVENUE.
+    if (/refund|revers(?:al|ed)|cashback|\binterest\b|\bprofit\b/i.test(text)) {
       return { id: 'other', deliberate: true };
     }
     return { id: 'business', deliberate: true };
@@ -1146,6 +1190,10 @@ export function parseSms(
 
   if (OTP_RE.test(raw)) return null;
   if (DECLINED_RE.test(raw)) return null;
+  // A reversal that says the money came back is a credit, not a failure. One
+  // that says nothing of the kind is the terminal declining, and still isn't a
+  // transaction.
+  if (REVERSED_RE.test(raw) && !reversedCredit(raw)) return null;
   if (PREAUTH_RE.test(raw)) return null;
   // Telecom rate cards ("Make local calls for 5 AED/Minute") read like
   // purchases; a biller's own AutoPay receipt duplicates the bank-side SMS.
@@ -1494,12 +1542,12 @@ export function parseSms(
 
   // A refund reverses spending: money coming back IN, whatever verbs the
   // message uses ("Purchase amount of AED X ... has been refunded").
-  const isRefund = /refunded to your (?:card|account)/i.test(raw);
+  const isRefund = REFUNDED_TO_RE.test(raw) || reversedCredit(raw);
   // "credited to your account" settles the direction on its own. These
   // messages carry a reference line naming the sender — "...B/O DELIVERY HERO
   // TALABAT DB LLC Talabat Biweekly Payment" — and the word Payment in it was
   // enough to trip the debit test, filing an incoming payout as spending.
-  const creditedIn = /credited to your (?:account|a\/c)\b/i.test(prose);
+  const creditedIn = CREDITED_IN_RE.test(prose);
   const type: TransactionType =
     isRefund || creditedIn || (!isBillDue && hasCredit && !hasDebit) ? 'income' : 'expense';
 

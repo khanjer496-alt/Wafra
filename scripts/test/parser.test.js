@@ -1571,5 +1571,63 @@ for (const [descriptor, category] of [
     { category });
 }
 
+// ── A reversal is two events wearing one word ──
+// `reversed` sat in DECLINED_RE, so a chargeback was discarded outright. The
+// user confirmed the USD 300 Accra charge was fraud: the fraudulent expense is
+// already in the ledger, and the credit undoing it never landed — charged for
+// the fraud twice, and unrecoverable by healing, because a refused message
+// leaves no row to heal.
+//
+// These wordings are constructed, not sampled. They are here to pin the
+// REFUSAL boundary, which is the part that was already asserting something
+// about messages nobody has seen. No format-reading rule rests on them.
+t('a reversal credited to the account is money coming back',
+  'Your transaction of AED 1,101.75 at WASSAGY EBOOKS has been reversed and credited to your account.',
+  { type: 'income', amountFils: 110175, merchant: 'Wassagy Ebooks', category: 'other' });
+
+t('a reversal credited to the CARD is money coming back too',
+  'Your transaction of AED 1,101.75 has been reversed and credited to your Card ending 9960.',
+  { type: 'income', amountFils: 110175, category: 'other' });
+
+// Purchase wording must not flip the direction back to spending: the message
+// names the original charge, and "reversed ... credited" outranks it.
+t('a reversal keeps its direction even when worded as a purchase',
+  'Your purchase of AED 1,101.75 at WASSAGY EBOOKS has been reversed and credited to your Card ending 9960.',
+  { type: 'income', amountFils: 110175, merchant: 'Wassagy Ebooks', category: 'other' });
+
+t('the reversal wording already handled still works',
+  'Reversal of AED 1,101.75 has been credited to your Card ending 9960.',
+  { type: 'income', amountFils: 110175, category: 'other' });
+
+t('...and so does the refund wording',
+  'AED 1,101.75 has been refunded to your Credit Card ending 9960.',
+  { type: 'income', amountFils: 110175, category: 'other' });
+
+// The failed-at-the-terminal reading is why the word was refused, and it must
+// keep being refused. The last two are the reason the guard does NOT use
+// CREDIT_WORDS: its bare `credit` matches the "Credit Card" and "available
+// credit" that nearly every bank message carries.
+t('a reversal with no sign of a credit is still refused',
+  'Your transaction of AED 500.00 at SHARAF DG has been reversed.',
+  null);
+t('"Credit Card" is not evidence that money came back',
+  'Your purchase of AED 500.00 on your Credit Card ending 9960 has been reversed.',
+  null);
+t('"available credit" is not evidence either',
+  'Your transaction of AED 500.00 has been reversed. Available credit AED 1,000.00',
+  null);
+
+// declined: unchanged, including with credit wording. A declined transaction
+// never debited, so there is nothing to put back and nothing to import.
+t('a declined transaction is refused even when it mentions a credit',
+  'Your transaction of AED 500.00 was declined and the amount has been credited to your account.',
+  null);
+
+// cancelled was never in the refusal set, and the corpus message proves the
+// path works. Nothing to change.
+t('a cancelled-order refund is unaffected',
+  "We've issued your refund of 58.89 AED for your cancelled order.",
+  { type: 'income', merchant: 'Refund', amountFils: 5889 });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
