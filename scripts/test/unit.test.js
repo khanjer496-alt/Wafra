@@ -1136,7 +1136,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const patch = heal.healPatch(wrong, parsed);
   ok('paid card: a rescan corrects the direction', !!patch && patch.type === 'income');
 
-  const fixed = { ...wrong, ...(patch || {}) };
+  const fixed = heal.applyHealPatch(wrong, patch);
   const settled = {
     accounts: [{ id: 'cc', name: 'ENBD Credit Card •8575', kind: 'card', cardType: 'credit', last4: '8575', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' }],
     transactions: [fixed],
@@ -1153,6 +1153,78 @@ ok('stale: a stale statement that gets paid leaves openDues',
   // A row the user edited by hand is never overwritten by a rescan.
   ok('paid card: a hand-edited row is left alone',
     heal.healPatch({ ...wrong, userEdited: true }, parsed) === null);
+
+  // The corrected card payment must also stop being offered as an unread
+  // format. It is income now; an expense-shaped confidence test kept calling it
+  // low-confidence and left the source text on it.
+  ok('paid card: the corrected row stops carrying source text',
+    heal.healPatch({ ...wrong, raw }, parsed).raw === null);
+
+  // Applying the patch is a shared function now, because the launch-time
+  // re-parse in the store used to be a second copy of these rules: it set the
+  // transfer flag and left the direction alone, so the row stayed the exact
+  // shape allocatePayments refuses. Pin the whole loop, patch and apply.
+  const relaunched = heal.applyHealPatch({ ...wrong, raw }, heal.healPatch({ ...wrong, raw }, parsed));
+  ok('paid card: after a relaunch it is an income-side transfer',
+    relaunched.type === 'income' && relaunched.isTransfer === true);
+  ok('paid card: after a relaunch it carries no source text', relaunched.raw === undefined);
+  ok('paid card: a relaunched row settles the statement',
+    cardsGuardLib.openDues({ ...settled, transactions: [relaunched] }, new Date(2026, 6, 20)).length === 0);
+}
+
+// ── the accuracy report shrinks when the parser improves ──
+//
+// Source text is stored ONLY to show the user formats the parser cannot read.
+// Nothing used to remove it, so a format stayed on the "could not read" list
+// forever — including after the rescan that learned to read it. The count could
+// only grow, which made every parser improvement look like a regression.
+{
+  const heal = require('./build/heal');
+  const parser = require('./build/sms-parser');
+  const accuracy = require('./build/accuracy');
+  const label = (id) => id;
+
+  const raw = 'Your Card ending 1234 was used for AED 45.00 at CARREFOUR MARKET on 10/07/2026.';
+  const parsed = parser.parseSms(raw, '2026-07-10T10:00:00Z');
+  ok('accuracy: the message reads with a real category',
+    !!parsed && parsed.categoryGuess !== 'other');
+
+  // How the row looked when it was imported by an older parser: no name, no
+  // category, source text kept so it could be reported.
+  const unread = {
+    id: 'u1', type: 'expense', amountFils: 4500, category: 'other',
+    accountId: 'a', title: 'Card purchase', date: '2026-07-10',
+    source: 'sms', smsKey: 'u1-4500', raw,
+  };
+  ok('accuracy: an unreadable row is listed',
+    accuracy.unreadFormats([unread], label).length === 1);
+  // The two failures are told apart: no merchant at all, vs a merchant read
+  // correctly that simply has no category rule. A real export of 177 was
+  // almost entirely the second kind and was labelled as the first.
+  ok('accuracy: a row with no merchant is marked unread',
+    accuracy.unreadFormats([unread], label)[0].reason === 'unread');
+  const named = { ...unread, title: 'Hutong', raw: raw.replace('CARREFOUR MARKET', 'HUTONG') };
+  ok('accuracy: a named merchant with no category is marked uncategorized',
+    accuracy.unreadFormats([named], label)[0].reason === 'uncategorized');
+  ok('accuracy: unread formats sort ahead of uncategorized ones',
+    accuracy.unreadFormats([named, named, unread], label)[0].reason === 'unread');
+
+  const patch = heal.healPatch(unread, parsed);
+  ok('accuracy: the rescan names it', !!patch && patch.title === parsed.merchant);
+  ok('accuracy: the rescan drops the source text', patch.raw === null);
+
+  const healed = { ...unread, ...patch, raw: patch.raw ?? undefined };
+  ok('accuracy: the healed row is no longer reported',
+    accuracy.unreadFormats([healed], label).length === 0);
+  ok('accuracy: and it no longer counts',
+    accuracy.unreadFormatCount({ transactions: [healed] }) === 0);
+
+  // A row the parser still cannot read keeps its text — clearing must not be
+  // unconditional, or the report goes permanently blank.
+  const stillBad = { ...unread, raw };
+  const noop = heal.healPatch(stillBad, { ...parsed, merchant: 'Card purchase', categoryGuess: 'other' });
+  ok('accuracy: a still-unreadable row keeps its source text',
+    noop === null || noop.raw !== null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -36,12 +36,28 @@ export default function AccuracyScreen() {
     [state.transactions],
   );
 
+  const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
+  const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
+
+  // Two headings, not one. The old export called every row "could not read",
+  // which was wrong about most of them — the merchant was read fine, it just
+  // had no category — and that made a long list look like a broken parser.
   const shareAll = () => {
-    const body = rows
-      .map((r, i) => `#${i + 1} (seen ${r.count}x, read as "${r.title}" / ${r.category}):\n${maskDigits(r.raw)}`)
-      .join('\n\n');
+    const section = (label: string, list: typeof rows) =>
+      list.length === 0
+        ? ''
+        : `\n\n${label} (${list.length}):\n\n` +
+          list
+            .map(
+              (r, i) =>
+                `#${i + 1} (seen ${r.count}x, read as "${r.title}" / ${r.category}):\n${maskDigits(r.raw)}`,
+            )
+            .join('\n\n');
     Share.share({
-      message: `Wafra — bank SMS formats the parser could not fully read:\n\n${body}`,
+      message:
+        'Wafra — bank SMS the app is not reading well:' +
+        section('COULD NOT READ — no merchant found', unread) +
+        section('READ, BUT NO CATEGORY — merchant name is correct', uncategorized),
     }).catch(() => {});
   };
 
@@ -66,24 +82,36 @@ export default function AccuracyScreen() {
             )}
           </Section>
 
-          {rows.map((r, i) => (
-            <Row key={i} last={i === rows.length - 1} style={styles.formatRow}>
-              <View style={styles.formatInner}>
-                <View style={styles.formatTop}>
-                  <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
-                    {r.title}
-                  </ThemedText>
-                  <Money fils={r.amountFils} prefix={false} />
-                </View>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('readAs')} {r.category} · seen {r.count}×
+          {([
+            [t('couldNotRead'), unread] as const,
+            [t('noCategoryYet'), uncategorized] as const,
+          ]).map(([heading, list]) =>
+            list.length === 0 ? null : (
+              <View key={heading}>
+                <ThemedText type="meta" themeColor="textTertiary" style={styles.groupHeading}>
+                  {heading} · {list.length}
                 </ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
-                  {maskDigits(r.raw)}
-                </ThemedText>
+                {list.map((r, i) => (
+                  <Row key={`${heading}-${i}`} last={i === list.length - 1} style={styles.formatRow}>
+                    <View style={styles.formatInner}>
+                      <View style={styles.formatTop}>
+                        <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
+                          {r.title}
+                        </ThemedText>
+                        <Money fils={r.amountFils} prefix={false} />
+                      </View>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        {t('readAs')} {r.category} · seen {r.count}×
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
+                        {maskDigits(r.raw)}
+                      </ThemedText>
+                    </View>
+                  </Row>
+                ))}
               </View>
-            </Row>
-          ))}
+            ),
+          )}
 
           {rows.length === 0 && (
             <Section index={1} style={styles.empty}>
@@ -120,6 +148,12 @@ const styles = StyleSheet.create({
   intro: {
     gap: Spacing.three - 2,
     paddingBottom: Spacing.four,
+  },
+  groupHeading: {
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.two - 2,
   },
   formatRow: {
     paddingVertical: Spacing.three - 2,

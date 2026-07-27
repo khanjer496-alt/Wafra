@@ -1,5 +1,19 @@
 import type { AppState, Transaction } from '@/lib/types';
 
+/**
+ * Why a message ended up on this list — two very different failures that were
+ * being reported as one.
+ *
+ * A real export of 177 entries turned out to be almost entirely `uncategorized`:
+ * the merchant name was read correctly every time, it just had no category
+ * rule. Calling all of that "could not read" overstated the problem and buried
+ * the handful of messages the grammar genuinely cannot parse.
+ */
+export type UnreadReason = 'unread' | 'uncategorized';
+
+/** The title the parser falls back to when it cannot find a merchant at all. */
+const GENERIC_MERCHANT = 'Card purchase';
+
 export interface UnreadFormat {
   /** One representative message for this format. */
   raw: string;
@@ -8,6 +22,7 @@ export interface UnreadFormat {
   /** How many transactions share this format. */
   count: number;
   amountFils: number;
+  reason: UnreadReason;
 }
 
 /**
@@ -38,9 +53,14 @@ export function unreadFormats(
       category: categoryLabel(tx.category),
       count: 1,
       amountFils: tx.amountFils,
+      reason: tx.title === GENERIC_MERCHANT ? 'unread' : 'uncategorized',
     });
   }
-  return [...byFormat.values()].sort((a, b) => b.count - a.count);
+  // Unread first: those are the ones where the app shows the user nothing
+  // useful at all, and they are usually the short list.
+  return [...byFormat.values()].sort(
+    (a, b) => Number(b.reason === 'unread') - Number(a.reason === 'unread') || b.count - a.count,
+  );
 }
 
 /**

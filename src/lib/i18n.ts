@@ -100,9 +100,11 @@ const S = {
   noBalanceYet: { en: 'no balance SMS yet', ar: 'لا رسالة رصيد بعد' },
   improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },
   improveAccuracyHint: {
-    en: 'These bank messages could not be fully read — the merchant or category had to be guessed. Share the list with the developer and the next update will read them properly. Long account numbers are masked.',
-    ar: 'تعذّرت قراءة هذه الرسائل بالكامل — تم تخمين المتجر أو التصنيف. شارك القائمة مع المطوّر وسيقرأها التحديث القادم بشكل صحيح. الأرقام الطويلة مخفية.',
+    en: 'Bank messages the app is not reading well. Some have no merchant name at all; most read the name correctly but have no category yet. Share the list with the developer and the next update will handle them. Long account numbers are masked.',
+    ar: 'رسائل بنكية لا يقرأها التطبيق جيداً. بعضها بلا اسم متجر إطلاقاً، ومعظمها يُقرأ الاسم فيه بشكل صحيح لكن بلا تصنيف بعد. شارك القائمة مع المطوّر وسيعالجها التحديث القادم. الأرقام الطويلة مخفية.',
   },
+  couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
+  noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },
   shareUnrecognized: { en: 'Share formats', ar: 'مشاركة الصيغ' },
   readAs: { en: 'Read as', ar: 'قُرئت كـ' },
   noUnrecognized: { en: 'Everything reads clean', ar: 'كل الرسائل مقروءة' },

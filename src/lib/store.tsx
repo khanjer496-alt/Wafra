@@ -16,13 +16,8 @@ import { setThemePreference as applyThemePreference } from '@/lib/theme-preferen
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import { detectMarketId, setActiveMarket } from '@/lib/markets';
 import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/seed';
-import {
-  guessCategory,
-  normalizeServiceName,
-  parseSms,
-  PARSER_VERSION,
-  STRUCTURAL_TITLES,
-} from '@/lib/sms-parser';
+import { applyHealPatch, healPatch } from '@/lib/heal';
+import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
 import type {
   Account,
   AppState,
@@ -215,15 +210,7 @@ function reducer(state: AppState, action: Action): AppState {
               .filter((t) => !patches.get(t.id)?.remove)
               .map((t) => {
                 const u = patches.get(t.id);
-                if (!u) return t;
-                return {
-                  ...t,
-                  ...(u.title !== undefined ? { title: u.title } : null),
-                  ...(u.category !== undefined ? { category: u.category } : null),
-                  ...(u.type !== undefined ? { type: u.type } : null),
-                  ...(u.isTransfer !== undefined ? { isTransfer: u.isTransfer } : null),
-                  ...(u.raw !== undefined ? { raw: u.raw } : null),
-                };
+                return u ? applyHealPatch(t, u) : t;
               })
           : state.transactions;
       return {
@@ -562,27 +549,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               const p = parseSms(t.raw, parsed.merchantOverrides);
               if (!p) return []; // no longer a transaction at all
               if (p.kind === 'billDue' || p.kind === 'cardStatement') return []; // was a reminder
-              const next = { ...t };
-              if (
-                p.merchant !== 'Card purchase' &&
-                p.merchant !== t.title &&
-                (t.title === 'Card purchase' || t.category === 'other')
-              ) {
-                next.title = p.merchant;
-              }
-              if (t.category === 'other' && p.categoryGuess !== 'other' && !t.isTransfer) {
-                next.category = p.categoryGuess;
-              }
-              if ((p.transferHint || p.kind === 'cardPayment') && !t.isTransfer) {
-                next.isTransfer = true;
-              }
-              const stillLow =
-                !next.isTransfer &&
-                next.type === 'expense' &&
-                (next.title === 'Card purchase' ||
-                  (next.category === 'other' && !STRUCTURAL_TITLES.has(next.title)));
-              if (!stillLow) delete next.raw;
-              return [next];
+              // Same rules as a rescan — deliberately the same function. This
+              // used to be a second copy that had drifted: it flagged a card
+              // payment as a transfer but left it an expense, which is exactly
+              // the shape `allocatePayments` refuses, so a paid card kept
+              // showing as owed on the path that runs on every launch.
+              const patch = healPatch(t, p);
+              return [patch ? applyHealPatch(t, patch) : t];
             });
           }
           // Drop stale unsettled card dues, and dues attached to anything that

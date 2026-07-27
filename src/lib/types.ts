@@ -201,7 +201,16 @@ export interface TxHealUpdate {
    */
   type?: TransactionType;
   isTransfer?: boolean;
-  raw?: string;
+  /**
+   * The stored source text, or `null` to CLEAR it.
+   *
+   * Clearing matters as much as setting. Source text is kept only so the
+   * accuracy report can show formats the parser cannot read; once a rescan
+   * reads one properly, leaving the text behind means the report goes on
+   * listing a format that now works. Without a clear, that count can only ever
+   * grow, and every parser improvement makes the report look worse.
+   */
+  raw?: string | null;
   /** The message no longer parses as a transaction (e.g. it's a statement reminder) — drop the row. */
   remove?: boolean;
 }
