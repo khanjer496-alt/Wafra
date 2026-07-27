@@ -54,6 +54,11 @@ class SmsDeliveryReceiver : BroadcastReceiver() {
         }
       } else arr
       prefs.edit().putString(KEY, trimmed.toString()).apply()
+
+      // Capture first, announce second. The buffer is what the ledger is
+      // built from and it must never be at the mercy of the banner; if
+      // InstantAlert throws, the message is already safely stored.
+      InstantAlert.post(context, address, body)
     } catch (_: Exception) {
       // Never crash on a delivery broadcast. A dropped alert is recovered by
       // the next inbox scan; a crash loop on every incoming SMS is not.

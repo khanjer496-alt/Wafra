@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Strings for the banner posted at SMS-delivery time. They live here, in
+  Android resources, rather than in the app's own i18n table because the code
+  that needs them runs in a broadcast receiver with no JavaScript engine.
+  Keep them in step with src/lib/i18n.ts by hand — there is no other way.
+
+  Prefixed wafra_ because an Android library's resources merge into the host
+  app's namespace, where a bare name like "alert_title" would be a collision
+  waiting to happen.
+-->
+<resources>
+  <string name="wafra_alert_title">%1$s spent</string>
+  <string name="wafra_alert_title_named">%1$s · %2$s</string>
+  <string name="wafra_alert_title_credit">%1$s received</string>
+  <string name="wafra_alert_title_credit_named">%1$s received · %2$s</string>
+  <string name="wafra_alert_card">··%1$s</string>
+  <string name="wafra_alert_fallback">Tap to open Wafra</string>
+  <string name="wafra_alert_channel">Transaction alerts</string>
+  <string name="wafra_alert_channel_description">A silent banner the moment a bank message arrives.</string>
+</resources>

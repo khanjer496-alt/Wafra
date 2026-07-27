@@ -16,3 +16,6 @@ node unit.test.js
 node worker.test.js
 # Properties that must hold for every message, not just the pinned ones.
 node invariants.test.js
+# The delivery-time banner reads bank SMS a second time, in Kotlin. This runs
+# the real patterns out of that source against the real corpus.
+node instant-alert.test.js

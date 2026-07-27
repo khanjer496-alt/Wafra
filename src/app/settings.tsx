@@ -32,6 +32,7 @@ import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormatCount } from '@/lib/accuracy';
+import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
 import { t } from '@/lib/i18n';
@@ -40,6 +41,7 @@ import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
+import SmsReader from '../../modules/sms-reader';
 
 /** The reporting month can start on any day that exists in February. */
 const MAX_START_DAY = 28;
@@ -76,9 +78,20 @@ export default function SettingsScreen() {
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
+  const [instantAlerts, setInstantAlerts] = useState(false);
+  // Only builds carrying the delivery receiver can post at delivery time.
+  const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
+
   useEffect(() => {
     if (!isSmsScanningAvailable()) return;
     hasSmsPermission().then(setSmsGranted).catch(() => {});
+    // The native side owns this one — the receiver reads it from
+    // SharedPreferences long after this screen is gone.
+    try {
+      setInstantAlerts(SmsReader?.getInstantAlerts?.() ?? false);
+    } catch {
+      // An older build without the function: leave it off.
+    }
   }, []);
 
   /* ── Pro gating ─────────────────────────────────────────────────────── */
@@ -145,6 +158,28 @@ export default function SettingsScreen() {
     }
     const granted = await requestSmsPermission();
     setSmsGranted(granted);
+  };
+
+  const toggleInstantAlerts = async (enabled: boolean) => {
+    if (enabled) {
+      // Android 13 needs the notification permission before anything can be
+      // posted. Asking here rather than at delivery time means the failure is
+      // visible now, instead of as banners that silently never arrive.
+      const allowed = await requestNotificationPermission();
+      if (!allowed) {
+        Alert.alert(
+          'Notifications are off',
+          'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.',
+        );
+        return;
+      }
+    }
+    try {
+      SmsReader?.setInstantAlerts?.(enabled);
+      setInstantAlerts(enabled);
+    } catch {
+      // Nothing to recover: the toggle stays where it was.
+    }
   };
 
   const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
@@ -404,6 +439,26 @@ export default function SettingsScreen() {
                 smsGranted ? 'Granted · nothing is uploaded' : 'Off · nothing can import',
                 smsGranted,
                 toggleSms,
+              )}
+            {instantAvailable &&
+              switchRow(
+                'Alert me on every charge',
+                smsGranted
+                  ? instantAlerts
+                    ? 'On · a silent banner the moment the bank texts'
+                    : 'Off · charges appear when you next open Wafra'
+                  : 'Needs bank SMS reading above',
+                instantAlerts && smsGranted,
+                (next) => {
+                  if (!smsGranted) {
+                    Alert.alert(
+                      'Turn on bank SMS first',
+                      'Wafra can only alert you about a charge it is allowed to read.',
+                    );
+                    return;
+                  }
+                  void toggleInstantAlerts(next);
+                },
               )}
             <Row onPress={gated(onNotificationAccess)} last accessibilityLabel="Bank app notifications">
               <View style={styles.rowText}>
