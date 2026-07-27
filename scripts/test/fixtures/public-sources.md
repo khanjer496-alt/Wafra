@@ -33,6 +33,19 @@ AED 3,000` is a requirement, not this account's money.
 
 No code was copied; the licence is compatible either way.
 
+### saurabhgupta050890/transaction-sms-parser — **MIT**
+
+The TypeScript original the Dart package above was ported from. Its published
+corpus is a single example row, and that row earned its keep:
+
+    INR 2000 debited from A/c no. XX3423 on date IST at SMAPLE Avl Bal- INR 2343.23
+
+A **hyphen** between the label and the figure. Wafra read nothing at all from
+`Avl Bal- AED 2343.23`, because `-` is one of the mask characters barred from
+the gap. Now allowed as a separator immediately after the label, while a *run*
+of hyphens beside the figure (`Avl Bal AED ----9235.93`) is still a mask and
+still refused. Both halves pinned.
+
 ### obahareth/bank-al-bilad-sms-parser
 
 Saudi, and the only source found with **Arabic** GCC message text:
@@ -50,6 +63,22 @@ requesting a bank, and those quotes are facts about bank wording.
 ADCB, Emirates Islamic, Emirates NBD, FAB, Liv, Mashreq — which makes its
 source the most tempting thing in this list and the most dangerous. AGPL would
 force Wafra to publish under AGPL too. Read the issues; stay out of the code.
+
+**ritesh-kanwar/Cashiro** is the same trap wearing a different name: same UAE
+bank list, same "on-device, no cloud" pitch, **also AGPL-3.0**, and it has a
+`parser-core` module that is exactly what one would want to read. Its source
+was deliberately not opened here.
+
+**Xetera/sms-regex** has **no licence file at all**, which means all rights
+reserved — nothing in it may be copied. Moot anyway: its patterns are Turkish
+(Trendyol, Getir, Finansbank, Türk Telekom), with no Gulf coverage.
+
+## Not open source
+
+**[Obba](https://www.obba.pro/)** is a commercial MENA tracker claiming 25+
+banks across English *and* Arabic, Emirates NBD and ADCB among them. No source
+and no corpus to read — its interest is as proof that Arabic parsing is table
+stakes in this market, not a technical curiosity.
 
 ## Known gap: Arabic
 

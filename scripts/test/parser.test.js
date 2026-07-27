@@ -391,6 +391,26 @@ for (const [tail, kind, fils] of [
   }
 }
 
+// A hyphen between the label and the figure — "Avl Bal- AED 2343.23", the
+// shape in saurabhgupta050890/transaction-sms-parser's corpus (MIT). Allowed
+// as a separator, still refused as a mask.
+for (const [tail, want] of [
+  ['Avl Bal- AED 2343.23', 234323],
+  ['Avl Bal - AED 2343.23', 234323],
+  ['Avl Bal-AED 2343.23', 234323],
+  ['Your balance- AED 2343.23', 234323],
+  ['Avl Bal- AED ····2343.23', null],
+  ['Avl Bal AED ----2343.23', null],
+]) {
+  const r = parseSms(`AED 2000 debited from A/c no. XX3423 at SPINNEYS. ${tail}`);
+  if (r && r.snapshotFils === want && r.amountFils === 200000) {
+    pass++; console.log(`✓ "${tail}" -> ${want === null ? 'no snapshot' : want}`);
+  } else {
+    fail++; console.log(`✗ "${tail}" -> ${want === null ? 'no snapshot' : want}`,
+      JSON.stringify(r && { f: r.snapshotFils, a: r.amountFils }));
+  }
+}
+
 // Bare "balance" stays out: "minimum balance AED 3,000" is a requirement,
 // not this account's money.
 for (const tail of ['Balance AED 5,000.00', 'Minimum balance AED 3,000.00']) {

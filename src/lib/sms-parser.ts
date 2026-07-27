@@ -957,13 +957,19 @@ function extractMerchant(raw: string, re: RegExp): string {
 // and Standard Chartered carry into the Gulf. None appear in this corpus
 // yet; they are here because a missed snapshot is silent, and an
 // abbreviation of a word already matched cannot match anything else.
+//
+// `(?:\s*-)?` is the one hyphen banks use as a separator — "Avl Bal- AED
+// 2343.23" is the shape in the published corpus of
+// saurabhgupta050890/transaction-sms-parser (MIT). It is allowed ONLY
+// straight after the label, so a RUN of hyphens next to the figure
+// ("Avl Bal AED ----9235.93") is still a mask and still refused.
 const SNAPSHOT_RE =
-  /(?:(?:avl|avbl|avail(?:able)?|remaining|total)\.?\s*(?:cr(?:edit)?\.?\s+)?(limit|lmt|bal(?:ance)?|outstanding)|(limit|lmt)\s+available)[^0-9·•*-]{0,12}([\d,]+(?:\.\d{1,2})?)/i;
+  /(?:(?:avl|avbl|avail(?:able)?|remaining|total)\.?\s*(?:cr(?:edit)?\.?\s+)?(limit|lmt|bal(?:ance)?|outstanding)|(limit|lmt)\s+available)(?:\s*-)?[^0-9·•*-]{0,12}([\d,]+(?:\.\d{1,2})?)/i;
 // "Your balance is AED 401913.68" — balance quotes without an Avl/Total
 // prefix. Kept separate so bare "limit" mentions (daily limits, offers)
 // still need the availability prefix above.
 const PLAIN_BALANCE_RE =
-  /(?:your|current|new|updated|net|a\/?c(?:count)?)\s+bal(?:ance)?\s*(?:is|:|now)?[^0-9·•*-]{0,10}([\d,]+(?:\.\d{1,2})?)/i;
+  /(?:your|current|new|updated|net|a\/?c(?:count)?)\s+bal(?:ance)?\s*(?:is|:|now)?(?:\s*-)?[^0-9·•*-]{0,10}([\d,]+(?:\.\d{1,2})?)/i;
 const MAX_SNAPSHOT_FILS = 1_000_000_000; // 10M in the local currency
 
 /** The balance / available-limit figure banks append to most alerts. */
