@@ -1227,5 +1227,94 @@ ok('stale: a stale statement that gets paid leaves openDues',
     noop === null || noop.raw !== null);
 }
 
+// ── one transaction, three channels, one row ──
+//
+// A user's Home screen showed the same AED 28,538 salary twice and the same
+// AED 77 ChatGPT charge twice. The cause is that the same event reaches the
+// app through up to three capture channels, and the fingerprint that was
+// supposed to collapse them was built out of a timestamp each channel
+// stamps from a different clock.
+{
+  const { duplicateGuard, bodyPrint } = require('./build/dedupe');
+
+  const salary = {
+    id: 't1', type: 'income', amountFils: 2853750, category: 'salary',
+    accountId: 'fab', title: 'Incoming transfer', date: '2026-07-25',
+    source: 'sms', smsKey: 's1753400000000-2853750',
+  };
+
+  // The delivery receiver's copy of the SAME SMS. Identical in every way the
+  // user can see; the carrier's PDU timestamp is 4 seconds off the
+  // provider's, so the smsKey does not match.
+  {
+    const guard = duplicateGuard([salary]);
+    ok('duplicate: the same SMS caught twice is one row',
+      guard.has({
+        date: '2026-07-25', amountFils: 2853750, title: 'Incoming transfer',
+        type: 'income', smsKey: 's1753400004000-2853750', channel: 'delivery',
+      }));
+  }
+
+  // The bank's own app notification about the same credit. Different words,
+  // so a different title — nothing but the money, the day and the direction
+  // is shared. This is the pair the user actually saw.
+  {
+    const guard = duplicateGuard([salary]);
+    ok('duplicate: a push about an SMS already imported is one row',
+      guard.has({
+        date: '2026-07-25', amountFils: 2853750, title: 'Salary credited',
+        type: 'income', smsKey: 's1753400009000-2853750', channel: 'push',
+      }));
+  }
+
+  // ...but that looseness is for push only. Two real charges of the same
+  // amount on the same day, both by SMS, are two charges.
+  {
+    const coffee = { ...salary, id: 't2', type: 'expense', amountFils: 1800, title: 'Costa', category: 'dining' };
+    const guard = duplicateGuard([coffee]);
+    ok('duplicate: two same-day same-amount SMS charges stay two rows',
+      !guard.has({
+        date: '2026-07-25', amountFils: 1800, title: 'Starbucks',
+        type: 'expense', smsKey: 's1753400500000-1800', channel: 'inbox',
+      }));
+    // And the same shop twice in a day IS still caught — that is the
+    // everyday fingerprint, unchanged.
+    ok('duplicate: the same shop, amount and day is still one row',
+      guard.has({
+        date: '2026-07-25', amountFils: 1800, title: 'costa',
+        type: 'expense', smsKey: 's1753400500000-1800', channel: 'inbox',
+      }));
+  }
+
+  // A push that matches nothing is a transaction the SMS channel missed —
+  // the whole reason the listener exists.
+  {
+    const guard = duplicateGuard([salary]);
+    ok('duplicate: a push with no SMS behind it still imports',
+      !guard.has({
+        date: '2026-07-26', amountFils: 4500, title: 'Carrefour',
+        type: 'expense', smsKey: 's1753500000000-4500', channel: 'push',
+      }));
+  }
+
+  // Adding to the guard has to close the door behind it, or a batch
+  // duplicates against itself.
+  {
+    const guard = duplicateGuard([]);
+    const c = {
+      date: '2026-07-25', amountFils: 1200, title: 'Noon',
+      type: 'expense', smsKey: 's1753400000000-1200', channel: 'inbox',
+    };
+    ok('duplicate: the first copy is not a duplicate', !guard.has(c));
+    guard.add(c);
+    ok('duplicate: the second copy in the same batch is', guard.has(c));
+  }
+
+  // The two SMS sources rejoin multi-part messages independently, so the
+  // whitespace does not always survive identically.
+  ok('duplicate: body prints ignore how the PDUs were rejoined',
+    bodyPrint('Purchase of AED 77.00\n  at OPENAI  ') === bodyPrint('Purchase of AED 77.00 at OPENAI'));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -4,6 +4,7 @@ import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type RawSms } from '../../modules/sms-reader';
 import { bankFromSender, cardAccountName, colorForHint } from '@/lib/cards';
 import { toISODate } from '@/lib/format';
+import { bodyPrint, duplicateGuard, type CaptureChannel } from '@/lib/dedupe';
 import { healPatch } from '@/lib/heal';
 import { parseSms, STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
@@ -36,7 +37,13 @@ export async function requestSmsPermission(): Promise<boolean> {
   return result[PermissionsAndroid.PERMISSIONS.READ_SMS] === PermissionsAndroid.RESULTS.GRANTED;
 }
 
-export type ScannedSms = ParsedSms & { smsTs?: number; sender?: string };
+export type { CaptureChannel } from '@/lib/dedupe';
+
+export type ScannedSms = ParsedSms & {
+  smsTs?: number;
+  sender?: string;
+  channel?: CaptureChannel;
+};
 
 export interface ScanResult {
   parsed: ScannedSms[];
@@ -58,7 +65,9 @@ export async function scanInbox(
     return { parsed: [], newestTs: sinceMs, scannedCount: 0 };
   }
 
-  const parsed: (ParsedSms & { smsTs: number; sender: string })[] = [];
+  const parsed: (ParsedSms & { smsTs: number; sender: string; channel: CaptureChannel })[] = [];
+  /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
+  const inboxBodies = new Set<string>();
   let newestTs = sinceMs;
   let untilMs = Date.now() + 60_000;
   let scannedCount = 0;
@@ -69,9 +78,16 @@ export async function scanInbox(
     scannedCount += batch.length;
     for (const sms of batch) {
       if (sms.date > newestTs) newestTs = sms.date;
+      inboxBodies.add(bodyPrint(sms.body));
       const p = parseSms(sms.body, overrides);
       if (!p) continue;
-      parsed.push({ ...p, date: p.date ?? toISODate(new Date(sms.date)), smsTs: sms.date, sender: sms.address });
+      parsed.push({
+        ...p,
+        date: p.date ?? toISODate(new Date(sms.date)),
+        smsTs: sms.date,
+        sender: sms.address,
+        channel: 'inbox',
+      });
     }
     onProgress?.(scannedCount, parsed.length);
     untilMs = batch[batch.length - 1].date; // page ends exclusive, walk backwards
@@ -87,6 +103,12 @@ export async function scanInbox(
       for (const sms of await SmsReader.getReceived(sinceMs)) {
         scannedCount += 1;
         if (sms.date > newestTs) newestTs = sms.date;
+        // The inbox pass above almost always found this same message. Its
+        // copy carries the provider's timestamp and this one carries the
+        // carrier's, which differ by seconds — enough for the fingerprint
+        // built from that timestamp to call them two different charges. The
+        // body is the one thing both copies agree on exactly.
+        if (inboxBodies.has(bodyPrint(sms.body))) continue;
         const p = parseSms(sms.body, overrides);
         if (!p) continue;
         parsed.push({
@@ -94,6 +116,7 @@ export async function scanInbox(
           date: p.date ?? toISODate(new Date(sms.date)),
           smsTs: sms.date,
           sender: sms.address,
+          channel: 'delivery',
         });
       }
       onProgress?.(scannedCount, parsed.length);
@@ -118,6 +141,7 @@ export async function scanInbox(
           smsTs: n.ts,
           // Package names usually contain the bank ("com.enbd...", "adcb...").
           sender: `${n.pkg} ${n.title}`,
+          channel: 'push',
         });
       }
       onProgress?.(scannedCount, parsed.length);
@@ -141,8 +165,33 @@ export interface ImportPlan {
   billDues: ParsedSms[];
 }
 
-function dedupeKey(date: string, amountFils: number, title: string): string {
-  return `${date}|${amountFils}|${title.toLowerCase()}`;
+
+
+/**
+ * Nothing to import, and nothing learned.
+ *
+ * lastScanTs stays at 0 on purpose. Advancing the watermark here would mark
+ * messages as read that were never actually compared against anything, and
+ * a message is only ever offered once.
+ */
+function emptyPlan(): ImportPlan {
+  return {
+    batch: {
+      transactions: [],
+      newAccounts: [],
+      newHints: {},
+      newDues: [],
+      snapshots: {},
+      bankNames: {},
+      lastScanTs: 0,
+      updates: [],
+    },
+    txCount: 0,
+    newAccountCount: 0,
+    dueCount: 0,
+    healedCount: 0,
+    billDues: [],
+  };
 }
 
 /**
@@ -156,15 +205,24 @@ export function buildImportPlan(
   newestTs: number,
   today: Date = new Date(),
 ): ImportPlan {
+  // An unhydrated store is not an empty ledger, it is an unknown one — and
+  // every duplicate check below is a lookup against `state.transactions`.
+  //
+  // A user pulled to refresh while AsyncStorage was still loading and the
+  // screen was showing zeros. Nothing matched anything, so the whole inbox
+  // imported as new; hydration then landed and restored the rows that were
+  // already there, on top of the copies just made. Their entire history
+  // doubled. The auto-import on Home waits for hydration; pull-to-refresh did
+  // not, and neither did the manual importer, so the guard belongs here where
+  // every caller has to pass through it.
+  if (!state.hydrated) return emptyPlan();
+
   // A full-history scan surfaces statements from years back; only dues still
   // near their pay-by date are live obligations worth tracking.
   const staleDueCutoff = toISODate(new Date(today.getTime() - 45 * 86400000));
-  const seen = new Set(
-    state.transactions.map((t) => dedupeKey(t.date, t.amountFils, t.title)),
-  );
-  // Message fingerprints survive parser updates (titles/accounts may change,
-  // the source SMS does not). This is the primary duplicate guard on rescans.
-  const seenSms = new Set(state.transactions.map((t) => t.smsKey).filter(Boolean));
+  // Three fingerprints, because the same transaction can reach us through
+  // three capture channels. See dedupe.ts for why one is not enough.
+  const guard = duplicateGuard(state.transactions);
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
   const priorBySmsKey = new Map<string, Transaction>();
@@ -271,16 +329,19 @@ export function buildImportPlan(
     if (p.kind === 'cardPayment') {
       const accountId = resolveAccount(p);
       noteSnapshot(accountId, p);
-      const key = dedupeKey(date, p.amountFils, p.merchant);
       const smsKey = smsKeyOf(p);
-      if (seen.has(key) || (smsKey && seenSms.has(smsKey))) {
+      // A card payment lands as income into the card account.
+      const candidate = {
+        date, amountFils: p.amountFils, title: p.merchant,
+        type: 'income' as const, smsKey, channel: p.channel,
+      };
+      if (guard.has(candidate)) {
         // A row imported as a plain expense before this message was
         // recognized as a card payment becomes a transfer now.
         healFromReparse(smsKey, p);
         continue;
       }
-      seen.add(key);
-      if (smsKey) seenSms.add(smsKey);
+      guard.add(candidate);
       transactions.push({
         type: 'income', // money arriving INTO the card account
         amountFils: p.amountFils,
@@ -298,14 +359,16 @@ export function buildImportPlan(
     // own-account transfer: keep it for balances, exclude it from spending.
     const accountId = resolveAccount(p);
     noteSnapshot(accountId, p);
-    const key = dedupeKey(date, p.amountFils, p.merchant);
     const smsKey = smsKeyOf(p);
-    if (seen.has(key) || (smsKey && seenSms.has(smsKey))) {
+    const candidate = {
+      date, amountFils: p.amountFils, title: p.merchant,
+      type: p.type, smsKey, channel: p.channel,
+    };
+    if (guard.has(candidate)) {
       healFromReparse(smsKey, p);
       continue;
     }
-    seen.add(key);
-    if (smsKey) seenSms.add(smsKey);
+    guard.add(candidate);
     // Low-confidence rows keep their source text so the user can report
     // unrecognized bank formats from Settings → Improve accuracy.
     // Structurally-understood rows (ATM, VAT, transfers...) stay out.

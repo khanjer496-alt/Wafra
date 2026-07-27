@@ -96,6 +96,12 @@ export default function ImportSmsScreen() {
   const started = useRef(false);
 
   const runScan = async () => {
+    // The plan's duplicate checks read state.transactions, so scanning before
+    // the ledger has loaded imports the whole inbox a second time.
+    if (!state.hydrated) {
+      Alert.alert('One moment', 'Your data is still loading. Try again in a second.');
+      return;
+    }
     if (!isProActive(state)) {
       router.push('/pro');
       return;
@@ -129,6 +135,10 @@ export default function ImportSmsScreen() {
   };
 
   const runParse = (input: string) => {
+    if (!state.hydrated) {
+      Alert.alert('One moment', 'Your data is still loading. Try again in a second.');
+      return;
+    }
     if (!isProActive(state)) {
       router.push('/pro');
       return;

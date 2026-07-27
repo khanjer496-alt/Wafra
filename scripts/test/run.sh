@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 rm -rf build && mkdir -p build
-for f in types format categories sms-parser bills insights seed subscriptions cards analytics period purchases markets i18n balances brand-marks leaving-soon accounts heal accuracy; do
+for f in types format categories dedupe sms-parser bills insights seed subscriptions cards analytics period purchases markets i18n balances brand-marks leaving-soon accounts heal accuracy; do
   sed -e "s|from '@/lib/|from './|g" \
       -e "s|import type { IconName } from '@/components/ui/icon';|type IconName = string;|" \
       -e "s|import('@/components/ui/icon').IconName|string|g" \
@@ -19,3 +19,5 @@ node invariants.test.js
 # The delivery-time banner reads bank SMS a second time, in Kotlin. This runs
 # the real patterns out of that source against the real corpus.
 node instant-alert.test.js
+# Every route the app navigates to must have a file behind it.
+node routes.test.js

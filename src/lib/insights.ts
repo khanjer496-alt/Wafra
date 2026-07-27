@@ -120,6 +120,17 @@ export function spentInMonthForCategory(
 
 export type InsightTone = 'positive' | 'warning' | 'neutral';
 
+/**
+ * Every screen an insight is allowed to send you to.
+ *
+ * A route name is just a string, and expo-router resolves one with no file
+ * behind it to Unmatched Route — no compile error, no warning, nothing until
+ * a user taps it. Two of these were wrong for months ("/budgets", "/stats"),
+ * so the button on a budget warning could only ever fail. Naming them once
+ * gives the typechecker something to hold, and a test checks each has a file.
+ */
+export const INSIGHT_DESTINATIONS = ['/flow', '/bills', '/transactions', '/wallet'] as const;
+
 export interface Insight {
   id: string;
   tone: InsightTone;
@@ -127,7 +138,7 @@ export interface Insight {
   title: string;
   body: string;
   /** Where tapping the insight takes you (the screen to act on it). */
-  href?: string;
+  href?: (typeof INSIGHT_DESTINATIONS)[number];
 }
 
 /**
@@ -310,15 +321,19 @@ export function buildInsights(
     });
   }
 
-  // Every insight leads somewhere actionable.
+  // Every insight leads somewhere actionable — and somewhere that EXISTS.
+  // "/budgets" and "/stats" were never routes: a budget warning's own "See
+  // the breakdown" button landed on Unmatched Route. Only names in
+  // INSIGHT_DESTINATIONS may be used, and a test asserts every one of them
+  // has a file behind it.
   for (const i of insights) {
     i.href = i.id.startsWith('budget-')
-      ? '/budgets'
+      ? '/flow'
       : i.id.startsWith('subs-') || i.id.startsWith('price-up')
         ? '/bills'
         : i.id === 'largest' || i.id === 'overspend'
           ? '/transactions'
-          : '/stats';
+          : '/flow';
   }
 
   const toneRank: Record<InsightTone, number> = { warning: 0, positive: 1, neutral: 2 };

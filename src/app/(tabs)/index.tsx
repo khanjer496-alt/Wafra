@@ -359,6 +359,15 @@ export default function HomeScreen() {
 
   const runAutoImport = useCallback(
     async (interactive: boolean) => {
+      // Never scan against a ledger that has not finished loading. Every
+      // duplicate check in the plan is a lookup against state.transactions,
+      // so an unhydrated store means nothing matches and the entire inbox
+      // imports as new — on top of the rows that arrive a moment later. The
+      // effect below already waits for this; pull-to-refresh did not.
+      if (!state.hydrated) {
+        if (interactive) toast.show('Still loading your data — try again in a second.');
+        return;
+      }
       // Hard paywall: tracking pauses when the trial ends without Pro.
       if (!isProActive(state)) {
         if (interactive) router.push('/pro');
