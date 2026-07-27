@@ -2,7 +2,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type RawSms } from '../../modules/sms-reader';
-import { bankFromSender, cardAccountName, colorForHint } from '@/lib/cards';
+import { bankFromSender, cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, duplicateGuard, type CaptureChannel } from '@/lib/dedupe';
 import { healPatch } from '@/lib/heal';
@@ -319,7 +319,7 @@ export function buildImportPlan(
         // 5% is a common UAE card minimum, but it is not this card's minimum
         // unless the bank said so. Kept as a placeholder for the progress
         // bar's sake, flagged so nothing quotes it back as a figure.
-        minDueFils: p.minDueFils ?? Math.round(p.amountFils * 0.05),
+        minDueFils: p.minDueFils ?? estimatedMinimumFils(p.amountFils),
         minDueEstimated: p.minDueFils === null ? true : undefined,
         dueDate: p.date,
         paidFils: 0,

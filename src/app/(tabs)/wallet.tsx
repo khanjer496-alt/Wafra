@@ -37,6 +37,7 @@ import {
   parseAmountToFils,
   shortDate,
   toISODate,
+  totalAsShown,
 } from '@/lib/format';
 import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
@@ -107,8 +108,12 @@ export default function WalletScreen() {
     return { fils: last.fils - first.fils, since: monthLabel(first.key, true) };
   }, [state]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  // Totalled AS SHOWN, because this figure is printed directly above the
+  // rows it covers. Summing the exact fils and rounding once gives a heading
+  // that can differ from its own list by a dirham — the same defect that put
+  // "AED 1,025/mo" over rows adding to 1,022 on Bills.
   const duesTotalFils = useMemo(
-    () => dues.reduce((sum, d) => sum + d.remainingFils, 0),
+    () => totalAsShown(dues.map((d) => d.remainingFils)),
     [dues],
   );
 

@@ -37,6 +37,22 @@ export interface DueWithStatus {
  * stands alone rather than guessing. Accounts with no digits at all cannot be
  * compared this way and fall back to their own id.
  */
+/**
+ * The minimum a UAE bank asks for when the statement did not say.
+ *
+ * A guess, and the app must never present it as the bank's figure — which is
+ * what `minDueEstimated` and `minimumKnown` are for. It lives here rather
+ * than at the import site because two places that must agree about what an
+ * "estimated minimum" IS is exactly the arrangement that goes wrong quietly:
+ * change one and the estimate stops matching the thing that decides whether
+ * to trust it.
+ */
+export const ESTIMATED_MINIMUM_RATE = 0.05;
+
+export function estimatedMinimumFils(totalFils: number): number {
+  return Math.round(totalFils * ESTIMATED_MINIMUM_RATE);
+}
+
 export function cardIdentity(accounts: Account[]): (accountId: string) => string {
   /** last4|type → the distinct bank names seen on those rows. */
   const banks = new Map<string, Set<string>>();

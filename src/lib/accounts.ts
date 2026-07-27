@@ -1,3 +1,4 @@
+import { cardIdentity } from '@/lib/cards';
 import type { Account, AppState } from '@/lib/types';
 
 /**
@@ -17,11 +18,19 @@ import type { Account, AppState } from '@/lib/types';
  * are repointed; nothing is deleted except the emptied duplicate.
  */
 export function mergeDuplicateAccounts(state: AppState): AppState {
+  // The same identity rule the DISPLAY uses, not a second spelling of it.
+  //
+  // This used to key on `${bankName ?? ''}|${last4}|${type}`, which splits
+  // exactly the rows it exists to merge: a hand-added card has no bank name,
+  // because only the SMS sender ID teaches the app the bank, so "FAB|5793"
+  // and "|5793" were two different cards. `openDues` was taught that an
+  // unknown bank is not a different bank; the data has to agree, or the
+  // display keeps papering over twins that never merge underneath.
+  const identify = cardIdentity(state.accounts);
   const groups = new Map<string, Account[]>();
   for (const a of state.accounts) {
     if (!a.last4) continue;
-    const key = `${a.bankName ?? ''}|${a.last4}|${a.cardType ?? a.kind}`;
-    groups.set(key, [...(groups.get(key) ?? []), a]);
+    groups.set(identify(a.id), [...(groups.get(identify(a.id)) ?? []), a]);
   }
   const dupes = [...groups.values()].filter((g) => g.length > 1);
   if (dupes.length === 0) return state;
