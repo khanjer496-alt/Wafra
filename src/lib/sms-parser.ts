@@ -100,8 +100,40 @@ function ensureCurrencyPatterns(): void {
     `total\\s+(?:amount\\s+due|due|billed\\s+am(?:oun)?t)\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   OUTSTANDING_RE = new RegExp(
     `\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  // Money arriving ON a credit card. Getting this wrong is expensive in a way
+  // that is invisible: a payment that misses this test is still imported, but
+  // as an EXPENSE carrying a transfer hint — and `allocatePayments` only ever
+  // credits income-side transfers, so the statement stays open and the app
+  // goes on saying a paid card is overdue.
+  //
+  // Three shapes below were doing exactly that. They are ordinary UAE bank
+  // messages; only the word order differs from the ones already handled:
+  //
+  //   "Your payment instructions of AED 7,663.94 to 5492********3749 has been
+  //    processed"           — the target is a masked PAN, and "processed"
+  //                           comes after it rather than before
+  //   "AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards
+  //    payment of your Credit Card ending 8575"
+  //                         — "towards payment of ... card", not
+  //                           "payment ... towards card"
+  //   "...towards settlement of your card ..."
+  //
+  // The masked-PAN branch requires a run of at least twelve digit-or-mask
+  // characters, so "payment instructions of AED 417.90 to Du for consumer
+  // number 1238865" stays a utility bill — that message is handled earlier
+  // anyway, and this keeps the two from ever competing.
   CARD_PAYMENT_RE = new RegExp(
-    `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\s+)?(?:credit\\s+)?card|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?credit\\s+card|received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card|thank you for (?:your )?payment.*card|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`, 'i');
+    [
+      `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\s+)?(?:credit\\s+)?card`,
+      `payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?credit\\s+card`,
+      `received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card`,
+      `thank you for (?:your )?payment.*card`,
+      `card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`,
+      // "payment instructions of AED 7,663.94 to 5492********3749"
+      `payment\\s+instructions?\\s+of\\s+(?:${CUR})?\\s*[\\d,.]+\\s+to\\s+[\\dXx*•]{12,}`,
+      // "...towards payment/settlement of your Credit Card ending 8575"
+      `towards?\\s+(?:the\\s+)?(?:payment|settlement|repayment)\\s+of\\s+(?:your\\s+)?(?:\\w+\\s+)?(?:credit\\s+)?card`,
+    ].join('|'), 'i');
   // "Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit
   // Card ending with 4110." The payee sits BEFORE the amount with none of the
   // prepositions MERCHANT_RE looks for, so every message in this format

@@ -173,3 +173,28 @@ export interface AppState {
   /** Palette choice: 'system' follows the OS, 'light'/'dark' pin it. */
   themePreference: string;
 }
+
+/**
+ * A correction a rescan makes to a row already imported. Only the fields that
+ * genuinely changed are present; an absent field is left alone.
+ */
+export interface TxHealUpdate {
+  id: string;
+  title?: string;
+  category?: CategoryId;
+  /**
+   * The DIRECTION, when a rescan proves the old one wrong.
+   *
+   * A card payment imported before the parser recognized its wording landed as
+   * an expense carrying a transfer hint. Healing set the hint and stopped
+   * there, so the row stayed an expense — and `allocatePayments` credits
+   * income-side transfers only, which meant a card the user had actually paid
+   * stayed open forever. The message can never be re-imported either, because
+   * its fingerprint is already known. Only a direction correction reaches it.
+   */
+  type?: TransactionType;
+  isTransfer?: boolean;
+  raw?: string;
+  /** The message no longer parses as a transaction (e.g. it's a statement reminder) — drop the row. */
+  remove?: boolean;
+}

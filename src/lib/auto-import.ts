@@ -4,6 +4,7 @@ import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type RawSms } from '../../modules/sms-reader';
 import { bankFromSender, cardAccountName, colorForHint } from '@/lib/cards';
 import { toISODate } from '@/lib/format';
+import { healPatch } from '@/lib/heal';
 import { parseSms, STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 import type { ImportBatchInput, TxHealUpdate } from '@/lib/store';
@@ -174,33 +175,8 @@ export function buildImportPlan(
   const healFromReparse = (smsKey: string | undefined, p: ScannedSms) => {
     const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
     if (!prior) return;
-    // Never re-heal a row the user corrected by hand — a rescan that undoes
-    // their edit teaches them that correcting anything is pointless.
-    if (prior.userEdited) return;
-    const patch: TxHealUpdate = { id: prior.id };
-    // Retitle rows whose old title was generic OR whose category never got
-    // past "other" (that combination is where garbage titles live) — but
-    // never replace a name with the generic fallback.
-    if (
-      p.merchant !== 'Card purchase' &&
-      p.merchant !== prior.title &&
-      (prior.title === 'Card purchase' || prior.category === 'other')
-    ) {
-      patch.title = p.merchant;
-    }
-    if (prior.category === 'other' && p.categoryGuess !== 'other' && !prior.isTransfer) {
-      patch.category = p.categoryGuess;
-    }
-    if (p.transferHint && !prior.isTransfer) patch.isTransfer = true;
-    const titleAfter = patch.title ?? prior.title;
-    const catAfter = patch.category ?? prior.category;
-    const stillLow =
-      p.type === 'expense' &&
-      !p.transferHint &&
-      !prior.isTransfer &&
-      (titleAfter === 'Card purchase' || (catAfter === 'other' && !STRUCTURAL_TITLES.has(titleAfter)));
-    if (stillLow && !prior.raw) patch.raw = p.raw.slice(0, 300);
-    if (Object.keys(patch).length > 1) updates.push(patch);
+    const patch = healPatch(prior, p);
+    if (patch) updates.push(patch);
   };
   const smsKeyOf = (p: ScannedSms): string | undefined =>
     p.smsTs !== undefined ? `s${p.smsTs}-${p.amountFils}` : undefined;

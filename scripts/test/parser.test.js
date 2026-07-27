@@ -523,6 +523,49 @@ if (payAgainst && payAgainst.kind === 'cardPayment' && payAgainst.amountFils ===
     JSON.stringify(payAgainst && { k: payAgainst.kind, a: payAgainst.amountFils }));
 }
 
+// Three payment shapes that were being imported as EXPENSES carrying a
+// transfer hint. `allocatePayments` only credits income-side transfers, so a
+// card the user had paid stayed open and the app went on calling it overdue —
+// the whole point of tracking dues, wrong.
+{
+  const cases = [
+    ['payment instructions to a masked card number',
+     'Dear Customer, Your payment instructions of AED 7,663.94 to 5492********3749 has been processed on 10/07/2026 01:19',
+     766394, '3749'],
+    ['deducted from an account towards a card',
+     'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.',
+     406169, '8575'],
+    ['the same, on a second card',
+     'AED 1,027.60 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8917.',
+     102760, '8917'],
+  ];
+  for (const [name, raw, amt, last4] of cases) {
+    const r = parseSms(raw);
+    if (r && r.kind === 'cardPayment' && r.amountFils === amt && r.card && r.card.last4 === last4
+        && r.card.kind === 'credit' && r.transferHint === true) {
+      pass++; console.log(`✓ ${name} is a card payment`);
+    } else {
+      fail++; console.log(`✗ ${name} is a card payment`,
+        JSON.stringify(r && { k: r.kind, a: r.amountFils, c: r.card }));
+    }
+  }
+}
+
+// The account the money LEFT is named first in those messages. The card it
+// landed on is the one the payment belongs to.
+t('a card payment is filed against the card, not the debited account',
+  'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.',
+  { card: { last4: '8575', kind: 'credit' } });
+
+// The new patterns must not swallow their neighbours.
+t('payment instructions to a biller stay a utility bill',
+  'Dear Customer, Your payment instructions of AED 417.9 to Du for consumer number 1238865 has been processed on 21/10/2022 17:03',
+  { merchant: 'Du', category: 'telecom' });
+
+t('a loan repayment towards something that is not a card stays an expense',
+  'AED 2,500.00 has been deducted from your account 095XXX11XXX01 towards payment of your personal loan.',
+  { category: 'loan', type: 'expense' });
+
 t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
   'Your Noon order for AED 49.75 is due tomorrow and will be charged to your default card. Pay it now at https://s.tabby.ai/s3b4DC',
   null);

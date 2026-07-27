@@ -1113,5 +1113,47 @@ ok('stale: a stale statement that gets paid leaves openDues',
     acc.mergeDuplicateAccounts(guardState) === guardState);
 }
 
+// ── a paid card stops saying it is overdue ──
+//
+// The whole chain, because every link of it was broken at some point: the SMS
+// parses as a card payment, a row already imported the wrong way is corrected
+// on rescan, and the corrected row settles the statement.
+{
+  const heal = require('./build/heal');
+  const parser = require('./build/sms-parser');
+
+  const raw = 'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.';
+  const parsed = parser.parseSms(raw, '2026-07-10T10:00:00Z');
+  ok('paid card: the message reads as a card payment', parsed && parsed.kind === 'cardPayment');
+
+  // How such a row was stored before the parser knew this wording: an expense
+  // wearing a transfer hint, which nothing downstream can use.
+  const wrong = {
+    id: 'p1', type: 'expense', amountFils: 406169, category: 'other',
+    accountId: 'cc', title: 'Card payment', date: '2026-07-10',
+    source: 'sms', smsKey: 's1-406169', isTransfer: true,
+  };
+  const patch = heal.healPatch(wrong, parsed);
+  ok('paid card: a rescan corrects the direction', !!patch && patch.type === 'income');
+
+  const fixed = { ...wrong, ...(patch || {}) };
+  const settled = {
+    accounts: [{ id: 'cc', name: 'ENBD Credit Card •8575', kind: 'card', cardType: 'credit', last4: '8575', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' }],
+    transactions: [fixed],
+    cardDues: [{ id: 'd', accountId: 'cc', totalDueFils: 406169, minDueFils: 20308, dueDate: '2026-06-29', paidFils: 0 }],
+  };
+  ok('paid card: the statement is settled and leaves the list',
+    cardsGuardLib.openDues(settled, new Date(2026, 6, 20)).length === 0);
+
+  // The uncorrected row must NOT settle it — that is the bug, pinned.
+  const broken = { ...settled, transactions: [wrong] };
+  ok('paid card: without the correction it would still read as owed',
+    cardsGuardLib.openDues(broken, new Date(2026, 6, 20)).length === 1);
+
+  // A row the user edited by hand is never overwritten by a rescan.
+  ok('paid card: a hand-edited row is left alone',
+    heal.healPatch({ ...wrong, userEdited: true }, parsed) === null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

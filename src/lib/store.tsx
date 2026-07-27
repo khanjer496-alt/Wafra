@@ -26,6 +26,7 @@ import type {
   CategoryId,
   Goal,
   Transaction,
+  TxHealUpdate,
 } from '@/lib/types';
 
 const STORAGE_KEY = 'wafra/state/v1';
@@ -205,6 +206,7 @@ function reducer(state: AppState, action: Action): AppState {
                   ...t,
                   ...(u.title !== undefined ? { title: u.title } : null),
                   ...(u.category !== undefined ? { category: u.category } : null),
+                  ...(u.type !== undefined ? { type: u.type } : null),
                   ...(u.isTransfer !== undefined ? { isTransfer: u.isTransfer } : null),
                   ...(u.raw !== undefined ? { raw: u.raw } : null),
                 };
@@ -342,15 +344,7 @@ function reducer(state: AppState, action: Action): AppState {
  * parses BETTER (named merchant, real category, transfer flag) upgrades that
  * row in place instead of requiring an erase + reimport.
  */
-export interface TxHealUpdate {
-  id: string;
-  title?: string;
-  category?: CategoryId;
-  isTransfer?: boolean;
-  raw?: string;
-  /** The message no longer parses as a transaction (e.g. it's a statement reminder) — drop the row. */
-  remove?: boolean;
-}
+export type { TxHealUpdate } from '@/lib/types';
 
 export interface ImportBatchInput {
   transactions: Omit<Transaction, 'id'>[];
