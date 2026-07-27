@@ -20,7 +20,7 @@ export interface ParsedCard {
  * the whole inbox instead of the tail. Existing rows are not duplicated —
  * `seenSms` recognizes them by fingerprint — they are healed in place.
  */
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -80,8 +80,16 @@ const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent
 
 /** OTP / verification messages describe an ATTEMPT, not a completed transaction. */
 const OTP_RE = /\botp\b|one[\s-]?time\s+(?:password|pin|code)|verification code|auth(?:oris|oriz)ation code|do not share|never share/i;
-/** Pre-auth holds are not postings; the real charge arrives as its own SMS. */
-const PREAUTH_RE = /pre-?auth|amount\s+(?:has been\s+)?blocked|hold\s+(?:of|amount|placed)|temporary\s+hold/i;
+/**
+ * Pre-auth holds are not postings; the real charge arrives as its own SMS.
+ *
+ * `hold` is word-bounded on the left. Without the boundary it matched inside
+ * HOUSEHOLD, LEASEHOLD and THRESHOLD — "HOUSEHOLD OF ..." is `hold of` — and a
+ * refusal is silent, so a purchase at a shop named that way would never appear
+ * in spending at all. The app's own shopping vocabulary lists `house ?hold`,
+ * so those descriptors are expected in a UAE inbox.
+ */
+const PREAUTH_RE = /pre-?auth|amount\s+(?:has been\s+)?blocked|\bhold\s+(?:of|amount|placed)|temporary\s+hold/i;
 const DECLINED_RE = /declin|unsuccessful|insufficient|could not be (?:processed|completed)|has failed/i;
 /**
  * "Reversed" is two different events wearing one word.
@@ -131,9 +139,34 @@ const PROMO_RE =
  * Evidence that money ACTUALLY moved — banks append promo footers to real
  * alerts ("...Avl Bal AED 5,376. 0% instalments... bit.ly/..."), so promo
  * markers alone must not discard a message that shows a transaction.
+ *
+ * This is the ONLY escape hatch from PROMO_RE, and PROMO_RE is a list of bare
+ * stems: `promo`, `bonus`, `discount`, `voucher`, `cashback`. Those are shop
+ * names as readily as they are marketing words — Promod is a fashion chain
+ * with UAE mall stores — so any purchase whose descriptor happens to contain
+ * one is refused outright unless something here recognises the format. A
+ * refused message leaves no row at all: the charge never reaches Out and there
+ * is nothing to heal later.
+ *
+ * Two of the biggest formats in the corpus had no entry here, which is 14
+ * distinct messages / 56 occurrences carrying no evidence of any kind:
+ *
+ *   "Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card
+ *    ending with 4110. Available limit AED 63,155.07."
+ *                      — "has been made using", and the balance is labelled
+ *                        "Available limit", which `available (balance|credit)`
+ *                        did not cover
+ *   "Debit Card Purchase / Card XXXX5083 / AED 53.58 / MARK AND SAVE Dubai AE
+ *    / 19/02/26 15:45 / Balance AED 1780.67"
+ *                      — the header says "Debit Card Purchase", not "purchase
+ *                        of", and the balance line is a bare "Balance"
+ *
+ * Widening this can only ever RESCUE a message: it is consulted at the promo
+ * gate alone, and everything it lets through still has to carry a debit or
+ * credit verb and yield a readable amount before a row is produced.
  */
 const TXN_EVIDENCE_RE =
-  /purchase (?:of|amount)|was used for|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
+  /purchase (?:of|amount)|(?:debit|credit)\s+card\s+purchase|was used for|has been made using|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available\s+(?:balance|credit|limit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
 
 /**
  * Currency-bound patterns compile from the ACTIVE MARKET's currency aliases

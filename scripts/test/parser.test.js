@@ -1629,5 +1629,69 @@ t('a cancelled-order refund is unaffected',
   "We've issued your refund of 58.89 AED for your cancelled order.",
   { type: 'income', merchant: 'Refund', amountFils: 5889 });
 
+// ── The promo guard's escape hatch did not cover two real formats ──
+//
+// PROMO_RE is a list of bare stems (`promo`, `bonus`, `discount`, `voucher`,
+// `cashback`) and TXN_EVIDENCE_RE is the only thing that stops one of them
+// discarding a real charge. Measured over both accuracy exports, 14 distinct
+// messages / 56 occurrences carried NO evidence at all and survived only
+// because nothing in them happened to look like marketing.
+//
+// The two formats below are the bulk of that, and both are corpus text:
+// report-1 #8 and report-1 #6. The footer appended in the promo cases is the
+// footer report-2 #6, #27 and #41 all carry verbatim from the same bank — the
+// point of the test is that a real purchase does not disappear when its bank
+// staples its standard advert onto the end.
+
+// Format A: "Payment for <SHOP> of AED <x> has been made using Credit Card
+// ending with <n>. Available limit AED <y>." — no "purchase of", and the
+// balance is labelled "Available limit", which the evidence list did not know.
+t('the "has been made using" purchase format counts as evidence money moved',
+  'Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card ending with 4110. Available limit AED 63,155.07.',
+  { merchant: 'Caribou Coffee', amountFils: 2600, category: 'dining' });
+
+t('...and it survives the bank stapling its advert to the end',
+  'Payment for CARIBOU COFFEE of AED 26.00 has been made using Credit Card ending with 4110. Available limit AED 63,155.07.\n0% instalments up to 12 months, NO fees on international purchases. bit.ly/4nR8uHP Conditions apply.',
+  { merchant: 'Caribou Coffee', amountFils: 2600, category: 'dining' });
+
+// Format B: the multi-line alert whose balance line is a bare "Balance", so
+// neither `avl bal` nor `available balance` fired. The header is the evidence.
+t('the multi-line "Debit Card Purchase" header counts as evidence money moved',
+  'Debit Card Purchase  \nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE \n19/02/26 15:45 \nBalance AED 1780.67',
+  { merchant: 'Mark & Save', amountFils: 5358, category: 'groceries' });
+
+t('...and it survives the advert too',
+  'Debit Card Purchase  \nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE \n19/02/26 15:45 \nBalance AED 1780.67\n0% instalments up to 12 months, NO fees on international purchases. bit.ly/4nR8uHP Conditions apply.',
+  { merchant: 'Mark & Save', amountFils: 5358, category: 'groceries' });
+
+// The guard still has to throw away actual marketing. Widening the evidence
+// list must not buy that back: none of these names a format, and the first two
+// carry no debit verb and no readable charge either.
+t('a pure promo is still refused',
+  'Get AED 100 cashback offer when you shop now! T&C apply. https://promo.example',
+  null);
+t('a property advert is still refused',
+  'New Launch! Masaar 3 by Arada\nLuxury Villas & Townhouse \n2,3,4 & 5 Beds \nStarts from AED 1.79 MN\n60/40 Payment Plan\nCall Us Now\n5553243\nwa.link/eqm3uu',
+  null);
+
+// ── `hold` was matching inside a longer word ──
+//
+// PREAUTH_RE refuses the message outright, and a refusal leaves no row to heal
+// later, so an over-match here deletes spending permanently. "HOUSEHOLD OF" is
+// `hold of`. The descriptor template is the one this file already uses for
+// every category assertion (report-2's "Purchase of ... at <X>, DUBAI" shape);
+// the shop name is a kind the app's own vocabulary lists (`house ?hold`).
+t('a shop whose name contains HOUSEHOLD is not a pre-auth hold',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at HOUSEHOLD OF FURNITURE, DUBAI. Avl Balance is AED 846.57.',
+  { amountFils: 4200, category: 'shopping' });
+
+// ...and a genuine hold is still refused, in both wordings.
+t('a real pre-auth hold is still refused',
+  'A pre-auth hold of AED 500.00 has been placed on your card ending 1234 at HOTEL ATLANTIS',
+  null);
+t('a bare "hold of" hold is still refused',
+  'A hold of AED 500.00 has been placed on your Credit Card ending 1234.',
+  null);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
