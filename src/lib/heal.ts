@@ -55,7 +55,7 @@ export function healPatch(prior: Transaction, p: ParsedSms): TxHealUpdate | null
     !p.transferHint &&
     !transferAfter &&
     (titleAfter === 'Card purchase' ||
-      (catAfter === 'other' && !STRUCTURAL_TITLES.has(titleAfter)));
+      (catAfter === 'other' && !p.categoryDeliberate && !STRUCTURAL_TITLES.has(titleAfter)));
   if (stillLow) {
     if (!prior.raw) patch.raw = p.raw.slice(0, 300);
   } else if (prior.raw) {

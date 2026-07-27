@@ -20,7 +20,7 @@ export interface ParsedCard {
  * the whole inbox instead of the tail. Existing rows are not duplicated —
  * `seenSms` recognizes them by fingerprint — they are healed in place.
  */
-export const PARSER_VERSION = 2;
+export const PARSER_VERSION = 3;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -48,6 +48,20 @@ export interface ParsedSms {
   snapshotFils: number | null;
   snapshotKind: SnapshotKind | null;
   categoryGuess: CategoryId;
+  /**
+   * True when `categoryGuess` was DECIDED — by a vocabulary rule, a user
+   * override, or a branch that knows what the row is — and false only when it
+   * is the untouched fall-through default.
+   *
+   * It exists because `other` means two opposite things. A brokerage or a
+   * crypto on-ramp is mapped to `other` on purpose (that money moved, it was
+   * not spent), and so is a card settlement or a transfer between the user's
+   * own accounts. Those rows are understood. A row that merely failed every
+   * rule is not. The accuracy report treats an uncategorized row as a format
+   * it could not read, which made every eToro and Capital.com purchase look
+   * like a parser failure — 30-odd of them in one export.
+   */
+  categoryDeliberate?: boolean;
   raw: string;
 }
 
@@ -248,6 +262,13 @@ const DATE_RE = /\b(?:on|by|before|is)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i
 // "03/07/26 05:53" — a bare date WITH a time is the transaction timestamp and
 // beats any "statement due on <date>" footer later in the message.
 const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
+// HSBC opens every alert with the transaction date run together, no
+// separators: "From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from...".
+// Nothing else in the grammar could read it, so a quarter of the messages in
+// the first accuracy export carried no date at all and were filed on the day
+// they happened to be imported. Anchored to the bank's own prefix, because a
+// bare \d\d[A-Z]{3}\d\d would find that shape inside reference numbers.
+const HSBC_DATE_RE = /\bfrom\s+hsbc:\s*(\d{1,2})([A-Za-z]{3})(\d{2})\b/i;
 
 const ATM_RE = /\batm\b|cash\s+withdrawal|\bwithdrawn\b/i;
 const FEE_RE = /\bfees?\b|\bcharges?\s+(?:of|:)|service charge|\bvat\b|annual membership/i;
@@ -278,8 +299,14 @@ const TRAILING_PLACE_RE =
  * on a glued place ate the real last character of every truncated name:
  * "FRIENDS AVENUE CATERINDUBAI" came back as "Friends Avenue Cateri".
  */
+/**
+ * ...and RAK is split out because three letters glued to a name is not a
+ * place, it is the end of an Arabic word. AL MUBARAK came back as "Al Muba"
+ * and NEW BURAK as "New Bu". Ras Al Khaimah written out is long enough to be
+ * unambiguous either way.
+ */
 const PLACE_TAIL_RE =
-  /(?:[-\s]+[A-Za-z]?)?(?:DXB|DUBAI|ABU ?DHABI|SHARJAH|AJMAN|FUJAIRAH|UMM AL QUWAIN|AL AIN|RAK)$/i;
+  /(?:(?:[-\s]+[A-Za-z]?)?(?:DXB|DUBAI|ABU ?DHABI|SHARJAH|AJMAN|FUJAIRAH|UMM AL QUWAIN|AL AIN|RAS AL KHAIMAH?)|[-\s]+RAK)$/i;
 
 /**
  * Strips the noise an acquirer wraps around a merchant name.
@@ -302,8 +329,19 @@ function cleanDescriptor(name: string): string {
     .replace(/\s+G\.CO\/\S+(?:\s+[A-Za-z]{2,3})?$/i, '')
     .replace(TERMINAL_ID_RE, '') // "BLOOMFIELD TREAT-····5814"
     .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '') // "MUZZ LTD +····1111"
-    .replace(/[-\s]*\b(?:AE|ARE|UAE|BH|BHR|SA|KSA|US|USA|GB|IN)$/i, '')
     .trim();
+  // The acquirer's country field, when that is what it is. A country code
+  // follows a WHOLE word: in "TOYS R US" and "HOMES R US" the US is the shop's
+  // own name, and stripping it left "Toys R" — a name no override or merchant
+  // grouping could ever match, for a chain the category vocabulary already
+  // knows by its full name.
+  const country = out.match(/([-\s]*)\b(?:AE|ARE|UAE|BH|BHR|SA|KSA|US|USA|GB|IN)$/i);
+  if (country) {
+    const upTo = (country.index ?? 0) + country[1].length;
+    if (!/(?:^|[-\s])[A-Za-z][-\s]*$/.test(out.slice(0, upTo))) {
+      out = out.slice(0, country.index ?? 0).trim();
+    }
+  }
   // Peel repeatedly: "TGI FRIDAYS DUBADUBAI" carries two. Never peel a name
   // down to nothing — a shop really can be called Dubai something.
   let prev = '';
@@ -378,17 +416,32 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // truncate the descriptor to 20-22 characters, so several of these
   // deliberately match the stub the bank sends ("CATERIN", "GOVERNMEN",
   // "NATIONAL PAR") rather than the merchant's full legal name.
-  [/caribou|caffe\s*nero|\bpeets?\b|tgi\s*fridays?|\btgif\b|cinnabon|cravia|bakemart|manazil al sham|al bait al shami|qalat trablus|alfatayir|aldumashqi|raydan|sultan saray|koshari|cookie dealer|malfoof|flurya|little neighborhood|friends\s?avenue|friendsavenue|caterin|chocolala|rabbash|arwa cake|cake n more|roti bhai|al tarbouch|buffalo\s+(?:jumeira|mirdif|wings)|cheese\s?cake|widerange fish|25 hours f and b/i, 'dining'],
-  [/hyper\s?ramez|lavender al madina|mark and save|fresh good day|almed retail/i, 'groceries'],
+  [/caribou|caffe\s*nero|\bpeets?\b|tgi\s*fridays?|\btgif\b|cinnabon|cravia|bakemart|manazil al sham|al bait al shami|qalat trablus|alfatayir|aldumashqi|raydan|sultan saray|koshari|cookie dealer|malfoof|flurya|little neighborhood|friends\s?avenue|friendsavenue|caterin|chocolala|rabbash|arwa cake|cake n more|roti bhai|al tarbouch|buffalo\s+(?:jumeira|mirdif|wings)|cheese\s?cake|widerange fish|25 hours f and b|bloomfield treat|point seven|\bhutong\b|al baar wa al bahr/i, 'dining'],
+  // "TOPS-PATONG" is a branch of the Thai supermarket chain. Written with the
+  // branch attached because a bare `tops` is a clothing word.
+  [/hyper\s?ramez|lavender al madina|mark and save|fresh good day|almed retail|\btops-patong\b/i, 'groceries'],
   [/max fashion|\bmax\b(?!imum|\s*(?:limit|amount))|new yorker|lefties|la senza|victoria\s?s secret|\bkoton\b|ardene|lovisa|\blevis\b|\bcider\b|mumuso|whsmith|rivoli|malabar gold|l'?oreal|stradivarius|genzy trendz|nice style|honeylove|globale/i, 'shopping'],
-  [/alphamed|wellfit|pilates|\bwatsons?\b|oriana/i, 'health'],
+  [/alphamed|wellfit|pilates|\bwatsons?\b|oriana|al khabeer al awal/i, 'health'],
   [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b|valtrans|\bcar\s*par\b|golden bay car|yellow line car|smart green line car/i, 'transport'],
   [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|\bfresha\b|adobe|\bcanva\b|linkedin/i, 'entertainment'],
   [/\bunigaz\b/i, 'utilities'],
   [/carrefour|lulu|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
   [/talabat|deliveroo|zomato|noon food|careem food|eateasy|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
-  [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts/i, 'transport'],
-  [/dewa|sewa|fewa|addc|aadc|empower|lootah|tabreed|btu\b|chilled water|electricity|water|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder/i, 'utilities'],
+  // `metro` is bounded: unbounded it claimed METROPOLITAN HOTEL for transport
+  // ahead of the travel rule, and METROPOLIS CINEMA ahead of entertainment.
+  //
+  // The tail here is read off the second accuracy export. `motors` is plural
+  // on purpose — MOTOR CITY is a Dubai district, AL HABTOOR MOTORS is a car
+  // dealer. The `auto` forms are the acquirer's 22-character truncations of
+  // "AUTO SERVICE"/"AUTO AC" ("FARIQ AL AWAIEL AUTO S", "SHABAB AL KHAN AUTO
+  // AC"), so they are anchored to the word `auto` rather than left loose.
+  [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|\bprkn\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|\bmetro\b|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility/i, 'transport'],
+  // `water` is deliberately bounded and deliberately refuses "water park".
+  // Unbounded it read AQUAVENTURE WATERPARK, WILD WADI WATERPARK and SEAWATER
+  // SPA as utilities — and utilities unlocks the relaxed bill path in
+  // subscriptions.ts, so a day out could mint a permanent monthly bill. It
+  // also took Dubai's WATERFRONT MARKET, a fish market, off the groceries rule.
+  [/dewa|sewa|fewa|addc|aadc|empower|lootah|tabreed|btu\b|chilled water|electricity|\bwater\b(?!\s*park)|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder/i, 'utilities'],
   [/etisalat|\be&(?![a-z])|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
   [/rent|ejari|landlord/i, 'rent'],
   // Personal care and home services. Neither had a category, so a corpus full
@@ -401,19 +454,19 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // pickup were both filed as retail, which is why the gap did not show up as
   // "other" and went unnoticed. They are services, not purchases, and a limit
   // on Shopping should not move because someone had their hair cut.
-  [/urbanclap|urban ?clap|justlife|just ?life|helpling|matic services|home ?maids?|maids? ?in ?minutes|cleantizer|clentizer|\bfixat\b|servicemarket|service ?market|hitches ?(?:&|and) ?glitches/i, 'home-services'],
+  [/urbanclap|urban ?clap|justlife|just ?life|helpling|matic services|home ?maids?|maids? ?in ?minutes|cleantizer|clentizer|\bfixat\b|servicemarket|service ?market|hitches ?(?:&|and) ?glitches|\bserrurier\b|lock ?smith/i, 'home-services'],
   [/\bcleanin|\bcleaner|\blaundr|dry ?clean|\bironing\b|housekeep|house ?maid|maid ?service|pest ?control|handyman|\bplumb|\belectrician|\bac (?:service|repair|clean)|\bcarpent|\bmovers?\b|packers?(?: ?(?:&|and)? ?movers)?\b|deep ?clean|car ?wash/i, 'home-services'],
   [/fresha|\bglamb\b|\bnstyle\b|tips ?(?:&|and) ?toes|sisters? beauty|laura ?beauty|\bbeautyland\b|pastels? ?salon|\bzenora\b|the ?nail ?spa/i, 'personal-care'],
   [/\bsalo{1,2}n\b|\bbarber|\bspa\b|\bnails?\b|\bhair(?:cut|dress|\s?studio)|\bbeauty\b|\bgrooming\b|\bmassage\b|\bmani ?cure|\bpedi ?cure|\bwaxing\b|\bthreading\b|\btattoo\b|cosmetic ?(?:centre|center|clinic)/i, 'personal-care'],
-  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun ?& ?sand|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|house ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya/i, 'shopping'],
-  [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic/i, 'health'],
+  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun ?& ?sand|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?(?:&|and) ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|house ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b/i, 'shopping'],
+  [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insura\w*|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic/i, 'health'],
   [/school|university|college|tuition|academy|nursery|kindergarten|\bgems\b|taaleem|kumon|udemy|coursera|coursra|skillshare|training (?:center|centre)|institute/i, 'education'],
-  [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport companion|dayuse|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight/i, 'travel'],
+  [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport companion|dayuse|daypass|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight/i, 'travel'],
   [/playstation|\bpsn\b|xbox|steam|nintendo|app store|google play|itunes|apple\.com|you\s*tube|national park|cinema|vox\b|reel\b|novo\b|roxy\b|imax|netflix|spotify|anghami|shahid|osn\b|starz|game\b|gaming|arcade|bowling|magic planet|kidzania|global village|ferrari world|yas island|img world|wild wadi|aquaventure|dubai parks|adventure|entertainment|theme park|water ?park|playground|palyground|ball talent|openai|chat\s*gpt|anthropic|\bclaude\b|alldebrid|real-?debrid|getresponse|domain\.com|godaddy|namecheap|hostinger|\bhosting\b|museum|prison island|x ?strike|billiard|\bgolf\b|shooting|leisure|theentertainer|little fox|g2a\b|cdkeys|oculus|stadia|al futtaim cin|\bcin\b|bounce\b/i, 'entertainment'],
   [/donat|charity|zakat|sadaqah|dubai cares|red crescent|beit al khair|dar al ber|gofundme/i, 'charity'],
   // Developer and AI tooling billed per seat — a whole spending family the
   // vocabulary had no entry for, so every one of them landed in "other".
-  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr/i, 'entertainment'],
+  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|mailtrack|proton ?(?:vpn|mail)|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr/i, 'entertainment'],
   // Leisure venues and cinema distributors. Deliberately no district names
   // here — "City Walk" appears in the descriptor of every shop and cafe in
   // it, and matching it sent a coffee roastery to entertainment.
@@ -442,22 +495,64 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/\bsaydal\w*|\bsaidal\w*|\bsydal\w*/i, 'health'],
   // AliPay / WeChat descriptors are marketplace purchases.
   [/\balp\*|weixin\*|taobao|otherretail|guangdong|personalservices/i, 'shopping'],
-  // Brokerages and crypto on-ramps are moving money, not spending it.
-  [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity/i, 'other'],
+  // Brokerages, crypto on-ramps and savings schemes are moving money, not
+  // spending it. This rule RESOLVES to `other` — it is not the fall-through —
+  // which is why `categoryDeliberate` exists: the accuracy report was calling
+  // every one of these an unread format.
+  [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds/i, 'other'],
   // Government sits AFTER transport/utilities so traffic fines, RTA and SEWA
   // keep their more specific buckets.
   [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco|\bded\b|governmen|muncipal/i, 'government'],
   [/salary|payroll|wages/i, 'salary'],
   // Structural fallbacks — what the merchant IS, when no brand matched.
   // These sit last so brand rules always win.
-  [/hypermarket|supermarket|superm\w*|hyperm\w*|mini ?mart?\b|\bmart\b|grocer|baqala|coop\b|co-?op|vegetables|\bfruits?\b|butcher|fish market|meat\b|roastery|adnoc oasis|zoom\b|7-?11|7-?eleven|circle k|last chance|day to day|gala\b|west zone|foodstuff|tawfeer|tawpeek|vending|\bmarket\b|\bsupe\w*\b|sprmkt|spmkt|\bsprm\b|\bsmkt\b|now ?now|\bviva\b|smart seven|mazraat|janata|aswaaq|plus point|\bspices?\b|\bdates? (?:llc|tr|trading)\b|\bgro\b|\bgroc\b|\bhymkt\b|hypermkt|\bfoodstuff|nuts? (?:tr|llc)\b|\bbakala|dairy|\bmeats?\b/i, 'groceries'],
+  // `7-11` is anchored on BOTH sides. Unanchored it matched the digits of a
+  // card number — "Card No XXXX4711" contains "711" — so every purchase on
+  // that card that matched nothing else was filed as groceries. Four cards in
+  // the two accuracy exports end in a number containing 711.
+  [/hypermarket|supermarket|superm\w*|hyperm\w*|mini ?mart?\b|\bmart\b|grocer|baqala|coop\b|co-?op|vegetables|\bfruits?\b|butcher|fish market|meat\b|roastery|adnoc oasis|zoom\b|\b7-?11\b|\b7-?eleven\b|circle k|last chance|day to day|gala\b|west zone|foodstuff|tawfeer|tawpeek|vending|\bmarket\b|\bsupe\w*\b|sprmkt|spmkt|\bsprm\b|\bsmkt\b|now ?now|\bviva\b|smart seven|mazraat|janata|aswaaq|plus point|\bspices?\b|\bdates? (?:llc|tr|trading)\b|\bgro\b|\bgroc\b|\bhymkt\b|hypermkt|\bfoodstuff|nuts? (?:tr|llc)\b|\bbakala|dairy|\bmeats?\b/i, 'groceries'],
   [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b/i, 'dining'],
   // "Centre" sits here, in the structural fallbacks, rather than with the
   // brands: a medical centre is health and a car centre is transport, and both
   // of those rules run earlier. By the time anything reaches this line, the
   // only centres left are the retail kind.
-  [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments|textile|readymade|footwear|shoes|optical shop|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b/i, 'shopping'],
+  [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments?|textile|ready ?made|footwear|shoes|optical shop|furniture|\bretail\b|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b/i, 'shopping'],
 ];
+
+/**
+ * The category AND whether anything actually decided it.
+ *
+ * `deliberate` is false in exactly one case: nothing matched and the answer is
+ * the fall-through `other`. Every other answer — an override, the income
+ * rules, a vocabulary rule that resolves to `other` on purpose — is a decision
+ * the parser stands behind, and callers need to tell the two apart.
+ */
+function categoryOf(
+  text: string,
+  type: TransactionType,
+  overrides?: Record<string, CategoryId>,
+  merchant?: string,
+): { id: CategoryId; deliberate: boolean } {
+  if (overrides && merchant) {
+    const hit = overrides[merchant.trim().toLowerCase()];
+    if (hit) return { id: hit, deliberate: true };
+  }
+  // Money coming IN is never dining/groceries/etc — a Talabat payout is
+  // business revenue, not food spending. Refunds, cashback, and bank
+  // interest/profit are offsets, not revenue, so they stay out of Business.
+  if (type === 'income') {
+    if (/salary|payroll|wages/i.test(text)) return { id: 'salary', deliberate: true };
+    if (/refund|reversal|cashback|\binterest\b|\bprofit\b/i.test(text)) {
+      return { id: 'other', deliberate: true };
+    }
+    return { id: 'business', deliberate: true };
+  }
+  // Market-local vocabulary wins over the global baseline.
+  for (const [re, cat] of [...getActiveMarket().keywords, ...CATEGORY_KEYWORDS]) {
+    if (re.test(text)) return { id: cat, deliberate: true };
+  }
+  return { id: 'other', deliberate: false };
+}
 
 export function guessCategory(
   text: string,
@@ -465,23 +560,7 @@ export function guessCategory(
   overrides?: Record<string, CategoryId>,
   merchant?: string,
 ): CategoryId {
-  if (overrides && merchant) {
-    const hit = overrides[merchant.trim().toLowerCase()];
-    if (hit) return hit;
-  }
-  // Money coming IN is never dining/groceries/etc — a Talabat payout is
-  // business revenue, not food spending. Refunds, cashback, and bank
-  // interest/profit are offsets, not revenue, so they stay out of Business.
-  if (type === 'income') {
-    if (/salary|payroll|wages/i.test(text)) return 'salary';
-    if (/refund|reversal|cashback|\binterest\b|\bprofit\b/i.test(text)) return 'other';
-    return 'business';
-  }
-  // Market-local vocabulary wins over the global baseline.
-  for (const [re, cat] of [...getActiveMarket().keywords, ...CATEGORY_KEYWORDS]) {
-    if (re.test(text)) return cat;
-  }
-  return 'other';
+  return categoryOf(text, type, overrides, merchant).id;
 }
 
 /**
@@ -869,6 +948,11 @@ function extractDate(raw: string): string | null {
     const iso = numericDate(withTime[1], withTime[2], withTime[3]);
     if (iso) return iso;
   }
+  const hsbc = raw.match(HSBC_DATE_RE);
+  if (hsbc) {
+    const iso = namedDate(hsbc[2], hsbc[1], String(2000 + Number(hsbc[3])));
+    if (iso) return iso;
+  }
   const numeric = raw.match(DATE_RE);
   if (numeric) {
     const iso = numericDate(numeric[1], numeric[2], numeric[3]);
@@ -946,6 +1030,7 @@ export function parseSms(
       snapshotFils: null,
       snapshotKind: null,
       categoryGuess: 'transport',
+      categoryDeliberate: true,
       raw,
     };
   }
@@ -978,6 +1063,7 @@ export function parseSms(
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
+      categoryDeliberate: true,
       raw,
     };
   }
@@ -1003,6 +1089,7 @@ export function parseSms(
         snapshotFils,
         snapshotKind,
         categoryGuess: 'other',
+        categoryDeliberate: true,
         raw,
       };
     }
@@ -1042,6 +1129,7 @@ export function parseSms(
       categoryGuess: guessCategory(payee, 'expense', overrides, merchant) === 'other'
         ? 'utilities'
         : guessCategory(payee, 'expense', overrides, merchant),
+      categoryDeliberate: true,
       raw,
     };
   }
@@ -1066,7 +1154,8 @@ export function parseSms(
   if (billerRef && !BANK_NOUN_RE.test(billerRef[1].trim())) {
     const payee = billerRef[1].trim();
     const named = normalizeServiceName(payee);
-    const category = guessCategory(payee, 'expense', overrides, named ?? titleCase(payee));
+    const cat = categoryOf(payee, 'expense', overrides, named ?? titleCase(payee));
+    const category = cat.id;
     const amountFils = category === 'other' && !named ? null : amountWithFx(raw, false);
     if (amountFils) {
       const merchant = named ?? titleCase(payee);
@@ -1083,6 +1172,8 @@ export function parseSms(
         snapshotFils,
         snapshotKind,
         categoryGuess: category,
+        // A recognized biller reached here; its category came from a rule.
+        categoryDeliberate: cat.deliberate,
         raw,
       };
     }
@@ -1102,6 +1193,7 @@ export function parseSms(
     // label the row with its leading digits.
     const last4 = portalPay[1].slice(-4);
     const amountFils = Math.round(Number(portalPay[2].replace(/,/g, '')) * 100);
+    const portalCat = categoryOf(raw, 'expense', overrides, `Payment to •${last4}`);
     if (amountFils > 0) {
       return {
         kind: 'transaction',
@@ -1115,7 +1207,10 @@ export function parseSms(
         transferHint: false,
         snapshotFils,
         snapshotKind,
-        categoryGuess: guessCategory(raw, 'expense', overrides, `Payment to \u2022${last4}`),
+        categoryGuess: portalCat.id,
+        // The row IS understood \u2014 a settled bill on a named account \u2014 even
+        // when the payment channel says nothing about what the bill was for.
+        categoryDeliberate: true,
         raw,
       };
     }
@@ -1139,6 +1234,7 @@ export function parseSms(
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
+      categoryDeliberate: true,
       raw,
     };
   }
@@ -1164,6 +1260,7 @@ export function parseSms(
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
+      categoryDeliberate: true,
       raw,
     };
   }
@@ -1198,6 +1295,7 @@ export function parseSms(
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
+      categoryDeliberate: true,
       raw,
     };
   }
@@ -1215,7 +1313,12 @@ export function parseSms(
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
   if (!hasDebit && !hasCredit && !isBillDue) return null;
 
-  const amountFils = amountWithFx(raw, isBillDue);
+  // No balance fallback here. On a bill reminder the fallback could only ever
+  // return a figure the message introduced as a BALANCE or a LIMIT, and a
+  // reminder carrying a balance-sized amount is exactly the garbage the
+  // carrier-billing guard above was added to stop. Nothing in the corpus needs
+  // it; refusing the message is the honest answer.
+  const amountFils = amountWithFx(raw, false);
   if (!amountFils) return null;
 
   // A refund reverses spending: money coming back IN, whatever verbs the
@@ -1396,6 +1499,14 @@ export function parseSms(
     transferHint = true;
   }
 
+  const cat = categoryOf(raw, type, overrides, merchant);
+  // A row the parser named STRUCTURALLY — a savings sweep, "Transfer to Khalid
+  // Rashid", a bank transfer — is understood even though no spending category
+  // applies to it. Money moving between places has no category, and reporting
+  // one of these as an unread format is what buried the real misses.
+  const structural =
+    structuralMerchant || transferHint || STRUCTURAL_TITLES.has(merchant);
+
   return {
     kind: isBillDue ? 'billDue' : 'transaction',
     type,
@@ -1408,7 +1519,8 @@ export function parseSms(
     transferHint,
     snapshotFils,
     snapshotKind,
-    categoryGuess: guessCategory(raw, type, overrides, merchant),
+    categoryGuess: cat.id,
+    categoryDeliberate: cat.deliberate || structural,
     raw,
   };
 }

@@ -309,11 +309,17 @@ export function buildImportPlan(
     // Low-confidence rows keep their source text so the user can report
     // unrecognized bank formats from Settings → Improve accuracy.
     // Structurally-understood rows (ATM, VAT, transfers...) stay out.
+    // `categoryDeliberate` is the difference between "other" as an answer and
+    // "other" as a shrug. Brokerages and crypto on-ramps are mapped to other on
+    // purpose; without this the report asked the user to send in formats the
+    // parser reads perfectly, which is most of what a 177-entry export was.
     const lowConfidence =
       !p.transferHint &&
       p.type === 'expense' &&
       (p.merchant === 'Card purchase' ||
-        (p.categoryGuess === 'other' && !STRUCTURAL_TITLES.has(p.merchant)));
+        (p.categoryGuess === 'other' &&
+          !p.categoryDeliberate &&
+          !STRUCTURAL_TITLES.has(p.merchant)));
     transactions.push({
       type: p.type,
       amountFils: p.amountFils,
