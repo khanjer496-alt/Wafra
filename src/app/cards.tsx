@@ -13,6 +13,7 @@ import { AmountField, Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
 import { t } from '@/lib/i18n';
@@ -63,7 +64,7 @@ export default function CardsScreen() {
     const key = monthKey(now);
     const map = new Map<string, number>();
     for (const tx of state.transactions) {
-      if (tx.type !== 'expense' || tx.isTransfer || monthKey(tx.date) !== key) continue;
+      if (!isSpending(tx) || monthKey(tx.date) !== key) continue;
       map.set(tx.accountId, (map.get(tx.accountId) ?? 0) + tx.amountFils);
     }
     return map;

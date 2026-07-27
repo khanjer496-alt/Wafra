@@ -35,6 +35,7 @@ import {
   monthLabel,
   shiftMonthKey,
 } from '@/lib/format';
+import { liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -61,9 +62,11 @@ export default function FlowScreen() {
   const key = period.mode === 'month' ? period.key : monthKey(now);
   const live = isCurrentMonth(period, now);
 
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period),
-    [state.transactions, period],
+    () => summarizeMonth(state.transactions, period, liveAccounts),
+    [state.transactions, period, liveAccounts],
   );
 
   const insights = useMemo(
@@ -93,10 +96,10 @@ export default function FlowScreen() {
       state.budgets
         .map((b) => ({
           budget: b,
-          spent: spentInMonthForCategory(state.transactions, key, b.category),
+          spent: spentInMonthForCategory(state.transactions, key, b.category, liveAccounts),
         }))
         .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils),
-    [state.budgets, state.transactions, key],
+    [state.budgets, state.transactions, key, liveAccounts],
   );
 
   const totalLimit = limits.reduce((s, r) => s + r.budget.limitFils, 0);
@@ -121,7 +124,7 @@ export default function FlowScreen() {
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const k = shiftMonthKey(key, -i);
-      const s = summarizeMonth(state.transactions, k);
+      const s = summarizeMonth(state.transactions, k, liveAccounts);
       months.push({
         key: k,
         label: monthLabel(k, true).split(' ')[0],
@@ -130,7 +133,7 @@ export default function FlowScreen() {
       });
     }
     return months;
-  }, [state.transactions, key]);
+  }, [state.transactions, key, liveAccounts]);
 
   const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
   // What the six months averaged, in minus out. The header figure the chart is

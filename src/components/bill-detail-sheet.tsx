@@ -9,6 +9,7 @@ import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { CategoryTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
+import { isSpending } from '@/lib/ledger';
 import { getCategory } from '@/lib/categories';
 import { formatAmount, monthKey, monthLabel, shiftMonthKey, shortDate } from '@/lib/format';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
@@ -43,7 +44,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
     const history = months.map((m) => {
       let fils = 0;
       for (const t of state.transactions) {
-        if (t.type !== 'expense' || t.isTransfer) continue;
+        if (!isSpending(t)) continue;
         if (t.title.trim().toLowerCase() !== key) continue;
         if (monthKey(t.date) !== m) continue;
         fils += t.amountFils;

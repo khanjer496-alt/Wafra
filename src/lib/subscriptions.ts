@@ -1,4 +1,5 @@
 import { toISODate } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import type { CategoryId, Transaction } from '@/lib/types';
 
 export type Cadence = 'weekly' | 'monthly' | 'yearly';
@@ -85,7 +86,7 @@ export function detectSubscriptions(
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer) continue;
+    if (!isSpending(t)) continue;
     const k = t.title.trim().toLowerCase();
     if (!k || dismissed.has(k)) continue;
     const list = groups.get(k) ?? [];

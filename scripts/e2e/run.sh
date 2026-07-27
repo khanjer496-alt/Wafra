@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Exports the app for web, serves it, and runs both browser suites against it.
+#
+# These existed for a while and ran only when somebody remembered to. That is
+# the same "nothing checks it" problem the rest of the audit is about, one
+# level up: the suites that catch dead routes and broken screens were not
+# themselves wired to anything.
+set -e
+cd "$(dirname "$0")/../.."
+
+PORT="${E2E_PORT:-8126}"
+OUT="${E2E_DIST:-dist}"
+
+echo "→ exporting web build to $OUT"
+npx expo export --platform web --output-dir "$OUT" >/dev/null
+
+echo "→ serving $OUT on :$PORT"
+npx serve -s "$OUT" -l "$PORT" >/dev/null 2>&1 &
+SERVER=$!
+trap 'kill $SERVER 2>/dev/null || true' EXIT
+
+# Wait for the server rather than sleeping a fixed amount: on a cold CI runner
+# the export is slow and a fixed sleep is either flaky or wasted time.
+for _ in $(seq 1 60); do
+  if curl -sf "http://localhost:$PORT" >/dev/null; then break; fi
+  sleep 1
+done
+curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; exit 1; }
+
+node scripts/e2e/e2e-smoke.mjs
+node scripts/e2e/e2e-period.mjs

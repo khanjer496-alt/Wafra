@@ -1316,5 +1316,57 @@ ok('stale: a stale statement that gets paid leaves openDues',
     bodyPrint('Purchase of AED 77.00\n  at OPENAI  ') === bodyPrint('Purchase of AED 77.00 at OPENAI'));
 }
 
+// ── one definition of spending ──
+//
+// This was written four ways across six files. They agreed by luck, and one
+// of them did not: archiving an account took its balance off Wallet and its
+// history out of net worth, while its spending went on counting on Home, in
+// Flow's categories, and against budgets. Hiding a card half-hid it.
+{
+  const ledger = require('./build/ledger');
+  const ins = require('./build/insights');
+
+  const accounts = [
+    { id: 'live', name: 'FAB', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'gone', name: 'Old card', kind: 'card', openingFils: 0, color: '#000', archived: true },
+  ];
+  const live = ledger.liveAccountIds(accounts);
+  ok('ledger: an archived account is not live', live.has('live') && !live.has('gone'));
+
+  const tx = (over) => ({
+    id: 'x', type: 'expense', amountFils: 10000, category: 'dining',
+    accountId: 'live', title: 'Shop', date: '2026-07-10', source: 'sms', ...over,
+  });
+
+  ok('ledger: an ordinary purchase is spending', ledger.isSpending(tx(), live));
+  ok('ledger: a transfer is not spending', !ledger.isSpending(tx({ isTransfer: true }), live));
+  ok('ledger: income is not spending', !ledger.isSpending(tx({ type: 'income' }), live));
+  ok('ledger: a hidden account spends nothing', !ledger.isSpending(tx({ accountId: 'gone' }), live));
+  ok('ledger: without an account list, the transfer rule still applies',
+    ledger.isSpending(tx({ accountId: 'gone' })) && !ledger.isSpending(tx({ isTransfer: true })));
+
+  // The one thing that must NOT be filtered away as "just a transfer" —
+  // card settlement is built on finding it.
+  ok('ledger: the inbound leg of a transfer is findable',
+    ledger.isInboundTransfer(tx({ type: 'income', isTransfer: true })) &&
+      !ledger.isInboundTransfer(tx({ isTransfer: true })));
+
+  // And the screens agree, because they ask the same function.
+  const rows = [
+    tx({ id: 'a', amountFils: 10000 }),
+    tx({ id: 'b', amountFils: 25000, accountId: 'gone' }),
+    tx({ id: 'c', amountFils: 5000, isTransfer: true }),
+    tx({ id: 'd', type: 'income', amountFils: 900000, category: 'salary' }),
+  ];
+  const period = { mode: 'month', key: '2026-07' };
+  const all = ins.summarizeMonth(rows, period);
+  const shown = ins.summarizeMonth(rows, period, live);
+  ok('ledger: the hidden account was counted before', all.expenseFils === 35000, String(all.expenseFils));
+  ok('ledger: and is not counted now', shown.expenseFils === 10000, String(shown.expenseFils));
+  ok('ledger: income skips transfers either way', shown.incomeFils === 900000, String(shown.incomeFils));
+  ok('ledger: a category total agrees with the summary',
+    ins.spentInMonthForCategory(rows, period, 'dining', live) === shown.expenseFils);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

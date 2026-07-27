@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/icon';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { isSpending } from '@/lib/ledger';
 import { EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
@@ -77,7 +78,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (!picked) return [];
     const map = new Map<string, { title: string; totalFils: number; count: number }>();
     for (const t of state.transactions) {
-      if (t.type !== 'expense' || t.isTransfer) continue;
+      if (!isSpending(t)) continue;
       if (t.category !== picked || !inPeriod(t.date, key)) continue;
       const k = t.title.trim().toLowerCase();
       const cur = map.get(k);

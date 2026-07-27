@@ -1,4 +1,5 @@
 import { getCategory } from '@/lib/categories';
+import { isIncome, isSpending } from '@/lib/ledger';
 import { formatAED, totalAsShown } from '@/lib/format';
 import {
   elapsedDays,
@@ -76,17 +77,22 @@ export function composition(
   return { slices: head, totalFils: totalAsShown(head.map((h) => h.totalFils)) };
 }
 
-export function summarizeMonth(transactions: Transaction[], period: PeriodLike): MonthSummary {
+export function summarizeMonth(
+  transactions: Transaction[],
+  period: PeriodLike,
+  live?: Set<string>,
+): MonthSummary {
   let incomeFils = 0;
   let expenseFils = 0;
   const catTotals = new Map<CategoryId, number>();
 
   for (const t of transactions) {
-    if (t.isTransfer) continue; // card payments move money, they aren't income/spending
     if (!inPeriod(t.date, period)) continue;
-    if (t.type === 'income') {
+    // One definition of spending and income, shared with every other screen
+    // that adds money up. See ledger.ts for what these exclude and why.
+    if (isIncome(t, live)) {
       incomeFils += t.amountFils;
-    } else {
+    } else if (isSpending(t, live)) {
       expenseFils += t.amountFils;
       catTotals.set(t.category, (catTotals.get(t.category) ?? 0) + t.amountFils);
     }
@@ -107,11 +113,11 @@ export function spentInMonthForCategory(
   transactions: Transaction[],
   period: PeriodLike,
   category: CategoryId,
+  live?: Set<string>,
 ): number {
   let total = 0;
   for (const t of transactions) {
-    if (t.isTransfer) continue;
-    if (t.type === 'expense' && t.category === category && inPeriod(t.date, period)) {
+    if (t.category === category && inPeriod(t.date, period) && isSpending(t, live)) {
       total += t.amountFils;
     }
   }

@@ -23,6 +23,7 @@ import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { isSpending } from '@/lib/ledger';
 import { t } from '@/lib/i18n';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues } from '@/lib/cards';
@@ -142,7 +143,7 @@ export default function WalletScreen() {
     const key = monthKey(now);
     const map = new Map<string, number>();
     for (const t of state.transactions) {
-      if (t.type !== 'expense' || t.isTransfer || monthKey(t.date) !== key) continue;
+      if (!isSpending(t) || monthKey(t.date) !== key) continue;
       map.set(t.accountId, (map.get(t.accountId) ?? 0) + t.amountFils);
     }
     return map;

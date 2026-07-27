@@ -1,4 +1,5 @@
 import { monthKey, shiftMonthKey } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import { inPeriod, previousPeriod, toPeriod, type PeriodLike } from '@/lib/period';
 import type { AppState, CategoryId, Transaction } from '@/lib/types';
 
@@ -10,10 +11,15 @@ export interface MerchantStat {
 }
 
 /** Top merchants by spend within a month. */
-export function topMerchants(transactions: Transaction[], period: PeriodLike, limit = 5): MerchantStat[] {
+export function topMerchants(
+  transactions: Transaction[],
+  period: PeriodLike,
+  limit = 5,
+  live?: Set<string>,
+): MerchantStat[] {
   const map = new Map<string, MerchantStat>();
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer || !inPeriod(t.date, period)) continue;
+    if (!isSpending(t, live) || !inPeriod(t.date, period)) continue;
     const k = t.title.trim().toLowerCase();
     const cur = map.get(k);
     if (cur) {
@@ -34,14 +40,19 @@ export interface CategoryMover {
 }
 
 /** Categories with the biggest spend change vs the previous month. */
-export function categoryMovers(transactions: Transaction[], periodLike: PeriodLike, limit = 4): CategoryMover[] {
+export function categoryMovers(
+  transactions: Transaction[],
+  periodLike: PeriodLike,
+  limit = 4,
+  live?: Set<string>,
+): CategoryMover[] {
   const period = toPeriod(periodLike);
   const prevPeriod = previousPeriod(period);
   if (!prevPeriod) return []; // 'all time' has nothing to compare against
   const cur = new Map<CategoryId, number>();
   const prev = new Map<CategoryId, number>();
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer) continue;
+    if (!isSpending(t, live)) continue;
     if (inPeriod(t.date, period)) cur.set(t.category, (cur.get(t.category) ?? 0) + t.amountFils);
     else if (inPeriod(t.date, prevPeriod)) prev.set(t.category, (prev.get(t.category) ?? 0) + t.amountFils);
   }
@@ -59,10 +70,14 @@ export function categoryMovers(transactions: Transaction[], periodLike: PeriodLi
 }
 
 /** Spend per weekday (0 = Sunday … 6 = Saturday) within a month. */
-export function dayOfWeekSpend(transactions: Transaction[], period: PeriodLike): number[] {
+export function dayOfWeekSpend(
+  transactions: Transaction[],
+  period: PeriodLike,
+  live?: Set<string>,
+): number[] {
   const buckets = new Array(7).fill(0);
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer || !inPeriod(t.date, period)) continue;
+    if (!isSpending(t, live) || !inPeriod(t.date, period)) continue;
     const day = new Date(`${t.date}T12:00:00`).getDay();
     buckets[day] += t.amountFils;
   }

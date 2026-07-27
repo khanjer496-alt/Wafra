@@ -1,4 +1,5 @@
 import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import type { Bill, Transaction } from '@/lib/types';
 
 /**
@@ -47,7 +48,7 @@ function paidByTransaction(bill: Bill, transactions: Transaction[], key: string)
   const billTitle = normalize(bill.title);
   if (!billTitle) return false;
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer || monthKey(t.date) !== key) continue;
+    if (!isSpending(t) || monthKey(t.date) !== key) continue;
     if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
     const txTitle = normalize(t.title);
     // Every string contains "", so a title that normalizes to nothing (a row

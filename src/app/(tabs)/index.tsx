@@ -47,6 +47,7 @@ import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { committed } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
+import { liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
@@ -324,9 +325,14 @@ export default function HomeScreen() {
     [state.cardDues, router],
   );
 
+  // Archiving an account used to remove its balance from Wallet and its
+  // history from net worth, while its spending went on counting here. Hiding
+  // a card now hides what it spent too.
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period),
-    [state.transactions, period],
+    () => summarizeMonth(state.transactions, period, liveAccounts),
+    [state.transactions, period, liveAccounts],
   );
 
   // One insight, not five. The rest are on Flow.
