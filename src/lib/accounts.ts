@@ -69,3 +69,61 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
     ),
   };
 }
+
+/**
+ * Fold a reissued card's predecessor into it, on the user's say-so.
+ *
+ * The survivor is the NEW number, because that is the card in their wallet
+ * and the one the next statement will name. The old row's history moves
+ * across, so the payments made under the old digits and the statement issued
+ * under the new ones finally sit on the same card — which is the whole point:
+ * until they do, the due can never be settled by any payment.
+ *
+ * Deliberately separate from `mergeDuplicateAccounts`. That one collapses
+ * rows the app is CERTAIN describe one card (same bank, same digits) and runs
+ * unattended on every load. This one acts on a guess the user confirmed, and
+ * must never run by itself.
+ */
+export function mergeRenewedCard(state: AppState, oldId: string, newId: string): AppState {
+  const older = state.accounts.find((a) => a.id === oldId);
+  const newer = state.accounts.find((a) => a.id === newId);
+  if (!older || !newer || oldId === newId) return state;
+
+  const to = (id: string) => (id === oldId ? newId : id);
+  return {
+    ...state,
+    accounts: state.accounts
+      .filter((a) => a.id !== oldId)
+      .map((a) =>
+        a.id === newId
+          ? {
+              ...a,
+              renewedFrom: oldId,
+              // Keep whatever the older row knew that the new one does not:
+              // the bank name comes from an SMS sender, and a brand-new card
+              // may not have had one yet.
+              bankName: a.bankName ?? older.bankName,
+              openingFils: a.openingFils + older.openingFils,
+              creditLimitFils: a.creditLimitFils ?? older.creditLimitFils,
+            }
+          : a,
+      ),
+    transactions: state.transactions.map((t) =>
+      t.accountId === oldId ? { ...t, accountId: newId } : t,
+    ),
+    cardDues: state.cardDues.map((d) => (d.accountId === oldId ? { ...d, accountId: newId } : d)),
+    accountHints: Object.fromEntries(
+      Object.entries(state.accountHints).map(([last4, id]) => [last4, to(id)]),
+    ),
+  };
+}
+
+/** Record that these two are NOT the same card, so the app stops asking. */
+export function markCardsDistinct(state: AppState, accountId: string): AppState {
+  return {
+    ...state,
+    accounts: state.accounts.map((a) =>
+      a.id === accountId ? { ...a, renewedFrom: a.id } : a,
+    ),
+  };
+}

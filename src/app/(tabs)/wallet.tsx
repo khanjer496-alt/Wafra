@@ -26,7 +26,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
 import { t } from '@/lib/i18n';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { isInactiveAccount, openDues } from '@/lib/cards';
+import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { tapped } from '@/lib/haptics';
 import { netWorthSeries } from '@/lib/analytics';
 import {
   cardTitle,
@@ -71,8 +72,18 @@ export default function WalletScreen() {
   const theme = useTheme();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
-  const { state, addAccount, editAccount, deleteAccount, payCardDue, addGoal, editGoal, deleteGoal } =
-    useStore();
+  const {
+    state,
+    addAccount,
+    editAccount,
+    deleteAccount,
+    payCardDue,
+    addGoal,
+    editGoal,
+    deleteGoal,
+    mergeRenewedCard,
+    markCardsDistinct,
+  } = useStore();
 
   const now = useMemo(() => new Date(), []);
   const todayISO = toISODate(now);
@@ -108,6 +119,7 @@ export default function WalletScreen() {
     return { fils: last.fils - first.fils, since: monthLabel(first.key, true) };
   }, [state]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  const reissues = useMemo(() => reissueSuggestions(state, now), [state, now]);
   // Totalled AS SHOWN, because this figure is printed directly above the
   // rows it covers. Summing the exact fils and rounding once gives a heading
   // that can differ from its own list by a dirham — the same defect that put
@@ -385,6 +397,53 @@ export default function WalletScreen() {
                 right={t('seeAll')}
                 onPressRight={() => router.push('/cards')}
               />
+              {/* A card that has a statement but has never been spent on is
+                  almost certainly a reissue: the bank kept the account and
+                  changed the digits, so the history is on the old number and
+                  the bill arrived on the new one. Offered, never done — a
+                  brand-new card looks identical, and merging two real cards
+                  is a corruption the user cannot see. */}
+              {reissues.map((r) => {
+                const fresh = state.accounts.find((a) => a.id === r.newAccountId);
+                const prior = state.accounts.find((a) => a.id === r.candidateIds[0]);
+                if (!fresh || !prior) return null;
+                return (
+                  <View
+                    key={r.newAccountId}
+                    style={[styles.reissue, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+                    <ThemedText type="small">Same card, renewed?</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {`•${fresh.last4} has a statement but nothing spent on it. Is it ${prior.name} with new digits? Linking moves the history across so your payments settle the bill.`}
+                    </ThemedText>
+                    <View style={styles.reissueActions}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Link ${prior.last4} to ${fresh.last4}`}
+                        onPress={() => {
+                          tapped();
+                          mergeRenewedCard(prior.id, fresh.id);
+                        }}
+                        style={[styles.reissueBtn, { backgroundColor: theme.primary }]}>
+                        <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                          {`Yes · same as •${prior.last4}`}
+                        </ThemedText>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Keep ${fresh.last4} separate`}
+                        onPress={() => {
+                          tapped();
+                          markCardsDistinct(fresh.id);
+                        }}
+                        style={[styles.reissueBtn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
+                        <ThemedText type="nano" themeColor="textSecondary">
+                          Different card
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
               <View>
                 {cards.map((account, i) => {
                   const isCredit = account.cardType === 'credit';
@@ -788,6 +847,23 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
+  reissue: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.tile,
+    padding: Spacing.three,
+    gap: Spacing.two - 2,
+    marginBottom: Spacing.two,
+  },
+  reissueActions: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    paddingTop: Spacing.two - 2,
+  },
+  reissueBtn: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two - 2,
+    borderRadius: Radius.full,
+  },
   root: {
     flex: 1,
     alignItems: 'center',

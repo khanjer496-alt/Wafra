@@ -431,3 +431,63 @@ export function colorForHint(last4: string): string {
 
 /** Bank identity from an SMS sender ID, per the active market pack. */
 export { bankFromSender } from '@/lib/markets';
+
+/**
+ * A card that was reissued, and the card it is probably a reissue OF.
+ *
+ * When a UAE bank renews a credit card the account survives and the last four
+ * digits change. The app has no notion of that, so the two halves of one card
+ * sit as two rows and never meet: the OLD number holds every purchase and
+ * payment ever made, and the NEW number holds the statement — because the
+ * card is new, so nothing has been spent on it yet.
+ *
+ * That split is why a statement stays open forever. The due is on a row no
+ * payment will ever land on, and the payments are on a row with no due.
+ *
+ * The signal is simpler than any date arithmetic: a credit-card row that has
+ * a STATEMENT but NO TRANSACTIONS AT ALL. Nobody receives a bill for a card
+ * they have never spent on. The exception is a card genuinely just opened,
+ * which looks identical — which is exactly why this SUGGESTS and never acts.
+ * Merging two real cards corrupts the ledger in a way the user cannot see.
+ */
+export interface ReissueSuggestion {
+  /** The row holding the statement and nothing else. */
+  newAccountId: string;
+  /** The row holding the history, best candidate first. */
+  candidateIds: string[];
+}
+
+export function reissueSuggestions(state: AppState, today: Date): ReissueSuggestion[] {
+  const txCount = new Map<string, number>();
+  for (const t of state.transactions) {
+    txCount.set(t.accountId, (txCount.get(t.accountId) ?? 0) + 1);
+  }
+  const hasOpenDue = new Set(openDues(state, today).map((d) => d.due.accountId));
+
+  const out: ReissueSuggestion[] = [];
+  for (const a of state.accounts) {
+    if (a.cardType !== 'credit' || a.archived) continue;
+    // Already answered — the user linked it, or said these are different.
+    if (a.renewedFrom) continue;
+    if (!hasOpenDue.has(a.id) || (txCount.get(a.id) ?? 0) > 0) continue;
+
+    const candidates = state.accounts
+      .filter(
+        (b) =>
+          b.id !== a.id &&
+          b.cardType === 'credit' &&
+          !b.archived &&
+          // Same bank, or an unknown bank on one side — a hand-added row has
+          // no bank name because only the SMS sender teaches the app one.
+          (!a.bankName || !b.bankName || a.bankName === b.bankName) &&
+          (txCount.get(b.id) ?? 0) > 0,
+      )
+      // Most recently used first: a card renewed last month is a likelier
+      // predecessor than one silent since 2023.
+      .sort((x, y) => (accountLastActivityISO(state, y.id) ?? '').localeCompare(accountLastActivityISO(state, x.id) ?? ''))
+      .map((b) => b.id);
+
+    if (candidates.length > 0) out.push({ newAccountId: a.id, candidateIds: candidates });
+  }
+  return out;
+}

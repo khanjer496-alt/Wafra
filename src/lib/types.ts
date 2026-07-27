@@ -54,6 +54,16 @@ export interface Account {
   snapshotTs?: number;
   /** Hidden from lists (expired/unused card). Data stays; a new charge keeps it hidden until unhidden. */
   archived?: boolean;
+  /**
+   * The account id this card replaced, when the bank reissued it with new
+   * digits. Set once the user confirms the link, so the app stops asking and
+   * can still show where the history came from.
+   *
+   * Also set to the row's OWN id to mean "asked and answered — these are
+   * different cards", which is the only way to stop offering a merge the
+   * user has already declined.
+   */
+  renewedFrom?: string;
 }
 
 export interface Transaction {

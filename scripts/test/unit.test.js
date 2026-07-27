@@ -1770,5 +1770,93 @@ ok('stale: a stale statement that gets paid leaves openDues',
     fmt.fullDateTime({ date: '2026-07-18' }));
 }
 
+// ── a renewed card is the same card with new digits ──
+//
+// The user's Wallet listed six "FAB Credit Card" rows. They are not six
+// cards: the bank reissued them, and a reissue keeps the account and changes
+// the last four. The OLD number holds every purchase and payment; the NEW
+// number holds the statement, because nothing has been spent on it yet. So
+// the due sits on a row no payment will ever reach, and the payments sit on a
+// row with no due. That is why a paid card kept reading as overdue.
+{
+  const cardsLib = require('./build/cards');
+  const acc = require('./build/accounts');
+  const today = new Date(2026, 6, 27);
+
+  const card = (id, last4, over = {}) => ({
+    id, name: `FAB Credit Card •${last4}`, kind: 'card', cardType: 'credit',
+    last4, bankName: 'FAB', openingFils: 0, color: '#fff', ...over,
+  });
+  const spend = (id, accountId, date, fils) => ({
+    id, type: 'expense', amountFils: fils, category: 'shopping', accountId,
+    title: 'Shop', date, source: 'sms',
+  });
+
+  // •5793 has the history. •3324 has only the statement.
+  const state = {
+    accounts: [card('old', '5793'), card('new', '3324')],
+    transactions: [spend('t1', 'old', '2026-05-02', 500000), spend('t2', 'old', '2026-06-11', 314440)],
+    cardDues: [{ id: 'd', accountId: 'new', totalDueFils: 890900, minDueFils: 44545, dueDate: '2026-07-14', paidFils: 0 }],
+    accountHints: { '5793': 'old', '3324': 'new' },
+  };
+
+  const found = cardsLib.reissueSuggestions(state, today);
+  ok('reissue: the statement-only card is spotted', found.length === 1, JSON.stringify(found));
+  ok('reissue: it points at the card holding the history',
+    found[0]?.newAccountId === 'new' && found[0]?.candidateIds[0] === 'old');
+
+  // A card with purchases of its own is not a reissue candidate.
+  const spent = { ...state, transactions: [...state.transactions, spend('t3', 'new', '2026-07-20', 1000)] };
+  ok('reissue: a card that has been spent on is not suggested',
+    cardsLib.reissueSuggestions(spent, today).length === 0);
+
+  // Different bank is a different card, whatever the timing.
+  const otherBank = {
+    ...state,
+    accounts: [card('old', '5793'), card('new', '3324', { bankName: 'Emirates NBD' })],
+  };
+  ok('reissue: a different bank is never suggested',
+    cardsLib.reissueSuggestions(otherBank, today).length === 0);
+
+  // Most recently used first, so a card renewed last month beats one silent
+  // since 2023.
+  const three = {
+    ...state,
+    accounts: [card('old', '5793'), card('older', '4499'), card('new', '3324')],
+    transactions: [...state.transactions, spend('t4', 'older', '2023-01-04', 900)],
+  };
+  ok('reissue: candidates are ranked by most recent use',
+    cardsLib.reissueSuggestions(three, today)[0].candidateIds[0] === 'old');
+
+  // The merge is what actually settles the statement.
+  const merged = acc.mergeRenewedCard(state, 'old', 'new');
+  ok('reissue: the old row is gone', merged.accounts.length === 1);
+  ok('reissue: the survivor is the NEW number', merged.accounts[0].id === 'new');
+  ok('reissue: it remembers what it replaced', merged.accounts[0].renewedFrom === 'old');
+  ok('reissue: the history came across',
+    merged.transactions.every((t) => t.accountId === 'new'));
+  ok('reissue: the last-four hints follow', merged.accountHints['5793'] === 'new');
+  ok('reissue: the due is on the same card as the history',
+    merged.cardDues[0].accountId === 'new');
+
+  // And once merged, a payment made under the OLD digits settles the
+  // statement issued under the new ones. That is the whole point.
+  const paid = {
+    ...merged,
+    transactions: [
+      ...merged.transactions,
+      { id: 'p', type: 'income', amountFils: 890900, category: 'other', accountId: 'new',
+        title: 'Card payment', date: '2026-07-10', source: 'sms', isTransfer: true },
+    ],
+  };
+  ok('reissue: a payment now settles the statement',
+    cardsLib.openDues(paid, today).length === 0);
+
+  // Declining must stick, or the app nags forever.
+  const declined = acc.markCardsDistinct(state, 'new');
+  ok('reissue: a declined suggestion is not offered again',
+    cardsLib.reissueSuggestions(declined, today).length === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

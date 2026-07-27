@@ -10,7 +10,7 @@ import React, {
   useRef,
 } from 'react';
 
-import { mergeDuplicateAccounts } from '@/lib/accounts';
+import { markCardsDistinct, mergeDuplicateAccounts, mergeRenewedCard } from '@/lib/accounts';
 import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
@@ -87,6 +87,8 @@ type Action =
   | { type: 'addAccount'; account: Account }
   | { type: 'editAccount'; id: string; patch: Partial<Omit<Account, 'id'>> }
   | { type: 'deleteAccount'; id: string }
+  | { type: 'mergeRenewedCard'; oldId: string; newId: string }
+  | { type: 'markCardsDistinct'; id: string }
   | { type: 'addBill'; bill: Bill }
   | { type: 'deleteBill'; id: string }
   | { type: 'markBillPaid'; id: string; month: string; transaction: Transaction }
@@ -240,6 +242,11 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
       };
+    case 'mergeRenewedCard':
+      // The bank reissued the card; the user confirmed the two rows are one.
+      return mergeRenewedCard(state, action.oldId, action.newId);
+    case 'markCardsDistinct':
+      return markCardsDistinct(state, action.id);
     case 'deleteAccount':
       return {
         ...state,
@@ -375,6 +382,10 @@ interface StoreValue {
   addAccount: (a: Omit<Account, 'id'>) => void;
   editAccount: (id: string, patch: Partial<Omit<Account, 'id'>>) => void;
   deleteAccount: (id: string) => void;
+  /** Fold a reissued card's predecessor into it (user-confirmed). */
+  mergeRenewedCard: (oldId: string, newId: string) => void;
+  /** Remember that a suggested reissue link was declined. */
+  markCardsDistinct: (id: string) => void;
   addBill: (b: Omit<Bill, 'id' | 'paidMonths'>) => void;
   deleteBill: (id: string) => void;
   markBillPaid: (id: string, month: string, transaction: Omit<Transaction, 'id'>) => void;
@@ -753,6 +764,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteAccount', id });
   }, []);
 
+  const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
+    dispatch({ type: 'mergeRenewedCard', oldId, newId });
+  }, []);
+
+  const markCardsDistinctAction = useCallback((id: string) => {
+    dispatch({ type: 'markCardsDistinct', id });
+  }, []);
+
   const addBill = useCallback((b: Omit<Bill, 'id' | 'paidMonths'>) => {
     dispatch({ type: 'addBill', bill: { ...b, id: makeId('bill'), paidMonths: [] } });
   }, []);
@@ -883,6 +902,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      mergeRenewedCard: mergeRenewedCardAction,
+      markCardsDistinct: markCardsDistinctAction,
       addBill,
       deleteBill,
       markBillPaid,
@@ -919,6 +940,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addAccount,
       editAccount,
       deleteAccount,
+      mergeRenewedCardAction,
+      markCardsDistinctAction,
       addBill,
       deleteBill,
       markBillPaid,
