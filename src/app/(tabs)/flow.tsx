@@ -9,6 +9,7 @@
  * list. Here the composition comes first, the limits sit directly under it, and
  * the trend that explains both closes the screen.
  */
+import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -45,6 +46,7 @@ const MAX_SLICES = 5;
 
 export default function FlowScreen() {
   const theme = useTheme();
+  const router = useRouter();
   const dark = useColorScheme() === 'dark';
   const clearance = useTabBarClearance();
   const { state } = useStore();
@@ -201,12 +203,21 @@ export default function FlowScreen() {
               </View>
 
               <View style={styles.compRows}>
+                {/* Every row opens the entries behind it, scoped to the period
+                    it was read in — the figure on the row and the list it
+                    leads to are the same set of money. The pooled slice hands
+                    over every category it stands for, so "5 more · 1,849"
+                    opens exactly those five. */}
                 {slices.map((s, i) => (
-                  <View
+                  <Pressable
                     key={s.key}
-                    style={[
+                    accessibilityRole="button"
+                    accessibilityLabel={`${s.label}, see entries`}
+                    onPress={() => router.push(`/transactions?category=${s.categories.join(',')}`)}
+                    style={({ pressed }) => [
                       styles.compRow,
                       i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+                      pressed && { opacity: 0.6 },
                     ]}>
                     {/* The swatch carries the glyph. An 8px dot said only
                         "this row is the third segment"; the same square at 26px
@@ -225,7 +236,8 @@ export default function FlowScreen() {
                     <ThemedText type="smallBold" tabular style={styles.compFigure}>
                       {formatAmount(s.totalFils, { decimals: false })}
                     </ThemedText>
-                  </View>
+                    <Icon name="chevron-right" size={14} color={theme.textTertiary} />
+                  </Pressable>
                 ))}
               </View>
             </Animated.View>

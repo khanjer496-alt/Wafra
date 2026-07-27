@@ -76,7 +76,12 @@ export default function TransactionsScreen() {
     category?: string;
     merchant?: string;
   }>();
-  const deepCategory = CATEGORIES.find((c) => c.id === categoryParam)?.id ?? null;
+  // One category, or several — Flow's pooled "N more" slice hands over every
+  // category behind it, so the drill-down covers exactly what the row totalled.
+  const deepCategories = (categoryParam ?? '')
+    .split(',')
+    .map((c) => CATEGORIES.find((x) => x.id === c.trim())?.id)
+    .filter((c): c is CategoryId => !!c);
 
   const [query, setQuery] = useState('');
   /**
@@ -99,10 +104,15 @@ export default function TransactionsScreen() {
   const [filters, setFilters] = useState<Filters>(() => ({
     ...DEFAULT_FILTERS,
     // Insights category drill-down deep-links here pre-filtered
-    categories: deepCategory ? new Set<CategoryId>([deepCategory]) : new Set(),
-    // reviewing an SMS import (or a drill-down asking for ALL rows) must show
-    // everything even if the app is scoped to a past period, so start unscoped
-    datePreset: source === 'sms' || deepCategory || merchantParam ? 'all' : 'selected',
+    categories: new Set<CategoryId>(deepCategories),
+    // Reviewing an SMS import, or drilling into one merchant, must show
+    // everything even if the app is scoped to a past period.
+    //
+    // A category drill-down is the opposite: it comes from a row on Flow that
+    // reads "Groceries · 16% · 1,774" FOR THE SELECTED PERIOD. Landing on
+    // all-time rows would show a list that cannot add up to the figure that
+    // was tapped, which is the whole class of bug this app has been fixing.
+    datePreset: source === 'sms' || merchantParam ? 'all' : 'selected',
     // Home's In/Out figures deep-link here pre-filtered by type
     type: typeParam === 'income' || typeParam === 'expense' ? typeParam : null,
   }));

@@ -417,6 +417,47 @@ ok('flow shows the six-month pair chart', !!(await visibleText(page, /IN VS OUT/
   ok(`flow: the chart header states the average (${header?.t})`, !!header && /^[+−-]/.test(header.t));
 }
 
+/**
+ * A composition row opens the entries behind it, and the list it opens has to
+ * total the figure that was tapped. An all-time drill-down from a row read in
+ * one month would show a set that cannot add up to it.
+ *
+ * Read off the row ELEMENT, not off screen coordinates: every screen stays
+ * mounted, so Home's "Out 12,465" sits at the same y as a Flow row and a
+ * coordinate scan picks it up first.
+ */
+{
+  const row = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('[aria-label$="see entries"]')].find(
+      (n) => n.getBoundingClientRect().width > 0,
+    );
+    if (!el) return null;
+    const figures = [...el.querySelectorAll('*')]
+      .filter((n) => n.children.length === 0 && /^[\d,]+$/.test((n.textContent || '').trim()))
+      .map((n) => n.textContent.trim());
+    return { label: el.getAttribute('aria-label'), figure: figures[figures.length - 1] };
+  });
+  ok('flow: the composition offers a category to open', !!row?.figure);
+  if (row?.figure) {
+    await tapLabel(page, row.label, 1800);
+    ok(`flow: a category row opens Activity (${row.label})`,
+      !!(await visibleText(page, /transactions? ·/i)));
+    const total = await page.evaluate(() => {
+      const el = [...document.querySelectorAll('*')].find(
+        (n) => n.children.length === 0 && /^[+−-]\s?AED/.test((n.textContent || '').trim())
+          && n.getBoundingClientRect().width > 0,
+      );
+      return el ? el.textContent.trim() : null;
+    });
+    const want = Number(row.figure.replace(/,/g, ''));
+    const got = total ? Number(total.replace(/[^\d]/g, '')) : NaN;
+    ok(`flow: and that list totals what the row said (row ${want}, list ${got})`,
+      Number.isFinite(got) && got === want);
+    await tapLabel(page, 'Back', 1400);
+    await tapTab(page, 'Flow');
+  }
+}
+
 // Limit editor sheet. The same category name also appears in the composition
 // list above, which deep-links to Activity — target the limit row by label.
 await tapLabel(page, 'Groceries limit', 1300);

@@ -37,23 +37,38 @@ export const MAX_COMPOSITION_SLICES = 5;
  * apart — each correct by its own rule, and plainly contradictory to anyone
  * who looked at both. One rule, one place.
  */
+export interface CompositionSlice {
+  key: string;
+  /** The single category, or null for the pooled tail. */
+  category: CategoryId | null;
+  /**
+   * Every category this slice stands for — one for a named slice, all of the
+   * tail for the pooled one. What a drill-down from the row has to filter on,
+   * so the list it opens totals what the row said.
+   */
+  categories: CategoryId[];
+  totalFils: number;
+  share: number;
+}
+
 export function composition(
   summary: MonthSummary,
   maxSlices = MAX_COMPOSITION_SLICES,
-): { slices: { key: string; category: CategoryId | null; totalFils: number; share: number }[]; totalFils: number } {
-  const head: { key: string; category: CategoryId | null; totalFils: number; share: number }[] =
-    summary.byCategory.slice(0, maxSlices).map((c) => ({
-      key: c.category as string,
-      category: c.category,
-      totalFils: c.totalFils,
-      share: c.share,
-    }));
+): { slices: CompositionSlice[]; totalFils: number } {
+  const head: CompositionSlice[] = summary.byCategory.slice(0, maxSlices).map((c) => ({
+    key: c.category as string,
+    category: c.category,
+    categories: [c.category],
+    totalFils: c.totalFils,
+    share: c.share,
+  }));
   const tail = summary.byCategory.slice(maxSlices);
   if (tail.length > 0) {
     const totalFils = tail.reduce((sum, c) => sum + c.totalFils, 0);
     head.push({
       key: 'rest',
       category: null,
+      categories: tail.map((c) => c.category),
       totalFils,
       share: summary.expenseFils > 0 ? totalFils / summary.expenseFils : 0,
     });
