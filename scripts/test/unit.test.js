@@ -2008,5 +2008,71 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('google: a steady price is never a rise', flat.priceIncreased === false);
 }
 
+// ── Wallet says one thing per row ──
+//
+// The right-hand figure meant different things depending on what happened to
+// be known: a bank-quoted balance where there was one, this month's spending
+// where there was not, in the same column at the same weight. One row read
+// "21,933 per bank SMS" and the row above it "466 spent this month", and
+// nothing about the layout said those were different kinds of number.
+{
+  const cardsLib = require('./build/cards');
+  const today = new Date(2026, 6, 27);
+
+  const card = (id, over) => ({
+    id, name: 'Card', kind: 'card', cardType: 'credit', last4: '1111',
+    bankName: 'FAB', openingFils: 0, color: '#fff', ...over,
+  });
+
+  // A credit card with an open statement leads with what is still owed.
+  const owing = {
+    accounts: [card('c')],
+    transactions: [],
+    cardDues: [{ id: 'd', accountId: 'c', totalDueFils: 814440, minDueFils: 40722, dueDate: '2026-07-14', paidFils: 100000 }],
+  };
+  const owed = cardsLib.cardFigure(owing, owing.accounts[0], today);
+  ok('wallet: a credit card leads with what is owed', owed.kind === 'owed');
+  ok('wallet: and it is the REMAINDER, not the statement total',
+    owed.fils === 714440, String(owed.fils));
+
+  // Nothing owed is a real answer, not a blank.
+  const clear = { accounts: [card('c')], transactions: [], cardDues: [] };
+  const none = cardsLib.cardFigure(clear, clear.accounts[0], today);
+  ok('wallet: a settled credit card owes zero', none.kind === 'owed' && none.fils === 0);
+
+  // A debit card leads with its balance, and only when the bank quoted one.
+  const debit = {
+    accounts: [card('d', { cardType: 'debit', snapshotKind: 'balance', snapshotFils: 2193300 })],
+    transactions: [], cardDues: [],
+  };
+  const bal = cardsLib.cardFigure(debit, debit.accounts[0], today);
+  ok('wallet: a debit card leads with its balance',
+    bal.kind === 'balance' && bal.fils === 2193300);
+
+  const unknown = {
+    accounts: [card('u', { cardType: 'debit' })],
+    transactions: [{ id: 't', type: 'expense', amountFils: 100, category: 'other', accountId: 'u', title: 'x', date: '2026-07-01', source: 'sms' }],
+    cardDues: [],
+  };
+  const nothing = cardsLib.cardFigure(unknown, unknown.accounts[0], today);
+  ok('wallet: an unknown balance is never guessed at',
+    nothing.kind === 'unknown' && nothing.fils === null);
+
+  // Grouping: six FAB rows become one FAB group.
+  const many = [
+    card('a', { last4: '3644' }), card('b', { last4: '3749' }), card('c', { last4: '5793' }),
+    card('d', { last4: '7720', bankName: 'ADCB' }),
+    card('e', { last4: '1354', bankName: 'Liv' }),
+    card('f', { last4: '9999', bankName: undefined }),
+  ];
+  const groups = cardsLib.groupCardsByBank(many);
+  ok('wallet: cards are grouped by their bank', groups.length === 4, String(groups.length));
+  ok('wallet: the biggest group leads', groups[0].bank === 'FAB' && groups[0].accounts.length === 3);
+  ok('wallet: a card with no known bank is not its own bank',
+    groups.some((g) => g.bank === 'Other cards' && g.accounts.length === 1));
+  ok('wallet: every card appears exactly once',
+    groups.reduce((n, g) => n + g.accounts.length, 0) === many.length);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

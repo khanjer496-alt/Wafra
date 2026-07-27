@@ -96,6 +96,8 @@ const S = {
   goalsHeader: { en: 'Savings goals', ar: 'أهداف الادخار' },
   newGoal: { en: '+ New goal', ar: '+ هدف جديد' },
   outstanding: { en: 'outstanding', ar: 'مستحق' },
+  owed: { en: 'owed', ar: 'المستحق عليك' },
+  nothingSpentThisMonth: { en: 'nothing spent this month', ar: 'لا مصروف هذا الشهر' },
   perBankSms: { en: 'per bank SMS', ar: 'حسب رسالة البنك' },
   noBalanceYet: { en: 'no balance SMS yet', ar: 'لا رسالة رصيد بعد' },
   improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },

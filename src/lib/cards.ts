@@ -1,3 +1,4 @@
+import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
@@ -490,4 +491,72 @@ export function reissueSuggestions(state: AppState, today: Date): ReissueSuggest
     if (candidates.length > 0) out.push({ newAccountId: a.id, candidateIds: candidates });
   }
   return out;
+}
+
+/**
+ * The one figure a card row should lead with.
+ *
+ * Wallet showed a different quantity depending on what happened to be known:
+ * a bank-quoted balance where there was one, this month's spending where
+ * there was not — in the same column, at the same weight, distinguished only
+ * by a caption underneath. One row read "21,933 per bank SMS" and the row
+ * above it "466 spent this month", and nothing about the layout said those
+ * were different kinds of number.
+ *
+ * A credit card leads with what is OWED, because that is what a person opens
+ * a wallet to check and the only figure they can act on. In order of
+ * authority: the statement still to be paid, then the bank's own outstanding
+ * quote. A debit card leads with its balance. Spending belongs on the second
+ * line, where it reads as context rather than as money you have.
+ */
+export type CardFigureKind = 'owed' | 'balance' | 'unknown';
+
+export interface CardFigure {
+  kind: CardFigureKind;
+  /** Null when nothing authoritative is known — never a guess. */
+  fils: number | null;
+}
+
+export function cardFigure(state: AppState, account: Account, today: Date): CardFigure {
+  if (account.cardType === 'credit') {
+    // An open statement is the most useful answer: it is what the bank will
+    // take, on a date, and the app knows how much of it is already paid.
+    const due = openDues(state, today).find((d) => d.due.accountId === account.id);
+    if (due) return { kind: 'owed', fils: due.remainingFils };
+    // Failing that, a figure the bank itself quoted as outstanding.
+    if (account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined) {
+      return { kind: 'owed', fils: Math.abs(account.snapshotFils) };
+    }
+    // A credit card with nothing owed owes nothing. That is a real answer.
+    return { kind: 'owed', fils: 0 };
+  }
+  const balance = reliableBalanceFils(state, account);
+  return balance !== null ? { kind: 'balance', fils: balance } : { kind: 'unknown', fils: null };
+}
+
+/**
+ * Cards grouped under the bank that issued them, banks ordered by how much is
+ * on them.
+ *
+ * Eleven rows of which six said "FAB Credit Card" was the whole readability
+ * problem: nothing told the user whether that was six cards or one card the
+ * app had failed to recognise. Under a FAB heading, six FAB cards are
+ * obviously six FAB cards — and if that is wrong, it is obviously wrong.
+ */
+export interface BankGroup {
+  bank: string;
+  accounts: Account[];
+}
+
+export function groupCardsByBank(accounts: Account[]): BankGroup[] {
+  const groups = new Map<string, Account[]>();
+  for (const a of accounts) {
+    // Cards the app has never seen a sender for gather under one heading
+    // rather than each inventing a bank of its own.
+    const bank = a.bankName?.trim() || 'Other cards';
+    groups.set(bank, [...(groups.get(bank) ?? []), a]);
+  }
+  return [...groups.entries()]
+    .map(([bank, list]) => ({ bank, accounts: list }))
+    .sort((a, b) => b.accounts.length - a.accounts.length || a.bank.localeCompare(b.bank));
 }

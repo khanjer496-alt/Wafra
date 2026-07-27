@@ -26,7 +26,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
 import { t } from '@/lib/i18n';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthSeries } from '@/lib/analytics';
 import {
@@ -139,6 +139,7 @@ export default function WalletScreen() {
       ),
     [state, now],
   );
+  const cardGroups = useMemo(() => groupCardsByBank(cards), [cards]);
   const nonCardAccounts = useMemo(
     () =>
       state.accounts.filter(
@@ -444,58 +445,77 @@ export default function WalletScreen() {
                   </View>
                 );
               })}
-              <View>
-                {cards.map((account, i) => {
-                  const isCredit = account.cardType === 'credit';
-                  // Only figures the bank itself quoted (balance/outstanding
-                  // SMS) are shown as balances. Partial SMS history can't
-                  // reconstruct one, so without a quote we show month spend.
-                  const reliable = reliableBalanceFils(state, account);
-                  const display = reliable !== null ? Math.abs(reliable) : null;
-                  const spent = monthSpendByAccount.get(account.id) ?? 0;
-                  return (
-                    <Pressable
-                      key={account.id}
-                      onLongPress={() => accountOptions(account)}
-                      style={[
-                        styles.accountRow,
-                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-                      ]}>
-                      <AccountTile account={account} />
-                      <View style={styles.accountInfo}>
-                        <ThemedText type="default" numberOfLines={1}>
-                          {cardTitle(account.name)}
-                        </ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                          {isCredit ? 'Credit' : 'Debit'}
-                          {account.last4 ? ` ·· ${account.last4}` : ''}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.accountRight}>
-                        <ThemedText
-                          type="smallBold"
-                          tabular
-                          style={{
-                            color:
-                              isCredit && display !== null && display > 0
-                                ? theme.expense
-                                : theme.text,
-                            fontSize: 15,
-                          }}>
-                          {formatAED(display ?? spent, { decimals: false })}
-                        </ThemedText>
-                        <ThemedText type="micro" themeColor="textSecondary">
-                          {display !== null
-                            ? isCredit
-                              ? t('outstanding')
-                              : t('perBankSms')
-                            : t('spentThisMonthCaption')}
-                        </ThemedText>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              {/* Grouped under the bank that issued them. Eleven flat rows,
+                  six of them called "FAB Credit Card", told the user nothing
+                  about whether that was six cards or one card the app had
+                  failed to recognise. Under a FAB heading it is obviously
+                  six FAB cards — and if that is wrong, it is obviously
+                  wrong. */}
+              {cardGroups.map((group) => (
+                <View key={group.bank} style={styles.bankGroup}>
+                  <ThemedText type="micro" themeColor="textTertiary" style={styles.bankName}>
+                    {group.bank}
+                    {group.accounts.length > 1 ? ` · ${group.accounts.length}` : ''}
+                  </ThemedText>
+                  {group.accounts.map((account, i) => {
+                    const isCredit = account.cardType === 'credit';
+                    // One meaning per row: what you owe, or what you have.
+                    // Spending moves to the second line, where it reads as
+                    // context rather than as money.
+                    const figure = cardFigure(state, account, now);
+                    const spent = monthSpendByAccount.get(account.id) ?? 0;
+                    return (
+                      <Pressable
+                        key={account.id}
+                        onLongPress={() => accountOptions(account)}
+                        accessibilityLabel={`${account.name} ${account.last4 ?? ''}`}
+                        style={[
+                          styles.accountRow,
+                          i > 0 && {
+                            borderTopWidth: StyleSheet.hairlineWidth,
+                            borderTopColor: theme.cardBorder,
+                          },
+                        ]}>
+                        <AccountTile account={account} />
+                        <View style={styles.accountInfo}>
+                          <ThemedText type="default" numberOfLines={1}>
+                            {isCredit ? 'Credit' : 'Debit'}
+                            {account.last4 ? ` ·· ${account.last4}` : ''}
+                          </ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                            {spent > 0
+                              ? `${formatAED(spent, { decimals: false })} ${t('spentThisMonthCaption')}`
+                              : t('nothingSpentThisMonth')}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.accountRight}>
+                          <ThemedText
+                            type="smallBold"
+                            tabular
+                            style={{
+                              color:
+                                figure.kind === 'owed' && (figure.fils ?? 0) > 0
+                                  ? theme.expense
+                                  : theme.text,
+                              fontSize: 15,
+                            }}>
+                            {figure.fils === null
+                              ? '—'
+                              : formatAED(Math.abs(figure.fils), { decimals: false })}
+                          </ThemedText>
+                          <ThemedText type="micro" themeColor="textSecondary">
+                            {figure.kind === 'owed'
+                              ? t('owed')
+                              : figure.kind === 'balance'
+                                ? t('perBankSms')
+                                : t('noBalanceYet')}
+                          </ThemedText>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))}
             </View>
           )}
 
@@ -847,6 +867,14 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
+  bankGroup: {
+    paddingTop: Spacing.two,
+  },
+  bankName: {
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    paddingBottom: Spacing.two - 4,
+  },
   reissue: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.tile,
