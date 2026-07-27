@@ -329,6 +329,29 @@ ok('openDues: different due dates are different statements',
       new Date(2026, 6, 24),
     ).length === 2);
 
+// One physical card stored as two account rows. Home listed the same FAB
+// statement twice, one directly above the other, and counted it twice.
+{
+  const twoRows = {
+    accounts: [
+      { id: 'fab-a', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      { id: 'fab-b', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      { id: 'enbd', name: 'ENBD Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' },
+    ],
+    transactions: [],
+    cardDues: [
+      { id: 'x1', accountId: 'fab-a', totalDueFils: 814400, minDueFils: 40000, dueDate: '2026-07-15', paidFils: 0 },
+      { id: 'x2', accountId: 'fab-b', totalDueFils: 814400, minDueFils: 40000, dueDate: '2026-07-15', paidFils: 0 },
+      { id: 'x3', accountId: 'enbd', totalDueFils: 406200, minDueFils: 20000, dueDate: '2026-07-15', paidFils: 0 },
+    ],
+  };
+  const rows = cardsGuardLib.openDues(twoRows, new Date(2026, 6, 20));
+  ok('dues: one card stored twice still lists once',
+    rows.filter(d => d.due.dueDate === '2026-07-15' && d.remainingFils === 814400).length === 1);
+  ok('dues: a different bank with the same last4 stays its own card',
+    rows.length === 2);
+}
+
 // Archived (hidden) cards drop out of dues too
 const archivedState = {
   ...guardState,
@@ -1050,6 +1073,44 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const spent = an.netWorthSeries(withSpend);
   ok('net worth: real spending still moves it',
     spent[spent.length - 1].fils === base[base.length - 1].fils - 50000);
+}
+
+// ── merging two account rows that are one card ──
+// This rewrites the ledger, so it is tested at the level it runs: the ids on
+// every transaction and due have to follow the surviving account.
+{
+  const acc = require('./build/accounts');
+  const dup = {
+    accounts: [
+      { id: 'a1', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      { id: 'a2', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      { id: 'b1', name: 'ENBD Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' },
+      { id: 'cash', name: 'Cash', kind: 'cash', openingFils: 5000, color: '#fff' },
+    ],
+    transactions: [
+      { id: 't1', type: 'expense', amountFils: 1000, category: 'dining', accountId: 'a1', title: 'A', date: '2026-07-01', source: 'sms' },
+      { id: 't2', type: 'expense', amountFils: 2000, category: 'dining', accountId: 'a1', title: 'B', date: '2026-07-02', source: 'sms' },
+      { id: 't3', type: 'expense', amountFils: 3000, category: 'dining', accountId: 'a2', title: 'C', date: '2026-07-03', source: 'sms' },
+    ],
+    cardDues: [{ id: 'd1', accountId: 'a2', totalDueFils: 100, minDueFils: 5, dueDate: '2026-07-15', paidFils: 0 }],
+    accountHints: { '5793': 'a2' },
+  };
+  const merged = acc.mergeDuplicateAccounts(dup);
+  ok('merge: the two FAB rows become one', merged.accounts.filter(a => a.bankName === 'FAB').length === 1);
+  ok('merge: a different bank is untouched', merged.accounts.some(a => a.id === 'b1'));
+  ok('merge: accounts with no digits are untouched', merged.accounts.some(a => a.id === 'cash'));
+  ok('merge: the row with more history survives', merged.accounts.some(a => a.id === 'a1'));
+  ok('merge: no transaction is orphaned',
+    merged.transactions.every(t => merged.accounts.some(a => a.id === t.accountId)));
+  ok('merge: no transaction is lost', merged.transactions.length === 3);
+  ok('merge: dues follow the survivor', merged.cardDues.every(d => d.accountId === 'a1'));
+  ok('merge: the last-four hint follows too', merged.accountHints['5793'] === 'a1');
+  // Idempotent, because it runs on every hydrate.
+  const twice = acc.mergeDuplicateAccounts(merged);
+  ok('merge: running it again changes nothing', twice === merged);
+  // And a clean state is returned untouched, not rebuilt.
+  ok('merge: a state with no duplicates is returned as-is',
+    acc.mergeDuplicateAccounts(guardState) === guardState);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

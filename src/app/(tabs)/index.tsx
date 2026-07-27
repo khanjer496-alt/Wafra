@@ -329,6 +329,17 @@ export default function HomeScreen() {
   );
 
   // One insight, not five. The rest are on Flow.
+  /**
+   * The hero's three figures, reconciled. Rounding each of in and out to whole
+   * dirhams first and subtracting those is the only way the caption under them
+   * can be checked by eye — which is the entire point of showing all three.
+   */
+  const hero = useMemo(() => {
+    const expenseFils = composition(summary).totalFils;
+    const incomeFils = Math.round(summary.incomeFils / 100) * 100;
+    return { incomeFils, expenseFils, netFils: incomeFils - expenseFils };
+  }, [summary]);
+
   const insight = useMemo(() => {
     const all = buildInsights(
       state.transactions,
@@ -430,14 +441,18 @@ export default function HomeScreen() {
           <Hero
             period={period}
             live={live}
-            netFils={summary.incomeFils - summary.expenseFils}
-            incomeFils={summary.incomeFils}
-            // The same figure Flow prints above the category split, from the
-            // same helper. These two are one tap apart and were a dirham
-            // different — Home rounded the raw sum once, Flow totalled its
-            // rows as shown. Both were right by their own rule, which is no
-            // help to anyone looking at both.
-            expenseFils={composition(summary).totalFils}
+            // All three figures from one arithmetic, so the hero equals its
+            // own two cells. It read "63,039 in, 8,815 out, saved 54,223" —
+            // a subtraction that is off by one, in 40px type, at the top of
+            // the screen. Each cell was rounded on its own while the net was
+            // computed from the raw fils and rounded once more.
+            //
+            // Out is the composition total, which Flow prints above the
+            // category split; in is rounded the same way; and the net is the
+            // difference between those two, not a third measurement.
+            netFils={hero.netFils}
+            incomeFils={hero.incomeFils}
+            expenseFils={hero.expenseFils}
           />
 
           {!isProActive(state) && (

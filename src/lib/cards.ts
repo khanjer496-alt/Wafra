@@ -142,11 +142,27 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
+  // How a card is identified, since two account rows can describe one physical
+  // card. Not the digits alone: a person can hold a FAB and an Emirates NBD
+  // card whose last four happen to match, and collapsing those would hide a
+  // real statement. Bank, digits and type together — the same identity the
+  // store merges duplicate rows on. Accounts with no digits fall back to their
+  // own id, because there is nothing to compare.
+  const cardKey = new Map<string, string>();
+  for (const a of state.accounts) {
+    cardKey.set(
+      a.id,
+      a.last4 ? `${a.bankName ?? ''}|${a.last4}|${a.cardType ?? a.kind}` : `id:${a.id}`,
+    );
+  }
+  const keyOf = (accountId: string) => cardKey.get(accountId) ?? `id:${accountId}`;
+
   // Latest statement date per card, to tell "replaced" from "still owed".
-  const newestByAccount = new Map<string, string>();
+  const newestByCard = new Map<string, string>();
   for (const d of state.cardDues) {
-    const seen = newestByAccount.get(d.accountId);
-    if (!seen || d.dueDate > seen) newestByAccount.set(d.accountId, d.dueDate);
+    const k = keyOf(d.accountId);
+    const seen = newestByCard.get(k);
+    if (!seen || d.dueDate > seen) newestByCard.set(k, d.dueDate);
   }
 
   const open = state.cardDues
@@ -157,7 +173,7 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
           new Date(`${toISODate(today)}T12:00:00`).getTime()) /
           86400000,
       );
-      const superseded = (newestByAccount.get(d.accountId) ?? d.dueDate) > d.dueDate;
+      const superseded = (newestByCard.get(keyOf(d.accountId)) ?? d.dueDate) > d.dueDate;
       return dueWithStatus(state, d, today, daysLeft < -STALE_OVERDUE_DAYS && !superseded);
     })
     .filter(
@@ -176,9 +192,18 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
   //
   // The larger balance wins: a due and its reminder can disagree, and the one
   // still owing more is the one that has not been paid down.
+  //
+  // Keyed on the CARD, not the account row. Two account records can describe
+  // one physical card — a hand-added card that the SMS scan had already
+  // discovered, or state written by an older version — and keying on the
+  // account id let both through: Home listed "FAB Credit Card •5793 · 15 Jun ·
+  // 8,144" twice, one above the other, and counted it twice in the total.
+  //
+  // A card is identified by its last four digits. Accounts with no digits at
+  // all cannot be compared that way, so they fall back to their own id.
   const byStatement = new Map<string, DueWithStatus>();
   for (const d of open) {
-    const key = `${d.due.accountId}|${d.due.dueDate}`;
+    const key = `${keyOf(d.due.accountId)}|${d.due.dueDate}`;
     const seen = byStatement.get(key);
     if (!seen || d.remainingFils > seen.remainingFils) byStatement.set(key, d);
   }

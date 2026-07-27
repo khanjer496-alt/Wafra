@@ -10,6 +10,7 @@ import React, {
   useRef,
 } from 'react';
 
+import { mergeDuplicateAccounts } from '@/lib/accounts';
 import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
@@ -124,7 +125,9 @@ function reducer(state: AppState, action: Action): AppState {
       setActiveMarket(next.marketId);
       if (!next.language) next.language = detectLanguage();
       setLanguage(next.language === 'ar' ? 'ar' : 'en');
-      return next;
+      // Older states can carry two rows for one card. Collapse on the way in,
+      // once, rather than teaching every screen to tolerate it.
+      return mergeDuplicateAccounts(next);
     }
     case 'setPro':
       return { ...state, pro: action.pro };
