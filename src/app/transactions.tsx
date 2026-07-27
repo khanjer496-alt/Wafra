@@ -23,7 +23,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 import { CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
-import { inPeriod, periodLabel } from '@/lib/period';
+import { inPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
@@ -316,7 +316,12 @@ export default function TransactionsScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               {filtered.length} transaction{filtered.length === 1 ? '' : 's'}
               {filters.datePreset === 'selected' && period.mode !== 'all'
-                ? ` · ${periodLabel(period)}`
+                ? // The dates too, when the month is not a calendar month. A
+                  // salary month called "Jun 2026" is 25 Jun – 24 Jul, so
+                  // every row under that heading is dated JULY. A user read
+                  // that screen and concluded their July payments had gone
+                  // missing; they were right there, correctly filed.
+                  ` · ${periodLabel(period)}${periodRange(period) ? ` (${periodRange(period)})` : ''}`
                 : ''}
               {activeFilterCount > 0 ? ` · ${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'}` : ''}
               {transfersShown > 0

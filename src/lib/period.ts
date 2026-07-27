@@ -1,4 +1,4 @@
-import { monthEndISO, monthKey, monthLabel, monthStartISO, shortDate, toISODate } from '@/lib/format';
+import { getMonthStartDay, monthEndISO, monthKey, monthLabel, monthStartISO, shortDate, toISODate } from '@/lib/format';
 import type { Transaction } from '@/lib/types';
 
 /**
@@ -53,6 +53,24 @@ export function periodLabel(p: PeriodLike): string {
     case 'all':
       return 'All time';
   }
+}
+
+/**
+ * The dates a period actually covers, when they are not the obvious ones.
+ *
+ * A "money month" runs from the user's salary day, so with a start day of 25
+ * the period called "Jun 2026" is 25 June to 24 July. Every row inside it is
+ * dated JULY, under a heading that says June — which reads as a bug even
+ * though it is exactly what was asked for. A user looked at that screen and
+ * concluded their July payments had gone missing.
+ *
+ * Returns '' for calendar months and for the modes that already state their
+ * own dates, so nothing is repeated back at the user.
+ */
+export function periodRange(p: PeriodLike): string {
+  const period = toPeriod(p);
+  if (period.mode !== 'month' || getMonthStartDay() === 1) return '';
+  return `${shortDate(monthStartISO(period.key))} – ${shortDate(monthEndISO(period.key))}`;
 }
 
 /**

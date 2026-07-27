@@ -1858,5 +1858,39 @@ ok('stale: a stale statement that gets paid leaves openDues',
     cardsLib.reissueSuggestions(declined, today).length === 0);
 }
 
+// ── a salary month must say which days it covers ──
+//
+// A user opened Transactions, saw "4 transactions · Jun 2026" above four rows
+// dated 2, 3, 10 and 13 JULY, and concluded their July payments had gone
+// missing. They had not: their month starts on the 25th, so "Jun 2026" runs
+// 25 Jun – 24 Jul and every one of those rows was correctly inside it. The
+// heading was right and unreadable at the same time.
+{
+  const period = require('./build/period');
+  const fmt = require('./build/format');
+
+  fmt.setMonthStartDay(1);
+  ok('period: a calendar month needs no explaining',
+    period.periodRange({ mode: 'month', key: '2026-06' }) === '',
+    period.periodRange({ mode: 'month', key: '2026-06' }));
+
+  fmt.setMonthStartDay(25);
+  const range = period.periodRange({ mode: 'month', key: '2026-06' });
+  ok('period: a salary month states its real dates', range.includes('25') && /Jul/.test(range), range);
+  ok('period: and it still calls itself June',
+    period.periodLabel({ mode: 'month', key: '2026-06' }).startsWith('Jun'));
+
+  // The thing that confused the user, asserted directly: a payment made on
+  // 3 July belongs to the money-month called June.
+  ok('period: a 3 July payment sits in the June salary month',
+    fmt.monthKey('2026-07-03') === '2026-06', fmt.monthKey('2026-07-03'));
+  ok('period: and a 27 July one sits in July', fmt.monthKey('2026-07-27') === '2026-07');
+
+  // Other modes already state their own dates; do not repeat them.
+  ok('period: a year needs no range', period.periodRange({ mode: 'year', year: 2026 }) === '');
+  ok('period: all time needs no range', period.periodRange({ mode: 'all' }) === '');
+  fmt.setMonthStartDay(1);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
