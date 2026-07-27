@@ -40,68 +40,18 @@ function ok(name, cond, detail) {
 }
 
 /* ── Pull the real patterns out of the Kotlin ────────────────────────── */
+// The extraction itself lives in kotlin-source.js, shared with
+// kotlin-regex.test.js — which compiles these same strings on a real JVM,
+// because Java is the engine the app runs them on and this file's engine is
+// not.
 
-const KT = path.join(
-  __dirname,
-  '../../modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt',
-);
-const source = fs.readFileSync(KT, 'utf8');
+const { constant, patternSource } = require('./kotlin-source');
 
-/** Every "..." literal in a declaration, concatenated the way Kotlin does. */
-function literals(text) {
-  const out = [];
-  const re = /"((?:[^"\\]|\\.)*)"/g;
-  let m;
-  while ((m = re.exec(text))) out.push(m[1]);
-  return out.join('');
-}
-
-/**
- * A `private const val` string, with any $NAME references already expanded.
- *
- * Stops at the next declaration rather than the next newline: these values are
- * long enough to wrap, and a newline-anchored scan read only the first
- * fragment — which, once the Arabic currency words were added, was empty.
- */
-function constant(name, vars = {}) {
-  const m = source.match(
-    new RegExp(`private const val ${name} =([\\s\\S]*?)(?:\\n\\s*\\n|private )`),
-  );
-  if (!m) throw new Error(`${name} not found in InstantAlert.kt`);
-  return interpolate(literals(m[1]), vars);
-}
-
-/**
- * Substitute $NAME references, LONGEST NAME FIRST.
- *
- * Doing it shortest-first turns "$CUR_AR" into "<value of CUR>_AR" — a
- * pattern that is not the one Kotlin compiles, and which happened to be
- * broken in precisely the way the real one was written to avoid. The test
- * went red against a pattern the app never runs.
- */
-function interpolate(text, vars) {
-  let out = text;
-  for (const key of Object.keys(vars).sort((a, b) => b.length - a.length)) {
-    out = out.split(`$${key}`).join(vars[key]);
-  }
-  return out;
-}
-
-const CUR_AR = constant('CUR_AR');
-const CUR = constant('CUR', { CUR_AR });
+const CUR_AR = constant('InstantAlert', 'CUR_AR');
+const CUR = constant('InstantAlert', 'CUR', { CUR_AR });
 
 function pattern(name) {
-  // Anchored on the trailing RegexOption, not on a closing paren: the
-  // patterns contain parens of their own, and a lazy scan to the next ")"
-  // silently swallowed the declaration after it.
-  const decl = source.match(
-    new RegExp(`private val ${name} = Regex\\(([\\s\\S]*?),\\s*RegexOption\\.IGNORE_CASE`),
-  )?.[1];
-  if (!decl) throw new Error(`${name} not found in InstantAlert.kt`);
-  // Kotlin escapes backslashes in a plain string literal; undo one level, and
-  // substitute the one interpolated value the file uses.
-  const body = interpolate(literals(decl).replace(/\\\\/g, '\\'), { CUR, CUR_AR });
-  return new RegExp(body, 'i');
+  return new RegExp(patternSource('InstantAlert', name, { CUR, CUR_AR }), 'i');
 }
 
 const AMOUNT_RE = pattern('AMOUNT_RE');

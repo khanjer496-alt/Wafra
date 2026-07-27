@@ -21,6 +21,8 @@ node arabic.test.js
 # The delivery-time banner reads bank SMS a second time, in Kotlin. This runs
 # the real patterns out of that source against the real corpus.
 node instant-alert.test.js
+# The same Kotlin patterns, compiled by the engine that actually runs them.
+node kotlin-regex.test.js
 # Every route the app navigates to must have a file behind it.
 node routes.test.js
 # Definitions that live in two places and must agree.
