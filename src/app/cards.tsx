@@ -156,14 +156,23 @@ export default function CardsScreen() {
               falls back to this month's spend — and captioning that
               "15,000 left" read as a balance of 3,200 against an 18,200
               limit. The caption says which figure it is first, and headroom
-              rides along after it. */}
+              rides along after it.
+
+              The invitation to set a limit rides along too, for the same
+              reason: on its own, "Set limit" under AED 5,353 reads as the
+              limit BEING 5,353, while Wallet captions the identical figure
+              "spent this month" one tap away. */}
           <ThemedText
             type="nano"
             themeColor="textTertiary"
             onPress={isCredit && limitLeft === null ? () => askCreditLimit(card) : undefined}
             style={isCredit && limitLeft === null ? { color: theme.primary } : undefined}>
-            {outstanding !== null ? 'Outstanding' : isCredit && limitLeft === null ? 'Set limit' : 'This month'}
-            {limitLeft !== null ? ` · ${formatAmount(limitLeft, { decimals: false })} left` : ''}
+            {outstanding !== null ? 'Outstanding' : 'This month'}
+            {limitLeft !== null
+              ? ` · ${formatAmount(limitLeft, { decimals: false })} left`
+              : isCredit
+                ? ' · Set limit'
+                : ''}
           </ThemedText>
         </View>
       </Row>

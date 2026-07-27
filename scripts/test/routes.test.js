@@ -93,14 +93,32 @@ function sources(dir = SRC) {
   const bad = declared.filter((r) => !available.has(r));
   ok('every insight destination exists', declared.length > 0 && bad.length === 0, bad.join(' | '));
 
-  // And the assignment must only ever use one of them, or the list is
-  // decoration. Anything quoted next to `i.href =` has to be in it.
-  // Only the path-shaped strings: the same expression tests insight ids
-  // ('budget-', 'largest'), and those are not destinations.
-  const assigned = [...text.matchAll(/i\.href =([\s\S]*?);/g)]
-    .flatMap((m) => [...m[1].matchAll(/'(\/[^']*)'/g)].map((x) => x[1]));
-  const stray = assigned.filter((r) => !declared.includes(r));
-  ok('no insight is given a destination outside the list', stray.length === 0, stray.join(' | '));
+  // Every href goes through `dest()`, whose first argument is a plain literal.
+  // That is the whole reason the helper exists: a template literal assembled
+  // at the call site would carry a real route AND be invisible here, which is
+  // how "/budgets" survived for months.
+  const used = [...text.matchAll(/\bdest\(\s*'([^']+)'/g)].map((m) => m[1]);
+  ok('every insight destination is built from a declared route', used.length > 0
+    && used.every((r) => declared.includes(r)), used.filter((r) => !declared.includes(r)).join(' | '));
+
+  // Every insight the builder can produce must carry one. An insight without
+  // an href still draws no chevron, but the "See the breakdown" button on Home
+  // is unconditional and falls back to '/flow'.
+  const pushed = (text.match(/insights\.push\(\{/g) ?? []).length;
+  const withHref = (text.match(/href: dest\(/g) ?? []).length;
+  ok(`every insight the builder pushes carries a destination (${withHref} of ${pushed})`,
+    pushed > 0 && withHref === pushed);
+
+  /**
+   * And none of them may be '/flow'.
+   *
+   * "Worth knowing" is rendered ON Flow, so `router.push('/flow')` from a card
+   * there is a no-op: the row keeps its chevron and does nothing, forever.
+   * That is the state the app was left in after the /stats and /budgets fix —
+   * the dead route became a dead tap, which no route table can catch.
+   */
+  ok('no insight sends you to the screen the insight list is drawn on',
+    !used.includes('/flow'), used.filter((r) => r === '/flow').join(' | '));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

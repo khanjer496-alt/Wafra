@@ -137,6 +137,27 @@ export type InsightTone = 'positive' | 'warning' | 'neutral';
  */
 export const INSIGHT_DESTINATIONS = ['/flow', '/bills', '/transactions', '/wallet'] as const;
 
+export type InsightDestination = (typeof INSIGHT_DESTINATIONS)[number];
+
+/** A declared destination, optionally scoped by a query. */
+export type InsightHref = InsightDestination | `${InsightDestination}?${string}`;
+
+/**
+ * Build a destination.
+ *
+ * Everything goes through here so the route half of an href is always a plain
+ * literal from INSIGHT_DESTINATIONS — which is what routes.test.js scans for.
+ * A template literal assembled at the call site would be invisible to it, and
+ * invisible is exactly how "/budgets" survived for months.
+ */
+function dest(route: InsightDestination, query?: Record<string, string>): InsightHref {
+  if (!query) return route;
+  const q = Object.entries(query)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join('&');
+  return `${route}?${q}`;
+}
+
 export interface Insight {
   id: string;
   tone: InsightTone;
@@ -144,7 +165,7 @@ export interface Insight {
   title: string;
   body: string;
   /** Where tapping the insight takes you (the screen to act on it). */
-  href?: (typeof INSIGHT_DESTINATIONS)[number];
+  href?: InsightHref;
 }
 
 /**
@@ -185,6 +206,9 @@ export function buildInsights(
           icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
           title: delta > 0 ? `Trending ${pct}% higher` : `Trending ${pct}% lower`,
           body: `At today's pace you'll spend about ${formatAED(Math.round(projected), { decimals: false })} this month, vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+          // The entries the pace is measured over. Not '/flow': this list is
+          // DRAWN on Flow, so pushing Flow is a no-op and the card is inert.
+          href: dest('/transactions'),
         });
       }
     } else {
@@ -197,6 +221,7 @@ export function buildInsights(
           icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
           title: `Spent ${pct}% ${delta > 0 ? 'more' : 'less'}`,
           body: `${formatAED(current.expenseFils, { decimals: false })} vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+          href: dest('/transactions'),
         });
       }
     }
@@ -215,6 +240,8 @@ export function buildInsights(
         icon: 'alert',
         title: `${cat.label} budget exceeded`,
         body: `${formatAED(spent, { decimals: false })} spent of your ${formatAED(b.limitFils, { decimals: false })} limit.`,
+        // What blew the limit, not the screen the warning is printed on.
+        href: dest('/transactions', { category: b.category }),
       });
     } else if (ratio >= 0.85 && live) {
       insights.push({
@@ -223,6 +250,7 @@ export function buildInsights(
         icon: 'alert',
         title: `${cat.label} almost at limit`,
         body: `${Math.round(ratio * 100)}% used — ${formatAED(b.limitFils - spent, { decimals: false })} left for the month.`,
+        href: dest('/transactions', { category: b.category }),
       });
     }
   }
@@ -237,6 +265,7 @@ export function buildInsights(
       icon: cat.icon,
       title: `${cat.label} leads your spending`,
       body: `${formatAED(top.totalFils, { decimals: false })} — ${Math.round(top.share * 100)}% of this month's expenses.`,
+      href: dest('/transactions', { category: top.category }),
     });
   }
 
@@ -250,6 +279,8 @@ export function buildInsights(
         icon: 'leaf',
         title: `Saving ${Math.round(rate * 100)}% of income`,
         body: `${formatAED(current.incomeFils - current.expenseFils, { decimals: false })} kept aside${live ? ' so far this month' : ''}. Keep it up!`,
+        // Where money that was kept aside actually lives: balances and goals.
+        href: dest('/wallet'),
       });
     } else if (rate < 0) {
       insights.push({
@@ -258,6 +289,7 @@ export function buildInsights(
         icon: 'alert',
         title: 'Spending exceeds income',
         body: `Expenses are ${formatAED(current.expenseFils - current.incomeFils, { decimals: false })} above income${isMonthMode ? ' this month' : ' in this period'}.`,
+        href: dest('/transactions'),
       });
     }
   }
@@ -277,6 +309,9 @@ export function buildInsights(
       icon: 'diamond',
       title: 'Biggest purchase',
       body: `${largest.title} — ${formatAED(largest.amountFils, { decimals: false })} on ${largest.date.slice(8)}/${largest.date.slice(5, 7)}.`,
+      // That merchant's own history, which is the question a biggest-purchase
+      // line provokes: is this a one-off or do I do this every month?
+      href: dest('/transactions', { merchant: largest.title }),
     });
   }
 
@@ -294,6 +329,7 @@ export function buildInsights(
         icon: 'repeat',
         title: `${subs.length} subscriptions cost ${formatAED(monthly, { decimals: false })}/mo`,
         body: `That's ${Math.round((monthly / current.incomeFils) * 100)}% of this month's income. Review them in Bills.`,
+        href: dest('/bills'),
       });
     } else {
       insights.push({
@@ -302,6 +338,7 @@ export function buildInsights(
         icon: 'repeat',
         title: `${subs.length} active subscriptions`,
         body: `About ${formatAED(monthly, { decimals: false })} per month combined.`,
+        href: dest('/bills'),
       });
     }
   }
@@ -313,6 +350,7 @@ export function buildInsights(
       icon: 'arrow-up-right',
       title: `${increased.title} got pricier`,
       body: `Last charge ${formatAED(increased.lastAmountFils, { decimals: false })} vs the usual ${formatAED(increased.avgAmountFils, { decimals: false })}.`,
+      href: dest('/bills'),
     });
   }
 
@@ -324,22 +362,8 @@ export function buildInsights(
       icon: 'sun',
       title: 'Daily average',
       body: `You spend about ${formatAED(Math.round(current.expenseFils / dayOfMonth), { decimals: false })} per day${isMonthMode ? ' this month' : ' in this period'}.`,
+      href: dest('/transactions'),
     });
-  }
-
-  // Every insight leads somewhere actionable — and somewhere that EXISTS.
-  // "/budgets" and "/stats" were never routes: a budget warning's own "See
-  // the breakdown" button landed on Unmatched Route. Only names in
-  // INSIGHT_DESTINATIONS may be used, and a test asserts every one of them
-  // has a file behind it.
-  for (const i of insights) {
-    i.href = i.id.startsWith('budget-')
-      ? '/flow'
-      : i.id.startsWith('subs-') || i.id.startsWith('price-up')
-        ? '/bills'
-        : i.id === 'largest' || i.id === 'overspend'
-          ? '/transactions'
-          : '/flow';
   }
 
   const toneRank: Record<InsightTone, number> = { warning: 0, positive: 1, neutral: 2 };

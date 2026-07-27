@@ -14,6 +14,9 @@ import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/perio
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 
+/** How many merchants "Where it went" names before pooling the rest. */
+const MERCHANT_ROWS = 4;
+
 interface LimitSheetProps {
   /** The category being edited, or null to create a new limit. */
   category: CategoryId | null;
@@ -73,9 +76,18 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     return Math.round(total / 3);
   }, [state.transactions, key, picked]);
 
-  /** Who the money went to, so the number has something behind it. */
-  const merchants = useMemo(() => {
-    if (!picked) return [];
+  /**
+   * Who the money went to, so the number has something behind it.
+   *
+   * Four rows, plus the remainder. The four biggest were shown on their own
+   * under a "Spent this month" figure that covers every merchant in the
+   * category, so with a fifth grocer the column simply did not add up: AED
+   * 2,289 spent, four rows totalling 2,074, and nothing anywhere to say where
+   * the other 215 went. Home's "leaving soon" list had the identical bug and
+   * takes the identical cure — keep the total honest and state the rest.
+   */
+  const { merchants, restFils, restCount } = useMemo(() => {
+    if (!picked) return { merchants: [], restFils: 0, restCount: 0 };
     const map = new Map<string, { title: string; totalFils: number; count: number }>();
     for (const t of state.transactions) {
       if (!isSpending(t)) continue;
@@ -89,7 +101,14 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
         map.set(k, { title: t.title, totalFils: t.amountFils, count: 1 });
       }
     }
-    return [...map.values()].sort((a, b) => b.totalFils - a.totalFils).slice(0, 4);
+    const all = [...map.values()].sort((a, b) => b.totalFils - a.totalFils);
+    const shown = all.slice(0, MERCHANT_ROWS);
+    const rest = all.slice(MERCHANT_ROWS);
+    return {
+      merchants: shown,
+      restFils: rest.reduce((s, m) => s + m.totalFils, 0),
+      restCount: rest.length,
+    };
   }, [state.transactions, key, picked]);
 
   const limitFils = parseAmountToFils(text);
@@ -288,6 +307,20 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     </ThemedText>
                   </View>
                 ))}
+                {restCount > 0 && (
+                  <View
+                    style={[
+                      styles.whereRow,
+                      { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+                    ]}>
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.whereName}>
+                      {restCount} more merchant{restCount === 1 ? '' : 's'}
+                    </ThemedText>
+                    <ThemedText type="smallBold" tabular themeColor="textSecondary" style={styles.whereFigure}>
+                      {formatAED(restFils, { decimals: false })}
+                    </ThemedText>
+                  </View>
+                )}
               </View>
             )}
           </ScrollView>

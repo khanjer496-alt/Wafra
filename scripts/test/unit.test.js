@@ -1692,7 +1692,11 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('insights: every card has somewhere to go', noHref.length === 0,
     noHref.map((i) => i.id).join(' | '));
 
-  const offRoute = built.filter((i) => i.href && !routes.has(i.href));
+  // Compare the ROUTE half. A destination may carry a query that scopes the
+  // screen it opens ("/transactions?category=groceries"), which is still the
+  // same route — and a card that lands you on an unfiltered list you have to
+  // search yourself is barely better than one that lands you nowhere.
+  const offRoute = built.filter((i) => i.href && !routes.has(i.href.split('?')[0]));
   ok('insights: no card points at a route that does not exist', offRoute.length === 0,
     [...new Set(offRoute.map((i) => `${i.id}→${i.href}`))].join(' | '));
 
