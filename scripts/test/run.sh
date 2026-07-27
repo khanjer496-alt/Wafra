@@ -14,3 +14,5 @@ npx tsc build/*.ts --module commonjs --target es2022 --lib es2022,dom --outDir b
 node parser.test.js
 node unit.test.js
 node worker.test.js
+# Properties that must hold for every message, not just the pinned ones.
+node invariants.test.js
