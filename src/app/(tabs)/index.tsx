@@ -45,7 +45,7 @@ import {
 } from '@/lib/auto-import';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
-import { committed } from '@/lib/haptics';
+import { committed, tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
@@ -170,7 +170,7 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
-  const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
   const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
 
@@ -185,7 +185,7 @@ function LeavingSoon({
   // different lie. Two things make it legible instead: the heading admits the
   // overdue items are in there, and the remainder is stated below the rows so
   // the column reconciles.
-  const shown = items.slice(0, 3);
+  const shown = expanded ? items : items.slice(0, 3);
   const late = items.filter((x) => x.overdue).length;
   const hidden = items.length - shown.length;
 
@@ -229,7 +229,14 @@ function LeavingSoon({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`See all ${items.length} upcoming payments`}
-          onPress={() => router.push('/bills')}
+          // Expand in place. This used to push to Bills, which opens on its
+          // Cards segment — so tapping "3 more" under three card rows showed
+          // the SAME three cards, and the three items actually being counted
+          // (bills, not cards) were never reachable at all.
+          onPress={() => {
+            tapped();
+            setExpanded(true);
+          }}
           style={[
             styles.leaveRow,
             { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
