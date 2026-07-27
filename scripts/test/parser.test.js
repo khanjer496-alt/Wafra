@@ -1243,5 +1243,169 @@ if (noMin && noMin.kind === 'cardStatement' && noMin.minDueFils === null) {
     JSON.stringify(noMin && { k: noMin.kind, min: noMin.minDueFils }));
 }
 
+// ── Audit round: rules that were claiming messages they should not ──
+
+// The worst of them. `7-?11` was unanchored, so it matched the DIGITS OF A
+// CARD NUMBER: "Card No XXXX4711" contains "711". Every purchase on that card
+// that matched no other rule was filed as groceries — and the card ending 4711
+// is the one most of the multi-line corpus is on.
+t('a card number containing 711 is not a corner shop',
+  'Credit Card Purchase \nCard No XXXX4711 \nAED 132.99 \nMUZZ LTD +····1111 GBR \n21/02/25 20:17',
+  { merchant: 'Muzz Ltd', category: 'other', amountFils: 13299 });
+t('...and the rule still reads a real 7-Eleven',
+  'Purchase of AED 12.00 with Debit Card ending 4744 at 7-ELEVEN AL BARSHA, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'groceries' });
+
+// `water` was unbounded, so utilities claimed every waterpark ahead of the
+// entertainment rule that names them — including WILD WADI, which is listed
+// there by name. Utilities also unlocks the relaxed bill path, so a day out
+// could mint a standing monthly bill.
+t('a waterpark is entertainment, not a utility',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at AQUAVENTURE WATERPARK, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'entertainment' });
+t('the fish market is groceries, not a utility',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at WATERFRONT MARKET, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'groceries' });
+t('a water authority is still a utility',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at SHARJAH WATER AUTHORITY, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'utilities' });
+
+// `metro` was unbounded and transport runs before travel.
+t('a hotel whose name starts with Metro is travel',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at METROPOLITAN HOTEL DUBAI, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'travel' });
+t('the Metro itself is still transport',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at DUBAI METRO STATION, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'transport' });
+
+// PLACE_TAIL_RE peeled a GLUED "RAK" — three letters that end an Arabic word
+// far more often than they name Ras Al Khaimah. "Al Muba" was the result.
+t('a glued RAK is the end of the name, not an emirate',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at AL MUBARAK, DUBAI. Avl Balance is AED 846.57.',
+  { merchant: 'Al Mubarak' });
+t('...but the emirate written out still comes off',
+  'Credit Card Purchase \nCard No XXXX3749 \nAED 78.80 \nGOLDEN CITY RAS AL KHAIMA ARE \n10/05/25 11:57 \nAvailable Balance AED 1474.55',
+  { merchant: 'Golden City', amountFils: 7880 });
+
+// The country-code strip ate a real trailing word. The vocabulary already
+// knows "toys r us" by its full name; the descriptor cleanup was destroying
+// the very string the rule matches on.
+t('a shop whose name ends in US keeps it',
+  'Purchase of AED 42.00 with Debit Card ending 4744 at TOYS R US, DUBAI. Avl Balance is AED 846.57.',
+  { merchant: 'Toys R Us', category: 'shopping' });
+
+// A bill reminder took its amount from the balance fallback, which can only
+// ever return a figure the message introduced as a BALANCE or a LIMIT. This is
+// the tail segment of the multi-line FAB format already tested above, as it
+// arrives when a long message is split: no purchase line, so nothing marks it
+// as a transaction, and it used to import as a AED 9,705.65 bill.
+t('a due reminder never takes the available balance as its amount',
+  'Avl Bal AED 9705.65\nJuly statement due on 27/07/2026',
+  null);
+
+// HSBC runs the transaction date together with no separators. Nothing in the
+// grammar could read it, so every HSBC message was filed on the day it was
+// imported rather than the day it happened.
+t('the HSBC date prefix is read',
+  'From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. Your available balance is AED 1,430.28',
+  { date: '2025-06-24' });
+t('the HSBC date prefix is read on a transfer too',
+  'From HSBC: 20MAR25 TT Payment to 041-339***-001 AED 1,108.00+ Your available balance is AED 946.48',
+  { date: '2025-03-20', merchant: 'Bank transfer' });
+
+// ── "other" means two opposite things ──
+// A brokerage mapped to "other" on purpose is a row the parser understands.
+// A row that failed every rule is not. The accuracy report could not tell them
+// apart and called all of them unread formats.
+{
+  const cases = [
+    ['a brokerage is deliberately uncategorized',
+     'Credit Card Purchase \nCard No XXXX3749 \nAED 3000.00 \neToro ME LTD etoro ARE \n24/12/25 22:48 \nAvailable Balance AED 5409.02', true],
+    ['a crypto on-ramp is deliberately uncategorized',
+     'Purchase of AED 2,062.26 with Debit Card ending 8783 at CRYPTO.COM, SAN GILJAN. Avl Balance is AED 37,091.01.', true],
+    ['a card settlement is deliberately uncategorized',
+     'Payment of AED 2,000.00 received on your card ending 8575. Thank you.', true],
+    ['a savings sweep is deliberately uncategorized',
+     'AED 7,000.00 has been debited from your account no. 095XXX13XXX01 TO LIV FROM EMERGENCY FUNDS. The available balance is AED 7,939.20.', true],
+    ['an unknown shop is NOT deliberately uncategorized',
+     'Purchase of AED 1.00 with Debit Card ending 8783 at XPOWERPLUS, DUBAI. Avl Balance is AED 7,097.56.', false],
+  ];
+  for (const [name, raw, want] of cases) {
+    const r = parseSms(raw);
+    if (r && r.categoryGuess === 'other' && Boolean(r.categoryDeliberate) === want) {
+      pass++; console.log(`✓ ${name}`);
+    } else {
+      fail++; console.log(`✗ ${name}`,
+        JSON.stringify(r && { c: r.categoryGuess, d: r.categoryDeliberate }));
+    }
+  }
+  // A category the vocabulary DID choose is a decision too.
+  const known = parseSms('Purchase of AED 42.00 with Debit Card ending 4744 at CARREFOUR, DUBAI. Avl Balance is AED 846.57.');
+  if (known && known.categoryGuess === 'groceries' && known.categoryDeliberate === true) {
+    pass++; console.log('✓ a matched category is marked deliberate');
+  } else {
+    fail++; console.log('✗ a matched category is marked deliberate', JSON.stringify(known && { c: known.categoryGuess, d: known.categoryDeliberate }));
+  }
+}
+
+// ── Second accuracy export: merchants the vocabulary had no entry for ──
+// Every descriptor below is quoted from uae-accuracy-report-2.txt, where it
+// was read correctly and then dumped in "other".
+for (const [descriptor, category] of [
+  // Acquirer truncations of "AUTO SERVICE" / "AUTO AC", and the parking
+  // operator's vowel-free descriptor.
+  ['PRKN-MTPA', 'transport'],
+  ['TIER AE RIDE', 'transport'],
+  ['AL HABTOOR MOTORS CO L', 'transport'],
+  ['FARIQ AL AWAIEL AUTO S', 'transport'],
+  ['SHABAB AL KHAN AUTO AC', 'transport'],
+  ['MENA MOBILITY LLC', 'transport'],
+  // The existing rule was `pull ?& ?bear`; the acquirer spells out the AND.
+  ['PULL AND BEAR', 'shopping'],
+  ['DALMA READY MADE GAR T', 'shopping'],
+  ['RUKN AL ASAAD READYMAD', 'shopping'],
+  ['AL SAAD FURNITURE EST', 'shopping'],
+  ['BRAND FOLIO LLC', 'shopping'],
+  ['G O A T', 'shopping'],
+  ['UNDER ARMOUR-C.PHUKET FES', 'shopping'],
+  ['CRC SPORTS-PHUKET 4', 'shopping'],
+  ['A025-AIIZ-JUNGCEYLON PHUK', 'shopping'],
+  ['SP YZY SPLY', 'shopping'],
+  ['QDF CONCOURSE A DOHA', 'shopping'],
+  ['DUBAI RETAIL ASSETS', 'shopping'],
+  ['HUTONG', 'dining'],
+  ['POINT SEVEN SPECIALIT', 'dining'],
+  ['WAQT AL KHAFAYEF CAF', 'dining'],
+  ['AL BAAR WA AL BAHR ROA', 'dining'],
+  ['BLOOMFIELD TREAT-245814', 'dining'],
+  ['TOPS-PATONG', 'groceries'],
+  ['SERRURIER', 'home-services'],
+  ['AL KHABEER AL AWAL PH', 'health'],
+  // "INSURA" is one character shorter than the `insuran` the rule wanted.
+  // Insurance has no category of its own; it lands where insurance lands.
+  ['UNITED FIDELITY INSURA', 'health'],
+  ['DAYPASSAPP.COM', 'travel'],
+  ['MAILTRACK.IO', 'entertainment'],
+  ['Google VPN Proton Fas', 'entertainment'],
+]) {
+  t(`${descriptor} reads as ${category}`,
+    `Purchase of AED 42.00 with Debit Card ending 4744 at ${descriptor}, DUBAI. Avl Balance is AED 846.57.`,
+    { category });
+}
+
+// ...and the neighbours those new alternations could have eaten.
+for (const [descriptor, category] of [
+  ['MOTOR CITY GARDENS', 'other'],      // \bmotors\b is plural on purpose
+  ['CAFU FUEL DELIVERY', 'transport'],  // \bcaf\b must not reach CAFU
+  ['SUN & SAND SPORTS', 'shopping'],    // crc sports must not move sportswear
+  ['GYMNATION FITNESS', 'health'],
+  ['ANANTARA RESORT HOTEL', 'travel'],
+  ['CARREFOUR HYPERMARKET', 'groceries'],
+]) {
+  t(`${descriptor} still reads as ${category}`,
+    `Purchase of AED 42.00 with Debit Card ending 4744 at ${descriptor}, DUBAI. Avl Balance is AED 846.57.`,
+    { category });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

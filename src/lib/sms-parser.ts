@@ -50,8 +50,8 @@ export interface ParsedSms {
   categoryGuess: CategoryId;
   /**
    * True when `categoryGuess` was DECIDED — by a vocabulary rule, a user
-   * override, or a branch that knows what the row is — and false only when it
-   * is the untouched fall-through default.
+   * override, or a branch that knows what the row is. Absent when it is the
+   * untouched fall-through default.
    *
    * It exists because `other` means two opposite things. A brokerage or a
    * crypto on-ramp is mapped to `other` on purpose (that money moved, it was
@@ -466,7 +466,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/donat|charity|zakat|sadaqah|dubai cares|red crescent|beit al khair|dar al ber|gofundme/i, 'charity'],
   // Developer and AI tooling billed per seat — a whole spending family the
   // vocabulary had no entry for, so every one of them landed in "other".
-  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|mailtrack|proton ?(?:vpn|mail)|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr/i, 'entertainment'],
+  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|mailtrack|\bvpn\b|protonmail|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr/i, 'entertainment'],
   // Leisure venues and cinema distributors. Deliberately no district names
   // here — "City Walk" appears in the descriptor of every shop and cafe in
   // it, and matching it sent a coffee roastery to entertainment.
@@ -511,12 +511,15 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // that card that matched nothing else was filed as groceries. Four cards in
   // the two accuracy exports end in a number containing 711.
   [/hypermarket|supermarket|superm\w*|hyperm\w*|mini ?mart?\b|\bmart\b|grocer|baqala|coop\b|co-?op|vegetables|\bfruits?\b|butcher|fish market|meat\b|roastery|adnoc oasis|zoom\b|\b7-?11\b|\b7-?eleven\b|circle k|last chance|day to day|gala\b|west zone|foodstuff|tawfeer|tawpeek|vending|\bmarket\b|\bsupe\w*\b|sprmkt|spmkt|\bsprm\b|\bsmkt\b|now ?now|\bviva\b|smart seven|mazraat|janata|aswaaq|plus point|\bspices?\b|\bdates? (?:llc|tr|trading)\b|\bgro\b|\bgroc\b|\bhymkt\b|hypermkt|\bfoodstuff|nuts? (?:tr|llc)\b|\bbakala|dairy|\bmeats?\b/i, 'groceries'],
-  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b/i, 'dining'],
+  // `caf` is the acquirer's truncation of "CAFE"/"CAFETERIA" at the 20-character
+  // field limit ("WAQT AL KHAFAYEF CAF"). Bounded both sides, and it sits below
+  // the transport rule so CAFU, the fuel-delivery brand, is claimed there first.
+  [/\brest\b|\bres\b|\bresto\b|restur|\bcaf\b|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b/i, 'dining'],
   // "Centre" sits here, in the structural fallbacks, rather than with the
   // brands: a medical centre is health and a car centre is transport, and both
   // of those rules run earlier. By the time anything reaches this line, the
   // only centres left are the retail kind.
-  [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments?|textile|ready ?made|footwear|shoes|optical shop|furniture|\bretail\b|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b/i, 'shopping'],
+  [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments?|textile|ready ?made?|footwear|shoes|optical shop|furniture|\bretail\b|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b/i, 'shopping'],
 ];
 
 /**
@@ -969,7 +972,81 @@ function extractDate(raw: string): string | null {
   return null;
 }
 
-/** Parses a single bank-alert SMS. Returns null for non-transaction messages. */
+/**
+ * Parses a single bank-alert SMS. Returns null for non-transaction messages.
+ *
+ * ONE if-chain, first match wins. Nothing documented the intended precedence,
+ * so here it is. `L` marks an ordering that is load-bearing: move that branch
+ * and a message starts reading as the wrong thing.
+ *
+ *  #  branch                guard                                      why here
+ *  ─────────────────────────────────────────────────────────────────────────────
+ *  1  refusals              OTP / declined / pre-auth / rate card /  L first: a
+ *                           fee schedule / autopay / BNPL preview /    declined
+ *                           instalment offer / overdue nag / receipt   purchase
+ *                                                                      still says
+ *                                                                      "purchase"
+ *  2  parking              "PlateNo-" AND a fee figure               L before the
+ *                                                                      amount
+ *                                                                      helpers:
+ *                                                                      "Fee-AED2.38"
+ *                                                                      is not the
+ *                                                                      only figure
+ *  3  card payment IN       a card AND CARD_PAYMENT_RE               L before the
+ *                                                                      generic
+ *                                                                      debit path,
+ *                                                                      which sees
+ *                                                                      only the
+ *                                                                      word
+ *                                                                      "payment"
+ *                                                                      and files a
+ *                                                                      settlement
+ *                                                                      as spending
+ *  4  payment instructions "payment instructions of" AND a masked      near-dead:
+ *     → masked PAN          PAN                                        #3 claims
+ *                                                                      every shape
+ *                                                                      seen so far
+ *  5  bank bill-pay        "payment instructions ... for consumer     L after #4:
+ *                           number"                                    a masked PAN
+ *                                                                      is a card,
+ *                                                                      not a biller
+ *  6  biller reference      CAPS + "NO.-<digits>", not BANK_NOUN_RE,   L after #5
+ *                           and the name must resolve to a category    and before
+ *                           or a known service                         the generic
+ *                                                                      path, whose
+ *                                                                      title would
+ *                                                                      be "Account
+ *                                                                      debit"
+ *  7  biller portal receipt "payment to account no ..." + "Amount Paid"
+ *  8  telegraphic transfer / outward remittance
+ *  9  TT payment          "TT Payment"                                L before the
+ *                                                                      generic
+ *                                                                      path: the
+ *                                                                      account
+ *                                                                      fragment
+ *                                                                      "041-339***-
+ *                                                                      001 AED"
+ *                                                                      fakes an
+ *                                                                      amount
+ * 10  card statement        a card AND statement words AND due words  L the
+ *                           AND NOT purchase/was used/charged/          negative
+ *                           withdraw/debited/spent                      guard is
+ *                                                                      what keeps
+ *                                                                      a PURCHASE
+ *                                                                      carrying a
+ *                                                                      "statement
+ *                                                                      due on"
+ *                                                                      footer in
+ *                                                                      the generic
+ *                                                                      path
+ * 11  generic               a debit word, a credit word, or bill-due   the rest
+ *                           words with neither
+ *
+ * Inside #11 the order matters too: refund/credited-in decides direction before
+ * a merchant is looked for; savings sweeps and named transfers overwrite the
+ * merchant AFTER descriptor cleanup so a rail is never titled like a shop; the
+ * ATM rename runs last because those messages do name a location.
+ */
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,
