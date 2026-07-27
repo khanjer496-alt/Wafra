@@ -1,6 +1,7 @@
 // https://docs.expo.dev/guides/using-eslint/
 const { defineConfig } = require('eslint/config');
 const expoConfig = require("eslint-config-expo/flat");
+const globals = require('globals');
 
 module.exports = defineConfig([
   expoConfig,
@@ -8,5 +9,15 @@ module.exports = defineConfig([
     // scripts/test/build/ holds the transpiled copies run.sh generates. Linting
     // them made results depend on whether the suite had been run.
     ignores: ["dist/*", "scripts/test/build/*", "android/*", "ios/*", "server/*"],
+  },
+  {
+    // Everything under scripts/ is a Node program, not app code: the test
+    // runner, the invariant harness, the Playwright suites, the icon renderer.
+    // They legitimately use __dirname, process and require, and the app config
+    // does not grant those — so a new tool file failed `eslint .` in CI while
+    // passing `eslint src` locally. Say what these files are instead of
+    // contorting them around a config gap.
+    files: ["scripts/**"],
+    languageOptions: { globals: { ...globals.node } },
   }
 ]);
