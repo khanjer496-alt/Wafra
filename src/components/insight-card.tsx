@@ -51,7 +51,11 @@ export function InsightCard({ insight }: InsightCardProps) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={insight.title}
-      onPress={() => router.push(insight.href!)}
+      // No non-null assertion. The guard above already proved it is there,
+      // and asserting is how a missing href became a push to the empty path —
+      // which is why the error screen said "wafra:///" and not the route it
+      // failed to find.
+      onPress={() => router.push(insight.href ?? '/flow')}
       style={({ pressed }) => [
         styles.wrap,
         { borderTopColor: theme.cardBorder },

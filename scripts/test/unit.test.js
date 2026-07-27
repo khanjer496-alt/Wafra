@@ -1368,5 +1368,57 @@ ok('stale: a stale statement that gets paid leaves openDues',
     ins.spentInMonthForCategory(rows, period, 'dining', live) === shown.expenseFils);
 }
 
+// ── every card under "Worth knowing" must lead somewhere real ──
+//
+// The user reported that MOST of them opened Unmatched Route. Twelve kinds of
+// insight exist and seven of them pointed at "/stats" or "/budgets", neither
+// of which has ever been a route. The static check in routes.test.js reads
+// the destinations off the source; this one drives the real function with
+// real data and checks what actually comes out, which is the only way to know
+// a kind was not missed.
+{
+  const ins = require('./build/insights');
+  const routes = new Set(ins.INSIGHT_DESTINATIONS);
+  ok('insights: the destination list is not empty', routes.size > 0);
+
+  // A ledger shaped to trip as many insight kinds as possible at once: two
+  // months of history, a blown budget, a subscription, a price rise, and one
+  // charge far bigger than the rest.
+  const rows = [];
+  const push = (date, amountFils, title, category, type = 'expense') =>
+    rows.push({ id: `t${rows.length}`, type, amountFils, category, accountId: 'a', title, date, source: 'sms' });
+  for (const m of ['06', '07']) {
+    push(`2026-${m}-02`, 900000, 'Salary', 'salary', 'income');
+    push(`2026-${m}-03`, 350000, 'Rent', 'rent');
+    push(`2026-${m}-05`, 4500, 'Carrefour', 'groceries');
+    push(`2026-${m}-09`, 290000, 'Carrefour', 'groceries');
+    push(`2026-${m}-12`, 7700, 'ChatGPT', 'entertainment');
+    push(`2026-${m}-19`, 12000, 'Talabat', 'dining');
+  }
+  push('2026-07-21', 480000, 'Emirates', 'travel'); // the outlier
+  push('2026-07-22', 8800, 'ChatGPT', 'entertainment'); // a price rise
+
+  const budgets = [{ category: 'groceries', limitFils: 250000 }];
+  const built = [];
+  for (const period of [{ mode: 'month', key: '2026-07' }, { mode: 'year', key: '2026' }, { mode: 'all' }]) {
+    built.push(...ins.buildInsights(rows, budgets, period, new Date(2026, 6, 25)));
+  }
+  ok('insights: the fixture produces a useful spread', built.length >= 4, `${built.length}`);
+
+  const noHref = built.filter((i) => !i.href);
+  ok('insights: every card has somewhere to go', noHref.length === 0,
+    noHref.map((i) => i.id).join(' | '));
+
+  const offRoute = built.filter((i) => i.href && !routes.has(i.href));
+  ok('insights: no card points at a route that does not exist', offRoute.length === 0,
+    [...new Set(offRoute.map((i) => `${i.id}→${i.href}`))].join(' | '));
+
+  // The kinds this fixture actually reached, so a future reader can see the
+  // coverage rather than trusting the count.
+  const kinds = [...new Set(built.map((i) => i.id.replace(/-.*$/, '')))].sort();
+  console.log(`  insight kinds exercised: ${kinds.join(', ')}`);
+  ok('insights: budget cards were among them', kinds.includes('budget'), kinds.join(','));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

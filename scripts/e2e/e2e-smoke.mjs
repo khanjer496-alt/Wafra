@@ -1,6 +1,7 @@
 // Smoke suite: visits every screen of the four-tab IA, opens each detail
 // sheet, exercises the import paste flow, the paywall, founder unlock, and
 // trial expiry.
+import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:8126';
@@ -239,7 +240,13 @@ const paintedScheme = (page) => page.evaluate(() => {
   return (r + g + b) / 3 > 128 ? 'light' : 'dark';
 });
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+// The dev container ships Chromium at a fixed path; a CI runner installs it
+// where Playwright expects. Use the pinned path only when it is really there,
+// or the suite fails to launch on whichever of the two it was not written on.
+const CHROMIUM = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
+const browser = await chromium.launch(
+  existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
+);
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));

@@ -1,5 +1,6 @@
 // Focused E2E: the global reporting period reflects on Home, Flow, and
 // Activity, and survives a reload.
+import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const BASE = 'http://localhost:8126';
@@ -100,7 +101,13 @@ const tapTab = async (page, label) => {
   await page.waitForTimeout(1300);
 };
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+// The dev container ships Chromium at a fixed path; a CI runner installs it
+// where Playwright expects. Use the pinned path only when it is really there,
+// or the suite fails to launch on whichever of the two it was not written on.
+const CHROMIUM = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
+const browser = await chromium.launch(
+  existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
+);
 const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
