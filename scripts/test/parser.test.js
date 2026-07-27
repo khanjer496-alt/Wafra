@@ -370,6 +370,39 @@ if (dailyLimit && dailyLimit.snapshotKind === null) {
     JSON.stringify(dailyLimit && { k: dailyLimit.snapshotKind, f: dailyLimit.snapshotFils }));
 }
 
+// ── abbreviated balance wording ──
+// "avbl" / "lmt" / "limit available" come from the published vocabulary of
+// MabudAlam/transaction_sms_parser (MIT). Not in this corpus yet; pinned so
+// the shorthand keeps reading, and so the three deliberate refusals below
+// stay refusals when the vocabulary widens again.
+for (const [tail, kind, fils] of [
+  ['Avbl bal AED 5,000.00', 'balance', 500000],
+  ['Avl lmt AED 5,000.00', 'limit', 500000],
+  ['Avbl. credit limit AED 5,000.00', 'limit', 500000],
+  ['Limit available AED 5,000.00', 'limit', 500000],
+]) {
+  const body = `Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR. ${tail}`;
+  const r = parseSms(body);
+  if (r && r.snapshotKind === kind && r.snapshotFils === fils && r.amountFils === 12000) {
+    pass++; console.log(`✓ "${tail}" reads as a ${kind}`);
+  } else {
+    fail++; console.log(`✗ "${tail}" reads as a ${kind}`,
+      JSON.stringify(r && { k: r.snapshotKind, f: r.snapshotFils, a: r.amountFils }));
+  }
+}
+
+// Bare "balance" stays out: "minimum balance AED 3,000" is a requirement,
+// not this account's money.
+for (const tail of ['Balance AED 5,000.00', 'Minimum balance AED 3,000.00']) {
+  const r = parseSms(`Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR. ${tail}`);
+  if (r && r.snapshotFils === null) {
+    pass++; console.log(`✓ "${tail}" is not a balance snapshot`);
+  } else {
+    fail++; console.log(`✗ "${tail}" is not a balance snapshot`,
+      JSON.stringify(r && { k: r.snapshotKind, f: r.snapshotFils }));
+  }
+}
+
 // ── real-device corpus (user-shared formats, July 2026) ──
 t('parking confirmation is a transport expense, not "Paid Upto..."',
   'Confirmation\nPlateNo-1239301\nPlateSource-Dubai\nTicketNo-4479126\nFee-AED2.38\nVAT-AED0.019\nPaid upto 09/07/26 09:08PM',

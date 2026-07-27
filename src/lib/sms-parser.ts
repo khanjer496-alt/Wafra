@@ -950,8 +950,15 @@ function extractMerchant(raw: string, re: RegExp): string {
 // The gap before the figure excludes mask characters: "Avl Bal AED ····9235.93"
 // must not report a 9,235.93 balance, because the real one has digits the bank
 // redacted.
+// "avbl" and "lmt" are the same two words with the vowels dropped, and
+// "limit available" is them the other way round. All three come from the
+// published vocabulary of a long-running Indian SMS parser
+// (MabudAlam/transaction_sms_parser, MIT) — the template family HSBC, Citi
+// and Standard Chartered carry into the Gulf. None appear in this corpus
+// yet; they are here because a missed snapshot is silent, and an
+// abbreviation of a word already matched cannot match anything else.
 const SNAPSHOT_RE =
-  /(?:avl|avail(?:able)?|remaining|total)\.?\s*(?:cr(?:edit)?\.?\s+)?(limit|bal(?:ance)?|outstanding)[^0-9·•*-]{0,12}([\d,]+(?:\.\d{1,2})?)/i;
+  /(?:(?:avl|avbl|avail(?:able)?|remaining|total)\.?\s*(?:cr(?:edit)?\.?\s+)?(limit|lmt|bal(?:ance)?|outstanding)|(limit|lmt)\s+available)[^0-9·•*-]{0,12}([\d,]+(?:\.\d{1,2})?)/i;
 // "Your balance is AED 401913.68" — balance quotes without an Avl/Total
 // prefix. Kept separate so bare "limit" mentions (daily limits, offers)
 // still need the availability prefix above.
@@ -963,12 +970,19 @@ const MAX_SNAPSHOT_FILS = 1_000_000_000; // 10M in the local currency
 function extractSnapshot(raw: string): { fils: number; kind: SnapshotKind } | null {
   const m = raw.match(SNAPSHOT_RE);
   if (m) {
-    const fils = Math.round(Number(m[2].replace(/,/g, '')) * 100);
+    const fils = Math.round(Number(m[3].replace(/,/g, '')) * 100);
     if (Number.isFinite(fils) && fils >= 0 && fils <= MAX_SNAPSHOT_FILS) {
-      const word = m[1].toLowerCase();
+      // Group 1 is the "avl <word>" order, group 2 the "<word> available"
+      // order; exactly one of them is set.
+      const word = (m[1] ?? m[2]).toLowerCase();
       return {
         fils,
-        kind: word.startsWith('limit') ? 'limit' : word === 'outstanding' ? 'outstanding' : 'balance',
+        kind:
+          word.startsWith('limit') || word === 'lmt'
+            ? 'limit'
+            : word === 'outstanding'
+              ? 'outstanding'
+              : 'balance',
       };
     }
   }
