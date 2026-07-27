@@ -1962,5 +1962,51 @@ ok('stale: a stale statement that gets paid leaves openDues',
     ledger.internalTransferIds(oneOut, live).size === 2);
 }
 
+// ── a price that halved must not say "price up" ──
+//
+// The user's Google One: AED 7.99 for a year, up to 76.99 on a tier change,
+// then DOWN to 37 — and the row wore a PRICE UP badge in a month they paid
+// less than half. The comment in subscriptions.ts had already claimed this
+// merchant fixed once. It was not; the window was the problem both times.
+{
+  const subsLib = require('./build/subscriptions');
+  const mk = (amountFils, date, i) => ({
+    id: `g${i}`, type: 'expense', amountFils, category: 'entertainment',
+    accountId: 'a', title: 'Google One', date, source: 'sms',
+  });
+
+  // Twelve months at 7.99, two at 76.99, three at 37 — their real shape.
+  const rows = [];
+  let i = 0;
+  for (let m = 4; m <= 12; m++) rows.push(mk(799, `2025-${String(m).padStart(2, '0')}-02`, i++));
+  for (const d of ['2026-01-02', '2026-02-02', '2026-03-02']) rows.push(mk(799, d, i++));
+  rows.push(mk(7699, '2026-04-02', i++));
+  rows.push(mk(7699, '2026-05-02', i++));
+  for (const d of ['2026-06-02', '2026-07-02', '2026-08-02']) rows.push(mk(3700, d, i++));
+
+  const [sub] = subsLib.detectSubscriptions(rows, [], new Date(2026, 7, 25));
+  ok('google: the subscription is detected', !!sub, JSON.stringify(sub && sub.title));
+  ok('google: a halved price is NOT a rise', sub.priceIncreased === false,
+    `prior=${sub && sub.priorTypicalFils} last=${sub && sub.lastAmountFils}`);
+  ok('google: the price it is compared against is the one before, not the lifetime median',
+    sub.priorTypicalFils === 7699, String(sub && sub.priorTypicalFils));
+  ok('google: the reported price is what it costs now', sub.avgAmountFils === 3700,
+    String(sub && sub.avgAmountFils));
+
+  // The rise that started it is still a rise, however long ago — a user who
+  // has been paying more for three months has not stopped paying more.
+  const upgraded = rows.slice(0, 14);
+  const [up] = subsLib.detectSubscriptions(upgraded, [], new Date(2026, 4, 25));
+  ok('google: the tier upgrade itself still reports as a rise', up.priceIncreased === true);
+  ok('google: and names the old price it rose from', up.priorTypicalFils === 799,
+    String(up && up.priorTypicalFils));
+
+  // A price that never moved has nothing to announce.
+  const steady = ['2026-04-02', '2026-05-02', '2026-06-02', '2026-07-02'].map((d, n) =>
+    mk(3700, d, 100 + n));
+  const [flat] = subsLib.detectSubscriptions(steady, [], new Date(2026, 6, 25));
+  ok('google: a steady price is never a rise', flat.priceIncreased === false);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -86,6 +86,33 @@ const SUBSCRIPTION_CATEGORIES = new Set<CategoryId>(['entertainment', 'shopping'
  * stability, boosted by a known-subscription merchant list. Merchants the
  * user marked "not a subscription" are skipped entirely.
  */
+/** Materially different — the same threshold the rise test uses. */
+function differs(a: number, b: number): boolean {
+  return Math.abs(a - b) > Math.min(a, b) * 0.1;
+}
+
+/**
+ * The contiguous run of charges, ending just before the current price began,
+ * that were charged at a different price. Empty when the price never changed.
+ *
+ * amounts is oldest-first, so this walks backwards past every charge at the
+ * current price, then collects the run of the price before it.
+ */
+function previousPriceRun(amounts: number[]): number[] {
+  if (amounts.length < 2) return [];
+  const current = amounts[amounts.length - 1];
+  let i = amounts.length - 1;
+  while (i >= 0 && !differs(amounts[i], current)) i -= 1;
+  if (i < 0) return []; // never anything else
+  const previous = amounts[i];
+  const run: number[] = [];
+  while (i >= 0 && !differs(amounts[i], previous)) {
+    run.unshift(amounts[i]);
+    i -= 1;
+  }
+  return run;
+}
+
 export function detectSubscriptions(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
@@ -181,11 +208,25 @@ export function detectSubscriptions(
     // least two of them. A mean over one prorated first charge made every
     // steady subscription look like a price rise — Google One was flagged
     // "price up" in a month its price went down.
-    // The latest charge against the MEDIAN of every charge before it. Median
-    // rather than mean so one bad parse cannot move the bar, and unfiltered so
-    // a real upgrade is not hidden by the outlier guard — a tier change and a
-    // misparse look identical to that guard, and it silently prefers the past.
-    const priorAmounts = amounts.slice(0, -1);
+    // The latest charge against THE PRICE IT WAS BEFORE — the most recent
+    // run of charges that differed from what is being paid now.
+    //
+    // Neither obvious window works. A lifetime median answers the wrong
+    // question: Google One ran at AED 7.99 for a year, went to 76.99 on a
+    // tier change, then down to 37, and the median of all sixteen prior
+    // charges is still the 7.99 era — so a price that had just HALVED wore a
+    // "price up" badge. A fixed window of the last three is no better: it
+    // hides a rise that happened three charges ago, which is a rise the user
+    // has been paying ever since.
+    //
+    // Walking back to the previous distinct price answers what was actually
+    // asked. 37 after a run of 77 is a fall. 76.99 after a run of 7.99 is a
+    // rise, however long ago it started. And a steady price has no previous
+    // run at all, so there is nothing to announce.
+    //
+    // The run is taken whole rather than a single charge, so one bad parse
+    // cannot masquerade as the old price.
+    const priorAmounts = previousPriceRun(amounts);
     const priorTypical = priorAmounts.length ? median(priorAmounts) : last.amountFils;
     // What it costs NOW, not what it averaged over its life. A lifetime average
     // reports a price the user no longer pays: Google One went from AED 7.99
