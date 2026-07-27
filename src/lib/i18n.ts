@@ -238,6 +238,17 @@ export function detectLanguage(): Lang {
   return 'en';
 }
 
-export function t(key: StringKey): string {
-  return S[key][lang] ?? S[key].en;
+/**
+ * A string in the current UI language.
+ *
+ * `in` is there for the one caller that cannot rely on "current": React
+ * Compiler memoises a component's output on the values it can see going in,
+ * and the module-level `lang` is not one of them. A component that reads the
+ * language only through this function therefore keeps whatever labels it
+ * rendered first until something else invalidates its memo — which is how the
+ * tab bar kept five English labels under four Arabic screens. Passing the
+ * language makes the dependency real rather than merely true.
+ */
+export function t(key: StringKey, override?: Lang): string {
+  return S[key][override ?? lang] ?? S[key].en;
 }

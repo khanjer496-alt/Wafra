@@ -27,56 +27,56 @@ const ok = (name, cond, detail) => {
 /* ── Reaching things ──────────────────────────────────────────────────── */
 
 /**
- * Bring an element on screen and say whether it is the thing that would
- * actually receive the tap.
+ * Find the on-screen control carrying this aria-label or exact text and return
+ * the point to click, or null.
  *
- * Every screen stays mounted behind the current one, so a locator match is
- * routinely a control on a screen the user cannot see. Two steps, the same
- * pair the smoke suite learned: the browser's minimal scroll, then a nudge
- * past the floating tab bar — which the minimal scroll parks things under and
- * which the hit test below then correctly calls covered.
+ * All of it happens inside one page.evaluate on purpose. A Playwright locator
+ * for a common word matches on every mounted screen at once — "Groceries" is a
+ * chip on the add form, a composition row on Flow and a limit row under it —
+ * and walking those candidates one round trip at a time, scrolling each into
+ * view to find out, took longer than the timeout allowed. Doing the search
+ * where the DOM is makes it one call and lets the hit test decide.
  */
-const bringForward = async (el) => {
-  await el.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-  await el.evaluate((node) => {
-    const BAR = 130;
-    for (let i = 0; i < 4; i++) {
-      const r = node.getBoundingClientRect();
-      const over = r.bottom - (window.innerHeight - BAR);
-      if (over <= 0) break;
-      let p = node.parentElement;
-      while (p && !(p.scrollHeight > p.clientHeight + 4 && p.clientHeight > 200)) p = p.parentElement;
-      if (!p) break;
-      p.scrollTop += over + 12;
+const locate = (page, key) => page.evaluate((want) => {
+  const BAR = 130;
+  const nodes = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.getAttribute?.('aria-label') === want) nodes.push(el);
+    else if ((el.textContent || '').trim() === want
+      && !(el.firstElementChild && (el.firstElementChild.textContent || '').trim() === want)) {
+      nodes.push(el);
     }
-  }).catch(() => {});
-  return el.evaluate((node) => {
-    const r = node.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) return false;
+  }
+  for (const el of nodes) {
+    // A disabled control is not broken for refusing the tap.
+    if (el.getAttribute('aria-disabled') === 'true' || el.disabled) return { disabled: true };
+    let p = el.parentElement;
+    while (p && !(p.scrollHeight > p.clientHeight + 4 && p.clientHeight > 200)) p = p.parentElement;
+    if (p) {
+      const r = el.getBoundingClientRect(), pr = p.getBoundingClientRect();
+      if (r.top < pr.top + 4) p.scrollTop += r.top - pr.top - 20;
+      else if (r.bottom > pr.bottom - BAR) p.scrollTop += r.bottom - pr.bottom + BAR + 12;
+    }
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) continue;
     const cx = Math.min(Math.max(r.x + r.width / 2, 1), window.innerWidth - 2);
     const cy = Math.min(Math.max(r.y + r.height / 2, 1), window.innerHeight - 2);
     const top = document.elementFromPoint(cx, cy);
-    return !!top && (node.contains(top) || top.contains(node));
-  }).catch(() => false);
-};
+    if (top && (el.contains(top) || top.contains(el))) return { x: cx, y: cy };
+  }
+  return null;
+}, key);
 
 /** Click whatever carries this aria-label or exact text and is on top. */
-async function tapKey(page, key, timeout = 6000) {
+async function tapKey(page, key, timeout = 4000) {
   const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const els = [
-      ...(await page.getByLabel(key, { exact: true }).all()),
-      ...(await page.getByText(key, { exact: true }).all()),
-    ];
-    for (const el of els) {
-      if (await bringForward(el)) {
-        await el.click({ timeout: 5000 });
-        return true;
-      }
-    }
+  for (;;) {
+    const hit = await locate(page, key);
+    if (hit?.disabled) return 'disabled';
+    if (hit) { await page.mouse.click(hit.x, hit.y); return true; }
+    if (Date.now() > deadline) return false;
     await page.waitForTimeout(200);
   }
-  return false;
 }
 
 const tapTab = async (page, name) => {
@@ -103,8 +103,11 @@ const visibleControls = (page) => page.evaluate(() => {
     const cy = Math.min(Math.max(r.y + r.height / 2, 1), window.innerHeight - 2);
     const top = document.elementFromPoint(cx, cy);
     if (!(top && (el.contains(top) || top.contains(el)))) continue;
+    // Not truncated: the key is what the tap is looked up by, and a row whose
+    // label is its own concatenated contents ("FAB Credit CardPay by 1 Aug ·
+    // 5d left · min AED 250AED 4,975") stops matching the moment it is cut.
     const key = el.getAttribute('aria-label') ?? (el.textContent || '').trim();
-    if (key) out.push(key.slice(0, 60));
+    if (key) out.push(key);
   }
   return out;
 });
@@ -256,24 +259,94 @@ await reload();
 async function pressEverything(name, enter, { skip = [] } = {}) {
   await enter();
   const controls = await everyControl(page);
+  const base = await url(page);
   const dead = [];
   const unreachable = [];
+  const opened = [];
+  const stuck = [];
+  let pressed = 0, disabled = 0;
   for (const key of controls) {
     if (skip.includes(key) || ['Home', 'Flow', 'Bills', 'Wallet'].includes(key)) continue;
-    await enter();
     errors.length = 0;
     let clicked = false;
-    try { clicked = await tapKey(page, key, 3500); } catch { clicked = false; }
-    if (!clicked) { unreachable.push(key); continue; }
-    await page.waitForTimeout(950);
+    try { clicked = await tapKey(page, key, 1200); } catch { clicked = false; }
+    /**
+     * Missing usually means an earlier press took the control away rather than
+     * that it was never there: pressing Bills' "Cards" segment replaces every
+     * subscription row, and pressing "+ Income" on the entry form replaces
+     * every expense category chip. Re-enter and look once more, so the sweep
+     * covers all of a screen's modes instead of only the last one it happened
+     * to leave itself in.
+     */
+    if (!clicked) {
+      await enter();
+      try { clicked = await tapKey(page, key, 2500); } catch { clicked = false; }
+    }
+    if (clicked === 'disabled') { disabled++; continue; }
+    if (clicked) pressed++;
+    if (!clicked) { unreachable.push(key); await backToScreen(base, enter); continue; }
+    await page.waitForTimeout(800);
     const after = await bodyText(page);
     if (/Unmatched Route|This screen does not exist|Sorry, this page/i.test(after)) dead.push(`${key} → Unmatched Route`);
     else if (after.length < 40) dead.push(`${key} → blank`);
     else if (errors.length) dead.push(`${key} → ${errors[0].slice(0, 90)}`);
+    // Every sheet a tap opens has to be closable, or the user is stuck in it.
+    if (await dialogOpen(page)) opened.push(key);
+    await backToScreen(base, enter);
+    if (await dialogOpen(page)) stuck.push(key);
   }
-  ok(`${name}: every pressable leads somewhere (${controls.length} controls, ${unreachable.length} off-screen)`,
-    dead.length === 0, dead.join(' | '));
+  ok(`${name}: every pressable leads somewhere (${pressed} pressed${disabled ? `, ${disabled} disabled` : ''})`,
+    dead.length === 0 && unreachable.length === 0,
+    [...dead, ...unreachable.map((k) => `${k}: could not be pressed`)].join(' | '));
+  if (opened.length) {
+    ok(`${name}: every sheet it opens can be closed again (${opened.length})`,
+      stuck.length === 0, stuck.join(' | '));
+  }
   return { controls, dead, unreachable };
+}
+
+/**
+ * Is a sheet or modal covering the screen?
+ *
+ * react-native-web renders `<Modal>` with role="dialog" and aria-modal, which
+ * is the only reliable marker: "can I still see a control I had before" is
+ * not, because the sheets are labelled from the same small vocabulary as the
+ * screens under them — the BottomSheet backdrop is labelled "Dismiss" and so
+ * is the button on Home's insight, so a wide-open period sheet read as a
+ * fully restored Home and every later tap on that screen missed.
+ */
+const dialogOpen = (page) => page.evaluate(
+  () => [...document.querySelectorAll('[role="dialog"],[aria-modal="true"]')]
+    .some((n) => n.getBoundingClientRect().width > 0),
+);
+
+/**
+ * Get back to the screen under test after a tap took us off it.
+ *
+ * Reloading between every control is correct and unbearably slow — a screen
+ * with 27 of them spends two minutes waiting for the bundle. Unwind instead:
+ * browser back for a pushed route, the sheet's own close control for a sheet,
+ * and only fall back to a full re-entry when neither worked.
+ */
+async function backToScreen(base, enter) {
+  for (let i = 0; i < 4; i++) {
+    if (await dialogOpen(page)) {
+      const closed = (await tapKey(page, 'Close', 900))
+        || (await tapKey(page, 'Dismiss', 900))
+        // Sheets whose close glyph carries no label still dismiss on a tap in
+        // the strip of backdrop above them.
+        || (await page.mouse.click(206, 16).then(() => true).catch(() => false));
+      await page.waitForTimeout(closed ? 550 : 250);
+      continue;
+    }
+    if ((await url(page)) !== base) {
+      await page.goBack();
+      await page.waitForTimeout(700);
+      continue;
+    }
+    return;
+  }
+  await enter();
 }
 
 const home = async () => { await reload(); };
@@ -292,6 +365,29 @@ await pressEverything('settings', async () => { await home(); await tapKey(page,
   // Erasing the ledger and cycling the language both make every later
   // control on the screen a different control; they get their own passes.
   { skip: ['Erase everything on this phone', 'Language', 'Country pack'] });
+
+/**
+ * Put the settings back.
+ *
+ * Pressing everything on Settings means pressing all 28 bars of the money-month
+ * picker, so the app is left reporting a month that starts on the 28th — under
+ * which "Jul 2026" runs 28 Jun to 27 Jul and today is its last day. Every
+ * arithmetic assertion below reads a different month than the one the seed was
+ * written for, which is how a green sweep produced "the hero equals In minus
+ * Out (0 − 0 = 0)".
+ */
+const resetPreferences = async () => {
+  await page.evaluate(() => {
+    const K = 'wafra/state/v1';
+    const meta = JSON.parse(localStorage.getItem(K) || '{}');
+    meta.monthStartDay = 1;
+    meta.themePreference = 'system';
+    meta.language = 'en';
+    localStorage.setItem(K, JSON.stringify(meta));
+  });
+  await reload();
+};
+await resetPreferences();
 await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'See all'); await page.waitForTimeout(1300); });
 await pressEverything('pro', async () => {
   await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200);
@@ -307,6 +403,7 @@ await pressEverything('import', async () => {
 await pressEverything('add entry', async () => {
   await home(); await tapKey(page, 'Add an entry'); await page.waitForTimeout(1400);
 });
+await resetPreferences();
 
 /* ── 2. Nothing offers a destination it is already at ─────────────────── */
 
@@ -325,10 +422,15 @@ await pressEverything('add entry', async () => {
     let head = [...document.querySelectorAll('div,span')].find(
       (e) => !e.children.length && /^worth knowing$/i.test((e.textContent || '').trim()),
     );
-    while (head && !head.querySelector?.('[role="button"][aria-label]')) head = head.parentElement;
+    // Up to the section that holds the header AND the list under it.
+    for (let i = 0; head && i < 8; i++, head = head.parentElement) {
+      if (head.querySelectorAll?.('[role="button"][aria-label]').length >= 2) break;
+    }
     return head ? [...head.querySelectorAll('[role="button"][aria-label]')].map((n) => n.getAttribute('aria-label')) : [];
   });
-  ok(`flow: "Worth knowing" has cards to press (${cards.length})`, cards.length >= 3);
+  // The seeded ledger produces nine. Fewer means the section is being read
+  // against a month it was not written for, and a pass would be vacuous.
+  ok(`flow: "Worth knowing" has cards to press (${cards.length})`, cards.length >= 6);
   const inert = [];
   for (const label of cards) {
     await flow();
@@ -421,9 +523,10 @@ for (const [name, enter] of [
     return c.length ? money(c[0].t) : NaN;
   };
   const inFils = figureUnder(inCell), outFils = figureUnder(outCell);
+  // Both cells have to carry a real figure, or "0 − 0 = 0" passes and says
+  // nothing — which is exactly what it did when the month had been moved.
   ok(`home: the hero equals In minus Out (${inFils} − ${outFils} = ${money(hero?.t ?? '')})`,
-    !!hero && Number.isFinite(inFils) && Number.isFinite(outFils)
-      && money(hero.t) === inFils - outFils);
+    !!hero && inFils > 0 && outFils > 0 && money(hero.t) === inFils - outFils);
 }
 
 /**
@@ -437,13 +540,27 @@ for (const [name, enter] of [
   ok('flow: a limit row opens its sheet', await tapKey(page, 'Groceries limit', 5000));
   await page.waitForTimeout(1200);
   const t = await paintedText(page);
-  const spentLabel = t.find((x) => /^spent this month$/i.test(x.t));
-  const spent = spentLabel && t.find((x) => Math.abs(x.y - spentLabel.y) < 14 && /^AED [\d,]+$/.test(x.t));
+  /**
+   * Read off the row, not off `paintedText`.
+   *
+   * "AED 2,289  / AED 1,800" is one ThemedText with another nested inside it,
+   * so the spend is a bare text node in an element that HAS children — and
+   * paintedText only collects leaves. It reported the figure as missing while
+   * it was the largest thing on the sheet.
+   */
+  const spent = await page.evaluate(() => {
+    const label = [...document.querySelectorAll('div,span')].find(
+      (e) => !e.children.length && /^spent this month$/i.test((e.textContent || '').trim()),
+    );
+    const row = label?.parentElement;
+    const m = (row?.textContent || '').match(/AED\s[\d,]+/);
+    return m ? m[0] : null;
+  });
   const where = t.find((x) => /^where it went$/i.test(x.t));
   const rows = where ? t.filter((x) => x.y > where.y && /^AED [\d,]+$/.test(x.t)).map((x) => money(x.t)) : [];
   const sum = rows.reduce((a, b) => a + b, 0);
-  ok(`flow: the limit sheet's merchant list adds up to what was spent (${spent?.t} vs ${sum} over ${rows.length} rows)`,
-    !!spent && rows.length > 0 && money(spent.t) === sum);
+  ok(`flow: the limit sheet's merchant list adds up to what was spent (${spent} vs ${sum} over ${rows.length} rows)`,
+    !!spent && rows.length > 4 && money(spent) === sum);
 }
 
 /**
@@ -469,41 +586,63 @@ for (const [name, enter] of [
 /* ── 6. Arabic ────────────────────────────────────────────────────────── */
 
 /**
- * The language row cycles English and Arabic. On the phone the flip needs a
- * restart for RTL, but the STRINGS change immediately on every platform — so
- * a screen that stayed English after the switch means a hard-coded label, and
- * a run that overflows its box means the Arabic face is not being measured.
+ * The Settings language row cycles English and Arabic.
+ *
+ * Coverage is partial by design today — a lot of copy is written straight into
+ * the screens rather than going through `t()` — so this does not assert that
+ * everything turns over. It asserts the two things that must hold whatever the
+ * coverage is: the strings that ARE translated change immediately, and the
+ * Arabic face fits the boxes the Latin one was measured for.
+ *
+ * RTL is not part of it. `I18nManager.forceRTL` is skipped on web and needs a
+ * restart on the phone, so mirrored layout cannot be exercised here at all.
  */
 {
   await home();
   await tapKey(page, 'Settings');
   await page.waitForTimeout(1300);
-  ok('settings: the language row is there', await tapKey(page, 'Language', 5000));
+  ok('settings: the language row is there', (await tapKey(page, 'Language', 5000)) === true);
   await page.waitForTimeout(1200);
+  ok('settings: the language switch is written down',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'ar');
   await tapKey(page, 'Back');
-  await page.waitForTimeout(1400);
+  await page.waitForTimeout(1500);
   const arabic = /[؀-ۿ]/;
-  const tabs = await page.evaluate(() =>
-    [...document.querySelectorAll('[role="tab"]')].map((n) => (n.textContent || '').trim()));
-  ok(`home: the tab bar is in Arabic (${tabs.join(' ')})`, tabs.length === 4 && tabs.every((x) => arabic.test(x)));
-  const t = await paintedText(page);
-  ok('home: nothing is clipped in Arabic', t.filter((x) => x.clipped).length === 0,
-    t.filter((x) => x.clipped).map((x) => x.t).join(' | '));
-  for (const [name, tab] of [['flow', 'التدفق'], ['bills', 'الفواتير'], ['wallet', 'المحفظة']]) {
-    await page.getByRole('tab', { name: tab }).click({ timeout: 8000 });
-    await page.waitForTimeout(1300);
+  /**
+   * The tab bar has to be Arabic the moment you come back from Settings.
+   *
+   * `t()` reads a module-level variable and react-navigation re-renders a tab
+   * bar only when the NAVIGATION state changes, so the bar used to keep its
+   * five English labels under four Arabic screens until the user happened to
+   * switch tabs for an unrelated reason.
+   */
+  const tabs = await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
+    .map((n) => (n.textContent || '').trim()).filter(Boolean).slice(0, 4));
+  ok(`home: the tab bar turns over with the language, without changing tab (${tabs.join(' ')})`,
+    tabs.length === 4 && tabs.every((x) => arabic.test(x)));
+
+  for (const [name, tab] of [['home', null], ['flow', 'التدفق'], ['bills', 'الفواتير'], ['wallet', 'المحفظة']]) {
+    if (tab) {
+      await page.getByRole('tab', { name: tab }).click({ timeout: 8000 });
+      await page.waitForTimeout(1300);
+    }
     const painted = await paintedText(page);
-    ok(`${name}: renders in Arabic without clipping`,
-      painted.length > 6 && painted.filter((x) => x.clipped).length === 0,
-      painted.filter((x) => x.clipped).map((x) => x.t).join(' | '));
+    const clipped = painted.filter((x) => x.clipped);
+    ok(`${name}: the Arabic face fits its boxes (${painted.length} runs)`,
+      painted.length > 6 && clipped.length === 0, clipped.map((x) => x.t).join(' | '));
   }
-  // Back to English so the state left behind is the one every other suite
-  // assumes.
+
+  // Back to English, so what this suite leaves behind is what the others
+  // assume they are starting from.
+  // Both of these are still English in Arabic — Home's settings button and the
+  // language row itself are written into the screen rather than looked up.
   await tapTab(page, 'الرئيسية');
-  await tapKey(page, 'الإعدادات');
+  await tapKey(page, 'Settings', 5000);
   await page.waitForTimeout(1300);
-  await tapKey(page, 'اللغة');
+  await tapKey(page, 'Language', 5000);
   await page.waitForTimeout(1200);
+  ok('settings: switching back returns the app to English',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'en');
 }
 
 ok('no page errors across the sweep', errors.length === 0, errors.slice(0, 2).join(' | '));

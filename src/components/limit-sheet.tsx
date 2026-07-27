@@ -132,10 +132,16 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
         highlight: true,
       });
     }
-    if (spent > 0) out.push({ fils: roundToHundred(spent * 0.9), note: '10% under this month', highlight: false });
-    for (const fils of [50_000, 100_000, 200_000]) {
-      if (!out.some((s) => s.fils === fils)) out.push({ fils, note: '', highlight: false });
-    }
+    // The fixed suggestions were de-duplicated against the computed ones and
+    // the computed ones were not de-duplicated against each other, so a month
+    // running close to its own three-month average offered "AED 2,100 · your
+    // 3-month average" beside "AED 2,100 · 10% under this month" — the same
+    // number twice, under two explanations that cannot both be the reason.
+    const add = (fils: number, note: string, highlight = false) => {
+      if (!out.some((s) => s.fils === fils)) out.push({ fils, note, highlight });
+    };
+    if (spent > 0) add(roundToHundred(spent * 0.9), '10% under this month');
+    for (const fils of [50_000, 100_000, 200_000]) add(fils, '');
     return out.slice(0, 4);
   }, [threeMonthAverage, spent]);
 

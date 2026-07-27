@@ -29,3 +29,4 @@ curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; e
 
 node scripts/e2e/e2e-smoke.mjs
 node scripts/e2e/e2e-period.mjs
+node scripts/e2e/e2e-navigation.mjs
