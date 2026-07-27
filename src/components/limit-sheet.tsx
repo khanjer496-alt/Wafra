@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
 import { EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
@@ -36,6 +37,7 @@ interface LimitSheetProps {
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const theme = useTheme();
+  const keyboardHeight = useKeyboardHeight();
   const { state, upsertBudget, deleteBudget } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
@@ -163,6 +165,9 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             styles.sheet,
             Elevation,
             { backgroundColor: theme.card, borderColor: theme.cardBorder },
+            // Its own Modal, so the same rule applies: nothing resizes it for
+            // the keyboard, and the limit amount is typed at the bottom.
+            { marginBottom: keyboardHeight },
           ]}
           onPress={() => {}}>
           <View style={styles.header}>

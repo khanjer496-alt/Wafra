@@ -16,6 +16,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { parseAmountToFils, toISODate } from '@/lib/format';
@@ -26,6 +27,7 @@ import type { CategoryId, TransactionType } from '@/lib/types';
 export default function AddTransactionScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const keyboardHeight = useKeyboardHeight();
   const { state, addTransaction } = useStore();
 
   const [type, setType] = useState<TransactionType>('expense');
@@ -68,6 +70,11 @@ export default function AddTransactionScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        {/* behavior was undefined on Android, which makes this component a
+            no-op — the platform this app ships to had no keyboard handling at
+            all, and the amount, merchant, date, account and Save button were
+            all under the keys. The measured height below is what actually
+            moves them. */}
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -86,7 +93,7 @@ export default function AddTransactionScreen() {
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             {/* Type switch */}

@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { EASE, Elevation, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
@@ -33,6 +34,7 @@ interface BottomSheetProps {
 export function BottomSheet({ visible, onClose, title, children }: BottomSheetProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const y = useSharedValue(OFFSCREEN);
 
   useEffect(() => {
@@ -56,7 +58,12 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
             {
               backgroundColor: theme.background,
               borderColor: theme.cardBorder,
-              paddingBottom: Spacing.five - 2 + insets.bottom,
+              // Lift clear of the keyboard. A Modal is its own window and
+              // never resizes for it on Android, so a sheet with inputs at
+              // the bottom — the period picker's custom range — had its
+              // fields buried under the keys with no way to scroll to them.
+              paddingBottom: Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom),
+              marginBottom: keyboardHeight,
             },
             Elevation,
             sheetStyle,
@@ -79,6 +86,8 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
             <ScrollView
               showsVerticalScrollIndicator={false}
               bounces={false}
+              // Or a tap on a chip while the keyboard is up only dismisses it.
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={styles.content}>
               {children}
             </ScrollView>

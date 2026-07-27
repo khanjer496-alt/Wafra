@@ -28,6 +28,7 @@ import { Money } from '@/components/ui/money';
 import { PulseDot } from '@/components/ui/states';
 import { CategoryTile } from '@/components/ui/tile';
 import { EASE, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildImportPlan,
@@ -84,6 +85,7 @@ function ScanPanel() {
 export default function ImportSmsScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const keyboardHeight = useKeyboardHeight();
   const { auto } = useLocalSearchParams<{ auto?: string }>();
   const { state, importBatch, addBill } = useStore();
 
@@ -194,7 +196,10 @@ export default function ImportSmsScreen() {
           <ScreenHeader title="Read my inbox" onBack={() => router.back()} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
           {scanning ? (
             <Section index={0} style={styles.scanning}>
               <ScanPanel />
