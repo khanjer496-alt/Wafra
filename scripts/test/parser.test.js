@@ -1250,8 +1250,8 @@ if (noMin && noMin.kind === 'cardStatement' && noMin.minDueFils === null) {
 // that matched no other rule was filed as groceries — and the card ending 4711
 // is the one most of the multi-line corpus is on.
 t('a card number containing 711 is not a corner shop',
-  'Credit Card Purchase \nCard No XXXX4711 \nAED 132.99 \nMUZZ LTD +····1111 GBR \n21/02/25 20:17',
-  { merchant: 'Muzz Ltd', category: 'other', amountFils: 13299 });
+  'Purchase of AED 1.00 with Debit Card ending 4711 at XPOWERPLUS, DUBAI. Avl Balance is AED 7,097.56.',
+  { merchant: 'Xpowerplus', category: 'other', amountFils: 100 });
 t('...and the rule still reads a real 7-Eleven',
   'Purchase of AED 12.00 with Debit Card ending 4744 at 7-ELEVEN AL BARSHA, DUBAI. Avl Balance is AED 846.57.',
   { category: 'groceries' });
@@ -1403,6 +1403,133 @@ for (const [descriptor, category] of [
   ['CARREFOUR HYPERMARKET', 'groceries'],
 ]) {
   t(`${descriptor} still reads as ${category}`,
+    `Purchase of AED 42.00 with Debit Card ending 4744 at ${descriptor}, DUBAI. Avl Balance is AED 846.57.`,
+    { category });
+}
+
+// ── The gateway prefix is evidence, not noise ──
+// cleanDescriptor strips GOOGLE*/PAYPAL */TAP* off the NAME, because the
+// gateway is not the shop. But the prefix says what kind of purchase it was,
+// and guessCategory reads the raw message, where it survives. These rules sit
+// below every brand rule so the sub-merchant always wins.
+
+t('a Play Store charge is entertainment',
+  'Purchase of AED 49.99 with Debit Card ending 1354 at GOOGLE*CANDLE COUPLE, G.CO/HELPPAY#. Avl Balance is AED 30,417.54.  Pls refer stmt for exact amt.',
+  { merchant: 'Candle Couple', category: 'entertainment', amountFils: 4999 });
+
+t('a PayPal star is followed by a payee, so it is a purchase',
+  'From HSBC: 08SEP25 PAYPAL *CXIANGHUI01L Purchase from 041-340***-001 AED 259.40- by Card Ending with 6737. Your available balance is AED 7.03',
+  { merchant: 'Cxianghui01l', category: 'shopping', amountFils: 25940 });
+
+t('a PayPal star with a foreign-fee note is still a purchase',
+  'Your Cr.Card XXX7720 was used for AED99.18 (plus foreign transaction fee of 2.1%) on 15/06/2024 17:49:27 at PAYPAL *FARHANAUSMA,····9001-GB. Avl. Cr.limit is AED4322.45',
+  { merchant: 'Farhanausma', category: 'shopping', amountFils: 9918 });
+
+t('a UAE checkout platform is shopping',
+  'Debit Card Purchase \nDebit \nAccount XXXX0002 \nCard XXXX8335\nAED 1.00\nzbooni.com/marketplaceDubai           AE \n08/03/25 12:58 \nAvailable Balance AED 2633.19',
+  { category: 'shopping', amountFils: 100 });
+
+t('the glued NEXT UAE AED ECOM storefront is shopping',
+  'Purchase of AED 272.00 with Debit Card ending 1354 at NEXTUAEAEDECOMIC1, DUBAI. Avl Balance is AED 16,536.80.',
+  { category: 'shopping', amountFils: 27200 });
+
+// Two charges the gateway rules must NOT call purchases: both are the
+// verification hold a wallet places when a card is added. `other` here is an
+// answer, not a shrug, so the accuracy report must not report them.
+{
+  const cases = [
+    ['a Google wallet hold is not an in-app purchase',
+     'Credit Card Purchase \nCard No XXXX3749 \nAED 4.00 \nGOOGLE*WALLET TEMP G.CO/HELPPAY# USA \n26/11/25 22:56 \nAvailable Balance AED 995.02'],
+    ['PayPal with no star and no payee is a card verification',
+     'Your Cr.Card XXX7720 was used for USD1.00 on 15/06/2024 17:49:15 at PAYPAL,····7733-LU. Avl. Cr.limit is AED4417.96'],
+  ];
+  for (const [name, raw] of cases) {
+    const r = parseSms(raw);
+    if (r && r.categoryGuess === 'other' && r.categoryDeliberate === true) {
+      pass++; console.log(`✓ ${name}`);
+    } else {
+      fail++; console.log(`✗ ${name}`, JSON.stringify(r && { c: r.categoryGuess, d: r.categoryDeliberate }));
+    }
+  }
+}
+
+// The star is the whole discriminator between those two PayPal rules, and the
+// sub-merchant still outranks both.
+t('a PayPal subscription keeps its own service and category',
+  'Purchase of AED 16.50 at PAYPAL *REALDEBRID with Credit Card ending 4821',
+  { merchant: 'Real-Debrid', category: 'entertainment' });
+
+// ── One trip, not seven scattered rows ──
+// Seven charges on one card with a PHUKET location tail: a resort, a boat
+// charter, a driver, a guesthouse, a phone shop, a mall and a coffee shop.
+for (const descriptor of [
+  'PHUKET DELIGHT',
+  'NIKORN MARINE',
+  'PRASERT ON-PUTTHA',
+  'PHONEINN',
+  'PZD131 CENTRAL PHUKET',
+  'AT TWENTY TWO HOUSE',
+  'AROMAYA',
+]) {
+  t(`${descriptor} on holiday reads as travel`,
+    `Purchase of AED 42.00 with Debit Card ending 8783 at ${descriptor}, PHUKET. Avl Balance is AED 846.57.  Pls refer stmt for exact amt.`,
+    { category: 'travel' });
+}
+
+// ...and the four charges from the same trip whose OWN names are known keep
+// the categories those names earn. This is why the trip rule sits below the
+// brand rules rather than above them.
+for (const [descriptor, category] of [
+  ['A025-AIIZ-JUNGCEYLON PHUK', 'shopping'],
+  ['CRC SPORTS-PHUKET 4', 'shopping'],
+  ['UNDER ARMOUR-C.PHUKET FES', 'shopping'],
+  ['TOPS-PATONG', 'groceries'],
+]) {
+  t(`${descriptor} keeps ${category} despite the trip tail`,
+    `Purchase of AED 42.00 with Debit Card ending 8783 at ${descriptor}, PHUKET. Avl Balance is AED 846.57.`,
+    { category });
+}
+
+// I did NOT generalise the trip rule to "any non-ARE country code": these two
+// carry one and must stay unresolved. USD 300 of ebooks billed from Accra is
+// not a holiday.
+for (const [name, raw] of [
+  ['an ebook charge from Accra is not a trip',
+   'Credit Card Purchase \nCard No XXXX9960 \nUSD 300.00 \nWASSAGY EBOOKS MAAHEKO-ACCRA GHA \n03/04/25 16:29 \nAvailable Balance AED 1242.83'],
+  ['a Brussels web charge is not a trip',
+   'Credit Card Purchase \nCard No XXXX3644 \nUSD 50.00 \nYAMM.COM BRUSSELS BEL \n07/07/26 14:53 \nAvl Bal AED 7806.31'],
+]) {
+  const r = parseSms(raw);
+  if (r && r.categoryGuess === 'other' && !r.categoryDeliberate) {
+    pass++; console.log(`✓ ${name}`);
+  } else {
+    fail++; console.log(`✗ ${name}`, JSON.stringify(r && { c: r.categoryGuess, d: r.categoryDeliberate }));
+  }
+}
+
+// ── Named merchants from the second export ──
+t('a bakery-cafe behind a Tap link is dining',
+  'Debit Card Purchase  \nCard XXXX5083\nAED 134.00\nTAP*CASA PONS         Dubai           AE \n31/03/26 15:47 \nBalance AED 6002.98',
+  { merchant: 'Casa Pons', category: 'dining', amountFils: 13400 });
+
+t('a modest-fashion brand behind a Mamo link is shopping',
+  'Credit Card Purchase \nCard No XXXX3749 \nAED 366.45 \nMamo*aneeq Dubai ARE \n24/01/26 11:47 \nAvl Bal AED 3696.56',
+  { merchant: 'Aneeq', category: 'shopping', amountFils: 36645 });
+
+t('a salon behind a Ziina link is personal care',
+  'Credit Card Purchase \nCard No XXXX3749 \nAED 250.00 \nZiina  *qasr al zain m Sharjah ARE \n29/05/26 12:39 \nAvl Bal AED 4861.46',
+  { merchant: 'Qasr Al Zain M', category: 'personal-care', amountFils: 25000 });
+
+for (const [descriptor, category] of [
+  ['OFF PRICE GENERAL TRAD', 'shopping'],
+  ['AL BAHAR AL MUTAWASIT', 'dining'],
+  ['THAI CORNER GENERAL TR', 'dining'],
+  ['GOLDEN CITY RAS AL KHAIMA', 'dining'],
+  ['Dubai Refreshment', 'groceries'],
+  ['PM CONNECT PORTAL', 'entertainment'],
+  ['MUZZ LTD', 'entertainment'],
+]) {
+  t(`${descriptor} reads as ${category}`,
     `Purchase of AED 42.00 with Debit Card ending 4744 at ${descriptor}, DUBAI. Avl Balance is AED 846.57.`,
     { category });
 }
