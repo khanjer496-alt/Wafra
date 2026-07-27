@@ -6,6 +6,22 @@ export interface ParsedCard {
   kind: 'credit' | 'debit' | 'account';
 }
 
+/**
+ * Bump whenever a parsing rule changes in a way that would read an ALREADY
+ * IMPORTED message differently.
+ *
+ * A message is imported once — its fingerprint is remembered so it can never
+ * arrive again — and the routine scan only ever looks at messages newer than
+ * the last one it saw. So without this, every parser improvement applies only
+ * to the future: the card payments a user has already received stay filed as
+ * spending forever, however well the parser learns to read them.
+ *
+ * When this differs from the version recorded in state, the next scan re-reads
+ * the whole inbox instead of the tail. Existing rows are not duplicated —
+ * `seenSms` recognizes them by fingerprint — they are healed in place.
+ */
+export const PARSER_VERSION = 2;
+
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
 export interface ParsedSms {

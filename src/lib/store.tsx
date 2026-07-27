@@ -16,7 +16,13 @@ import { setThemePreference as applyThemePreference } from '@/lib/theme-preferen
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import { detectMarketId, setActiveMarket } from '@/lib/markets';
 import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/seed';
-import { guessCategory, normalizeServiceName, parseSms, STRUCTURAL_TITLES } from '@/lib/sms-parser';
+import {
+  guessCategory,
+  normalizeServiceName,
+  parseSms,
+  PARSER_VERSION,
+  STRUCTURAL_TITLES,
+} from '@/lib/sms-parser';
 import type {
   Account,
   AppState,
@@ -103,6 +109,7 @@ type Action =
   | { type: 'setPro'; pro: boolean }
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; language: string }
+  | { type: 'markParserVersion' }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -130,6 +137,13 @@ function reducer(state: AppState, action: Action): AppState {
       // once, rather than teaching every screen to tolerate it.
       return mergeDuplicateAccounts(next);
     }
+    case 'markParserVersion':
+      // A full re-read that changed nothing still proves the stored rows were
+      // read with this parser. Without recording it, the app would re-read the
+      // entire inbox on every single launch.
+      return state.parserVersion === PARSER_VERSION
+        ? state
+        : { ...state, parserVersion: PARSER_VERSION };
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'setMarket':
@@ -219,6 +233,7 @@ function reducer(state: AppState, action: Action): AppState {
         accountHints: { ...state.accountHints, ...action.newHints },
         cardDues: dues,
         lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
+        parserVersion: PARSER_VERSION,
       };
     }
     case 'undoBatch': {
@@ -384,6 +399,7 @@ interface StoreValue {
   addGoal: (g: Omit<Goal, 'id'>) => void;
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
+  markParserVersion: () => void;
   setAppLock: (enabled: boolean) => void;
   setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
@@ -794,6 +810,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteGoal', id });
   }, []);
 
+  const markParserVersion = useCallback(() => {
+    dispatch({ type: 'markParserVersion' });
+  }, []);
+
   const setAppLock = useCallback((enabled: boolean) => {
     dispatch({ type: 'setAppLock', enabled });
   }, []);
@@ -872,6 +892,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
+      markParserVersion,
       setAppLock,
       setMonthStartDay,
       setThemePreference,
@@ -907,6 +928,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
+      markParserVersion,
       setAppLock,
       setMonthStartDay,
       setThemePreference,

@@ -48,6 +48,7 @@ import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } fr
 import { committed } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
+import { PARSER_VERSION } from '@/lib/sms-parser';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -296,7 +297,7 @@ export default function HomeScreen() {
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
-  const { state, importBatch, undoBatch } = useStore();
+  const { state, importBatch, undoBatch, markParserVersion } = useStore();
   const { period } = usePeriod();
 
   const now = useMemo(() => new Date(), []);
@@ -371,10 +372,22 @@ export default function HomeScreen() {
         return;
       }
       setNeedsPermission(false);
-      const sinceMs = state.lastScanTs > 0 ? state.lastScanTs + 1 : 0;
+      // The routine scan reads only what arrived since last time. That is
+      // right for a normal refresh and wrong after a parser change: a message
+      // is imported once and can never arrive again, so every improvement
+      // would apply to the future only, and the card payments already in the
+      // ledger would stay filed as spending forever. When the parser has moved
+      // on, re-read everything — existing rows are recognized by fingerprint
+      // and healed in place, not duplicated.
+      const reread = state.parserVersion !== PARSER_VERSION;
+      const sinceMs = reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
       const { parsed, newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
       const plan = buildImportPlan(parsed, state, newestTs);
-      if (plan.txCount === 0 && plan.dueCount === 0) {
+      // healedCount belongs in this test. A re-read that only CORRECTS rows —
+      // exactly what a parser fix produces — was being thrown away here, so the
+      // corrections never reached the store.
+      if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
+        markParserVersion();
         if (interactive) toast.show('Up to date. No new bank messages.');
         return;
       }
@@ -388,7 +401,7 @@ export default function HomeScreen() {
         ],
       );
     },
-    [state, importBatch, undoBatch, toast, router],
+    [state, importBatch, undoBatch, markParserVersion, toast, router],
   );
 
   // Silent auto-import + reminder sync, once per session.

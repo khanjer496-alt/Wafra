@@ -156,6 +156,13 @@ export interface AppState {
   notSubscriptions: string[];
   /** Epoch ms of the newest SMS already scanned. */
   lastScanTs: number;
+  /**
+   * The parser version the stored rows were read with. When it falls behind
+   * `PARSER_VERSION` the next scan re-reads the whole inbox so the improvements
+   * reach data already imported. Absent on states written before this existed,
+   * which correctly reads as "older than any version".
+   */
+  parserVersion?: number;
   /** Whether the first-run onboarding has completed. */
   onboarded: boolean;
   userName: string;
