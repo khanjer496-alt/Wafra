@@ -1,14 +1,14 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Elevation, Radius, Spacing } from '@/constants/theme';
+import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -62,6 +62,10 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
             canPreventDefault: true,
           });
           if (!focused && !event.defaultPrevented) {
+            // The interaction the user makes more than any other, and it had
+            // no feedback at all. A tick fires only on an actual switch —
+            // tapping the tab you are already on is not a choice.
+            tapped();
             navigation.navigate(route.name);
           }
         }}>
@@ -98,9 +102,7 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
             accessibilityRole="button"
             accessibilityLabel={t('tabAdd')}
             onPress={() => {
-              if (Platform.OS !== 'web') {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              }
+              tapped();
               router.push('/add-transaction');
             }}
             style={({ pressed }) => [

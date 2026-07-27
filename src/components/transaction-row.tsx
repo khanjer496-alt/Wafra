@@ -12,7 +12,8 @@ import type { Account, Transaction } from '@/lib/types';
 interface TransactionRowProps {
   transaction: Transaction;
   account?: Account;
-  onPress?: () => void;
+  /** Receives the entry, so callers can pass one stable handler for the list. */
+  onPress?: (transaction: Transaction) => void;
 }
 
 /**
@@ -21,14 +22,15 @@ interface TransactionRowProps {
  * Only money in is coloured. An expense row painted red says "something is
  * wrong" about a cup of coffee — and when every row says it, none of them do.
  */
-export function TransactionRow({ transaction, account, onPress }: TransactionRowProps) {
+function TransactionRowInner({ transaction, account, onPress }: TransactionRowProps) {
   const theme = useTheme();
+  const press = onPress ? () => onPress(transaction) : undefined;
   const meta = getCategory(transaction.category);
   const isIncome = transaction.type === 'income';
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={press}
       style={({ pressed }) => [styles.row, pressed && { transform: [{ scale: 0.985 }] }]}>
       <MerchantAvatar title={transaction.title} category={transaction.category} size={34} />
       <View style={styles.middle}>
@@ -47,6 +49,20 @@ export function TransactionRow({ transaction, account, onPress }: TransactionRow
     </Pressable>
   );
 }
+
+/**
+ * Memoised, because this is the component the app renders most.
+ *
+ * A SectionList re-runs `renderItem` for every row on screen whenever its
+ * parent re-renders, and Activity's parent re-renders on every keystroke in
+ * the search field and on every store change. Fifteen rows, each rebuilding an
+ * avatar and two text nodes, on every character typed.
+ *
+ * The memo only holds if the props are stable, which is why `onPress` takes
+ * the entry instead of closing over it: `() => setEditing(item)` is a new
+ * function on every render and defeats the comparison entirely.
+ */
+export const TransactionRow = React.memo(TransactionRowInner);
 
 const styles = StyleSheet.create({
   row: {

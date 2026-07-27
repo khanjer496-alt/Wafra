@@ -11,6 +11,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { tapped } from '@/lib/haptics';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -109,7 +110,10 @@ export function Toggle({
       accessibilityLabel={label}
       accessibilityState={{ checked: value }}
       hitSlop={10}
-      onPress={() => onChange(!value)}
+      onPress={() => {
+        tapped();
+        onChange(!value);
+      }}
       style={[
         styles.track,
         {
@@ -197,7 +201,10 @@ export function Segmented<T extends string>({
             key={s.value}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            onPress={() => onChange(s.value)}
+            onPress={() => {
+              if (s.value !== value) tapped();
+              onChange(s.value);
+            }}
             style={[
               styles.segment,
               active && {

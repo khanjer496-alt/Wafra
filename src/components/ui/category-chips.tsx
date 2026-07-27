@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { tapped } from '@/lib/haptics';
 import type { CategoryMeta } from '@/lib/categories';
 import type { CategoryId } from '@/lib/types';
 
@@ -67,7 +68,10 @@ export function CategoryChips({
     return (
       <Pressable
         key={c.id}
-        onPress={() => onToggle(c.id)}
+        onPress={() => {
+          tapped();
+          onToggle(c.id);
+        }}
         onLayout={(e) => remember(c.id, e.nativeEvent.layout.x)}
         accessibilityRole="button"
         accessibilityState={{ selected: on }}

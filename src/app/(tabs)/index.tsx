@@ -14,10 +14,9 @@
  * dues, bills, and subscriptions. The user does not think of those as three
  * kinds of thing. They are all money that leaves on a date.
  */
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -46,6 +45,7 @@ import {
 } from '@/lib/auto-import';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
+import { committed } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
@@ -368,9 +368,7 @@ export default function HomeScreen() {
         return;
       }
       const ids = importBatch(plan.batch);
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      }
+      committed();
       toast.show(
         `Imported ${plan.txCount} transaction${plan.txCount === 1 ? '' : 's'}${plan.newAccountCount > 0 ? ` · ${plan.newAccountCount} new card${plan.newAccountCount === 1 ? '' : 's'}` : ''}`,
         [
@@ -528,7 +526,7 @@ export default function HomeScreen() {
                 <TransactionRow
                   transaction={tx}
                   account={state.accounts.find((a) => a.id === tx.accountId)}
-                  onPress={() => setEntry(tx)}
+                  onPress={setEntry}
                 />
               </View>
             ))}

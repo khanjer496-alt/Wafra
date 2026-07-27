@@ -280,10 +280,33 @@ ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
   }
 }
 
-// Entry detail sheet
-await tapText(page, 'Amazon.ae', 1200);
+// Entry detail sheet.
+//
+// Whichever merchant Home happens to be showing. The seed is generated
+// relative to today, so a hard-coded name ("Amazon.ae") passes until the date
+// rolls and the top six rows shift — a suite failure that says nothing about
+// the app. Read the first row and its account off the screen instead.
+const firstEntry = await page.evaluate(() => {
+  const heads = [...document.querySelectorAll('*')].filter(
+    (n) => n.children.length === 0 && /^recent activity$/i.test((n.textContent || '').trim()),
+  );
+  if (!heads.length) return null;
+  const y = heads[0].getBoundingClientRect().bottom;
+  // A row's title sits directly above its "Category · Account" meta line.
+  const leaves = [...document.querySelectorAll('*')]
+    .filter((n) => n.children.length === 0 && (n.textContent || '').trim())
+    .map((n) => ({ t: n.textContent.trim(), r: n.getBoundingClientRect() }))
+    .filter((x) => x.r.top > y && x.r.width > 0)
+    .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
+  const metaIdx = leaves.findIndex((x) => / · /.test(x.t));
+  if (metaIdx < 1) return null;
+  return { title: leaves[metaIdx - 1].t, account: leaves[metaIdx].t.split(' · ').pop() };
+});
+ok('home lists an entry to open', !!firstEntry?.title);
+await tapText(page, firstEntry.title, 1200);
 ok('entry sheet opens on a row', !!(await visibleText(page, /ENTRY DETAIL/i)));
-ok('entry sheet names the account', !!(await visibleText(page, 'FAB Credit Card')));
+ok(`entry sheet names the account (${firstEntry.account})`,
+  !!(await visibleText(page, firstEntry.account)));
 await tapText(page, 'EDIT ENTRY', 1000);
 ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)));
 
@@ -318,7 +341,7 @@ ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)
   if (picked) await tapText(page, /^Charity$|^Government$|^Other$/, 900).catch(() => {});
   await tapText(page, /^SAVE CHANGES$/i, 1600).catch(() => {});
   await page.waitForTimeout(600);
-  await tapText(page, 'Amazon.ae', 1200).catch(() => {});
+  await tapText(page, firstEntry.title, 1200).catch(() => {});
   await tapText(page, 'EDIT ENTRY', 1100).catch(() => {});
   const after = await amountValue();
   ok(`editing only the category leaves the amount alone (${before} → ${after})`, !!before && before === after);

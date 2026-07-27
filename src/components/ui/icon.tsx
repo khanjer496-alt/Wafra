@@ -64,7 +64,7 @@ interface IconProps {
  * place it goes up is an active tab (2.1), where weight is doing the work that
  * a filled tile used to do.
  */
-export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
+function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' } as const;
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
@@ -374,3 +374,10 @@ export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: Ico
     </Svg>
   );
 }
+
+/**
+ * Memoised. Every glyph walks the whole `name === ...` chain and builds an
+ * `<Svg>` tree, and a list screen holds dozens of them — all with primitive
+ * props that rarely change, which is exactly the case a shallow compare wins.
+ */
+export const Icon = React.memo(IconInner);

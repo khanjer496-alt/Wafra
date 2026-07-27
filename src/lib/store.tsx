@@ -457,6 +457,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const prevChunkCount = useRef(0);
   /** Last successfully written body per chunk, so unchanged ones are skipped. */
   const prevChunks = useRef<string[]>([]);
+  /** Identity of the last transactions array serialised, and its chunks. */
+  const prevTransactions = useRef<Transaction[] | null>(null);
+  const pendingChunks = useRef<[string, string][]>([]);
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -596,17 +599,30 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!state.hydrated) return;
     const { hydrated: _hydrated, transactions, ...meta } = state;
-    const chunks: [string, string][] = [];
-    for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
-      chunks.push([
-        txChunkKey(i),
-        JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
-      ]);
+
+    // Re-serialise the ledger only when the ledger moved.
+    //
+    // Every state change lands here — flipping a setting, editing a budget,
+    // dismissing a toast — and each one rebuilt the chunk array, which means
+    // JSON.stringify over every transaction the user has. Comparing the
+    // strings afterwards saved the WRITE but not the stringify, which is the
+    // part that runs on the JS thread and is felt. The array identity answers
+    // the question directly: the reducer only ever hands back a new one when
+    // the transactions actually changed.
+    const ledgerMoved = prevTransactions.current !== transactions;
+    if (ledgerMoved) {
+      const next: [string, string][] = [];
+      for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
+        next.push([
+          txChunkKey(i),
+          JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
+        ]);
+      }
+      pendingChunks.current = next;
+      prevTransactions.current = transactions;
     }
-    // Only chunks whose contents actually changed are rewritten. Every state
-    // change lands here — flipping a setting, editing a budget, dismissing a
-    // toast — and each one used to re-serialise and rewrite the entire
-    // transaction history.
+    const chunks = pendingChunks.current;
+    // Of those, only the chunks whose contents differ are written.
     const changed = chunks.filter(([, body], i) => prevChunks.current[i] !== body);
 
     (async () => {

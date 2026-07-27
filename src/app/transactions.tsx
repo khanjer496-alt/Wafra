@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -79,6 +79,19 @@ export default function TransactionsScreen() {
   const deepCategory = CATEGORIES.find((c) => c.id === categoryParam)?.id ?? null;
 
   const [query, setQuery] = useState('');
+  /**
+   * The field updates on every keystroke; the FILTER lags it by a beat.
+   *
+   * Every character was re-running the predicate over the entire ledger and
+   * rebuilding every section, so typing a merchant name did that work once per
+   * letter. 140ms is under the threshold where a search feels like it is
+   * thinking, and it collapses a nine-letter word into one pass.
+   */
+  const [appliedQuery, setAppliedQuery] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setAppliedQuery(query), 140);
+    return () => clearTimeout(id);
+  }, [query]);
   // Insights merchant rows deep-link here scoped to that exact merchant.
   const [merchantFilter, setMerchantFilter] = useState<string | null>(
     typeof merchantParam === 'string' && merchantParam.trim() ? merchantParam.trim() : null,
@@ -110,7 +123,7 @@ export default function TransactionsScreen() {
     (merchantFilter ? 1 : 0);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = appliedQuery.trim().toLowerCase();
     const lastKey = shiftMonthKey(currentKey, -1);
     const threeKey = shiftMonthKey(currentKey, -2);
     const merchantKey = merchantFilter?.toLowerCase();
@@ -144,7 +157,29 @@ export default function TransactionsScreen() {
       list = [...list].reverse();
     }
     return list;
-  }, [state.transactions, query, filters, source, merchantFilter, currentKey, period]);
+  }, [state.transactions, appliedQuery, filters, source, merchantFilter, currentKey, period]);
+
+  const accountById = useMemo(
+    () => new Map(state.accounts.map((a) => [a.id, a] as const)),
+    [state.accounts],
+  );
+  // One stable handler for the whole list. An inline `() => setEditing(item)`
+  // is a new function per row per render, which defeats TransactionRow's memo
+  // and re-renders every visible row on each keystroke in the search field.
+  const openEntry = useCallback((tx: Transaction) => setEditing(tx), []);
+  const renderRow = useCallback(
+    ({ item, index }: { item: Transaction; index: number }) => (
+      <View
+        style={index > 0 ? [styles.rowDivider, { borderTopColor: theme.cardBorder }] : undefined}>
+        <TransactionRow
+          transaction={item}
+          account={accountById.get(item.accountId)}
+          onPress={openEntry}
+        />
+      </View>
+    ),
+    [accountById, openEntry, theme.cardBorder],
+  );
 
   const totalShown = useMemo(
     () =>
@@ -318,20 +353,7 @@ export default function TransactionsScreen() {
               </ThemedText>
             </View>
           )}
-          renderItem={({ item, index, section }) => (
-            <View
-              style={
-                index < section.data.length && index > 0
-                  ? [styles.rowDivider, { borderTopColor: theme.cardBorder }]
-                  : undefined
-              }>
-              <TransactionRow
-                transaction={item}
-                account={state.accounts.find((a) => a.id === item.accountId)}
-                onPress={() => setEditing(item)}
-              />
-            </View>
-          )}
+          renderItem={renderRow}
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>

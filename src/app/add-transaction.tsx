@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
@@ -20,6 +19,7 @@ import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { parseAmountToFils, toISODate } from '@/lib/format';
+import { committed } from '@/lib/haptics';
 import { useStore } from '@/lib/store';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
@@ -52,9 +52,7 @@ export default function AddTransactionScreen() {
 
   const save = () => {
     if (!amountFils || !accountId) return;
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    }
+    committed();
     addTransaction({
       type,
       amountFils,
