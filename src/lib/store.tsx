@@ -443,7 +443,19 @@ async function loadPersisted(): Promise<Partial<Omit<AppState, 'hydrated'>> | nu
         Array.from({ length: count }, (_, i) => txChunkKey(i)),
       );
       for (const [, v] of pairs) {
-        if (v) txs.push(...(JSON.parse(v) as Transaction[]));
+        if (!v) continue;
+        // Each chunk stands on its own. One throw here used to abort the
+        // whole load, and the caller turns a failed load into a blank
+        // onboarded=false state — so a single corrupt chunk presented as
+        // "your data is gone", accounts, settings and all, while the other
+        // chunks sat intact in storage. Losing 400 rows is bad; losing the
+        // app is worse, and it is the same one-line failure either way.
+        try {
+          const rows = JSON.parse(v) as Transaction[];
+          if (Array.isArray(rows)) txs.push(...rows);
+        } catch {
+          // Skip it. The next save rewrites every chunk from memory.
+        }
       }
     }
     parsed.transactions = txs;
@@ -460,6 +472,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /** Identity of the last transactions array serialised, and its chunks. */
   const prevTransactions = useRef<Transaction[] | null>(null);
   const pendingChunks = useRef<[string, string][]>([]);
+  /** Serialises saves — see the comment where it is used. */
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -608,11 +622,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       prevTransactions.current = transactions;
     }
     const chunks = pendingChunks.current;
-    // Of those, only the chunks whose contents differ are written.
-    const changed = chunks.filter(([, body], i) => prevChunks.current[i] !== body);
 
-    (async () => {
+    // Saves run ONE AT A TIME, chained onto whatever is still in flight.
+    //
+    // Two state changes in quick succession — an import followed by the
+    // parser-version stamp, say — used to start two overlapping writes. Each
+    // writes the meta record, and meta carries txChunks, the number of chunk
+    // keys the loader will ask for. If the smaller save's meta landed last,
+    // the count said 3 while 4 chunks existed on disk, and the loader read
+    // three of them: 400 transactions gone, silently, with the data still
+    // sitting in storage. The bookkeeping refs below have the same problem —
+    // they are read and written across an await.
+    //
+    // Chaining makes the last save's meta the one that survives, which is the
+    // only correct answer, and lets the diff be computed against a cache that
+    // is actually current.
+    writeQueue.current = writeQueue.current.then(async () => {
       try {
+        // Computed in here, not outside: out here `prevChunks` may still be
+        // the value from before the write that is currently in flight.
+        const changed = chunks.filter(([, body], i) => prevChunks.current[i] !== body);
         await AsyncStorage.multiSet([
           [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunks.length })],
           ...changed,
@@ -632,7 +661,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // than assuming a failed write landed.
         prevChunks.current = [];
       }
-    })();
+    });
   }, [state]);
 
   const addTransaction = useCallback((t: Omit<Transaction, 'id'>) => {
