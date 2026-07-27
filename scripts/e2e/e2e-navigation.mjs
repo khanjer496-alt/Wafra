@@ -224,6 +224,30 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
+/**
+ * Text whose box extends past the right edge of the viewport.
+ *
+ * Only leaf text nodes, and only when the overflow is more than a couple of
+ * pixels — a hairline of subpixel rounding is not a bug, a total the user
+ * cannot read is.
+ */
+async function clippedText(page, screen) {
+  return page.evaluate((label) => {
+    const out = [];
+    const width = window.innerWidth;
+    for (const el of document.querySelectorAll('div, span')) {
+      if (el.children.length > 0) continue;
+      const text = (el.textContent || '').trim();
+      if (!text) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      if (r.right > width + 2) out.push(`${label}: "${text.slice(0, 30)}" ends ${Math.round(r.right - width)}px past the edge`);
+    }
+    return out;
+  }, screen);
+}
+
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => {
@@ -643,6 +667,33 @@ for (const [name, enter] of [
   await page.waitForTimeout(1200);
   ok('settings: switching back returns the app to English',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'en');
+}
+
+/* ── Nothing may be pushed off the right edge ──────────────────────────
+ *
+ * A user photographed the Transactions header reading "+A" — the net total
+ * for the whole filtered list, clipped to two characters because the
+ * description beside it wrapped to two lines and shoved it past the viewport.
+ * Nothing was checking that a figure the layout renders is a figure the user
+ * can actually see, so it went unnoticed until someone asked what "+A" meant.
+ */
+{
+  const overflow = [];
+  for (const [name, key] of [['home', 'HOME'], ['flow', 'FLOW'], ['bills', 'BILLS'], ['wallet', 'WALLET']]) {
+    await tapKey(page, key, 5000);
+    await page.waitForTimeout(700);
+    overflow.push(...(await clippedText(page, name)));
+  }
+  await tapKey(page, 'HOME', 5000);
+  await page.waitForTimeout(600);
+  await tapKey(page, 'ALL ACTIVITY', 5000);
+  await page.waitForTimeout(900);
+  overflow.push(...(await clippedText(page, 'transactions')));
+  await page.goBack();
+  await page.waitForTimeout(700);
+
+  ok('no text is clipped by the right edge of the screen', overflow.length === 0,
+    overflow.slice(0, 3).join(' | '));
 }
 
 ok('no page errors across the sweep', errors.length === 0, errors.slice(0, 2).join(' | '));

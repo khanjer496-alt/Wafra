@@ -313,7 +313,11 @@ export default function TransactionsScreen() {
           )}
 
           <View style={styles.summaryRow}>
-            <ThemedText type="small" themeColor="textSecondary">
+            {/* Takes the space that is left, and no more. Without a flex
+                constraint this line expanded to whatever it needed, wrapped
+                to two lines, and shoved the total clean off the right edge of
+                the screen — the user saw "+A" and nothing else. */}
+            <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
               {filtered.length} transaction{filtered.length === 1 ? '' : 's'}
               {filters.datePreset === 'selected' && period.mode !== 'all'
                 ? // The dates too, when the month is not a calendar month. A
@@ -653,6 +657,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  summaryText: {
+    flexShrink: 1,
   },
   merchantChip: {
     flexDirection: 'row',
@@ -666,6 +674,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
+    // The figure is the point of the row; it never gives up space.
+    flexShrink: 0,
   },
   listContent: {
     paddingHorizontal: Spacing.three,
