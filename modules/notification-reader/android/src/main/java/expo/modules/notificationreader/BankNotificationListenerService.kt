@@ -89,8 +89,13 @@ class BankNotificationListenerService : NotificationListenerService() {
     const val PREFS = "wafra_notification_capture"
     const val KEY = "captured"
     const val MAX = 500
+    // Arabic writes the currency on either side of the figure and spells it
+    // out ("150.00 درهم"), so a bank app posting in Arabic passed none of the
+    // prefix-only tests and every one of its notifications was dropped here,
+    // before anything downstream could see it.
     val MONEY_RE = Regex(
-      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|د\\.إ|ر\\.س)\\s*[0-9]",
+      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
+        "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE
     )
   }

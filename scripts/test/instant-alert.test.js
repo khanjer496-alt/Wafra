@@ -56,11 +56,39 @@ function literals(text) {
   return out.join('');
 }
 
-const CUR = (() => {
-  const m = source.match(/private const val CUR = ([\s\S]*?)\n/);
-  if (!m) throw new Error('CUR not found in InstantAlert.kt');
-  return literals(m[1]);
-})();
+/**
+ * A `private const val` string, with any $NAME references already expanded.
+ *
+ * Stops at the next declaration rather than the next newline: these values are
+ * long enough to wrap, and a newline-anchored scan read only the first
+ * fragment — which, once the Arabic currency words were added, was empty.
+ */
+function constant(name, vars = {}) {
+  const m = source.match(
+    new RegExp(`private const val ${name} =([\\s\\S]*?)(?:\\n\\s*\\n|private )`),
+  );
+  if (!m) throw new Error(`${name} not found in InstantAlert.kt`);
+  return interpolate(literals(m[1]), vars);
+}
+
+/**
+ * Substitute $NAME references, LONGEST NAME FIRST.
+ *
+ * Doing it shortest-first turns "$CUR_AR" into "<value of CUR>_AR" — a
+ * pattern that is not the one Kotlin compiles, and which happened to be
+ * broken in precisely the way the real one was written to avoid. The test
+ * went red against a pattern the app never runs.
+ */
+function interpolate(text, vars) {
+  let out = text;
+  for (const key of Object.keys(vars).sort((a, b) => b.length - a.length)) {
+    out = out.split(`$${key}`).join(vars[key]);
+  }
+  return out;
+}
+
+const CUR_AR = constant('CUR_AR');
+const CUR = constant('CUR', { CUR_AR });
 
 function pattern(name) {
   // Anchored on the trailing RegexOption, not on a closing paren: the
@@ -72,7 +100,7 @@ function pattern(name) {
   if (!decl) throw new Error(`${name} not found in InstantAlert.kt`);
   // Kotlin escapes backslashes in a plain string literal; undo one level, and
   // substitute the one interpolated value the file uses.
-  const body = literals(decl).replace(/\\\\/g, '\\').replace(/\$CUR/g, CUR);
+  const body = interpolate(literals(decl).replace(/\\\\/g, '\\'), { CUR, CUR_AR });
   return new RegExp(body, 'i');
 }
 
@@ -94,7 +122,10 @@ function merchantOf(body) {
   if (!m) return null;
   const name = m[1].trim().replace(/[,.\- ]+$/, '');
   if (name.length < 3 || name.length > 28) return null;
-  if (!/[a-z]/i.test(name)) return null;
+  // Kotlin's Char.isLetter() is Unicode-aware, so this restatement has to be
+  // too — /[a-z]/i said an Arabic shop name contained no letters and threw it
+  // away, which the Kotlin never did.
+  if (!/\p{L}/u.test(name)) return null;
   if (BANK_WORD_RE.test(name.split(' ')[0])) return null;
   return name;
 }
@@ -106,11 +137,13 @@ function read(body) {
   if (!credit && !DEBIT_RE.test(body)) return null;
   const amount = AMOUNT_RE.exec(body);
   if (!amount) return null;
-  const figure = amount[2];
+  // Groups 1/2 are "AED 150.00"; groups 3/4 are the Arabic order, "150.00 درهم".
+  const currency = amount[1] || amount[4];
+  const figure = amount[2] || amount[3];
   if (/[·*Xx]/.test(figure)) return null;
   if (!/\d/.test(figure)) return null;
   return {
-    currency: amount[1].toUpperCase(),
+    currency: currency.toUpperCase(),
     figure,
     credit,
     merchant: merchantOf(body),
@@ -217,6 +250,34 @@ const cases = [
 ];
 for (const [message, expected, name] of cases) {
   ok(name, !!read(message) === expected);
+}
+
+// Arabic. A customer whose bank writes to them in Arabic got no banner at all
+// — the app claimed instant alerts and was silent for every charge they made.
+{
+  const arabic = [
+    ['تم خصم مبلغ 150.00 درهم من حسابك رقم 1234 لدى بيسان الطبي', true, 'an Arabic debit gets a banner'],
+    ['عملية شراء بمبلغ AED 250.00 لدى نون من بطاقتك المنتهية 8575', true, 'Arabic wording with a Latin amount gets a banner'],
+    ['تم إيداع الراتب بمبلغ 12,000.00 درهم في حسابك', true, 'an Arabic salary credit gets a banner'],
+    ['سحب نقدي بمبلغ 500.00 درهم من بطاقتك المنتهية 1234', true, 'an Arabic ATM withdrawal gets a banner'],
+    // The Arabic counterparts of the English refusals: a statement that says a
+    // balance is due has moved no money, in either language.
+    ['المبلغ المستحق على بطاقتك 5,000.00 درهم', false, 'an Arabic statement gets no banner'],
+    ['الرصيد المتاح في حسابك 3,200.00 درهم', false, 'an Arabic balance notice gets no banner'],
+  ];
+  for (const [message, expected, name] of arabic) {
+    ok(name, !!read(message) === expected, JSON.stringify(read(message)));
+  }
+
+  const r = read('تم خصم مبلغ 150.00 درهم من حسابك رقم 1234 لدى بيسان الطبي');
+  ok('the Arabic banner quotes the charge', r?.figure === '150.00', r?.figure);
+  ok('the Arabic banner names the shop', r?.merchant === 'بيسان الطبي', r?.merchant);
+
+  // The suffix form exists only for Arabic script. A Latin code after digits
+  // is a card number followed by a currency, and reading it as an amount put
+  // "001" on the banner where the charge should have been.
+  const trap = read('Purchase of AED 10.00 with Card ending 001 SR at CARREFOUR');
+  ok('digits before a Latin currency are not the amount', trap?.figure === '10.00', trap?.figure);
 }
 
 {

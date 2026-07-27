@@ -152,14 +152,17 @@ object InstantAlert {
     if (!credit && !DEBIT_RE.containsMatchIn(body)) return null
 
     val amount = AMOUNT_RE.find(body) ?: return null
-    val figure = amount.groupValues[2]
+    // Groups 1/2 are "AED 150.00", groups 3/4 are "150.00 درهم". Exactly one
+    // pair is populated.
+    val code = amount.groupValues[1].ifEmpty { amount.groupValues[4] }
+    val figure = amount.groupValues[2].ifEmpty { amount.groupValues[3] }
     // A redacted figure is not a figure. "AED ····1985.47" is a masked
     // balance; announcing it would quote a number that does not exist.
     if (figure.any { it == '·' || it == '*' || it == 'X' || it == 'x' }) return null
     if (!figure.any { it.isDigit() }) return null
 
     return Read(
-      amount = "${amount.groupValues[1].uppercase()} $figure",
+      amount = "${code.uppercase()} $figure",
       credit = credit,
       merchant = merchant(body),
       last4 = LAST4_RE.find(body)?.groupValues?.get(1),
@@ -193,28 +196,61 @@ object InstantAlert {
     return trimmed.take(16)
   }
 
-  private const val CUR = "AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP"
+  /** Currency written in Arabic script. Never appears in an English message. */
+  private const val CUR_AR = "درهم|ريال|د\\.إ|ر\\.س"
 
-  private val AMOUNT_RE = Regex("\\b($CUR)\\s*([\\d,.·*Xx]+)", RegexOption.IGNORE_CASE)
+  private const val CUR =
+    "AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|$CUR_AR"
+
+  /**
+   * The amount, with the currency on either side of it.
+   *
+   * `\b` is deliberately not used here. Java and Kotlin define it over
+   * [a-zA-Z0-9_] exactly as JavaScript does, so between a space and the first
+   * letter of "درهم" there is no boundary and the pattern never fires — the
+   * same trap that made the first version of the parser's Arabic layer a
+   * silent no-op. The guard is an explicit "not a letter" instead.
+   *
+   * Arabic states the currency AFTER the figure ("مبلغ: 150.00 درهم") at least
+   * as often as before it, hence the second alternative. It accepts ONLY the
+   * Arabic-script words, and that restriction is load-bearing: with the Latin
+   * codes allowed too, "Card ending 001 SR 10.00" matched "001 SR" — a card
+   * number read as an amount, announced as the charge — because alternation
+   * picks the leftmost start, not the better reading. In Arabic script the
+   * ambiguity cannot arise, since no English message contains درهم.
+   */
+  private val AMOUNT_RE = Regex(
+    "(?:(?<![\\p{L}\\d])($CUR)\\s*([\\d,.·*Xx]+)" +
+      "|(?<![\\p{L}\\d])([\\d,.·*Xx]+)\\s*($CUR_AR))",
+    RegexOption.IGNORE_CASE,
+  )
 
   private val LAST4_RE = Regex(
     "(?:card|a/?c|acct?|account)\\D{0,24}?(\\d{4})\\b",
     RegexOption.IGNORE_CASE,
   )
 
+  // "لدى" is the preposition an Arabic message puts the shop's name after, and
+  // that name is written in Arabic, so both the preposition and the name class
+  // carry the Arabic range.
   private val MERCHANT_RE = Regex(
-    "\\b(?:at|to|from)\\s+([A-Za-z0-9][A-Za-z0-9 &'./-]{2,27})",
+    "(?:\\b(?:at|to|from)|لدى)\\s*:?\\s+([A-Za-z0-9\\u0621-\\u064A][A-Za-z0-9\\u0621-\\u064A &'./-]{2,27})",
     RegexOption.IGNORE_CASE,
   )
 
+  // The Arabic verbs carry no \b for the reason given on AMOUNT_RE. They are
+  // the same completed-verb list as the English one, not a wider one: خصم is
+  // "deducted", شراء is "purchase", سحب is "withdrawn". Deliberately absent
+  // here as in English: مستحق ("due") and رصيد ("balance").
   private val DEBIT_RE = Regex(
     "purchase|was used|has been used|\\bdebited\\b|\\bspent\\b|withdraw(?:n|al)?|" +
-      "\\bdeducted\\b|\\bcharged to\\b",
+      "\\bdeducted\\b|\\bcharged to\\b|خصم|شراء|مشتريات|سحب|مخصوم",
     RegexOption.IGNORE_CASE,
   )
 
   private val CREDIT_RE = Regex(
-    "\\bcredited\\b|\\brefunded\\b|\\bdeposited\\b|\\bsalary\\b",
+    "\\bcredited\\b|\\brefunded\\b|\\bdeposited\\b|\\bsalary\\b|" +
+      "إيداع|ايداع|استرداد|استرجاع|راتب",
     RegexOption.IGNORE_CASE,
   )
 

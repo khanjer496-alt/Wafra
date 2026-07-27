@@ -1,3 +1,4 @@
+import { arabicToEnglish } from '@/lib/arabic-sms';
 import { getActiveMarket } from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
@@ -20,7 +21,7 @@ export interface ParsedCard {
  * the whole inbox instead of the tail. Existing rows are not duplicated —
  * `seenSms` recognizes them by fingerprint — they are healed in place.
  */
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -310,7 +311,18 @@ const ACCOUNT_RE =
 const MASKED_PAN_RE = /\b\d{4,6}[Xx*•]{2,}(\d{4})\b/;
 
 const MERCHANT_STOP =
-  String.raw`(?=\s*(?:,|\.|;|\bon\b|\bwith\b|\busing\b|\bvia\b|\bending\b|\bcard\b|\ba\/c\b|\bacc(?:ount)?\b|\bref\b|\btxn\b|\bdated\b|\bavl\b|\bavail(?:able)?\b|\bbal(?:ance)?\b|\botp\b|\bfor\b|\bis\b|\bhas\b|\bhave\b|\bwas\b|\bwill\b|\baed\b|\bdhs\b|\bsar\b|\busd\b|\beur\b|\bgbp\b|$))`;
+  // "from" and "at" end a name as surely as "with" does. Both directions of
+  // this bit: "at <shop> from Card ending 8575" gave the merchant as
+  // "<shop> From", and "from account no 1234 at <shop>" matched the whole tail
+  // as ONE name — the "from" branch ran straight through the "at" that marks
+  // where the shop actually starts, and took the real merchant down with it
+  // when the candidate was rejected.
+  // A line ending is a stop in its own right. The labelled format puts the
+  // shop on its own line ("لدى: <shop>") with the amount on the next one, and
+  // with only `\s*` here the lookahead crossed the newline, found a bare
+  // figure — which is in no stop list — and failed the match outright. The
+  // shop's name was not mis-read, it was lost.
+  String.raw`(?=[^\S\r\n]*(?:\r?\n|,|\.|;|\bon\b|\bwith\b|\busing\b|\bvia\b|\bfrom\b|\bat\b|\bending\b|\bcard\b|\ba\/c\b|\bacc(?:ount)?\b|\bref\b|\btxn\b|\bdated\b|\bavl\b|\bavail(?:able)?\b|\bbal(?:ance)?\b|\botp\b|\bfor\b|\bis\b|\bhas\b|\bhave\b|\bwas\b|\bwill\b|\baed\b|\bdhs\b|\bsar\b|\busd\b|\beur\b|\bgbp\b|$))`;
 // "%" leads a real brand ("% ARABICA"); "·•" appear inside acquirer terminal
 // IDs ("BLOOMFIELD TREAT-····5814"). Both used to break the match outright and
 // cost the whole merchant name.
@@ -318,7 +330,10 @@ const MERCHANT_RE = new RegExp(
   // The optional domain tail keeps "CAPITAL.COM" and "Name.com, Inc" whole —
   // MERCHANT_STOP treats "." as a sentence end, so both used to arrive as
   // "Capital" and "Name".
-  String.raw`(?:\bat|\bto|\bfrom|@)\s+([A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
+  // The Arabic range is here because a shop in an Arabic message is named in
+  // Arabic ("لدى: بيسان الطبي" → "at بيسان الطبي"). It cannot widen anything
+  // on the English path: no English bank SMS contains an Arabic letter.
+  String.raw`(?:\bat|\bto|\bfrom|@)\s+([A-Za-z0-9%ء-ي][A-Za-z0-9%ء-ي·• &'\-*/()]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
     MERCHANT_STOP,
   'gi',
 );
@@ -393,6 +408,19 @@ const PLACE_TAIL_RE =
  * same shop arrived under a different name from every bank that reported it
  * and no merchant override could ever cover them all.
  */
+/**
+ * How many LETTERS a descriptor has, in either script.
+ *
+ * Both callers below mean "is there a name here, or just digits and noise".
+ * Counting only [A-Za-z] answered that question with a flat no for every
+ * Arabic shop in existence: "بيسان الطبي" has nine letters and zero of them
+ * are Latin, so the guard against bare account numbers was silently deleting
+ * every Arabic merchant name instead.
+ */
+function letterCount(s: string): number {
+  return (s.match(/[A-Za-zء-ي]/g) ?? []).length;
+}
+
 function cleanDescriptor(name: string): string {
   let out = name
     .replace(/\s*\([^)]*\)?\s*/g, ' ') // "noon Food(Noon ECommerce)" → "noon Food"
@@ -424,7 +452,7 @@ function cleanDescriptor(name: string): string {
   while (prev !== out) {
     prev = out;
     const peeled = out.replace(PLACE_TAIL_RE, '').trim();
-    if (peeled !== out && (peeled.match(/[A-Za-z]/g) ?? []).length >= 3) {
+    if (peeled !== out && letterCount(peeled) >= 3) {
       out = peeled;
       peeledPlace = true;
     }
@@ -919,12 +947,16 @@ function extractMerchant(raw: string, re: RegExp): string {
     if (/^your\b/i.test(candidate) || /^(?:the |an? )?account\b/i.test(candidate)) continue;
     if (/^\d+$/.test(candidate)) continue; // bare digits are a card number, not a merchant
     if (/\d{4}[Xx*•]{2,}/.test(candidate) || /^\d{6,}/.test(candidate)) continue; // masked PANs
-    if ((candidate.match(/[A-Za-z]/g) ?? []).length < 3) continue; // account numbers, "AED 1"
+    if (letterCount(candidate) < 3) continue; // account numbers, "AED 1"
     // "your payment to the account number 4822" stops at "account", leaving a
     // bare article as the merchant. A row titled "The" helps nobody.
     if (/^(?:the|this|that|your|our|an?|and|for|to)$/i.test(candidate)) continue;
     if (/^\d+\s+(?:month|day|week|year|hr|hour|min)/i.test(candidate)) continue; // "up to 12 months"
     if (/^acc[\s/]|^a\/?c\b|^cr\.?\s*card/i.test(candidate)) continue; // "from Acc/Cr.Card ..."
+    // "refunded 75.00 AED to Card ending 8575" — the word on its own is the
+    // thing the money went to, not a shop. Exact match only: CARD FACTORY and
+    // CARD PLANET are real shops.
+    if (/^cards?$/i.test(candidate)) continue;
     if (/^(?:aed|dhs|sar|usd|eur|gbp)\b/i.test(candidate)) continue;
     if (/^www\.?$/i.test(candidate)) continue; // "at WWW.GRAB.COM" stops at the dot
     // Marketing sentences hide behind the same "to"/"for" the merchant uses:
@@ -1022,8 +1054,14 @@ function extractCard(raw: string): ParsedCard | null {
     // Multi-line formats say "Credit Card Purchase" in the header and
     // "Card No XXXX4711" further down — when the number clause carries no
     // kind word, look at the whole message before assuming debit.
+    // Arabic states the kind AFTER the number, not before it: the corpus line
+    // "بطاقة: **1234;الإئتمانية" arrives here as "Card **1234; credit". With
+    // only the "credit card" adjacency to go on, every Arabic credit card was
+    // filed as a debit card — which routes its charges away from the statement
+    // and quietly breaks the whole card-due chain.
+    const kindAfterNumber = /\d{4}\s*[;,]\s*credit\b/i.test(raw);
     const kind =
-      kindWord === 'credit' || (!kindWord && /credit\s+card/i.test(raw))
+      kindWord === 'credit' || (!kindWord && (/credit\s+card/i.test(raw) || kindAfterNumber))
         ? 'credit'
         : 'debit';
     return { last4: cardMatch[2], kind };
@@ -1233,7 +1271,28 @@ function extractDate(raw: string): string | null {
  * merchant AFTER descriptor cleanup so a rail is never titled like a shop; the
  * ATM rename runs last because those messages do name a location.
  */
+/**
+ * Arabic messages are rewritten into the wording below before any of it runs,
+ * so there is exactly one parser and Arabic inherits every rule in it.
+ *
+ * The rewrite is NOT what gets stored. `raw` is the text the bank actually
+ * sent: it is what the accuracy report exports, what the entry sheet shows,
+ * and what a re-parse on a later version reads. Storing the rewrite would
+ * show an Arabic-reading user a half-English mangling of their own SMS, and
+ * would freeze today's word list into their history forever.
+ */
 export function parseSms(
+  message: string,
+  overrides?: Record<string, CategoryId>,
+): ParsedSms | null {
+  const source = message.trim();
+  const rewritten = arabicToEnglish(source);
+  if (rewritten === source) return parseReadable(source, overrides);
+  const parsed = parseReadable(rewritten, overrides);
+  return parsed ? { ...parsed, raw: source } : null;
+}
+
+function parseReadable(
   message: string,
   overrides?: Record<string, CategoryId>,
 ): ParsedSms | null {

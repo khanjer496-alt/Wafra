@@ -80,16 +80,36 @@ banks across English *and* Arabic, Emirates NBD and ADCB among them. No source
 and no corpus to read — its interest is as proof that Arabic parsing is table
 stakes in this market, not a technical curiosity.
 
-## Known gap: Arabic
+## Arabic — was the gap, now supported
 
-Wafra refuses every Arabic bank SMS, including ones whose amount is in Latin
-script:
+Every Arabic bank SMS used to be refused outright, including ones whose amount
+was already in Latin script, because the parser gates on an English verb
+before it looks at anything else. Banks in both Gulf markets send Arabic to any
+customer whose profile language is Arabic, so this was a whole-user gap rather
+than a missing format.
 
-    ❌ شراء عبر نقاط البيع بطاقة: **1234 لدى: CARREFOUR مبلغ: 132.00 AED
-    ❌ عملية شراء بمبلغ AED 250.00 لدى نون من بطاقتك المنتهية 8575
-    ❌ تم خصم مبلغ 150.00 درهم من حسابك رقم 1234 لدى بيسان الطبي
-    ❌ تم خصم د.إ 150.00 من حسابك
+`src/lib/arabic-sms.ts` rewrites the vocabulary into the wording the parser
+already reads, and everything downstream — categories, cards, dues,
+subscriptions — is inherited rather than reimplemented. See that file's header
+for why a rewrite rather than a second parser.
 
-UAE banks send Arabic to customers whose profile language is Arabic, so this
-is a whole-user gap rather than a missing format. Not started — it needs its
-own decision about scope.
+Al Bilad's two published formats are the reference, and are pinned verbatim in
+`scripts/test/arabic.test.js`:
+
+    شراء عبر نقاط البيع
+    بطاقة: **1234;الإئتمانية
+    لدى: <merchant>
+    دولة: السعودية
+    مبلغ: 12.00 SAR
+    رصيد: 1234.56 SAR
+    في: 2019-05-07 23:44
+
+### Still open
+
+- **Dates.** `في: 2019-05-07` is ISO; the date patterns read `d/m/y`, so an
+  Arabic message's own date is not used. Live SMS take the received time, so
+  this only shows on a bulk import of old messages.
+- **The word list is the ceiling.** A rewrite is only ever as good as its
+  vocabulary, and this one has never been checked against a real Arabic
+  message from a UAE bank — there is no such corpus to check against. The
+  first real one will almost certainly add words.

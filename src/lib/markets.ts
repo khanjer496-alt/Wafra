@@ -33,6 +33,46 @@ export interface MarketPack {
   keywords: [RegExp, CategoryId][];
 }
 
+/**
+ * Category vocabulary in Arabic, shared by both Gulf packs.
+ *
+ * A merchant named in Arabic matched nothing at all — every Arabic charge
+ * landed in `other`, which is the category that makes the whole app look
+ * broken, because it is the one the user sees and cannot explain.
+ *
+ * Two kinds of entry, both facts rather than guesses: the common noun for a
+ * kind of shop (مطعم is "restaurant", صيدلية is "pharmacy"), and the Arabic
+ * spelling of a chain the English list already knows (كارفور is Carrefour,
+ * نون is noon). Nothing here is a transliteration invented for the purpose.
+ */
+const ARABIC_KEYWORDS: [RegExp, CategoryId][] = [
+  // shop kinds — the noun does the work
+  [/مطعم|مطاعم|كافيه|مقهى|قهوة/, 'dining'],
+  [/سوبرماركت|بقالة|بقاله|تموين|هايبر|جمعية/, 'groceries'],
+  [/صيدلية|صيدليه|مستشفى|مستوصف|عيادة|عياده|طبي|طبية|مختبر/, 'health'],
+  [/محطة|محطه|وقود|بنزين|مواقف|موقف/, 'transport'],
+  [/كهرباء|مياه|ماء|غاز/, 'utilities'],
+  [/اتصالات|جوال|هاتف|انترنت|إنترنت/, 'telecom'],
+  [/مدرسة|مدرسه|جامعة|جامعه|رسوم\s*دراسية/, 'education'],
+  [/فندق|طيران|تذكرة\s*سفر|سياحة|سفر/, 'travel'],
+  [/تأمين|تامين/, 'health'],
+  [/إيجار|ايجار/, 'rent'],
+  [/صالون|حلاق|تجميل|مشغل/, 'personal-care'],
+  // chains the English vocabulary already knows, in their Arabic spelling
+  [/كارفور/, 'groceries'],
+  [/لولو/, 'groceries'],
+  [/العثيم|أسواق\s*عبدالله/, 'groceries'],
+  [/التميمي|بنده|الدانوب|نستو/, 'groceries'],
+  [/نون(?!\s*ية)/, 'shopping'],
+  [/طلبات|كريم\s*ناو|هنقرستيشن|جاهز/, 'dining'],
+  [/كريم|أوبر|اوبر/, 'transport'],
+  [/أدنوك|ادنوك|إينوك|اينوك|أرامكو|ارامكو/, 'transport'],
+  [/سالك|درب/, 'transport'],
+  [/امازون|أمازون|نمشي|شي\s*إن/, 'shopping'],
+  [/نتفلكس|نتفليكس|سبوتيفاي|شاهد|ستارزبلاي/, 'entertainment'],
+  [/دو\b|اتصالات\s*الإمارات|موبايلي|زين|إس\s*تي\s*سي/, 'telecom'],
+];
+
 const AE: MarketPack = {
   id: 'AE',
   name: 'United Arab Emirates',
@@ -56,7 +96,7 @@ const AE: MarketPack = {
     { re: /\bajman\s*bank/i, name: 'Ajman Bank', color: '#00747A', domain: 'ajmanbank.ae' },
     { re: /\bcbi\b/i, name: 'CBI', color: '#7A2048', domain: 'cbi.ae' },
   ],
-  keywords: [], // the UAE vocabulary is the current global baseline
+  keywords: ARABIC_KEYWORDS, // the UAE vocabulary is the current global baseline
 };
 
 const SA: MarketPack = {
@@ -85,6 +125,7 @@ const SA: MarketPack = {
     [/panda|tamimi|danube|othaim|bindawood|lulu/i, 'groceries'],
     [/petromin|sasco|aldrees|naft/i, 'transport'],
     [/\bsadad\b/i, 'utilities'],
+    ...ARABIC_KEYWORDS,
   ],
 };
 
