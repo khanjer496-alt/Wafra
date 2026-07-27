@@ -1,5 +1,5 @@
 import { toISODate } from '@/lib/format';
-import type { Account, AppState, CardDue } from '@/lib/types';
+import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
 export type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
 
@@ -20,7 +20,117 @@ export interface DueWithStatus {
 }
 
 /**
- * Payments spread across an account's statements, each payment counted once.
+ * How a card is identified, since two account rows can describe one physical
+ * card — a hand-added card the SMS scan had already discovered, or state
+ * written by an older version.
+ *
+ * Not the digits alone: a person can hold a FAB and an Emirates NBD card whose
+ * last four happen to match, and collapsing those would hide a real statement.
+ * But not `bank|last4|type` literally either, which is what this was: one row
+ * carries the bank learned from the sender ID and its twin, added by hand,
+ * carries none, so `FAB|5793|credit` and `|5793|credit` read as two cards and
+ * the statement was listed — and counted — twice.
+ *
+ * An unknown bank is not a different bank. Rows with no bank name join the one
+ * named bank holding those digits; only when TWO banks both have a card ending
+ * in those digits is an unnamed row genuinely unattributable, and then it
+ * stands alone rather than guessing. Accounts with no digits at all cannot be
+ * compared this way and fall back to their own id.
+ */
+export function cardIdentity(accounts: Account[]): (accountId: string) => string {
+  /** last4|type → the distinct bank names seen on those rows. */
+  const banks = new Map<string, Set<string>>();
+  for (const a of accounts) {
+    if (!a.last4) continue;
+    const group = `${a.last4}|${a.cardType ?? a.kind}`;
+    const seen = banks.get(group) ?? new Set<string>();
+    if (a.bankName) seen.add(a.bankName);
+    banks.set(group, seen);
+  }
+  const keys = new Map<string, string>();
+  for (const a of accounts) {
+    if (!a.last4) {
+      keys.set(a.id, `id:${a.id}`);
+      continue;
+    }
+    const group = `${a.last4}|${a.cardType ?? a.kind}`;
+    const named = banks.get(group) ?? new Set<string>();
+    if (a.bankName) keys.set(a.id, `${a.bankName}|${group}`);
+    else if (named.size === 1) keys.set(a.id, `${[...named][0]}|${group}`);
+    else if (named.size === 0) keys.set(a.id, `|${group}`);
+    else keys.set(a.id, `id:${a.id}`);
+  }
+  return (accountId: string) => keys.get(accountId) ?? `id:${accountId}`;
+}
+
+/**
+ * Every account row that describes the same physical card as `accountId`.
+ *
+ * Allocation used to run per account row while the display deduped per card,
+ * and the two disagreeing is how a paid card kept reading as owed: the payment
+ * SMS landed on one row, the statement sat on its twin, and neither could see
+ * the other. The dedupe then kept whichever copy still owed the most — which
+ * is always the one the payment never reached.
+ */
+function cardAccountIds(state: AppState, accountId: string): Set<string> {
+  const keyOf = cardIdentity(state.accounts);
+  const key = keyOf(accountId);
+  const ids = new Set<string>([accountId]);
+  for (const a of state.accounts) if (keyOf(a.id) === key) ids.add(a.id);
+  return ids;
+}
+
+/**
+ * Money arriving on a card, whichever direction it was stored in.
+ *
+ * The income-side transfer is the shape the importer produces today. The
+ * expense side is the shape it produced for years: a card payment whose
+ * wording the parser did not recognize was imported as an EXPENSE carrying a
+ * transfer hint, and `allocatePayments` credited income-side rows only, so
+ * those statements could never settle.
+ *
+ * Those rows cannot heal themselves. `raw` is kept only for rows that look
+ * low-confidence, and a transfer hint disqualifies a row from that — so the
+ * launch-time re-parse, which reads `raw`, never sees them. They are reachable
+ * only by a full inbox re-read, which needs both the message still in the
+ * inbox and a PARSER_VERSION bump.
+ *
+ * Reading them here costs nothing, because on a CREDIT CARD a transfer can
+ * only be a payment toward the card: purchases are plain expenses and the
+ * bank-side leg of the payment is filed against the bank account, not this
+ * one. (A cash transfer out of a card would be misread as a payment. No
+ * message in the corpus takes that shape, and one that did would have to have
+ * been read as a transfer to get here.)
+ */
+function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
+  const creditIds = new Set(
+    state.accounts.filter((a) => a.cardType === 'credit' && ids.has(a.id)).map((a) => a.id),
+  );
+  return state.transactions
+    .filter(
+      (t) =>
+        t.isTransfer === true &&
+        ids.has(t.accountId) &&
+        (t.type === 'income' || creditIds.has(t.accountId)),
+    )
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** A card's statements: one per due date, however many rows describe each. */
+interface Statement {
+  dueDate: string;
+  /** The largest figure any copy of this statement quotes. */
+  totalFils: number;
+  /** Allocated so far — seeded with manual "Mark paid" amounts. */
+  paidFils: number;
+  /** Date part of settledAt, when the user marked this statement paid. */
+  settledOn: string | null;
+  dueIds: string[];
+}
+
+/**
+ * Payments spread across a card's statements, each payment counted once.
  *
  * A due's matching window (~40 days before to 20 after) is wider than the
  * monthly statement cycle, so consecutive statements overlap. Crediting every
@@ -30,6 +140,26 @@ export interface DueWithStatus {
  *
  * Payments are walked oldest-first and poured into the oldest statement they
  * could belong to, so an overpayment still spills onto the next one.
+ *
+ * Three things the plain window got wrong, all of which read to the user as
+ * "I paid this and it still says I owe it":
+ *
+ *  - The same statement stored twice is two rows with one due date. Pouring
+ *    into them in turn split the payment across the copies, and the display
+ *    keeps whichever copy owes more — so a fully paid statement showed its
+ *    full balance. Copies are one statement here, and share one allocation.
+ *
+ *  - A statement stops taking payments once the next one has been issued
+ *    (~25 days before ITS due date, the same approximation used throughout).
+ *    Without that the June statement was still eligible three weeks into July
+ *    and swallowed the payment made for the July bill, leaving July unpaid —
+ *    and June's balance is inside July's total anyway.
+ *
+ *  - "Mark paid" on a statement already a month late records the transfer
+ *    dated today, which fell outside that statement's window and landed on the
+ *    NEXT one instead: one tap settled a statement nobody had paid. A
+ *    statement the user marked paid accepts payments up to the day they
+ *    marked it.
  */
 function allocatePayments(
   state: AppState,
@@ -37,39 +167,62 @@ function allocatePayments(
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
 ): Map<string, number> {
-  const known = state.cardDues.filter((d) => d.accountId === accountId);
-  const dues = (target && !known.some((d) => d.id === target.id) ? [...known, target] : known)
-    .slice()
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  // Manual "Mark paid" amounts are already attributed to their own statement.
-  const allocated = new Map(dues.map((d) => [d.id, d.paidFils] as const));
+  const ids = cardAccountIds(state, accountId);
+  const known = state.cardDues.filter((d) => ids.has(d.accountId));
+  const dues = target && !known.some((d) => d.id === target.id) ? [...known, target] : known;
 
-  const payments = state.transactions
-    .filter((t) => t.isTransfer && t.type === 'income' && t.accountId === accountId)
-    .slice()
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const byDate = new Map<string, Statement>();
+  for (const d of dues) {
+    const s = byDate.get(d.dueDate);
+    const settledOn = d.settledAt ? d.settledAt.slice(0, 10) : null;
+    if (!s) {
+      byDate.set(d.dueDate, {
+        dueDate: d.dueDate,
+        totalFils: d.totalDueFils,
+        paidFils: d.paidFils,
+        settledOn,
+        dueIds: [d.id],
+      });
+      continue;
+    }
+    s.totalFils = Math.max(s.totalFils, d.totalDueFils);
+    // Manual "Mark paid" happened once, to the statement, not to each copy.
+    s.paidFils = Math.max(s.paidFils, d.paidFils);
+    if (settledOn && (!s.settledOn || settledOn > s.settledOn)) s.settledOn = settledOn;
+    s.dueIds.push(d.id);
+  }
+  const statements = [...byDate.values()].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
-  for (const payment of payments) {
+  for (const payment of cardPaymentsOf(state, ids)) {
     let left = payment.amountFils;
-    for (const due of dues) {
-      if (left <= 0) break;
-      // Statement date approximated as ~25 days before the due date.
-      if (payment.date < shiftISO(due.dueDate, -40)) continue;
-      if (payment.date > shiftISO(due.dueDate, 20)) continue;
-      const already = allocated.get(due.id) ?? 0;
-      const outstanding = due.totalDueFils - already;
+    for (let i = 0; i < statements.length && left > 0; i++) {
+      const s = statements[i];
+      const outstanding = s.totalFils - s.paidFils;
       if (outstanding <= 0) continue;
+      if (payment.date < shiftISO(s.dueDate, -40)) continue;
+      let until = shiftISO(s.dueDate, 20);
+      const next = statements[i + 1]?.dueDate;
+      if (next) {
+        const replaced = shiftISO(next, -25);
+        if (replaced < until) until = replaced;
+      }
+      if (s.settledOn && s.settledOn > until) until = s.settledOn;
+      if (payment.date > until) continue;
       const take = Math.min(outstanding, left);
-      allocated.set(due.id, already + take);
+      s.paidFils += take;
       left -= take;
     }
   }
+
+  const allocated = new Map<string, number>();
+  for (const s of statements) for (const id of s.dueIds) allocated.set(id, s.paidFils);
   return allocated;
 }
 
 /**
  * What has been paid toward a due: explicit paidFils (manual "Mark paid")
- * plus its share of the card-payment transfers on that account.
+ * plus its share of the payments made to that CARD — every account row that
+ * describes it, not just the row this statement happens to be filed under.
  */
 export function duePaidFils(state: AppState, due: CardDue): number {
   return allocatePayments(state, due.accountId, due).get(due.id) ?? due.paidFils;
@@ -85,7 +238,7 @@ export function dueWithStatus(
   state: AppState,
   due: CardDue,
   today: Date,
-  /** Set by openDues, which knows whether a later statement superseded this. */
+  /** Set by openDues, which knows how long this has been the current one. */
   stale = false,
 ): DueWithStatus {
   const todayISO = toISODate(today);
@@ -137,25 +290,17 @@ const STALE_OVERDUE_DAYS = 30;
  * survives, flagged `stale`, and the caller can present it as old news instead
  * of the app pretending it never happened. Cards that have gone silent
  * altogether are handled by `isInactiveAccount`, not by hiding their debts.
+ *
+ * The other half of that rule is that supersession is not about age. A card
+ * carries one obligation — the newest statement, whose total already contains
+ * whatever went unpaid before it. Two open statements on one card was the app
+ * charging the user twice for the same money.
  */
 export function openDues(state: AppState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
-  // How a card is identified, since two account rows can describe one physical
-  // card. Not the digits alone: a person can hold a FAB and an Emirates NBD
-  // card whose last four happen to match, and collapsing those would hide a
-  // real statement. Bank, digits and type together — the same identity the
-  // store merges duplicate rows on. Accounts with no digits fall back to their
-  // own id, because there is nothing to compare.
-  const cardKey = new Map<string, string>();
-  for (const a of state.accounts) {
-    cardKey.set(
-      a.id,
-      a.last4 ? `${a.bankName ?? ''}|${a.last4}|${a.cardType ?? a.kind}` : `id:${a.id}`,
-    );
-  }
-  const keyOf = (accountId: string) => cardKey.get(accountId) ?? `id:${accountId}`;
+  const keyOf = cardIdentity(state.accounts);
 
   // Latest statement date per card, to tell "replaced" from "still owed".
   const newestByCard = new Map<string, string>();
@@ -167,21 +312,28 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
 
   const open = state.cardDues
     .filter((d) => creditIds.has(d.accountId))
+    // One card owes one statement. A credit card rolls its unpaid balance into
+    // the next statement, so a superseded statement is not a second debt — its
+    // total is already inside the newer one, and listing both said the user
+    // owed the same money twice. This used to hold only for statements more
+    // than 30 days overdue, which let every card with two open rows (two
+    // account rows for one card, or a reminder filed under a second due date)
+    // count itself twice on Home.
+    //
+    // The newer statement supersedes whether or not it is settled: what
+    // settles it is a payment covering a total that included the older one.
+    .filter((d) => (newestByCard.get(keyOf(d.accountId)) ?? d.dueDate) <= d.dueDate)
     .map((d) => {
       const daysLeft = Math.round(
         (new Date(`${d.dueDate}T12:00:00`).getTime() -
           new Date(`${toISODate(today)}T12:00:00`).getTime()) /
           86400000,
       );
-      const superseded = (newestByCard.get(keyOf(d.accountId)) ?? d.dueDate) > d.dueDate;
-      return dueWithStatus(state, d, today, daysLeft < -STALE_OVERDUE_DAYS && !superseded);
+      // Nothing replaced it and it is long overdue: kept, but said to be old
+      // news rather than passed off as this month's bill.
+      return dueWithStatus(state, d, today, daysLeft < -STALE_OVERDUE_DAYS);
     })
-    .filter(
-      (d) =>
-        d.status !== 'settled' &&
-        // Long overdue AND replaced by a later statement: genuinely history.
-        (d.daysLeft >= -STALE_OVERDUE_DAYS || d.stale),
-    )
+    .filter((d) => d.status !== 'settled')
     .sort((a, b) => a.daysLeft - b.daysLeft);
 
   // One statement, one row. A card has a single statement per due date, so two
@@ -191,16 +343,15 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
   // Emirates NBD statement twice and counting it twice in the total.
   //
   // The larger balance wins: a due and its reminder can disagree, and the one
-  // still owing more is the one that has not been paid down.
+  // still owing more is the one quoting the fuller total. Payments no longer
+  // decide this — copies of one statement share one allocation now, so the two
+  // rows only differ in what the bank said they were for.
   //
   // Keyed on the CARD, not the account row. Two account records can describe
   // one physical card — a hand-added card that the SMS scan had already
   // discovered, or state written by an older version — and keying on the
   // account id let both through: Home listed "FAB Credit Card •5793 · 15 Jun ·
   // 8,144" twice, one above the other, and counted it twice in the total.
-  //
-  // A card is identified by its last four digits. Accounts with no digits at
-  // all cannot be compared that way, so they fall back to their own id.
   const byStatement = new Map<string, DueWithStatus>();
   for (const d of open) {
     const key = `${keyOf(d.due.accountId)}|${d.due.dueDate}`;

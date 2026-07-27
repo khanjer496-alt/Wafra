@@ -302,32 +302,45 @@ const twinState = {
 const twinOpen = cardsGuardLib.openDues(twinState, new Date(2026, 6, 24));
 ok('openDues: one statement per account and due date',
   twinOpen.filter(d => d.due.accountId === 'cc' && d.due.dueDate === '2026-07-10').length === 1);
-ok('openDues: the copy still owing the most wins',
-  cardsGuardLib
-    .openDues(
-      {
-        ...guardState,
-        cardDues: [
-          { id: 'p1', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 400000 },
-          { id: 'p2', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
-        ],
-      },
-      new Date(2026, 6, 24),
-    )
-    .every(d => d.remainingFils === 406100));
-// Two genuinely different statements on one card must both survive.
-ok('openDues: different due dates are different statements',
-  cardsGuardLib
-    .openDues(
-      {
-        ...guardState,
-        cardDues: [
-          { id: 'd1', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
-          { id: 'd2', accountId: 'cc', totalDueFils: 120000, minDueFils: 6000, dueDate: '2026-07-28', paidFils: 0 },
-        ],
-      },
-      new Date(2026, 6, 24),
-    ).length === 2);
+// The copy quoting the fuller total wins — but a payment against the statement
+// counts once, for the statement, not once per copy of it. Two rows of one
+// statement where one carries a manual "Mark paid" of 4,000 owe 61, not 4,061:
+// keeping the copy the payment never touched is how a paid card kept reading
+// as unpaid, since the unpaid copy always owes more and always won.
+{
+  const copies = cardsGuardLib.openDues(
+    {
+      ...guardState,
+      cardDues: [
+        { id: 'p1', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 400000 },
+        { id: 'p2', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
+      ],
+    },
+    new Date(2026, 6, 24),
+  );
+  ok('openDues: one statement stored twice is one row', copies.length === 1);
+  ok('openDues: a payment counts for the statement, not for each copy of it',
+    copies[0].remainingFils === 6100);
+}
+// Two statements on one card is one obligation, not two. A credit card rolls
+// what went unpaid into the next statement, so listing both charged the user
+// the June balance twice — inside July's total and again on its own row.
+{
+  const twoDates = cardsGuardLib.openDues(
+    {
+      ...guardState,
+      cardDues: [
+        { id: 'd1', accountId: 'cc', totalDueFils: 406100, minDueFils: 20300, dueDate: '2026-07-10', paidFils: 0 },
+        { id: 'd2', accountId: 'cc', totalDueFils: 520000, minDueFils: 26000, dueDate: '2026-07-28', paidFils: 0 },
+      ],
+    },
+    new Date(2026, 6, 24),
+  );
+  ok('openDues: only the newest statement on a card is owed',
+    twoDates.length === 1 && twoDates[0].due.id === 'd2');
+  ok('openDues: the total is the newest statement, not the sum of both',
+    twoDates[0].remainingFils === 520000);
+}
 
 // One physical card stored as two account rows. Home listed the same FAB
 // statement twice, one directly above the other, and counted it twice.
@@ -1123,7 +1136,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const parser = require('./build/sms-parser');
 
   const raw = 'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.';
-  const parsed = parser.parseSms(raw, '2026-07-10T10:00:00Z');
+  const parsed = parser.parseSms(raw);
   ok('paid card: the message reads as a card payment', parsed && parsed.kind === 'cardPayment');
 
   // How such a row was stored before the parser knew this wording: an expense
@@ -1145,10 +1158,39 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('paid card: the statement is settled and leaves the list',
     cardsGuardLib.openDues(settled, new Date(2026, 6, 20)).length === 0);
 
-  // The uncorrected row must NOT settle it — that is the bug, pinned.
+  // And the UNCORRECTED row settles it too, which is the point.
+  //
+  // A card payment the parser did not recognize was imported as an expense
+  // wearing a transfer hint — and that hint is exactly what disqualifies a row
+  // from keeping its source text, so the launch-time re-parse (which reads
+  // `raw`) can never reach it. These rows are only healable by a full inbox
+  // re-read, which needs the message still to be in the inbox AND a
+  // PARSER_VERSION bump. Until then the statement they paid stayed open.
+  //
+  // On a credit card a transfer can only be money arriving: purchases are
+  // plain expenses, and the bank-side leg is filed against the bank account.
   const broken = { ...settled, transactions: [wrong] };
-  ok('paid card: without the correction it would still read as owed',
-    cardsGuardLib.openDues(broken, new Date(2026, 6, 20)).length === 1);
+  ok('paid card: a payment stored the old way settles the statement anyway',
+    cardsGuardLib.openDues(broken, new Date(2026, 6, 20)).length === 0);
+
+  // The rule is about transfers, not about expenses. A purchase on the card is
+  // money going the other way and must never settle anything.
+  const purchase = {
+    ...wrong, id: 'p2', isTransfer: undefined, title: 'CARREFOUR', category: 'groceries',
+  };
+  ok('paid card: an ordinary purchase on the card settles nothing',
+    cardsGuardLib.openDues({ ...settled, transactions: [purchase] }, new Date(2026, 6, 20)).length === 1);
+
+  // Nor is it about debit cards or bank accounts, where an expense-side
+  // transfer is money LEAVING — a sweep to savings, the bank-side leg of this
+  // very payment. Only a credit card can absorb one.
+  const onBank = {
+    accounts: [{ id: 'cc', name: 'Current account', kind: 'bank', last4: '8575', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' }],
+    transactions: [wrong],
+    cardDues: settled.cardDues,
+  };
+  ok('paid card: an outgoing transfer on a bank account is not a card payment',
+    cardsLib.duePaidFils(onBank, onBank.cardDues[0]) === 0);
 
   // A row the user edited by hand is never overwritten by a rescan.
   ok('paid card: a hand-edited row is left alone',
@@ -1172,6 +1214,247 @@ ok('stale: a stale statement that gets paid leaves openDues',
     cardsGuardLib.openDues({ ...settled, transactions: [relaunched] }, new Date(2026, 6, 20)).length === 0);
 }
 
+// ── One card, whichever account row the bank's messages landed on ──
+//
+// Allocation ran per ACCOUNT ROW while the display deduped per CARD. Two rows
+// for one physical card — a hand-added card the scan had already found, or
+// state written by an older version — meant the payment SMS was filed against
+// one row and the statement against its twin, and neither could see the other.
+// The dedupe then kept whichever copy owed more, which is always the one the
+// payment never reached: a paid card, permanently overdue, in the total.
+{
+  const fabA = { id: 'fab-a', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' };
+  // The twin, added by hand: same card, no bank name, because the user typed
+  // it in and only the SMS sender ID teaches the app who the bank is.
+  const fabB = { id: 'fab-b', name: 'FAB •5793', kind: 'card', cardType: 'credit', last4: '5793', openingFils: 0, color: '#fff' };
+  const split = {
+    accounts: [fabA, fabB],
+    cardDues: [{ id: 'st', accountId: 'fab-b', totalDueFils: 814440, minDueFils: 40722, dueDate: '2026-07-06', paidFils: 0 }],
+    transactions: [{
+      id: 'pay', type: 'income', isTransfer: true, accountId: 'fab-a', amountFils: 814440,
+      date: '2026-07-05', category: 'other', title: 'Card •5793 payment', source: 'sms',
+    }],
+  };
+  ok('one card: a payment on one row settles the statement on its twin',
+    cardsLib.duePaidFils(split, split.cardDues[0]) === 814440);
+  ok('one card: and the card drops out of the open list',
+    cardsLib.openDues(split, new Date(2026, 6, 27)).length === 0);
+
+  // An unknown bank is not a different bank — that split is what made
+  // `FAB|5793|credit` and `|5793|credit` two cards.
+  const key = cardsLib.cardIdentity([fabA, fabB]);
+  ok('one card: a row with no bank name joins the bank holding those digits',
+    key('fab-a') === key('fab-b'));
+
+  // But two banks really can issue cards ending in the same four digits.
+  const enbd = { id: 'enbd', name: 'ENBD Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' };
+  const twoBanks = cardsLib.cardIdentity([fabA, enbd, fabB]);
+  ok('one card: two named banks with the same digits stay two cards',
+    twoBanks('fab-a') !== twoBanks('enbd'));
+  ok('one card: an unattributable row stands alone rather than guessing',
+    twoBanks('fab-b') !== twoBanks('fab-a') && twoBanks('fab-b') !== twoBanks('enbd'));
+
+  // Two cards at one bank must not pool their payments.
+  const twoCards = {
+    accounts: [
+      fabA,
+      { id: 'fab-3749', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'FAB', openingFils: 0, color: '#fff' },
+    ],
+    cardDues: [
+      { id: 's-5793', accountId: 'fab-a', totalDueFils: 814440, minDueFils: 40722, dueDate: '2026-07-06', paidFils: 0 },
+      { id: 's-3749', accountId: 'fab-3749', totalDueFils: 744800, minDueFils: 37240, dueDate: '2026-07-04', paidFils: 0 },
+    ],
+    transactions: [{
+      id: 'pay', type: 'income', isTransfer: true, accountId: 'fab-3749', amountFils: 766394,
+      date: '2026-07-10', category: 'other', title: 'Card •3749 payment', source: 'sms',
+    }],
+  };
+  ok('one card: a payment to one card at a bank leaves the other alone',
+    cardsLib.duePaidFils(twoCards, twoCards.cardDues[0]) === 0 &&
+    cardsLib.duePaidFils(twoCards, twoCards.cardDues[1]) === 744800);
+}
+
+// ── Which statement a payment belongs to ──
+//
+// The matching window is ~40 days before the due date to 20 after, which is
+// wider than the statement cycle: consecutive statements overlap, and the rule
+// that keeps every payment counted exactly once is that they are poured
+// oldest-first into the oldest statement they could belong to.
+{
+  const card = { id: 'cc', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'FAB', openingFils: 0, color: '#fff' };
+  const stmt = (id, dueDate, totalDueFils, extra = {}) => ({
+    id, accountId: 'cc', totalDueFils, minDueFils: Math.round(totalDueFils / 20), dueDate, paidFils: 0, ...extra,
+  });
+  const pay = (id, amountFils, date) => ({
+    id, type: 'income', isTransfer: true, accountId: 'cc', amountFils, date,
+    category: 'other', title: 'Card •3749 payment', source: 'sms',
+  });
+  const st = (dues, txs) => ({ accounts: [card], cardDues: dues, transactions: txs });
+
+  // A payment before the statement was ever issued belongs to nothing here.
+  const early = st([stmt('jul', '2026-07-15', 100000)], [pay('p', 100000, '2026-05-20')]);
+  ok('window: a payment made before the statement existed is not credited to it',
+    cardsLib.duePaidFils(early, early.cardDues[0]) === 0);
+  // The month before the due date is inside the cycle and does count: the
+  // statement is issued around 25 days ahead and people pay it that week.
+  const onCycle = st([stmt('jul', '2026-07-15', 100000)], [pay('p', 100000, '2026-06-22')]);
+  ok('window: a payment made after the statement was issued is credited',
+    cardsLib.duePaidFils(onCycle, onCycle.cardDues[0]) === 100000);
+
+  // Part of the bill is part of the bill.
+  const partial = st([stmt('jul', '2026-07-15', 100000)], [pay('p', 40000, '2026-07-10')]);
+  ok('window: a partial payment leaves the remainder owing',
+    cardsLib.dueWithStatus(partial, partial.cardDues[0], new Date(2026, 6, 20)).remainingFils === 60000);
+  ok('window: a part-paid statement is still open',
+    cardsLib.openDues(partial, new Date(2026, 6, 20)).length === 1);
+
+  // One bill paid in two transfers — two SMS, one statement.
+  const inTwo = st([stmt('jul', '2026-07-15', 100000)],
+    [pay('p1', 60000, '2026-07-08'), pay('p2', 40000, '2026-07-12')]);
+  ok('window: a payment split across two messages settles the statement',
+    cardsLib.duePaidFils(inTwo, inTwo.cardDues[0]) === 100000 &&
+    cardsLib.openDues(inTwo, new Date(2026, 6, 20)).length === 0);
+
+  // The invariant this module exists for, restated against two overlapping
+  // statements and one payment: counted once, never twice.
+  const overlap = st(
+    [stmt('jun', '2026-06-15', 100000), stmt('jul', '2026-07-15', 100000)],
+    [pay('p', 100000, '2026-06-10')],
+  );
+  ok('window: one payment settles one of two overlapping statements, not both',
+    cardsLib.duePaidFils(overlap, overlap.cardDues[0]) === 100000 &&
+    cardsLib.duePaidFils(overlap, overlap.cardDues[1]) === 0);
+
+  // A statement stops competing for payments once the next one has been
+  // issued. Without this the June statement was still eligible three weeks
+  // into July and swallowed the payment made against the July bill — and June
+  // is inside July's total anyway, so the app then showed the same money owed
+  // on both rows.
+  const rolled = st(
+    [stmt('jun', '2026-06-15', 100000), stmt('jul', '2026-07-15', 250000)],
+    [pay('p', 250000, '2026-07-02')],
+  );
+  ok('window: a payment made after the next statement was issued belongs to it',
+    cardsLib.duePaidFils(rolled, rolled.cardDues[1]) === 250000);
+  ok('window: paying the current statement clears the card',
+    cardsLib.openDues(rolled, new Date(2026, 6, 20)).length === 0);
+
+  // "Mark paid" on a statement already a month late records the transfer dated
+  // TODAY, which fell outside that statement's window and landed on the next
+  // one: one tap settled a statement nobody had paid.
+  const markedLate = st(
+    [stmt('jun', '2026-06-15', 100000, { settledAt: '2026-07-27T08:00:00Z' }), stmt('jul', '2026-07-15', 250000)],
+    [pay('p', 100000, '2026-07-27')],
+  );
+  ok('window: marking a late statement paid does not pay the next one',
+    cardsLib.duePaidFils(markedLate, markedLate.cardDues[1]) === 0);
+  ok('window: the July statement is still owed in full',
+    cardsLib.dueWithStatus(markedLate, markedLate.cardDues[1], new Date(2026, 6, 27)).remainingFils === 250000);
+}
+
+// ── A real payment SMS settles the statement it pays ──
+//
+// End to end from the two messages as the bank actually sends them, through
+// the shape buildImportPlan gives them (a card payment lands as income on the
+// CARD account, not on the account the money left), to the statement leaving
+// the list. Every link of this has been broken at some point.
+{
+  const parser = require('./build/sms-parser');
+  const statementSms =
+    'Dear Customer, the payment due date of your FAB Credit Card ending with 4833 is 06-07-2026. ' +
+    'The total amount due is AED 8,144.40 and the Minimum due amount is AED 407.22. ' +
+    'Please ignore the message, if already paid.';
+  const paymentSms =
+    'Dear Customer, Your payment instructions of AED 8,144.40 to 5492********4833 has been processed on 05/07/2026 01:19';
+
+  const stmt = parser.parseSms(statementSms);
+  const paid = parser.parseSms(paymentSms);
+  ok('real SMS: the reminder is a statement, with the bank\'s own minimum',
+    stmt.kind === 'cardStatement' && stmt.amountFils === 814440 &&
+    stmt.minDueFils === 40722 && stmt.date === '2026-07-06');
+  ok('real SMS: the payment is a card payment against the card it names',
+    paid.kind === 'cardPayment' && paid.amountFils === 814440 && paid.card.last4 === '4833');
+  ok('real SMS: both messages name the same card',
+    stmt.card.last4 === paid.card.last4);
+
+  // What the importer builds out of them.
+  const account = {
+    id: 'fab4833', name: 'FAB Credit Card •4833', kind: 'card', cardType: 'credit',
+    last4: stmt.card.last4, bankName: 'FAB', openingFils: 0, color: '#fff',
+  };
+  const billed = {
+    accounts: [account],
+    cardDues: [{
+      id: 'd', accountId: account.id, totalDueFils: stmt.amountFils,
+      minDueFils: stmt.minDueFils, dueDate: stmt.date, paidFils: 0,
+    }],
+    transactions: [],
+  };
+  const afterPaying = {
+    ...billed,
+    transactions: [{
+      id: 'p', type: 'income', isTransfer: true, accountId: account.id,
+      amountFils: paid.amountFils, date: paid.date, category: 'other',
+      title: paid.merchant, source: 'sms',
+    }],
+  };
+  const today = new Date(2026, 6, 27); // 27 Jul: three weeks past the due date
+  ok('real SMS: before the payment the statement is overdue for its full total',
+    cardsLib.openDues(billed, today).length === 1 &&
+    cardsLib.openDues(billed, today)[0].remainingFils === 814440);
+  ok('real SMS: the payment settles it and it leaves the list',
+    cardsLib.openDues(afterPaying, today).length === 0);
+  ok('real SMS: and it leaves "leaving soon" with it',
+    leaving.leavingSoon({ ...lsBase, ...afterPaying }, today, { kinds: ['card'] }).length === 0);
+}
+
+// ── The heading over "Leaving soon" equals the rows under it ──
+//
+// Home prints one total, three rows and a "+N more" remainder. The total
+// covers the whole list, so the column only reconciles if the rows plus the
+// remainder come back to it — a heading of AED 41,933 over rows adding to
+// 52,683 is the app disagreeing with itself in the user's face, whichever of
+// the two is right.
+{
+  const cards = [];
+  const dues = [];
+  const amounts = [814440, 273612, 744855, 1050033, 620017, 431199, 388741, 275506, 190228];
+  amounts.forEach((amountFils, i) => {
+    cards.push({
+      id: `c${i}`, name: `Card ${i}`, kind: 'card', cardType: 'credit',
+      last4: `10${String(i).padStart(2, '0')}`, bankName: 'FAB', openingFils: 0, color: '#fff',
+    });
+    dues.push({
+      id: `d${i}`, accountId: `c${i}`, totalDueFils: amountFils,
+      minDueFils: Math.round(amountFils / 20), dueDate: `2026-07-${String(10 + i).padStart(2, '0')}`,
+      paidFils: 0,
+    });
+  });
+  const many = { ...lsBase, accounts: cards, cardDues: dues };
+  const items = leaving.leavingSoon(many, new Date(2026, 6, 18), { withinDays: 9 });
+  ok('leaving soon: every open statement is in the list', items.length === 9);
+  const heading = fmt.totalAsShown(items.map((x) => x.amountFils));
+  const shown = fmt.totalAsShown(items.slice(0, 3).map((x) => x.amountFils));
+  const more = fmt.totalAsShown(items.slice(3).map((x) => x.amountFils));
+  ok('leaving soon: the heading equals the three rows plus the remainder',
+    heading === shown + more);
+  ok('leaving soon: the remainder covers exactly what the rows do not',
+    items.length - 3 === 6 && more > 0);
+
+  // A statement that survives only because nothing replaced it is still owed,
+  // but it is not "leaving in nine days" and the caller has to be able to say
+  // so. It used to be indistinguishable from this week's bill.
+  const orphaned = {
+    ...lsBase,
+    cardDues: [{ id: 'old', accountId: 'card1', totalDueFils: 814440, minDueFils: 40722, dueDate: '2026-06-15', paidFils: 0 }],
+  };
+  const late = leaving.leavingSoon(orphaned, new Date(2026, 6, 27), { kinds: ['card'] });
+  ok('leaving soon: a 42-day-late statement is carried, and marked stale',
+    late.length === 1 && late[0].overdue === true && late[0].stale === true);
+  ok('leaving soon: this week\'s statement is not stale',
+    leaving.leavingSoon(lsDueState, lsToday, { kinds: ['card'] })[0].stale === false);
+}
+
 // ── the accuracy report shrinks when the parser improves ──
 //
 // Source text is stored ONLY to show the user formats the parser cannot read.
@@ -1185,7 +1468,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const label = (id) => id;
 
   const raw = 'Your Card ending 1234 was used for AED 45.00 at CARREFOUR MARKET on 10/07/2026.';
-  const parsed = parser.parseSms(raw, '2026-07-10T10:00:00Z');
+  const parsed = parser.parseSms(raw);
   ok('accuracy: the message reads with a real category',
     !!parsed && parsed.categoryGuess !== 'other');
 

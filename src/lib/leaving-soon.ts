@@ -26,6 +26,12 @@ export interface Outgoing {
   overdue: boolean;
   /** Due within three days — worth colouring, not yet worth alarming about. */
   urgent: boolean;
+  /**
+   * A statement long past its date that no later statement replaced. It is
+   * still owed — that is why it is here — but it is not "leaving in 9 days",
+   * and a heading that totals it with this week's bills says it is.
+   */
+  stale: boolean;
   /** Present for card dues, so a row can open the right payment sheet. */
   dueId?: string;
   subscription?: Subscription;
@@ -50,7 +56,7 @@ export function leavingSoon(
   const items: Outgoing[] = [];
 
   if (kinds.has('card')) {
-    for (const { due, daysLeft, remainingFils } of openDues(state, today)) {
+    for (const { due, daysLeft, remainingFils, stale } of openDues(state, today)) {
       const account = state.accounts.find((a) => a.id === due.accountId);
       items.push({
         id: `card-${due.id}`,
@@ -62,6 +68,7 @@ export function leavingSoon(
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,
+        stale,
         dueId: due.id,
       });
     }
@@ -88,6 +95,7 @@ export function leavingSoon(
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,
+        stale: false,
         billId: bill.id,
       });
     }
@@ -111,6 +119,7 @@ export function leavingSoon(
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,
+        stale: false,
         subscription: sub,
       });
     }

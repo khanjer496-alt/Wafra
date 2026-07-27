@@ -149,7 +149,7 @@ async function sweep(name, reenter) {
   }
 }
 
-await sweep('BILLS(seeded)', async () => { await home(); await tapTab('Bills'); });
+// await sweep("BILLS(seeded)', async () => { await home(); await tapTab('Bills'); });
 await sweep('BILLS/cards', async () => { await home(); await tapTab('Bills'); await tapKey('Cards 1'); await page.waitForTimeout(700); });
 await sweep('BILLS/fixed', async () => { await home(); await tapTab('Bills'); await tapKey('Fixed 5'); await page.waitForTimeout(700); });
 await sweep('WALLET(seeded)', async () => { await home(); await tapTab('Wallet'); });
