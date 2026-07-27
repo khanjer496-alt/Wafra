@@ -1892,5 +1892,75 @@ ok('stale: a stale statement that gets paid leaves openDues',
   fmt.setMonthStartDay(1);
 }
 
+// ── moving your own money is not income ──
+//
+// A user moved AED 19,000 and AED 5,000 from their FAB •0002 account to their
+// FAB •0004 account. The bank sends one message per side, neither mentions
+// the other, and the arriving one reads exactly like being paid — so June's
+// "In" carried 24,000 of their own savings as business revenue.
+{
+  const ledger = require('./build/ledger');
+  const ins = require('./build/insights');
+
+  const accounts = [
+    { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'a4', name: 'FAB •0004', kind: 'bank', openingFils: 0, color: '#000' },
+  ];
+  const live = ledger.liveAccountIds(accounts);
+  const row = (id, type, accountId, amountFils, date, over = {}) => ({
+    id, type, amountFils, category: type === 'income' ? 'business' : 'other',
+    accountId, title: 'Incoming transfer', date, source: 'sms', ...over,
+  });
+
+  const moved = [
+    row('out19', 'expense', 'a2', 1900000, '2026-06-26'),
+    row('in19', 'income', 'a4', 1900000, '2026-06-26'),
+    row('out5', 'expense', 'a2', 500000, '2026-06-26'),
+    row('in5', 'income', 'a4', 500000, '2026-06-26'),
+    // Real salary, from outside — must survive.
+    row('pay', 'income', 'a2', 2882800, '2026-06-26', { category: 'salary' }),
+    // Real spending — must survive.
+    row('shop', 'expense', 'a2', 12000, '2026-06-27', { title: 'Carrefour', category: 'groceries' }),
+  ];
+
+  const internal = ledger.internalTransferIds(moved, live);
+  ok('internal: both halves of the move are paired',
+    internal.size === 4 && internal.has('in19') && internal.has('out19'), [...internal].join(','));
+  ok('internal: the salary is untouched', !internal.has('pay'));
+  ok('internal: real spending is untouched', !internal.has('shop'));
+
+  const period = { mode: 'month', key: '2026-06' };
+  const before = ins.summarizeMonth(moved, period, live);
+  const after = ins.summarizeMonth(moved, period, live, internal);
+  ok('internal: In counted the move before', before.incomeFils === 2882800 + 2400000, String(before.incomeFils));
+  ok('internal: In is just the salary now', after.incomeFils === 2882800, String(after.incomeFils));
+  ok('internal: Out drops the outgoing half too', after.expenseFils === 12000, String(after.expenseFils));
+
+  // Strictness. A same-amount pair on ONE account is not a move between two.
+  const sameAccount = [
+    row('o', 'expense', 'a2', 50000, '2026-06-10'),
+    row('i', 'income', 'a2', 50000, '2026-06-10'),
+  ];
+  ok('internal: one account cannot transfer to itself',
+    ledger.internalTransferIds(sameAccount, live).size === 0);
+
+  // Two weeks apart is not one movement.
+  const farApart = [
+    row('o', 'expense', 'a2', 50000, '2026-06-01'),
+    row('i', 'income', 'a4', 50000, '2026-06-20'),
+  ];
+  ok('internal: weeks apart is not a pair',
+    ledger.internalTransferIds(farApart, live).size === 0);
+
+  // Each row pairs once: two arrivals cannot both cancel one departure.
+  const oneOut = [
+    row('o', 'expense', 'a2', 50000, '2026-06-10'),
+    row('i1', 'income', 'a4', 50000, '2026-06-10'),
+    row('i2', 'income', 'a4', 50000, '2026-06-11'),
+  ];
+  ok('internal: one departure cancels one arrival, not two',
+    ledger.internalTransferIds(oneOut, live).size === 2);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

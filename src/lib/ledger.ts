@@ -40,20 +40,26 @@ export function isTransfer(t: Transaction): boolean {
  * the importer) still get the transfer rule. Every screen with the accounts
  * to hand should pass it, or a hidden account keeps spending your money.
  */
-export function countsInTotals(t: Transaction, live?: Set<string>): boolean {
+export function countsInTotals(
+  t: Transaction,
+  live?: Set<string>,
+  internal?: Set<string>,
+): boolean {
   if (isTransfer(t)) return false;
   if (live && !live.has(t.accountId)) return false;
+  // Both halves of a move between your own accounts. See internalTransferIds.
+  if (internal?.has(t.id)) return false;
   return true;
 }
 
 /** Spending: an expense that is not a transfer, on an account still in play. */
-export function isSpending(t: Transaction, live?: Set<string>): boolean {
-  return t.type === 'expense' && countsInTotals(t, live);
+export function isSpending(t: Transaction, live?: Set<string>, internal?: Set<string>): boolean {
+  return t.type === 'expense' && countsInTotals(t, live, internal);
 }
 
 /** Income: money arriving from outside, not shuffled between own accounts. */
-export function isIncome(t: Transaction, live?: Set<string>): boolean {
-  return t.type === 'income' && countsInTotals(t, live);
+export function isIncome(t: Transaction, live?: Set<string>, internal?: Set<string>): boolean {
+  return t.type === 'income' && countsInTotals(t, live, internal);
 }
 
 /**
@@ -64,4 +70,55 @@ export function isIncome(t: Transaction, live?: Set<string>): boolean {
  */
 export function isInboundTransfer(t: Transaction): boolean {
   return isTransfer(t) && t.type === 'income';
+}
+
+/**
+ * Money you moved between your own accounts, matched by its two halves.
+ *
+ * A bank sends one message for each side of an internal transfer: AED 19,000
+ * leaves •0002 and AED 19,000 arrives in •0004. Neither message says the
+ * other exists, and the arriving one reads exactly like being paid — so it
+ * was counted as income, and the same 19,000 the user already had appeared as
+ * money earned. Their June "In" carried 24,000 of their own savings.
+ *
+ * The wording cannot settle this; only the pairing can. An amount that leaves
+ * one of your accounts and arrives in another within a few days is one
+ * movement told twice.
+ *
+ * Deliberately strict, because a wrong pair hides real income:
+ *  - the exact same amount to the fils
+ *  - two DIFFERENT accounts, both the user's own
+ *  - within three days, for a transfer that clears overnight
+ *  - each row pairs once, so three 500s do not all cancel one
+ */
+export function internalTransferIds(
+  transactions: Transaction[],
+  accountIds: Set<string>,
+): Set<string> {
+  const paired = new Set<string>();
+  const outgoing = new Map<number, Transaction[]>();
+  for (const t of transactions) {
+    if (t.type !== 'expense' || !accountIds.has(t.accountId)) continue;
+    const list = outgoing.get(t.amountFils);
+    if (list) list.push(t);
+    else outgoing.set(t.amountFils, [t]);
+  }
+
+  const DAY = 86400000;
+  for (const t of transactions) {
+    if (t.type !== 'income' || t.isTransfer || !accountIds.has(t.accountId)) continue;
+    const candidates = outgoing.get(t.amountFils);
+    if (!candidates) continue;
+    const arrived = Date.parse(`${t.date}T12:00:00Z`);
+    const match = candidates.find(
+      (o) =>
+        !paired.has(o.id) &&
+        o.accountId !== t.accountId &&
+        Math.abs(Date.parse(`${o.date}T12:00:00Z`) - arrived) <= 3 * DAY,
+    );
+    if (!match) continue;
+    paired.add(match.id);
+    paired.add(t.id);
+  }
+  return paired;
 }

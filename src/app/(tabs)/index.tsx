@@ -47,7 +47,7 @@ import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { committed } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
-import { liveAccountIds } from '@/lib/ledger';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
@@ -329,10 +329,16 @@ export default function HomeScreen() {
   // history from net worth, while its spending went on counting here. Hiding
   // a card now hides what it spent too.
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  // Both halves of a move between the user's own accounts. Without this the
+  // arriving half reads exactly like being paid.
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
 
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period, liveAccounts),
-    [state.transactions, period, liveAccounts],
+    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   // One insight, not five. The rest are on Flow.

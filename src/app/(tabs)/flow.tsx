@@ -35,7 +35,7 @@ import {
   monthLabel,
   shiftMonthKey,
 } from '@/lib/format';
-import { liveAccountIds } from '@/lib/ledger';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -63,10 +63,16 @@ export default function FlowScreen() {
   const live = isCurrentMonth(period, now);
 
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  // Both halves of a move between the user's own accounts. Without this the
+  // arriving half reads exactly like being paid.
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
 
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period, liveAccounts),
-    [state.transactions, period, liveAccounts],
+    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   const insights = useMemo(
@@ -124,7 +130,7 @@ export default function FlowScreen() {
     const months = [];
     for (let i = 5; i >= 0; i--) {
       const k = shiftMonthKey(key, -i);
-      const s = summarizeMonth(state.transactions, k, liveAccounts);
+      const s = summarizeMonth(state.transactions, k, liveAccounts, internal);
       months.push({
         key: k,
         label: monthLabel(k, true).split(' ')[0],
@@ -133,7 +139,7 @@ export default function FlowScreen() {
       });
     }
     return months;
-  }, [state.transactions, key, liveAccounts]);
+  }, [state.transactions, key, liveAccounts, internal]);
 
   const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
   // What the six months averaged, in minus out. The header figure the chart is

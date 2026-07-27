@@ -81,6 +81,7 @@ export function summarizeMonth(
   transactions: Transaction[],
   period: PeriodLike,
   live?: Set<string>,
+  internal?: Set<string>,
 ): MonthSummary {
   let incomeFils = 0;
   let expenseFils = 0;
@@ -90,9 +91,9 @@ export function summarizeMonth(
     if (!inPeriod(t.date, period)) continue;
     // One definition of spending and income, shared with every other screen
     // that adds money up. See ledger.ts for what these exclude and why.
-    if (isIncome(t, live)) {
+    if (isIncome(t, live, internal)) {
       incomeFils += t.amountFils;
-    } else if (isSpending(t, live)) {
+    } else if (isSpending(t, live, internal)) {
       expenseFils += t.amountFils;
       catTotals.set(t.category, (catTotals.get(t.category) ?? 0) + t.amountFils);
     }
