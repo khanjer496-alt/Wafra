@@ -342,14 +342,21 @@ export function buildInsights(
       });
     }
   }
-  const increased = subs.find((s) => s.priceIncreased);
+  // Rounded to whole dirhams for display, so a rise that survives the test
+  // but not the rounding would print the same figure twice. If the user
+  // cannot see the difference, there is nothing to tell them.
+  const increased = subs.find(
+    (s) =>
+      s.priceIncreased &&
+      Math.round(s.lastAmountFils / 100) !== Math.round(s.priorTypicalFils / 100),
+  );
   if (increased) {
     insights.push({
       id: `price-up-${increased.title}`,
       tone: 'warning',
       icon: 'arrow-up-right',
       title: `${increased.title} got pricier`,
-      body: `Last charge ${formatAED(increased.lastAmountFils, { decimals: false })} vs the usual ${formatAED(increased.avgAmountFils, { decimals: false })}.`,
+      body: `Last charge ${formatAED(increased.lastAmountFils, { decimals: false })} vs the usual ${formatAED(increased.priorTypicalFils, { decimals: false })}.`,
       href: dest('/bills'),
     });
   }

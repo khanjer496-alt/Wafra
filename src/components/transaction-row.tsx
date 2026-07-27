@@ -6,7 +6,7 @@ import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
-import { formatAmount } from '@/lib/format';
+import { clockTime, formatAmount } from '@/lib/format';
 import type { Account, Transaction } from '@/lib/types';
 
 interface TransactionRowProps {
@@ -26,6 +26,7 @@ function TransactionRowInner({ transaction, account, onPress }: TransactionRowPr
   const theme = useTheme();
   const press = onPress ? () => onPress(transaction) : undefined;
   const meta = getCategory(transaction.category);
+  const clock = clockTime(transaction);
   const isIncome = transaction.type === 'income';
 
   return (
@@ -40,6 +41,9 @@ function TransactionRowInner({ transaction, account, onPress }: TransactionRowPr
         <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
           {transaction.isTransfer ? 'Transfer' : meta.label}
           {account ? ` · ${account.name}` : ''}
+          {/* The clock, when the bank gave one. Two coffees on the same day
+              at the same shop are otherwise indistinguishable in this list. */}
+          {clock ? ` · ${clock}` : ''}
         </ThemedText>
       </View>
       <ThemedText type="small" tabular style={{ color: isIncome ? theme.income : theme.text }}>

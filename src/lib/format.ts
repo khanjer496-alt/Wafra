@@ -176,3 +176,37 @@ export function greetingForHour(hour: number): string {
   if (hour < 17) return t('goodAfternoon');
   return t('goodEvening');
 }
+
+
+/**
+ * When a transaction happened, to the minute, or null if unknown.
+ *
+ * Rows imported before `ts` existed still know: the SMS fingerprint is
+ * `s{timestamp}-{amount}`, and that timestamp has been in every SMS row since
+ * the first version. Reading it back is free and needs no migration.
+ */
+export function transactionTime(tx: { ts?: number; smsKey?: string }): Date | null {
+  if (tx.ts) return new Date(tx.ts);
+  const m = tx.smsKey?.match(/^s(\d{10,})-/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "18 Jul 2026, 14:32" — the full stamp, for a detail view. */
+export function fullDateTime(tx: { date: string; ts?: number; smsKey?: string }): string {
+  const day = new Date(`${tx.date}T12:00:00`);
+  const stamp = day.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const at = transactionTime(tx);
+  if (!at) return stamp;
+  const hh = String(at.getHours()).padStart(2, '0');
+  const mm = String(at.getMinutes()).padStart(2, '0');
+  return `${stamp}, ${hh}:${mm}`;
+}
+
+/** "14:32", or empty when the row carries no clock. */
+export function clockTime(tx: { ts?: number; smsKey?: string }): string {
+  const at = transactionTime(tx);
+  if (!at) return '';
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+}

@@ -10,7 +10,7 @@ import { CategoryTile } from '@/components/ui/tile';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
-import { formatAmount, friendlyDate, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
 
@@ -74,6 +74,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
   const amountFils = parseAmountToFils(amountText);
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
+  const stamp = transaction ? fullDateTime(transaction) : '';
   const canSave = !!amountFils && !!title.trim() && dateValid;
 
   const save = () => {
@@ -187,7 +188,11 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             </View>
             <View style={[styles.field, styles.flex]}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Date
+                {/* The field edits the DAY, so it stays YYYY-MM-DD. The label
+                    carries the full stamp — year included, and the clock the
+                    bank sent — because that is the part the row cannot show
+                    and the part that answers "which charge was this?". */}
+                Date · {stamp}
               </ThemedText>
               <TextInput
                 accessibilityLabel="Date"

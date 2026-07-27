@@ -67,6 +67,15 @@ export interface Transaction {
   note?: string;
   /** ISO date string, e.g. 2026-07-18 */
   date: string;
+  /**
+   * When the bank said it happened, to the minute (epoch ms).
+   *
+   * `date` alone cannot answer "which of these two coffees was this?", and a
+   * bank SMS always carries a clock. Optional because rows imported before
+   * this existed have none — `transactionTime` recovers those from the SMS
+   * fingerprint, which has always had the timestamp baked into it.
+   */
+  ts?: number;
   /** Where this entry came from. Undefined = manual (pre-v2 data). */
   source?: 'sms' | 'manual';
   /**

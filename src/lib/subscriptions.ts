@@ -26,6 +26,14 @@ export interface Subscription {
   chargeCount: number;
   /** Latest charge is >10% above the average of prior charges. */
   priceIncreased: boolean;
+  /**
+   * What the prior charges typically were — the figure `priceIncreased` was
+   * decided against, and therefore the only honest thing to show beside the
+   * new price. `avgAmountFils` includes the latest charge, so quoting THAT
+   * produced "Last charge AED 386 vs the usual AED 386": a rise announced
+   * against a number that had already absorbed it.
+   */
+  priorTypicalFils: number;
   /** Monthly-equivalent cost for totals (yearly/12, weekly*4.33). */
   monthlyEquivalentFils: number;
 }
@@ -222,6 +230,7 @@ export function detectSubscriptions(
       nextExpectedISO: addDays(last.date, window.typicalDays),
       chargeCount: charges.length,
       priceIncreased: priorAmounts.length >= 2 && last.amountFils > priorTypical * 1.1,
+      priorTypicalFils: priorTypical,
       monthlyEquivalentFils,
     });
   }

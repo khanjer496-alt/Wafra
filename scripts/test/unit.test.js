@@ -1707,5 +1707,68 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('insights: budget cards were among them', kinds.includes('budget'), kinds.join(','));
 }
 
+// ── a price rise has to be a rise the user can see ──
+//
+// Home showed "Claude got pricier — Last charge AED 386 vs the usual AED
+// 386." The test fires on the last charge against the PRIOR typical, and the
+// card explained itself with the average of all charges INCLUDING that one,
+// which had already absorbed the rise. Two numbers that had to agree, and
+// nothing checking that they did.
+{
+  const subsLib = require('./build/subscriptions');
+  const ins = require('./build/insights');
+
+  const charge = (date, amountFils) => ({
+    id: `c${date}`, type: 'expense', amountFils, category: 'entertainment',
+    accountId: 'a', title: 'Claude', date, source: 'sms',
+  });
+  // Ten months at 350, then TWO at 386 — the shape that produced the bug.
+  // `avgAmountFils` is the median of the last three charges, so as soon as
+  // two of them are the new price it IS the new price, and quoting it beside
+  // the new price says "386 vs 386". `priorTypicalFils` is the median of
+  // everything before the latest charge, which is what the test used.
+  const rows = [];
+  for (let m = 1; m <= 10; m++) rows.push(charge(`2025-${String(m).padStart(2, '0')}-05`, 35000));
+  rows.push(charge('2025-11-05', 38600));
+  rows.push(charge('2025-12-05', 38600));
+
+  const [sub] = subsLib.detectSubscriptions(rows, []);
+  ok('price: the rise is detected', !!sub && sub.priceIncreased);
+  ok('price: the prior typical is the figure it was judged against',
+    sub.priorTypicalFils === 35000, String(sub?.priorTypicalFils));
+  ok('price: the recent average has already absorbed the rise',
+    sub.avgAmountFils === 38600, String(sub?.avgAmountFils));
+
+  const built = ins.buildInsights(rows, [], { mode: 'all' }, new Date(2025, 11, 20));
+  const card = built.find((i) => i.id.startsWith('price-up'));
+  ok('price: the card is shown', !!card, built.map((i) => i.id).join(','));
+  // The two figures in the sentence must differ, or it says nothing.
+  const figures = (card?.body ?? '').match(/[\d,]+/g) ?? [];
+  ok('price: the sentence names two different amounts',
+    figures.length >= 2 && figures[0] !== figures[1], (card?.body ?? '').slice(0, 70));
+}
+
+// ── every row knows what time it happened ──
+{
+  const fmt = require('./build/format');
+  const at = new Date(2026, 6, 18, 14, 32).getTime();
+
+  ok('time: a new row carries its own timestamp',
+    fmt.clockTime({ ts: at }) === '14:32', fmt.clockTime({ ts: at }));
+  // Rows imported before `ts` existed still know — the fingerprint has always
+  // been `s{timestamp}-{amount}`, so no migration is needed to read it back.
+  ok('time: an older row recovers it from the SMS fingerprint',
+    fmt.clockTime({ smsKey: `s${at}-4500` }) === '14:32', fmt.clockTime({ smsKey: `s${at}-4500` }));
+  ok('time: a manual row simply has none', fmt.clockTime({}) === '');
+  ok('time: a malformed fingerprint is not a date', fmt.clockTime({ smsKey: 'sABC-4500' }) === '');
+
+  const stamp = fmt.fullDateTime({ date: '2026-07-18', ts: at });
+  ok('time: the full stamp carries the year', /2026/.test(stamp), stamp);
+  ok('time: and the clock', /14:32/.test(stamp), stamp);
+  ok('time: a row with no clock still names its day',
+    fmt.fullDateTime({ date: '2026-07-18' }) === '18 Jul 2026',
+    fmt.fullDateTime({ date: '2026-07-18' }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
