@@ -16,6 +16,7 @@ import {
 } from '@/lib/auto-import';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
+import NotificationReader from '../../modules/notification-reader';
 
 type Step = 'welcome' | 'scanning' | 'choose';
 
@@ -46,6 +47,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
 
   const showOverlay = state.hydrated && !state.onboarded;
+  const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
 
   const startScan = async () => {
     const granted = await requestSmsPermission();
@@ -137,11 +139,41 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
               {result && (
                 <View style={styles.actions}>
+                  {/* Offered here, not buried in Settings.
+                      Android will not let an app grant notification access
+                      itself — the user has to toggle it in system settings,
+                      because a listener can read 2FA codes and private
+                      messages. All we can do is ask at the moment it makes
+                      sense and take them straight there.
+                      This is the moment: they have just watched their SMS
+                      import, so "some banks send a push instead of an SMS"
+                      lands as a gap in what they can already see, rather
+                      than as an abstract permission request months later in
+                      a Privacy menu they never open. */}
+                  {notifAvailable && !NotificationReader?.isEnabled?.() && (
+                    <>
+                      <ThemedText type="meta" style={styles.notifNote}>
+                        Some banks send a push notification instead of an SMS —
+                        ADCB and Emirates NBD do for many cards. Those charges
+                        cannot be read without notification access.
+                      </ThemedText>
+                      <Button
+                        label="Also read bank notifications"
+                        onPress={() => NotificationReader?.openSettings()}
+                        labelColor={night.onPrimary}
+                        style={{ backgroundColor: night.primary }}
+                      />
+                    </>
+                  )}
                   <Button
                     label="Open Wafra"
                     onPress={setOnboarded}
-                    labelColor={night.onPrimary}
-                    style={{ backgroundColor: night.primary }}
+                    labelColor={notifAvailable ? night.text : night.onPrimary}
+                    style={
+                      notifAvailable
+                        ? { borderWidth: 1, borderColor: night.cardBorder }
+                        : { backgroundColor: night.primary }
+                    }
                   />
                 </View>
               )}
@@ -183,6 +215,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 }
 
 const styles = StyleSheet.create({
+  notifNote: {
+    color: night.textSecondary,
+    paddingBottom: Spacing.two,
+  },
   container: {
     flex: 1,
   },
