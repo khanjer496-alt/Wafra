@@ -7,14 +7,40 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Captures bank-app transaction notifications as they arrive (banks are
- * shifting from SMS to push alerts). Only notifications whose text mentions a
- * dirham amount are kept — everything else is ignored on the spot, so no
- * personal chatter is ever stored. Kept entries go to a small ring buffer in
- * SharedPreferences that the app drains during its normal import scan.
+ * Captures bank-app transaction notifications (banks are shifting from SMS to
+ * push alerts). Only notifications whose text mentions a dirham amount are
+ * kept — everything else is ignored on the spot, so no personal chatter is
+ * ever stored. Kept entries go to a small ring buffer in SharedPreferences
+ * that the app drains during its normal import scan.
  */
 class BankNotificationListenerService : NotificationListenerService() {
   override fun onNotificationPosted(sbn: StatusBarNotification) {
+    capture(sbn)
+  }
+
+  /**
+   * Sweep whatever is already in the shade the moment access is granted.
+   *
+   * Without this, turning the permission on captured nothing that had already
+   * arrived — a charge from an hour ago was unreachable even though its
+   * notification was still sitting there, and there is no other record of it
+   * because the bank never sent an SMS. A user granted access specifically to
+   * recover a transaction and got nothing back.
+   *
+   * Only what is still posted can be read; anything swiped away is gone for
+   * good. This also runs after every reboot and whenever Android restarts the
+   * service, which is exactly when re-reading is free — the dedupe on drain
+   * already handles seeing the same notification twice.
+   */
+  override fun onListenerConnected() {
+    try {
+      activeNotifications?.forEach { capture(it) }
+    } catch (_: Exception) {
+      // A listener that dies on connect never captures anything again.
+    }
+  }
+
+  private fun capture(sbn: StatusBarNotification) {
     try {
       if (sbn.packageName == packageName) return
       val extras = sbn.notification.extras
@@ -28,10 +54,17 @@ class BankNotificationListenerService : NotificationListenerService() {
 
       val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
       val arr = JSONArray(prefs.getString(KEY, "[]"))
-      // Skip exact repeats (updated/re-posted notifications).
-      if (arr.length() > 0) {
-        val last = arr.getJSONObject(arr.length() - 1)
-        if (last.optString("text") == text && last.optString("pkg") == sbn.packageName) return
+      // Skip exact repeats. Checked across the whole buffer rather than only
+      // against the last entry, because the connect-time sweep re-reads
+      // notifications this service already saw when they were posted.
+      for (i in 0 until arr.length()) {
+        val e = arr.optJSONObject(i) ?: continue
+        if (e.optString("text") == text &&
+          e.optString("pkg") == sbn.packageName &&
+          e.optLong("ts") == sbn.postTime
+        ) {
+          return
+        }
       }
       arr.put(
         JSONObject()
