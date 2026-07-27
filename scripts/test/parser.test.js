@@ -461,8 +461,17 @@ t('ChatGPT via Google descriptor categorizes as entertainment',
   'Purchase of AED 76.99 with Debit Card ending 4733 at Google ChatGPT, 650-5550000. Avl Balance is AED 11,102.89.  Pls refer stmt for exact amt.',
   { merchant: 'ChatGPT', category: 'entertainment' });
 
-t('grab.com purchase names Grab and categorizes transport',
+// This asserted `transport` until the location field started deciding the
+// category: the ride was hailed in BANGKOK, so it is now holiday transport and
+// reads as travel. The merchant is unchanged — only where the row is filed
+// moved, and it moved because a Grab ride abroad belongs with the trip that
+// paid for it rather than among the month's commuting at home.
+t('a Grab ride hailed in Bangkok is the trip, and still names Grab',
   'Purchase of AED 16.92 with Debit Card ending 4744 at WWW.GRAB.COM, BANGKOK. Avl Balance is AED 26,306.05.  Pls refer stmt for exact amt.',
+  { merchant: 'Grab', category: 'travel' });
+
+t('...but a Grab ride in Dubai is still transport',
+  'Purchase of AED 16.92 with Debit Card ending 4744 at WWW.GRAB.COM, DUBAI. Avl Balance is AED 26,306.05.  Pls refer stmt for exact amt.',
   { merchant: 'Grab', category: 'transport' });
 
 t('foodstuff trader categorizes as groceries',
@@ -1459,9 +1468,12 @@ t('a PayPal subscription keeps its own service and category',
   'Purchase of AED 16.50 at PAYPAL *REALDEBRID with Credit Card ending 4821',
   { merchant: 'Real-Debrid', category: 'entertainment' });
 
-// ── One trip, not seven scattered rows ──
-// Seven charges on one card with a PHUKET location tail: a resort, a boat
-// charter, a driver, a guesthouse, a phone shop, a mall and a coffee shop.
+// ── One trip, not twelve scattered rows ──
+// WHERE beats WHAT. Twelve charges on one card whose LOCATION field is in
+// Thailand: a resort, a boat charter, a driver, a guesthouse, a phone shop, a
+// mall, a coffee shop — and four whose own brands the vocabulary knows
+// perfectly well. All of it is the holiday, so the location decides before any
+// merchant rule runs.
 for (const descriptor of [
   'PHUKET DELIGHT',
   'NIKORN MARINE',
@@ -1470,23 +1482,48 @@ for (const descriptor of [
   'PZD131 CENTRAL PHUKET',
   'AT TWENTY TWO HOUSE',
   'AROMAYA',
+  // These four have brand rules — shopping, shopping, shopping, groceries —
+  // and the location beats every one of them.
+  'A025-AIIZ-JUNGCEYLON PHUK',
+  'CRC SPORTS-PHUKET 4',
+  'UNDER ARMOUR-C.PHUKET FES',
+  'TOPS-PATONG',
 ]) {
   t(`${descriptor} on holiday reads as travel`,
     `Purchase of AED 42.00 with Debit Card ending 8783 at ${descriptor}, PHUKET. Avl Balance is AED 846.57.  Pls refer stmt for exact amt.`,
     { category: 'travel' });
 }
 
-// ...and the four charges from the same trip whose OWN names are known keep
-// the categories those names earn. This is why the trip rule sits below the
-// brand rules rather than above them.
-for (const [descriptor, category] of [
-  ['A025-AIIZ-JUNGCEYLON PHUK', 'shopping'],
-  ['CRC SPORTS-PHUKET 4', 'shopping'],
-  ['UNDER ARMOUR-C.PHUKET FES', 'shopping'],
-  ['TOPS-PATONG', 'groceries'],
+t('a Bangkok location is the trip too',
+  'Purchase of AED 0.10 with Debit Card ending 8783 at WWW.2C2P.COM*2C2P BOLT (M, BANGKOK. Avl Balance is AED 35,848.02.  Pls refer stmt for exact amt.',
+  { category: 'travel', amountFils: 10 });
+
+// The multi-line format has no location line — the country code at the end of
+// the descriptor line IS the location field. The padded tail cannot be used
+// for this: "Ziina  *qasr al zain m Sharjah ARE" pads inside the shop's name.
+t('a THA country code on the descriptor line is the trip',
+  'Credit Card Purchase \nCard No XXXX3749 \nAED 80.81 \nTOPS-PATONG PHUKET THA \n24/01/26 11:47 \nAvl Bal AED 3696.56',
+  { category: 'travel', amountFils: 8081 });
+
+// The whole point of reading the LOCATION field and not the message: a Thai
+// restaurant in the UAE is a UAE dinner. Both formats, because they find the
+// location in completely different ways.
+t('a Thai-named restaurant located in Dubai is dining, not travel',
+  'Purchase of AED 42.00 with Debit Card ending 8783 at BANGKOK RESTAURANT LLC, DUBAI. Avl Balance is AED 846.57.',
+  { category: 'dining' });
+t('...the same in the multi-line format',
+  'Credit Card Purchase \nCard No XXXX3749 \nAED 60.00 \nPHUKET THAI KITCHEN Dubai ARE \n24/01/26 11:47 \nAvl Bal AED 3696.56',
+  { merchant: 'Phuket Thai Kitchen', category: 'dining' });
+
+// The rest of that card, either side of the trip, is untouched.
+for (const [descriptor, place, category] of [
+  ['PULL AND BEAR', 'DUBAI', 'shopping'],
+  ['DUBAI RETAIL ASSETS', 'DUBAI', 'shopping'],
+  ['TIER AE RIDE', 'Berlin', 'transport'],
+  ['CRYPTO.COM', 'SAN GILJAN', 'other'],
 ]) {
-  t(`${descriptor} keeps ${category} despite the trip tail`,
-    `Purchase of AED 42.00 with Debit Card ending 8783 at ${descriptor}, PHUKET. Avl Balance is AED 846.57.`,
+  t(`${descriptor} in ${place} is unaffected by the trip rule`,
+    `Purchase of AED 42.00 with Debit Card ending 8783 at ${descriptor}, ${place}. Avl Balance is AED 846.57.`,
     { category });
 }
 

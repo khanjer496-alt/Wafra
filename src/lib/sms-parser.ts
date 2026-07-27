@@ -365,8 +365,18 @@ function cleanDescriptor(name: string): string {
   return out.replace(/(?:\s+COM|\.com)$/i, '').trim();
 }
 
-function merchantFromLines(raw: string): string {
-  if (!raw.includes('\n')) return '';
+/**
+ * The candidate descriptor lines of a multi-line alert, in order: everything
+ * after the amount line that is not a date, a card/balance label, or another
+ * amount.
+ *
+ * Split out of `merchantFromLines` so the location check reads the acquirer's
+ * fields the same way the merchant does. Two readers of one format that
+ * disagree about which line is which is how a parser starts contradicting
+ * itself.
+ */
+function descriptorLines(raw: string): string[] {
+  if (!raw.includes('\n')) return [];
   const codes = [
     ...Object.keys(UNITS_PER_USD),
     ...getActiveMarket().currency.aliases,
@@ -374,12 +384,20 @@ function merchantFromLines(raw: string): string {
   const amountLineRe = new RegExp(`\\b(?:${codes})\\.?\\s*[\\d,]+(?:\\.\\d{1,2})?`, 'i');
   const lines = raw.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
   const amountIdx = lines.findIndex((l) => amountLineRe.test(l));
-  if (amountIdx < 0) return '';
-  for (const line of lines.slice(amountIdx + 1)) {
-    if (LINE_DATE_RE.test(line)) continue;
-    if (LINE_NOISE_RE.test(line)) continue;
-    if (amountLineRe.test(line)) continue;
-    if ((line.match(/[A-Za-z]/g) ?? []).length < 3) continue;
+  if (amountIdx < 0) return [];
+  return lines
+    .slice(amountIdx + 1)
+    .filter(
+      (line) =>
+        !LINE_DATE_RE.test(line) &&
+        !LINE_NOISE_RE.test(line) &&
+        !amountLineRe.test(line) &&
+        (line.match(/[A-Za-z]/g) ?? []).length >= 3,
+    );
+}
+
+function merchantFromLines(raw: string): string {
+  for (const line of descriptorLines(raw)) {
     // Acquirer descriptors are fixed-width fields padded with spaces:
     // "EXINITY ME LTD        Dubai           AE" and
     // "WL *STEAM PURCHASE    425-889-9642 WA US". Only drop the tail when it
@@ -402,6 +420,48 @@ function merchantFromLines(raw: string): string {
   }
   return '';
 }
+
+/**
+ * WHERE THE CARD WAS PRESENTED — the acquirer's location field, and nothing
+ * else in the message.
+ *
+ * Two formats, two fields:
+ *
+ *   inline     "...at <DESCRIPTOR>, <LOCATION>. Avl Balance is AED ..."
+ *              the LAST comma-separated field of the merchant clause. The
+ *              search is greedy so it lands on the last comma and not on one
+ *              inside the descriptor ("Name.com, Inc, 720-2374"); a field that
+ *              starts with a digit or a "+" is a phone number, not a place.
+ *
+ *   multi-line "<NAME> <CITY> <ISO3>" — the trailing country code ONLY.
+ *              The padded tail cannot be used: "Ziina  *qasr al zain m Sharjah
+ *              ARE" pads INSIDE the merchant name, so cutting at the padding
+ *              would hand a shop's own words to the location check.
+ *
+ * Reading the descriptor instead would be the `water`-claims-waterparks
+ * mistake pointed the other way: a Bangkok restaurant in Dubai is a Dubai
+ * dinner, and its name must never decide where the card was.
+ */
+const INLINE_PLACE_RE =
+  /\bat\s+[^\n]*,\s*([A-Za-z][A-Za-z .'-]{1,28}?)\s*(?:-\s*[A-Za-z]{2})?\s*\.(?:\s|$)/i;
+function transactionPlace(raw: string): string {
+  const line = descriptorLines(raw)[0];
+  if (line) return line.match(/\b([A-Z]{3})\s*$/)?.[1] ?? '';
+  return raw.match(INLINE_PLACE_RE)?.[1] ?? '';
+}
+
+/**
+ * Places that only ever appear in a LOCATION field, never as a category.
+ *
+ * A card presented in Thailand is a holiday, whatever the shop sells: the
+ * sportswear, the supermarket run and the mall stop on a trip belong with the
+ * flights and the hotel, not scattered across Shopping and Groceries at home.
+ * Krabi, Pattaya, Chiang Mai and Ko Samui are here for the same reason as the
+ * three the corpus actually carries — safe only because this is matched
+ * against the location field alone, where a restaurant name can never reach.
+ */
+const TRIP_PLACE_RE =
+  /\b(?:THA|PHUKET|PATONG|BANGKOK|KRABI|PATTAYA|CHIANG ?MAI|KO[H]? ?SAMUI)\b/i;
 
 /** Debit messages that are actually transfers: paying a card bill, moving between own accounts. */
 const TRANSFER_HINT_RE =
@@ -533,13 +593,6 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // descriptor decomposes as NEXT + UAE + AED + ECOM. Matched whole, because
   // a bare `next` would match half the sentences in a bank SMS.
   [/\bzbooni\b|nextuaeaedecom/i, 'shopping'],
-  // One trip, not seven scattered rows. A resort, a boat charter, a driver, a
-  // guesthouse, a phone shop, a mall and a coffee shop all read as travel when
-  // the location tail says they were paid for on holiday. Below the brand
-  // rules on purpose: AIIZ, CRC Sports, Under Armour and Tops-Patong carry the
-  // same tail and keep the categories their own names earn them.
-  [/\bphuket\b/i, 'travel'],
-
   // Structural fallbacks — what the merchant IS, when no brand matched.
   // These sit last so brand rules always win.
   // `7-11` is anchored on BOTH sides. Unanchored it matched the digits of a
@@ -1617,7 +1670,23 @@ export function parseSms(
     transferHint = true;
   }
 
-  const cat = categoryOf(raw, type, overrides, merchant);
+  // WHERE beats WHAT. A charge whose location field is abroad on a trip is
+  // holiday spending, decided before any merchant vocabulary runs — otherwise
+  // one week in Thailand arrives as a sportswear purchase, a supermarket run
+  // and a mall stop filed among the month's ordinary shopping at home.
+  //
+  // A category the USER set still wins over both, which is why the override is
+  // read out first rather than left to `categoryOf`.
+  const overridden = Boolean(overrides && merchant && overrides[merchant.trim().toLowerCase()]);
+  const onTrip =
+    type === 'expense' &&
+    !isBillDue &&
+    !transferHint &&
+    TRIP_PLACE_RE.test(transactionPlace(raw));
+  const cat =
+    onTrip && !overridden
+      ? { id: 'travel' as CategoryId, deliberate: true }
+      : categoryOf(raw, type, overrides, merchant);
   // A row the parser named STRUCTURALLY — a savings sweep, "Transfer to Khalid
   // Rashid", a bank transfer — is understood even though no spending category
   // applies to it. Money moving between places has no category, and reporting
