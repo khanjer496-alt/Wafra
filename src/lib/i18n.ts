@@ -323,6 +323,83 @@ const S = {
   scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
   parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   trySample: { en: 'Try sample', ar: 'جرّب مثالاً' },
+
+  // iOS automatic capture setup.
+  //
+  // This is the screen that decides whether iPhone feels like the lesser
+  // platform, so it is translated as carefully as anything in the app. The
+  // Arabic is written as Arabic rather than transliterated from the English:
+  // "Shortcut" is اختصار, the Apple term, not شورت‌كت.
+  iosSetupTitle: { en: 'Automatic capture', ar: 'الالتقاط التلقائي' },
+  iosStepConnect: { en: 'Connect', ar: 'الربط' },
+  iosStepBanks: { en: 'Banks', ar: 'البنوك' },
+  iosStepShortcut: { en: 'Shortcut', ar: 'الاختصار' },
+  iosStepTest: { en: 'Test', ar: 'الاختبار' },
+  iosStepProgress: { en: 'Step {n} of {total}: {name}', ar: 'الخطوة {n} من {total}: {name}' },
+
+  iosIntroTitle: { en: 'iPhone works differently', ar: 'الآيفون يعمل بطريقة مختلفة' },
+  iosIntroBody1: {
+    en: 'Apple does not let any app read your messages. So instead of reading them, Wafra has your iPhone forward bank alerts to it — using a Shortcut you set up once, in about two minutes.',
+    ar: 'لا تسمح آبل لأي تطبيق بقراءة رسائلك. لذلك بدلاً من قراءتها، تجعل وفرة آيفونك يُمرّر تنبيهات البنك إليها — عبر اختصار تُعدّه مرة واحدة، في دقيقتين تقريباً.',
+  },
+  iosIntroBody2: {
+    en: 'After that it is automatic. Alerts get filed while your phone is locked, and there is nothing to open or tap again.',
+    ar: 'بعد ذلك يصبح كل شيء تلقائياً. تُسجَّل التنبيهات وهاتفك مقفل، ولا شيء تفتحه أو تضغطه مرة أخرى.',
+  },
+  iosPrivacyNote: {
+    en: 'Wafra reads the message, files the transaction, and throws the text away. It is never stored and never logged.',
+    ar: 'تقرأ وفرة الرسالة، وتسجّل العملية، ثم تتخلص من النص. لا يُحفظ أبداً ولا يُسجَّل.',
+  },
+  iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
+  iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
+  iosConnectFailed: { en: 'Could not connect.', ar: 'تعذّر الربط.' },
+
+  iosBanksTitle: { en: 'Which banks text you?', ar: 'أي البنوك تراسلك؟' },
+  iosBanksBody: {
+    en: 'Pick the ones that send you card and account alerts. You will point the Shortcut at these senders, so it only ever sees your bank messages — nothing else in your inbox.',
+    ar: 'اختر البنوك التي ترسل لك تنبيهات البطاقات والحسابات. ستوجّه الاختصار إلى هؤلاء المرسلين، فلا يرى سوى رسائل بنكك — ولا شيء آخر في صندوق رسائلك.',
+  },
+  iosBanksSelected: { en: 'SELECTED · {n}', ar: 'المحدد · {n}' },
+  iosBanksNext: { en: 'Next', ar: 'التالي' },
+  iosBanksSkip: { en: 'Skip — I will pick later', ar: 'تخطَّ — سأختار لاحقاً' },
+  iosBankSelected: { en: '{name}, selected', ar: '{name}، محدد' },
+
+  iosShortcutTitle: { en: 'Install the Shortcut', ar: 'ثبّت الاختصار' },
+  iosShortcutBody: {
+    en: 'Open the Shortcut, then paste these two values into it when it asks. They belong to this iPhone only.',
+    ar: 'افتح الاختصار، ثم الصق هاتين القيمتين فيه عندما يطلبهما. وهما خاصتان بهذا الآيفون وحده.',
+  },
+  iosYourAddress: { en: 'YOUR ADDRESS', ar: 'عنوانك' },
+  iosCopy: { en: 'COPY', ar: 'نسخ' },
+  iosCopied: { en: 'COPIED', ar: 'تم النسخ' },
+  iosCopyAddress: { en: 'Copy your Wafra address', ar: 'انسخ عنوان وفرة الخاص بك' },
+  iosCopyToken: { en: 'Copy your secret key', ar: 'انسخ مفتاحك السري' },
+  iosRunFor: { en: 'SET THE AUTOMATION TO RUN FOR', ar: 'اضبط الأتمتة لتعمل مع' },
+  iosOpenShortcut: { en: 'Open the Shortcut', ar: 'افتح الاختصار' },
+  iosInstalledIt: { en: 'I have installed it', ar: 'لقد ثبّته' },
+
+  iosTestTitle: { en: 'Let us prove it works', ar: 'لنتأكد أنه يعمل' },
+  iosTestBody: {
+    en: 'Forward any bank message to yourself, or wait for the next real one. When it arrives, it will appear here.',
+    ar: 'مرّر أي رسالة بنكية إلى نفسك، أو انتظر الرسالة الحقيقية التالية. عندما تصل، ستظهر هنا.',
+  },
+  iosCaught: {
+    en: 'Captured and filed — with no help from you.',
+    ar: 'التُقطت وسُجّلت — دون أي تدخل منك.',
+  },
+  iosListening: { en: 'Listening for a message…', ar: 'في انتظار رسالة…' },
+  iosWaitingLabel: {
+    en: 'Waiting for a message from your bank',
+    ar: 'في انتظار رسالة من بنكك',
+  },
+  iosTimedOut: {
+    en: 'Nothing arrived. The usual cause is the automation being set to ask before running — turn off “Ask Before Running” in the Shortcuts app.',
+    ar: 'لم تصل أي رسالة. السبب المعتاد هو ضبط الأتمتة لتسأل قبل التشغيل — أوقف «السؤال قبل التشغيل» في تطبيق الاختصارات.',
+  },
+  iosTryAgain: { en: 'Try again', ar: 'حاول مرة أخرى' },
+  iosStartListening: { en: 'Start listening', ar: 'ابدأ الاستماع' },
+  iosDone: { en: 'Done', ar: 'تم' },
+  iosSkipForNow: { en: 'Skip for now', ar: 'تخطَّ الآن' },
 } as const;
 
 export type StringKey = keyof typeof S;

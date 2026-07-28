@@ -235,7 +235,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     style={{
                       width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
                       height: '100%',
-                      backgroundColor: over ? theme.expense : theme.primary,
+                      backgroundColor: over ? theme.expenseGraphic : theme.primary,
                       borderRadius: 4,
                     }}
                   />

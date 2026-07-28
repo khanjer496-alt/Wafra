@@ -4,7 +4,7 @@
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
-const BASE = 'http://localhost:8126';
+const BASE = process.env.BASE ?? 'http://localhost:8126';
 let pass = 0, fail = 0;
 const ok = (name, cond) => {
   if (cond) { pass++; console.log(`✓ ${name}`); }

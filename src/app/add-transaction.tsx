@@ -86,7 +86,7 @@ export default function AddTransactionScreen() {
               style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>
               <Icon name="close" size={18} color={theme.text} />
             </Pressable>
-            <ThemedText type="smallBold" style={styles.headerTitle}>
+            <ThemedText type="smallBold" accessibilityRole="header" style={styles.headerTitle}>
               New transaction
             </ThemedText>
             <View style={styles.closeBtn} />
@@ -104,6 +104,9 @@ export default function AddTransactionScreen() {
                 return (
                   <Pressable
                     key={t}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={t === 'expense' ? 'Expense' : 'Income'}
                     onPress={() => switchType(t)}
                     style={[
                       styles.segmentItem,
@@ -129,6 +132,7 @@ export default function AddTransactionScreen() {
                 onChangeText={setAmountText}
                 keyboardType="decimal-pad"
                 placeholder="0"
+                accessibilityLabel="Amount in dirhams"
                 autoFocus
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
@@ -155,6 +159,9 @@ export default function AddTransactionScreen() {
                   return (
                     <Pressable
                       key={a.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={a.name}
+                      accessibilityState={{ selected: active }}
                       onPress={() => setAccountId(a.id)}
                       style={[
                         styles.accountChip,
@@ -185,6 +192,9 @@ export default function AddTransactionScreen() {
                   return (
                     <Pressable
                       key={d.offset}
+                      accessibilityRole="button"
+                      accessibilityLabel={d.label}
+                      accessibilityState={{ selected: active }}
                       onPress={() => setDayOffset(d.offset)}
                       style={[
                         styles.dateChip,
@@ -206,6 +216,7 @@ export default function AddTransactionScreen() {
               <TextInput
                 value={title}
                 onChangeText={setTitle}
+                accessibilityLabel="Description, optional"
                 placeholder={`e.g. ${type === 'expense' ? 'Carrefour weekly shop' : 'July salary'}`}
                 placeholderTextColor={theme.textSecondary}
                 style={[
@@ -222,6 +233,9 @@ export default function AddTransactionScreen() {
 
           <View style={styles.footer}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Save transaction"
+              accessibilityState={{ disabled: !canSave }}
               onPress={save}
               disabled={!canSave}
               style={[

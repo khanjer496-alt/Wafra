@@ -7,6 +7,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
 import { clockTime, formatAmount } from '@/lib/format';
+import { getActiveMarket } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
@@ -38,9 +39,25 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
   // income arriving twice — which is precisely what it looked like.
   const isTransfer = transaction.isTransfer || internal === true;
   const isIncome = transaction.type === 'income' && !isTransfer;
+  const where = isTransfer ? t('transferLabel') : meta.label;
+
+  // Spoken as one sentence. Left to itself RN would concatenate the children,
+  // which reads the sign as a stray "minus" and drops the currency entirely —
+  // "ENOC Fuel Transport · FAB Credit Card − 113".
+  const label = [
+    transaction.title,
+    where,
+    account?.name,
+    clock,
+    `${isIncome ? 'plus' : 'minus'} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={press}
       style={({ pressed }) => [styles.row, pressed && { transform: [{ scale: 0.985 }] }]}>
       <MerchantAvatar title={transaction.title} category={transaction.category} size={34} />
@@ -49,7 +66,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
           {transaction.title}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-          {isTransfer ? t('transferLabel') : meta.label}
+          {where}
           {account ? ` · ${account.name}` : ''}
           {/* The clock, when the bank gave one. Two coffees on the same day
               at the same shop are otherwise indistinguishable in this list. */}

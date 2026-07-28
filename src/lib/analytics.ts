@@ -1,6 +1,7 @@
 import { monthKey, shiftMonthKey } from '@/lib/format';
 import { internalTransferIds, isSpending } from '@/lib/ledger';
 import { inPeriod, previousPeriod, toPeriod, type PeriodLike } from '@/lib/period';
+import { allocationsOf, amountInCategory } from '@/lib/splits';
 import type { AppState, CategoryId, Transaction } from '@/lib/types';
 
 export interface MerchantStat {
@@ -53,8 +54,13 @@ export function categoryMovers(
   const prev = new Map<CategoryId, number>();
   for (const t of transactions) {
     if (!isSpending(t, live)) continue;
-    if (inPeriod(t.date, period)) cur.set(t.category, (cur.get(t.category) ?? 0) + t.amountFils);
-    else if (inPeriod(t.date, prevPeriod)) prev.set(t.category, (prev.get(t.category) ?? 0) + t.amountFils);
+    // Split rows contribute to several categories at once, so movers are
+    // computed over allocations rather than the row's headline category.
+    const target = inPeriod(t.date, period) ? cur : inPeriod(t.date, prevPeriod) ? prev : null;
+    if (!target) continue;
+    for (const a of allocationsOf(t)) {
+      target.set(a.category, (target.get(a.category) ?? 0) + a.amountFils);
+    }
   }
   const cats = new Set<CategoryId>([...cur.keys(), ...prev.keys()]);
   const movers: CategoryMover[] = [];
@@ -135,8 +141,8 @@ export function categoryTrend(
   return keys.map((key) => {
     let fils = 0;
     for (const t of transactions) {
-      if (t.type === 'expense' && !t.isTransfer && t.category === category && monthKey(t.date) === key) {
-        fils += t.amountFils;
+      if (t.type === 'expense' && !t.isTransfer && monthKey(t.date) === key) {
+        fils += amountInCategory(t, category);
       }
     }
     return { key, fils };

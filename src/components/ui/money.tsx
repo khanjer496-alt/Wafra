@@ -3,6 +3,7 @@ import { StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'rea
 
 import { ThemedText, type TextType } from '@/components/themed-text';
 import { Fonts, Motion, Spacing } from '@/constants/theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAmount } from '@/lib/format';
 import { getActiveMarket } from '@/lib/markets';
@@ -86,10 +87,17 @@ export function CountUpMoney({
   const [display, setDisplay] = useState(fils);
   const fromRef = useRef(fils);
   const frame = useRef<number | null>(null);
+  const reduced = useReducedMotion();
 
   useEffect(() => {
     const from = fromRef.current;
     if (from === fils) return;
+    // Reduce Motion, or a screen reader that would announce every frame.
+    if (reduced) {
+      setDisplay(fils);
+      fromRef.current = fils;
+      return;
+    }
     const start = Date.now();
     const tick = () => {
       const t = Math.min(1, (Date.now() - start) / durationMs);
@@ -106,7 +114,7 @@ export function CountUpMoney({
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       fromRef.current = fils;
     };
-  }, [fils, durationMs]);
+  }, [fils, durationMs, reduced]);
 
   return <Money fils={display} type={type} color={color} />;
 }

@@ -2143,6 +2143,86 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('wallet: every card appears exactly once',
     groups.reduce((n, g) => n + g.accounts.length, 0) === many.length);
 }
+// ── Splits ──
+//
+// The one thing that must never slip: the parts sum to the charge. If they
+// drift, category totals stop matching the bank statement, which is the single
+// bug a money app cannot ship.
+const splits = require('./build/splits');
+
+const tx = (over) => ({
+  id: 't1', type: 'expense', amountFils: 10000, category: 'groceries',
+  accountId: 'a1', title: 'Carrefour', date: '2026-07-18', ...over,
+});
+
+eq('allocationsOf: an unsplit row is one allocation of the whole amount',
+  splits.allocationsOf(tx()), [{ category: 'groceries', amountFils: 10000 }]);
+
+const twoWay = splits.normalizeSplits(10000, [
+  { category: 'groceries', amountFils: 7000 },
+  { category: 'shopping', amountFils: 3000 },
+]);
+eq('normalizeSplits: an exact split is left alone', twoWay.length, 2);
+eq('normalizeSplits: exact split still sums to the charge',
+  splits.unallocatedFils(10000, twoWay), 0);
+
+// 100.00 three ways is 33.33 each — a fil short. Nobody should hunt for it.
+const threeWay = splits.splitEvenly(10000, ['groceries', 'dining', 'shopping']);
+eq('splitEvenly: three-way rounding remainder is absorbed',
+  splits.unallocatedFils(10000, threeWay), 0);
+eq('splitEvenly: every part stays positive',
+  threeWay.every((s) => s.amountFils > 0), true);
+
+// Parts that do not add up are corrected rather than stored wrong.
+const short = splits.normalizeSplits(10000, [
+  { category: 'groceries', amountFils: 4000 },
+  { category: 'dining', amountFils: 3000 },
+]);
+eq('normalizeSplits: a short split is topped up to the charge',
+  splits.unallocatedFils(10000, short), 0);
+const over = splits.normalizeSplits(10000, [
+  { category: 'groceries', amountFils: 9000 },
+  { category: 'dining', amountFils: 6000 },
+]);
+eq('normalizeSplits: an overshooting split is pulled back to the charge',
+  splits.unallocatedFils(10000, over), 0);
+
+eq('normalizeSplits: the same category twice is folded into one part',
+  splits.normalizeSplits(10000, [
+    { category: 'groceries', amountFils: 6000 },
+    { category: 'groceries', amountFils: 4000 },
+  ]),
+  undefined);
+eq('normalizeSplits: a single part is not a split',
+  splits.normalizeSplits(10000, [{ category: 'groceries', amountFils: 10000 }]), undefined);
+eq('normalizeSplits: zero and negative parts are dropped',
+  splits.normalizeSplits(10000, [
+    { category: 'groceries', amountFils: 10000 },
+    { category: 'dining', amountFils: 0 },
+  ]), undefined);
+
+const splitTx = tx({ splits: twoWay });
+eq('amountInCategory: reads the part, not the whole charge',
+  splits.amountInCategory(splitTx, 'groceries'), 7000);
+eq('amountInCategory: a category not in the split contributes nothing',
+  splits.amountInCategory(splitTx, 'transport'), 0);
+eq('amountInCategory: an unsplit row still answers for its own category',
+  splits.amountInCategory(tx(), 'groceries'), 10000);
+eq('dominantCategory: the largest part wins', splits.dominantCategory(splitTx), 'groceries');
+eq('isSplit', [splits.isSplit(splitTx), splits.isSplit(tx())], [true, false]);
+
+// The whole point: a split changes how a charge is COUNTED, never how much.
+eq('a split never changes the total spent',
+  splits.allocationsOf(splitTx).reduce((n, a) => n + a.amountFils, 0), splitTx.amountFils);
+
+// And analytics must agree with that.
+const splitLedger = [splitTx];
+eq('insights: category spend follows the split, not the headline category',
+  [insights.spentInMonthForCategory(splitLedger, '2026-07', 'groceries'),
+   insights.spentInMonthForCategory(splitLedger, '2026-07', 'shopping')],
+  [7000, 3000]);
+eq('analytics: the category trend follows the split too',
+  an.categoryTrend(splitLedger, 'shopping', 1).length >= 1, true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

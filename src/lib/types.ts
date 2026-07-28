@@ -117,6 +117,24 @@ export interface Transaction {
    * Settings → Improve accuracy. Never leaves the device unless shared.
    */
   raw?: string;
+  /**
+   * One charge that belongs to several categories — the Carrefour receipt that
+   * is mostly groceries and partly a phone charger. The parts must sum to
+   * amountFils exactly; see src/lib/splits.ts, which owns that invariant and
+   * is the only thing analytics should read categories through.
+   *
+   * `category` stays populated on a split row and holds the largest part, so
+   * every reader that has not been taught about splits still shows something
+   * defensible rather than nothing.
+   */
+  splits?: TransactionSplit[];
+}
+
+export interface TransactionSplit {
+  category: CategoryId;
+  /** Fils, always positive. The parts sum to the parent's amountFils. */
+  amountFils: number;
+  note?: string;
 }
 
 export interface Budget {

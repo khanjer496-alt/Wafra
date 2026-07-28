@@ -10,6 +10,7 @@ import {
   toPeriod,
   type PeriodLike,
 } from '@/lib/period';
+import { allocationsOf, amountInCategory } from '@/lib/splits';
 import {
   activeSubscriptions,
   detectSubscriptions,
@@ -95,7 +96,9 @@ export function summarizeMonth(
       incomeFils += t.amountFils;
     } else if (isSpending(t, live, internal)) {
       expenseFils += t.amountFils;
-      catTotals.set(t.category, (catTotals.get(t.category) ?? 0) + t.amountFils);
+      for (const a of allocationsOf(t)) {
+        catTotals.set(a.category, (catTotals.get(a.category) ?? 0) + a.amountFils);
+      }
     }
   }
 
@@ -118,8 +121,10 @@ export function spentInMonthForCategory(
 ): number {
   let total = 0;
   for (const t of transactions) {
-    if (t.category === category && inPeriod(t.date, period) && isSpending(t, live)) {
-      total += t.amountFils;
+    // amountInCategory does the category match itself, and counts each part of
+    // a split row separately — so the row's headline category is not consulted.
+    if (inPeriod(t.date, period) && isSpending(t, live)) {
+      total += amountInCategory(t, category);
     }
   }
   return total;

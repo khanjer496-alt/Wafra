@@ -150,7 +150,7 @@ export function PairedBars({
                 styles.bar,
                 {
                   height: Math.max(3, (m.outFils / max) * height),
-                  backgroundColor: m.current ? theme.expense : outColor,
+                  backgroundColor: m.current ? theme.expenseGraphic : outColor,
                 },
               ]}
             />

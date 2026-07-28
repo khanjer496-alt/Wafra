@@ -1,6 +1,6 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -23,6 +23,9 @@ import { t } from '@/lib/i18n';
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
 type BiometricState = 'prompting' | 'failed' | 'unavailable';
+
+/** Short trips out of the app — a permission sheet, the share card — do not re-lock. */
+const RELOCK_GRACE_MS = 20_000;
 
 /** The breathing ring around the sensor target: scale 1 → 1.4, opacity .85 → .3. */
 function SensorRing({ color }: { color: string }) {
@@ -84,13 +87,56 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     if (lockRequired && !attempted) tryUnlock();
   }, [lockRequired, attempted, tryUnlock]);
 
+  /**
+   * Re-lock when the app leaves the foreground. Without this the gate is a
+   * launch-time formality: unlock once and the process stays unlocked until
+   * iOS or Android kills it, so handing someone your unlocked phone hands
+   * them your ledger — which is the exact thing App Lock is for.
+   *
+   * The grace period exists because iOS backgrounds the app for its OWN
+   * permission and share dialogs. Re-locking on those would make the setting
+   * unusable rather than secure.
+   */
+  useEffect(() => {
+    if (!state.appLock || Platform.OS === 'web') return;
+    let leftAt = 0;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' || next === 'inactive') {
+        leftAt = leftAt || Date.now();
+        return;
+      }
+      if (next === 'active' && leftAt) {
+        const away = Date.now() - leftAt;
+        leftAt = 0;
+        if (away > RELOCK_GRACE_MS) {
+          setUnlocked(false);
+          setAttempted(false);
+          setBiometric('prompting');
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [state.appLock]);
+
   if (!lockRequired) return <>{children}</>;
 
   return (
     <View style={styles.container}>
-      {/* The router's Stack stays mounted; the lock paints over it. */}
-      <View style={styles.hidden}>{children}</View>
-      <ThemedView style={[StyleSheet.absoluteFillObject, styles.root]}>
+      {/*
+        The router's Stack stays mounted; the lock paints over it. Opacity
+        alone only hides it from EYES — VoiceOver and TalkBack still walk the
+        tree underneath and will happily read out every balance on the locked
+        screen, so the subtree has to be removed from the accessibility tree
+        explicitly (each platform has its own prop) and made untappable.
+      */}
+      <View
+        style={styles.hidden}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants">
+        {children}
+      </View>
+      <ThemedView accessibilityViewIsModal style={[StyleSheet.absoluteFillObject, styles.root]}>
         <View style={styles.centre}>
           <WafraMark size={46} />
           <ThemedText type="micro" themeColor="textTertiary">

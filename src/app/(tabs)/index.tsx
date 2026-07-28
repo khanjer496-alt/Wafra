@@ -36,19 +36,13 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import {
-  buildImportPlan,
-  hasSmsPermission,
-  isSmsScanningAvailable,
-  requestSmsPermission,
-  scanInbox,
-} from '@/lib/auto-import';
+import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { committed, tapped } from '@/lib/haptics';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
-import { PARSER_VERSION } from '@/lib/sms-parser';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -409,34 +403,41 @@ export default function HomeScreen() {
         if (interactive) router.push('/pro');
         return;
       }
-      if (!isSmsScanningAvailable()) return;
-      let granted = await hasSmsPermission();
-      if (!granted && interactive) granted = await requestSmsPermission();
-      if (!granted) {
-        setNeedsPermission(true);
+      if (!isCaptureAvailable()) return;
+      // Android needs the SMS permission before it can read anything. iOS has
+      // no permission to ask for — its messages arrive over the relay — so the
+      // prompt is skipped there rather than shown and refused.
+      if (isSmsScanningAvailable()) {
+        let granted = await hasSmsPermission();
+        if (!granted && interactive) granted = await requestSmsPermission();
+        if (!granted) {
+          setNeedsPermission(true);
+          return;
+        }
+        setNeedsPermission(false);
+      }
+
+      const { plan, commit, needsSetup } = await planNewMessages(state);
+      if (needsSetup) {
+        // The relay is not paired yet, so silence here means "not connected",
+        // not "nothing new". Only say so when the user actually asked.
+        if (interactive) router.push('/ios-setup');
         return;
       }
-      setNeedsPermission(false);
-      // The routine scan reads only what arrived since last time. That is
-      // right for a normal refresh and wrong after a parser change: a message
-      // is imported once and can never arrive again, so every improvement
-      // would apply to the future only, and the card payments already in the
-      // ledger would stay filed as spending forever. When the parser has moved
-      // on, re-read everything — existing rows are recognized by fingerprint
-      // and healed in place, not duplicated.
-      const reread = state.parserVersion !== PARSER_VERSION;
-      const sinceMs = reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
-      const { parsed, newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
-      const plan = buildImportPlan(parsed, state, newestTs);
       // healedCount belongs in this test. A re-read that only CORRECTS rows —
       // exactly what a parser fix produces — was being thrown away here, so the
       // corrections never reached the store.
       if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
         markParserVersion();
+        // Nothing arrived, so nothing is owed — but acking is still correct:
+        // the relay may have queued rows that parsed to nothing at all.
+        await commit();
         if (interactive) toast.show(t('upToDateNoNew'));
         return;
       }
       const ids = importBatch(plan.batch);
+      // Only now is it safe to drop the relay's copy.
+      await commit();
       committed();
       toast.show(
         `Imported ${plan.txCount} transaction${plan.txCount === 1 ? '' : 's'}${plan.newAccountCount > 0 ? ` · ${plan.newAccountCount} new card${plan.newAccountCount === 1 ? '' : 's'}` : ''}`,
