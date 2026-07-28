@@ -149,7 +149,25 @@ const S = {
   yearly: { en: 'YEARLY', ar: 'سنوي' },
   monthly: { en: 'MONTHLY', ar: 'شهري' },
   perMonth: { en: 'per month', ar: 'شهرياً' },
-  perYear: { en: 'per year · 2 months free', ar: 'سنوياً · شهران مجاناً' },
+  transferLabel: { en: 'Transfer', ar: 'تحويل' },
+  perYear: { en: 'per year', ar: 'سنوياً' },
+  playOnlyTitle: { en: 'Available with the Play Store release', ar: 'متاح مع إصدار متجر Play' },
+  playOnlyBody: {
+    en: 'Purchases go through Google Play billing, which only works when Wafra is installed from the Play Store. This build has every Pro feature unlockable from Settings.',
+    ar: 'تتم عمليات الشراء عبر فوترة Google Play، وهي تعمل فقط عند تثبيت وفرة من متجر Play. في هذا الإصدار يمكن تفعيل كل ميزات برو من الإعدادات.',
+  },
+  nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
+  nothingToRestoreBody: { en: 'Purchases arrive with the Play Store release.', ar: 'ستتوفر عمليات الشراء مع إصدار متجر Play.' },
+  noPurchaseFound: { en: 'No purchase found', ar: 'لم يُعثر على عملية شراء' },
+  noPurchaseFoundBody: {
+    en: 'No previous Wafra Pro purchase on this Google account.',
+    ar: 'لا توجد عملية شراء سابقة لوفرة برو على حساب Google هذا.',
+  },
+  monthsFreeSuffix: { en: '· {months} months free', ar: '· {months} أشهر مجاناً' },
+  trialDaysLeftPaywall: {
+    en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
+    ar: 'كل شيء مجاني في أول {total} أيام — تبقّى {left} يوم. تابع الاستخدام:',
+  },
   featAutoTracking: { en: 'Automatic tracking', ar: 'تتبع تلقائي' },
   featAutoTrackingText: { en: 'Bank SMS and app notifications become transactions, cards and dues by themselves.', ar: 'رسائل البنك والإشعارات تتحول تلقائياً إلى عمليات وبطاقات ومستحقات.' },
   featInsights: { en: 'Insights & subscriptions', ar: 'تحليلات واشتراكات' },
@@ -253,4 +271,23 @@ export function detectLanguage(): Lang {
  */
 export function t(key: StringKey, override?: Lang): string {
   return S[key][override ?? lang] ?? S[key].en;
+}
+
+/**
+ * A translated string with {placeholders} filled in.
+ *
+ * Sentences that carry a number used to be assembled in the screen by
+ * concatenating English fragments, which meant they stayed English in Arabic
+ * however well the rest of the screen was translated — the paywall's trial
+ * line was doing exactly that. A whole sentence per language, with the number
+ * dropped into it, is the only form a translator can actually work with.
+ */
+export function tf(
+  key: StringKey,
+  vars: Record<string, string | number>,
+  override?: Lang,
+): string {
+  return t(key, override).replace(/\{(\w+)\}/g, (whole, name) =>
+    name in vars ? String(vars[name]) : whole,
+  );
 }

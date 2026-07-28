@@ -621,6 +621,7 @@ export default function HomeScreen() {
                   transaction={tx}
                   account={state.accounts.find((a) => a.id === tx.accountId)}
                   onPress={setEntry}
+                  internal={internal.has(tx.id)}
                 />
               </View>
             ))}

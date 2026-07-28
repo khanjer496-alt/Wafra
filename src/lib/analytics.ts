@@ -1,5 +1,5 @@
 import { monthKey, shiftMonthKey } from '@/lib/format';
-import { isSpending } from '@/lib/ledger';
+import { internalTransferIds, isSpending } from '@/lib/ledger';
 import { inPeriod, previousPeriod, toPeriod, type PeriodLike } from '@/lib/period';
 import type { AppState, CategoryId, Transaction } from '@/lib/types';
 
@@ -106,10 +106,16 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   const keys: string[] = [];
   for (let i = months - 1; i >= 0; i--) keys.push(shiftMonthKey(nowKey, -i));
 
+  // Only the LEAVING side of a move between your own accounts reads as a
+  // transfer; the arriving side is worded exactly like being paid and carries
+  // no flag. Excluding one and counting the other made net worth rise every
+  // time the user shifted their own money.
+  const internal = internalTransferIds(state.transactions, live);
+
   return keys.map((key) => {
     let fils = opening;
     for (const t of state.transactions) {
-      if (t.isTransfer || !live.has(t.accountId)) continue;
+      if (t.isTransfer || internal.has(t.id) || !live.has(t.accountId)) continue;
       if (monthKey(t.date) > key) continue;
       fils += t.type === 'income' ? t.amountFils : -t.amountFils;
     }

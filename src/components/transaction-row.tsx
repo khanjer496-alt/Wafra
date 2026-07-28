@@ -7,6 +7,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
 import { clockTime, formatAmount } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import type { Account, Transaction } from '@/lib/types';
 
 interface TransactionRowProps {
@@ -14,6 +15,8 @@ interface TransactionRowProps {
   account?: Account;
   /** Receives the entry, so callers can pass one stable handler for the list. */
   onPress?: (transaction: Transaction) => void;
+  /** This row is one leg of a move between the user's own accounts. */
+  internal?: boolean;
 }
 
 /**
@@ -22,12 +25,19 @@ interface TransactionRowProps {
  * Only money in is coloured. An expense row painted red says "something is
  * wrong" about a cup of coffee — and when every row says it, none of them do.
  */
-function TransactionRowInner({ transaction, account, onPress }: TransactionRowProps) {
+function TransactionRowInner({ transaction, account, onPress, internal }: TransactionRowProps) {
   const theme = useTheme();
   const press = onPress ? () => onPress(transaction) : undefined;
   const meta = getCategory(transaction.category);
   const clock = clockTime(transaction);
-  const isIncome = transaction.type === 'income';
+  // A move between the user's own accounts, paired with its other leg.
+  //
+  // Only the LEAVING side carries `isTransfer`; the bank words the arriving
+  // side exactly like being paid. So the row for money landing in your own
+  // second account was painted green with a + on it, and the list read as
+  // income arriving twice — which is precisely what it looked like.
+  const isTransfer = transaction.isTransfer || internal === true;
+  const isIncome = transaction.type === 'income' && !isTransfer;
 
   return (
     <Pressable
@@ -39,7 +49,7 @@ function TransactionRowInner({ transaction, account, onPress }: TransactionRowPr
           {transaction.title}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-          {transaction.isTransfer ? 'Transfer' : meta.label}
+          {isTransfer ? t('transferLabel') : meta.label}
           {account ? ` · ${account.name}` : ''}
           {/* The clock, when the bank gave one. Two coffees on the same day
               at the same shop are otherwise indistinguishable in this list. */}

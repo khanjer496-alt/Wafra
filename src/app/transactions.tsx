@@ -25,6 +25,7 @@ import { CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
 import { inPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 
@@ -169,6 +170,13 @@ export default function TransactionsScreen() {
     return list;
   }, [state.transactions, appliedQuery, filters, source, merchantFilter, currentKey, period]);
 
+  // Both legs of a move between the user's own accounts, so the arriving one
+  // is not painted as income it never was.
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccountIds(state.accounts)),
+    [state.transactions, state.accounts],
+  );
+
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
     [state.accounts],
@@ -185,10 +193,11 @@ export default function TransactionsScreen() {
           transaction={item}
           account={accountById.get(item.accountId)}
           onPress={openEntry}
+          internal={internal.has(item.id)}
         />
       </View>
     ),
-    [accountById, openEntry, theme.cardBorder],
+    [accountById, openEntry, theme.cardBorder, internal],
   );
 
   const totalShown = useMemo(

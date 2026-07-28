@@ -1086,6 +1086,42 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const spent = an.netWorthSeries(withSpend);
   ok('net worth: real spending still moves it',
     spent[spent.length - 1].fils === base[base.length - 1].fils - 50000);
+
+  // Moving your own money between your own accounts.
+  //
+  // The bank sends one message per side, and only the LEAVING side reads as a
+  // transfer — the arriving side is worded exactly like being paid, so it
+  // carries no transfer flag and nothing here excluded it. The result: shift
+  // AED 20,000 from one account to another and net worth rose by 20,000. This
+  // is the "double income" the user kept seeing, and it was on the figure
+  // Wallet leads with.
+  const between = {
+    ...nwState,
+    accounts: [
+      ...nwState.accounts,
+      { id: 'bank2', name: 'Second', kind: 'bank', openingFils: 0, color: '#fff' },
+    ],
+    transactions: [
+      { id: 'o1', type: 'expense', amountFils: 2000000, category: 'other', accountId: 'bank',
+        title: 'Transfer out', date: '2026-07-02', source: 'sms', isTransfer: true },
+      { id: 'i1', type: 'income', amountFils: 2000000, category: 'other', accountId: 'bank2',
+        title: 'Incoming transfer', date: '2026-07-02', source: 'sms' },
+    ],
+  };
+  const moved = an.netWorthSeries(between);
+  ok('net worth: moving money between your own accounts creates none',
+    moved[moved.length - 1].fils === base[base.length - 1].fils,
+    { moved: moved[moved.length - 1].fils, base: base[base.length - 1].fils });
+
+  // Being genuinely paid still counts, even into a second account.
+  const paid = {
+    ...between,
+    transactions: [between.transactions[1]],
+  };
+  const paidSeries = an.netWorthSeries(paid);
+  ok('net worth: real income with no matching outflow still counts',
+    paidSeries[paidSeries.length - 1].fils === base[base.length - 1].fils + 2000000,
+    paidSeries[paidSeries.length - 1].fils);
 }
 
 // ── merging two account rows that are one card ──

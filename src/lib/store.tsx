@@ -18,6 +18,8 @@ import { detectMarketId, setActiveMarket } from '@/lib/markets';
 import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/seed';
 import { applyHealPatch, healPatch } from '@/lib/heal';
 import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
+import { internalTransferIds } from '@/lib/ledger';
+
 import type {
   ImportBatchInput,
   Account,
@@ -974,11 +976,14 @@ export { accountBalanceFils, netWorthFils, reliableBalanceFils } from './balance
 /** Net worth as of end-of-day on the given ISO date. */
 export function netWorthAtDate(state: AppState, dateISO: string): number {
   // Same two rules as netWorthSeries: hidden accounts are not part of net
-  // worth, and a transfer between your own accounts moves nothing.
+  // worth, and a transfer between your own accounts moves nothing — including
+  // the arriving side, which the bank words like ordinary income and which
+  // therefore carries no transfer flag of its own.
   const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
+  const internal = internalTransferIds(state.transactions, live);
   let total = state.accounts.reduce((sum, a) => (a.archived ? sum : sum + a.openingFils), 0);
   for (const t of state.transactions) {
-    if (t.isTransfer || !live.has(t.accountId)) continue;
+    if (t.isTransfer || internal.has(t.id) || !live.has(t.accountId)) continue;
     if (t.date > dateISO) continue;
     total += t.type === 'income' ? t.amountFils : -t.amountFils;
   }

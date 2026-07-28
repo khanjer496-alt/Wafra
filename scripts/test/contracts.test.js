@@ -152,6 +152,30 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   for (const fn of ['isSpending', 'isIncome', 'liveAccountIds', 'isInboundTransfer']) {
     ok(`ledger exports ${fn}`, ledger.includes(`export function ${fn}`));
   }
+
+  // Running totals of money are the other half of the same rule.
+  //
+  // Two of them added income by hand — net worth over time, and net worth on
+  // a date — and both skipped only the FLAGGED side of a transfer. The bank
+  // words the arriving side like ordinary income, so it carries no flag, and
+  // moving your own money between your own accounts raised your net worth by
+  // the amount you moved. Any new running total has to consult
+  // internalTransferIds too, or it will make the same money out of nothing.
+  const totalling = [];
+  for (const file of sources('src')) {
+    const rel = path.relative(ROOT, file);
+    if (rel.includes('lib/ledger.ts')) continue;
+    // An account BALANCE is the one place both legs genuinely belong: money
+    // really did leave one account and arrive in the other.
+    if (rel.includes('lib/balances.ts')) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/[+-]?=\s*\w+\.type === 'income' \?/g)) {
+      const near = text.slice(Math.max(0, text.indexOf(m[0]) - 600), text.indexOf(m[0]));
+      if (!/internalTransferIds|internal\.has/.test(near)) totalling.push(`${rel}: ${m[0].trim()}`);
+    }
+  }
+  ok('every running money total knows about internal transfers',
+    totalling.length === 0, totalling.join(' | '));
 }
 
 function sources(dir) {
@@ -171,6 +195,43 @@ function ktSources(dir) {
     else if (entry.name.endsWith('.kt')) text += fs.readFileSync(path.join(ROOT, dir, entry.name), 'utf8');
   }
   return text;
+}
+
+
+/* ── the paywall ──────────────────────────────────────────────────────
+ *
+ * The screen that sells the product, so its mistakes are the expensive kind.
+ * All three of these were live: a sentence assembled from English fragments
+ * that stayed English in Arabic, a discount claim that disagreed with the
+ * prices beside it, and a single long-press on the icon that granted Pro for
+ * free — on the paywall itself. */
+{
+  const pro = fs.readFileSync(path.join(ROOT, 'src/app/pro.tsx'), 'utf8');
+
+  ok('the paywall gives away no free unlock',
+    !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
+
+  // Seven taps on the Settings version row stays — deliberate, unreachable
+  // by accident, and the only unlock the code documents.
+  const settings = fs.readFileSync(path.join(ROOT, 'src/app/settings.tsx'), 'utf8');
+  ok('the deliberate founder unlock still exists', /tapCount\.current >= 7/.test(settings));
+
+  // No English sentence built inline: every user-visible string goes through
+  // t() or tf(), so Arabic gets Arabic.
+  const inlineSentence = /[`'"][A-Z][a-z]+ [a-z]+ [a-z]+ [a-z]+[^`'"]*[`'"]/g;
+  const suspects = (pro.match(inlineSentence) || []).filter(
+    (m) => !/accessibilityLabel|Alert\.alert|^['"`]Wafra/.test(m),
+  );
+  ok('the paywall builds no English sentence inline', suspects.length === 0, suspects.slice(0, 3));
+
+  const { PRO_PRICES, yearlySavingMonths } = require('./build/purchases');
+  const months = yearlySavingMonths();
+  const saved = PRO_PRICES.monthly.fils * 12 - PRO_PRICES.yearly.fils;
+  ok('the yearly saving is derived from the prices, not written down',
+    months === Math.floor(saved / PRO_PRICES.monthly.fils) && months > 0,
+    { months, saved });
+  ok('no hard-coded month count survives in the copy',
+    !/\d+ months free/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -21,10 +21,24 @@ export const PRO_SKUS = {
 export type ProPlan = keyof typeof PRO_SKUS;
 
 /** Display prices until Play Billing supplies localized live ones. */
-export const PRO_PRICES: Record<ProPlan, { fils: number; caption: string }> = {
-  monthly: { fils: 999, caption: 'per month' },
-  yearly: { fils: 7499, caption: 'per year · 2 months free' },
+export const PRO_PRICES: Record<ProPlan, { fils: number }> = {
+  monthly: { fils: 999 },
+  yearly: { fils: 7499 },
 };
+
+/**
+ * How many months of the monthly price the yearly plan saves.
+ *
+ * Derived rather than written down. The paywall claimed "2 months free"
+ * beside prices that actually save four and a half — a number in the sales
+ * copy and a number in the price table, with nothing checking they agreed.
+ * Understating the discount only cost conversions, but the next edit could
+ * as easily have overstated it, and that is a claim in a store listing.
+ */
+export function yearlySavingMonths(prices = PRO_PRICES): number {
+  const saved = prices.monthly.fils * 12 - prices.yearly.fils;
+  return Math.floor(saved / prices.monthly.fils);
+}
 
 /** Every Pro feature is free for this long after first launch. When Play
  *  Billing is wired, also configure a 3-day free trial on the SKUs so store
