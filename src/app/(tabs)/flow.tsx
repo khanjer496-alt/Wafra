@@ -226,8 +226,14 @@ export default function FlowScreen() {
                 const ratio = budget.limitFils > 0 ? spent / budget.limitFils : 0;
                 const over = ratio >= 1;
                 const nearly = !over && ratio >= 0.85;
+                // Ink for the figure, graphic for the bar — see Colors in
+                // constants/theme.ts for why the two differ in light mode.
                 const health = over ? theme.expense : nearly ? theme.warning : theme.text;
-                const barColor = over ? theme.expense : nearly ? theme.warning : theme.primary;
+                const barColor = over
+                  ? theme.expenseGraphic
+                  : nearly
+                    ? theme.warningGraphic
+                    : theme.primary;
                 // Spending faster than the month is running is a warning even
                 // when there is money left — "ahead" would read as praise.
                 const fast = !over && ratio > monthShare + 0.1;

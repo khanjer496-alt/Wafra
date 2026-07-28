@@ -314,7 +314,7 @@ export default function WalletScreen() {
                       <View
                         style={[
                           styles.dueMarker,
-                          { backgroundColor: leading ? theme.expense : urgent ? `${theme.expense}55` : theme.track },
+                          { backgroundColor: leading ? theme.expenseGraphic : urgent ? `${theme.expenseGraphic}55` : theme.track },
                         ]}
                       />
                       <View style={styles.dueInfo}>

@@ -49,8 +49,18 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <Pressable accessibilityLabel="Dismiss" style={styles.backdrop} onPress={onClose}>
+      {/*
+        `accessible` must stay false on both wrappers. An accessibilityLabel —
+        or a bare Pressable — makes the view an accessibility element, and an
+        element absorbs its whole subtree into one node: VoiceOver would read
+        every sheet in the app as a single button called "Dismiss" and never
+        reach the title, the close button or any of the content. Tapping the
+        backdrop still closes the sheet; the labelled way out is the Close
+        button below, which is where a screen-reader user expects it.
+      */}
+      <Pressable accessible={false} style={styles.backdrop} onPress={onClose}>
         <Animated.View
+          accessibilityViewIsModal
           style={[
             styles.sheet,
             {
@@ -62,7 +72,7 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
             sheetStyle,
           ]}>
           {/* Swallows taps so a press inside the sheet never dismisses it. */}
-          <Pressable onPress={() => {}}>
+          <Pressable accessible={false} onPress={() => {}}>
             <View style={styles.header}>
               <ThemedText type="micro" themeColor="textTertiary">
                 {title}
