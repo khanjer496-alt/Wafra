@@ -299,15 +299,27 @@ const firstEntry = await page.evaluate(() => {
   );
   if (!heads.length) return null;
   const y = heads[0].getBoundingClientRect().bottom;
-  // A row's title sits directly above its "Category · Account" meta line.
   const leaves = [...document.querySelectorAll('*')]
     .filter((n) => n.children.length === 0 && (n.textContent || '').trim())
     .map((n) => ({ t: n.textContent.trim(), r: n.getBoundingClientRect() }))
     .filter((x) => x.r.top > y && x.r.width > 0)
     .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
-  const metaIdx = leaves.findIndex((x) => / · /.test(x.t));
-  if (metaIdx < 1) return null;
-  return { title: leaves[metaIdx - 1].t, account: leaves[metaIdx].t.split(' · ').pop() };
+  const meta = leaves.find((x) => / · /.test(x.t));
+  if (!meta) return null;
+  // A row's title sits directly above its "Category · Account" meta line IN
+  // THE SAME COLUMN. The column part is not decoration: when a merchant has
+  // no logo the icon tile shows its initials as text ("en" for ENOC Fuel),
+  // and that tile sits lower than the title, so "the leaf directly above the
+  // meta line" returned the monogram. The suite then tapped a two-letter
+  // string that matched eight elements, opened nothing, and died looking for
+  // EDIT ENTRY — a failure that said nothing about the app.
+  const title = leaves
+    .filter((x) => x.r.top < meta.r.top && Math.abs(x.r.left - meta.r.left) < 4)
+    .pop();
+  if (!title) return null;
+  // "Category · Account" and "Category · Account · 14:32" both exist — the
+  // account is always the second field, never the last one.
+  return { title: title.t, account: meta.t.split(' · ')[1] };
 });
 ok('home lists an entry to open', !!firstEntry?.title);
 await tapText(page, firstEntry.title, 1200);
