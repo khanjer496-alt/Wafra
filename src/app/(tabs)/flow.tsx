@@ -41,7 +41,7 @@ import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
-import { t } from '@/lib/i18n';
+import { alignEnd, t } from '@/lib/i18n';
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
 const MAX_SLICES = 5;
@@ -206,7 +206,7 @@ export default function FlowScreen() {
                       backgroundColor: s.color,
                       // A hairline of background between segments, so adjacent
                       // steps of one hue still read as two slices.
-                      marginLeft: i === 0 ? 0 : 1,
+                      marginStart: i === 0 ? 0 : 1,
                     }}
                   />
                 ))}
@@ -243,7 +243,7 @@ export default function FlowScreen() {
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {Math.round(s.share * 100)}%
                     </ThemedText>
-                    <ThemedText type="smallBold" tabular style={styles.compFigure}>
+                    <ThemedText type="smallBold" tabular style={[styles.compFigure, { textAlign: alignEnd() }]}>
                       {formatAmount(s.totalFils, { decimals: false })}
                     </ThemedText>
                     <Icon name="chevron-right" size={14} color={theme.textTertiary} />
@@ -476,7 +476,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   compLabel: { flex: 1 },
-  compFigure: { minWidth: 62, textAlign: 'right' },
+  compFigure: { minWidth: 62 },
 
   emptyLimits: {
     borderWidth: 1,

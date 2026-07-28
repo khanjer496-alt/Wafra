@@ -341,6 +341,18 @@ export function isRTL(): boolean {
   return lang === 'ar';
 }
 
+/**
+ * textAlign for a column of figures.
+ *
+ * They line up on the END of their column — the right in English, the left in
+ * Arabic. React Native's textAlign has no 'end' value, only the physical
+ * 'left' and 'right', so the direction has to be resolved here rather than
+ * left to the layout engine.
+ */
+export function alignEnd(): 'left' | 'right' {
+  return lang === 'ar' ? 'left' : 'right';
+}
+
 /** Device language → app language (Arabic devices get Arabic). */
 export function detectLanguage(): Lang {
   try {

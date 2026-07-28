@@ -144,7 +144,7 @@ function Hero({
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
-              i === 1 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.cardBorder },
+              i === 1 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
             ]}>
             <View style={styles.splitTop}>
               <View style={[styles.dot, { backgroundColor: color }]} />
@@ -681,8 +681,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 11,
     paddingBottom: Spacing.two,
-    paddingRight: Spacing.three,
-    paddingLeft: 0,
+    paddingEnd: Spacing.three,
+    paddingStart: 0,
     gap: 5,
   },
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },

@@ -4,14 +4,42 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { useColorScheme } from 'react-native';
+import { StyleSheet, useColorScheme, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { PeriodProvider } from '@/lib/period-context';
-import { StoreProvider } from '@/lib/store';
+import { StoreProvider, useStore } from '@/lib/store';
+
+/**
+ * Mirrors the whole app left-to-right or right-to-left, live.
+ *
+ * The obvious tool for this is I18nManager.forceRTL, and it cannot do it:
+ * `isRTL` is an EXPORTED CONSTANT of the native module, read once when that
+ * module is constructed, so forceRTL writes a preference that nothing
+ * re-reads until the process restarts. That is why switching to Arabic used
+ * to mean closing the app.
+ *
+ * Yoga has always been able to lay out a subtree in either direction, and RN
+ * exposes it as the `direction` style. Setting it on the root flips every
+ * flex row beneath it on the spot — which is nearly the whole app, since the
+ * layout is built from rows and gaps rather than from left/right offsets.
+ *
+ * What this does NOT reach: react-navigation reads I18nManager.isRTL itself
+ * for its push animation and edge-swipe direction. Those stay as they were
+ * until the next launch. A screen sliding in from the same side is a much
+ * smaller thing to be wrong than every screen being laid out backwards.
+ */
+function Direction({ children }: { children: React.ReactNode }) {
+  const { state } = useStore();
+  return (
+    <View style={[StyleSheet.absoluteFill, { direction: state.language === 'ar' ? 'rtl' : 'ltr' }]}>
+      {children}
+    </View>
+  );
+}
 
 // Held until the faces are in memory. A money screen that paints in the system
 // font and then reflows into Geist Mono moves every figure sideways, which
@@ -60,6 +88,7 @@ export default function RootLayout() {
 
   return (
     <StoreProvider>
+      <Direction>
       <PeriodProvider>
       <ThemeProvider value={navTheme}>
         <StatusBar style={dark ? 'light' : 'dark'} />
@@ -86,6 +115,7 @@ export default function RootLayout() {
         </LockGate>
       </ThemeProvider>
       </PeriodProvider>
+      </Direction>
     </StoreProvider>
   );
 }

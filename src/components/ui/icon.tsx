@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
+import { isRTL } from '@/lib/i18n';
+
 export type IconName =
   | 'home'
   | 'chart'
@@ -64,10 +66,25 @@ interface IconProps {
  * place it goes up is an active tab (2.1), where weight is doing the work that
  * a filled tile used to do.
  */
+/**
+ * Icons that point along the reading direction rather than at a fixed side.
+ *
+ * A chevron means "onward" and a back arrow means "whence you came"; in a
+ * mirrored layout both of those are the other way round. Every other icon —
+ * a house, a trash can, a chart — means the same thing in both directions and
+ * would look wrong reversed.
+ */
+const DIRECTIONAL = new Set<IconName>(['chevron-right', 'chevron-left', 'arrow-up-right', 'arrow-down-right']);
+
 function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' } as const;
+  const flip = isRTL() && DIRECTIONAL.has(name);
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      style={flip ? { transform: [{ scaleX: -1 }] } : undefined}>
       {name === 'home' && (
         <>
           <Path {...p} d="M4 10.5 12 3.5 20 10.5" />

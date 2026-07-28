@@ -95,8 +95,8 @@ export function CompositionBar({
             backgroundColor: s.neutral ? theme.cardBorderStrong : ramp[i % ramp.length],
             // Segments are separated by a background-coloured gap, not a
             // border: a border would eat into the smallest slices.
-            borderRightWidth: i === segments.length - 1 ? 0 : 1,
-            borderRightColor: theme.background,
+            borderEndWidth: i === segments.length - 1 ? 0 : 1,
+            borderEndColor: theme.background,
           }}
         />
       ))}

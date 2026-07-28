@@ -281,7 +281,7 @@ export default function ImportSmsScreen() {
                       key={label}
                       style={[
                         styles.statCell,
-                        i > 0 && { borderLeftWidth: 1, borderLeftColor: theme.cardBorder },
+                        i > 0 && { borderStartWidth: 1, borderStartColor: theme.cardBorder },
                       ]}>
                       <ThemedText type="small" tabular style={[styles.statFigure, { color }]}>
                         {value}

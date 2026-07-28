@@ -105,7 +105,7 @@ export function CategoryChips({
 }
 
 const styles = StyleSheet.create({
-  row: { gap: Spacing.two, paddingRight: Spacing.three },
+  row: { gap: Spacing.two, paddingEnd: Spacing.three },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   chip: {
     flexDirection: 'row',

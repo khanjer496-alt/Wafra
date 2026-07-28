@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
   },
   chipRow: {
     gap: Spacing.two,
-    paddingRight: Spacing.three,
+    paddingEnd: Spacing.three,
   },
   transferRow: {
     flexDirection: 'row',

@@ -211,22 +211,18 @@ export default function SettingsScreen() {
 
   const cycleLanguage = () => {
     const next = state.language === 'ar' ? 'en' : 'ar';
-    const wantRTL = next === 'ar';
-    // Whether the layout actually has to flip — asked BEFORE the switch, and
-    // the only reason a restart is ever mentioned.
-    const mirrorPending = Platform.OS !== 'web' && I18nManager.isRTL !== wantRTL;
+    // No alert, and nothing to restart. The strings re-render from this and
+    // the layout mirrors from the `direction` style on the root — see the
+    // Direction component in app/_layout.tsx for why I18nManager could never
+    // do it live.
     setUiLanguage(next);
-    // Every string re-renders from this, immediately. What cannot change
-    // without an app start is the LAYOUT DIRECTION: Android fixes it when the
-    // views are created, so I18nManager.forceRTL only takes effect next
-    // launch. The old message said "restart to apply the new language", which
-    // read as though nothing had happened yet — and sent people out of the
-    // app to see a change that was already on screen.
+    // Still set, for react-navigation's own gesture and animation direction,
+    // which reads I18nManager rather than the layout. That part is the only
+    // thing left waiting for a restart.
     if (Platform.OS !== 'web') {
-      I18nManager.allowRTL(wantRTL);
-      I18nManager.forceRTL(wantRTL);
+      I18nManager.allowRTL(next === 'ar');
+      I18nManager.forceRTL(next === 'ar');
     }
-    if (mirrorPending) Alert.alert(t('languageChanged'), t('mirrorOnNextOpen'));
   };
 
   /* ── Data ───────────────────────────────────────────────────────────── */

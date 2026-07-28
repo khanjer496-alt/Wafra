@@ -645,6 +645,23 @@ for (const [name, enter] of [
   ok(`home: the tab bar turns over with the language, without changing tab (${tabs.join(' ')})`,
     tabs.length === 4 && tabs.every((x) => arabic.test(x)));
 
+  /**
+   * And the LAYOUT mirrors, without the app being restarted.
+   *
+   * I18nManager cannot do this: its isRTL is an exported constant of the
+   * native module, read once at construction, so forceRTL writes a preference
+   * nothing re-reads until the process restarts — which is why switching to
+   * Arabic used to mean closing the app. The root carries a `direction` style
+   * instead, which Yoga applies to the whole subtree on the spot.
+   */
+  const dir = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('*')].find(
+      (n) => getComputedStyle(n).direction === 'rtl',
+    );
+    return el ? getComputedStyle(el).direction : getComputedStyle(document.body).direction;
+  });
+  ok(`home: the layout is mirrored without a restart (${dir})`, dir === 'rtl');
+
   for (const [name, tab] of [['home', null], ['flow', 'التدفق'], ['bills', 'الفواتير'], ['wallet', 'المحفظة']]) {
     if (tab) {
       await page.getByRole('tab', { name: tab }).click({ timeout: 8000 });

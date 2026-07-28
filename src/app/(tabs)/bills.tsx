@@ -1049,7 +1049,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two + 2,
     flexShrink: 1,
-    paddingRight: Spacing.two,
+    paddingEnd: Spacing.two,
   },
   factRow: {
     flexDirection: 'row',

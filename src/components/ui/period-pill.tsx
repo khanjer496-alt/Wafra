@@ -108,8 +108,8 @@ const styles = StyleSheet.create({
     gap: Spacing.one + 2,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.full,
-    paddingLeft: 12,
-    paddingRight: 11,
+    paddingStart: 12,
+    paddingEnd: 11,
     paddingVertical: 6,
   },
   iconBtn: {

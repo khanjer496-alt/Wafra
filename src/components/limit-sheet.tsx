@@ -14,7 +14,7 @@ import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
-import { t } from '@/lib/i18n';
+import { alignEnd, t } from '@/lib/i18n';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -314,7 +314,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {m.count}×
                     </ThemedText>
-                    <ThemedText type="smallBold" tabular style={styles.whereFigure}>
+                    <ThemedText type="smallBold" tabular style={[styles.whereFigure, { textAlign: alignEnd() }]}>
                       {formatAED(m.totalFils, { decimals: false })}
                     </ThemedText>
                   </View>
@@ -328,7 +328,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     <ThemedText type="small" themeColor="textSecondary" style={styles.whereName}>
                       {restCount} more merchant{restCount === 1 ? '' : 's'}
                     </ThemedText>
-                    <ThemedText type="smallBold" tabular themeColor="textSecondary" style={styles.whereFigure}>
+                    <ThemedText type="smallBold" tabular themeColor="textSecondary" style={[styles.whereFigure, { textAlign: alignEnd() }]}>
                       {formatAED(restFils, { decimals: false })}
                     </ThemedText>
                   </View>
@@ -433,7 +433,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   whereName: { flex: 1 },
-  whereFigure: { minWidth: 62, textAlign: 'right' },
+  whereFigure: { minWidth: 62 },
   actions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three },
   btn: {
     borderRadius: Radius.control,
