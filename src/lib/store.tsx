@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { I18nManager, Platform } from 'react-native';
+import { AppState as RNAppState, I18nManager, Platform } from 'react-native';
 import React, {
   createContext,
   useCallback,
@@ -402,14 +402,23 @@ function demoState(): Partial<Omit<AppState, 'hydrated'>> {
  * brand new. Meta (small) lives at STORAGE_KEY; rows live at :tx:N keys.
  */
 const TX_CHUNK_SIZE = 400;
+/** Collapses a burst of dispatches — import, rename, undo — into one write. */
+const SAVE_DEBOUNCE_MS = 700;
 const txChunkKey = (i: number) => `${STORAGE_KEY}:tx:${i}`;
 
 type PersistedMeta = Partial<Omit<AppState, 'hydrated'>> & { txChunks?: number };
 
-async function loadPersisted(): Promise<Partial<Omit<AppState, 'hydrated'>> | null> {
+interface LoadedState {
+  state: Partial<Omit<AppState, 'hydrated'>>;
+  /** The chunk bodies exactly as they were on disk, to seed the write cache. */
+  chunkBodies: string[];
+}
+
+async function loadPersisted(): Promise<LoadedState | null> {
   const raw = await AsyncStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   const parsed = JSON.parse(raw) as PersistedMeta;
+  const chunkBodies: string[] = [];
   if (!Array.isArray(parsed.transactions)) {
     const count = Number(parsed.txChunks) || 0;
     const txs: Transaction[] = [];
@@ -418,13 +427,16 @@ async function loadPersisted(): Promise<Partial<Omit<AppState, 'hydrated'>> | nu
         Array.from({ length: count }, (_, i) => txChunkKey(i)),
       );
       for (const [, v] of pairs) {
-        if (v) txs.push(...(JSON.parse(v) as Transaction[]));
+        if (v) {
+          txs.push(...(JSON.parse(v) as Transaction[]));
+          chunkBodies.push(v);
+        }
       }
     }
     parsed.transactions = txs;
   }
   delete parsed.txChunks;
-  return parsed;
+  return { state: parsed, chunkBodies };
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -432,6 +444,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const prevChunkCount = useRef(0);
   /** Last successfully written body per chunk, so unchanged ones are skipped. */
   const prevChunks = useRef<string[]>([]);
+  /**
+   * The transactions array as of the last save. Reducers return a NEW array
+   * only when they actually touch transactions, so an identity check here is
+   * exact — and it is what lets a settings toggle skip re-serialising the
+   * whole ledger.
+   */
+  const prevTransactions = useRef<Transaction[] | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -451,8 +471,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const loaded = await loadPersisted();
         if (cancelled) return;
         if (loaded) {
-          const parsed = loaded;
+          const parsed = loaded.state;
           prevChunkCount.current = Math.ceil((parsed.transactions?.length ?? 0) / TX_CHUNK_SIZE);
+          // Seed the write cache with what is already on disk. Without this the
+          // first save after every launch believes no chunk has ever been
+          // written and rewrites the entire history — about a megabyte on a
+          // heavy ledger, for no change at all.
+          prevChunks.current = loaded.chunkBodies;
+          prevTransactions.current = parsed.transactions ?? [];
           // Pre-onboarding builds stored data without the flag; count them as onboarded.
           if (parsed.onboarded === undefined) parsed.onboarded = true;
           // Repair rows imported before the masked-PAN parser fix: titles like
@@ -568,45 +594,100 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!state.hydrated) return;
-    const { hydrated: _hydrated, transactions, ...meta } = state;
-    const chunks: [string, string][] = [];
-    for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
-      chunks.push([
-        txChunkKey(i),
-        JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
-      ]);
-    }
-    // Only chunks whose contents actually changed are rewritten. Every state
-    // change lands here — flipping a setting, editing a budget, dismissing a
-    // toast — and each one used to re-serialise and rewrite the entire
-    // transaction history.
-    const changed = chunks.filter(([, body], i) => prevChunks.current[i] !== body);
+  /**
+   * Persist. Two guards, because this runs on EVERY dispatch.
+   *
+   * The first is that transactions are only re-serialised when the array
+   * identity changed. Chunk diffing already avoided rewriting unchanged
+   * chunks, but the JSON.stringify that produced the bodies to compare ran
+   * first — so flipping App Lock, editing a budget or dismissing a toast still
+   * built roughly a megabyte of string on the JS thread at 5,000 rows, and
+   * then threw it away. Those mutations now write the small meta key alone.
+   *
+   * The second is a debounce. An import batch, a rename and an undo arrive as
+   * separate dispatches within a few hundred milliseconds, and each used to be
+   * its own full write. They now collapse into one, flushed on the way to the
+   * background so nothing is lost when the app is swiped away.
+   */
+  const persist = useCallback((snapshot: AppState) => {
+    const { hydrated: _hydrated, transactions, ...meta } = snapshot;
+    const txChanged = prevTransactions.current !== transactions;
 
-    (async () => {
+    let chunks: [string, string][] | null = null;
+    if (txChanged) {
+      chunks = [];
+      for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
+        chunks.push([
+          txChunkKey(i),
+          JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
+        ]);
+      }
+    }
+    const chunkCount = chunks ? chunks.length : prevChunkCount.current;
+    // Only chunks whose contents actually changed are rewritten.
+    const changed = chunks ? chunks.filter(([, body], i) => prevChunks.current[i] !== body) : [];
+
+    return (async () => {
       try {
         await AsyncStorage.multiSet([
-          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunks.length })],
+          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunkCount })],
           ...changed,
         ]);
-        if (prevChunkCount.current > chunks.length) {
+        if (chunks && prevChunkCount.current > chunks.length) {
           await AsyncStorage.multiRemove(
             Array.from({ length: prevChunkCount.current - chunks.length }, (_, i) =>
-              txChunkKey(chunks.length + i),
+              txChunkKey(chunks!.length + i),
             ),
           );
         }
-        prevChunkCount.current = chunks.length;
-        prevChunks.current = chunks.map(([, body]) => body);
+        if (chunks) {
+          prevChunkCount.current = chunks.length;
+          prevChunks.current = chunks.map(([, body]) => body);
+        }
+        prevTransactions.current = transactions;
       } catch {
         // Persistence is best-effort; the in-memory state stays authoritative.
-        // The cache is cleared so the next save rewrites every chunk rather
+        // The caches are cleared so the next save rewrites every chunk rather
         // than assuming a failed write landed.
         prevChunks.current = [];
+        prevTransactions.current = null;
       }
     })();
-  }, [state]);
+  }, []);
+
+  // Keeps the debounced flush reading the newest state without re-arming the
+  // AppState subscription on every dispatch.
+  const latest = useRef(state);
+  latest.current = state;
+
+  useEffect(() => {
+    if (!state.hydrated) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      persist(latest.current);
+    }, SAVE_DEBOUNCE_MS);
+  }, [state, persist]);
+
+  // A debounce that loses the last write when the app is swiped away is a data
+  // loss bug, so leaving the foreground flushes immediately.
+  useEffect(() => {
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next !== 'background' && next !== 'inactive') return;
+      if (!saveTimer.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      persist(latest.current);
+    });
+    return () => {
+      sub.remove();
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        persist(latest.current);
+      }
+    };
+  }, [persist]);
 
   const addTransaction = useCallback((t: Omit<Transaction, 'id'>) => {
     dispatch({ type: 'addTransaction', transaction: { ...t, id: makeId('tx') } });
