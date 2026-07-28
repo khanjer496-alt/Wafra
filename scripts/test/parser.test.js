@@ -1003,6 +1003,37 @@ t('a Tap* payment link is not an imperative',
   'Purchase of AED 128.60 with Debit Card ending 4744 at Tap*OpenSooq, Dubai. Avl Balance is AED 2,954.09.',
   { merchant: 'Opensooq' });
 
+// ── an instruction is not a shop ─────────────────────────────────────────
+// Two different messages both arrived titled "The Payments Section And
+// Choose Payouts", grouped under that one name, and read in the list as the
+// same charge twice — with a "this merchant is always Dining" hint about
+// itself. The tell is an article LEADING a phrase that also joins clauses.
+{
+  const prose = parseSms('AED 363.75 debited to The Payments Section And Choose Payouts');
+  if (prose && prose.merchant !== 'The Payments Section And Choose Payouts') {
+    pass++; console.log('✓ an instruction sentence is not a merchant');
+  } else {
+    fail++; console.log('✗ an instruction sentence is not a merchant', JSON.stringify(prose && prose.merchant));
+  }
+}
+
+// The other half of the rule: names that must NOT be caught by it. Short
+// "The …" names are ordinary shops, and a name joining two words with "and"
+// is fine as long as no article leads it.
+for (const [name, want] of [
+  ['The Coffee Club', 'The Coffee Club'],
+  ['The Cheesecake Factory', 'The Cheesecake Factory'],
+  ['The Body Shop', 'The Body Shop'],
+  ['MARKS AND SPENCER', 'Marks And Spencer'],
+]) {
+  const r = parseSms(`Purchase of AED 100.00 with Debit Card ending 1234 at ${name}, DUBAI.`);
+  if (r && r.merchant === want) {
+    pass++; console.log(`✓ "${name}" survives the instruction guard`);
+  } else {
+    fail++; console.log(`✗ "${name}" survives the instruction guard`, JSON.stringify(r && r.merchant));
+  }
+}
+
 const sweep = parseSms('AED 3,000.00 has been debited from your account no. 095-XXX11XXX-01 RULE TRANSFER TO SAVINGS WITH ONE-SHOT SAVING. The available balance is AED 2257.74.');
 if (sweep && sweep.merchant === 'Savings transfer' && sweep.transferHint === true) {
   pass++; console.log('\u2713 a savings sweep is a transfer, not spending');

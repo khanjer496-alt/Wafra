@@ -964,9 +964,28 @@ function extractMerchant(raw: string, re: RegExp): string {
     // titled "View Your Statement" and "Avoid Charges" were the result.
     // A descriptor never opens with an imperative or names the reader.
     if (
-      /^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt)\b/i.test(
+      /^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt|choose|proceed|continue)\b/i.test(
         candidate,
       )
+    ) {
+      continue;
+    }
+    // A sentence, not a shop.
+    //
+    // "…go to the Payments Section and choose Payouts…" was arriving as a
+    // merchant named "The Payments Section And Choose Payouts", on two
+    // different messages — which then grouped under one name and read as a
+    // duplicate charge in the list, complete with a "this merchant is always
+    // Dining" hint about itself.
+    //
+    // The discriminator is an article LEADING a phrase that also contains a
+    // joining word. Real names starting with "The" are short and do not join
+    // clauses — The Coffee Club, The Cheesecake Factory, The Body Shop all
+    // survive — and a name that contains "and" without the article, like
+    // MARKS AND SPENCER, is untouched.
+    if (
+      /^(?:the|an?|this|that|our|your|their)\s/i.test(candidate) &&
+      /\s(?:and|or|to|of|in)\s/i.test(candidate)
     ) {
       continue;
     }
