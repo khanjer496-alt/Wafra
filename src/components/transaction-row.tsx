@@ -7,6 +7,7 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
 import { formatAmount } from '@/lib/format';
+import { getActiveMarket } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 
 interface TransactionRowProps {
@@ -25,9 +26,24 @@ export function TransactionRow({ transaction, account, onPress }: TransactionRow
   const theme = useTheme();
   const meta = getCategory(transaction.category);
   const isIncome = transaction.type === 'income';
+  const where = transaction.isTransfer ? 'Transfer' : meta.label;
+
+  // Spoken as one sentence. Left to itself RN would concatenate the children,
+  // which reads the sign as a stray "minus" and drops the currency entirely —
+  // "ENOC Fuel Transport · FAB Credit Card − 113".
+  const label = [
+    transaction.title,
+    where,
+    account?.name,
+    `${isIncome ? 'plus' : 'minus'} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && { transform: [{ scale: 0.985 }] }]}>
       <MerchantAvatar title={transaction.title} category={transaction.category} size={34} />
@@ -36,7 +52,7 @@ export function TransactionRow({ transaction, account, onPress }: TransactionRow
           {transaction.title}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-          {transaction.isTransfer ? 'Transfer' : meta.label}
+          {where}
           {account ? ` · ${account.name}` : ''}
         </ThemedText>
       </View>
