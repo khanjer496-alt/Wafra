@@ -169,7 +169,15 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     // really did leave one account and arrive in the other.
     if (rel.includes('lib/balances.ts')) continue;
     const text = fs.readFileSync(file, 'utf8');
-    for (const m of text.matchAll(/[+-]?=\s*\w+\.type === 'income' \?/g)) {
+    // Two shapes, because only the first was being looked for and the
+    // Transactions screen used the second — so its header, its day headings
+    // and its "transfers not counted" line all added up an own-account move
+    // as income while a test said every total was safe.
+    const shapes = [
+      /[+-]?=\s*\w+\.type === 'income' \?/g,
+      /\w+\.type === 'expense' \? -\w+\.amountFils : \w+\.amountFils/g,
+    ];
+    for (const m of shapes.flatMap((re) => [...text.matchAll(re)])) {
       const near = text.slice(Math.max(0, text.indexOf(m[0]) - 600), text.indexOf(m[0]));
       if (!/internalTransferIds|internal\.has/.test(near)) totalling.push(`${rel}: ${m[0].trim()}`);
     }

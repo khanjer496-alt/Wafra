@@ -200,13 +200,28 @@ export default function TransactionsScreen() {
     [accountById, openEntry, theme.cardBorder, internal],
   );
 
+  /**
+   * A row that moves money in or out of the user's world, as opposed to
+   * around inside it.
+   *
+   * `isTransfer` alone is not enough and this screen learned that the hard
+   * way: only the LEAVING side of an own-account move carries the flag, so
+   * the arriving side — worded by the bank exactly like being paid — was
+   * added to the total while its twin was skipped. Moving AED 20,000 between
+   * two of your own accounts read as AED 20,000 earned.
+   */
+  const counts = useCallback(
+    (t: Transaction) => !t.isTransfer && !internal.has(t.id),
+    [internal],
+  );
+
   const totalShown = useMemo(
     () =>
       filtered.reduce(
-        (s, t) => (t.isTransfer ? s : s + (t.type === 'expense' ? -t.amountFils : t.amountFils)),
+        (s, t) => (counts(t) ? s + (t.type === 'expense' ? -t.amountFils : t.amountFils) : s),
         0,
       ),
-    [filtered],
+    [filtered, counts],
   );
 
   // Transfers are listed — they are real records and the user wants to find
@@ -216,8 +231,8 @@ export default function TransactionsScreen() {
   // transfer, and the header read 25,000 above rows summing to 28,000. The
   // rule is stated now rather than left for the user to work out.
   const transfersShown = useMemo(
-    () => filtered.filter((t) => t.isTransfer).length,
-    [filtered],
+    () => filtered.filter((t) => !counts(t)).length,
+    [filtered, counts],
   );
 
   const sections = useMemo<DaySection[]>(() => {
@@ -233,12 +248,12 @@ export default function TransactionsScreen() {
     return [...byDay.entries()].map(([date, data]) => ({
       title: friendlyDate(date, todayISO),
       totalFils: data.reduce(
-        (s, t) => (t.isTransfer ? s : s + (t.type === 'expense' ? -t.amountFils : t.amountFils)),
+        (s, t) => (counts(t) ? s + (t.type === 'expense' ? -t.amountFils : t.amountFils) : s),
         0,
       ),
       data,
     }));
-  }, [filtered, filters.sort, todayISO, totalShown]);
+  }, [filtered, filters.sort, todayISO, totalShown, counts]);
 
   const toggleCategory = (id: CategoryId) => {
     const next = new Set(filters.categories);
