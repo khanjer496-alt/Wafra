@@ -74,10 +74,17 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   ok('every string has English', noEn.length === 0, noEn.slice(0, 5).join(' | '));
 
   // t('x') resolves at runtime — a typo is a blank label, not a build error.
+  //
+  // tf() is checked by the same rule and for the same reason. It was left out
+  // of the first version of this scan, which meant the sentences carrying a
+  // NUMBER — the ones assembled from fragments, the exact case tf() exists to
+  // fix — were the only ones a typo could slip through.
   const defined = new Set(entries.map((e) => e[1]));
   const used = new Set();
   for (const file of sources('src')) {
-    for (const m of fs.readFileSync(file, 'utf8').matchAll(/\bt\('([a-zA-Z0-9_]+)'\)/g)) used.add(m[1]);
+    const src = fs.readFileSync(file, 'utf8');
+    for (const m of src.matchAll(/\bt\('([a-zA-Z0-9_]+)'/g)) used.add(m[1]);
+    for (const m of src.matchAll(/\btf\('([a-zA-Z0-9_]+)'/g)) used.add(m[1]);
   }
   const missing = [...used].filter((k) => !defined.has(k));
   ok('every string the app asks for exists', missing.length === 0, missing.join(' | '));
