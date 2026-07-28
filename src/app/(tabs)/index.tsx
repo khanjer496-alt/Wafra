@@ -46,7 +46,6 @@ import {
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { committed, tapped } from '@/lib/haptics';
-import { t } from '@/lib/i18n';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { PARSER_VERSION } from '@/lib/sms-parser';
@@ -57,6 +56,7 @@ import { isProActive } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 // The one-time setup that must not repeat: asking for notification
 // permission, and the first reminder sync.
@@ -204,7 +204,11 @@ function LeavingSoon({
   return (
     <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
       <SectionHeader
-        title={late > 0 ? `Overdue and leaving in ${HORIZON_DAYS} days` : `Leaving in ${HORIZON_DAYS} days`}
+        title={
+          late > 0
+            ? tf('overdueAndLeaving', { days: HORIZON_DAYS })
+            : tf('leavingInDays', { days: HORIZON_DAYS })
+        }
         right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
       />
       {shown.map((x, i) => {
@@ -396,7 +400,7 @@ export default function HomeScreen() {
       // imports as new — on top of the rows that arrive a moment later. The
       // effect below already waits for this; pull-to-refresh did not.
       if (!state.hydrated) {
-        if (interactive) toast.show('Still loading your data — try again in a second.');
+        if (interactive) toast.show(t('stillLoading'));
         return;
       }
       // Hard paywall: tracking pauses when the trial ends without Pro.
@@ -428,7 +432,7 @@ export default function HomeScreen() {
       // corrections never reached the store.
       if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
         markParserVersion();
-        if (interactive) toast.show('Up to date. No new bank messages.');
+        if (interactive) toast.show(t('upToDateNoNew'));
         return;
       }
       const ids = importBatch(plan.batch);
@@ -627,7 +631,7 @@ export default function HomeScreen() {
             ))}
             {/* Reading the ledger back off disk takes long enough to paint,
                 and an unhydrated store is indistinguishable from an empty one.
-                The screen was announcing "No entries in this period yet" over
+                The screen was announcing t('noEntriesPeriod') over
                 AED 0 and then replacing it with a real month — telling the user
                 their data was gone, every cold start. Skeletons until the store
                 says it has looked. */}

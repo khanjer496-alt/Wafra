@@ -13,6 +13,7 @@ import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/catego
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 interface EntryDetailSheetProps {
   /** The entry to show, or null to keep the sheet closed. */
@@ -91,10 +92,14 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     const merchant = title.trim();
     if (categoryChanged && merchant.length > 2) {
       Alert.alert(
-        `Remember for ${merchant}?`,
+        tf('rememberForMerchant', { merchant }),
         sameMerchantCount > 0
-          ? `Future imports from ${merchant} will use this category. Also update ${sameMerchantCount} existing entr${sameMerchantCount === 1 ? 'y' : 'ies'}?`
-          : `Future imports from ${merchant} will use this category.`,
+          ? tf('merchantRuleAlso', {
+              merchant,
+              n: sameMerchantCount,
+              entries: sameMerchantCount === 1 ? 'entry' : 'entries',
+            })
+          : tf('merchantRuleOnly', { merchant }),
         sameMerchantCount > 0
           ? [
               { text: 'No', style: 'cancel' },
@@ -111,7 +116,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   };
 
   const remove = () => {
-    Alert.alert('Delete this entry?', `${transaction.title} · ${formatAmount(transaction.amountFils)}`, [
+    Alert.alert(t('deleteThisEntry'), `${transaction.title} · ${formatAmount(transaction.amountFils)}`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -124,7 +129,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     ]);
   };
 
-  const sourceLabel = transaction.source === 'sms' ? 'Bank SMS' : 'Added by hand';
+  const sourceLabel = transaction.source === 'sms' ? 'Bank SMS' : t('addedByHand');
 
   return (
     <BottomSheet visible onClose={onClose} title={editing ? 'Edit entry' : 'Entry detail'}>
@@ -255,13 +260,13 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             <View style={styles.flex}>
               <ThemedText type="small">Transfer between my accounts</ThemedText>
               <ThemedText type="meta" themeColor="textTertiary">
-                Kept in balances, excluded from income and spending
+                {t('transferExplainer')}
               </ThemedText>
             </View>
             <Toggle
               value={isTransfer}
               onChange={setIsTransfer}
-              label="Transfer between my accounts"
+              label={t('transferBetweenMine')}
             />
           </View>
 

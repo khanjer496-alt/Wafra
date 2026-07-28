@@ -234,5 +234,44 @@ function ktSources(dir) {
     !/\d+ months free/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
 }
 
+
+/* ── every user-visible sentence is translated ────────────────────────
+ *
+ * The app auto-switches to Arabic on Arabic devices and flips to RTL, and
+ * Settings was still answering in English — while several of the strings it
+ * hardcoded already HAD translations sitting two lines apart in i18n.ts,
+ * unused. This counts English sentences written straight into a screen. */
+{
+  const stray = [];
+  for (const file of sources('src/app').concat(sources('src/components'))) {
+    const rel = path.relative(ROOT, file);
+    const text = fs.readFileSync(file, 'utf8');
+    let inComment = false;
+    for (const line of text.split('\n')) {
+      // Prose inside a block comment is prose ABOUT the code, not copy. Only
+      // the opening line starts with a slash, so the state has to be tracked.
+      if (/\/\*/.test(line)) inComment = true;
+      const wasComment = inComment;
+      if (/\*\//.test(line)) inComment = false;
+      if (wasComment) continue;
+      // Comments, imports, styles and accessibility labels are not copy.
+      if (/^\s*(\/\/|\*|import|export type)/.test(line)) continue;
+      if (/accessibilityLabel|testID|placeholder=\{`|fontFamily|require\(/.test(line)) continue;
+      // Three or more words starting with a capital, in a quoted literal...
+      const quoted = line.match(/['"`][A-Z][a-z]+(?: [a-z]+){2,}[^'"`]*['"`]/);
+      if (quoted && !/\bt\(|\btf\(/.test(line)) stray.push(`${rel}: ${quoted[0].slice(0, 52)}`);
+      // ...and the same thing written straight into JSX as a text child,
+      // which is how the onboarding copy escaped the first version of this
+      // check — the screen a new user reads before any other.
+      const child = line.match(/^\s{6,}[A-Z][a-z]+(?: [a-z,]+){3,}[.,]?\s*$/);
+      if (child && !/\bt\(|\btf\(|^\s*[/*]/.test(line)) {
+        stray.push(`${rel}: ${line.trim().slice(0, 52)}`);
+      }
+    }
+  }
+  ok('no screen writes an English sentence of its own', stray.length === 0,
+    stray.slice(0, 6));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

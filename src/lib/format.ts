@@ -1,5 +1,5 @@
-import { t } from '@/lib/i18n';
 import { getActiveMarket } from '@/lib/markets';
+import { t } from '@/lib/i18n';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',

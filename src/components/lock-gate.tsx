@@ -18,6 +18,7 @@ import { WafraMark } from '@/components/wafra-logo';
 import { EASE, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -117,7 +118,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               Set up a fingerprint, face unlock, or a PIN and Wafra can use it.
             </ThemedText>
             <Button
-              label="Open phone settings"
+              label={t('openPhoneSettings')}
               variant="outline"
               onPress={() => Linking.openSettings().catch(() => {})}
               style={styles.fullButton}
@@ -146,7 +147,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               <Icon name="fingerprint" size={38} color={theme.text} />
             </Pressable>
             <ThemedText type="small">
-              {biometric === 'failed' ? 'Try the sensor again' : 'Touch the sensor to unlock'}
+              {biometric === 'failed' ? t('trySensorAgain') : 'Touch the sensor to unlock'}
             </ThemedText>
             <ThemedText type="meta" themeColor="textTertiary">
               Fingerprint, face unlock, or your phone PIN

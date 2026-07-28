@@ -17,6 +17,7 @@ import {
 import { requestNotificationPermission } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
+import { t } from '@/lib/i18n';
 
 type Step = 'welcome' | 'scanning' | 'choose';
 
@@ -27,11 +28,11 @@ const night = Colors.dark;
 const POINTS: [IconName, string, string][] = [
   [
     'mail',
-    'Reads SMS, files the spend',
-    'Only messages from your bank are opened; the rest are never touched',
+    t('onboardReadsSms'),
+    t('onboardPrivacyBody'),
   ],
-  ['calendar', 'Warns before the money leaves', 'Card dues, DEWA, rent, and quiet subscriptions'],
-  ['lock', 'There is no server', 'Nothing to breach, nothing to sell, nothing to sync'],
+  ['calendar', t('warnsBeforeMoneyLeaves'), t('onboardWarnsDetail')],
+  ['lock', t('noServerTitle'), t('onboardNoServerDetail')],
 ];
 
 /**
@@ -80,13 +81,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             <Animated.View entering={FadeIn.duration(400)} style={styles.body}>
               <View style={styles.top}>
                 <WafraMark size={44} color={night.primary} />
-                <ThemedText style={styles.headline}>
-                  Your bank already texts you. Wafra reads it.
-                </ThemedText>
-                <ThemedText style={styles.sub}>
-                  Every ENBD, FAB, and du alert becomes a filed transaction. On device, in AED, with
-                  no account to create.
-                </ThemedText>
+                <ThemedText style={styles.headline}>{t('onboardHeadline')}</ThemedText>
+                <ThemedText style={styles.sub}>{t('onboardSub')}</ThemedText>
               </View>
 
               <View style={styles.points}>
@@ -107,14 +103,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
               <View style={styles.actions}>
                 <Button
-                  label={isSmsScanningAvailable() ? 'Read my inbox' : 'Continue'}
+                  label={isSmsScanningAvailable() ? t('readMyInbox') : t('continueWord')}
                   onPress={() => (isSmsScanningAvailable() ? startScan() : setStep('choose'))}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
                 <Button
                   variant="ghost"
-                  label="Start with sample data"
+                  label={t('startWithSample')}
                   onPress={loadDemoData}
                   labelColor={night.text}
                   style={styles.ghost}
@@ -128,7 +124,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               <View style={styles.top}>
                 <WafraMark size={44} color={night.primary} />
                 <ThemedText style={styles.headline}>
-                  {result ? 'Your history is in.' : 'Reading your inbox.'}
+                  {result ? t('historyIsIn') : t('readingInbox')}
                 </ThemedText>
                 <ThemedText style={styles.sub}>
                   {result
@@ -153,12 +149,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {notifAvailable && !NotificationReader?.isEnabled?.() && (
                     <>
                       <ThemedText type="meta" style={styles.notifNote}>
-                        Some banks send a push notification instead of an SMS —
-                        ADCB and Emirates NBD do for many cards. Those charges
-                        cannot be read without notification access.
+                        {t('notifNoteOnboard')}
                       </ThemedText>
                       <Button
-                        label="Also read bank notifications"
+                        label={t('alsoReadNotifs')}
                         onPress={() => NotificationReader?.openSettings()}
                         labelColor={night.onPrimary}
                         style={{ backgroundColor: night.primary }}
@@ -166,7 +160,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     </>
                   )}
                   <Button
-                    label="Open Wafra"
+                    label={t('openWafra')}
                     onPress={setOnboarded}
                     labelColor={notifAvailable ? night.text : night.onPrimary}
                     style={
@@ -188,12 +182,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 <ThemedText style={styles.sub}>
                   {Platform.OS === 'web'
                     ? 'Reading SMS works in the Android app. Pick a starting point:'
-                    : 'You can read your inbox later from Wallet.'}
+                    : t('readInboxLater')}
                 </ThemedText>
               </View>
               <View style={styles.actions}>
                 <Button
-                  label="Start with sample data"
+                  label={t('startWithSample')}
                   onPress={loadDemoData}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}

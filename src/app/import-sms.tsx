@@ -43,6 +43,7 @@ import { shortDate } from '@/lib/format';
 import { isProActive } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -101,7 +102,7 @@ export default function ImportSmsScreen() {
     // The plan's duplicate checks read state.transactions, so scanning before
     // the ledger has loaded imports the whole inbox a second time.
     if (!state.hydrated) {
-      Alert.alert('One moment', 'Your data is still loading. Try again in a second.');
+      Alert.alert('One moment', t('dataStillLoading'));
       return;
     }
     if (!isProActive(state)) {
@@ -129,7 +130,7 @@ export default function ImportSmsScreen() {
       setPlan(p);
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
-        Alert.alert('Up to date', 'Everything in your inbox is already filed.');
+        Alert.alert(t('upToDate'), 'Everything in your inbox is already filed.');
       }
     } finally {
       setScanning(false);
@@ -138,7 +139,7 @@ export default function ImportSmsScreen() {
 
   const runParse = (input: string) => {
     if (!state.hydrated) {
-      Alert.alert('One moment', 'Your data is still loading. Try again in a second.');
+      Alert.alert('One moment', t('dataStillLoading'));
       return;
     }
     if (!isProActive(state)) {
@@ -193,7 +194,7 @@ export default function ImportSmsScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
-          <ScreenHeader title="Read my inbox" onBack={() => router.back()} />
+          <ScreenHeader title={t('readMyInbox')} onBack={() => router.back()} />
         </View>
 
         <ScrollView
@@ -222,11 +223,11 @@ export default function ImportSmsScreen() {
             <Section index={0} style={styles.intro}>
               <ThemedText type="default" themeColor="textSecondary">
                 {isSmsScanningAvailable()
-                  ? 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.'
-                  : 'Paste one or more bank alerts below, separated by a blank line. Everything is read on this device.'}
+                  ? t('rescanHint')
+                  : t('pasteHint')}
               </ThemedText>
               {isSmsScanningAvailable() && (
-                <Button label="Scan full inbox" icon="search" onPress={runScan} />
+                <Button label={t('scanFullInbox')} icon="search" onPress={runScan} />
               )}
               <TextInput
                 accessibilityLabel="Paste bank messages"
@@ -248,7 +249,7 @@ export default function ImportSmsScreen() {
                 <Button
                   inline
                   variant="outline"
-                  label="Parse pasted text"
+                  label={t('parsePastedText')}
                   onPress={() => runParse(text)}
                   disabled={!text.trim()}
                 />
@@ -306,7 +307,7 @@ export default function ImportSmsScreen() {
 
               {newBills.length > 0 && (
                 <Section index={2}>
-                  <SectionHeader title="Bill reminders detected" />
+                  <SectionHeader title={t('billRemindersDetected')} />
                   {newBills.map((p, i) => {
                     const tracked = trackedBills.has(i);
                     return (

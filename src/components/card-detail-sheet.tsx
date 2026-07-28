@@ -13,6 +13,7 @@ import { duePaidFils } from '@/lib/cards';
 import { shortDate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 interface CardDetailSheetProps {
   /** The card to show, or null to keep the sheet closed. */
@@ -104,7 +105,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
         <SectionHeader title="Statements" />
         {data.statements.length === 0 ? (
           <ThemedText type="default" themeColor="textSecondary">
-            No statement message has arrived for this card yet.
+            {t('noStatementYet')}
           </ThemedText>
         ) : (
           data.statements.map((d, i) => {
@@ -135,7 +136,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
         />
         {data.payments.length === 0 ? (
           <ThemedText type="default" themeColor="textSecondary">
-            No payment to this card has been detected yet.
+            {t('noCardPaymentYet')}
           </ThemedText>
         ) : (
           data.payments.slice(0, 24).map((p, i) => (

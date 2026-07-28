@@ -24,7 +24,6 @@ import { ProgressBar } from '@/components/ui/progress-bar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
-import { t } from '@/lib/i18n';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
@@ -42,6 +41,7 @@ import {
 } from '@/lib/format';
 import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 
 const KIND_META: Record<AccountKind, { label: string; icon: import('@/components/ui/icon').IconName }> = {
@@ -222,9 +222,9 @@ export default function WalletScreen() {
   };
 
   const accountOptions = (account: Account) => {
-    Alert.alert(account.name, account.archived ? 'Hidden from lists.' : undefined, [
+    Alert.alert(account.name, account.archived ? t('hiddenFromLists') : undefined, [
       {
-        text: account.archived ? 'Unhide' : 'Hide from lists',
+        text: account.archived ? t('unhide') : t('hideFromLists'),
         onPress: () => editAccount(account.id, { archived: !account.archived }),
       },
       {
@@ -564,7 +564,7 @@ export default function WalletScreen() {
               })}
               {nonCardAccounts.length === 0 && (
                 <ThemedText type="small" themeColor="textSecondary">
-                  No bank or cash accounts yet.
+                  {t('noAccountsYet')}
                 </ThemedText>
               )}
             </View>
@@ -600,7 +600,7 @@ export default function WalletScreen() {
                           {account.name}
                         </ThemedText>
                         <ThemedText type="small" themeColor="textSecondary">
-                          {account.archived ? 'Hidden' : 'No activity for 90+ days'}
+                          {account.archived ? t('hidden') : t('noActivity90')}
                         </ThemedText>
                       </View>
                     </Pressable>
@@ -702,14 +702,14 @@ export default function WalletScreen() {
               <View style={styles.scanText}>
                 <ThemedText type="small">
                   {!isSmsScanningAvailable()
-                    ? 'Paste a bank message'
+                    ? t('pasteBankMessage')
                     : state.lastScanTs > 0
                       ? `Inbox scanned ${relativeSince(state.lastScanTs, now)}`
-                      : 'Inbox not read yet'}
+                      : t('inboxNotRead')}
                 </ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary" tabular>
                   {!isSmsScanningAvailable()
-                    ? 'Reading the inbox needs the Android app; pasting works anywhere'
+                    ? t('inboxNeedsAndroid')
                     : `${smsCount} entr${smsCount === 1 ? 'y' : 'ies'} read on this device · nothing uploaded`}
                 </ThemedText>
               </View>

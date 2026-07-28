@@ -20,7 +20,6 @@ import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
 import { CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
 import { inPeriod, periodLabel, periodRange } from '@/lib/period';
@@ -28,6 +27,7 @@ import { usePeriod } from '@/lib/period-context';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 type SortMode = 'newest' | 'oldest' | 'largest';
@@ -297,7 +297,7 @@ export default function TransactionsScreen() {
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search merchants or categories"
+              placeholder={t('searchMerchants')}
               placeholderTextColor={theme.textSecondary}
               style={[styles.searchInput, { color: theme.text }]}
             />

@@ -16,6 +16,7 @@ import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notif
 import { useStore } from '@/lib/store';
 import { daysPhrase } from '@/lib/leaving-soon';
 import { daysUntilNext, type Subscription } from '@/lib/subscriptions';
+import { t } from '@/lib/i18n';
 
 interface BillDetailSheetProps {
   /** The recurring charge to show, or null to keep the sheet closed. */
@@ -83,8 +84,8 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
     const granted = await requestNotificationPermission();
     if (!granted) {
       Alert.alert(
-        'Notifications are off',
-        'Wafra needs notification permission to warn you before a charge lands.',
+        t('notifsAreOff'),
+        t('notifsForBill'),
       );
       return;
     }
@@ -99,7 +100,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
 
   const notRecurring = () => {
     Alert.alert(
-      'Not a recurring charge?',
+      t('notRecurringQ'),
       `${subscription.title} will stop being tracked as one, and stops counting toward your monthly commitments.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -148,7 +149,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
       />
 
       <View style={styles.actions}>
-        <Button inline label="Remind me the day before" onPress={remindMe} />
+        <Button inline label={t('remindDayBefore')} onPress={remindMe} />
         <Button inline variant="outline" label="Not recurring" onPress={notRecurring} />
       </View>
     </BottomSheet>

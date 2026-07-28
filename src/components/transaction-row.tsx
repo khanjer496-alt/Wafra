@@ -7,8 +7,8 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
 import { clockTime, formatAmount } from '@/lib/format';
-import { t } from '@/lib/i18n';
 import type { Account, Transaction } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 interface TransactionRowProps {
   transaction: Transaction;

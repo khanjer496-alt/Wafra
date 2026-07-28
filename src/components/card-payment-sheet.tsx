@@ -13,6 +13,7 @@ import { formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import type { CardDue } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 interface CardPaymentSheetProps {
   /** The statement to settle, or null to keep the sheet closed. */
@@ -67,7 +68,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
   const markPaid = () => {
     const name = account?.name ?? 'Card';
     Alert.alert(
-      'Mark this statement paid?',
+      t('markStatementPaid'),
       `Files a ${formatAmount(status.remainingFils)} payment to ${name} today.`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -100,8 +101,8 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     const granted = await requestNotificationPermission();
     if (!granted) {
       Alert.alert(
-        'Notifications are off',
-        'Wafra needs notification permission to remind you before a payment is due.',
+        t('notifsAreOff'),
+        t('notifsForCardDue'),
       );
       return;
     }
@@ -115,7 +116,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
   };
 
   return (
-    <BottomSheet visible onClose={onClose} title="Card payment due">
+    <BottomSheet visible onClose={onClose} title={t('cardPaymentDue')}>
       <View style={styles.card}>
         <View style={styles.cardHead}>
           <ThemedText type="micro" style={{ color: '#8C857A' }}>
@@ -151,7 +152,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
         </ThemedText>
         {status.belowMinimum && (
           <ThemedText type="meta" style={{ color: theme.expense }}>
-            Still under the minimum due.
+            {t('underMinimumDue')}
           </ThemedText>
         )}
       </View>
@@ -176,7 +177,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
             value: (
               <ThemedText type="default" themeColor="textSecondary">
                 {payments === 0
-                  ? 'No payment to this card has been detected yet.'
+                  ? t('noCardPaymentYet')
                   : `${payments} payment${payments === 1 ? '' : 's'} on this card, walked oldest-first into the oldest statement each could belong to. An overpayment spills onto the next one.`}
               </ThemedText>
             ),

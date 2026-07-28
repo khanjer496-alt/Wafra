@@ -13,8 +13,8 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormats } from '@/lib/accuracy';
 import { getCategory } from '@/lib/categories';
-import { t } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
 function maskDigits(s: string): string {

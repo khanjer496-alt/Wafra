@@ -41,6 +41,7 @@ import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
 const MAX_SLICES = 5;
@@ -252,7 +253,7 @@ export default function FlowScreen() {
             </Animated.View>
           ) : (
             <ThemedText type="default" themeColor="textSecondary" style={styles.section}>
-              Nothing has gone out in this period yet.
+              {t('nothingOutYet')}
             </ThemedText>
           )}
 
@@ -336,7 +337,7 @@ export default function FlowScreen() {
           {/* ── In vs out ── */}
           <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
             <SectionHeader
-              title="In vs out · 6 months"
+              title={t('inVsOut6')}
               right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} avg`}
             />
             <View style={styles.trend}>

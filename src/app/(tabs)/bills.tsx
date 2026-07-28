@@ -20,7 +20,6 @@ import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
@@ -45,6 +44,7 @@ import {
 } from '@/lib/subscriptions';
 import { useStore } from '@/lib/store';
 import type { Account, CategoryId } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 type Segment = 'subscriptions' | 'cards' | 'utilities';
 
@@ -172,7 +172,7 @@ export default function BillsScreen() {
     if (!accountId) return;
     Alert.alert(
       `Mark "${bill.title}" as paid?`,
-      `Records an expense of ${formatAED(bill.amountFils, { decimals: false })} today.`,
+      tf('billRecordsExpense', { amount: formatAED(bill.amountFils, { decimals: false }) }),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -230,7 +230,7 @@ export default function BillsScreen() {
 
   const onDismissSub = (sub: Subscription) => {
     Alert.alert(
-      'Not a subscription?',
+      t('notASubscriptionQ'),
       `"${sub.title}" will stop appearing in subscriptions and won't count toward the monthly total.`,
       [
         { text: 'Cancel', style: 'cancel' },

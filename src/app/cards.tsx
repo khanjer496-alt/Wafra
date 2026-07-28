@@ -16,9 +16,9 @@ import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
 /**
  * Every card as a row: bank, last four, and the one figure that is actually
@@ -82,16 +82,16 @@ export default function CardsScreen() {
   };
 
   const cardOptions = (card: Account) => {
-    Alert.alert(card.name, card.archived ? 'Hidden from lists.' : undefined, [
+    Alert.alert(card.name, card.archived ? t('hiddenFromLists') : undefined, [
       ...(card.cardType === 'credit'
-        ? [{ text: 'Set credit limit', onPress: () => askCreditLimit(card) }]
+        ? [{ text: t('setCreditLimit'), onPress: () => askCreditLimit(card) }]
         : []),
       {
         text: card.archived ? 'Unhide' : 'Hide card',
         onPress: () => editAccount(card.id, { archived: !card.archived }),
       },
       {
-        text: 'Delete card and its entries',
+        text: t('deleteCardAndEntries'),
         style: 'destructive' as const,
         onPress: () =>
           Alert.alert('Delete card?', `"${card.name}" and all its entries will be removed.`, [
@@ -220,7 +220,7 @@ export default function CardsScreen() {
           Banks quote the headroom left, never the limit itself. Enter it once and every masked
           balance on {limitFor?.name ?? 'this card'} turns into a real figure.
         </ThemedText>
-        <AmountField label="Total credit limit" value={limitText} onChangeText={setLimitText} fontSize={34} />
+        <AmountField label={t('totalCreditLimit')} value={limitText} onChangeText={setLimitText} fontSize={34} />
         <Button label="Save limit" onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
       </BottomSheet>
     </ThemedView>

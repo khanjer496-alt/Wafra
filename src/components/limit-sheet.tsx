@@ -14,8 +14,9 @@ import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
+import { t } from '@/lib/i18n';
 
-/** How many merchants "Where it went" names before pooling the rest. */
+/** How many merchants t('whereItWent') names before pooling the rest. */
 const MERCHANT_ROWS = 4;
 
 interface LimitSheetProps {
@@ -296,7 +297,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
 
             {merchants.length > 0 && (
               <View style={styles.where}>
-                <SectionHeader title="Where it went" />
+                <SectionHeader title={t('whereItWent')} />
                 {merchants.map((m, i) => (
                   <View
                     key={m.title}

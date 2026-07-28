@@ -35,13 +35,13 @@ import { unreadFormatCount } from '@/lib/accuracy';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
+import { t } from '@/lib/i18n';
 
 /** The reporting month can start on any day that exists in February. */
 const MAX_START_DAY = 28;
@@ -114,8 +114,8 @@ export default function SettingsScreen() {
       const next = !state.pro;
       setPro(next);
       Alert.alert(
-        next ? 'Founder mode' : 'Founder mode off',
-        next ? 'Wafra Pro unlocked on this device.' : 'Wafra Pro disabled on this device.',
+        next ? t('founderMode') : t('founderModeOff'),
+        next ? t('founderOn') : t('founderOff'),
       );
     }
   };
@@ -128,20 +128,20 @@ export default function SettingsScreen() {
       return;
     }
     if (Platform.OS === 'web') {
-      Alert.alert('Not available', 'App lock works on the phone app only.');
+      Alert.alert('Not available', t('appLockPhoneOnly'));
       return;
     }
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!hasHardware || !enrolled) {
       Alert.alert(
-        'No screen lock set up',
-        'Set up a fingerprint, face unlock, or PIN in your phone settings first.',
+        t('noScreenLock'),
+        t('noScreenLockBody'),
       );
       return;
     }
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Confirm to enable app lock',
+      promptMessage: t('confirmAppLock'),
     });
     if (result.success) setAppLock(true);
   };
@@ -152,7 +152,7 @@ export default function SettingsScreen() {
       // only honest "off" is the one in the system settings.
       Alert.alert(
         'Turn SMS reading off',
-        'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.',
+        t('smsRevokeHint'),
       );
       return;
     }
@@ -168,8 +168,8 @@ export default function SettingsScreen() {
       const allowed = await requestNotificationPermission();
       if (!allowed) {
         Alert.alert(
-          'Notifications are off',
-          'Wafra needs notification permission to alert you. Turn it on in Settings → Apps → Wafra → Notifications.',
+          t('notificationsOff'),
+          t('notificationsOffBody'),
         );
         return;
       }
@@ -186,14 +186,12 @@ export default function SettingsScreen() {
   const notifEnabled = notifAvailable && NotificationReader != null && NotificationReader.isEnabled();
   const onNotificationAccess = () => {
     if (!notifAvailable || !NotificationReader) {
-      Alert.alert('Not available', 'Bank app notifications work on the phone app only.');
+      Alert.alert('Not available', t('notifsPhoneOnly'));
       return;
     }
     Alert.alert(
-      'Bank app notifications',
-      'Some banks send push notifications instead of SMS. Grant Wafra notification access and ' +
-        'money alerts import automatically. Only alerts that mention an amount are kept, and ' +
-        'they never leave this phone.',
+      t('bankAppNotifsTitle'),
+      t('notifAccessFull'),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -246,26 +244,26 @@ export default function SettingsScreen() {
       });
       if (picked.canceled || !picked.assets?.[0]) return;
       const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
-      Alert.alert('Restore backup?', 'This replaces everything currently in the app.', [
+      Alert.alert('Restore backup?', t('restoreReplacesAll'), [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Restore',
           style: 'destructive',
           onPress: () => {
             if (!restoreBackup(content)) {
-              Alert.alert('Invalid file', 'That does not look like a Wafra backup.');
+              Alert.alert('Invalid file', t('notAWafraBackup'));
             }
           },
         },
       ]);
     } catch {
-      Alert.alert('Could not read file', 'Try exporting a fresh backup and restoring that.');
+      Alert.alert(t('couldNotReadFile'), 'Try exporting a fresh backup and restoring that.');
     }
   };
 
   const confirmErase = () => {
     Alert.alert(
-      'Erase everything on this phone?',
+      t('eraseEverythingQ'),
       'All accounts, entries, bills, and goals will be permanently deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -337,7 +335,7 @@ export default function SettingsScreen() {
                     type="meta"
                     style={{ color: state.pro ? theme.textTertiary : theme.warning }}>
                     {state.pro
-                      ? 'Active on this device'
+                      ? t('activeOnThisDevice')
                       : trial > 0
                         ? `Free trial · ${trial} day${trial === 1 ? '' : 's'} left`
                         : 'Trial ended · tracking paused'}
@@ -419,7 +417,7 @@ export default function SettingsScreen() {
               />
               <ThemedText type="meta" themeColor="textTertiary">
                 {themeChoice === 'system'
-                  ? 'Following your phone. Wafra turns over when it does.'
+                  ? t('followingPhone')
                   : `Pinned to ${themeChoice}, whatever your phone is set to.`}
               </ThemedText>
             </Block>
@@ -442,7 +440,7 @@ export default function SettingsScreen() {
               )}
             {instantAvailable &&
               switchRow(
-                'Alert me on every charge',
+                t('alertEveryCharge'),
                 smsGranted
                   ? instantAlerts
                     ? 'On · a silent banner the moment the bank texts'
@@ -452,8 +450,8 @@ export default function SettingsScreen() {
                 (next) => {
                   if (!smsGranted) {
                     Alert.alert(
-                      'Turn on bank SMS first',
-                      'Wafra can only alert you about a charge it is allowed to read.',
+                      t('turnOnSmsFirst'),
+                      t('turnOnSmsFirstBody'),
                     );
                     return;
                   }
@@ -490,17 +488,17 @@ export default function SettingsScreen() {
 
           <Section index={5}>
             <SectionHeader title="Data" />
-            {linkRow('Back up as JSON', null, gated(backupJson))}
-            {linkRow('Restore from a backup file', null, gated(restoreFromFile))}
-            {linkRow('Export transactions as CSV', null, exportCsv)}
+            {linkRow(t('backupJson'), null, gated(backupJson))}
+            {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
+            {linkRow(t('exportCsv'), null, exportCsv)}
             {linkRow(
               'Improve accuracy',
               formats > 0
                 ? `${formats} unread message format${formats === 1 ? '' : 's'} · digits masked`
-                : 'Everything reads clean',
+                : t('noUnrecognized'),
               () => router.push('/accuracy'),
             )}
-            {linkRow('Erase everything on this phone', null, confirmErase, true, true)}
+            {linkRow(t('eraseAll'), null, confirmErase, true, true)}
           </Section>
 
           <Section index={6} style={styles.about}>
