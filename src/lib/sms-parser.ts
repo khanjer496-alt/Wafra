@@ -35,7 +35,14 @@ export interface ParsedSms {
   raw: string;
 }
 
-const CREDIT_WORDS = /credit(?:ed)?|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
+// Direction verbs only. `credit` used to be here bare, which matched the noun
+// in "Credit Card" — so on a credit card hasCredit was true for essentially
+// every message, and a purchase was booked as INCOME unless DEBIT_WORDS
+// happened to contain the bank's particular verb. Mashreq's "has been used
+// for" is not in that list, so a AED 250 Carrefour swipe on a Mashreq credit
+// card arrived as AED 250 of income.
+const CREDIT_WORDS =
+  /credited|credit\s+to\b|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
 // DEBIT_WORDS is market-compiled below (its payment guard embeds the currency).
 const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b/i;
 const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
@@ -61,7 +68,7 @@ const PROMO_RE =
  * markers alone must not discard a message that shows a transaction.
  */
 const TXN_EVIDENCE_RE =
-  /purchase (?:of|amount)|was used for|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
+  /purchase (?:of|amount)|was used (?:for|at)|has been (?:used|debited|deducted|credited|received)|debited from|deducted from|credited to|\bspent\b|charged to your|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
 
 /**
  * Currency-bound patterns compile from the ACTIVE MARKET's currency aliases
@@ -110,7 +117,10 @@ function ensureCurrencyPatterns(): void {
   PAYMENT_FOR_RE = new RegExp(
     `payment\\s+for\\s+([A-Za-z0-9][^\\n]{1,48}?)\\s+of\\s+(?:${CUR})\\s*[\\d,]`, 'i');
   DEBIT_WORDS = new RegExp(
-    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|was used|charged`, 'i');
+    // `used` covers "was used for", "has been used at", "used at" — it was
+    // `was used` alone, so Mashreq's "has been used for" matched no debit verb
+    // at all and the message fell through the direction test entirely.
+    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|(?:was|been)\\s+used|\\bused\\s+(?:for|at)\\b|charged`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
   FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // Same line only. "Card No XXXX4777 \n USD .00" used to read the card's last
@@ -166,7 +176,7 @@ const MAX_PLAUSIBLE_AMOUNT_FILS = 100_000_000;
 const BALANCE_PREFIX_RE = /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total)\s*(?:is|:|\.|-)?\s*$/i;
 
 /** Card identity: "Credit Card ending 1234", "Debit Card ..5678", "a/c XX9012", "card no. *1234". */
-const CARD_RE = /(credit|debit)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+)?\s*(\d{4})\b/i;
+const CARD_RE = /(credit|debit|\bcr\.?)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+)?\s*(\d{4})\b/i;
 const ACCOUNT_RE =
   /a\/?c(?:count)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+in)?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
 /** Fully masked PAN like "4782********4833" — the LAST four digits identify the card. */
@@ -196,7 +206,12 @@ const MERCHANT_RE = new RegExp(
  */
 const TERMINAL_ID_RE = /[-\s]+(?:[·•X]{2,}\d*|\d{4,})$/i;
 
-const DATE_RE = /\b(?:on|by|before|is)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+const DATE_RE =
+  /\b(?:on|by|before|is|dated|due date|date)\s*:?\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+// "05-Aug-2026", "07-Jan-22". Statements use this constantly, and
+// auto-import.ts drops a due row outright when the date is null — so an
+// unparsed date did not degrade the reminder, it deleted it.
+const DAY_MONTH_RE = /\b(\d{1,2})[-\s/]([A-Za-z]{3,9})\.?[-\s/](\d{2,4})\b/;
 // "03/07/26 05:53" — a bare date WITH a time is the transaction timestamp and
 // beats any "statement due on <date>" footer later in the message.
 const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
@@ -679,8 +694,14 @@ function extractCard(raw: string): ParsedCard | null {
     // Multi-line formats say "Credit Card Purchase" in the header and
     // "Card No XXXX4711" further down — when the number clause carries no
     // kind word, look at the whole message before assuming debit.
+    // ADCB writes "Cr.Card XXX7720" and "Acc/Cr.Card XXX7720". Reading that as
+    // a DEBIT card made its available CREDIT count as cash: balances.ts treats
+    // a debit card's balance as real money, so an untouched card with a
+    // 12,500 limit added 12,500 to net worth.
     const kind =
-      kindWord === 'credit' || (!kindWord && /credit\s+card/i.test(raw))
+      kindWord === 'credit' ||
+      kindWord?.startsWith('cr') ||
+      (!kindWord && /(?:credit|\bcr\.)\s*card/i.test(raw))
         ? 'credit'
         : 'debit';
     return { last4: cardMatch[2], kind };
@@ -739,6 +760,17 @@ function extractDate(raw: string): string | null {
     const month = MONTH_NAMES[named[1].slice(0, 3).toLowerCase()];
     if (month) {
       const iso = isoDate(Number(named[3]), month, Number(named[2]));
+      if (iso) return iso;
+    }
+  }
+  // "05-Aug-2026" / "07-Jan-22". Last, so the prepositioned numeric forms
+  // above still win when a message carries both.
+  const dayMonth = raw.match(DAY_MONTH_RE);
+  if (dayMonth) {
+    const month = MONTH_NAMES[dayMonth[2].slice(0, 3).toLowerCase()];
+    if (month) {
+      const year = Number(dayMonth[3]);
+      const iso = isoDate(year < 100 ? 2000 + year : year, month, Number(dayMonth[1]));
       if (iso) return iso;
     }
   }
@@ -1023,9 +1055,14 @@ export function parseSms(
     // "Min payment of AED100 ... Total billed amt is AED1174.49" — the
     // stated total beats first-amount extraction (which would grab the min).
     const totalMatch = raw.match(TOTAL_DUE_RE);
+    // Only an explicitly labelled total counts. The fallback here used to be
+    // amountWithFx(raw, true), whose `allowBalanceFallback` returns the
+    // BALANCE it had just skipped — so "statement is generated, pay by 05/08,
+    // Avl Cr. Limit AED 14,671.30" told the user they owed 14,671.30, and
+    // notifications.ts duly reminded them about it.
     const amountFils = totalMatch
       ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100)
-      : amountWithFx(raw, true);
+      : null;
     if (!amountFils) return null;
     const minMatch = raw.match(MIN_DUE_RE);
     return {
@@ -1046,14 +1083,20 @@ export function parseSms(
   }
 
   // URLs carry misleading words ("sewapayment.tiny.us" is not a payment).
-  const prose = raw.replace(/https?:\/\/\S+/gi, ' ');
+  // So does the boilerplate UAE billers append: "Please ignore if already
+  // paid" contains `paid`, which satisfied DEBIT_WORDS, which disqualified the
+  // bill-due branch — so a DEWA reminder became a phantom AED 450 expense
+  // dated the DUE date, and the real debit arrived later as a second row.
+  const prose = raw
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\b(?:please|kindly)?\s*(?:ignore|disregard)\b[^.]*?\bpaid\b[^.]*/gi, ' ');
   const hasDebit = DEBIT_WORDS.test(prose);
   const hasCredit = CREDIT_WORDS.test(prose);
   // Carrier-billed store purchases ("App Store & Google Play bill") are
   // receipts, never utility bills — treating them as dues produced garbage
   // reminders with balance-sized amounts.
   const carrierBilling = /app\s*store|google play|play store|itunes/i.test(raw);
-  const isBillDue = BILL_DUE_WORDS.test(raw) && !hasDebit && !hasCredit && !carrierBilling;
+  const isBillDue = BILL_DUE_WORDS.test(prose) && !hasDebit && !hasCredit && !carrierBilling;
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
   if (!hasDebit && !hasCredit && !isBillDue) return null;
@@ -1063,12 +1106,18 @@ export function parseSms(
 
   // A refund reverses spending: money coming back IN, whatever verbs the
   // message uses ("Purchase amount of AED X ... has been refunded").
-  const isRefund = /refunded to your (?:card|account)/i.test(raw);
+  const isRefund =
+    /refunded to your (?:card|account)/i.test(raw) ||
+    /\brefund(?:ed)?\b[\s\S]{0,80}\bcredited\b/i.test(prose);
   // "credited to your account" settles the direction on its own. These
   // messages carry a reference line naming the sender — "...B/O DELIVERY HERO
   // TALABAT DB LLC Talabat Biweekly Payment" — and the word Payment in it was
   // enough to trip the debit test, filing an incoming payout as spending.
-  const creditedIn = /credited to your (?:account|a\/c)\b/i.test(prose);
+  // "...credited to your Credit Card" counts too. It did not, so a refund
+  // naming the original purchase ("refund for your purchase at NOON") kept the
+  // debit verb, booked a SECOND expense, and doubled the merchant's total.
+  const creditedIn =
+    /credited (?:back )?to your (?:account|a\/c|(?:credit\s*|cr\.?\s*)?card)\b/i.test(prose);
   const type: TransactionType =
     isRefund || creditedIn || (!isBillDue && hasCredit && !hasDebit) ? 'income' : 'expense';
 

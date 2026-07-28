@@ -1066,5 +1066,64 @@ t('a masked amount is still refused, not guessed',
   'Your Credit Card ending *** 6383 was used for AED ····0710.00 at MSPLUS DOCUMENTS CL.... Your available limit is AED 3019.69',
   null);
 
+
+// ── Direction, card kind and the footers that used to invert them ──
+//
+// Every case below was a real wrong ANSWER, not a skip: the parser returned a
+// confident, plausible row that was simply not what the message said. Those
+// are the dangerous ones — a dropped message shows up as a gap the user can
+// see, but a AED 250 purchase filed as AED 250 of income silently moves their
+// whole month.
+
+t('a credit-card spend is an expense, not income ("Credit Card" is a noun)',
+  'Your Mashreq Credit Card ending 1234 has been used for AED 250.00 at CARREFOUR, DUBAI on 12/07/2026. Available Limit: AED 5,000.00',
+  { merchant: 'Carrefour', amountFils: 25000, type: 'expense', category: 'groceries' });
+
+t('the same message on a debit card reads identically',
+  'Your Mashreq Debit Card ending 1234 has been used for AED 250.00 at CARREFOUR, DUBAI on 12/07/2026. Available Limit: AED 5,000.00',
+  { merchant: 'Carrefour', amountFils: 25000, type: 'expense', category: 'groceries' });
+
+t('an incoming salary is still income',
+  'Your salary of AED 18,500.00 has been credited to your account ending 5678',
+  { amountFils: 1850000, type: 'income', category: 'salary' });
+
+t('a refund credited to a CREDIT CARD comes back in, not out again',
+  'A refund of AED 250.00 for your purchase at NOON has been credited to your Credit Card ending 4821. Avl Cr. Limit is AED 12,000.00',
+  { merchant: 'Noon', amountFils: 25000, type: 'income' });
+
+// "Please ignore if already paid" contains `paid`, which used to satisfy the
+// debit test and disqualify the bill branch — so the reminder became a phantom
+// expense dated the DUE date, and the real debit arrived later as a second row.
+t('a bill reminder survives its "ignore if already paid" footer',
+  'Dear Customer, your DEWA bill of AED 450.00 is due on 25/07/2026. Please ignore if already paid.',
+  { merchant: 'DEWA', amountFils: 45000, kind: 'billDue' });
+
+t('the same reminder without the footer is unchanged',
+  'Dear Customer, your DEWA bill of AED 450.00 is due on 25/07/2026.',
+  { merchant: 'DEWA', amountFils: 45000, kind: 'billDue' });
+
+t('actually paying the bill is still an expense',
+  'AED 450.00 has been debited from your account for DEWA bill payment on 25/07/2026',
+  { amountFils: 45000, type: 'expense', category: 'utilities' });
+
+// A trailing app link is standard for Liv, Wio and Mashreq Neo. PROMO_RE
+// matches any URL, so without matching evidence the whole spend vanished.
+t('a spend with a trailing app link is not discarded as promo',
+  'You spent AED 45.00 at STARBUCKS DIFC with your card ending 1234. https://liv.me/t/abc',
+  { amountFils: 4500, type: 'expense', category: 'dining' });
+
+t('"was used at" with a fraud-report link is not discarded either',
+  'Your Debit Card ending 1234 was used at STARBUCKS for AED 45.00. Not you? https://bank.ae/report',
+  { merchant: 'Starbucks', amountFils: 4500, type: 'expense' });
+
+// A statement quoting only the available limit must not claim that is owed.
+t('a statement with no stated total is refused rather than guessed',
+  'Your Emirates NBD Credit Card ending 4821 statement is generated. Please pay by 05/08/2026. Avl Cr. Limit AED 14,671.30',
+  null);
+
+t('a statement WITH a stated total still parses, incl. a DD-Mon-YYYY due date',
+  'Your ENBD Credit Card ending 4821 statement. Total amount due AED 3,240.00. Minimum amount due AED 162.00. Payment due on 05-Aug-2026.',
+  { amountFils: 324000, kind: 'cardStatement', date: '2026-08-05' });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
