@@ -36,13 +36,8 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import {
-  buildImportPlan,
-  hasSmsPermission,
-  isSmsScanningAvailable,
-  requestSmsPermission,
-  scanInbox,
-} from '@/lib/auto-import';
+import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { daysPhrase, leavingSoon, outgoingTotalFils, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate } from '@/lib/format';
 import { t } from '@/lib/i18n';
@@ -315,22 +310,35 @@ export default function HomeScreen() {
         if (interactive) router.push('/pro');
         return;
       }
-      if (!isSmsScanningAvailable()) return;
-      let granted = await hasSmsPermission();
-      if (!granted && interactive) granted = await requestSmsPermission();
-      if (!granted) {
-        setNeedsPermission(true);
+      if (!isCaptureAvailable()) return;
+      // Android needs the SMS permission before it can read anything. iOS has
+      // no permission to ask for — its messages arrive over the relay — so the
+      // prompt is skipped there rather than shown and refused.
+      if (isSmsScanningAvailable()) {
+        let granted = await hasSmsPermission();
+        if (!granted && interactive) granted = await requestSmsPermission();
+        if (!granted) {
+          setNeedsPermission(true);
+          return;
+        }
+        setNeedsPermission(false);
+      }
+
+      const { plan, commit, needsSetup } = await planNewMessages(state);
+      if (needsSetup) {
+        // The relay is not paired yet, so silence here means "not connected",
+        // not "nothing new". Only say so when the user actually asked.
+        if (interactive) router.push('/ios-setup');
         return;
       }
-      setNeedsPermission(false);
-      const sinceMs = state.lastScanTs > 0 ? state.lastScanTs + 1 : 0;
-      const { parsed, newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
-      const plan = buildImportPlan(parsed, state, newestTs);
       if (plan.txCount === 0 && plan.dueCount === 0) {
+        await commit();
         if (interactive) toast.show('Up to date. No new bank messages.');
         return;
       }
       const ids = importBatch(plan.batch);
+      // Only now is it safe to drop the relay's copy.
+      await commit();
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }

@@ -93,6 +93,54 @@ async function open(privateKey, blob) {
     openedRow.merchant === '% Arabica' && openedRow.amountFils === 4000 &&
     openedRow.categoryGuess === 'dining');
 
+  // ── The real device half ──
+  //
+  // Everything above proves the Worker agrees with the `open()` written in
+  // this file. That is not the thing that ships. src/lib/relay-crypto.ts is
+  // what runs on the phone, under Hermes, with @noble instead of WebCrypto,
+  // and it is the half that can silently drift. Seal with the real Worker,
+  // open with the real client.
+  const client = require('./build/relay-crypto');
+
+  const kp = client.generateKeypair();
+  const forClient = await seal(kp.publicKey, row);
+  const byClient = client.openSealed(kp.privateKey, forClient);
+  ok('client: opens what the Worker sealed',
+    byClient.merchant === '% Arabica' && byClient.amountFils === 4000,
+    JSON.stringify(byClient));
+
+  // Arabic merchants are ordinary in this corpus, and a UTF-8 bug here would
+  // only ever show up as mojibake in someone's ledger.
+  const arabic = { merchant: 'مقهى ٪ أرابيكا', amountFils: 4000, note: 'دبي' };
+  const openedAr = client.openSealed(kp.privateKey, await seal(kp.publicKey, arabic));
+  ok('client: round-trips Arabic merchant names',
+    openedAr.merchant === arabic.merchant && openedAr.note === arabic.note,
+    JSON.stringify(openedAr));
+
+  let clientDenied = false;
+  try { client.openSealed(client.generateKeypair().privateKey, forClient); }
+  catch { clientDenied = true; }
+  ok('client: another device cannot open it', clientDenied);
+
+  let clientRejected = false;
+  try {
+    const t = b64decode(forClient.ct); t[0] ^= 0xff;
+    client.openSealed(kp.privateKey, { ...forClient, ct: b64encode(t) });
+  } catch { clientRejected = true; }
+  ok('client: a tampered ciphertext is rejected', clientRejected);
+
+  // The client's own base64 must agree with the Worker's, since every field
+  // crosses between them as a base64 string.
+  const probe = crypto.getRandomValues(new Uint8Array(97));
+  ok('client: base64 agrees with the Worker in both directions',
+    client.b64encode(probe) === b64encode(probe) &&
+    b64encode(client.b64decode(b64encode(probe))) === b64encode(probe));
+
+  // A keypair the client generated must be usable as a pairing public key,
+  // which means 32 raw bytes once decoded — the Worker rejects anything else.
+  ok('client: public key is the 32 bytes /v1/pair accepts',
+    client.b64decode(kp.publicKey).length === 32);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

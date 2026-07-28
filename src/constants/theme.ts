@@ -30,9 +30,13 @@ export const Colors = {
     primarySoft: '#E4EDE8',
     primaryBorder: '#C3D8CD',
     onPrimary: '#F7FBF8',
-    income: '#2E8A63',
-    expense: '#B4503C', // clay red, not pink
-    warning: '#A07B2A',
+    // These three carry meaning as TEXT — "+2,400", "over by AED 431", "3 days
+    // late" — so they are held to WCAG AA (4.5:1) on paper, not the 3:1 that
+    // would be enough for a bar or a dot. The lighter values they replaced
+    // measured 3.77, 4.48 and 3.47:1 respectively.
+    income: '#1E7355', // 5.12:1 on paper
+    expense: '#A3402D', // 5.59:1 — clay red, not pink
+    warning: '#7E5F14', // 5.27:1
     track: '#E3DED2',
     expenseSoftBg: '#FBF3F0',
     expenseSoftBorder: '#E7D3CD',
