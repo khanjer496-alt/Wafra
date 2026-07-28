@@ -16,7 +16,7 @@ import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
-/** How many merchants t('whereItWent') names before pooling the rest. */
+/** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
 
 interface LimitSheetProps {

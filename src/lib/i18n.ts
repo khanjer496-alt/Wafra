@@ -137,7 +137,11 @@ const S = {
   loadDemo: { en: 'Load demo data', ar: 'تحميل بيانات تجريبية' },
   eraseAll: { en: 'Erase all data', ar: 'مسح كل البيانات' },
   tapToChange: { en: 'tap to change', ar: 'اضغط للتغيير' },
-  restartForLanguage: { en: 'Restart the app to apply the new language fully.', ar: 'أعد تشغيل التطبيق لتطبيق اللغة الجديدة بالكامل.' },
+  languageChanged: { en: 'Language changed', ar: 'تم تغيير اللغة' },
+  mirrorOnNextOpen: {
+    en: 'The text has changed already. Android can only mirror the layout right-to-left when the app starts, so that part arrives next time you open Wafra.',
+    ar: 'تغيّر النص بالفعل. لا يستطيع أندرويد عكس اتجاه الواجهة إلى اليمين إلا عند بدء التطبيق، لذا سيظهر ذلك في المرة القادمة التي تفتح فيها وفرة.',
+  },
 
   // Paywall
   proTagline: { en: 'A few power features fund the app.', ar: 'ميزات إضافية تدعم استمرار التطبيق.' },

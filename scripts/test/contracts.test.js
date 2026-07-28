@@ -273,5 +273,36 @@ function ktSources(dir) {
     stray.slice(0, 6));
 }
 
+
+/* ── no translated string is frozen at import time ────────────────────
+ *
+ * t() reads a module-level `lang` that is set during hydrate. A t() call
+ * evaluated while the file is being IMPORTED therefore runs before the
+ * language is known, keeps the default forever, and never re-renders — the
+ * onboarding bullet points were a module-level array doing exactly this, so
+ * an Arabic phone was greeted in English on the first screen a user sees. */
+{
+  const frozen = [];
+  for (const file of sources('src')) {
+    const rel = path.relative(ROOT, file);
+    if (rel.includes('lib/i18n.ts')) continue;
+    let depth = 0;
+    let inComment = false;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (/\/\*/.test(line)) inComment = true;
+      const wasComment = inComment;
+      if (/\*\//.test(line)) inComment = false;
+      const code = line.replace(/\/\/.*$/, '');
+      if (!wasComment && depth === 0 && /\bt\(|\btf\(/.test(code)) {
+        frozen.push(`${rel}: ${line.trim().slice(0, 46)}`);
+      }
+      depth += (code.match(/[{([]/g) || []).length - (code.match(/[})\]]/g) || []).length;
+      if (depth < 0) depth = 0;
+    }
+  }
+  ok('no translated string is evaluated at import time', frozen.length === 0,
+    frozen.slice(0, 4));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

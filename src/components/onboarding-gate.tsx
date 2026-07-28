@@ -25,15 +25,21 @@ type Step = 'welcome' | 'scanning' | 'choose';
  *  the tone, and the mark is at its strongest on charcoal. */
 const night = Colors.dark;
 
-const POINTS: [IconName, string, string][] = [
-  [
-    'mail',
-    t('onboardReadsSms'),
-    t('onboardPrivacyBody'),
-  ],
-  ['calendar', t('warnsBeforeMoneyLeaves'), t('onboardWarnsDetail')],
-  ['lock', t('noServerTitle'), t('onboardNoServerDetail')],
-];
+/**
+ * Built per render, not once at import.
+ *
+ * As a module-level constant every t() here ran the moment this file was
+ * imported — before the store had hydrated and before setLanguage() had been
+ * called — so an Arabic phone was greeted in English on the very first screen,
+ * and switching language later never touched it.
+ */
+function points(): [IconName, string, string][] {
+  return [
+    ['mail', t('onboardReadsSms'), t('onboardPrivacyBody')],
+    ['calendar', t('warnsBeforeMoneyLeaves'), t('onboardWarnsDetail')],
+    ['lock', t('noServerTitle'), t('onboardNoServerDetail')],
+  ];
+}
 
 /**
  * First run: read the inbox, or start with sample data.
@@ -86,7 +92,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               </View>
 
               <View style={styles.points}>
-                {POINTS.map(([icon, title, detail], i) => (
+                {points().map(([icon, title, detail], i) => (
                   <View
                     key={title}
                     style={[styles.point, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth }]}>
