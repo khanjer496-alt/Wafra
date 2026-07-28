@@ -9,6 +9,7 @@ import {
   toPeriod,
   type PeriodLike,
 } from '@/lib/period';
+import { allocationsOf, amountInCategory } from '@/lib/splits';
 import {
   activeSubscriptions,
   detectSubscriptions,
@@ -35,7 +36,9 @@ export function summarizeMonth(transactions: Transaction[], period: PeriodLike):
       incomeFils += t.amountFils;
     } else {
       expenseFils += t.amountFils;
-      catTotals.set(t.category, (catTotals.get(t.category) ?? 0) + t.amountFils);
+      for (const a of allocationsOf(t)) {
+        catTotals.set(a.category, (catTotals.get(a.category) ?? 0) + a.amountFils);
+      }
     }
   }
 
@@ -58,8 +61,8 @@ export function spentInMonthForCategory(
   let total = 0;
   for (const t of transactions) {
     if (t.isTransfer) continue;
-    if (t.type === 'expense' && t.category === category && inPeriod(t.date, period)) {
-      total += t.amountFils;
+    if (t.type === 'expense' && inPeriod(t.date, period)) {
+      total += amountInCategory(t, category);
     }
   }
   return total;
