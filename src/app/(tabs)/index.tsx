@@ -53,6 +53,7 @@ import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notif
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
+import { refreshEntitlement } from '@/lib/billing';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
@@ -321,7 +322,7 @@ export default function HomeScreen() {
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
-  const { state, importBatch, undoBatch, markParserVersion } = useStore();
+  const { state, importBatch, undoBatch, markParserVersion, setPro } = useStore();
   const { period } = usePeriod();
 
   const now = useMemo(() => new Date(), []);
@@ -474,6 +475,22 @@ export default function HomeScreen() {
     if (!sessionSetupRan) {
       sessionSetupRan = true;
       (async () => {
+        try {
+          // Ask the store who this customer is, once per launch.
+          //
+          // Without this, `pro` was a local boolean that nothing ever
+          // re-checked: once true it stayed true through a lapsed
+          // subscription, a refund or a cancellation, and a reinstall left a
+          // paying customer to find the Restore button by themselves.
+          //
+          // A null answer means the store could not be reached, which is NOT
+          // the same as not having paid — the cached flag stands in that
+          // case, so a flight does not lock someone out of their own ledger.
+          const entitled = await refreshEntitlement();
+          if (entitled !== null && entitled !== state.pro) setPro(entitled);
+        } catch {
+          // Entitlement is best-effort; the cached flag stands.
+        }
         try {
           await requestNotificationPermission();
           await syncPaymentReminders(state);

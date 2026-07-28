@@ -13,15 +13,13 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTheme } from '@/hooks/use-theme';
 import { t, tf } from '@/lib/i18n';
 import {
-  isBillingAvailable,
   PRO_PRICES,
-  purchasePro,
-  restorePro,
   TRIAL_DAYS,
   trialDaysLeft,
   yearlySavingMonths,
   type ProPlan,
 } from '@/lib/purchases';
+import { isBillingAvailable, purchasePro, restorePro } from '@/lib/billing';
 import { useStore } from '@/lib/store';
 
 const FEATURES: { icon: IconName; titleKey: Parameters<typeof t>[0]; textKey: Parameters<typeof t>[0] }[] = [

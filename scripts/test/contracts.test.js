@@ -304,5 +304,56 @@ function ktSources(dir) {
     frozen.slice(0, 4));
 }
 
+
+/* ── billing ──────────────────────────────────────────────────────────
+ *
+ * Nothing here can exercise the store SDK, so these check the things that
+ * are wrong in the SOURCE rather than at runtime — which is where the
+ * expensive mistakes in a billing file live. */
+{
+  const src = read('src/lib/purchases.ts');
+  const sdk = read('src/lib/billing.ts');
+  const home = read('src/app/(tabs)/index.tsx');
+
+  // The entitlement id is a string shared with a dashboard nobody can grep.
+  ok('the entitlement id is named once and exported',
+    /export const ENTITLEMENT_ID = 'pro'/.test(src) &&
+      (src.match(/'pro'/g) || []).length === 1);
+
+  // Entitlement has to be asked for at launch. Without it `pro` is a local
+  // boolean that survives a lapsed subscription, a refund and a cancellation.
+  ok('entitlement is re-checked on launch', /refreshEntitlement\(\)/.test(home));
+
+  // ...and the answer has three states, not two. Treating "could not reach
+  // the store" as "has not paid" locks a paying customer out of their own
+  // ledger the first time they open the app on a plane.
+  ok('a null entitlement leaves the cached flag alone',
+    /entitled !== null/.test(home));
+  ok('refreshEntitlement can return null', /Promise<boolean \| null>/.test(sdk));
+
+  // A secret key in the client is a real incident. Only the public SDK key
+  // belongs in app.json, and only ever empty in the repository.
+  const appJson = JSON.parse(read('app.json'));
+  const extra = appJson.expo.extra || {};
+  for (const k of ['revenueCatAndroidKey', 'revenueCatIosKey']) {
+    ok(`${k} ships empty`, extra[k] === '');
+  }
+  ok('no secret RevenueCat key is committed',
+    !/sk_[A-Za-z0-9]{10}/.test(read('app.json') + src + sdk));
+
+  // Billing must be impossible rather than broken when unconfigured, or the
+  // paywall opens a flow that cannot complete.
+  ok('billing is unavailable without a key', /apiKey\(\) !== null/.test(sdk));
+  ok('billing is unavailable on web', /Platform\.OS !== 'web'/.test(sdk));
+
+  // The prices and the SKUs are what Play Console has to match.
+  const { PRO_SKUS, PRO_PRICES } = require('./build/purchases');
+  ok('both plans have a product id and a price',
+    Object.keys(PRO_SKUS).every((k) => PRO_SKUS[k] && PRO_PRICES[k]?.fils > 0),
+    { PRO_SKUS, PRO_PRICES });
+  ok('the setup doc names the same product ids',
+    Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

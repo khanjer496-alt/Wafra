@@ -1,17 +1,40 @@
 /**
- * Billing abstraction for Wafra Pro.
+ * Billing for Wafra Pro, through RevenueCat.
  *
- * Google Play policy requires digital subscriptions to go through Google Play
- * Billing (react-native-iap). That SDK only functions when the app is
- * installed FROM the Play Store, so on side-load builds purchases are
- * structurally unavailable — the paywall explains this, and the founder
- * unlock (7 taps on the version row in Settings) grants Pro locally.
+ * RevenueCat rather than Play Billing directly, because iOS is coming: the
+ * thing it actually buys is one entitlement that both stores feed, so a
+ * subscriber on Android stays a subscriber when they pick up an iPhone. With
+ * a single store that would not be worth a dependency.
  *
- * At Play submission time: create these product IDs in Play Console →
- * Monetize → Subscriptions, add react-native-iap, and replace the stubs
- * below with real requestSubscription / getAvailablePurchases calls. The
- * UI (src/app/pro.tsx) needs no changes.
+ * The three moving parts, and which of them is the truth:
+ *
+ *   RevenueCat  the ONLY source of entitlement. Asked at launch, so a lapsed,
+ *               refunded or cancelled subscription actually locks again, and
+ *               a reinstall restores without the user hunting for a button.
+ *   state.pro   a cache of that answer, so the app is not blank while the
+ *               network is slow — and, on side-load builds, the founder
+ *               unlock, which is why it is still writable by hand.
+ *   the trial   local and independent of both. Three days from first launch,
+ *               granted before any purchase exists to check.
+ *
+ * Nothing financial ever reaches RevenueCat: it sees a purchase and an
+ * anonymous id, never a transaction, a balance or an SMS. Worth being precise
+ * about, because onboarding promises there is no server.
+ *
+ * The store-facing half lives in billing.ts, which imports the SDK and so
+ * cannot be loaded by the test harness. What is here is the arithmetic — the
+ * trial clock, the prices, the saving — and it is tested.
+ *
+ * SETUP (none of which can be done from here — see docs/billing.md):
+ *   1. RevenueCat project → add the Play app → paste the Play service account.
+ *   2. Create the two subscriptions in Play Console with the SKUs below.
+ *   3. RevenueCat → Entitlements → create `pro`, attach both products.
+ *   4. Put the PUBLIC SDK key in app.json → expo.extra.revenueCatAndroidKey.
+ * Until step 4, isBillingAvailable() is false and the app behaves exactly as
+ * it does today.
  */
+/** The entitlement id configured in RevenueCat. One, for everything Pro. */
+export const ENTITLEMENT_ID = 'pro';
 
 export const PRO_SKUS = {
   monthly: 'wafra_pro_monthly',
@@ -61,21 +84,4 @@ export function isProActive(
   nowMs: number = Date.now(),
 ): boolean {
   return state.pro || trialDaysLeft(state, nowMs) > 0;
-}
-
-/** True once the Play Billing SDK is wired and the app came from the Play Store. */
-export function isBillingAvailable(): boolean {
-  return false;
-}
-
-/** Starts a purchase flow. Resolves true when the entitlement was granted. */
-export async function purchasePro(_plan: ProPlan): Promise<boolean> {
-  // Play flavor: requestSubscription(PRO_SKUS[plan]) → validate → true.
-  return false;
-}
-
-/** Restores a previous purchase. Resolves true when Pro should be granted. */
-export async function restorePro(): Promise<boolean> {
-  // Play flavor: getAvailablePurchases() → check SKUs → true.
-  return false;
 }

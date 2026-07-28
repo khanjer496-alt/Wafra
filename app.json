@@ -61,6 +61,10 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "revenueCatAndroidKey": "",
+      "revenueCatIosKey": ""
     }
   }
 }
