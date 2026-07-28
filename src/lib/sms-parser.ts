@@ -35,14 +35,22 @@ export interface ParsedSms {
   raw: string;
 }
 
-const CREDIT_WORDS = /credit(?:ed)?|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
+/**
+ * The bare word "credit" is a trap in this market: every credit-card alert
+ * contains it, and "Your Mashreq Credit Card ending 1234 has been used for AED
+ * 150.00 at CARREFOUR" has no debit verb at all, so a loose match filed a
+ * card purchase as INCOME. The lookahead lets "credited"/"credit to your
+ * account" through and blocks the noun phrases that name a card or a limit.
+ */
+const CREDIT_WORDS =
+  /credit(?:ed)?(?!\s*(?:card|cards|limit|facility|shield|score))|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
 // DEBIT_WORDS is market-compiled below (its payment guard embeds the currency).
 const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b/i;
 const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
 
 /** Credit-card statement: has "statement"/"total due" language plus a card reference. */
 const STATEMENT_RE =
-  /statement|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+payment\s+of|outstanding\s+(?:amount|balance)\s+of/i;
+  /statement|total\s+(?:amount\s+|payment\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+payment\s+(?:of|due)|outstanding\s+(?:amount|balance)\s+of/i;
 /** Purchase-style verbs that disqualify the statement branch (NOT "paid"). */
 const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
 /** Payment INTO a card: settles dues rather than spending. */
@@ -52,7 +60,15 @@ const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent
 const OTP_RE = /\botp\b|one[\s-]?time\s+(?:password|pin|code)|verification code|auth(?:oris|oriz)ation code|do not share|never share/i;
 /** Pre-auth holds are not postings; the real charge arrives as its own SMS. */
 const PREAUTH_RE = /pre-?auth|amount\s+(?:has been\s+)?blocked|hold\s+(?:of|amount|placed)|temporary\s+hold/i;
-const DECLINED_RE = /declin|unsuccessful|insufficient|reversed|could not be (?:processed|completed)|has failed/i;
+/**
+ * A refusal describes money that never moved. Banks phrase it as a negation
+ * far more often than as the word "declined" — "was not successful", "could
+ * not be completed due to incorrect PIN" — and each of those that slipped
+ * through posted a transaction the user never made, at the full attempted
+ * amount, into a ledger they have stopped checking.
+ */
+const DECLINED_RE =
+  /declin|unsuccessful|insufficient|reversed|reject(?:ed)?|(?:could\s+not|was\s+not|has\s+not|were\s+not|not)\s+(?:be\s+)?(?:process|complet|success|approv|authoris|authoriz|honou?r)\w*|has failed/i;
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
 /**
@@ -94,14 +110,31 @@ function ensureCurrencyPatterns(): void {
   const CUR = m.currency.aliases.join('|');
   AED_AMOUNT_RE = new RegExp(`(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'gi');
   AED_SUFFIX_RE = new RegExp(`([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:${CUR})(?![A-Za-z])`, 'gi');
+  // "Minimum Payment Due is AED 127.00" (ADIB, Emirates Islamic) puts "due"
+  // AFTER "payment"; without that ordering the minimum was lost and every
+  // Islamic-bank statement arrived with no minimum to warn against.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+of)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+due)?(?:\\s+of)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  // The total and its figure are not always adjacent: ADIB writes "the Total
+  // Payment Due on your Covered Card ending 1234 is AED 2,540.00", so the
+  // whole card clause sits between them. The gap is same-line, lazy and
+  // bounded, which keeps it on the nearest figure rather than a balance
+  // further down the message.
   TOTAL_DUE_RE = new RegExp(
-    `total\\s+(?:amount\\s+due|due|billed\\s+am(?:oun)?t)\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `(?:total\\s+(?:amount\\s+|payment\\s+)?due(?:\\s+amount)?|total\\s+billed\\s+am(?:oun)?t)\\b[^\\n]{0,48}?(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   OUTSTANDING_RE = new RegExp(
     `\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  // The card is rarely called just "credit card": ADIB and Emirates Islamic
+  // send "your ADIB Covered Card", ENBD "your Emirates NBD Credit Card", Liv
+  // "your Liv. Credit Card" — hence the optional dot, the brand really is
+  // spelled with one. One optional word between "your" and "card" was not
+  // enough, and every one of those settlements arrived as a plain expense —
+  // counted as spending on top of the purchases it was paying off.
+  //
+  // The "received your payment of ... towards" order is ENBD's, and it is the
+  // mirror image of the first alternative rather than a variant of it.
   CARD_PAYMENT_RE = new RegExp(
-    `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\s+)?(?:credit\\s+)?card|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?credit\\s+card|received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card|thank you for (?:your )?payment.*card|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`, 'i');
+    `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\.?\\s+){0,3}card|received\\s+your\\s+payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+(?:towards?|against|for|on)\\s+(?:your\\s+)?(?:\\w+\\.?\\s+){0,3}card|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?(?:\\w+\\.?\\s+){0,3}card|received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card|thank you for (?:your )?payment.*card|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`, 'i');
   // "Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit
   // Card ending with 4110." The payee sits BEFORE the amount with none of the
   // prepositions MERCHANT_RE looks for, so every message in this format
@@ -109,8 +142,16 @@ function ensureCurrencyPatterns(): void {
   // rows that could never group into a merchant or a subscription.
   PAYMENT_FOR_RE = new RegExp(
     `payment\\s+for\\s+([A-Za-z0-9][^\\n]{1,48}?)\\s+of\\s+(?:${CUR})\\s*[\\d,]`, 'i');
+  // "has been used for" is the ADIB / Mashreq / Emirates Islamic phrasing and
+  // it carries no other debit verb, so a rule that only knew "was used" left
+  // those purchases with nothing to mark them as money going out: the Mashreq
+  // one became income, the ADIB one was dropped entirely.
+  //
+  // The bare "used for/at" form is deliberately anchored to a figure. Card
+  // marketing says "can be used at all ATMs", and treating that as a debit
+  // would invent a transaction out of a fee quoted in the same sentence.
   DEBIT_WORDS = new RegExp(
-    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|was used|charged`, 'i');
+    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|(?:was|been|is)\\s+used|used\\s+(?:for|at)\\s+(?:${CUR}|[\\d·•])|charged`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
   FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // Same line only. "Card No XXXX4777 \n USD .00" used to read the card's last
@@ -165,10 +206,21 @@ function extractForeignAmountFils(raw: string): number | null {
 const MAX_PLAUSIBLE_AMOUNT_FILS = 100_000_000;
 const BALANCE_PREFIX_RE = /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total)\s*(?:is|:|\.|-)?\s*$/i;
 
-/** Card identity: "Credit Card ending 1234", "Debit Card ..5678", "a/c XX9012", "card no. *1234". */
-const CARD_RE = /(credit|debit)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+)?\s*(\d{4})\b/i;
+/**
+ * Card identity: "Credit Card ending 1234", "Debit Card ..5678", "a/c XX9012",
+ * "card no. *1234", "Wio card •••• 1234".
+ *
+ * "Covered Card" is what the Islamic banks call a credit card — ADIB,
+ * Emirates Islamic and Sharjah Islamic all use it, and there is no such thing
+ * as a covered DEBIT card. Reading them as debit cards attached a whole card
+ * portfolio to the wrong account kind, which is also what decides whether
+ * "Avl Bal" means money or borrowing headroom.
+ */
+const CARD_RE =
+  /(credit|debit|covered)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+// "Acc XXX7720" is ADCB's spelling and it matched none of a/c, ac or account.
 const ACCOUNT_RE =
-  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+in)?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+  /\ba\/?c(?:c|count)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
 /** Fully masked PAN like "4782********4833" — the LAST four digits identify the card. */
 const MASKED_PAN_RE = /\b\d{4,6}[Xx*•]{2,}(\d{4})\b/;
 
@@ -196,7 +248,11 @@ const MERCHANT_RE = new RegExp(
  */
 const TERMINAL_ID_RE = /[-\s]+(?:[·•X]{2,}\d*|\d{4,})$/i;
 
-const DATE_RE = /\b(?:on|by|before|is)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
+// "Payment due date 05/08/2026" and "Due Date: 15/08/2026" carry no
+// preposition at all. Four of the eight banks write their statement due date
+// that way, and losing it left a card statement with no dueDay — the one
+// field the dues screen exists to show.
+const DATE_RE = /\b(?:on|by|before|is|dated|due(?:\s+date)?)[\s:]+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
 // "03/07/26 05:53" — a bare date WITH a time is the transaction timestamp and
 // beats any "statement due on <date>" footer later in the message.
 const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
@@ -321,6 +377,15 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // fall through every other rule into "other". These three phrasings are
   // specific to standing debt instructions, not to utility direct debits.
   [/\bDD\s+instal?lments?\b|\bDDR\s+Reference\b|Direct\s+Debit\s+Service\s+Instructions?|\b(?:loan|finance|emi)\s+instal?lment\b|\b(?:car|auto|vehicle|home|personal|mortgage)\s+(?:loan|finance)\b|\bloan\s+(?:repayment|account|a\/c)\b|\binstal?lment\s+(?:due|paid|debited)\b/i, 'loan'],
+  // Islamic finance names the CONTRACT where a conventional bank names the
+  // loan, so none of the words above appear on an ADIB, DIB, Emirates Islamic
+  // or Sharjah Islamic debt instruction. These are the contracts themselves —
+  // murabaha is cost-plus sale, ijara is lease, tawarruq is the cash variant —
+  // and a payment against one is debt servicing, not "other".
+  [/\bmurabaha?h?\b|\bijara(?:h|ah)?\b|\btawarruq\b|\bmusharaka?h?\b|\bmudaraba?h?\b|\bqard\s+hasan\b|islamic\s+(?:finance|financing)/i, 'loan'],
+  // Takaful is Islamic insurance: cooperative contributions, not a loan and
+  // not a purchase. It sits with insurance, which this app files as health.
+  [/\btakaful\b/i, 'health'],
   // UAE merchants read off a real 300-message accuracy report. Acquirers
   // truncate the descriptor to 20-22 characters, so several of these
   // deliberately match the stub the bank sends ("CATERIN", "GOVERNMEN",
@@ -522,6 +587,11 @@ export const STRUCTURAL_TITLES = new Set([
   'Account debit',
   'Telegraphic transfer',
   'Outward remittance',
+  'Finance instalment',
+  'Profit credit',
+  'Interest credit',
+  'Savings transfer',
+  'Own account transfer',
 ]);
 
 /** Clean descriptor noise and map to a canonical service name when known. */
@@ -680,7 +750,9 @@ function extractCard(raw: string): ParsedCard | null {
     // "Card No XXXX4711" further down — when the number clause carries no
     // kind word, look at the whole message before assuming debit.
     const kind =
-      kindWord === 'credit' || (!kindWord && /credit\s+card/i.test(raw))
+      kindWord === 'credit' ||
+      kindWord === 'covered' ||
+      (!kindWord && /credit\s+card|covered\s+card/i.test(raw))
         ? 'credit'
         : 'debit';
     return { last4: cardMatch[2], kind };
@@ -694,8 +766,49 @@ const MONTH_NAMES: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
+/**
+ * A month name in full or abbreviated, and nothing else.
+ *
+ * Matching on the first three letters alone is what makes a date rule
+ * dangerous: MARINA, MARKET, JUNCTION and DECOR all open with a month, and
+ * "12 MARINA 2026" in a descriptor would otherwise have booked a transaction
+ * into March.
+ */
+const MONTH_WORD_RE =
+  /^(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)$/i;
+function monthFromWord(word: string): number | null {
+  if (!MONTH_WORD_RE.test(word)) return null;
+  return MONTH_NAMES[word.slice(0, 3).toLowerCase()] ?? null;
+}
 // ADCB style: "due by Jul 19 2026"
 const MONTH_DATE_RE = /\b(?:on|by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+/**
+ * Day-first named month: "12-Jul-26" (RAKBANK), "07-Jan-22" (SEWA),
+ * "24JUN25" (HSBC), "25 July 2026".
+ *
+ * Scanned as a stream rather than a single match because the shape also fits
+ * things that are not dates at all — "Zone 393K-24Hrs" — and the month name is
+ * the only thing that tells them apart. Taking the first shape-match and
+ * giving up would let a zone code hide the real date behind it.
+ */
+const MONTH_DASH_RE = /\b(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})\b/g;
+/**
+ * The date a bill is DUE, as opposed to the date it was issued.
+ *
+ * A bill names both — "billed on 07-Jan-22. Please pay by 22-Jan-22" — and
+ * reading them left to right takes the issue date, which is the one date on
+ * the message that is of no use: the whole point of a due reminder is the
+ * day the money has to be there by, and a due day fifteen days early sends
+ * the reminder while the bill is still fresh and files it as settled after.
+ *
+ * Only consulted for messages that ARE about a due. A purchase that happens
+ * to carry a statement footer keeps its own transaction date.
+ */
+const DUE_PREFIX = String.raw`\b(?:pay(?:ment)?\s+(?:by|before|on)|due\s+(?:by|on)|due\s+date)[\s:]*`;
+const DUE_NUMERIC_RE = new RegExp(
+  DUE_PREFIX + String.raw`(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})`, 'i');
+const DUE_NAMED_RE = new RegExp(
+  DUE_PREFIX + String.raw`(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})\b`, 'i');
 
 /**
  * ISO string for a date that actually exists. A day past the end of its month
@@ -721,13 +834,27 @@ function numericDate(d: string, m: string, yRaw: string): string | null {
   return isoDate(y, second, first) ?? isoDate(y, first, second);
 }
 
-function extractDate(raw: string): string | null {
+function extractDate(raw: string, preferDue = false): string | null {
   // Each format falls through to the next: a numeric date that matched but
   // could not be resolved must not stop the named-month form from being read.
   const withTime = raw.match(DATETIME_RE);
   if (withTime) {
     const iso = numericDate(withTime[1], withTime[2], withTime[3]);
     if (iso) return iso;
+  }
+  if (preferDue) {
+    const dueNum = raw.match(DUE_NUMERIC_RE);
+    if (dueNum) {
+      const iso = numericDate(dueNum[1], dueNum[2], dueNum[3]);
+      if (iso) return iso;
+    }
+    const dueNamed = raw.match(DUE_NAMED_RE);
+    if (dueNamed) {
+      const month = monthFromWord(dueNamed[2]);
+      const year = dueNamed[3].length === 2 ? 2000 + Number(dueNamed[3]) : Number(dueNamed[3]);
+      const iso = month ? isoDate(year, month, Number(dueNamed[1])) : null;
+      if (iso) return iso;
+    }
   }
   const numeric = raw.match(DATE_RE);
   if (numeric) {
@@ -736,11 +863,19 @@ function extractDate(raw: string): string | null {
   }
   const named = raw.match(MONTH_DATE_RE);
   if (named) {
-    const month = MONTH_NAMES[named[1].slice(0, 3).toLowerCase()];
+    const month = monthFromWord(named[1]);
     if (month) {
       const iso = isoDate(Number(named[3]), month, Number(named[2]));
       if (iso) return iso;
     }
+  }
+  MONTH_DASH_RE.lastIndex = 0;
+  for (const m of raw.matchAll(MONTH_DASH_RE)) {
+    const month = monthFromWord(m[2]);
+    if (!month) continue;
+    const year = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    const iso = isoDate(year, month, Number(m[1]));
+    if (iso) return iso;
   }
   return null;
 }
@@ -811,7 +946,13 @@ export function parseSms(
   }
 
   const card = extractCard(raw);
-  const date = extractDate(raw);
+  // A message ABOUT a due reports its due date; a purchase that merely carries
+  // a statement footer reports the purchase's own date. The purchase verbs are
+  // what separates the two, exactly as they do for the statement branch below.
+  const date = extractDate(
+    raw,
+    (BILL_DUE_WORDS.test(raw) || STATEMENT_RE.test(raw)) && !STATEMENT_TXN_BLOCK_RE.test(raw),
+  );
   const snapshot = extractSnapshot(raw);
   const snapshotFils = snapshot?.fils ?? null;
   let snapshotKind = snapshot?.kind ?? null;
@@ -1147,16 +1288,42 @@ export function parseSms(
   }
 
   // "debited ... for SALIK on", "sent to Dubai Islamic Bank as per your
-  // Direct Debit instructions" — payee named after "for" / "sent to".
+  // Direct Debit instructions", "debited from your account XXX4502 towards
+  // DEWA bill payment" — payee named after "for" / "sent to" / "towards".
+  //
+  // "towards" is how ENBD, Mashreq and ADIB word a direct debit, and without
+  // it every utility DD on those banks was titled "Account debit" — a row
+  // that can never group, never build a bill, and never learn a category.
   if (!merchant && !isBillDue && type === 'expense' && !transferHint) {
     const payeeRe =
-      /\b(?:for|sent\s+to)\s+([A-Za-z][A-Za-z &.'\-]{2,40}?)\s*(?:[.,;]|\bon\b|\bas\s+per\b|\bthrough\b|$)/gi;
+      /\b(?:for|sent\s+to|towards?)\s+([A-Za-z][A-Za-z &.'\-]{2,40}?)\s*(?:[.,;]|\bon\b|\bas\s+per\b|\bthrough\b|$)/gi;
     for (const m of raw.matchAll(payeeRe)) {
       const candidate = m[1].trim();
       if (/^(?:aed|dhs|sar|usd|eur|gbp|your|the|payment|consumer|exact|pay\b|using|below)/i.test(candidate)) continue;
+      // A transfer rail is not a payee, and neither is what the bank is
+      // charging you for: "towards instant transfer" names a mechanism and
+      // "towards annual membership fee" names a fee. The structural titles
+      // further down ("Outgoing transfer", "Bank fee") say both better than a
+      // title-cased fragment of the sentence does.
+      if (
+        /^(?:instant|local|domestic|international|fund|funds|telegraphic|outward|inward|mobile|own|self|savings?|cash|settlement|card|credit\s+card|salary|profit|annual|monthly|service|processing|late|fee|fees|charge|charges|vat|value\s+added)\b/i.test(
+          candidate,
+        )
+      ) {
+        continue;
+      }
       if ((candidate.match(/[A-Za-z]/g) ?? []).length < 3) continue;
-      merchant = candidate.replace(/\s+(?:PJSC|LLC|PSC|FZE)$/i, '').trim();
-      break;
+      merchant = candidate
+        .replace(/\s+(?:PJSC|LLC|PSC|FZE)$/i, '')
+        // "DEWA bill payment", "DU MONTHLY BILL" — the biller is the payee;
+        // the rest is the bank describing what kind of debit this was.
+        .replace(/(?:\s+(?:monthly|bill|bills|payment|instal?ments?|contribution))+$/i, '')
+        .trim();
+      // "DU MONTHLY BILL" strips down to "DU", and du is a real telco: the
+      // floor here is lower than the one on the raw candidate because what is
+      // left after the strip is the biller's own name.
+      if ((merchant.match(/[A-Za-z]/g) ?? []).length < 2) merchant = '';
+      if (merchant) break;
     }
   }
   if (!merchant) {
@@ -1169,15 +1336,29 @@ export function parseSms(
     merchant = service ?? (isBillDue
       ? 'Bill payment'
       : type === 'income'
-        ? /\brefund(?:ed)?\b/i.test(raw)
+        // A reversal lands back on the card exactly like a refund, and the
+        // bank word for it changes by bank, not by what happened.
+        ? /\brefund(?:ed)?\b|\breversal\b/i.test(raw)
           ? 'Refund'
+          // Islamic banks pay PROFIT where a conventional one pays interest.
+          // Both are the bank's own credit, not income from anyone, and a row
+          // titled "Incoming transfer" hid that distinction completely.
+          : /\bprofit\b/i.test(raw)
+          ? 'Profit credit'
+          : /\binterest\b/i.test(raw)
+          ? 'Interest credit'
           : DEPOSIT_RE.test(raw)
           ? 'Cash deposit'
           : /inward\s+remittance/i.test(raw)
             ? 'Inward remittance'
             : 'Incoming transfer'
         : transferHint
-          ? 'Card payment'
+          // Moving money between your own accounts is not a card settlement,
+          // and titling it "Card payment" invented a card that was never in
+          // the message.
+          ? /own\s+account|self\s+transfer/i.test(raw)
+            ? 'Own account transfer'
+            : 'Card payment'
           : ATM_RE.test(raw)
             ? 'ATM withdrawal'
             : /cheque|\bchq\b/i.test(raw)
@@ -1188,6 +1369,12 @@ export function parseSms(
                   ? 'Bank fee'
                   : /instant\s+transfer|local\s+transfer|social\s+transfer/i.test(raw)
                     ? 'Outgoing transfer'
+                    // A financing instalment names no payee — "your monthly
+                    // Murabaha instalment of AED 3,150.00 has been debited" —
+                    // but the message says exactly what it is, and the row is
+                    // debt servicing rather than an anonymous account debit.
+                    : /\binstal?ment\b/i.test(raw)
+                      ? 'Finance instalment'
                     // No card in the message means no card purchase: "An amount
                     // of AED 118.04 has been debited from your FAB account
                     // XXXX0002" names no payee at all, and saying "Card
@@ -1219,8 +1406,10 @@ export function parseSms(
       titleCase((unprefixed || deUrled || merchant).replace(/[\s,;.*-]+$/, ''));
   }
   // ATM messages usually name a location; the row is still a cash withdrawal.
+  let isCashWithdrawal = false;
   if (!isBillDue && type === 'expense' && !transferHint && ATM_RE.test(raw)) {
     merchant = 'ATM withdrawal';
+    isCashWithdrawal = true;
   }
   // A transfer the bank never gave a payee for is money moving between your
   // own places, not spending. The bank sends BOTH legs of a card settlement —
@@ -1251,7 +1440,12 @@ export function parseSms(
     transferHint,
     snapshotFils,
     snapshotKind,
-    categoryGuess: guessCategory(raw, type, overrides, merchant),
+    // Cash out of an ATM is not spending on anything yet, and the machine's
+    // location is not a merchant: "EMIRATES NBD ATM DEIRA CITY CENTRE" was
+    // being read as a shopping centre and "MASHREQ ATM BURJUMAN" as a mall.
+    // Whatever the cash gets spent on, the withdrawal itself has no category.
+    // The empty text still lets a user's own correction for this title win.
+    categoryGuess: guessCategory(isCashWithdrawal ? '' : raw, type, overrides, merchant),
     raw,
   };
 }

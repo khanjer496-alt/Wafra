@@ -1,0 +1,219 @@
+These are RECONSTRUCTIONS, not captures.
+
+uae-accuracy-report.txt beside this file is real text off a real phone. This
+file is not: it is one message per bank per kind, written in each bank's
+register from the formats that ARE in the real corpus, plus the conventions
+those banks are known to use — ADCB's abbreviations, RAKBANK's DD-MMM-YY
+dates, ADIB's Covered Card and profit wording, Wio's bullet-masked tails.
+
+Treat a message here as a hypothesis about a format, not as evidence of one.
+When a real message from one of these banks turns up, it belongs in a real
+corpus file and the guess here should be replaced by it. Every message below
+is asserted individually in parser.test.js.
+
+#1 (seen 1x):
+Cash Withdrawal of AED 1,500.00 with Debit Card ending 4502 at EMIRATES NBD ATM DEIRA CITY CENTRE, DUBAI. Avl Balance is AED 12,847.31.
+
+#2 (seen 1x):
+Dear Customer, AED 18,500.00 has been credited to your a/c XXX4502 on 25-07-2026 being SALARY FOR JUL 2026. Avl Bal is AED 21,347.31.
+
+#3 (seen 1x):
+Your Emirates NBD Credit Card ending 4844 statement is ready. Total Amount Due AED 3,240.55 and Minimum Amount Due AED 162.05. Payment due date 05/08/2026. Pls ignore if already paid.
+
+#4 (seen 1x):
+Thank you. We have received your payment of AED 3,240.55 towards your Credit Card ending 4844 on 03/08/2026. Avl Cr. Limit is AED 17,911.85
+
+#5 (seen 1x):
+Your Emirates NBD account XXX4502 balance as of 27/07/2026 is AED 12,847.31.
+
+#6 (seen 1x):
+Your purchase of AED 1,200.00 at SHARAF DG on Credit Card ending 4844 has been declined. Avl Cr. Limit is AED 300.00
+
+#7 (seen 1x):
+Your Credit Card ending 4844 was used for USD 49.99 (AED 183.55) at ADOBE INC on 12/07/2026. Avl Cr. Limit is AED 11,204.90
+
+#8 (seen 1x):
+AED 1,242.60 has been debited from your account XXX4502 towards DEWA bill payment on 05/07/2026 as per your Direct Debit instructions. Avl Bal is AED 9,300.10
+
+#9 (seen 1x):
+AED 500.00 withdrawn from Acc XXX7720 at ADCB ATM MARINA MALL on 11-02-2025 09:03:37. Avl.Bal is AED 2,508.31
+
+#10 (seen 1x):
+AED 20,150.00 credited to Acc XXX7720 on 25-07-2026 09:14:02 through SALARY. Avl.Bal is AED 24,918.62
+
+#11 (seen 1x):
+Your ADCB Card XXX7720 was used for AED 132.75 at LULU HYPERMARKET on 19-07-2026 18:04:11. Avl.Bal is AED 6,292.43
+
+#12 (seen 1x):
+Transaction of AED 250.00 on Card XXX7720 at LULU was not successful. Please contact us.
+
+#13 (seen 1x):
+A reversal of AED 250.00 has been credited to your Credit Card XXX7720 on 20-07-2026. Avl.Limit is AED 12,000.00
+
+#14 (seen 1x):
+AED 402.30 (USD 109.55) spent on Card XXX7720 at AMAZON.COM on 19-07-2026 18:04:11. Avl.Bal is AED 5,890.13
+
+#15 (seen 1x):
+Cash Withdrawal
+Account XXXX0002
+AED 1000.00
+FAB ATM AL WAHDA MALL AUH ARE
+12/07/26 19:22
+Available Balance AED 4877.51
+
+#16 (seen 1x):
+An amount of AED 22,000.00 has been credited to your FAB account XXXX0002 on 25/07/2026 being Salary .Your balance is AED 26,877.51
+
+#17 (seen 1x):
+Dear Customer, your payment of AED 8,144.40 has been received towards your FAB Credit Card ending with 4833 on 06/07/2026. Thank you.
+
+#18 (seen 1x):
+Credit Card Statement
+Card No XXXX4711
+Total Amount Due AED 3,120.45
+Minimum Amount Due AED 156.02
+Payment Due Date 26/07/2026
+
+#19 (seen 1x):
+Dear Customer, your transaction of AED 500.00 on FAB Credit Card ending 4711 was declined due to insufficient available limit.
+
+#20 (seen 1x):
+Dear Customer, the available balance in your FAB Account XXXX0002 is AED 4,877.51 as on 27/07/2026.
+
+#21 (seen 1x):
+Your Mashreq Credit Card ending 1234 has been used for AED 150.00 at CARREFOUR MOE, DUBAI on 12/07/2026. Available Limit is AED 20,000.00
+
+#22 (seen 1x):
+AED 15,000.00 has been credited to your Mashreq Account XXX1234 as Salary on 25/07/2026. Avl Bal AED 18,240.11
+
+#23 (seen 1x):
+Your Mashreq Credit Card ending 1234 statement for Jul 2026 is ready. Total Amount Due is AED 4,500.00 and Minimum Amount Due is AED 225.00. Due date 15/08/2026.
+
+#24 (seen 1x):
+Thank you for your payment of AED 4,500.00 towards your Mashreq Credit Card ending 1234 on 14/08/2026.
+
+#25 (seen 1x):
+AED 1,000.00 has been withdrawn from your Mashreq Account XXX1234 at MASHREQ ATM BURJUMAN on 12/07/2026. Avl Bal AED 6,110.00
+
+#26 (seen 1x):
+AED 250.00 has been debited from your account XX1234 towards DU MONTHLY BILL on 18/07/2026
+
+#27 (seen 1x):
+AED 62.00 has been spent on your Mashreq Neo Debit Card ending 5566 at TIM HORTONS DUBAI on 12/07/2026. Avl Bal AED 1,240.00
+
+#28 (seen 1x):
+Your Mashreq Credit Card ending 1234 has been used for USD 30.00 (AED 110.18) at SPOTIFY on 12/07/2026.
+
+#29 (seen 1x):
+Your ADIB Covered Card XXX1234 has been used for AED 250.00 at LULU HYPERMARKET, ABU DHABI on 12/07/2026. Available Balance AED 8,000.00
+
+#30 (seen 1x):
+Profit of AED 125.40 has been credited to your ADIB Ghina Savings Account XXX1234 on 30/06/2026. Avl Bal AED 45,125.40
+
+#31 (seen 1x):
+Your monthly Murabaha instalment of AED 3,150.00 has been debited from your ADIB Account XXX1234 on 05/07/2026. Avl Bal AED 12,000.00
+
+#32 (seen 1x):
+Your Ijara instalment of AED 5,400.00 has been debited from your ADIB Account XXX1234 on 05/07/2026 towards Home Finance. Avl Bal AED 20,000.00
+
+#33 (seen 1x):
+Dear Customer, the Total Payment Due on your ADIB Covered Card ending 1234 is AED 2,540.00 and the Minimum Payment Due is AED 127.00. Payment due date 10/08/2026. Pls ignore if already paid.
+
+#34 (seen 1x):
+Your payment of AED 2,540.00 has been received towards your ADIB Covered Card ending 1234. Thank you.
+
+#35 (seen 1x):
+Cash Withdrawal of AED 1,000.00 from ADIB ATM AL WAHDA, ABU DHABI using Card ending 1234 on 12/07/2026. Avl Bal AED 5,000.00
+
+#36 (seen 1x):
+AED 780.00 has been debited from your ADIB Account XXX1234 towards Takaful contribution on 01/07/2026.
+
+#37 (seen 1x):
+AED 500.00 cash withdrawal at ADIB ATM using Card ending 1234 was not completed due to incorrect PIN.
+
+#38 (seen 1x):
+Your ADIB Covered Card XXX1234 has been used for USD 25.00 (AED 91.81) at NETFLIX.COM on 12/07/2026.
+
+#39 (seen 1x):
+Dear Customer, the available balance of your ADIB Account XXX1234 is AED 5,200.00.
+
+#40 (seen 1x):
+Dear Customer, AED 250.00 was spent using your RAKBANK Debit Card XXXX1234 at CARREFOUR CITY CENTRE on 12-Jul-26. Avl Bal: AED 3,000.00
+
+#41 (seen 1x):
+AED 1,000.00 was withdrawn using your RAKBANK Debit Card XXXX1234 at RAKBANK ATM AL NAKHEEL on 12-Jul-26. Avl Bal: AED 2,000.00
+
+#42 (seen 1x):
+Your salary of AED 12,000.00 has been credited to your RAKBANK Account XXXX1234 on 25-Jul-26. Avl Bal: AED 14,300.55
+
+#43 (seen 1x):
+Your RAKBANK Credit Card XXXX1234 statement is generated. Total Amount Due AED 1,842.30, Minimum Amount Due AED 92.12. Payment due by 08-Aug-26.
+
+#44 (seen 1x):
+AED 542.30 has been debited from your RAKBANK Account XXXX1234 towards ETISALAT bill on 12-Jul-26 as per your standing instruction. Avl Bal: AED 2,000.00
+
+#45 (seen 1x):
+Dear Customer, we have received your payment of AED 1,842.30 towards your RAKBANK Credit Card XXXX1234 on 07-Aug-26. Thank you.
+
+#46 (seen 1x):
+Your transaction of AED 350.00 at CARREFOUR using RAKBANK Debit Card XXXX1234 was declined due to insufficient balance.
+
+#47 (seen 1x):
+AED 91.81 (USD 25.00) was spent using your RAKBANK Credit Card XXXX1234 at NETFLIX.COM on 12-Jul-26. Avl Cr. Limit: AED 8,000.00
+
+#48 (seen 1x):
+Your Liv. Credit Card ending 1354 statement is ready. Total Amount Due AED 890.55 and Minimum Amount Due AED 100.00. Payment due date 12/08/2026.
+
+#49 (seen 1x):
+AED 16,000.00 has been credited to your Liv account ending 1354 on 25/07/2026 being Salary. The available balance is AED 18,220.00.
+
+#50 (seen 1x):
+We have received your payment of AED 890.55 towards your Liv. Credit Card ending 1354 on 11/08/2026.
+
+#51 (seen 1x):
+Purchase of USD 12.00 (AED 44.07) with Debit Card ending 1354 at SPOTIFY on 12/07/2026. Avl Bal is AED 900.00. Most Liv. users pay with their debit card.
+
+#52 (seen 1x):
+Purchase of AED 300.00 with Debit Card ending 1354 at CARREFOUR was declined due to insufficient balance.
+
+#53 (seen 1x):
+Your Liv account ending 1354 balance is AED 900.00 as of 27/07/2026.
+
+#54 (seen 1x):
+AED 45.00 spent at CARREFOUR MARKET using your Wio card •••• 1234 on 12/07/2026. Available balance AED 4,500.00
+
+#55 (seen 1x):
+You've spent AED 120.50 at TALABAT with your Wio Personal card ending 1234. Avl Bal AED 3,120.00
+
+#56 (seen 1x):
+AED 17,500.00 has been credited to your Wio Personal account ending 1234 on 25/07/2026 as Salary. Available balance AED 20,000.00
+
+#57 (seen 1x):
+Your Wio credit card ending 1234 statement is ready. Total amount due is AED 2,340.00. Minimum amount due is AED 117.00. Due by 18/08/2026.
+
+#58 (seen 1x):
+AED 1,200.00 has been debited from your Wio account ending 1234 towards DEWA on 05/07/2026. Available balance AED 3,000.00
+
+#59 (seen 1x):
+AED 800.00 withdrawn at ATM using your Wio card •••• 1234 on 12/07/2026. Available balance AED 2,300.00
+
+#60 (seen 1x):
+Your payment of AED 2,340.00 has been received towards your Wio credit card ending 1234. Thank you.
+
+#61 (seen 1x):
+Your payment of AED 260.00 at NOON.COM using your Wio card •••• 1234 was declined.
+
+#62 (seen 1x):
+AED 183.55 (USD 49.99) spent at ADOBE INC using your Wio card •••• 1234 on 12/07/2026. Available balance AED 1,900.00
+
+#63 (seen 1x):
+Your Emirates Islamic Covered Card ending 3021 has been used for AED 410.00 at CARREFOUR MOE, DUBAI on 12/07/2026. Available Balance AED 9,000.00
+
+#64 (seen 1x):
+Profit of AED 320.15 has been credited to your Sharjah Islamic Bank Savings Account XXX4410 for the month of Jun 2026.
+
+#65 (seen 1x):
+Your DIB Covered Card ending 8890 statement is generated. Total Payment Due AED 1,200.00. Minimum Payment Due AED 60.00. Payment Due Date 15/08/2026.
+
+#66 (seen 1x):
+Your Tawarruq finance instalment of AED 2,100.00 has been debited from your account XXX4410 on 05/07/2026.

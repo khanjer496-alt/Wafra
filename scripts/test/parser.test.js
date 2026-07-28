@@ -16,6 +16,15 @@ function t(name, msg, expect) {
       if (expect.category !== undefined && p.categoryGuess !== expect.category) errs.push(`cat ${p.categoryGuess} != ${expect.category}`);
       if (expect.date !== undefined && p.date !== expect.date) errs.push(`date ${p.date} != ${expect.date}`);
       if (expect.transfer !== undefined && p.transferHint !== expect.transfer) errs.push(`transfer ${p.transferHint} != ${expect.transfer}`);
+      // The card tail decides which account a row lands in and the kind
+      // decides whether "Avl Bal" is money or borrowing headroom, so both are
+      // assertable per message rather than only in the hand-written blocks.
+      if (expect.card !== undefined && (p.card ? p.card.last4 : null) !== expect.card) errs.push(`card ${p.card ? p.card.last4 : null} != ${expect.card}`);
+      if (expect.cardKind !== undefined && (p.card ? p.card.kind : null) !== expect.cardKind) errs.push(`cardKind ${p.card ? p.card.kind : null} != ${expect.cardKind}`);
+      if (expect.minDue !== undefined && p.minDueFils !== expect.minDue) errs.push(`minDue ${p.minDueFils} != ${expect.minDue}`);
+      if (expect.dueDay !== undefined && p.dueDay !== expect.dueDay) errs.push(`dueDay ${p.dueDay} != ${expect.dueDay}`);
+      if (expect.snapshot !== undefined && p.snapshotFils !== expect.snapshot) errs.push(`snapshot ${p.snapshotFils} != ${expect.snapshot}`);
+      if (expect.snapshotKind !== undefined && p.snapshotKind !== expect.snapshotKind) errs.push(`snapshotKind ${p.snapshotKind} != ${expect.snapshotKind}`);
     }
   }
   if (errs.length) { fail++; console.log(`✗ ${name}\n    ${errs.join('\n    ')}`); }
@@ -1065,6 +1074,359 @@ t('Lime scooters are transport under any of their three descriptors',
 t('a masked amount is still refused, not guessed',
   'Your Credit Card ending *** 6383 was used for AED ····0710.00 at MSPLUS DOCUMENTS CL.... Your available limit is AED 3019.69',
   null);
+
+// ── Bank-by-bank dialect coverage ────────────────────────────────────────
+//
+// Eight banks, ten message kinds each. Written per bank because the dialects
+// differ in exactly the places the app reads: ADCB abbreviates ("Acc",
+// "Avl.Bal"), RAKBANK dates as "12-Jul-26", ADIB calls a credit card a
+// Covered Card and pays profit rather than interest, Wio masks the tail with
+// bullets, and four of the eight put the statement due date behind no
+// preposition at all.
+//
+// These are reconstructions of each bank's register, not captures from a
+// phone — see scripts/test/fixtures/uae-bank-dialects.txt for the same set as
+// a corpus file and for what that means. The formats above this line, by
+// contrast, all came off real devices.
+
+// ── Emirates NBD ──
+// "Purchase of X with <kind> Card ending NNNN at MERCHANT, EMIRATE." plus an
+// "Avl Cr. Limit" or "Avl Balance" tail. Liv. runs on the same engine.
+t('ENBD cash withdrawal is uncategorised, not the mall it stands in',
+  'Cash Withdrawal of AED 1,500.00 with Debit Card ending 4502 at EMIRATES NBD ATM DEIRA CITY CENTRE, DUBAI. Avl Balance is AED 12,847.31.',
+  { merchant: 'ATM withdrawal', amountFils: 150000, category: 'other', card: '4502', cardKind: 'debit',
+    snapshot: 1284731, snapshotKind: 'balance' });
+
+t('ENBD salary credit',
+  'Dear Customer, AED 18,500.00 has been credited to your a/c XXX4502 on 25-07-2026 being SALARY FOR JUL 2026. Avl Bal is AED 21,347.31.',
+  { type: 'income', amountFils: 1850000, category: 'salary', date: '2026-07-25', card: '4502', cardKind: 'account' });
+
+t('ENBD statement keeps its due date behind a bare "Payment due date"',
+  'Your Emirates NBD Credit Card ending 4844 statement is ready. Total Amount Due AED 3,240.55 and Minimum Amount Due AED 162.05. Payment due date 05/08/2026. Pls ignore if already paid.',
+  { kind: 'cardStatement', amountFils: 324055, minDue: 16205, date: '2026-08-05', dueDay: 5,
+    card: '4844', cardKind: 'credit' });
+
+t('ENBD card payment received is a transfer, not spending',
+  'Thank you. We have received your payment of AED 3,240.55 towards your Credit Card ending 4844 on 03/08/2026. Avl Cr. Limit is AED 17,911.85',
+  { kind: 'cardPayment', amountFils: 324055, transfer: true, card: '4844', cardKind: 'credit',
+    snapshot: 1791185, snapshotKind: 'limit' });
+
+t('ENBD balance enquiry is not a transaction',
+  'Your Emirates NBD account XXX4502 balance as of 27/07/2026 is AED 12,847.31.',
+  null);
+
+t('ENBD decline is not a transaction',
+  'Your purchase of AED 1,200.00 at SHARAF DG on Credit Card ending 4844 has been declined. Avl Cr. Limit is AED 300.00',
+  null);
+
+t('ENBD foreign purchase settles in AED',
+  'Your Credit Card ending 4844 was used for USD 49.99 (AED 183.55) at ADOBE INC on 12/07/2026. Avl Cr. Limit is AED 11,204.90',
+  { merchant: 'Adobe', amountFils: 18355, date: '2026-07-12', card: '4844', cardKind: 'credit' });
+
+t('ENBD direct debit names the biller, not "Account debit"',
+  'AED 1,242.60 has been debited from your account XXX4502 towards DEWA bill payment on 05/07/2026 as per your Direct Debit instructions. Avl Bal is AED 9,300.10',
+  { merchant: 'DEWA', amountFils: 124260, category: 'utilities', type: 'expense', date: '2026-07-05' });
+
+// ── ADCB ──
+// Heavily abbreviated: "Acc", "Cr.Card", "Avl.Bal", "Avl.Limit", and a
+// timestamped DD-MM-YYYY date.
+t('ADCB "Acc XXX7720" is an account, not an unidentified row',
+  'AED 500.00 withdrawn from Acc XXX7720 at ADCB ATM MARINA MALL on 11-02-2025 09:03:37. Avl.Bal is AED 2,508.31',
+  { merchant: 'ATM withdrawal', amountFils: 50000, category: 'other', card: '7720', cardKind: 'account',
+    date: '2025-02-11' });
+
+t('ADCB salary credit',
+  'AED 20,150.00 credited to Acc XXX7720 on 25-07-2026 09:14:02 through SALARY. Avl.Bal is AED 24,918.62',
+  { type: 'income', amountFils: 2015000, category: 'salary', date: '2026-07-25', card: '7720' });
+
+t('ADCB card purchase',
+  'Your ADCB Card XXX7720 was used for AED 132.75 at LULU HYPERMARKET on 19-07-2026 18:04:11. Avl.Bal is AED 6,292.43',
+  { merchant: 'Lulu Hypermarket', amountFils: 13275, category: 'groceries', type: 'expense', date: '2026-07-19' });
+
+t('ADCB "was not successful" is a refusal, not a posting',
+  'Transaction of AED 250.00 on Card XXX7720 at LULU was not successful. Please contact us.',
+  null);
+
+t('ADCB reversal comes back as income',
+  'A reversal of AED 250.00 has been credited to your Credit Card XXX7720 on 20-07-2026. Avl.Limit is AED 12,000.00',
+  { merchant: 'Refund', type: 'income', amountFils: 25000, category: 'other', card: '7720', cardKind: 'credit' });
+
+t('ADCB foreign purchase takes the AED leg',
+  'AED 402.30 (USD 109.55) spent on Card XXX7720 at AMAZON.COM on 19-07-2026 18:04:11. Avl.Bal is AED 5,890.13',
+  { amountFils: 40230, category: 'shopping', type: 'expense' });
+
+// ── FAB ──
+// Multi-line, one field per line, with the merchant descriptor on its own line
+// after the amount.
+t('FAB multi-line cash withdrawal',
+  'Cash Withdrawal \nAccount XXXX0002 \nAED 1000.00 \nFAB ATM AL WAHDA MALL AUH ARE \n12/07/26 19:22 \nAvailable Balance AED 4877.51',
+  { merchant: 'ATM withdrawal', amountFils: 100000, category: 'other', date: '2026-07-12',
+    snapshot: 487751, snapshotKind: 'balance' });
+
+t('FAB salary credit',
+  'An amount of AED 22,000.00 has been credited to your FAB account XXXX0002 on 25/07/2026 being Salary .Your balance is AED 26,877.51',
+  { type: 'income', amountFils: 2200000, category: 'salary', date: '2026-07-25', card: '0002' });
+
+t('FAB card payment received',
+  'Dear Customer, your payment of AED 8,144.40 has been received towards your FAB Credit Card ending with 4833 on 06/07/2026. Thank you.',
+  { kind: 'cardPayment', amountFils: 814440, transfer: true, card: '4833', cardKind: 'credit' });
+
+t('FAB multi-line statement carries both dues and the due day',
+  'Credit Card Statement\nCard No XXXX4711\nTotal Amount Due AED 3,120.45\nMinimum Amount Due AED 156.02\nPayment Due Date 26/07/2026',
+  { kind: 'cardStatement', amountFils: 312045, minDue: 15602, date: '2026-07-26', dueDay: 26,
+    card: '4711', cardKind: 'credit' });
+
+t('FAB decline is not a transaction',
+  'Dear Customer, your transaction of AED 500.00 on FAB Credit Card ending 4711 was declined due to insufficient available limit.',
+  null);
+
+t('FAB balance enquiry is not a transaction',
+  'Dear Customer, the available balance in your FAB Account XXXX0002 is AED 4,877.51 as on 27/07/2026.',
+  null);
+
+// ── Mashreq ──
+// "has been used for" — no other debit verb anywhere in the message.
+t('Mashreq card purchase is spending, not income',
+  'Your Mashreq Credit Card ending 1234 has been used for AED 150.00 at CARREFOUR MOE, DUBAI on 12/07/2026. Available Limit is AED 20,000.00',
+  { merchant: 'Carrefour Moe', type: 'expense', amountFils: 15000, category: 'groceries',
+    card: '1234', cardKind: 'credit', snapshot: 2000000, snapshotKind: 'limit' });
+
+t('Mashreq salary credit',
+  'AED 15,000.00 has been credited to your Mashreq Account XXX1234 as Salary on 25/07/2026. Avl Bal AED 18,240.11',
+  { type: 'income', amountFils: 1500000, category: 'salary', date: '2026-07-25' });
+
+t('Mashreq statement due date sits behind a bare "Due date"',
+  'Your Mashreq Credit Card ending 1234 statement for Jul 2026 is ready. Total Amount Due is AED 4,500.00 and Minimum Amount Due is AED 225.00. Due date 15/08/2026.',
+  { kind: 'cardStatement', amountFils: 450000, minDue: 22500, date: '2026-08-15', dueDay: 15 });
+
+t('Mashreq card payment received',
+  'Thank you for your payment of AED 4,500.00 towards your Mashreq Credit Card ending 1234 on 14/08/2026.',
+  { kind: 'cardPayment', amountFils: 450000, transfer: true, card: '1234', cardKind: 'credit' });
+
+t('Mashreq ATM withdrawal',
+  'AED 1,000.00 has been withdrawn from your Mashreq Account XXX1234 at MASHREQ ATM BURJUMAN on 12/07/2026. Avl Bal AED 6,110.00',
+  { merchant: 'ATM withdrawal', amountFils: 100000, category: 'other' });
+
+t('Mashreq direct debit names the biller',
+  'AED 250.00 has been debited from your account XX1234 towards DU MONTHLY BILL on 18/07/2026',
+  { merchant: 'Du', amountFils: 25000, category: 'telecom', type: 'expense' });
+
+t('Mashreq Neo debit card purchase',
+  'AED 62.00 has been spent on your Mashreq Neo Debit Card ending 5566 at TIM HORTONS DUBAI on 12/07/2026. Avl Bal AED 1,240.00',
+  { merchant: 'Tim Hortons', amountFils: 6200, category: 'dining', card: '5566', cardKind: 'debit' });
+
+t('Mashreq foreign purchase settles in AED',
+  'Your Mashreq Credit Card ending 1234 has been used for USD 30.00 (AED 110.18) at SPOTIFY on 12/07/2026.',
+  { merchant: 'Spotify', amountFils: 11018, type: 'expense', category: 'entertainment' });
+
+// ── ADIB ──
+// Islamic register throughout: a credit card is a Covered Card, the bank pays
+// PROFIT rather than interest, and financing is murabaha or ijara rather than
+// a loan. None of those words appear in a conventional bank's SMS.
+t('ADIB Covered Card is a credit card, and its "Available Balance" is headroom',
+  'Your ADIB Covered Card XXX1234 has been used for AED 250.00 at LULU HYPERMARKET, ABU DHABI on 12/07/2026. Available Balance AED 8,000.00',
+  { merchant: 'Lulu Hypermarket', type: 'expense', amountFils: 25000, category: 'groceries',
+    card: '1234', cardKind: 'credit', snapshot: 800000, snapshotKind: 'limit', date: '2026-07-12' });
+
+t('ADIB profit credit is named, and is never business revenue',
+  'Profit of AED 125.40 has been credited to your ADIB Ghina Savings Account XXX1234 on 30/06/2026. Avl Bal AED 45,125.40',
+  { merchant: 'Profit credit', type: 'income', amountFils: 12540, category: 'other', date: '2026-06-30' });
+
+t('ADIB murabaha instalment is debt servicing',
+  'Your monthly Murabaha instalment of AED 3,150.00 has been debited from your ADIB Account XXX1234 on 05/07/2026. Avl Bal AED 12,000.00',
+  { merchant: 'Finance instalment', type: 'expense', amountFils: 315000, category: 'loan', date: '2026-07-05' });
+
+t('ADIB ijara instalment is debt servicing too',
+  'Your Ijara instalment of AED 5,400.00 has been debited from your ADIB Account XXX1234 on 05/07/2026 towards Home Finance. Avl Bal AED 20,000.00',
+  { amountFils: 540000, category: 'loan', type: 'expense' });
+
+t('ADIB statement: "Total Payment Due ... is AED" with the card clause between',
+  'Dear Customer, the Total Payment Due on your ADIB Covered Card ending 1234 is AED 2,540.00 and the Minimum Payment Due is AED 127.00. Payment due date 10/08/2026. Pls ignore if already paid.',
+  { kind: 'cardStatement', amountFils: 254000, minDue: 12700, date: '2026-08-10', dueDay: 10,
+    card: '1234', cardKind: 'credit' });
+
+t('ADIB card payment received',
+  'Your payment of AED 2,540.00 has been received towards your ADIB Covered Card ending 1234. Thank you.',
+  { kind: 'cardPayment', amountFils: 254000, transfer: true, card: '1234', cardKind: 'credit' });
+
+t('ADIB ATM withdrawal',
+  'Cash Withdrawal of AED 1,000.00 from ADIB ATM AL WAHDA, ABU DHABI using Card ending 1234 on 12/07/2026. Avl Bal AED 5,000.00',
+  { merchant: 'ATM withdrawal', amountFils: 100000, category: 'other', date: '2026-07-12' });
+
+t('ADIB takaful contribution is insurance, not an anonymous debit',
+  'AED 780.00 has been debited from your ADIB Account XXX1234 towards Takaful contribution on 01/07/2026.',
+  { merchant: 'Takaful', amountFils: 78000, category: 'health', type: 'expense' });
+
+t('ADIB "not completed" withdrawal never happened',
+  'AED 500.00 cash withdrawal at ADIB ATM using Card ending 1234 was not completed due to incorrect PIN.',
+  null);
+
+t('ADIB foreign purchase settles in AED',
+  'Your ADIB Covered Card XXX1234 has been used for USD 25.00 (AED 91.81) at NETFLIX.COM on 12/07/2026.',
+  { merchant: 'Netflix', amountFils: 9181, type: 'expense', category: 'entertainment' });
+
+t('ADIB balance enquiry is not a transaction',
+  'Dear Customer, the available balance of your ADIB Account XXX1234 is AED 5,200.00.',
+  null);
+
+// ── RAKBANK ──
+// Dates as "12-Jul-26" everywhere, and a colon before the balance.
+t('RAKBANK purchase reads a DD-MMM-YY date',
+  'Dear Customer, AED 250.00 was spent using your RAKBANK Debit Card XXXX1234 at CARREFOUR CITY CENTRE on 12-Jul-26. Avl Bal: AED 3,000.00',
+  { merchant: 'Carrefour City Centre', amountFils: 25000, category: 'groceries', date: '2026-07-12',
+    card: '1234', cardKind: 'debit' });
+
+t('RAKBANK ATM withdrawal',
+  'AED 1,000.00 was withdrawn using your RAKBANK Debit Card XXXX1234 at RAKBANK ATM AL NAKHEEL on 12-Jul-26. Avl Bal: AED 2,000.00',
+  { merchant: 'ATM withdrawal', amountFils: 100000, category: 'other', date: '2026-07-12' });
+
+t('RAKBANK salary credit',
+  'Your salary of AED 12,000.00 has been credited to your RAKBANK Account XXXX1234 on 25-Jul-26. Avl Bal: AED 14,300.55',
+  { type: 'income', amountFils: 1200000, category: 'salary', date: '2026-07-25' });
+
+t('RAKBANK statement due date is a DD-MMM-YY too',
+  'Your RAKBANK Credit Card XXXX1234 statement is generated. Total Amount Due AED 1,842.30, Minimum Amount Due AED 92.12. Payment due by 08-Aug-26.',
+  { kind: 'cardStatement', amountFils: 184230, minDue: 9212, date: '2026-08-08', dueDay: 8,
+    card: '1234', cardKind: 'credit' });
+
+t('RAKBANK standing-instruction debit names the biller',
+  'AED 542.30 has been debited from your RAKBANK Account XXXX1234 towards ETISALAT bill on 12-Jul-26 as per your standing instruction. Avl Bal: AED 2,000.00',
+  { merchant: 'Etisalat', amountFils: 54230, category: 'telecom', type: 'expense', date: '2026-07-12' });
+
+t('RAKBANK card payment received',
+  'Dear Customer, we have received your payment of AED 1,842.30 towards your RAKBANK Credit Card XXXX1234 on 07-Aug-26. Thank you.',
+  { kind: 'cardPayment', amountFils: 184230, transfer: true, card: '1234', cardKind: 'credit' });
+
+t('RAKBANK decline is not a transaction',
+  'Your transaction of AED 350.00 at CARREFOUR using RAKBANK Debit Card XXXX1234 was declined due to insufficient balance.',
+  null);
+
+t('RAKBANK foreign purchase settles in AED',
+  'AED 91.81 (USD 25.00) was spent using your RAKBANK Credit Card XXXX1234 at NETFLIX.COM on 12-Jul-26. Avl Cr. Limit: AED 8,000.00',
+  { merchant: 'Netflix', amountFils: 9181, category: 'entertainment', type: 'expense' });
+
+// ── Liv. ──
+// ENBD's digital brand, so ENBD's grammar with Liv's own footer sentences.
+t('Liv. statement',
+  'Your Liv. Credit Card ending 1354 statement is ready. Total Amount Due AED 890.55 and Minimum Amount Due AED 100.00. Payment due date 12/08/2026.',
+  { kind: 'cardStatement', amountFils: 89055, minDue: 10000, date: '2026-08-12', dueDay: 12,
+    card: '1354', cardKind: 'credit' });
+
+t('Liv. salary credit',
+  'AED 16,000.00 has been credited to your Liv account ending 1354 on 25/07/2026 being Salary. The available balance is AED 18,220.00.',
+  { type: 'income', amountFils: 1600000, category: 'salary', date: '2026-07-25' });
+
+t('Liv. card payment received',
+  'We have received your payment of AED 890.55 towards your Liv. Credit Card ending 1354 on 11/08/2026.',
+  { kind: 'cardPayment', amountFils: 89055, transfer: true, card: '1354', cardKind: 'credit' });
+
+t('Liv. foreign subscription settles in AED',
+  'Purchase of USD 12.00 (AED 44.07) with Debit Card ending 1354 at SPOTIFY on 12/07/2026. Avl Bal is AED 900.00. Most Liv. users pay with their debit card.',
+  { merchant: 'Spotify', amountFils: 4407, category: 'entertainment', date: '2026-07-12' });
+
+t('Liv. decline is not a transaction',
+  'Purchase of AED 300.00 with Debit Card ending 1354 at CARREFOUR was declined due to insufficient balance.',
+  null);
+
+t('Liv. balance enquiry is not a transaction',
+  'Your Liv account ending 1354 balance is AED 900.00 as of 27/07/2026.',
+  null);
+
+// ── Wio ──
+// Bullet-masked card tails, and the merchant before the card rather than after.
+t('Wio bullet-masked card tail is still a card',
+  'AED 45.00 spent at CARREFOUR MARKET using your Wio card •••• 1234 on 12/07/2026. Available balance AED 4,500.00',
+  { merchant: 'Carrefour Market', amountFils: 4500, category: 'groceries', card: '1234', cardKind: 'debit',
+    date: '2026-07-12', snapshot: 450000, snapshotKind: 'balance' });
+
+t('Wio purchase with a spelled-out card tail',
+  "You've spent AED 120.50 at TALABAT with your Wio Personal card ending 1234. Avl Bal AED 3,120.00",
+  { merchant: 'Talabat', amountFils: 12050, category: 'dining', card: '1234', cardKind: 'debit' });
+
+t('Wio salary credit',
+  'AED 17,500.00 has been credited to your Wio Personal account ending 1234 on 25/07/2026 as Salary. Available balance AED 20,000.00',
+  { type: 'income', amountFils: 1750000, category: 'salary', date: '2026-07-25' });
+
+t('Wio statement',
+  'Your Wio credit card ending 1234 statement is ready. Total amount due is AED 2,340.00. Minimum amount due is AED 117.00. Due by 18/08/2026.',
+  { kind: 'cardStatement', amountFils: 234000, minDue: 11700, date: '2026-08-18', dueDay: 18,
+    card: '1234', cardKind: 'credit' });
+
+t('Wio direct debit names the biller',
+  'AED 1,200.00 has been debited from your Wio account ending 1234 towards DEWA on 05/07/2026. Available balance AED 3,000.00',
+  { merchant: 'DEWA', amountFils: 120000, category: 'utilities', type: 'expense', date: '2026-07-05' });
+
+t('Wio ATM withdrawal',
+  'AED 800.00 withdrawn at ATM using your Wio card •••• 1234 on 12/07/2026. Available balance AED 2,300.00',
+  { merchant: 'ATM withdrawal', amountFils: 80000, category: 'other', card: '1234' });
+
+t('Wio card payment received',
+  'Your payment of AED 2,340.00 has been received towards your Wio credit card ending 1234. Thank you.',
+  { kind: 'cardPayment', amountFils: 234000, transfer: true, card: '1234', cardKind: 'credit' });
+
+t('Wio decline is not a transaction',
+  'Your payment of AED 260.00 at NOON.COM using your Wio card •••• 1234 was declined.',
+  null);
+
+t('Wio foreign purchase settles in AED',
+  'AED 183.55 (USD 49.99) spent at ADOBE INC using your Wio card •••• 1234 on 12/07/2026. Available balance AED 1,900.00',
+  { merchant: 'Adobe', amountFils: 18355, category: 'entertainment', type: 'expense' });
+
+// ── Islamic phrasing outside ADIB ──
+// The other Islamic banks and the Islamic windows of conventional ones share
+// the vocabulary, so the rules are written against the words, not the sender.
+t('Emirates Islamic Covered Card is a credit card',
+  'Your Emirates Islamic Covered Card ending 3021 has been used for AED 410.00 at CARREFOUR MOE, DUBAI on 12/07/2026. Available Balance AED 9,000.00',
+  { type: 'expense', amountFils: 41000, card: '3021', cardKind: 'credit', snapshotKind: 'limit' });
+
+t('a Sharjah Islamic profit credit is the bank paying you, not revenue',
+  'Profit of AED 320.15 has been credited to your Sharjah Islamic Bank Savings Account XXX4410 for the month of Jun 2026.',
+  { merchant: 'Profit credit', type: 'income', amountFils: 32015, category: 'other' });
+
+t('a DIB Covered Card statement',
+  'Your DIB Covered Card ending 8890 statement is generated. Total Payment Due AED 1,200.00. Minimum Payment Due AED 60.00. Payment Due Date 15/08/2026.',
+  { kind: 'cardStatement', amountFils: 120000, minDue: 6000, date: '2026-08-15', dueDay: 15,
+    card: '8890', cardKind: 'credit' });
+
+t('a tawarruq finance instalment is a loan payment',
+  'Your Tawarruq finance instalment of AED 2,100.00 has been debited from your account XXX4410 on 05/07/2026.',
+  { category: 'loan', type: 'expense', amountFils: 210000 });
+
+// ── Guards on the rules the bank sweep above widened ──
+// Each of these is a message the widened rule could have misread, and every
+// one of them was checked against the parser before it was written down.
+
+t('a bill reports the day it is DUE, not the day it was issued',
+  'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22.',
+  { kind: 'billDue', amountFils: 78540, date: '2022-01-22', dueDay: 22 });
+
+t('a statement date does not outrank the payment due date',
+  'Your Credit Card ending 4844 statement dated 05/07/2026 is ready. Total Amount Due AED 1,200.00. Payment due date 05/08/2026.',
+  { kind: 'cardStatement', amountFils: 120000, date: '2026-08-05', dueDay: 5 });
+
+t('a purchase keeps its own date even with a statement footer',
+  'Credit Card Purchase \nCard No XXXX4711 \nAED 76.50 \nTAP*Keeta Dubai ARE \n15/12/25 22:34 \nYour December statement payment due date is 26/12/2025',
+  { date: '2025-12-15' });
+
+t('a descriptor that merely starts with a month is not a date',
+  'Purchase of AED 88.00 with Debit Card ending 4733 at 12 MARINA WALK 2026 LLC, DUBAI. Avl Balance is AED 900.00.',
+  { date: null, amountFils: 8800 });
+
+t('a fee is a fee, not a payee called "Annual Membership Fee"',
+  'AED 26.25 has been debited from your account no. 095-XXX11XXX-01 towards annual membership fee. The available balance is AED 1,320.34.',
+  { merchant: 'Bank fee', amountFils: 2625 });
+
+t('an own-account move is not a card payment',
+  'AED 2,000.00 has been debited from your account XXX4502 towards own account transfer on 12/07/2026.',
+  { merchant: 'Own account transfer', amountFils: 200000, transfer: true });
+
+t('a card that can be used somewhere has not been used',
+  'Your new ENBD Debit Card ending 4502 is ready and can be used at all ATMs. Annual fee AED 100 applies. T&Cs apply.',
+  null);
+
+t('a completed transfer is not a refused one',
+  'AED 500.00 has been debited from your account XXX4502 for a FastPay transfer to Khalid Rashid, completed successfully on 12/07/2026.',
+  { merchant: 'Transfer to Khalid Rashid', amountFils: 50000 });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

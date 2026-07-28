@@ -57,7 +57,12 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true
+        }
+      ],
       "expo-secure-store"
     ],
     "experiments": {
