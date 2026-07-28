@@ -16,7 +16,7 @@
  */
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { AppState as RNAppState, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -58,8 +58,20 @@ import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
 
-// Once per app session: auto-import + notification sync.
-let autoImportRan = false;
+// The one-time setup that must not repeat: asking for notification
+// permission, and the first reminder sync.
+let sessionSetupRan = false;
+
+/**
+ * How long a scan stays fresh enough to skip on returning to the app.
+ *
+ * Coming back from the banking app to see the charge is the single most
+ * common way this screen is opened, so the bar for re-scanning is low. It is
+ * not zero only because flicking between two apps should not run a full inbox
+ * read on every flick.
+ */
+const RESCAN_AFTER_MS = 30_000;
+let lastScanAt = 0;
 
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
@@ -432,19 +444,45 @@ export default function HomeScreen() {
     [state, importBatch, undoBatch, markParserVersion, toast, router],
   );
 
-  // Silent auto-import + reminder sync, once per session.
+  // Silent auto-import on open, and again every time the app comes back to
+  // the foreground.
+  //
+  // This used to run once per JS session, behind a module-level flag that was
+  // never reset. Android keeps the JS context alive when the app is
+  // backgrounded, so "once per session" meant once per COLD START: leaving the
+  // app to pay for something and coming back — the exact moment a new bank SMS
+  // exists — imported nothing, and the charge only appeared after a manual
+  // pull-to-refresh. The app looked like it could not see messages it had
+  // already captured.
   useEffect(() => {
-    if (!state.hydrated || autoImportRan) return;
-    autoImportRan = true;
-    (async () => {
-      try {
-        await runAutoImport(false);
-        await requestNotificationPermission();
-        await syncPaymentReminders(state);
-      } catch {
+    if (!state.hydrated) return;
+
+    const scan = () => {
+      if (Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
+      lastScanAt = Date.now();
+      void runAutoImport(false).catch(() => {
         // Best-effort; manual import still available.
-      }
-    })();
+      });
+    };
+
+    scan();
+
+    if (!sessionSetupRan) {
+      sessionSetupRan = true;
+      (async () => {
+        try {
+          await requestNotificationPermission();
+          await syncPaymentReminders(state);
+        } catch {
+          // Reminders are best-effort; the ledger does not depend on them.
+        }
+      })();
+    }
+
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') scan();
+    });
+    return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.hydrated]);
 

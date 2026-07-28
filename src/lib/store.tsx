@@ -19,6 +19,7 @@ import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/see
 import { applyHealPatch, healPatch } from '@/lib/heal';
 import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
 import type {
+  ImportBatchInput,
   Account,
   AppState,
   Bill,
@@ -29,6 +30,8 @@ import type {
   Transaction,
   TxHealUpdate,
 } from '@/lib/types';
+
+export type { ImportBatchInput } from '@/lib/types';
 
 const STORAGE_KEY = 'wafra/state/v1';
 
@@ -355,19 +358,6 @@ function reducer(state: AppState, action: Action): AppState {
  */
 export type { TxHealUpdate } from '@/lib/types';
 
-export interface ImportBatchInput {
-  transactions: Omit<Transaction, 'id'>[];
-  newAccounts: Omit<Account, 'id'>[];
-  /** last4 → index into newAccounts OR existing accountId. */
-  newHints: Record<string, string>;
-  newDues: Omit<CardDue, 'id'>[];
-  /** accountRef → newest bank-quoted balance/limit figure from the scan. */
-  snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
-  /** accountRef → bank name learned from the SMS sender (backfill only). */
-  bankNames: Record<string, string>;
-  lastScanTs: number;
-  updates?: TxHealUpdate[];
-}
 
 interface StoreValue {
   state: AppState;

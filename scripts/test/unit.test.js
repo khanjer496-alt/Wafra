@@ -1560,13 +1560,47 @@ ok('stale: a stale statement that gets paid leaves openDues',
         date: '2026-07-25', amountFils: 1800, title: 'Starbucks',
         type: 'expense', smsKey: 's1753400500000-1800', channel: 'inbox',
       }));
-    // And the same shop twice in a day IS still caught — that is the
-    // everyday fingerprint, unchanged.
-    ok('duplicate: the same shop, amount and day is still one row',
+    // The same shop, amount and day, captured SECONDS apart, is one event
+    // seen twice — that is the delivery receiver racing the inbox.
+    ok('duplicate: the same shop seconds later is one row',
       guard.has({
         date: '2026-07-25', amountFils: 1800, title: 'costa',
-        type: 'expense', smsKey: 's1753400500000-1800', channel: 'inbox',
+        type: 'expense', smsKey: 's1753400003000-1800', channel: 'inbox',
       }));
+
+    // The same shop, amount and day, captured EIGHT MINUTES apart, is two
+    // coffees. This used to collapse into one row and the second charge was
+    // lost — the comment above claimed both survived, and only the differing
+    // TITLE was making that true. Buy the same thing twice and the app quietly
+    // under-read the day's spending.
+    ok('duplicate: the same shop again later in the day is a second row',
+      !guard.has({
+        date: '2026-07-25', amountFils: 1800, title: 'costa',
+        type: 'expense', smsKey: 's1753400480000-1800', channel: 'inbox',
+      }));
+  }
+
+  // The race the user hit: the bank app's notification lands BEFORE the SMS.
+  // The push row is imported first, then the SMS about the same charge turns
+  // up worded differently — and the old guard only ever dropped a push for
+  // matching an SMS, never the reverse, so the charge appeared twice.
+  {
+    const pushed = {
+      id: 't9', type: 'expense', amountFils: 31000, category: 'shopping',
+      accountId: 'fab', title: 'The One', date: '2026-07-25',
+      source: 'sms', viaPush: true, smsKey: 's1753400900000-31000',
+    };
+    const guard = duplicateGuard([pushed]);
+    const sms = {
+      date: '2026-07-25', amountFils: 31000, title: 'The One Home',
+      type: 'expense', smsKey: 's1753400903000-31000', channel: 'inbox',
+    };
+    ok('duplicate: an SMS supersedes the push row it duplicates',
+      guard.supersedes(sms) === 't9', guard.supersedes(sms));
+    // And it does not work the other way: a push never rewrites an SMS row.
+    const smsRow = { ...pushed, id: 't10', viaPush: undefined };
+    ok('duplicate: a push never supersedes an SMS row',
+      duplicateGuard([smsRow]).supersedes({ ...sms, channel: 'push' }) === null);
   }
 
   // A push that matches nothing is a transaction the SMS channel missed —

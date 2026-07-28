@@ -69,8 +69,14 @@ class SmsDeliveryReceiver : BroadcastReceiver() {
     const val PREFS = "wafra_sms_capture"
     const val KEY = "received"
     const val MAX = 500
+    // Must stay in step with the same-named pattern in
+    // BankNotificationListenerService: both decide, before anything else can,
+    // whether a message is about money at all. This one was left behind when
+    // Arabic was added, so an Arabic bank SMS was dropped at delivery — the
+    // parser had learned to read it and never got the chance.
     val MONEY_RE = Regex(
-      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|د\\.إ|ر\\.س)\\s*[0-9]",
+      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
+        "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE
     )
   }

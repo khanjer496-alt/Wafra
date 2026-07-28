@@ -63,7 +63,19 @@ const PATTERNS = [
   ['REFUSE_RE', patternSource('InstantAlert', 'REFUSE_RE', vars)],
   ['BANK_WORD_RE', patternSource('InstantAlert', 'BANK_WORD_RE', vars)],
   ['MONEY_RE', patternSource('BankNotificationListenerService', 'MONEY_RE')],
+  ['SMS_MONEY_RE', patternSource('SmsDeliveryReceiver', 'MONEY_RE')],
 ];
+
+// Two gates decide whether a message is about money at all — one for SMS at
+// delivery, one for bank-app notifications. They are separate files and had
+// silently drifted: Arabic was added to one and not the other, so an Arabic
+// bank SMS was discarded before the parser that had just learned to read it
+// ever saw it.
+{
+  const a = PATTERNS.find(([n]) => n === 'MONEY_RE')[1];
+  const b = PATTERNS.find(([n]) => n === 'SMS_MONEY_RE')[1];
+  ok('both money gates accept the same currencies', a === b, { notification: a, sms: b });
+}
 
 /**
  * The amount cases. Group 1/2 is "AED 150.00", group 3/4 the Arabic order.

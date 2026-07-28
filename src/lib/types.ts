@@ -93,6 +93,15 @@ export interface Transaction {
    * titles/accounts, so re-scans dedupe on this instead of parsed fields.
    */
   smsKey?: string;
+  /**
+   * Captured from a bank app's push notification rather than an SMS.
+   *
+   * A notification and the SMS about the same charge are a race, and the
+   * notification is the poorer read — different wording, often truncated. The
+   * flag lets the SMS replace this row when it arrives instead of landing
+   * beside it as a second charge.
+   */
+  viaPush?: boolean;
   /** Credit-card payments etc — excluded from spending/income analytics. */
   isTransfer?: boolean;
   /**
@@ -232,4 +241,24 @@ export interface TxHealUpdate {
   raw?: string | null;
   /** The message no longer parses as a transaction (e.g. it's a statement reminder) — drop the row. */
   remove?: boolean;
+}
+
+/**
+ * One import scan, as a single applyable batch.
+ *
+ * Lives here rather than in store.tsx because the code that BUILDS it must be
+ * testable, and store.tsx is a React module the test harness cannot transpile.
+ */
+export interface ImportBatchInput {
+  transactions: Omit<Transaction, 'id'>[];
+  newAccounts: Omit<Account, 'id'>[];
+  /** last4 → index into newAccounts OR existing accountId. */
+  newHints: Record<string, string>;
+  newDues: Omit<CardDue, 'id'>[];
+  /** accountRef → newest bank-quoted balance/limit figure from the scan. */
+  snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
+  /** accountRef → bank name learned from the SMS sender (backfill only). */
+  bankNames: Record<string, string>;
+  lastScanTs: number;
+  updates?: TxHealUpdate[];
 }

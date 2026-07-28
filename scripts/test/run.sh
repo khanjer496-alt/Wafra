@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 rm -rf build && mkdir -p build
-for f in types format categories ledger dedupe arabic-sms sms-parser bills insights seed subscriptions cards analytics period purchases markets i18n balances brand-marks leaving-soon accounts heal accuracy; do
+for f in types format categories ledger dedupe arabic-sms sms-parser import-plan bills insights seed subscriptions cards analytics period purchases markets i18n balances brand-marks leaving-soon accounts heal accuracy; do
   sed -e "s|from '@/lib/|from './|g" \
       -e "s|import type { IconName } from '@/components/ui/icon';|type IconName = string;|" \
       -e "s|import('@/components/ui/icon').IconName|string|g" \
@@ -16,6 +16,8 @@ node unit.test.js
 node worker.test.js
 # Properties that must hold for every message, not just the pinned ones.
 node invariants.test.js
+# Whether a message the user already has counts as new.
+node import-plan.test.js
 # Arabic messages, which reach the same parser through a rewrite layer.
 node arabic.test.js
 # The delivery-time banner reads bank SMS a second time, in Kotlin. This runs
