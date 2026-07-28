@@ -66,7 +66,16 @@ export interface ParsedSms {
   raw: string;
 }
 
-const CREDIT_WORDS = /credit(?:ed)?|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
+/**
+ * Words that say money ARRIVED.
+ *
+ * `credited`, never bare `credit`. The bare stem is the noun, and it is the
+ * noun in "your FAB credit card" and "full credit limit" — so a card-approval
+ * advert with no debit verb in it read as income, and AED 2,000 of credit
+ * LIMIT was filed as AED 2,000 received. Any message mentioning a credit card
+ * without also naming a charge had the same problem.
+ */
+const CREDIT_WORDS = /credited|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
 // DEBIT_WORDS is market-compiled below (its payment guard embeds the currency).
 const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b/i;
 const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
@@ -964,7 +973,7 @@ function extractMerchant(raw: string, re: RegExp): string {
     // titled "View Your Statement" and "Avoid Charges" were the result.
     // A descriptor never opens with an imperative or names the reader.
     if (
-      /^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt|choose|proceed|continue)\b/i.test(
+      /^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt|choose|proceed|continue|begin|discover|explore|download)\b/i.test(
         candidate,
       )
     ) {
@@ -1348,6 +1357,16 @@ function parseReadable(
   // reminders and biller receipts duplicate messages already counted.
   if (/\*?convert now\*?|converted into instalments?|converted into installments?|interest payment plan|easy payment plan/i.test(raw)) return null;
   if (/payment reminder|due date reminder|pay immediately to avoid|avoid blockage|is overdue\b/i.test(raw)) return null;
+  // A credit limit being GRANTED is not money arriving. "You've got AED 2,000
+  // approved, with full credit limit coming after final checks" put AED 2,000
+  // of income in the ledger — headroom to borrow, read as earnings.
+  //
+  // Deliberately narrow: it needs the approval AND the limit, close together.
+  // "approved" on its own is what a real terminal says about a real purchase,
+  // and refusing on that word alone would drop genuine charges.
+  if (/\b(?:pre-?)?approved\b[^.!]{0,80}\bcredit\s+limit\b|\bcredit\s+limit\b[^.!]{0,80}\b(?:pre-?)?approved\b/i.test(raw)) {
+    return null;
+  }
   if (/rate our service|thank you for using ajmanpay|successfully redeemed|delivery associate/i.test(raw)) return null;
 
   // RTA / municipal parking confirmations:

@@ -370,6 +370,60 @@ if (dailyLimit && dailyLimit.snapshotKind === null) {
     JSON.stringify(dailyLimit && { k: dailyLimit.snapshotKind, f: dailyLimit.snapshotFils }));
 }
 
+
+// ── a credit LIMIT is not money ──────────────────────────────────────────
+// A FAB card-approval advert was imported as +AED 2,000 of income, titled
+// "Begin", filed under Business. Three faults in one message.
+{
+  const approval =
+    'Good news on your FAB credit card! You have got AED 2,000 approved, with full ' +
+    'credit limit coming after final checks. Download FAB Mobile to begin.';
+  const r = parseSms(approval);
+  if (r === null) { pass++; console.log('✓ a credit-limit approval is not a transaction'); }
+  else { fail++; console.log('✗ a credit-limit approval is not a transaction', JSON.stringify({ t: r.type, a: r.amountFils, m: r.merchant })); }
+}
+
+// Fault 1, the wide one: CREDIT_WORDS matched the bare stem "credit", which
+// is the NOUN in "your credit card" and "full credit limit". Any message
+// naming a credit card without also naming a charge read as money arriving.
+{
+  const r = parseSms('Your FAB credit card statement is ready. Total amount due AED 1,200.00 by 15/08/2026.');
+  const wrong = r && r.kind === 'transaction' && r.type === 'income';
+  if (!wrong) { pass++; console.log('✓ "credit card" alone is not money arriving'); }
+  else { fail++; console.log('✗ "credit card" alone is not money arriving', JSON.stringify({ k: r.kind, t: r.type })); }
+}
+
+// ...but the past participle still is, and these must not have been caught
+// in the blast radius.
+for (const [body, want] of [
+  ['AED 5,000.00 has been credited to your account 1234. Avl Bal AED 9,000.00', 'income'],
+  ['Purchase amount of AED 75.00 has been refunded to your card 8575', 'income'],
+  ['Your salary of AED 12,000.00 has been credited to your account 1234', 'income'],
+]) {
+  const r = parseSms(body);
+  if (r && r.type === want) { pass++; console.log(`✓ still income: ${body.slice(0, 44)}…`); }
+  else { fail++; console.log(`✗ still income: ${body.slice(0, 44)}…`, JSON.stringify(r && { t: r.type })); }
+}
+
+// Fault 2: "…to begin" became the merchant, because the imperative guard had
+// no "begin" in it.
+{
+  const r = parseSms('Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR. Download FAB Mobile to begin.');
+  if (r && r.merchant !== 'Begin') { pass++; console.log('✓ "to begin" is an instruction, not a shop'); }
+  else { fail++; console.log('✗ "to begin" is an instruction, not a shop', JSON.stringify(r && r.merchant)); }
+}
+
+// Fault 3 guard: narrow on purpose. A terminal saying a real purchase was
+// approved must still import.
+{
+  const r = parseSms('Purchase of AED 250.00 with Credit Card ending 4321 at NOON.COM was approved.');
+  if (r && r.type === 'expense' && r.amountFils === 25000) {
+    pass++; console.log('✓ an approved PURCHASE still imports');
+  } else {
+    fail++; console.log('✗ an approved PURCHASE still imports', JSON.stringify(r && { t: r.type, a: r.amountFils }));
+  }
+}
+
 // ── abbreviated balance wording ──
 // "avbl" / "lmt" / "limit available" come from the published vocabulary of
 // MabudAlam/transaction_sms_parser (MIT). Not in this corpus yet; pinned so
