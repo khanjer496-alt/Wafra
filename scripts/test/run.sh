@@ -7,6 +7,22 @@ cd "$(dirname "$0")"
 # that have nothing to do with the code. Queue them instead.
 exec 9>/tmp/wafra-test.lock
 flock 9 2>/dev/null || true
+# kotlin-regex.test.js needs a working javac, and skips itself (printing
+# "0 passed") when it cannot find one — which reads exactly like the suite
+# passing. Two traps here, both of which hid those 15 assertions on macOS:
+# Homebrew's openjdk is keg-only, so installing it does NOT put it on PATH;
+# and macOS ships a stub /usr/bin/javac that exists, satisfies `command -v`,
+# and then fails with "Unable to locate a Java Runtime" when actually run.
+# So the test is whether javac RUNS, not whether it resolves.
+if ! javac -version >/dev/null 2>&1; then
+  for jdk in /opt/homebrew/opt/openjdk/bin /usr/local/opt/openjdk/bin; do
+    if "$jdk/javac" -version >/dev/null 2>&1; then
+      export PATH="$jdk:$PATH"
+      break
+    fi
+  done
+fi
+
 rm -rf build && mkdir -p build
 # Modules added by later work are listed here too; a name that does not exist
 # yet is skipped rather than failing the run, so the suite stays green while a
