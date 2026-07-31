@@ -1,0 +1,68 @@
+# A guided tour of every Wafra surface, used to capture REAL device screenshots.
+#
+# The web export (scripts/e2e/capture.mjs) renders through react-native-web, so
+# it can prove layout, hierarchy, type, colour and content — but not native
+# gesture physics, real haptics, or the actual 60fps. This flow runs the real
+# binary on a real iOS simulator and a real Android emulator, so what it
+# captures is what a user would see.
+#
+# One flow drives both platforms; the bundle id comes from the caller:
+#   maestro test -e APP_ID=app.wafra.ios      .maestro/tour.yaml
+#   maestro test -e APP_ID=app.wafra.android  .maestro/tour.yaml
+#
+# Screenshots are prefixed with SHOT_PREFIX so a light and a dark pass can write
+# into the same directory without overwriting each other.
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: true
+
+# First run: the onboarding gate. Shoot it — it is the first thing anyone sees.
+- assertVisible: 'Your bank already texts you.*'
+- takeScreenshot: ${SHOT_PREFIX}-onboarding
+
+# 'Read my inbox' only appears where SMS scanning exists; on iOS the primary is
+# 'Continue', which leads to the same choose step. Take whichever is present.
+- runFlow:
+    when:
+      visible: 'Continue'
+    commands:
+      - tapOn: 'Continue'
+
+- tapOn: 'Start with sample data'
+- extendedWaitUntil:
+    visible: 'Recent activity'
+    timeout: 20000
+
+- takeScreenshot: ${SHOT_PREFIX}-home
+
+# Tabs are matched by their label rather than a testID: the tab bar sets
+# accessibilityRole="tab" but carries no testID, and the caps styling is a
+# textTransform, so the accessible text stays title case.
+- tapOn: 'Flow'
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT_PREFIX}-flow
+
+- tapOn: 'Bills'
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT_PREFIX}-bills
+
+- tapOn: 'Wallet'
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT_PREFIX}-wallet
+
+# Pushed screens, reached the way a user reaches them.
+- tapOn: 'Home'
+- waitForAnimationToEnd
+- tapOn: 'All activity'
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT_PREFIX}-transactions
+- back
+
+# The add-entry sheet is the app's most-used modal; capture it open. The raised
+# button has no visible label, so it is reached by its accessibilityLabel —
+# t('tabAdd'), which is 'Add an entry' in English.
+- tapOn: 'Add an entry'
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT_PREFIX}-add-transaction
+- back

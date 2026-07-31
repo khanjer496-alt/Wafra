@@ -1,0 +1,220 @@
+name: Device screenshots
+
+# Real screenshots from a real iOS simulator and a real Android emulator.
+#
+# The everyday visual check is scripts/e2e/capture.mjs, which drives the web
+# export through Playwright. That is fast and free and catches most of what
+# matters, but it renders through react-native-web — it cannot show how a sheet
+# actually settles, how the tab bar behaves under a real gesture, or what the
+# fonts and safe areas do on a device. This job can.
+#
+# It is deliberately NOT on every push. A macOS runner bills at 10x the Linux
+# rate, and build-apk.yml already learned what happens when an expensive job
+# runs on every intermediate commit: the monthly allowance is gone and then
+# nothing builds at all. So this runs when someone asks for it, or when a PR is
+# labelled `device-shots` because its changes are visual.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Which platform to capture'
+        type: choice
+        options: [both, ios, android]
+        default: both
+  pull_request:
+    types: [labeled, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+jobs:
+  ios:
+    # Only when asked, or when a PR is explicitly labelled for it.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.platform != 'android') ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'device-shots'))
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # CNG: /ios is gitignored, so the native project is generated here. This
+      # is also the only place ios.bundleIdentifier and the Info.plist keys
+      # written by the config plugins (NSFaceIDUsageDescription,
+      # UIBackgroundModes) are actually exercised.
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Boot the simulator
+        id: sim
+        run: |
+          DEVICE="iPhone 16 Pro"
+          UDID=$(xcrun simctl create wafra-shots "$DEVICE" || true)
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl list devices available -j \
+              | jq -r --arg d "$DEVICE" '.devices[][] | select(.name==$d) | .udid' | head -1)
+          fi
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Build for the simulator
+        run: |
+          xcodebuild \
+            -workspace ios/Wafra.xcworkspace \
+            -scheme Wafra \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath ios/build \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Install the app
+        run: |
+          APP=$(find ios/build/Build/Products -name '*.app' -maxdepth 2 | head -1)
+          echo "installing $APP"
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$APP"
+
+      - name: Start the JS bundler
+        run: |
+          npx expo start --dev-client --port 8081 > /tmp/metro.log 2>&1 &
+          # Poll rather than pull in wait-on: one less network dependency in a
+          # job that already downloads a toolchain, and the failure is legible.
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8081/status && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8081/status || { cat /tmp/metro.log; exit 1; }
+
+      - name: Install Maestro
+        run: |
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Capture dark and light
+        run: |
+          mkdir -p shots
+          for scheme in dark light; do
+            xcrun simctl ui "${{ steps.sim.outputs.udid }}" appearance "$scheme"
+            maestro test \
+              -e APP_ID=app.wafra.ios \
+              -e SHOT_PREFIX="ios-$scheme" \
+              --format junit --output "shots/ios-$scheme.xml" \
+              .maestro/tour.yaml
+          done
+          # Maestro writes screenshots to the working directory.
+          mv ./*.png shots/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-screenshots
+          path: shots/
+          if-no-files-found: warn
+
+  android:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.platform != 'ios') ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'device-shots'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # The emulator needs KVM, which is present on the Linux runner but not
+      # exposed to the job user by default.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prebuild Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-shots-${{ hashFiles('package-lock.json') }}
+          restore-keys: gradle-shots-
+
+      - name: Build the debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+        working-directory: android
+
+      - name: Install Maestro
+        run: |
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Start the JS bundler
+        run: |
+          npx expo start --dev-client --port 8081 > /tmp/metro.log 2>&1 &
+          # Poll rather than pull in wait-on: one less network dependency in a
+          # job that already downloads a toolchain, and the failure is legible.
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8081/status && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:8081/status || { cat /tmp/metro.log; exit 1; }
+
+      - name: Boot the emulator and capture
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            adb reverse tcp:8081 tcp:8081
+            mkdir -p shots
+            for scheme in dark light; do
+              [ "$scheme" = dark ] && adb shell "cmd uimode night yes" || adb shell "cmd uimode night no"
+              maestro test \
+                -e APP_ID=app.wafra.android \
+                -e SHOT_PREFIX="android-$scheme" \
+                --format junit --output "shots/android-$scheme.xml" \
+                .maestro/tour.yaml
+            done
+            mv ./*.png shots/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-screenshots
+          path: shots/
+          if-no-files-found: warn
