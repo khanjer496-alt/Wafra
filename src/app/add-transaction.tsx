@@ -142,7 +142,15 @@ export default function AddTransactionScreen() {
             {/* Account */}
             <View style={styles.fieldBlock}>
               <ThemedText type="small" themeColor="textSecondary">Account</ThemedText>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.accountRow}>
+              {/* Bleeds to both screen edges. Inset inside the page padding, a
+                  chip that overflowed was sliced 16px short of the edge — it
+                  read as a clipped label ("Casl"), not as a row that scrolls.
+                  Cut at the edge itself, it reads as more to come. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.accountScroll}
+                contentContainerStyle={styles.accountRow}>
                 {state.accounts.map((a) => {
                   const active = accountId === a.id;
                   return (
@@ -213,7 +221,16 @@ export default function AddTransactionScreen() {
             </View>
           </ScrollView>
 
-          <View style={styles.footer}>
+          {/* A docked bar, and it has to read as one. Undivided, the solid
+              green block simply began part-way down the description field and
+              looked like it was sitting on top of it. The rule says where the
+              scroll ends; the content padding above keeps the last field clear
+              of it once you reach the bottom. */}
+          <View
+            style={[
+              styles.footer,
+              { borderTopColor: theme.cardBorder, backgroundColor: theme.background },
+            ]}>
             <Pressable
               onPress={save}
               disabled={!canSave}
@@ -265,7 +282,8 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: Spacing.three,
-    gap: Spacing.four,
+    paddingBottom: Spacing.four,
+    gap: Spacing.three + 4,
   },
   segment: {
     flexDirection: 'row',
@@ -311,8 +329,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 1.5,
   },
+  accountScroll: {
+    marginHorizontal: -Spacing.three,
+  },
   accountRow: {
     gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
   },
   accountChip: {
     flexDirection: 'row',
@@ -349,6 +371,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   saveBtn: {
     flexDirection: 'row',

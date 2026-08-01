@@ -12,15 +12,34 @@ function groupThousands(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-/** Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234". */
+/**
+ * Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234".
+ *
+ * Dropping the fils ROUNDS to the nearest dirham. It used to truncate, which
+ * understated every headline figure by up to a dirham and — worse — let a
+ * total disagree with the rows it is made of: Wallet showed a net worth of
+ * 96,467 above two accounts that read 93,891 and 2,575. Rounding here, and
+ * summing already-rounded parts in `netWorthFils`, makes the two agree by
+ * construction rather than by luck.
+ */
 export function formatAmount(fils: number, opts?: { decimals?: boolean }): string {
   const abs = Math.abs(Math.round(fils));
-  const whole = Math.floor(abs / 100);
   const cents = abs % 100;
   const showDecimals = opts?.decimals ?? cents !== 0;
-  const sign = fils < 0 ? '-' : '';
+  const whole = showDecimals ? Math.floor(abs / 100) : Math.round(abs / 100);
+  // "-0" is not a figure. Sub-dirham amounts shown to the dirham are zero.
+  const sign = fils < 0 && (showDecimals || whole > 0) ? '-' : '';
   const base = `${sign}${groupThousands(whole)}`;
   return showDecimals ? `${base}.${String(cents).padStart(2, '0')}` : base;
+}
+
+/**
+ * `fils` snapped to the whole dirham it will be DISPLAYED as.
+ *
+ * Sum these, never the raw fils, when a figure sits above the rows it totals.
+ */
+export function toWholeDirhamFils(fils: number): number {
+  return Math.round(fils / 100) * 100;
 }
 
 /** "AED 1,234.56" — currency symbol follows the active market. */
@@ -109,9 +128,31 @@ export function shiftMonthKey(key: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Days a report month covers. With MONTH_START_DAY = 1 that is the calendar
+ * length; with a salary-day start it still is, because the window
+ * [day D of month M, day D-1 of month M+1] holds exactly as many days as M.
+ */
 export function daysInMonth(key: string): number {
   const [y, m] = key.split('-').map(Number);
   return new Date(y, m, 0).getDate();
+}
+
+/**
+ * Whole days from `fromISO` to `toISO`; negative once `toISO` has passed.
+ * Both ends are anchored at noon so a clock change can never round to ±1 day.
+ */
+export function daysBetweenISO(fromISO: string, toISO: string): number {
+  const from = new Date(`${fromISO}T12:00:00`).getTime();
+  const to = new Date(`${toISO}T12:00:00`).getTime();
+  return Math.round((to - from) / 86_400_000);
+}
+
+/** `iso` moved by `days`, staying a valid date across month and year ends. */
+export function shiftISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
 }
 
 /** "17 Jul" from an ISO date. */
@@ -124,9 +165,8 @@ export function shortDate(iso: string): string {
 /** "Today", "Yesterday", or "Friday, 18 Jul". */
 export function friendlyDate(iso: string, todayISO: string): string {
   if (iso === todayISO) return t('today');
+  if (daysBetweenISO(iso, todayISO) === 1) return t('yesterday');
   const d = new Date(`${iso}T12:00:00`);
-  const t2 = new Date(`${todayISO}T12:00:00`);
-  if (Math.round((t2.getTime() - d.getTime()) / 86400000) === 1) return t('yesterday');
   return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 

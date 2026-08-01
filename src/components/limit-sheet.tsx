@@ -9,7 +9,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { daysInMonth, formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
-import { inPeriod } from '@/lib/period';
+import { elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 
@@ -86,7 +86,14 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   const limitFils = parseAmountToFils(text);
   const ratio = limitFils ? spent / limitFils : 0;
   const over = ratio >= 1;
-  const daysLeft = Math.max(0, daysInMonth(key) - new Date().getDate());
+  // Days left in the REPORT month, and only while it is still running. The old
+  // `daysInMonth(key) - new Date().getDate()` ignored the salary-day month
+  // start, and cheerfully offered "13 days still to go" for a month that had
+  // already ended.
+  const now = new Date();
+  const daysLeft = isCurrentMonth(key, now)
+    ? Math.max(0, daysInMonth(key) - elapsedDays(key, now, []))
+    : 0;
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];

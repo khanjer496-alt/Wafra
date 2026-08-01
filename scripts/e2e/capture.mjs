@@ -54,6 +54,7 @@ const TABS = [
  */
 const PUSHED = [
   ['transactions', '/transactions'],
+  ['stats', '/stats'],
   ['settings', '/settings'],
   ['cards', '/cards'],
   ['import-sms', '/import-sms'],

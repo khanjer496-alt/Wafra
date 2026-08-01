@@ -208,14 +208,24 @@ export default function TransactionsScreen() {
             <Icon name="chevron-left" size={18} color={theme.text} />
           </Pressable>
           <ThemedText type="heading">{t('transactionsTitle')}</ThemedText>
+          {/* Filters, and it has to LOOK like filters. This wore the `chart`
+              glyph — the Flow tab's own icon — so the one control on the
+              screen that opens a filter sheet advertised Stats. A funnel, not
+              `sliders`: that one already means Settings elsewhere. */}
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              activeFilterCount > 0
+                ? `Filters, ${activeFilterCount} active`
+                : 'Filters'
+            }
             onPress={() => setSheetVisible(true)}
             style={[
               styles.backBtn,
               { backgroundColor: activeFilterCount > 0 ? theme.primary : theme.backgroundSelected },
             ]}>
             <Icon
-              name="chart"
+              name="filter"
               size={17}
               color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
             />

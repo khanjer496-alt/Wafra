@@ -1,8 +1,10 @@
 const fmt = require('./build/format');
+const bal0 = require('./build/balances');
 const bills = require('./build/bills');
 const insights = require('./build/insights');
 const seed = require('./build/seed');
 const leaving = require('./build/leaving-soon');
+const remind = require('./build/reminders');
 
 let pass = 0, fail = 0;
 function eq(name, actual, expected) {
@@ -18,9 +20,30 @@ function ok(name, cond, detail = '') {
 // ── format ──
 eq('formatAED with cents', fmt.formatAED(123456), 'AED 1,234.56');
 eq('formatAED whole drops decimals', fmt.formatAED(120000), 'AED 1,200');
-eq('formatAED forced no decimals rounds', fmt.formatAED(123456, { decimals: false }), 'AED 1,234');
+// Hiding the fils ROUNDS to the nearest dirham. It used to truncate, and a
+// truncated total sat above rows that had each been truncated too: Wallet
+// printed a net worth of 96,467 over accounts reading 93,891 and 2,575.
+eq('formatAED forced no decimals rounds up', fmt.formatAED(123456, { decimals: false }), 'AED 1,235');
+eq('formatAED forced no decimals rounds down', fmt.formatAED(123449, { decimals: false }), 'AED 1,234');
 eq('formatAED negative', fmt.formatAED(-50000), 'AED -500');
+eq('formatAED never renders minus zero', fmt.formatAED(-40, { decimals: false }), 'AED 0');
 eq('formatAED millions grouping', fmt.formatAED(123456789), 'AED 1,234,567.89');
+// A total is the sum of the figures printed under it, not of the fils behind
+// them: parts are snapped to the dirham before they are added.
+eq(
+  'net worth agrees with its parts to the dirham',
+  fmt.formatAmount(
+    bal0.netWorthFils({
+      accounts: [
+        { id: 'a', name: 'A', kind: 'bank', openingFils: 9389163, color: '#fff' },
+        { id: 'b', name: 'B', kind: 'cash', openingFils: 257481, color: '#fff' },
+      ],
+      transactions: [],
+    }),
+    { decimals: false },
+  ),
+  '96,467',
+);
 eq('parseAmountToFils decimal', fmt.parseAmountToFils('12.5'), 1250);
 eq('parseAmountToFils with junk chars', fmt.parseAmountToFils('AED 1,234.56'), 123456);
 eq('parseAmountToFils invalid', fmt.parseAmountToFils('abc'), null);
@@ -68,16 +91,67 @@ ok('warnings ranked before neutral',
 
 eq('spentInMonthForCategory', insights.spentInMonthForCategory(txs, '2026-07', 'dining'), 100000);
 
+// ── routes ──
+// Every insight ends in a chevron promising a screen. `buildInsights` used to
+// assign those destinations by matching on the insight's id, and sent most of
+// them to '/stats' and '/budgets' — neither of which was a screen, so five of
+// the six insights the demo seed produces dead-ended on expo-router's
+// "Unmatched Route" page.
+//
+// `AppRoute` is the type-level fix. This is the fix that needs no generated
+// router types: the declared union, checked against the files on disk.
+const fs = require('fs');
+const path = require('path');
+const routes = require('./build/routes');
+
+// Anchored to a module this file already resolves, so the check does not
+// depend on the working directory the suite was launched from.
+const APP_DIR = path.join(path.dirname(require.resolve('./build/routes')), '../../../src/app');
+
+/** Every route expo-router will actually serve, read off the filesystem. */
+function realRoutes(dir = APP_DIR, prefix = '') {
+  const found = new Set();
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    // A (group) directory shapes navigation but contributes no URL segment.
+    const segment = /^\(.*\)$/.test(entry.name) ? prefix : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      for (const r of realRoutes(path.join(dir, entry.name), segment)) found.add(r);
+      continue;
+    }
+    if (!entry.name.endsWith('.tsx')) continue;
+    const name = entry.name.replace(/\.tsx$/, '');
+    if (name.startsWith('_') || name.startsWith('+')) continue; // layouts, +not-found
+    found.add(name === 'index' ? prefix || '/' : `${prefix}/${name}`);
+  }
+  return found;
+}
+
+const onDisk = realRoutes();
+const missing = routes.APP_ROUTES.filter((r) => !onDisk.has(r));
+ok('routes: every declared route has a screen', missing.length === 0, `missing ${missing.join(', ')}`);
+ok('routes: the analytics screen exists', onDisk.has('/stats'));
+
+// The exact scenario from the bug: the demo seed, and every chevron on it.
+const seedTx = seed.generateSeedTransactions(new Date(2026, 6, 18));
+const seedInsights = insights.buildInsights(seedTx, seed.SEED_BUDGETS, '2026-07', new Date(2026, 6, 18));
+ok('routes: the seed still produces insights', seedInsights.length > 0);
+const deadEnds = seedInsights
+  .map((i) => i.href)
+  .filter((h) => h !== undefined)
+  // A destination may carry a query string; the screen is what precedes it.
+  .filter((h) => !onDisk.has(h.split('?')[0]));
+ok('routes: no insight points at a screen that does not exist', deadEnds.length === 0,
+  `dead ends: ${deadEnds.join(', ')}`);
+
 // ── seed ──
 const now = new Date(2026, 6, 18);
 const s1 = seed.generateSeedTransactions(now);
 const s2 = seed.generateSeedTransactions(now);
 ok('seed deterministic', JSON.stringify(s1) === JSON.stringify(s2));
 ok('seed sorted desc', s1.every((t, i) => i === 0 || s1[i - 1].date >= t.date));
-ok('seed has salary each month', s1.filter(t => t.title === 'Salary').length === 4);
+ok('seed has salary each month', s1.filter(t => t.title === 'Salary').length === seed.SEED_HISTORY_MONTHS);
 ok('seed no future dates', s1.every(t => t.date <= '2026-07-18'));
-ok('seed reasonable volume', s1.length > 100 && s1.length < 400, `len=${s1.length}`);
-
+ok('seed reasonable volume', s1.length > 100 && s1.length < 500, `len=${s1.length}`);
 
 // ── subscriptions (v2) ──
 const subsLib = require('./build/subscriptions');
@@ -385,6 +459,80 @@ ok('period: movers empty for all-time', an.categoryMovers(aTx, { mode: 'all' }).
 const rangeTop = an.topMerchants(aTx, { mode: 'range', from: '2026-07-01', to: '2026-07-05' });
 ok('period: range-scoped top merchants', rangeTop[0].totalFils === 50000 && rangeTop.length === 2);
 
+// ── payment reminders: the date has to be the date ──
+//
+// The whole point of a reminder is that it arrives BEFORE the thing happens.
+// The old builder computed the due date as `new Date(year, month, dueDay)`
+// with no clamp, so a bill due on the 31st rolled forward to 2–3 March in
+// February and both reminders landed after the bill was already late.
+const remState = (over = {}) => ({
+  accounts: [], transactions: [], cardDues: [], bills: [], notSubscriptions: [], ...over,
+});
+const mkRemBill = (id, dueDay, over = {}) => ({
+  id, title: id, category: 'utilities', amountFils: 20000, dueDay, paidMonths: [], ...over,
+});
+const febNow = new Date(2026, 1, 20); // 20 Feb 2026 — February has 28 days
+
+eq('billDueISO clamps day 31 into February', bills.billDueISO(31, '2026-02'), '2026-02-28');
+eq('billDueISO clamps day 31 into a leap February', bills.billDueISO(31, '2028-02'), '2028-02-29');
+eq('billDueISO leaves a day that fits alone', bills.billDueISO(15, '2026-07'), '2026-07-15');
+
+const febRem = remind.buildPaymentReminders(remState({ bills: [mkRemBill('Etisalat', 31)] }), febNow);
+eq('reminders: a 31st-of-the-month bill is reminded inside February',
+  febRem.map((r) => r.dateISO), ['2026-02-27', '2026-02-28']);
+ok('reminders: never spill into the next month',
+  febRem.every((r) => !r.dateISO.startsWith('2026-03')));
+ok('reminders: fire at 09:00 local, not midnight',
+  febRem.every((r) => r.date.getHours() === 9 && r.date.getMinutes() === 0));
+ok('reminders: the day-before one is worded as tomorrow',
+  febRem[0].title.endsWith('due tomorrow') && febRem[1].title.endsWith('due today'));
+
+ok('reminders: a manually paid bill is silent',
+  remind.buildPaymentReminders(
+    remState({ bills: [mkRemBill('Etisalat', 31, { paidMonths: ['2026-02'] })] }), febNow,
+  ).length === 0);
+
+// status === 'paid' already covers auto-reconciled, which is why the second
+// `paidMonths` check the old loop carried after it was unreachable.
+ok('reminders: a bill already reconciled from its debit is silent',
+  remind.buildPaymentReminders(remState({
+    bills: [mkRemBill('DEWA', 31, { amountFils: 44900 })],
+    transactions: [{ id: 'd', type: 'expense', amountFils: 45000, category: 'utilities', accountId: 'a', title: 'DEWA Bill', date: '2026-02-14' }],
+  }), febNow).length === 0);
+
+ok('reminders: a due date already gone is not scheduled',
+  remind.buildPaymentReminders(remState({ bills: [mkRemBill('Salik', 5)] }), febNow).length === 0);
+
+const cardRem = remind.buildPaymentReminders(remState({
+  accounts: [{ id: 'cc', name: 'FAB Credit Card', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff' }],
+  cardDues: [{ id: 'd1', accountId: 'cc', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-02-25', paidFils: 0 }],
+}), febNow);
+eq('reminders: a card statement gets three days of warning, then the day itself',
+  cardRem.map((r) => r.dateISO), ['2026-02-22', '2026-02-25']);
+
+const subTxs = ['2025-11-25', '2025-12-25', '2026-01-25'].map((date, i) => ({
+  id: `s${i}`, type: 'expense', amountFils: 5600, category: 'entertainment',
+  accountId: 'a', title: 'Netflix', date,
+}));
+const subsForRem = require('./build/subscriptions')
+  .detectSubscriptions(subTxs, [], febNow)
+  .find((s) => s.title === 'Netflix');
+const subRem = remind.buildPaymentReminders(remState({ transactions: subTxs }), febNow);
+ok('reminders: a subscription is flagged the day before it renews',
+  subsForRem && subRem.length === 1 &&
+  subRem[0].dateISO === fmt.shiftISO(subsForRem.nextExpectedISO, -1));
+ok('reminders: a merchant already tracked as a bill is not reminded twice',
+  remind.buildPaymentReminders(
+    remState({ transactions: subTxs, bills: [mkRemBill('Netflix', 5)] }), febNow,
+  ).length === 0);
+
+const manyRem = remind.buildPaymentReminders(
+  remState({ bills: Array.from({ length: 40 }, (_, i) => mkRemBill(`B${i}`, 28)) }), febNow, 24,
+);
+ok('reminders: capped and sorted soonest first',
+  manyRem.length === 24 &&
+  manyRem.every((r, i) => i === 0 || manyRem[i - 1].date.getTime() <= r.date.getTime()));
+
 // ── salary-day month start (runs last: it mutates the global grouping) ──
 fmt.setMonthStartDay(25);
 ok('salary month: day before start belongs to previous month',
@@ -399,6 +547,47 @@ ok('salary month: elapsed days counted from the start day',
   per.elapsedDays({ mode: 'month', key: '2026-06' }, new Date(2026, 6, 24), []) === 30);
 ok('salary month: period end for a past month',
   per.periodEndISO({ mode: 'month', key: '2026-05' }, new Date(2026, 6, 24)) === '2026-06-24');
+
+// The identity every "days left in the month" figure leans on: a report month
+// starting on day D holds exactly as many days as its calendar month does.
+ok('salary month: daysInMonth IS the report-month length',
+  ['2026-01', '2026-02', '2026-04', '2028-02'].every((k) =>
+    fmt.daysBetweenISO(fmt.monthStartISO(k), fmt.monthEndISO(k)) + 1 === fmt.daysInMonth(k)));
+
+// A bill's due DAY has to be placed inside the window the report month covers.
+// The "June" month runs 25 Jun – 24 Jul, so day 30 is in June and day 10 is in
+// July — a bare `new Date(year, month, dueDay)` put both in the same month.
+ok('salary month: a due day at or after the start sits in the first half',
+  bills.billDueISO(30, '2026-06') === '2026-06-30');
+ok('salary month: a due day before the start sits in the tail',
+  bills.billDueISO(10, '2026-06') === '2026-07-10');
+ok('salary month: the tail is still clamped to its own month length',
+  bills.billDueISO(10, '2026-01') === '2026-02-10' &&
+  bills.billDueISO(30, '2026-02') === '2026-02-28');
+
+// The regression the reminders carried: Bills and the reminder set disagreeing
+// about which month a bill is in. They now read the same function.
+const salaryNow = new Date(2026, 6, 10); // 10 Jul 2026 → report month 2026-06
+const salaryBills = [
+  { id: 'early', title: 'Early', category: 'utilities', amountFils: 10000, dueDay: 30, paidMonths: [] },
+  { id: 'late', title: 'Late', category: 'utilities', amountFils: 10000, dueDay: 20, paidMonths: [] },
+];
+const salaryRows = bills.billsForMonth(salaryBills, [], salaryNow);
+const salaryRow = (id) => salaryRows.find((r) => r.bill.id === id);
+ok('salary month: a due day already passed in the window reads overdue',
+  salaryRow('early').dueISO === '2026-06-30' && salaryRow('early').daysLeft === -10);
+ok('salary month: a due day still ahead in the window reads upcoming',
+  salaryRow('late').dueISO === '2026-07-20' && salaryRow('late').daysLeft === 10);
+const salaryReminders = remind.buildPaymentReminders(
+  { accounts: [], transactions: [], cardDues: [], bills: salaryBills, notSubscriptions: [] },
+  salaryNow,
+);
+// Only 'late' is still ahead, and it is reminded on the pair of days either
+// side of the date the Bills screen prints — not on the 19th/20th of June,
+// which is where the raw calendar month would have put it.
+eq('salary month: reminders land either side of the date Bills shows',
+  salaryReminders.map((r) => r.dateISO), ['2026-07-19', '2026-07-20']);
+
 fmt.setMonthStartDay(1);
 ok('calendar months restore cleanly', fmt.monthKey('2026-07-24') === '2026-07');
 
@@ -761,6 +950,103 @@ eq('daysPhrase late', leaving.daysPhrase(-3), '3 days late');
 eq('daysPhrase today', leaving.daysPhrase(0), 'today');
 eq('daysPhrase tomorrow', leaving.daysPhrase(1), 'tomorrow');
 eq('daysPhrase future', leaving.daysPhrase(5), 'in 5 days');
+
+// ── the demo has to be ALIVE on every screen, on any launch date ──
+//
+// It was not. A fresh install opened on "SUBS 0 · CARDS 0" because every
+// merchant in the seed was charged on a random day for a random amount, so
+// nothing in it recurred and nothing recurring could be detected; and the
+// bills' due days sat before their debits, so the demo greeted you with an
+// overdue DEWA. These lock that shut. Nothing here is anchored to a fixed
+// date: the sweep below is the point.
+const demoCards = require('./build/cards');
+const demoSubs = require('./build/subscriptions');
+const demoOn = (nowDate) => {
+  const transactions = seed.generateSeedTransactions(nowDate);
+  const cardDues = seed.generateSeedCardDues(nowDate, transactions);
+  return {
+    now: nowDate,
+    transactions,
+    state: {
+      hydrated: true, accounts: seed.SEED_ACCOUNTS, transactions, cardDues,
+      bills: seed.SEED_BILLS, budgets: seed.SEED_BUDGETS, goals: [],
+      merchantOverrides: {}, accountHints: {}, notSubscriptions: [],
+    },
+  };
+};
+const demoFacts = (nowDate) => {
+  const d = demoOn(nowDate);
+  const detected = demoSubs.detectSubscriptions(d.transactions, [], d.now);
+  return {
+    subs: demoSubs.activeSubscriptions(demoSubs.trueSubscriptions(detected)),
+    commitments: demoSubs.activeSubscriptions(demoSubs.fixedCommitments(detected)),
+    stopped: demoSubs.stoppedSubscriptions(demoSubs.trueSubscriptions(detected)),
+    dues: demoCards.openDues(d.state, d.now),
+    bills: billsLib.billsForMonth(seed.SEED_BILLS, d.transactions, d.now),
+    priceRises: detected.filter((s) => s.priceIncreased),
+    cashFils: bal.accountBalanceFils(d.state, 'acc-cash'),
+    transactions: d.transactions,
+  };
+};
+
+const demoJul = demoFacts(new Date(2026, 6, 18));
+ok('demo: Bills → Subscriptions is not empty', demoJul.subs.length >= 5,
+  `${demoJul.subs.length}: ${demoJul.subs.map((s) => s.title).join(', ')}`);
+ok('demo: Netflix, Spotify and the gym are among them',
+  ['Netflix', 'Spotify Premium', 'Fitness First'].every((t) => demoJul.subs.some((s) => s.title === t)),
+  demoJul.subs.map((s) => s.title).join(', '));
+ok('demo: Bills → Cards is not empty', demoJul.dues.length > 0);
+ok('demo: the card due is real money', demoJul.dues.every((d) => d.remainingFils > 0));
+ok('demo: du, Etisalat, DEWA and Salik are detected as fixed commitments',
+  ['du Home Internet', 'Etisalat Postpaid', 'DEWA Bill', 'Salik Auto Recharge']
+    .every((t) => demoJul.commitments.some((s) => s.title === t)),
+  demoJul.commitments.map((s) => s.title).join(', '));
+ok('demo: one cancelled subscription to show', demoJul.stopped.length === 1);
+ok('demo: exactly one thing worth noticing (a price rise)', demoJul.priceRises.length === 1,
+  demoJul.priceRises.map((s) => s.title).join(', '));
+ok('demo: the price rise reads as a rise, not a tautology',
+  demoJul.priceRises.every((s) => s.previousAmountFils < s.lastAmountFils));
+
+// Every launch date for three years. The seed used to draw from one PRNG
+// stream anchored to wall-clock `now`, so what surfaced drifted with the
+// calendar and an e2e suite broke on it. What it GUARANTEES must not drift.
+const sweep = { subs: [], dues: [], overdue: 0, noRise: 0, negativeCash: 0, days: 0 };
+for (let d = new Date(2025, 0, 1); d < new Date(2028, 0, 1); d.setDate(d.getDate() + 1)) {
+  const f = demoFacts(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+  sweep.days++;
+  sweep.subs.push(f.subs.length);
+  sweep.dues.push(f.dues.length);
+  if (f.bills.some((b) => b.status === 'overdue')) sweep.overdue++;
+  if (f.priceRises.length !== 1) sweep.noRise++;
+  if (f.cashFils < 0) sweep.negativeCash++;
+}
+ok('demo: subscriptions on every one of 1095 launch dates', Math.min(...sweep.subs) >= 5,
+  `worst day had ${Math.min(...sweep.subs)}`);
+ok('demo: a card due on every one of 1095 launch dates', Math.min(...sweep.dues) >= 1,
+  `worst day had ${Math.min(...sweep.dues)}`);
+ok('demo: never opens on an overdue bill', sweep.overdue === 0, `${sweep.overdue}/${sweep.days} days`);
+ok('demo: always has exactly one price rise', sweep.noRise === 0, `${sweep.noRise}/${sweep.days} days`);
+ok('demo: the cash wallet never goes negative', sweep.negativeCash === 0,
+  `${sweep.negativeCash}/${sweep.days} days`);
+
+// Stability: a given calendar month holds the same rows whenever you look,
+// and today's ledger is yesterday's plus today's — never a rewrite.
+// Card payments are re-dated with the rolling statement cycle, and Netflix's
+// price step is deliberately relative to today (the demo is a rolling window;
+// a rise pinned to a calendar month scrolls out of it). Everything else in a
+// past month is frozen — that is what the e2e suite needs to be able to trust.
+const marchFrom = (nowDate) => seed.generateSeedTransactions(nowDate)
+  .filter((t) => t.date.startsWith('2026-03') && !t.isTransfer && t.title !== 'Netflix')
+  .map((t) => `${t.date}|${t.title}|${t.amountFils}`).sort().join('\n');
+ok('demo: a past month reads the same from any later launch date',
+  marchFrom(new Date(2026, 3, 9)) === marchFrom(new Date(2026, 5, 27)));
+const dayBefore = seed.generateSeedTransactions(new Date(2026, 4, 20));
+const dayAfter = new Set(seed.generateSeedTransactions(new Date(2026, 4, 21))
+  .map((t) => `${t.date}|${t.title}|${t.amountFils}`));
+ok('demo: a new day adds rows, it does not rewrite them',
+  dayBefore.filter((t) => !t.isTransfer && t.title !== 'Netflix')
+    .every((t) => dayAfter.has(`${t.date}|${t.title}|${t.amountFils}`)));
+
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

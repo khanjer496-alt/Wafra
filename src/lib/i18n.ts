@@ -93,6 +93,12 @@ const S = {
   outstanding: { en: 'outstanding', ar: 'مستحق' },
   perBankSms: { en: 'per bank SMS', ar: 'حسب رسالة البنك' },
   noBalanceYet: { en: 'no balance SMS yet', ar: 'لا رسالة رصيد بعد' },
+  trackedManually: { en: 'Tracked manually', ar: 'يُتابع يدويًا' },
+  reminderSet: { en: 'Reminder on', ar: 'التذكير مُفعّل' },
+  recurringHint: {
+    en: 'Tap a row for its charge history, or to set a reminder.',
+    ar: 'اضغط على أي صف لعرض سجل الخصومات أو لضبط تذكير.',
+  },
   improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },
   improveAccuracyHint: {
     en: 'These bank messages could not be fully read — the merchant or category had to be guessed. Share the list with the developer and the next update will read them properly. Long account numbers are masked.',

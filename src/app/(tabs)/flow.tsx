@@ -9,6 +9,7 @@
  * list. Here the composition comes first, the limits sit directly under it, and
  * the trend that explains both closes the screen.
  */
+import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -19,7 +20,8 @@ import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { PairedBars, type MonthPair } from '@/components/ui/charts';
+import { LinkPill, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
@@ -27,7 +29,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { getCategory, rampColor } from '@/lib/categories';
 import { daysInMonth, formatAED, formatAmount, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
 import { buildInsights, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
-import { isCurrentMonth } from '@/lib/period';
+import { elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
@@ -38,6 +40,7 @@ const MAX_SLICES = 5;
 export default function FlowScreen() {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
+  const router = useRouter();
   const clearance = useTabBarClearance();
   const { state } = useStore();
   const { period } = usePeriod();
@@ -101,26 +104,32 @@ export default function FlowScreen() {
   // "out 11,375 of 5,400 in limits", which reads as a catastrophic overrun
   // when the truth is that rent simply has no limit set.
   const limitedSpend = limits.reduce((s, r) => s + r.spent, 0);
-  const monthShare = live ? Math.min(1, now.getDate() / daysInMonth(key)) : 1;
-  const daysLeft = live ? Math.max(0, daysInMonth(key) - now.getDate()) : 0;
+  // How far through the REPORT month we are. `now.getDate()` answered that for
+  // the calendar month instead, so with a salary-day month start (the "June"
+  // month running 25 Jun – 24 Jul) both the pace marker and the "N days left"
+  // on every limit row were out by up to three weeks.
+  const monthDays = daysInMonth(key);
+  const elapsed = live
+    ? Math.min(monthDays, elapsedDays(period, now, state.transactions))
+    : monthDays;
+  const monthShare = elapsed / monthDays;
+  const daysLeft = live ? Math.max(0, monthDays - elapsed) : 0;
 
   /** In and out for the six months ending at the selected one. */
-  const trend = useMemo(() => {
-    const months = [];
+  const trend = useMemo<MonthPair[]>(() => {
+    const months: MonthPair[] = [];
     for (let i = 5; i >= 0; i--) {
       const k = shiftMonthKey(key, -i);
       const s = summarizeMonth(state.transactions, k);
       months.push({
-        key: k,
         label: monthLabel(k, true).split(' ')[0],
-        income: s.incomeFils,
-        expense: s.expenseFils,
+        inFils: s.incomeFils,
+        outFils: s.expenseFils,
+        current: k === key,
       });
     }
     return months;
   }, [state.transactions, key]);
-
-  const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
 
   return (
     <ThemedView style={styles.root}>
@@ -130,7 +139,14 @@ export default function FlowScreen() {
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <ThemedText type="title">Flow</ThemedText>
-            <PeriodPill onPress={() => setPeriodOpen(true)} />
+            {/* Stats is the long form of this screen — merchants, movers, the
+                weekday pattern — and it used to be reachable only from a caps
+                link two thousand pixels down this scroll, past six limit rows.
+                Now it stands next to the period, in the header, in words. */}
+            <View style={styles.headerActions}>
+              <PeriodPill onPress={() => setPeriodOpen(true)} />
+              <LinkPill label="Stats" onPress={() => router.push('/stats')} />
+            </View>
           </View>
 
           <ThemedText type="meta" themeColor="textSecondary" style={styles.subtitle}>
@@ -282,46 +298,15 @@ export default function FlowScreen() {
 
           {/* ── In vs out ── */}
           <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
-            <SectionHeader title="In vs out · 6 months" />
-            <View style={styles.trend}>
-              {trend.map((m) => {
-                const current = m.key === key;
-                return (
-                  <View key={m.key} style={styles.trendCol}>
-                    <View style={styles.trendBars}>
-                      <View
-                        style={[
-                          styles.trendBar,
-                          {
-                            height: `${Math.max(2, (m.income / trendMax) * 100)}%`,
-                            backgroundColor: theme.primary,
-                          },
-                        ]}
-                      />
-                      <View
-                        style={[
-                          styles.trendBar,
-                          {
-                            height: `${Math.max(2, (m.expense / trendMax) * 100)}%`,
-                            backgroundColor: current
-                              ? theme.expense
-                              : dark
-                                ? '#4A3A34'
-                                : '#DCC9C2',
-                          },
-                        ]}
-                      />
-                    </View>
-                    <ThemedText
-                      type="nano"
-                      themeColor={current ? 'text' : 'textTertiary'}
-                      style={styles.trendLabel}>
-                      {m.label}
-                    </ThemedText>
-                  </View>
-                );
-              })}
-            </View>
+            <SectionHeader
+              title="In vs out · 6 months"
+              right="ALL STATS"
+              onPressRight={() => router.push('/stats')}
+            />
+            {/* Drawn by the shared primitive. This screen used to reimplement
+                it inline with its own bar widths, which meant the same six
+                months looked like two different charts. */}
+            <PairedBars months={trend} />
           </Animated.View>
 
           {/* ── What that adds up to ── */}
@@ -359,6 +344,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
   subtitle: { marginTop: Spacing.two },
   section: { marginTop: Spacing.five },
 
@@ -394,23 +384,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   limitTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
-
-  trend: { flexDirection: 'row', gap: Spacing.two, height: 118 + 18 },
-  trendCol: { flex: 1, gap: Spacing.two },
-  trendBars: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  trendBar: {
-    flex: 1,
-    maxWidth: 14,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-  },
-  trendLabel: { textAlign: 'center' },
 
   insights: { gap: Spacing.two },
 });

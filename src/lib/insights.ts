@@ -1,5 +1,5 @@
-import { getCategory } from '@/lib/categories';
-import { formatAED } from '@/lib/format';
+import { getCategory, isFixedCommitment } from '@/lib/categories';
+import { daysInMonth, formatAED, shortDate } from '@/lib/format';
 import {
   elapsedDays,
   inPeriod,
@@ -9,6 +9,7 @@ import {
   toPeriod,
   type PeriodLike,
 } from '@/lib/period';
+import type { AppRoute } from '@/lib/routes';
 import {
   activeSubscriptions,
   detectSubscriptions,
@@ -73,8 +74,16 @@ export interface Insight {
   icon: import('@/components/ui/icon').IconName;
   title: string;
   body: string;
-  /** Where tapping the insight takes you (the screen to act on it). */
-  href?: string;
+  /**
+   * Where tapping the insight takes you — the screen that lets you act on it.
+   *
+   * `AppRoute`, never `string`: a destination is chosen here, next to the
+   * sentence that promises it, and it has to be a screen that exists. See
+   * `@/lib/routes`. Leave it undefined when an observation genuinely has
+   * nowhere to go; the row then renders without a chevron rather than
+   * promising a journey it cannot make.
+   */
+  href?: AppRoute;
 }
 
 /**
@@ -96,10 +105,10 @@ export function buildInsights(
   const live = isCurrentMonth(period, today);
   const isMonthMode = period.mode === 'month';
   const dayOfMonth = Math.max(1, elapsedDays(period, today, transactions));
-  const totalDaysInPeriod =
-    period.mode === 'month'
-      ? Number(new Date(Number(period.key.slice(0, 4)), Number(period.key.slice(5, 7)), 0).getDate())
-      : dayOfMonth;
+  // `daysInMonth` is the report month's length whatever the month start day
+  // is — the window [day D of M, day D-1 of M+1] holds exactly as many days
+  // as M does. This used to be an inline re-implementation of it.
+  const totalDaysInPeriod = period.mode === 'month' ? daysInMonth(period.key) : dayOfMonth;
 
   // Change vs the previous period (pace projection only mid-current-month)
   if (prev && previous.expenseFils > 0 && current.expenseFils > 0) {
@@ -115,6 +124,7 @@ export function buildInsights(
           icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
           title: delta > 0 ? `Trending ${pct}% higher` : `Trending ${pct}% lower`,
           body: `At today's pace you'll spend about ${formatAED(Math.round(projected), { decimals: false })} this month, vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+          href: '/stats',
         });
       }
     } else {
@@ -127,6 +137,7 @@ export function buildInsights(
           icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
           title: `Spent ${pct}% ${delta > 0 ? 'more' : 'less'}`,
           body: `${formatAED(current.expenseFils, { decimals: false })} vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+          href: '/stats',
         });
       }
     }
@@ -145,6 +156,8 @@ export function buildInsights(
         icon: 'alert',
         title: `${cat.label} budget exceeded`,
         body: `${formatAED(spent, { decimals: false })} spent of your ${formatAED(b.limitFils, { decimals: false })} limit.`,
+        // Flow owns limits — it is the only screen where one can be changed.
+        href: '/flow',
       });
     } else if (ratio >= 0.85 && live) {
       insights.push({
@@ -153,12 +166,13 @@ export function buildInsights(
         icon: 'alert',
         title: `${cat.label} almost at limit`,
         body: `${Math.round(ratio * 100)}% used — ${formatAED(b.limitFils - spent, { decimals: false })} left for the month.`,
+        href: '/flow',
       });
     }
   }
 
   // Top category concentration (rent and business costs aren't lifestyle spending)
-  const top = current.byCategory.filter((c) => c.category !== 'rent' && c.category !== 'business')[0];
+  const top = current.byCategory.filter((c) => !isFixedCommitment(c.category))[0];
   if (top && top.share >= 0.15) {
     const cat = getCategory(top.category);
     insights.push({
@@ -167,6 +181,8 @@ export function buildInsights(
       icon: cat.icon,
       title: `${cat.label} leads your spending`,
       body: `${formatAED(top.totalFils, { decimals: false })} — ${Math.round(top.share * 100)}% of this month's expenses.`,
+      // The rows behind the number, already filtered to the category named.
+      href: `/transactions?category=${top.category}`,
     });
   }
 
@@ -180,6 +196,7 @@ export function buildInsights(
         icon: 'leaf',
         title: `Saving ${Math.round(rate * 100)}% of income`,
         body: `${formatAED(current.incomeFils - current.expenseFils, { decimals: false })} kept aside${live ? ' so far this month' : ''}. Keep it up!`,
+        href: '/stats',
       });
     } else if (rate < 0) {
       insights.push({
@@ -188,6 +205,7 @@ export function buildInsights(
         icon: 'alert',
         title: 'Spending exceeds income',
         body: `Expenses are ${formatAED(current.expenseFils - current.incomeFils, { decimals: false })} above income${isMonthMode ? ' this month' : ' in this period'}.`,
+        href: '/transactions?type=expense',
       });
     }
   }
@@ -196,7 +214,7 @@ export function buildInsights(
   let largest: Transaction | null = null;
   for (const t of transactions) {
     if (t.isTransfer) continue;
-    if (t.type === 'expense' && inPeriod(t.date, period) && t.category !== 'rent' && t.category !== 'business') {
+    if (t.type === 'expense' && inPeriod(t.date, period) && !isFixedCommitment(t.category)) {
       if (!largest || t.amountFils > largest.amountFils) largest = t;
     }
   }
@@ -204,9 +222,17 @@ export function buildInsights(
     insights.push({
       id: 'largest',
       tone: 'neutral',
-      icon: 'diamond',
+      // The glyph of what was bought, not a decoration. `diamond` used to sit
+      // here, and `diamond` is the Wafra Pro mark on Settings, Home and /pro —
+      // one glyph cannot mean both "premium" and "largest transaction".
+      icon: getCategory(largest.category).icon,
       title: 'Biggest purchase',
-      body: `${largest.title} — ${formatAED(largest.amountFils, { decimals: false })} on ${largest.date.slice(8)}/${largest.date.slice(5, 7)}.`,
+      // `shortDate`, so this reads "23 Jul" like every other date in the app.
+      // It used to hand-roll "23/07" and was the only DD/MM in the product.
+      body: `${largest.title} — ${formatAED(largest.amountFils, { decimals: false })} on ${shortDate(largest.date)}.`,
+      // Scoped to that merchant: "what else have I paid them?" is the next
+      // question every time.
+      href: `/transactions?merchant=${encodeURIComponent(largest.title)}`,
     });
   }
 
@@ -224,6 +250,7 @@ export function buildInsights(
         icon: 'repeat',
         title: `${subs.length} subscriptions cost ${formatAED(monthly, { decimals: false })}/mo`,
         body: `That's ${Math.round((monthly / current.incomeFils) * 100)}% of this month's income. Review them in Bills.`,
+        href: '/bills',
       });
     } else {
       insights.push({
@@ -232,6 +259,7 @@ export function buildInsights(
         icon: 'repeat',
         title: `${subs.length} active subscriptions`,
         body: `About ${formatAED(monthly, { decimals: false })} per month combined.`,
+        href: '/bills',
       });
     }
   }
@@ -242,7 +270,11 @@ export function buildInsights(
       tone: 'warning',
       icon: 'arrow-up-right',
       title: `${increased.title} got pricier`,
-      body: `Last charge ${formatAED(increased.lastAmountFils, { decimals: false })} vs the usual ${formatAED(increased.avgAmountFils, { decimals: false })}.`,
+      // Against what it USED to cost. avgAmountFils tracks the new price by
+      // design, so comparing the last charge to it read "AED 56 vs the usual
+      // AED 56" — a sentence that undermines the whole insight.
+      body: `Now ${formatAED(increased.lastAmountFils, { decimals: false })} a month, up from ${formatAED(increased.previousAmountFils, { decimals: false })}.`,
+      href: '/bills',
     });
   }
 
@@ -253,19 +285,11 @@ export function buildInsights(
       tone: 'neutral',
       icon: 'sun',
       title: 'Daily average',
+      // Stats breaks the same figure down by weekday, which is the only way
+      // an average like this becomes something you can act on.
       body: `You spend about ${formatAED(Math.round(current.expenseFils / dayOfMonth), { decimals: false })} per day${isMonthMode ? ' this month' : ' in this period'}.`,
+      href: '/stats',
     });
-  }
-
-  // Every insight leads somewhere actionable.
-  for (const i of insights) {
-    i.href = i.id.startsWith('budget-')
-      ? '/budgets'
-      : i.id.startsWith('subs-') || i.id.startsWith('price-up')
-        ? '/bills'
-        : i.id === 'largest' || i.id === 'overspend'
-          ? '/transactions'
-          : '/stats';
   }
 
   const toneRank: Record<InsightTone, number> = { warning: 0, positive: 1, neutral: 2 };

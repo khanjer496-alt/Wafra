@@ -1,14 +1,10 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { billsForMonth } from '@/lib/bills';
-import { openDues } from '@/lib/cards';
-import { formatAED, monthKey } from '@/lib/format';
-import { detectSubscriptions, daysUntilNext } from '@/lib/subscriptions';
+import { buildPaymentReminders } from '@/lib/reminders';
 import type { AppState } from '@/lib/types';
 
 const CHANNEL_ID = 'payment-reminders';
-const MAX_SCHEDULED = 24;
 
 let handlerConfigured = false;
 
@@ -35,16 +31,13 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return asked.granted;
 }
 
-interface PendingNotification {
-  date: Date;
-  title: string;
-  body: string;
-}
-
 /**
  * Rebuilds all scheduled payment reminders from current state. Idempotent:
  * cancels everything and re-schedules the next ~30 days of bill due dates,
  * card pay-by dates, and subscription renewals.
+ *
+ * What to schedule, and when, lives in `@/lib/reminders` — this function only
+ * knows how to hand it to the OS.
  */
 export async function syncPaymentReminders(state: AppState): Promise<void> {
   if (Platform.OS === 'web') return;
@@ -61,67 +54,7 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
 
   await Notifications.cancelAllScheduledNotificationsAsync();
 
-  const now = new Date();
-  const pending: PendingNotification[] = [];
-  const at9 = (d: Date) => {
-    const copy = new Date(d);
-    copy.setHours(9, 0, 0, 0);
-    return copy;
-  };
-
-  // Bills: 1 day before + day-of for this month's unpaid reminders.
-  const key = monthKey(now);
-  const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
-  for (const { bill, status } of billsForMonth(state.bills, state.transactions, now)) {
-    if (status === 'paid') continue;
-    const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    for (const [offset, label] of [[-1, 'tomorrow'], [0, 'today']] as const) {
-      const when = at9(new Date(due.getFullYear(), due.getMonth(), due.getDate() + offset));
-      if (when <= now) continue;
-      pending.push({
-        date: when,
-        title: `${bill.title} due ${label}`,
-        body: `${formatAED(bill.amountFils, { decimals: false })} · mark it paid in Wafra once done.`,
-      });
-    }
-    if (bill.paidMonths.includes(key)) continue;
-  }
-
-  // Card dues: 3 days before + day-of.
-  for (const { due, remainingFils } of openDues(state, now)) {
-    const account = state.accounts.find((a) => a.id === due.accountId);
-    const name = account?.name ?? 'Credit card';
-    const dueDate = new Date(`${due.dueDate}T09:00:00`);
-    for (const [offset, label] of [[-3, 'in 3 days'], [0, 'today']] as const) {
-      const when = new Date(dueDate);
-      when.setDate(when.getDate() + offset);
-      if (when <= now) continue;
-      pending.push({
-        date: when,
-        title: `${name} payment due ${label}`,
-        body: `${formatAED(remainingFils, { decimals: false })} outstanding · minimum ${formatAED(due.minDueFils, { decimals: false })}.`,
-      });
-    }
-  }
-
-  // Subscriptions: 1 day before the next expected charge. Merchants already
-  // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(state.transactions, state.notSubscriptions)) {
-    if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
-    if (billTitles.has(sub.title.toLowerCase())) continue;
-    const days = daysUntilNext(sub, now);
-    if (days < 1 || days > 30) continue;
-    const when = at9(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days - 1));
-    if (when <= now) continue;
-    pending.push({
-      date: when,
-      title: `${sub.title} renews tomorrow`,
-      body: `Around ${formatAED(sub.avgAmountFils, { decimals: false })} will be charged.`,
-    });
-  }
-
-  pending.sort((a, b) => a.date.getTime() - b.date.getTime());
-  for (const n of pending.slice(0, MAX_SCHEDULED)) {
+  for (const n of buildPaymentReminders(state, new Date())) {
     await Notifications.scheduleNotificationAsync({
       content: { title: n.title, body: n.body },
       trigger: {

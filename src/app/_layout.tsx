@@ -73,10 +73,14 @@ export default function RootLayout() {
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="bills" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="cards" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
+            {/* Reachable only from a hand-typed deep link; it must still look
+                like the app rather than like a crash. */}
+            <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />
           </Stack>
           </ToastProvider>
           </OnboardingGate>

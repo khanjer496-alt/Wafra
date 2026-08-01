@@ -18,6 +18,7 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AccountTile } from '@/components/ui/tile';
+import { TrendCurve } from '@/components/ui/charts';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
@@ -85,20 +86,29 @@ export default function WalletScreen() {
   const [goalTitle, setGoalTitle] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalIcon, setGoalIcon] = useState(GOAL_ICONS[0]);
+  const [curveWidth, setCurveWidth] = useState(0);
 
   // Scans every transaction once per account, so it is kept off the render path.
   const total = useMemo(() => netWorthFils(state), [state]);
 
+  /** Net worth at the end of each of the last six months. */
+  const worth = useMemo(() => netWorthSeries(state), [state]);
+
   /**
-   * Movement since the start of the six-month window. A single figure with no
-   * direction is a number; with a direction it is an answer.
+   * Movement across the window. A single figure with no direction is a number;
+   * with a direction it is an answer.
+   *
+   * Read end-to-end off the SERIES, not `total − series[0]`. Those are two
+   * different quantities — `netWorthFils` counts only bank-quoted balances,
+   * `netWorthSeries` runs opening balances forward through every transaction —
+   * so subtracting one from the other produced a delta that did not match the
+   * curve now drawn directly beneath it.
    */
   const worthChange = useMemo(() => {
-    const series = netWorthSeries(state);
-    if (series.length < 2) return null;
-    const first = series[0];
-    return { fils: total - first.fils, since: monthLabel(first.key, true) };
-  }, [state, total]);
+    if (worth.length < 2) return null;
+    const first = worth[0];
+    return { fils: worth[worth.length - 1].fils - first.fils, since: monthLabel(first.key, true) };
+  }, [worth]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const duesTotalFils = useMemo(
     () => dues.reduce((sum, d) => sum + d.remainingFils, 0),
@@ -275,17 +285,39 @@ export default function WalletScreen() {
                 {formatAmount(total, { decimals: false })}
               </ThemedText>
             </View>
-            {worthChange && (
-              <ThemedText
-                type="meta"
-                tabular
-                style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
-                {worthChange.fils >= 0 ? '+' : '−'}
-                {formatAmount(Math.abs(worthChange.fils), { decimals: false })} since{' '}
-                {worthChange.since}
-              </ThemedText>
-            )}
           </View>
+
+          {/* The shape behind that figure. Six months of it were already being
+              computed on every state change to print one line of text; a
+              balance is a continuous quantity, so it gets a line, not bars. */}
+          {worth.length > 1 && (
+            <View style={styles.section}>
+              <SectionHeader title={t('netWorth6mo')} />
+              <View onLayout={(e) => setCurveWidth(e.nativeEvent.layout.width)}>
+                {curveWidth > 0 && <TrendCurve points={worth} width={curveWidth} height={104} />}
+              </View>
+              <View style={styles.axis}>
+                {worth.map((p, i) => (
+                  <ThemedText
+                    key={p.key}
+                    type="nano"
+                    themeColor={i === worth.length - 1 ? 'text' : 'textTertiary'}>
+                    {monthLabel(p.key, true).split(' ')[0]}
+                  </ThemedText>
+                ))}
+              </View>
+              {worthChange && (
+                <ThemedText
+                  type="meta"
+                  tabular
+                  style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
+                  {worthChange.fils >= 0 ? '+' : '−'}
+                  {formatAmount(Math.abs(worthChange.fils), { decimals: false })} since{' '}
+                  {worthChange.since}
+                </ThemedText>
+              )}
+            </View>
+          )}
 
           {/* Card dues */}
           {dues.length > 0 && (
@@ -436,6 +468,16 @@ export default function WalletScreen() {
                 const balance = reliableBalanceFils(state, account);
                 const fromBank = account.snapshotKind === 'balance' && account.snapshotFils !== undefined;
                 const meta = KIND_META[account.kind];
+                // An account called "Cash" of kind cash printed "Cash" over
+                // "Cash" — the same word twice, which reads as a data bug. When
+                // the name already says what the account is, the second line
+                // says how its balance is known instead.
+                const namesItsKind = account.name.trim().toLowerCase() === meta.label.toLowerCase();
+                const subtitle = namesItsKind
+                  ? fromBank
+                    ? t('perBankSms')
+                    : t('trackedManually')
+                  : meta.label;
                 return (
                   <Pressable
                     key={account.id}
@@ -450,7 +492,7 @@ export default function WalletScreen() {
                         {account.name}
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
-                        {meta.label}
+                        {subtitle}
                         {account.last4 ? ` ·· ${account.last4}` : ''}
                       </ThemedText>
                     </View>
@@ -792,6 +834,7 @@ const styles = StyleSheet.create({
   },
   worth: { gap: Spacing.two, marginTop: -Spacing.two },
   worthRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  axis: { flexDirection: 'row', justifyContent: 'space-between' },
   aed: { fontSize: 15, lineHeight: 20 },
   scan: {
     flexDirection: 'row',

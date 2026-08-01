@@ -1,4 +1,4 @@
-import { toISODate } from '@/lib/format';
+import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
 import type { CategoryId, Transaction } from '@/lib/types';
 
 export type Cadence = 'weekly' | 'monthly' | 'yearly';
@@ -25,6 +25,13 @@ export interface Subscription {
   chargeCount: number;
   /** Latest charge is >10% above the average of prior charges. */
   priceIncreased: boolean;
+  /**
+   * The typical charge BEFORE the latest one — what it used to cost. Only
+   * meaningful alongside priceIncreased, and the only place the old price
+   * survives: avgAmountFils deliberately tracks the new one, so a "was X, now
+   * Y" sentence built from avg alone said "AED 56 vs the usual AED 56".
+   */
+  previousAmountFils: number;
   /** Monthly-equivalent cost for totals (yearly/12, weekly*4.33). */
   monthlyEquivalentFils: number;
 }
@@ -49,17 +56,11 @@ const WINDOWS: CadenceWindow[] = [
 const KNOWN_SUBSCRIPTION_MERCHANTS =
   /netflix|spotify|anghami|osn|shahid|starz|youtube|yt premium|apple\.com|apple services|icloud|google one|google storage|amazon prime|prime video|openai|chat\s*gpt|claude|anthropic|real-?debrid|all-?debrid|disney|hbo|deezer|audible|kindle|linkedin|dropbox|adobe|canva|microsoft 365|office 365|discord|notion|github|telegram premium|xbox game pass|playstation plus|psn plus|fitness first|gymnation|fitness time|classpass|etisalat postpaid|du postpaid|home internet/i;
 
-function daysBetween(a: string, b: string): number {
-  return Math.round(
-    (new Date(`${b}T12:00:00`).getTime() - new Date(`${a}T12:00:00`).getTime()) / 86400000,
-  );
-}
-
-function addDays(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return toISODate(d);
-}
+// Both of these used to be local copies. Date arithmetic re-implemented per
+// module is how the app ended up with two different answers for "when is this
+// due", so there is now one of each, in format.ts.
+const daysBetween = daysBetweenISO;
+const addDays = shiftISO;
 
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
@@ -211,6 +212,7 @@ export function detectSubscriptions(
       nextExpectedISO: addDays(last.date, window.typicalDays),
       chargeCount: charges.length,
       priceIncreased: priorAmounts.length >= 2 && last.amountFils > priorTypical * 1.1,
+      previousAmountFils: priorTypical,
       monthlyEquivalentFils,
     });
   }

@@ -25,6 +25,12 @@ export function InsightCard({ insight }: InsightCardProps) {
   const theme = useTheme();
   const router = useRouter();
 
+  // Read once into a local so the narrowing below survives into `onPress`.
+  // `href` is an `AppRoute`, so `router.push` type-checks it against the routes
+  // expo-router generated from `src/app` — a destination with no screen behind
+  // it fails to compile here rather than landing the user on "Unmatched Route".
+  const href = insight.href;
+
   const tone =
     insight.tone === 'warning'
       ? theme.warning
@@ -40,18 +46,20 @@ export function InsightCard({ insight }: InsightCardProps) {
       <View style={styles.text}>
         <RichSentence text={`${insight.title}. ${insight.body}`} />
       </View>
-      {insight.href && <Icon name="chevron-right" size={15} color={theme.textTertiary} />}
+      {/* The chevron is a promise. It only appears when there is somewhere
+          to go, and there is only somewhere to go when `href` is set. */}
+      {href && <Icon name="chevron-right" size={15} color={theme.textTertiary} />}
     </View>
   );
 
-  if (!insight.href) {
+  if (!href) {
     return <View style={[styles.wrap, { borderTopColor: theme.cardBorder }]}>{body}</View>;
   }
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={insight.title}
-      onPress={() => router.push(insight.href!)}
+      onPress={() => router.push(href)}
       style={({ pressed }) => [
         styles.wrap,
         { borderTopColor: theme.cardBorder },

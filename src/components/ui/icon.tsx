@@ -14,6 +14,7 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-down'
   | 'sliders'
+  | 'filter'
   | 'arrow-up'
   | 'arrow-down'
   | 'arrow-up-right'
@@ -130,6 +131,12 @@ export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: Ico
           <Path {...p} d="M4 7 H20 M4 12 H20 M4 17 H20" />
           <Path {...p} d="M9 5 V9 M15 10 V14 M7 15 V19" />
         </>
+      )}
+      {/* A funnel, and only a funnel. `sliders` is this set's SETTINGS glyph —
+          it opens Settings from Home and from Wallet — so a filter control
+          cannot borrow it any more than it could borrow `chart`. */}
+      {name === 'filter' && (
+        <Path {...p} d="M3.5 5.5 H20.5 L14 13 V20.5 L10 18.2 V13 Z" />
       )}
       {name === 'arrow-up' && (
         <>

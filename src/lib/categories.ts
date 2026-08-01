@@ -46,6 +46,28 @@ export const EXPENSE_CATEGORIES = CATEGORIES.filter((c) => c.type === 'expense')
 export const INCOME_CATEGORIES = CATEGORIES.filter((c) => c.type === 'income');
 
 /**
+ * Money that leaves on a contract, not on a decision.
+ *
+ * Rent is one charge the size of forty grocery runs, and business costs are
+ * somebody else's money passing through. Any statistic about *behaviour* —
+ * which category leads, which purchase was biggest, which weekday is heaviest —
+ * is answered by whichever bucket rent happened to land in unless these are
+ * taken out first. The lesson was learned once in `buildInsights` and lived
+ * there as two inline `!== 'rent' && !== 'business'` checks; it is a property
+ * of the categories themselves, so it lives here now and every analysis reads
+ * the same list.
+ *
+ * Totals are a different question — "what left the account this month" must
+ * include the rent — so `summarizeMonth` and the ledger deliberately do NOT
+ * use this.
+ */
+export const FIXED_COMMITMENT_CATEGORIES: readonly CategoryId[] = ['rent', 'business'];
+
+export function isFixedCommitment(id: CategoryId): boolean {
+  return FIXED_COMMITMENT_CATEGORIES.includes(id);
+}
+
+/**
  * The one place several categories have to be told apart at a glance: the
  * composition bar and its legend. One hue at five lightnesses, so the ramp
  * still reads as a single quantity being divided rather than as a set of

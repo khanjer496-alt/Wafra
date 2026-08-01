@@ -2,7 +2,6 @@ import type { IconName } from '@/components/ui/icon';
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
-import { toISODate } from '@/lib/format';
 import {
   activeSubscriptions,
   daysUntilNext,
@@ -32,12 +31,6 @@ export interface Outgoing {
   billId?: string;
 }
 
-function shiftISO(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return toISODate(d);
-}
-
 /**
  * Everything with a date on it, in one list: card statements, fixed bills and
  * detected subscriptions.
@@ -53,7 +46,6 @@ export function leavingSoon(
 ): Outgoing[] {
   const withinDays = opts.withinDays ?? 9;
   const kinds = new Set<OutgoingKind>(opts.kinds ?? ['card', 'bill', 'subscription']);
-  const todayISO = toISODate(today);
   const items: Outgoing[] = [];
 
   if (kinds.has('card')) {
@@ -75,7 +67,11 @@ export function leavingSoon(
   }
 
   if (kinds.has('bill')) {
-    for (const { bill, status, daysLeft } of billsForMonth(state.bills, state.transactions, today)) {
+    for (const { bill, status, dueISO, daysLeft } of billsForMonth(
+      state.bills,
+      state.transactions,
+      today,
+    )) {
       if (status === 'paid') continue;
       items.push({
         id: `bill-${bill.id}`,
@@ -83,7 +79,9 @@ export function leavingSoon(
         title: bill.title,
         icon: getCategory(bill.category).icon,
         amountFils: bill.amountFils,
-        dateISO: shiftISO(todayISO, daysLeft),
+        // The date bills.ts already worked out, rather than reconstructing it
+        // from daysLeft — one derivation, one answer.
+        dateISO: dueISO,
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,

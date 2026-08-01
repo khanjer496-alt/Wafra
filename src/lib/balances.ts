@@ -1,3 +1,4 @@
+import { toWholeDirhamFils } from './format';
 import type { Account, AppState } from './types';
 
 /** Current balance of an account: opening balance plus all its transactions. */
@@ -39,9 +40,16 @@ export function reliableBalanceFils(state: AppState, account: Account): number |
 export function netWorthFils(state: AppState): number {
   // Only bank-quoted or fully-manual balances count; unknowable accounts and
   // hidden (dead card) accounts contribute nothing.
+  //
+  // Each part is snapped to the whole dirham it is DISPLAYED as before it is
+  // added in. Summing raw fils and rounding once at the end is arithmetically
+  // purer and reads as a bug: the fils of two accounts carried, so Wallet's
+  // headline came out a dirham above the two rows printed directly under it.
+  // A finance app disagreeing with itself on one screen costs more than half a
+  // dirham of precision on a figure that is shown to the dirham anyway.
   return state.accounts.reduce((sum, a) => {
     if (a.archived) return sum;
     const fils = reliableBalanceFils(state, a);
-    return fils === null ? sum : sum + fils;
+    return fils === null ? sum : sum + toWholeDirhamFils(fils);
   }, 0);
 }

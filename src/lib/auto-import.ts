@@ -68,7 +68,10 @@ export async function scanInbox(
     scannedCount += batch.length;
     for (const sms of batch) {
       if (sms.date > newestTs) newestTs = sms.date;
-      const p = parseSms(sms.body, overrides);
+      // The sender ID is the ONLY thing that says which bank sent a message —
+      // no UAE bank but HSBC names itself in the body — so it is passed to the
+      // parser, not just recorded on the row.
+      const p = parseSms(sms.body, overrides, { sender: sms.address });
       if (!p) continue;
       parsed.push({ ...p, date: p.date ?? toISODate(new Date(sms.date)), smsTs: sms.date, sender: sms.address });
     }
@@ -86,7 +89,7 @@ export async function scanInbox(
       for (const sms of await SmsReader.getReceived(sinceMs)) {
         scannedCount += 1;
         if (sms.date > newestTs) newestTs = sms.date;
-        const p = parseSms(sms.body, overrides);
+        const p = parseSms(sms.body, overrides, { sender: sms.address });
         if (!p) continue;
         parsed.push({
           ...p,
@@ -109,7 +112,9 @@ export async function scanInbox(
       for (const n of captured) {
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
-        const p = parseSms(`${n.title} ${n.text}`.trim(), overrides);
+        const p = parseSms(`${n.title} ${n.text}`.trim(), overrides, {
+          sender: `${n.pkg} ${n.title}`,
+        });
         if (!p) continue;
         parsed.push({
           ...p,

@@ -608,9 +608,15 @@ const OFFER_RE =
  * that also states the money already moved keeps its row (a real posting with
  * a "the next instalment will be deducted on 05 Sep" footer is common).
  */
-/** A schedule states its own tense: nothing has been posted yet. */
+/**
+ * A schedule states its own tense: nothing has been posted yet.
+ *
+ * Only the VERBAL forms are here. "Your scheduled payment of AED 1,000.00 has
+ * been processed" uses "scheduled" as an adjective for a standing instruction
+ * that just RAN, and treating the adjective as a schedule deleted the posting.
+ */
 const SCHEDULED_CLAUSE_RE =
-  /\b(?:is|are|has\s+been|have\s+been|will\s+be)\s+scheduled\b(?:[^.\n]|\.\d)*|\bscheduled\s+(?:payment|transfer|debit|instruction)\b(?:[^.\n]|\.\d)*|\bstanding\s+instruction\s+(?:is|will)\b(?:[^.\n]|\.\d)*/gi;
+  /\b(?:is|are|has\s+been|have\s+been|will\s+be)\s+scheduled\b(?:[^.\n]|\.\d)*/gi;
 const FUTURE_CLAUSE_RE =
   /\b(?:will|shall|would|going\s+to)\s+(?:not\s+)?(?:be\s+)?(?:auto[\s-]?)?(?:debited|deducted|credited|charged|applied|paid|posted|processed|collected|taken|transferred|withdrawn|deduct|debit|charge|credit)\b(?:[^.\n]|\.\d)*|\bscheduled\s+(?:for|on|to\s+be)\b(?:[^.\n]|\.\d)*|سيتم\s+(?:خصم|اضافه|تحويل)(?:[^.\n]|\.\d)*/gi;
 /**
@@ -2486,10 +2492,11 @@ function merchantsAgree(a: ParsedSms, b: ParsedSms): boolean {
   if (namesNoMerchant(a) || namesNoMerchant(b)) return true;
   const ka = merchantKey(a.merchant);
   const kb = merchantKey(b.merchant);
-  // A one-consonant skeleton (IKEA, ايكيا) carries too little to tell the two
-  // names apart, so it contradicts nothing and the rest of the evidence —
-  // which already agreed on amount, card, day, kind and direction — decides.
-  if (ka.length < 2 || kb.length < 2) return true;
+  // Only an EMPTY skeleton (a name of pure vowels) says nothing at all. A
+  // one-consonant one still does: IKEA and ايكيا both reduce to "k", and
+  // treating that length as unknown merged a Starbucks purchase into an IKEA
+  // one — the second row was deleted and the coffee never happened.
+  if (!ka || !kb) return true;
   return ka === kb;
 }
 export function parseSmsBatch(

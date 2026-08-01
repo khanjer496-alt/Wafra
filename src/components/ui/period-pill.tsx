@@ -40,6 +40,38 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
   );
 }
 
+/**
+ * A labelled pill that goes somewhere — the pill's navigation counterpart.
+ *
+ * Labelled, not a glyph. The one destination this exists for, `/stats`, is the
+ * long form of the Flow tab, and the only icon that would say so is `chart` —
+ * which is the Flow tab's own glyph, sitting in the bar at the bottom of the
+ * same screen. A word cannot be mistaken for the tab you are already on.
+ */
+export function LinkPill({ label, onPress }: { label: string; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={6}
+      style={({ pressed }) => [
+        styles.pill,
+        {
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.primaryBorder,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}>
+      <ThemedText type="micro" themeColor="primary">
+        {label}
+      </ThemedText>
+      <Icon name="chevron-right" size={12} color={theme.primary} />
+    </Pressable>
+  );
+}
+
 /** A 34×34 bordered icon button — the square counterpart to the pill. */
 export function IconButton({
   name,

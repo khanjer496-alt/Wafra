@@ -21,7 +21,7 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
-import { billsForMonth, type BillStatus } from '@/lib/bills';
+import { billsForMonth, type BillStatus, type BillWithStatus } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
 import { formatAED, monthKey, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
@@ -39,6 +39,23 @@ import { useStore } from '@/lib/store';
 import type { Account, CategoryId } from '@/lib/types';
 
 type Segment = 'subscriptions' | 'cards' | 'utilities';
+
+/**
+ * A REMINDER IS NOT A BILL. It is a bill's alarm clock.
+ *
+ * Tapping "Remind me" on a detected charge writes a `Bill` carrying the
+ * merchant's name and the amount it cost that day. The screen then listed both
+ * — the detected charge AND the reminder it had just created — so DEWA, du and
+ * Etisalat each appeared twice on one scroll, and DEWA read 449 in the top
+ * list against the 450 frozen into its reminder. Two amounts for one bill,
+ * eight rows apart, is a data bug as far as anyone reading it is concerned.
+ *
+ * So a merchant is rendered exactly once, by its detected row, and the
+ * reminder shows up as state ON that row. Only a reminder with nothing to
+ * attach to — something typed in by hand that no charge history has caught up
+ * with yet — gets a row of its own.
+ */
+const titleKey = (s: string): string => s.trim().toLowerCase();
 
 export default function BillsScreen() {
   const theme = useTheme();
@@ -65,9 +82,13 @@ export default function BillsScreen() {
     [state.bills, state.transactions, now],
   );
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  // `now`, not the internal `new Date()` default: active-vs-stopped is decided
+  // against a date, and without passing the screen's own one this memo judged
+  // it from whenever it last happened to run while the rows beside it used
+  // `now` — two clocks on one screen.
   const detected = useMemo(
-    () => detectSubscriptions(state.transactions, state.notSubscriptions),
-    [state.transactions, state.notSubscriptions],
+    () => detectSubscriptions(state.transactions, state.notSubscriptions, now),
+    [state.transactions, state.notSubscriptions, now],
   );
   const subs = useMemo(() => activeSubscriptions(trueSubscriptions(detected)), [detected]);
   const stopped = useMemo(() => stoppedSubscriptions(trueSubscriptions(detected)), [detected]);
@@ -86,10 +107,27 @@ export default function BillsScreen() {
     [allCommitments],
   );
   const subsTotal = subscriptionsMonthlyTotal(subs);
-  const trackedTitles = useMemo(
-    () => new Set(state.bills.map((b) => b.title.toLowerCase())),
-    [state.bills],
-  );
+
+  /** The reminder attached to a merchant, if one has been set. */
+  const reminderFor = useMemo(() => {
+    const map = new Map<string, BillWithStatus>();
+    for (const row of rows) map.set(titleKey(row.bill.title), row);
+    return map;
+  }, [rows]);
+
+  /**
+   * Reminders with no detected row to sit on. Everything else is drawn once,
+   * where its charge history lives.
+   */
+  const standaloneReminders = useMemo(() => {
+    const detectedTitles = new Set(
+      [...subs, ...loans, ...commitments].map((s) => titleKey(s.title)),
+    );
+    return rows.filter((row) => !detectedTitles.has(titleKey(row.bill.title)));
+  }, [rows, subs, loans, commitments]);
+
+  /** What the FIXED badge counts: rows a user will actually see under it. */
+  const fixedCount = loans.length + commitments.length + standaloneReminders.length;
 
   // Everything the detail sheet needs about the tapped subscription: its raw
   // charges (newest first), which cards paid it, first charge, lifetime total.
@@ -210,6 +248,13 @@ export default function BillsScreen() {
     ]);
   };
 
+  const onRemoveReminder = (billId: string, billTitle: string) => {
+    Alert.alert('Stop reminding you?', `Wafra will still track "${billTitle}" — it just won't remind you before it is due.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Stop reminding', style: 'destructive', onPress: () => deleteBill(billId) },
+    ]);
+  };
+
   const onDismissSub = (sub: Subscription) => {
     Alert.alert(
       'Not a subscription?',
@@ -223,7 +268,8 @@ export default function BillsScreen() {
 
   const renderRecurringRow = (sub: Subscription, i: number) => {
     const next = daysUntilNext(sub, now);
-    const tracked = trackedTitles.has(sub.title.toLowerCase());
+    const reminder = reminderFor.get(titleKey(sub.title));
+    const reminderMeta = reminder ? statusMeta(reminder.status, reminder.daysLeft) : null;
     return (
       <Animated.View key={sub.title} entering={FadeInDown.delay(Math.min(i, 8) * 40).duration(300)}>
         <Pressable
@@ -247,46 +293,33 @@ export default function BillsScreen() {
                 </View>
               )}
             </View>
-            <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+            {/* The next charge date is the whole reason this line exists, and
+                it was the part that got cut: a 90px "Remind me" pill on the
+                right plus a "last charged" date nobody asked for left eight of
+                ten rows ending in "next 2…". The pill has moved to the detail
+                sheet this row already opens, the last-charged date lives there
+                too, and the line wraps rather than truncates — so the date
+                survives however long the merchant's name is. */}
+            <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
               {sub.status === 'stopped'
                 ? `stopped · last charged ${shortDate(sub.lastChargedISO)}`
-                : `${sub.cadence} · last ${shortDate(sub.lastChargedISO)} · ${
-                    next >= 0
-                      ? `next ${shortDate(sub.nextExpectedISO)} (${next}d)`
-                      : `expected ${-next}d ago`
-                  }`}
+                : next >= 0
+                  ? `${sub.cadence} · next ${shortDate(sub.nextExpectedISO)} (${next}d)`
+                  : `${sub.cadence} · expected ${shortDate(sub.nextExpectedISO)}, ${-next}d ago`}
             </ThemedText>
           </View>
           <View style={styles.rowRight}>
             <ThemedText type="smallBold" tabular>
               {formatAED(sub.avgAmountFils, { decimals: false })}
             </ThemedText>
-            {!tracked && sub.status !== 'stopped' && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Remind me about ${sub.title}`}
-                hitSlop={8}
-                onPress={() =>
-                  addBill({
-                    title: sub.title,
-                    category: sub.category,
-                    amountFils: sub.avgAmountFils,
-                    dueDay: Number(sub.nextExpectedISO.slice(8)),
-                    autoDetected: true,
-                  })
-                }
-                style={({ pressed }) => [
-                  styles.remindBtn,
-                  {
-                    backgroundColor: pressed ? `${theme.primary}2e` : `${theme.primary}17`,
-                    borderColor: `${theme.primary}44`,
-                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                  },
-                ]}>
-                <ThemedText type="nano" style={{ color: theme.primary }}>
-                  Remind me
-                </ThemedText>
-              </Pressable>
+            {/* The reminder, shown as state on the bill it belongs to rather
+                than as a second row for the same merchant further down. */}
+            {reminder && reminderMeta && (
+              <ThemedText type="nano" numberOfLines={1} style={{ color: reminderMeta.color }}>
+                {reminder.status === 'paid'
+                  ? `${reminderMeta.label} · ${shortDate(reminder.dueISO)}`
+                  : reminderMeta.label}
+              </ThemedText>
             )}
           </View>
         </Pressable>
@@ -318,7 +351,7 @@ export default function BillsScreen() {
                 ? `${t('subscriptionsSeg')} ${subs.length}`
                 : s === 'cards'
                   ? `${t('cardsSeg')} ${dues.length}`
-                  : `${t('utilitiesSeg')} ${loans.length + commitments.length + rows.length}`;
+                  : `${t('utilitiesSeg')} ${fixedCount}`;
             return (
               <Pressable
                 key={s}
@@ -489,7 +522,13 @@ export default function BillsScreen() {
                 </View>
               )}
 
-              {rows.length > 0 && (
+              {(loans.length > 0 || commitments.length > 0) && (
+                <ThemedText type="micro" themeColor="textTertiary" style={styles.hint}>
+                  {t('recurringHint')}
+                </ThemedText>
+              )}
+
+              {standaloneReminders.length > 0 && (
                 <View style={commitments.length > 0 ? styles.commitBlock : undefined}>
                   <ThemedText type="micro" themeColor="textSecondary">
                     {t('remindersSeg')}
@@ -497,7 +536,7 @@ export default function BillsScreen() {
                 </View>
               )}
               <View>
-                {rows.map(({ bill, status, daysLeft }, i) => {
+                {standaloneReminders.map(({ bill, status, dueISO, daysLeft }, i) => {
                   const meta = statusMeta(status, daysLeft);
                   return (
                     <Pressable
@@ -512,8 +551,12 @@ export default function BillsScreen() {
                         <ThemedText type="default" numberOfLines={1}>
                           {bill.title}
                         </ThemedText>
+                        {/* The date it actually falls on, not the stored day.
+                            A bill set to day 31 is due on 28 Feb, and "day 31"
+                            next to "Due in 8d" reads like one of the two is
+                            broken. */}
                         <ThemedText type="small" style={{ color: meta.color }}>
-                          {meta.label} · day {bill.dueDay}
+                          {meta.label} · {shortDate(dueISO)}
                         </ThemedText>
                       </View>
                       <View style={styles.rowRight}>
@@ -534,12 +577,12 @@ export default function BillsScreen() {
                   );
                 })}
               </View>
-              {rows.length > 0 && (
-                <ThemedText type="micro" themeColor="textSecondary" style={styles.hint}>
+              {standaloneReminders.length > 0 && (
+                <ThemedText type="micro" themeColor="textTertiary" style={styles.hint}>
                   Long-press a reminder to delete it.
                 </ThemedText>
               )}
-              {rows.length === 0 && commitments.length === 0 && (
+              {fixedCount === 0 && (
                 <View style={styles.empty}>
                   <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
                     <Icon name="calendar" size={26} color={theme.textSecondary} strokeWidth={1.7} />
@@ -674,26 +717,55 @@ export default function BillsScreen() {
                   </ScrollView>
                 </View>
 
-                {/* Actions */}
+                {/* Actions. The reminder is set and unset HERE now that the
+                    list row no longer carries a pill — the row opens straight
+                    into this sheet, and here the control has room for a label.
+                    One button, two states: filled when there is a reminder to
+                    set, outlined and ticked when there is one to call off. */}
                 <View style={styles.detailActions}>
-                  {!trackedTitles.has(detail.title.toLowerCase()) && detail.status !== 'stopped' && (
-                    <Pressable
-                      onPress={() => {
-                        addBill({
-                          title: detail.title,
-                          category: detail.category,
-                          amountFils: detail.avgAmountFils,
-                          dueDay: Number(detail.nextExpectedISO.slice(8)),
-                          autoDetected: true,
-                        });
-                        setDetail(null);
-                      }}
-                      style={[styles.detailBtn, { backgroundColor: theme.primary }]}>
-                      <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-                        {t('remindMe')}
-                      </ThemedText>
-                    </Pressable>
-                  )}
+                  {(() => {
+                    const reminder = reminderFor.get(titleKey(detail.title));
+                    if (reminder) {
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={() => {
+                            const { id, title: billTitle } = reminder.bill;
+                            setDetail(null);
+                            onRemoveReminder(id, billTitle);
+                          }}
+                          style={[
+                            styles.detailBtn,
+                            styles.detailToggle,
+                            { borderColor: theme.primaryBorder },
+                          ]}>
+                          <Icon name="check" size={15} color={theme.primary} strokeWidth={2.6} />
+                          <ThemedText type="smallBold" style={{ color: theme.primary }}>
+                            {t('reminderSet')}
+                          </ThemedText>
+                        </Pressable>
+                      );
+                    }
+                    return detail.status === 'stopped' ? null : (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => {
+                          addBill({
+                            title: detail.title,
+                            category: detail.category,
+                            amountFils: detail.avgAmountFils,
+                            dueDay: Number(detail.nextExpectedISO.slice(8)),
+                            autoDetected: true,
+                          });
+                          setDetail(null);
+                        }}
+                        style={[styles.detailBtn, { backgroundColor: theme.primary }]}>
+                        <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
+                          {t('remindMe')}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })()}
                   <Pressable
                     onPress={() => {
                       const sub = detail;
@@ -786,14 +858,6 @@ export default function BillsScreen() {
 }
 
 const styles = StyleSheet.create({
-  /** Matches the "Mark paid" chip on Wallet dues: a real target, not bare text. */
-  remindBtn: {
-    paddingHorizontal: Spacing.two + 2,
-    paddingVertical: Spacing.one + 3,
-    borderRadius: Radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignSelf: 'flex-end',
-  },
   root: {
     flex: 1,
     alignItems: 'center',
@@ -878,6 +942,9 @@ const styles = StyleSheet.create({
   },
   rowInfo: {
     flex: 1,
+    // Without this a flex child refuses to shrink below its content width, so
+    // the subtitle pushes the amount off instead of wrapping.
+    minWidth: 0,
     gap: 1,
   },
   rowTitleLine: {
@@ -890,6 +957,7 @@ const styles = StyleSheet.create({
   },
   rowRight: {
     alignItems: 'flex-end',
+    flexShrink: 0,
     gap: 2,
   },
   badge: {
@@ -1025,5 +1093,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     paddingVertical: Spacing.three,
     alignItems: 'center',
+  },
+  /** The "on" half of the reminder toggle: an outline, not a second fill. */
+  detailToggle: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
   },
 });

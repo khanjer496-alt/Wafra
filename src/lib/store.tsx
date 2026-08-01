@@ -13,7 +13,13 @@ import React, {
 import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import { detectMarketId, setActiveMarket } from '@/lib/markets';
-import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/seed';
+import {
+  generateSeedCardDues,
+  generateSeedTransactions,
+  SEED_ACCOUNTS,
+  SEED_BILLS,
+  SEED_BUDGETS,
+} from '@/lib/seed';
 import { guessCategory, normalizeServiceName, parseSms, STRUCTURAL_TITLES } from '@/lib/sms-parser';
 import type {
   Account,
@@ -377,19 +383,21 @@ interface StoreValue {
 
 const StoreContext = createContext<StoreValue | null>(null);
 
-const SEED_BILLS: Bill[] = [
-  { id: 'bill-dewa', title: 'DEWA Bill', category: 'utilities', amountFils: 45_000, dueDay: 25, paidMonths: [] },
-  { id: 'bill-etisalat', title: 'Etisalat Postpaid', category: 'telecom', amountFils: 19_900, dueDay: 5, paidMonths: [] },
-  { id: 'bill-du', title: 'du Home Internet', category: 'telecom', amountFils: 38_900, dueDay: 10, paidMonths: [] },
-];
-
 function demoState(): Partial<Omit<AppState, 'hydrated'>> {
+  const now = new Date();
+  const transactions = generateSeedTransactions(now);
   return {
     accounts: SEED_ACCOUNTS,
-    transactions: generateSeedTransactions(new Date()),
+    transactions,
+    // Derived from the same statement windows the seed's card payments were
+    // written against, so the open due matches what the card actually spent.
+    cardDues: generateSeedCardDues(now, transactions),
     budgets: SEED_BUDGETS,
     bills: SEED_BILLS,
-    goals: [{ id: 'goal-demo', title: 'Emergency fund', emoji: 'target', targetFils: 2_000_000, savedFils: 650_000 }],
+    // Six months of the demo's own outgoings, roughly 40% of the way there —
+    // an AED 20,000 target next to a AED 93,000 bank balance read as a goal
+    // already met and left on the screen by mistake.
+    goals: [{ id: 'goal-demo', title: 'Emergency fund', emoji: 'target', targetFils: 6_000_000, savedFils: 2_400_000 }],
     onboarded: true,
     userName: 'there',
   };
