@@ -127,8 +127,14 @@ function LegendKey({ color, label }: { color: string; label: string }) {
  * inline with a second set of bar widths, so the same six months rendered two
  * different ways depending on which screen you were standing on.
  *
- * The out bar is neutral except in the selected month, so the eye finds "now"
- * without the whole chart turning red.
+ * Colour here means SERIES and nothing else: accent is in, clay is out, in
+ * every month. It used to mean two things at once — out was clay in the
+ * selected month and a muted brown everywhere else — so the legend's clay
+ * "Out" swatch sat under five brown bars and one clay one, and the muting read
+ * as "these five months are a different quantity" rather than "this one is
+ * now". "Now" is a position on a time axis, not a third quantity, so it is
+ * marked positionally: the current column keeps its label in full ink and
+ * carries a tick beneath it.
  */
 export function PairedBars({
   months,
@@ -143,7 +149,6 @@ export function PairedBars({
   onPressMonth?: (index: number) => void;
 }) {
   const theme = useTheme();
-  const outColor = useOutBarColor();
   const max = Math.max(1, ...months.flatMap((m) => [m.inFils, m.outFils]));
 
   return (
@@ -171,7 +176,7 @@ export function PairedBars({
                   styles.pairBar,
                   {
                     height: Math.max(3, (m.outFils / max) * height),
-                    backgroundColor: m.current ? theme.expense : outColor,
+                    backgroundColor: theme.expense,
                   },
                 ]}
               />
@@ -179,6 +184,14 @@ export function PairedBars({
             <ThemedText type="nano" themeColor={m.current ? 'text' : 'textTertiary'}>
               {m.label}
             </ThemedText>
+            {/* The "you are here" tick. Ink, not a hue: it marks a position on
+                the axis, and every hue in this chart is already spoken for. */}
+            <View
+              style={[
+                styles.nowTick,
+                { backgroundColor: m.current ? theme.text : 'transparent' },
+              ]}
+            />
           </Pressable>
         ))}
       </View>
@@ -355,6 +368,12 @@ const styles = StyleSheet.create({
     maxWidth: 14,
     borderTopLeftRadius: 3,
     borderTopRightRadius: 3,
+  },
+  nowTick: {
+    width: 14,
+    height: 2,
+    borderRadius: 1,
+    marginTop: 1,
   },
   legend: {
     flexDirection: 'row',

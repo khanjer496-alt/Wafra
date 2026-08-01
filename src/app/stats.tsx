@@ -1,19 +1,26 @@
 /**
- * Stats — the six questions a month of spending actually raises.
+ * Stats — the four questions no other screen answers.
  *
  * Every written insight in the app ends with a chevron, and this is where most
- * of them point. Before this screen existed they pointed at `/stats`, which did
- * not exist, so tapping an observation landed the user on expo-router's
- * "Unmatched Route" page.
+ * of them point. It opens on the material that exists nowhere else:
  *
- * The maths was all here already, in `@/lib/analytics`, unit-tested and unused:
- * a merchant leaderboard, month-on-month category movers, a weekday pattern, a
- * per-category trend and a net-worth curve. The app was showing one unlabelled
- * bar chart on Flow and a single delta figure on Wallet. This screen surfaces
- * the rest, in the order the questions get asked:
+ *   who takes the money · what changed · how is that category moving ·
+ *   when does it go
  *
- *   where do I stand · what is the shape of the month · who takes the money ·
- *   what changed · how is that category moving · when do I spend
+ * It used to open on two charts it did not own. Section 1 was the same
+ * `TrendCurve` over the same six months that Wallet draws above the fold, under
+ * the same "+58,473 since Feb" figure. Section 2 was the same `PairedBars` that
+ * Flow draws — and the "ALL STATS" link that brought you here hung off the
+ * header of that very chart, so tapping it landed you on a pixel-identical copy
+ * of the thing you had just tapped. Two full screens of scrolling before a
+ * single new fact.
+ *
+ * So they are gone, not moved down. A chart belongs to the screen whose
+ * question it answers: net worth is the one figure Wallet exists to show, and
+ * the shape of the month is what Flow is for. Repeating either here would only
+ * teach the user that this screen is a longer version of a screen they have
+ * already read. What is left is a pair of links at the foot, naming where those
+ * two charts live — an index entry, not a second rendering.
  *
  * No cards. Sections are separated by space and 1px rules, figures are mono,
  * and the only colour beyond ink is meaning: accent for in, clay for out.
@@ -27,7 +34,7 @@ import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
-import { HistoryStrip, PairedBars, TrendCurve, type MonthPair } from '@/components/ui/charts';
+import { HistoryStrip } from '@/components/ui/charts';
 import { Chip } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Row, Section, SectionHeader } from '@/components/ui/layout';
@@ -42,11 +49,11 @@ import {
   categoryMovers,
   categoryTrend,
   dayOfWeekSpend,
-  netWorthSeries,
   topMerchants,
+  trendShape,
 } from '@/lib/analytics';
 import { getCategory } from '@/lib/categories';
-import { formatAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { formatAED, monthLabel } from '@/lib/format';
 import { summarizeMonth } from '@/lib/insights';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -75,22 +82,15 @@ export default function StatsScreen() {
   const router = useRouter();
   const { state } = useStore();
   const { period } = usePeriod();
-  const now = useMemo(() => new Date(), []);
 
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [curveWidth, setCurveWidth] = useState(0);
   const [trendCategory, setTrendCategory] = useState<CategoryId | null>(null);
-
-  // Limits, trends and net worth are monthly things; a year or a custom range
-  // falls back to the current month rather than pretending otherwise.
-  const key = period.mode === 'month' ? period.key : monthKey(now);
 
   const summary = useMemo(
     () => summarizeMonth(state.transactions, period),
     [state.transactions, period],
   );
 
-  const worth = useMemo(() => netWorthSeries(state, TREND_MONTHS), [state]);
   const merchants = useMemo(
     () => topMerchants(state.transactions, period, MERCHANT_ROWS),
     [state.transactions, period],
@@ -103,22 +103,6 @@ export default function StatsScreen() {
     () => dayOfWeekSpend(state.transactions, period),
     [state.transactions, period],
   );
-
-  /** In and out for the six months ending at the selected one. */
-  const inOut = useMemo<MonthPair[]>(() => {
-    const months: MonthPair[] = [];
-    for (let i = TREND_MONTHS - 1; i >= 0; i--) {
-      const k = shiftMonthKey(key, -i);
-      const s = summarizeMonth(state.transactions, k);
-      months.push({
-        label: monthLabel(k, true).split(' ')[0],
-        inFils: s.incomeFils,
-        outFils: s.expenseFils,
-        current: k === key,
-      });
-    }
-    return months;
-  }, [state.transactions, key]);
 
   /** The categories worth offering a trend for: this period's biggest. */
   const trendChoices = useMemo(
@@ -134,12 +118,39 @@ export default function StatsScreen() {
     [state.transactions, shownCategory],
   );
 
-  const worthDelta = worth.length > 1 ? worth[worth.length - 1].fils - worth[0].fils : 0;
-  const worthUp = worthDelta >= 0;
   const merchantMax = merchants[0]?.totalFils ?? 0;
   const weekdayTotal = weekdays.reduce((a, b) => a + b, 0);
   const heaviestDay = weekdays.indexOf(Math.max(...weekdays));
-  const trendTotal = trend.reduce((s, m) => s + m.fils, 0);
+
+  const shape = useMemo(() => trendShape(trend), [trend]);
+  const trendMonth = trend.length > 0 ? monthLabel(trend[trend.length - 1].key, true) : '';
+
+  /**
+   * The sentence under the category strip.
+   *
+   * Every branch has to say something the chart does not already say by being
+   * six bars tall. The flat case is the one that used to break it: rent is the
+   * same figure six times, and "AED 5,500 a month on average, AED 5,500 in the
+   * latest" printed one number twice and called it an observation.
+   */
+  const trendSentence = (() => {
+    const avg = formatAED(shape.averageFils, { decimals: false });
+    const latest = formatAED(shape.latestFils, { decimals: false });
+    const pct = Math.round(Math.abs(shape.latestVsAverage) * 100);
+    if (shape.flat) {
+      return `${avg} every month for ${TREND_MONTHS} months — it hasn't moved.`;
+    }
+    if (pct < 5) {
+      return `${avg} a month on average, and ${trendMonth} lands right on it.`;
+    }
+    const direction = shape.latestVsAverage > 0 ? 'above' : 'below';
+    const extreme = shape.latestIsHighest
+      ? ', the highest of the six'
+      : shape.latestIsLowest
+        ? ', the lowest of the six'
+        : '';
+    return `${avg} a month on average. ${trendMonth} came to ${latest} — ${pct}% ${direction}${extreme}.`;
+  })();
 
   const empty = summary.expenseFils === 0 && summary.incomeFils === 0;
 
@@ -171,47 +182,9 @@ export default function StatsScreen() {
             </View>
           ) : null}
 
-          {/* ── Net worth ─────────────────────────────────────────────── */}
-          {worth.length > 1 && (
-            <Section index={0} style={styles.section}>
-              <SectionHeader title={`Net worth · ${TREND_MONTHS} months`} />
-              {/* Sentence case, not a second row of tracked caps: one caps
-                  label per section is a hierarchy, two is noise. */}
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.caption}>
-                {worthUp ? 'Up' : 'Down'} since {monthLabel(worth[0].key, true)}
-              </ThemedText>
-              <Money
-                fils={worthDelta}
-                type="amount"
-                sign="auto"
-                color={worthUp ? theme.income : theme.expense}
-                style={styles.figure}
-              />
-              <View onLayout={(e) => setCurveWidth(e.nativeEvent.layout.width)}>
-                {curveWidth > 0 && <TrendCurve points={worth} width={curveWidth} />}
-              </View>
-              <View style={styles.axis}>
-                {worth.map((p, i) => (
-                  <ThemedText
-                    key={p.key}
-                    type="nano"
-                    themeColor={i === worth.length - 1 ? 'text' : 'textTertiary'}>
-                    {monthLabel(p.key, true).split(' ')[0]}
-                  </ThemedText>
-                ))}
-              </View>
-            </Section>
-          )}
-
-          {/* ── In vs out ─────────────────────────────────────────────── */}
-          <Section index={1} style={styles.section}>
-            <SectionHeader title={`In vs out · ${TREND_MONTHS} months`} />
-            <PairedBars months={inOut} />
-          </Section>
-
           {/* ── Merchants ─────────────────────────────────────────────── */}
           {merchants.length > 0 && (
-            <Section index={2} style={styles.section}>
+            <Section index={0} style={styles.section}>
               <SectionHeader title="Where it goes" />
               {merchants.map((m, i) => (
                 <Row
@@ -247,7 +220,7 @@ export default function StatsScreen() {
 
           {/* ── Movers ────────────────────────────────────────────────── */}
           {movers.length > 0 && (
-            <Section index={3} style={styles.section}>
+            <Section index={1} style={styles.section}>
               <SectionHeader title="What changed" />
               <ThemedText type="meta" themeColor="textSecondary" style={styles.caption}>
                 Against the period before this one.
@@ -289,8 +262,8 @@ export default function StatsScreen() {
           )}
 
           {/* ── One category over time ────────────────────────────────── */}
-          {shownCategory && trendTotal > 0 && (
-            <Section index={4} style={styles.section}>
+          {shownCategory && shape.maxFils > 0 && (
+            <Section index={2} style={styles.section}>
               <SectionHeader title={`${getCategory(shownCategory).label} · ${TREND_MONTHS} months`} />
               <View style={styles.chips}>
                 {trendChoices.map((c) => (
@@ -312,18 +285,21 @@ export default function StatsScreen() {
                   }))}
                 />
               </View>
-              <RichSentence
-                text={`${formatAED(Math.round(trendTotal / TREND_MONTHS), { decimals: false })} a month on average, ${formatAED(trend[trend.length - 1].fils, { decimals: false })} in the latest.`}
-                color={theme.textSecondary}
-                size={12}
-              />
+              <RichSentence text={trendSentence} color={theme.textSecondary} size={12} />
             </Section>
           )}
 
           {/* ── Weekday rhythm ────────────────────────────────────────── */}
           {weekdayTotal > 0 && (
-            <Section index={5} style={styles.section}>
+            <Section index={3} style={styles.section}>
               <SectionHeader title="When it goes" />
+              {/* Said before the chart, not after it. `dayOfWeekSpend` drops
+                  fixed commitments, and a reader who is not told that will
+                  wonder where the rent went. */}
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.caption}>
+                Day-to-day spending only. Rent and other fixed commitments land on whichever
+                weekday the standing order falls on, which is a calendar, not a habit.
+              </ThemedText>
               <View style={styles.strip}>
                 <HistoryStrip
                   height={64}
@@ -335,12 +311,45 @@ export default function StatsScreen() {
                 />
               </View>
               <RichSentence
-                text={`${WEEKDAYS_FULL[heaviestDay]} is your heaviest day — ${formatAED(weekdays[heaviestDay], { decimals: false })} of the ${formatAED(weekdayTotal, { decimals: false })} that left in ${periodLabel(period)}.`}
+                text={`${WEEKDAYS_FULL[heaviestDay]} is your heaviest day — ${formatAED(weekdays[heaviestDay], { decimals: false })} of the ${formatAED(weekdayTotal, { decimals: false })} you chose to spend in ${periodLabel(period)}.`}
                 color={theme.textSecondary}
                 size={12}
               />
             </Section>
           )}
+
+          {/* ── Where the other two charts live ───────────────────────── */}
+          {/* An index entry, not a second rendering. Both of these used to be
+              drawn again at the top of this screen, identical to the originals
+              down to the figure above them. */}
+          <Section index={4} style={styles.section}>
+            <SectionHeader title="Also worth a look" />
+            <Row
+              accessibilityLabel="Net worth over six months, on Wallet"
+              onPress={() => router.push('/wallet')}>
+              <Icon name="wallet" size={19} color={theme.textSecondary} />
+              <View style={styles.rowText}>
+                <ThemedText type="small">Net worth</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {TREND_MONTHS} months of balance, on Wallet
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Row>
+            <Row
+              last
+              accessibilityLabel="In versus out over six months, on Flow"
+              onPress={() => router.push('/flow')}>
+              <Icon name="chart" size={19} color={theme.textSecondary} />
+              <View style={styles.rowText}>
+                <ThemedText type="small">In vs out</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {TREND_MONTHS} months of earning and spending, on Flow
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Row>
+          </Section>
         </ScrollView>
       </SafeAreaView>
 
@@ -366,8 +375,6 @@ const styles = StyleSheet.create({
 
   section: { marginBottom: Spacing.five },
   caption: { marginBottom: Spacing.two },
-  figure: { marginBottom: Spacing.three },
-  axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: Spacing.two },
 
   rowText: { flex: 1, gap: 5 },
   rowFigure: { alignItems: 'flex-end', gap: 1 },

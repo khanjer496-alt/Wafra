@@ -298,11 +298,12 @@ export default function FlowScreen() {
 
           {/* ── In vs out ── */}
           <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
-            <SectionHeader
-              title="In vs out · 6 months"
-              right="ALL STATS"
-              onPressRight={() => router.push('/stats')}
-            />
+            {/* No "ALL STATS" link on this header any more. It used to hang off
+                this chart and land on a pixel-identical copy of it at the top
+                of /stats — the least rewarding tap in the app. Stats no longer
+                redraws this chart, and the labelled pill in the screen header
+                is the one way in, so the promise is made once. */}
+            <SectionHeader title="In vs out · 6 months" />
             {/* Drawn by the shared primitive. This screen used to reimplement
                 it inline with its own bar widths, which meant the same six
                 months looked like two different charts. */}
