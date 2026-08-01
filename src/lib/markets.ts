@@ -37,7 +37,14 @@ const AE: MarketPack = {
   id: 'AE',
   name: 'United Arab Emirates',
   flag: '🇦🇪',
-  currency: { code: 'AED', display: 'AED', aliases: ['AED', 'Dhs?\\.?', 'د\\.إ'] },
+  // The spelled-out forms matter as much as the symbol: an Arabic-locale
+  // handset renders the same alert as "50.00 درهم", and without the word the
+  // parser saw no currency at all and dropped the transaction. The plural
+  // "دراهم" must precede the singular, or "درهم" matches first and leaves a
+  // stray letter behind. The parser folds these aliases through the same
+  // orthography normalisation it applies to the message, so writing "د.إ"
+  // here (rather than the folded "د.ا") is correct and intentional.
+  currency: { code: 'AED', display: 'AED', aliases: ['AED', 'Dhs?\\.?', 'د\\.?إ\\.?', 'دراهم', 'درهم'] },
   banks: [
     { re: /enbd|emirates\s*nbd/i, name: 'Emirates NBD', color: '#2B4C9B', domain: 'emiratesnbd.com' },
     { re: /\bfab\b|first\s*abu\s*dhabi/i, name: 'FAB', color: '#00A3E0', domain: 'bankfab.com' },
