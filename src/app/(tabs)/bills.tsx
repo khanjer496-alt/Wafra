@@ -18,6 +18,7 @@ import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
@@ -52,6 +53,7 @@ type Segment = 'subscriptions' | 'cards' | 'utilities';
 
 export default function BillsScreen() {
   const theme = useTheme();
+  const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue } = useStore();
 
@@ -271,7 +273,9 @@ export default function BillsScreen() {
     const next = daysUntilNext(sub, now);
     const tracked = trackedTitles.has(sub.title.toLowerCase());
     return (
-      <Animated.View key={sub.title} entering={FadeInDown.delay(Math.min(i, 8) * 40).duration(300)}>
+      <Animated.View
+        key={sub.title}
+        entering={enter(FadeInDown.delay(Math.min(i, 8) * 40).duration(300))}>
         <Pressable
           onPress={() => setDetail(sub)}
           onLongPress={() => onDismissSub(sub)}

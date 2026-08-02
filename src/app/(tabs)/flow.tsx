@@ -25,6 +25,7 @@ import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, getCategory, onRampColor, rampColor } from '@/lib/categories';
@@ -49,6 +50,7 @@ const MAX_SLICES = 5;
 
 export default function FlowScreen() {
   const theme = useTheme();
+  const enter = useScreenEntering();
   const language = useLanguage();
   const router = useRouter();
   const dark = useColorScheme() === 'dark';
@@ -224,7 +226,7 @@ export default function FlowScreen() {
           {/* ── Composition ── */}
           {slices.length > 0 ? (
             <Animated.View
-              entering={FadeInDown.duration(320)}
+              entering={enter(FadeInDown.duration(320))}
               style={[
                 styles.section,
                 styles.surfaceSection,
@@ -298,7 +300,7 @@ export default function FlowScreen() {
           )}
 
           {/* ── Limits ── */}
-          <Animated.View entering={FadeInDown.delay(40).duration(320)} style={styles.section}>
+          <Animated.View entering={enter(FadeInDown.delay(40).duration(320))} style={styles.section}>
             <SectionHeader
               title={t('limitsHeader')}
               right={limits.length > 0 ? t('newLimit') : undefined}
@@ -389,7 +391,7 @@ export default function FlowScreen() {
 
           {/* ── In vs out ── */}
           <Animated.View
-            entering={FadeInDown.delay(80).duration(320)}
+            entering={enter(FadeInDown.delay(80).duration(320))}
             style={[
               styles.section,
               styles.surfaceSection,
@@ -478,7 +480,7 @@ export default function FlowScreen() {
 
           {/* ── What that adds up to ── */}
           {insights.length > 0 && (
-            <Animated.View entering={FadeInDown.delay(120).duration(320)} style={styles.section}>
+            <Animated.View entering={enter(FadeInDown.delay(120).duration(320))} style={styles.section}>
               <SectionHeader title={t('worthKnowing')} />
               <View style={styles.insights}>
                 {insights.map((insight) => (

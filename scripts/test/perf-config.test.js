@@ -1,32 +1,40 @@
 /**
- * The Android tab-switch performance configuration, and the library behaviour
- * it depends on.
+ * The Android tab-switch performance configuration.
  *
- * A signed Release build on emulator-5554 (commit 39bd99c) missed 8 of 8
- * frames on warm tab taps, p50 73-77ms, p90 97-113ms, with exactly one
- * rendered frame per tap. Cold start and scrolling were both fine, so the cost
- * was one synchronous block on the UI thread per tap: react-native-screens
- * destroying and rebuilding a whole tab's native View hierarchy through a
- * `commitNowAllowingStateLoss()` FragmentTransaction. The fix is one prop,
- * `detachInactiveScreens={false}` in src/app/(tabs)/_layout.tsx.
+ * Two things are pinned here, and they are two halves of one story.
  *
- * One prop is easy to delete. It reads like a default, it has no visible
- * effect on a debug build on a fast machine, and nothing in the type system
- * says it is load-bearing — so the regression it prevents can only be seen by
- * building a signed Release and counting frames, which nobody does on a
- * cleanup commit. Hence this file.
+ * WHAT WAS TRIED AND FAILED. `detachInactiveScreens={false}` on the tabs
+ * navigator. The reasoning was good and the result was not: signed Release
+ * builds, one emulator, warm and reseeded, run A/B/A so the control sat on both
+ * sides of the change.
  *
- * It also pins the three upstream facts the fix rests on. Each one is a real
- * way a dependency bump could turn the prop into a silent no-op while every
- * other test in the suite stays green:
+ *   default (detaching on)   7/7 janky, p50 81ms,  p90 129ms
+ *                            8/8 janky, p50 69ms,  p90 150ms
+ *   detachInactiveScreens=0  8/8 janky, p50 500ms, p90 2050ms
+ *                            8/8 janky, p50 200ms, p90 500ms   (+22.7MB PSS)
  *
- *   1. bottom-tabs still defaults detaching ON for Android. If upstream ever
- *      flips the default, the prop is redundant and the comment is a lie.
- *   2. ScreenContainer with enabled=false still renders a plain View, so the
- *      FragmentManager path is never constructed.
- *   3. InnerScreen with enabled=false still falls back to toggling `display`,
- *      so inactive tabs are actually hidden. If that branch changed, all four
- *      tabs would render on top of each other.
+ * Three to seven times slower and 22.7MB heavier. It is pinned as ABSENT
+ * because it is exactly the kind of change someone reaches for again — it is
+ * the top answer to "react-navigation tab switch slow on Android", it is one
+ * prop, and on a debug build on a fast machine it looks harmless.
+ *
+ * WHAT ACTUALLY COSTS THE TIME. systrace on the default path, same build:
+ * the tab's ACTION_UP lands, then ~33 consecutive `Choreographer#doFrame`
+ * slices run animation callbacks with no traversal at all — nothing measured,
+ * laid out or drawn — and the first traversal/draw arrives 548ms after the tap.
+ * The return tap cost 182ms. Those durations are the tab screens' own entering
+ * animations: Home and Flow reach delay 120 + duration 320 = 440ms, Wallet's
+ * net-worth columns reach 5 x 45 + 360 = 585ms, Bills' recurring rows reach
+ * min(i, 8) x 40 + 300 = 620ms. `ScreenFragment` recycles the same `Screen`
+ * view across the fragment remove/add, so React never remounts and component
+ * state survives — but the native subtree is detached from the window and
+ * re-attached, and the entering animation can start again on that path.
+ *
+ * So every entrance in the four tab screens goes through `useScreenEntering`,
+ * which returns undefined on Android. That is easy to bypass by accident: the
+ * next person adding a section to a tab copies the line above it, and if that
+ * line says `entering={FadeInDown...}` the stall comes straight back for one
+ * more section. The check below is the reason it cannot.
  */
 const fs = require('fs');
 const path = require('path');
@@ -47,17 +55,6 @@ const ROOT = path.join(__dirname, '../..');
 function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8');
 }
-
-/**
- * Assertions about the app's own config run against code with the comments
- * removed. The prop being checked here is one line and the comment explaining
- * it is forty, so a plain grep matches the explanation rather than the code —
- * which is how the first run of this file failed: the comment saying
- * freezeOnBlur is deliberately absent read as freezeOnBlur being present.
- */
-function stripComments(text) {
-  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-}
 function readIfPresent(rel) {
   try {
     return read(rel);
@@ -66,96 +63,154 @@ function readIfPresent(rel) {
   }
 }
 
+/**
+ * Assertions about the app's own config run against code with the comments
+ * removed. The code being checked here is a line or two and the comment
+ * explaining it is thirty, so a plain grep matches the explanation rather than
+ * the code — which is how the first version of this file failed: the comment
+ * saying a prop was deliberately absent read as the prop being present.
+ */
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\{\s*\/\/[^\n]*\n/g, '{\n')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+const TAB_SCREENS = [
+  'src/app/(tabs)/index.tsx',
+  'src/app/(tabs)/flow.tsx',
+  'src/app/(tabs)/bills.tsx',
+  'src/app/(tabs)/wallet.tsx',
+];
+
 // ---------------------------------------------------------------------------
-// The app's own configuration.
+// The navigator: the failed fix must stay gone.
 // ---------------------------------------------------------------------------
 
 const layout = stripComments(read('src/app/(tabs)/_layout.tsx'));
 
-ok('the tabs navigator opts out of detaching inactive screens',
-  /detachInactiveScreens=\{false\}/.test(layout),
-  'src/app/(tabs)/_layout.tsx must pass detachInactiveScreens={false} to <Tabs> — ' +
-    'without it every warm tab tap destroys and rebuilds a tab\'s native views on the UI thread');
+ok('the tabs navigator leaves detachInactiveScreens at its default',
+  !/detachInactiveScreens/.test(layout),
+  'measured on signed Release, A/B/A on one emulator: default detaching gives p50 69-81ms / ' +
+    'p90 129-150ms, detachInactiveScreens={false} gives p50 200-500ms / p90 500-2050ms and ' +
+    '+22.7MB PSS. Keeping every visited tab resident costs more than the fragment transaction ' +
+    'it avoids. The tab-switch cost lives in src/hooks/use-screen-entering.ts, not here');
 
 /**
- * freezeOnBlur is not a companion to the above — it is mutually exclusive with
- * it. react-freeze is only wired up inside InnerScreen's `enabled && native`
- * branch, which is the branch detachInactiveScreens={false} opts out of. So
- * adding freezeOnBlur here would look like a second optimisation and do
- * nothing at all. Caught here rather than in review.
- */
-ok('freezeOnBlur is not set on the tabs navigator, where it would be a silent no-op',
-  !/freezeOnBlur/.test(layout),
-  'freezeOnBlur has no effect while detachInactiveScreens is false — ' +
-    'react-native-screens only mounts the react-freeze wrapper on the enabled path');
-
-/**
- * `lazy` is what keeps the memory tradeoff bounded: an unvisited tab costs
- * nothing, so retaining views only ever applies to tabs the user has actually
- * opened. Turning it off here would mount all four heavy screens at launch and
- * push the cost back into cold start, which is currently healthy.
+ * `lazy` bounds what a tab costs before it is ever opened. Turning it off would
+ * mount all four heavy screens at launch and move the cost into cold start,
+ * which is currently healthy.
  */
 ok('lazy tab loading is not disabled',
   !/lazy=\{false\}/.test(layout) && !/lazy:\s*false/.test(layout),
-  'unvisited tabs must stay unmounted, otherwise retaining their views moves the cost to cold start');
+  'unvisited tabs must stay unmounted');
 
 // ---------------------------------------------------------------------------
-// The upstream behaviour the configuration depends on. Skipped rather than
-// failed when node_modules is absent, so the suite still runs on a bare
-// checkout.
+// The tab screens: no entrance may reach Android.
 // ---------------------------------------------------------------------------
 
-const tabView = readIfPresent('node_modules/@react-navigation/bottom-tabs/lib/module/views/BottomTabView.js');
+for (const rel of TAB_SCREENS) {
+  const src = stripComments(read(rel));
+
+  /**
+   * The whole guard. Every `entering=` in a tab screen must be wrapped, so the
+   * Android short-circuit is impossible to route around by copying the line
+   * above. An unwrapped one is a regression of exactly the shape systrace
+   * caught: 300-620ms of animation frames with nothing drawn.
+   */
+  const enterings = src.match(/entering=\{[^\n]*/g) ?? [];
+  const unwrapped = enterings.filter((line) => !line.startsWith('entering={enter('));
+  ok(`${rel}: every entering animation goes through useScreenEntering`,
+    enterings.length > 0 && unwrapped.length === 0,
+    enterings.length === 0
+      ? 'expected at least one entering= here; if the animations were removed outright, ' +
+        'drop this screen from TAB_SCREENS rather than leaving a check that cannot fail'
+      : `unwrapped: ${unwrapped.join(' | ')}`);
+
+  ok(`${rel}: calls useScreenEntering`,
+    /import \{ useScreenEntering \} from '@\/hooks\/use-screen-entering'/.test(src) &&
+      /const enter = useScreenEntering\(\)/.test(src),
+    'the wrapper has to come from the hook — a local `enter` would pass the check above ' +
+      'while doing nothing');
+
+  /**
+   * Exiting and layout animations have the same hazard and no guard of their
+   * own, because there are none today. A view being animated out on a native
+   * detach is worse than one animated in: the tab you are leaving holds the
+   * frame. Caught here rather than in review.
+   */
+  ok(`${rel}: no exiting or layout animation on a detachable screen`,
+    !/\bexiting=\{/.test(src) && !/\blayout=\{/.test(src),
+    'react-native-screens detaches and re-attaches these subtrees on every tab switch — ' +
+      'an exiting or layout animation there fires on a navigation the user already made');
+
+  /**
+   * `Section` from ui/layout carries its own ungated FadeInDown. It is the
+   * right thing on a pushed screen and a 320ms stall on a tab.
+   */
+  ok(`${rel}: does not use Section, which carries its own entrance`,
+    !/\bSection\b(?![A-Za-z])[^\n]*from '@\/components\/ui\/layout'/.test(src) &&
+      !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),
+    'Section animates itself and does not know it is on a tab');
+}
+
+// ---------------------------------------------------------------------------
+// The hook itself.
+// ---------------------------------------------------------------------------
+
+const hook = stripComments(read('src/hooks/use-screen-entering.ts'));
+
+ok('useScreenEntering drops the animation on Android',
+  /Platform\.OS === 'android' \|\| reducedMotion \? undefined :/.test(hook),
+  'this one expression is the fix; everything else in this file only makes sure it is reached');
+
+ok('useScreenEntering still honours Reduce Motion',
+  /reducedMotion/.test(hook) && /useReducedMotion/.test(hook),
+  'Flow and Bills were not checking Reduce Motion before this hook existed — routing them ' +
+    'through it is what fixed that, and dropping the check would undo it silently');
+
+// ---------------------------------------------------------------------------
+// The upstream behaviour this rests on. Skipped rather than failed when
+// node_modules is absent, so the suite still runs on a bare checkout.
+// ---------------------------------------------------------------------------
+
+const tabView = readIfPresent(
+  'node_modules/@react-navigation/bottom-tabs/lib/module/views/BottomTabView.js',
+);
 if (!tabView) {
   console.log('- react-navigation not installed, skipping the upstream-default checks');
 } else {
   /**
-   * The default we are overriding. Written upstream as a platform list, so
-   * match on Android appearing in the default expression for the prop.
+   * The path everything above was measured on. If upstream ever stops detaching
+   * by default on Android, the numbers in this file describe a configuration
+   * the app no longer runs, and the whole diagnosis needs re-measuring rather
+   * than re-reading.
    */
   const defaultExpr = tabView.match(/detachInactiveScreens\s*=\s*([^\n]*)/);
-  ok('bottom-tabs still defaults to detaching inactive screens on Android',
+  ok('bottom-tabs still detaches inactive screens by default on Android',
     !!defaultExpr && /android/i.test(defaultExpr[1]),
     defaultExpr ? defaultExpr[1].trim() : 'no detachInactiveScreens default found');
-
-  /**
-   * The prop has to reach both the container and each screen. If upstream ever
-   * stopped threading it to one of them, half the fix would quietly go away.
-   */
-  ok('the prop is threaded into both the screen container and each screen',
-    /MaybeScreenContainer[\s\S]{0,400}enabled: detachInactiveScreens/.test(tabView) &&
-      /MaybeScreen[\s\S]{0,600}enabled: detachInactiveScreens/.test(tabView),
-    'BottomTabView must pass detachInactiveScreens as `enabled` to MaybeScreenContainer and MaybeScreen');
 }
 
-const container = readIfPresent('node_modules/react-native-screens/src/components/ScreenContainer.tsx');
-if (!container) {
-  console.log('- react-native-screens sources not installed, skipping the escape-hatch checks');
+const fragment = readIfPresent(
+  'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenFragment.kt',
+);
+if (!fragment) {
+  console.log('- react-native-screens Android sources not installed, skipping the recycle check');
 } else {
   /**
-   * This is the whole fix: enabled=false must bypass the native container, so
-   * ScreenContainer.kt — and its commitNowAllowingStateLoss() transaction —
-   * is never in the tree.
+   * Why the fix is "do not configure an entrance" rather than "remount less".
+   * `onCreateView` re-adds the SAME `Screen` view through `recycle()`, so React
+   * state survives a tab switch and there is no remount to prevent — the view
+   * is merely detached from the window and re-attached. If this ever became a
+   * real teardown, component state would start being lost on tab switches and
+   * that is a much larger bug than the one this file is about.
    */
-  ok('ScreenContainer falls back to a plain View when disabled',
-    /if\s*\(enabled\s*&&\s*isNativePlatformSupported\)/.test(container) &&
-      /return\s*<View\s*\{\.\.\.rest\}\s*\/>/.test(container),
-    'a disabled ScreenContainer must not render the native RNSScreenContainer');
-
-  const screen = readIfPresent('node_modules/react-native-screens/src/components/Screen.tsx');
-  if (screen) {
-    // Inactive tabs are hidden by `display`, not by being detached.
-    ok('a disabled Screen still hides inactive tabs via display',
-      /display:\s*activityState\s*!==\s*0\s*\?\s*'flex'\s*:\s*'none'/.test(screen),
-      'without this branch all four tabs would draw on top of each other');
-
-    // The reason freezeOnBlur is checked as absent above.
-    const freezeIdx = screen.indexOf('DelayedFreeze freeze=');
-    const fallbackIdx = screen.search(/display:\s*activityState\s*!==\s*0/);
-    ok('react-freeze is still only wired into the enabled path',
-      freezeIdx !== -1 && fallbackIdx !== -1 && freezeIdx < fallbackIdx,
-      'if freezing became available on the disabled path, freezeOnBlur would be worth revisiting');
-  }
+  ok('ScreenFragment still recycles the same Screen view across a detach',
+    /addView\(screen\.recycle\(\)\)/.test(fragment),
+    'a tab switch is a native detach/re-attach, not a remount — if that changed, tab state ' +
+      'is now being destroyed and this whole diagnosis needs redoing');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -26,7 +26,7 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
@@ -74,7 +74,7 @@ export default function WalletScreen() {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
   const language = useLanguage();
-  const reducedMotion = useReducedMotion();
+  const enter = useScreenEntering();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const {
@@ -345,11 +345,7 @@ export default function WalletScreen() {
                 {worthChart.map((point, index) => (
                   <Animated.View
                     key={point.key}
-                    entering={
-                      reducedMotion
-                        ? undefined
-                        : FadeInDown.delay(index * 45).duration(360)
-                    }
+                    entering={enter(FadeInDown.delay(index * 45).duration(360))}
                     style={styles.worthChartColumn}>
                     <View
                       style={[

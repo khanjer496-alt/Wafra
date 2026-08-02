@@ -35,7 +35,7 @@ import { SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
@@ -121,7 +121,7 @@ function AutomaticCapture({
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const reducedMotion = useReducedMotion();
+  const enter = useScreenEntering();
   const active = status === 'active';
   const title =
     status === 'paused'
@@ -169,7 +169,7 @@ function AutomaticCapture({
         : t('captureEnable');
 
   return (
-    <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(280)}>
+    <Animated.View entering={enter(FadeInDown.duration(280))}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${t('automaticCapture')}. ${title}. ${detail}`}
@@ -289,7 +289,7 @@ function Hero({
 }) {
   const theme = useTheme();
   const router = useRouter();
-  const reducedMotion = useReducedMotion();
+  const enter = useScreenEntering();
   const dark = useColorScheme() === 'dark';
 
   const caption =
@@ -303,7 +303,7 @@ function Hero({
 
   return (
     <Animated.View
-      entering={reducedMotion ? undefined : FadeInDown.duration(320)}
+      entering={enter(FadeInDown.duration(320))}
       style={[styles.heroShell, { borderColor: theme.primaryBorder }]}>
       <LinearGradient
         pointerEvents="none"
@@ -392,7 +392,7 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
-  const reducedMotion = useReducedMotion();
+  const enter = useScreenEntering();
   const [expanded, setExpanded] = useState(false);
   const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
@@ -414,7 +414,7 @@ function LeavingSoon({
 
   return (
     <Animated.View
-      entering={reducedMotion ? undefined : FadeInDown.delay(80).duration(320)}
+      entering={enter(FadeInDown.delay(80).duration(320))}
       style={styles.section}>
       <SectionHeader
         title={
@@ -531,7 +531,7 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
 
 export default function HomeScreen() {
   const theme = useTheme();
-  const reducedMotion = useReducedMotion();
+  const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
@@ -955,7 +955,7 @@ export default function HomeScreen() {
               was five things to skim and nothing to act on. */}
           {insight && (
             <Animated.View
-              entering={reducedMotion ? undefined : FadeInDown.delay(40).duration(320)}
+              entering={enter(FadeInDown.delay(40).duration(320))}
               style={[
                 styles.insight,
                 { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
@@ -1005,7 +1005,7 @@ export default function HomeScreen() {
           <UnreadFormatsPrompt state={state} />
 
           <Animated.View
-            entering={reducedMotion ? undefined : FadeInDown.delay(120).duration(320)}
+            entering={enter(FadeInDown.delay(120).duration(320))}
             style={styles.section}>
             <SectionHeader
               title={live ? t('recentActivity') : periodLabel(period)}
