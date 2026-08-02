@@ -156,6 +156,51 @@ for (const rel of TAB_SCREENS) {
 }
 
 // ---------------------------------------------------------------------------
+// The tab bar. Not a tab screen, and that is exactly why it was missed.
+//
+// v43 (signed, 358f8b2) after the premount fix: a warm tab tap renders in ONE
+// frame at 65/73/85ms, against 7-8 frames at p50 70-101ms in v41 and up to
+// 2050ms in v42. PSS 161.7MB, back at the v41 control rather than v42's leak.
+// Atrace: ACTION_UP 4238.219 to Record View draw 4238.343 = 124ms, against
+// 548ms in v41.
+//
+// What still sits in front of that draw is a run of consecutive Choreographer
+// `animation` callbacks beginning 4238.223 — 4ms after the tap, before
+// anything is measured or laid out. The tab bar's own `FadeIn.duration(180)`
+// was the only ungated entrance left in the tab-switch path, and 180ms is the
+// duration in the trace. React-navigation re-renders the bar on every
+// navigation state change, so that entrance is configured afresh on each
+// press rather than once at mount.
+// ---------------------------------------------------------------------------
+
+const tabBar = stripComments(read('src/components/tab-bar.tsx'));
+
+{
+  const enterings = tabBar.match(/entering=\{[^\n]*/g) ?? [];
+  const unwrapped = enterings.filter((line) => !line.startsWith('entering={enter('));
+  ok('src/components/tab-bar.tsx: its entrance goes through useScreenEntering',
+    enterings.length > 0 && unwrapped.length === 0,
+    enterings.length === 0
+      ? 'expected an entering= here; if the animation was removed outright, drop this block ' +
+        'rather than leaving a check that cannot fail'
+      : `unwrapped: ${unwrapped.join(' | ')}`);
+
+  ok('src/components/tab-bar.tsx: calls useScreenEntering',
+    /import \{ useScreenEntering \} from '@\/hooks\/use-screen-entering'/.test(tabBar) &&
+      /const enter = useScreenEntering\(\)/.test(tabBar),
+    'a local `enter` would satisfy the check above while doing nothing');
+
+  /**
+   * The bar is rebuilt on every navigation state change, so an exiting or
+   * layout animation here would fire on every tab press by construction —
+   * worse than the entering one, which at least only replays on a re-register.
+   */
+  ok('src/components/tab-bar.tsx: no exiting or layout animation',
+    !/\bexiting=\{/.test(tabBar) && !/\blayout=\{/.test(tabBar),
+    'react-navigation re-renders this component on every navigation state change');
+}
+
+// ---------------------------------------------------------------------------
 // The hook itself.
 // ---------------------------------------------------------------------------
 
