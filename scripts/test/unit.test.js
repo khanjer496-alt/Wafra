@@ -1347,6 +1347,36 @@ ok('stale: a stale statement that gets paid leaves openDues',
     outgoingView.paidTotalFils === 0 && outgoingView.outstandingFils === 814440,
     { paid: outgoingView.paidTotalFils, outstanding: outgoingView.outstandingFils });
 
+  // The legacy compat branch: a card payment an older build stored the wrong
+  // way (expense-side transfer, titled as a card settlement) must settle the
+  // statement AND show up as a payment. duePaidFils always allocated through
+  // this branch; the sheet's own payments list and paidTotalFils used to run a
+  // narrower income-only copy of the rule, so this same row could settle the
+  // statement while "Payments Made" stayed empty and its total read zero.
+  const compatPaid = {
+    ...rolled,
+    cardDues: [rolled.cardDues[1]],
+    transactions: [{
+      id: 'compat-pay', type: 'expense', amountFils: 814440, category: 'other',
+      accountId: 'scanned', title: 'Card payment', date: '2026-08-05',
+      source: 'sms', isTransfer: true,
+    }],
+  };
+  const compatView = cardsLib.cardStatementView(compatPaid, 'scanned');
+  ok('card sheet: a legacy expense-direction card payment settles the statement',
+    compatView.outstandingFils === 0 && compatView.open.length === 0,
+    { outstanding: compatView.outstandingFils, open: compatView.open.length });
+  ok('card sheet: that same payment appears in Payments Made and its total',
+    compatView.payments.length === 1 && compatView.payments[0].id === 'compat-pay' &&
+    compatView.paidTotalFils === 814440,
+    { payments: compatView.payments.length, paidTotal: compatView.paidTotalFils });
+
+  // And an ordinary outgoing transfer on the same card (no settlement wording)
+  // must still not count — the compat branch is narrow, not "any expense-side
+  // transfer off a credit card is a payment."
+  ok('card sheet: an ordinary outgoing transfer off the card is still not a payment',
+    outgoingView.payments.length === 0, outgoingView.payments.length);
+
   // Two banks whose cards end in the same four digits are two cards.
   const collision = {
     accounts: [

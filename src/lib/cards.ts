@@ -173,23 +173,35 @@ function cardAccountIds(state: AppState, accountId: string): Set<string> {
  * message in the corpus takes that shape, and one that did would have to have
  * been read as a transfer to get here.)
  */
+/**
+ * The single eligibility rule for "is this transaction a payment toward this
+ * card" — shared by every caller that allocates, totals, or lists payments.
+ * `cardStatementView` used to run its own, narrower copy for the payments it
+ * *displayed* while `duePaidFils` allocated through this one, so a statement
+ * could be marked paid by a compat-branch row that never appeared in the
+ * "Payments Made" list and never counted toward `paidTotalFils` — outstanding
+ * said settled while the total shown next to it said otherwise.
+ */
+function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>): boolean {
+  return (
+    t.isTransfer === true &&
+    ids.has(t.accountId) &&
+    (t.type === 'income' ||
+      // Older builds stored card payments in the wrong direction. Keep
+      // that compatibility path, but only for a row whose title says it
+      // is a card settlement. Treating every transfer OUT of a credit card
+      // as a payment can falsely settle the bill after a cash transfer.
+      (creditIds.has(t.accountId) &&
+        /(?:card.*(?:payment|settlement)|(?:payment|settlement).*card)/i.test(t.title)))
+  );
+}
+
 function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && ids.has(a.id)).map((a) => a.id),
   );
   return state.transactions
-    .filter(
-      (t) =>
-        t.isTransfer === true &&
-        ids.has(t.accountId) &&
-        (t.type === 'income' ||
-          // Older builds stored card payments in the wrong direction. Keep
-          // that compatibility path, but only for a row whose title says it
-          // is a card settlement. Treating every transfer OUT of a credit card
-          // as a payment can falsely settle the bill after a cash transfer.
-          (creditIds.has(t.accountId) &&
-            /(?:card.*(?:payment|settlement)|(?:payment|settlement).*card)/i.test(t.title))),
-    )
+    .filter((t) => isCardPayment(t, ids, creditIds))
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -486,13 +498,12 @@ export function cardStatementView(state: AppState, accountId: string): CardState
     .slice()
     .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
 
-  // The direction test matters: import also stamps `isTransfer` on expense
-  // rows whose message carried a transfer hint, so dropping it counted an
-  // outgoing AED 2,000 as two thousand paid TOWARD the card.
-  const payments = state.transactions
-    .filter((t) => keyOf(t.accountId) === cardKey && t.isTransfer === true && t.type === 'income')
-    .slice()
-    .sort((a, b) => b.date.localeCompare(a.date));
+  // Same eligibility rule `duePaidFils`/`allocatePayments` use to decide what
+  // has settled a statement, via the shared `cardPaymentsOf`/`isCardPayment`.
+  // A second, narrower copy here is how a statement could read "settled" while
+  // the payment that settled it was invisible in this very list.
+  const ids = cardAccountIds(state, accountId);
+  const payments = cardPaymentsOf(state, ids).sort((a, b) => b.date.localeCompare(a.date));
 
   const paidByDueId = new Map(statements.map((d) => [d.id, duePaidFils(state, d)] as const));
 

@@ -506,8 +506,17 @@ function ktSources(dir) {
     slice > 0 && slice <= 32 && /await yieldToUi\(\)/.test(scan),
     `slice=${slice}`);
   ok('concurrent Home capture requests join one scan',
-    /const existing = importInFlight\.current;[\s\S]*if \(existing\) return existing;/.test(home) &&
-      /importInFlight\.current = operation/.test(home));
+    /const existing = importInFlight\.current;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
+      /importInFlight\.current = \{ promise: operation, interactive \}/.test(home));
+  // A silent scan cannot deliver a permission prompt, a paywall/setup
+  // redirect, or the up-to-date toast — every one of those is gated on
+  // `interactive`, which that scan ran with false. An explicit action that
+  // joins one instead of starting its own used to inherit that silent
+  // outcome and go unanswered. It must run its own follow-up once the shared
+  // scan settles, without re-entering as a second concurrent scan.
+  ok('an interactive request joining a silent scan still gets its own follow-up',
+    /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
+      /outcome === 'imported' \? undefined : startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home));
 }
 
 /* ── the budget editor answers the same question as the budget bar ──── */

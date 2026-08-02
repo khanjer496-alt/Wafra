@@ -76,6 +76,23 @@ let sessionSetupRan = false;
 const RESCAN_AFTER_MS = 30_000;
 let lastScanAt = 0;
 
+/**
+ * What a scan attempt actually did, so a caller who only *joined* it — rather
+ * than starting it — can tell whether it still owes its own interactive
+ * feedback. `'imported'` is the one outcome that already shows a toast
+ * unconditionally; every other outcome only acts when `interactive` was true
+ * for THAT attempt, so a silent attempt that hit one of them delivered
+ * nothing a joining interactive caller would see.
+ */
+type AutoImportOutcome =
+  | 'not-hydrated'
+  | 'not-pro'
+  | 'unavailable'
+  | 'no-permission'
+  | 'needs-setup'
+  | 'up-to-date'
+  | 'imported';
+
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
 
@@ -545,8 +562,17 @@ export default function HomeScreen() {
    * scan within the same second. Reading and parsing the same inbox twice is
    * both expensive and a race against two import plans built from one stale
    * ledger. Every caller joins the scan already in progress instead.
+   *
+   * Tracked with the interactivity it was started with: a silent background
+   * scan and a user-initiated one owe different feedback, and joining the
+   * wrong one used to mean the user's explicit pull-to-refresh silently rode
+   * along on a scan that could not redirect to paywall/setup, prompt for SMS
+   * permission, or show the up-to-date toast — all gated on `interactive`.
    */
-  const importInFlight = React.useRef<Promise<void> | null>(null);
+  const importInFlight = React.useRef<{
+    promise: Promise<AutoImportOutcome>;
+    interactive: boolean;
+  } | null>(null);
 
   // Read the real platform capability whenever Home regains focus. This makes
   // the card turn on immediately after returning from Settings or iOS setup,
@@ -690,7 +716,7 @@ export default function HomeScreen() {
   }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
 
   const performAutoImport = useCallback(
-    async (interactive: boolean) => {
+    async (interactive: boolean): Promise<AutoImportOutcome> => {
       // Never scan against a ledger that has not finished loading. Every
       // duplicate check in the plan is a lookup against state.transactions,
       // so an unhydrated store means nothing matches and the entire inbox
@@ -698,14 +724,14 @@ export default function HomeScreen() {
       // effect below already waits for this; pull-to-refresh did not.
       if (!state.hydrated) {
         if (interactive) toast.show(t('stillLoading'));
-        return;
+        return 'not-hydrated';
       }
       // Hard paywall: tracking pauses when the trial ends without Pro.
       if (!isProActive(state)) {
         if (interactive) router.push('/pro');
-        return;
+        return 'not-pro';
       }
-      if (!isCaptureAvailable()) return;
+      if (!isCaptureAvailable()) return 'unavailable';
       // Android needs the SMS permission before it can read anything. iOS has
       // no permission to ask for — its messages arrive over the relay — so the
       // prompt is skipped there rather than shown and refused.
@@ -715,7 +741,7 @@ export default function HomeScreen() {
         if (!granted) {
           setNeedsPermission(true);
           setCaptureState('off');
-          return;
+          return 'no-permission';
         }
         setNeedsPermission(false);
         setCaptureState('active');
@@ -726,7 +752,7 @@ export default function HomeScreen() {
         // The relay is not paired yet, so silence here means "not connected",
         // not "nothing new". Only say so when the user actually asked.
         if (interactive) router.push('/ios-setup');
-        return;
+        return 'needs-setup';
       }
       // healedCount belongs in this test. A re-read that only CORRECTS rows —
       // exactly what a parser fix produces — was being thrown away here, so the
@@ -740,7 +766,7 @@ export default function HomeScreen() {
         if (source === 'relay') await ensureDurable();
         await commit();
         if (interactive) toast.show(t('upToDateNoNew'));
-        return;
+        return 'up-to-date';
       }
       const receipt = importBatch(plan.batch);
       // A React dispatch is not a disk commit. Wait for the encrypted SQLite
@@ -765,22 +791,45 @@ export default function HomeScreen() {
           { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
         ],
       );
+      return 'imported';
     },
     [state, importBatch, ensureDurable, undoBatch, markParserVersion, toast, router],
+  );
+
+  // The single owner of `importInFlight`. Always starts a fresh scan — callers
+  // that should instead join one already running go through `runAutoImport`.
+  const startAutoImport = useCallback(
+    (interactive: boolean): Promise<AutoImportOutcome> => {
+      const operation = performAutoImport(interactive).finally(() => {
+        if (importInFlight.current?.promise === operation) importInFlight.current = null;
+      });
+      importInFlight.current = { promise: operation, interactive };
+      return operation;
+    },
+    [performAutoImport],
   );
 
   const runAutoImport = useCallback(
     (interactive: boolean): Promise<void> => {
       const existing = importInFlight.current;
-      if (existing) return existing;
-
-      const operation = performAutoImport(interactive).finally(() => {
-        if (importInFlight.current === operation) importInFlight.current = null;
-      });
-      importInFlight.current = operation;
-      return operation;
+      if (!existing) return startAutoImport(interactive).then(() => undefined);
+      // Two silent callers, or an interactive caller joining another
+      // interactive one already in flight: the one running owns delivering
+      // whatever feedback applies, same as before.
+      if (!interactive || existing.interactive) return existing.promise.then(() => undefined);
+      // An explicit action (pull-to-refresh, tapping the capture card) joined
+      // a scan nobody was watching. That scan only ever ran its `interactive`
+      // branches as false, so a permission prompt, a paywall/setup redirect,
+      // or the up-to-date toast never fired — the user's tap would otherwise
+      // get no feedback at all. None of those outcomes did any actual
+      // reading or importing, so re-running interactively is a fresh first
+      // attempt for this request, not a second scan of the same data. The one
+      // exception is `'imported'`, whose toast already fires unconditionally.
+      return existing.promise.then((outcome) =>
+        outcome === 'imported' ? undefined : startAutoImport(true).then(() => undefined),
+      );
     },
-    [performAutoImport],
+    [startAutoImport],
   );
 
   // Silent auto-import on open, and again every time the app comes back to
