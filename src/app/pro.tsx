@@ -62,7 +62,7 @@ export default function ProScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
-          <ScreenHeader title="Wafra Pro" onBack={() => router.back()} />
+          <ScreenHeader title={t('wafraPro')} onBack={() => router.back()} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -74,7 +74,7 @@ export default function ProScreen() {
                 deliberate unlock is seven taps on the version row in
                 Settings, which nobody reaches by accident. */}
             <Icon name="diamond" size={30} color={theme.warning} />
-            <ThemedText type="title">Wafra Pro</ThemedText>
+            <ThemedText type="title">{t('wafraPro')}</ThemedText>
             <ThemedText type="default" themeColor="textSecondary">
               {state.pro
                 ? t('proActiveThanks')

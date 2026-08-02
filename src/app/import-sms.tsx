@@ -21,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { SupplementImports } from '@/components/supplement-imports';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
@@ -38,12 +39,12 @@ import {
   type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
-import { getCategory } from '@/lib/categories';
+import { categoryLabel } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
 import { isProActive } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -93,6 +94,7 @@ export default function ImportSmsScreen() {
   const [text, setText] = useState('');
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [showManual, setShowManual] = useState(() => !isSmsScanningAvailable());
   const [progress, setProgress] = useState<{ scanned: number; found: number } | null>(null);
   const [trackedBills, setTrackedBills] = useState<Set<number>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
@@ -102,7 +104,7 @@ export default function ImportSmsScreen() {
     // The plan's duplicate checks read state.transactions, so scanning before
     // the ledger has loaded imports the whole inbox a second time.
     if (!state.hydrated) {
-      Alert.alert('One moment', t('dataStillLoading'));
+      Alert.alert(t('importOneMoment'), t('dataStillLoading'));
       return;
     }
     if (!isProActive(state)) {
@@ -115,8 +117,8 @@ export default function ImportSmsScreen() {
       const granted = await requestSmsPermission();
       if (!granted) {
         Alert.alert(
-          'Permission needed',
-          'Wafra needs SMS access to read bank alerts. You can also paste messages manually below.',
+          t('smsPermissionNeeded'),
+          t('smsPermissionNeededBody'),
         );
         return;
       }
@@ -130,7 +132,7 @@ export default function ImportSmsScreen() {
       setPlan(p);
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
-        Alert.alert(t('upToDate'), 'Everything in your inbox is already filed.');
+        Alert.alert(t('upToDate'), t('inboxAlreadyFiled'));
       }
     } finally {
       setScanning(false);
@@ -139,7 +141,7 @@ export default function ImportSmsScreen() {
 
   const runParse = (input: string) => {
     if (!state.hydrated) {
-      Alert.alert('One moment', t('dataStillLoading'));
+      Alert.alert(t('importOneMoment'), t('dataStillLoading'));
       return;
     }
     if (!isProActive(state)) {
@@ -186,7 +188,7 @@ export default function ImportSmsScreen() {
 
   // Preview account name: index refs point into the plan's new accounts.
   const accountName = (ref: string): string => {
-    if (/^\d+$/.test(ref)) return plan?.batch.newAccounts[Number(ref)]?.name ?? 'New card';
+    if (/^\d+$/.test(ref)) return plan?.batch.newAccounts[Number(ref)]?.name ?? t('newCard');
     return state.accounts.find((a) => a.id === ref)?.name ?? '';
   };
 
@@ -194,7 +196,7 @@ export default function ImportSmsScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
-          <ScreenHeader title={t('readMyInbox')} onBack={() => router.back()} />
+          <ScreenHeader title={t('importBankActivity')} onBack={() => router.back()} />
         </View>
 
         <ScrollView
@@ -208,61 +210,76 @@ export default function ImportSmsScreen() {
                 <View style={styles.progressLabel}>
                   <PulseDot color={theme.primary} />
                   <ThemedText type="micro" themeColor="textTertiary">
-                    Progress
+                    {t('importProgress')}
                   </ThemedText>
                 </View>
                 <ThemedText type="small" tabular>
-                  {progress?.scanned ?? 0} read · {progress?.found ?? 0} matched
+                  {tf('importProgressCounts', {
+                    read: progress?.scanned ?? 0,
+                    matched: progress?.found ?? 0,
+                  })}
                 </ThemedText>
               </View>
               <ThemedText type="meta" themeColor="textTertiary">
-                Reading backwards from today. Nothing leaves the phone.
+                {t('importProgressPrivacy')}
               </ThemedText>
             </Section>
           ) : (
             <Section index={0} style={styles.intro}>
               <ThemedText type="default" themeColor="textSecondary">
                 {isSmsScanningAvailable()
-                  ? t('rescanHint')
+                  ? t('scanBankAlertsPrivacy')
                   : t('pasteHint')}
               </ThemedText>
               {isSmsScanningAvailable() && (
-                <Button label={t('scanFullInbox')} icon="search" onPress={runScan} />
+                <>
+                  <Button label={t('findBankAlerts')} icon="search" onPress={runScan} />
+                  <Button
+                    label={showManual ? t('hideManualPaste') : t('pasteInstead')}
+                    variant="ghost"
+                    onPress={() => setShowManual((value) => !value)}
+                  />
+                </>
               )}
-              <TextInput
-                accessibilityLabel="Paste bank messages"
-                value={text}
-                onChangeText={setText}
-                multiline
-                placeholder="Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR…"
-                placeholderTextColor={theme.textTertiary}
-                style={[
-                  styles.textarea,
-                  {
-                    backgroundColor: theme.backgroundElement,
-                    borderColor: theme.cardBorder,
-                    color: theme.text,
-                  },
-                ]}
-              />
-              <View style={styles.parseRow}>
-                <Button
-                  inline
-                  variant="outline"
-                  label={t('parsePastedText')}
-                  onPress={() => runParse(text)}
-                  disabled={!text.trim()}
-                />
-                <Button
-                  inline
-                  variant="ghost"
-                  label="Try sample"
-                  onPress={() => {
-                    setText(SAMPLE);
-                    runParse(SAMPLE);
-                  }}
-                />
-              </View>
+              {showManual && (
+                <>
+                  <TextInput
+                    accessibilityLabel={t('pasteBankMessagesA11y')}
+                    value={text}
+                    onChangeText={setText}
+                    multiline
+                    placeholder={t('bankMessageExample')}
+                    placeholderTextColor={theme.textTertiary}
+                    style={[
+                      styles.textarea,
+                      {
+                        backgroundColor: theme.backgroundElement,
+                        borderColor: theme.cardBorder,
+                        color: theme.text,
+                        textAlign: state.language === 'ar' ? 'right' : 'left',
+                      },
+                    ]}
+                  />
+                  <View style={styles.parseRow}>
+                    <Button
+                      inline
+                      variant="outline"
+                      label={t('parsePastedText')}
+                      onPress={() => runParse(text)}
+                      disabled={!text.trim()}
+                    />
+                    <Button
+                      inline
+                      variant="ghost"
+                      label={t('trySample')}
+                      onPress={() => {
+                        setText(SAMPLE);
+                        runParse(SAMPLE);
+                      }}
+                    />
+                  </View>
+                </>
+              )}
             </Section>
           )}
 
@@ -272,9 +289,9 @@ export default function ImportSmsScreen() {
                 <View style={[styles.stats, { borderColor: theme.cardBorder }]}>
                   {(
                     [
-                      [plan.txCount, 'Matched', theme.text],
-                      [plan.newAccountCount, plan.newAccountCount === 1 ? 'Card' : 'Cards', theme.text],
-                      [unreadCount, 'Unread', unreadCount > 0 ? theme.warning : theme.textTertiary],
+                      [plan.txCount, t('matchedLabel'), theme.text],
+                      [plan.newAccountCount, t('cardsTitle'), theme.text],
+                      [unreadCount, t('unreadLabel'), unreadCount > 0 ? theme.warning : theme.textTertiary],
                     ] as const
                   ).map(([value, label, color], i) => (
                     <View
@@ -294,13 +311,15 @@ export default function ImportSmsScreen() {
                 </View>
                 {skippedCount > 0 && (
                   <ThemedText type="meta" themeColor="textTertiary" style={styles.skipped}>
-                    {skippedCount} already filed · skipped
+                    {skippedCount} {t('alreadyFiledSkipped')}
                   </ThemedText>
                 )}
                 {plan.healedCount > 0 && (
                   <ThemedText type="meta" style={{ color: theme.income }}>
-                    {plan.healedCount} existing entr{plan.healedCount === 1 ? 'y' : 'ies'} re-read
-                    better — renamed or recategorised in place.
+                    {tf('improvedExistingEntries', {
+                      count: plan.healedCount,
+                      ending: plan.healedCount === 1 ? 'y' : 'ies',
+                    })}
                   </ThemedText>
                 )}
               </Section>
@@ -318,13 +337,13 @@ export default function ImportSmsScreen() {
                             {p.merchant}
                           </ThemedText>
                           <ThemedText type="meta" themeColor="textTertiary">
-                            {getCategory(p.categoryGuess).label}
-                            {p.dueDay ? ` · due day ${p.dueDay}` : ''}
+                            {categoryLabel(p.categoryGuess)}
+                            {p.dueDay ? ` · ${tf('dueDay', { day: p.dueDay })}` : ''}
                           </ThemedText>
                         </View>
                         <Button
                           variant={tracked ? 'ghost' : 'outline'}
-                          label={tracked ? 'Tracked' : 'Track'}
+                          label={tracked ? t('tracked') : t('track')}
                           disabled={tracked}
                           onPress={() => {
                             addBill({
@@ -349,8 +368,8 @@ export default function ImportSmsScreen() {
                   <SectionHeader
                     title={
                       plan.txCount > PREVIEW_LIMIT
-                        ? `Just filed · first ${PREVIEW_LIMIT} of ${plan.txCount}`
-                        : 'Just filed'
+                        ? tf('justFiledFirst', { shown: PREVIEW_LIMIT, total: plan.txCount })
+                        : t('justFiled')
                     }
                   />
                   {previewRows.map((tx, i) => (
@@ -362,7 +381,7 @@ export default function ImportSmsScreen() {
                             {tx.title}
                           </ThemedText>
                           <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-                            {getCategory(tx.category).label} · {shortDate(tx.date)}
+                            {categoryLabel(tx.category)} · {shortDate(tx.date)}
                             {accountName(tx.accountId) ? ` · ${accountName(tx.accountId)}` : ''}
                           </ThemedText>
                         </View>
@@ -385,11 +404,13 @@ export default function ImportSmsScreen() {
                       <Icon name="alert" size={17} color={theme.warning} />
                       <View style={styles.rowText}>
                         <ThemedText type="small">
-                          {unreadCount} message{unreadCount === 1 ? '' : 's'} in a format we don&apos;t
-                          know
+                          {tf('unknownMessageFormats', {
+                            count: unreadCount,
+                            s: unreadCount === 1 ? '' : 's',
+                          })}
                         </ThemedText>
                         <ThemedText type="meta" themeColor="textTertiary">
-                          Send the shapes — digits masked — and they parse next release
+                          {t('shareMaskedFormatsHint')}
                         </ThemedText>
                       </View>
                       <Icon name="chevron-right" size={15} color={theme.textTertiary} />
@@ -398,6 +419,12 @@ export default function ImportSmsScreen() {
                 </Section>
               )}
             </>
+          )}
+
+          {!scanning && plan === null && (
+            <Section index={2}>
+              <SupplementImports />
+            </Section>
           )}
         </ScrollView>
 
@@ -410,10 +437,19 @@ export default function ImportSmsScreen() {
             <Button
               label={
                 plan.txCount > 0
-                  ? `File ${plan.txCount} entr${plan.txCount === 1 ? 'y' : 'ies'}`
+                  ? tf('fileEntries', {
+                      count: plan.txCount,
+                      ending: plan.txCount === 1 ? 'y' : 'ies',
+                    })
                   : plan.dueCount > 0
-                    ? `File ${plan.dueCount} card due${plan.dueCount === 1 ? '' : 's'}`
-                    : `Fix ${plan.healedCount} entr${plan.healedCount === 1 ? 'y' : 'ies'}`
+                    ? tf('fileCardDues', {
+                        count: plan.dueCount,
+                        s: plan.dueCount === 1 ? '' : 's',
+                      })
+                    : tf('fixEntries', {
+                        count: plan.healedCount,
+                        ending: plan.healedCount === 1 ? 'y' : 'ies',
+                      })
               }
               onPress={applyPlan}
             />

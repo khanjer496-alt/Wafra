@@ -75,7 +75,7 @@ class SmsDeliveryReceiver : BroadcastReceiver() {
     // Arabic was added, so an Arabic bank SMS was dropped at delivery — the
     // parser had learned to read it and never got the chance.
     val MONEY_RE = Regex(
-      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
+      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
         "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE
     )

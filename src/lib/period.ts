@@ -1,4 +1,5 @@
 import { getMonthStartDay, monthEndISO, monthKey, monthLabel, monthStartISO, shortDate, toISODate } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import type { Transaction } from '@/lib/types';
 
 /**
@@ -51,7 +52,7 @@ export function periodLabel(p: PeriodLike): string {
     case 'range':
       return `${shortDate(period.from)} – ${shortDate(period.to)}`;
     case 'all':
-      return 'All time';
+      return t('allTimeTitle');
   }
 }
 

@@ -25,6 +25,7 @@ import { openDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
 import {
   formatAED,
+  formatAmount,
   monthKey,
   parseAmountToFils,
   shortDate,
@@ -67,6 +68,21 @@ export default function BillsScreen() {
   const [amountText, setAmountText] = useState('');
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
+
+  const cadenceLabel = (cadence: Subscription['cadence']): string =>
+    cadence === 'weekly'
+      ? t('cadenceWeekly')
+      : cadence === 'monthly'
+        ? t('cadenceMonthly')
+        : t('cadenceYearly');
+
+  const scheduleWhen = (days: number): string => {
+    if (days === 0) return t('today');
+    if (days === 1) return t('tomorrow');
+    if (days === 2) return t('scheduleInTwoDays');
+    if (days <= 10) return tf('scheduleInFewDays', { days });
+    return tf('scheduleInManyDays', { days });
+  };
 
   const rows = useMemo(
     () => billsForMonth(state.bills, state.transactions, now),
@@ -134,23 +150,28 @@ export default function BillsScreen() {
     const d = new Date(`${firstISO}T12:00:00`);
     const months =
       (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
-    if (months < 1) return 'under a month';
-    if (months < 12) return `${months} month${months === 1 ? '' : 's'}`;
+    if (months < 1) return t('subscriptionUnderMonth');
+    if (months < 12) return tf('subscriptionMonths', { count: months, s: months === 1 ? '' : 's' });
     const y = Math.floor(months / 12);
     const m = months % 12;
-    return m > 0 ? `${y} yr ${m} mo` : `${y} year${y === 1 ? '' : 's'}`;
+    return m > 0
+      ? tf('subscriptionYearsMonths', { years: y, months: m })
+      : tf('subscriptionYears', { count: y, s: y === 1 ? '' : 's' });
   };
 
   const statusMeta = (status: BillStatus, daysLeft: number) => {
     switch (status) {
       case 'paid':
-        return { label: 'Paid', color: theme.income };
+        return { label: t('paid'), color: theme.income };
       case 'overdue':
-        return { label: `${-daysLeft}d overdue`, color: theme.expense };
+        return { label: tf('overdueDays', { days: -daysLeft }), color: theme.expense };
       case 'due-soon':
-        return { label: daysLeft === 0 ? 'Due today' : `Due in ${daysLeft}d`, color: theme.warning };
+        return {
+          label: daysLeft === 0 ? t('dueToday') : tf('dueInDays', { days: daysLeft }),
+          color: theme.warning,
+        };
       default:
-        return { label: `Due in ${daysLeft}d`, color: theme.textSecondary };
+        return { label: tf('dueInDays', { days: daysLeft }), color: theme.textSecondary };
     }
   };
 
@@ -171,12 +192,12 @@ export default function BillsScreen() {
     const accountId = bill.accountId ?? state.accounts[0]?.id;
     if (!accountId) return;
     Alert.alert(
-      `Mark "${bill.title}" as paid?`,
+      tf('markBillPaidTitle', { title: bill.title }),
       tf('billRecordsExpense', { amount: formatAED(bill.amountFils, { decimals: false }) }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Mark paid',
+          text: t('markPaid'),
           onPress: () =>
             markBillPaid(billId, key, {
               type: 'expense',
@@ -194,12 +215,12 @@ export default function BillsScreen() {
 
   const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
     Alert.alert(
-      `Pay ${accName}?`,
-      `Marks ${formatAED(remainingFils, { decimals: false })} as paid and records the transfer.`,
+      tf('payAccountTitle', { name: accName }),
+      tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Mark paid',
+          text: t('markPaid'),
           onPress: () =>
             payCardDue(
               dueId,
@@ -209,7 +230,7 @@ export default function BillsScreen() {
                 amountFils: remainingFils,
                 category: 'other',
                 accountId,
-                title: `${accName} payment`,
+                title: tf('accountPaymentTitle', { name: accName }),
                 date: todayISO,
                 source: 'manual',
                 isTransfer: true,
@@ -222,19 +243,19 @@ export default function BillsScreen() {
   };
 
   const onLongPressBill = (billId: string, billTitle: string) => {
-    Alert.alert('Delete reminder?', `"${billTitle}" will no longer be tracked.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteBill(billId) },
+    Alert.alert(t('deleteReminderTitle'), tf('deleteReminderBody', { title: billTitle }), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('delete'), style: 'destructive', onPress: () => deleteBill(billId) },
     ]);
   };
 
   const onDismissSub = (sub: Subscription) => {
     Alert.alert(
       t('notASubscriptionQ'),
-      `"${sub.title}" will stop appearing in subscriptions and won't count toward the monthly total.`,
+      tf('removeSubscriptionBody', { title: sub.title }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => setNotSubscription(sub.title, true) },
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('remove'), style: 'destructive', onPress: () => setNotSubscription(sub.title, true) },
       ],
     );
   };
@@ -260,7 +281,7 @@ export default function BillsScreen() {
               {sub.priceIncreased && (
                 <View style={[styles.badge, { backgroundColor: `${theme.warning}22` }]}>
                   <ThemedText type="micro" style={{ color: theme.warning }}>
-                    price up
+                    {t('priceUp')}
                   </ThemedText>
                 </View>
               )}
@@ -269,14 +290,19 @@ export default function BillsScreen() {
                 row ellipsised mid-sentence: "next 21 A…". The last charge is
                 the one the user can look up in the sheet; what leaves next is
                 the one they cannot. */}
-            <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+            <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
               {sub.status === 'stopped'
-                ? `stopped · last ${shortDate(sub.lastChargedISO)}`
-                : `${sub.cadence} · ${
-                    next >= 0
-                      ? `next ${shortDate(sub.nextExpectedISO)} (${next}d)`
-                      : `expected ${-next}d ago`
-                  }`}
+                ? tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })
+                : next >= 0
+                  ? tf('cadenceScheduleList', {
+                      cadence: cadenceLabel(sub.cadence),
+                      date: shortDate(sub.nextExpectedISO),
+                      when: scheduleWhen(next),
+                    })
+                  : tf('cadenceExpectedAgo', {
+                      cadence: cadenceLabel(sub.cadence),
+                      days: -next,
+                    })}
             </ThemedText>
           </View>
           <View style={styles.rowRight}>
@@ -291,13 +317,14 @@ export default function BillsScreen() {
             </ThemedText>
             {sub.cadence !== 'monthly' && sub.status !== 'stopped' && (
               <ThemedText type="nano" themeColor="textTertiary" tabular>
-                {formatAED(sub.avgAmountFils, { decimals: false })}/{sub.cadence === 'yearly' ? 'yr' : 'wk'}
+                {formatAED(sub.avgAmountFils, { decimals: false })}
+                {sub.cadence === 'yearly' ? t('perYearShort') : t('perWeekShort')}
               </ThemedText>
             )}
-            {!tracked && sub.status !== 'stopped' && (
+            {!tracked && sub.status !== 'stopped' && next >= 0 && next <= 7 ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Remind me about ${sub.title}`}
+                accessibilityLabel={tf('remindAboutA11y', { title: sub.title })}
                 hitSlop={8}
                 onPress={() =>
                   addBill({
@@ -316,10 +343,12 @@ export default function BillsScreen() {
                     transform: [{ scale: pressed ? 0.97 : 1 }],
                   },
                 ]}>
-                <ThemedText type="nano" style={{ color: theme.primary }}>
-                  Remind me
+                <ThemedText type="smallBold" style={{ color: theme.primary }}>
+                  {t('remindMe')}
                 </ThemedText>
               </Pressable>
+            ) : (
+              <Icon name="chevron-right" size={14} color={theme.textTertiary} />
             )}
           </View>
         </Pressable>
@@ -384,7 +413,143 @@ export default function BillsScreen() {
           {/* Credit-card statement dues live in their own tab. */}
           {segment === 'cards' && (
             <>
-              {dues.map(({ due, status, daysLeft, remainingFils, belowMinimum }, i) => {
+              {dues.length === 1 && (() => {
+                const item = dues[0];
+                const account = state.accounts.find((a) => a.id === item.due.accountId);
+                const urgent = item.status === 'urgent' || item.status === 'overdue';
+                const recentSpend = state.transactions
+                  .filter(
+                    (transaction) =>
+                      transaction.accountId === item.due.accountId &&
+                      transaction.type === 'expense' &&
+                      !transaction.isTransfer &&
+                      monthKey(transaction.date) === key,
+                  )
+                  .reduce((sum, transaction) => sum + transaction.amountFils, 0);
+                const paidShare = Math.max(
+                  0,
+                  Math.min(1, item.due.paidFils / Math.max(1, item.due.totalDueFils)),
+                );
+                return (
+                  <View
+                    style={[
+                      styles.dueFocal,
+                      { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+                    ]}>
+                    <View style={styles.dueFocalTop}>
+                      <View style={[styles.cardSummaryBadge, { backgroundColor: theme.primarySoft }]}>
+                        <Icon name="wallet" size={18} color={theme.primary} />
+                      </View>
+                      <View style={styles.dueFocalTitle}>
+                        <ThemedText type="smallBold" numberOfLines={1}>
+                          {account?.name ?? t('card')}
+                        </ThemedText>
+                        <ThemedText
+                          type="meta"
+                          style={{ color: urgent ? theme.expense : theme.textSecondary }}>
+                          {item.status === 'overdue'
+                            ? tf('overdueDays', { days: -item.daysLeft })
+                            : tf('payByWithDays', {
+                                date: shortDate(item.due.dueDate),
+                                days: item.daysLeft,
+                              })}
+                        </ThemedText>
+                      </View>
+                      <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+                    </View>
+
+                    <Pressable onPress={() => setCardDetail(account ?? null)}>
+                      <ThemedText type="meta" themeColor="textSecondary">
+                        {t('outstandingTitle')}
+                      </ThemedText>
+                      <View style={styles.cardSummaryMoney}>
+                        <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                        <ThemedText
+                          type="sheetAmount"
+                          tabular
+                          style={urgent ? { color: theme.expense } : undefined}>
+                          {formatAmount(item.remainingFils, { decimals: false })}
+                        </ThemedText>
+                      </View>
+                    </Pressable>
+
+                    <View style={[styles.dueProgress, { backgroundColor: theme.track }]}>
+                      <View
+                        style={[
+                          styles.dueProgressFill,
+                          { width: `${Math.max(2, paidShare * 100)}%`, backgroundColor: theme.primary },
+                        ]}
+                      />
+                    </View>
+                    <ThemedText type="meta" themeColor="textTertiary" tabular>
+                      {tf('paidOfTotal', {
+                        paid: formatAED(item.due.paidFils, { decimals: false }),
+                        total: formatAED(item.due.totalDueFils, { decimals: false }),
+                      })}
+                    </ThemedText>
+
+                    <View style={[styles.dueFacts, { borderColor: theme.cardBorder }]}>
+                      <View style={styles.dueFact}>
+                        <ThemedText type="micro" themeColor="textTertiary">
+                          {t('minimumDueLabel')}
+                        </ThemedText>
+                        <ThemedText type="smallBold" tabular>
+                          {item.minimumKnown
+                            ? formatAED(item.due.minDueFils, { decimals: false })
+                            : '—'}
+                        </ThemedText>
+                      </View>
+                      <View style={[styles.dueFact, styles.dueFactDivided, { borderColor: theme.cardBorder }]}>
+                        <ThemedText type="micro" themeColor="textTertiary">
+                          {t('thisMonth')}
+                        </ThemedText>
+                        <ThemedText type="smallBold" tabular>
+                          {formatAED(recentSpend, { decimals: false })}
+                        </ThemedText>
+                      </View>
+                    </View>
+
+                    <View style={styles.dueFocalActions}>
+                      <Pressable
+                        onPress={() =>
+                          onPayDue(
+                            item.due.id,
+                            item.remainingFils,
+                            item.due.accountId,
+                            account?.name ?? t('card'),
+                          )
+                        }
+                        style={[styles.duePayButton, { backgroundColor: theme.primary }]}>
+                        <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
+                          {t('markPaid')}
+                        </ThemedText>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setCardDetail(account ?? null)}
+                        style={[styles.dueDetailsButton, { borderColor: theme.cardBorderStrong }]}>
+                        <ThemedText type="smallBold">{t('seeAll')}</ThemedText>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })()}
+              {dues.length > 1 && (
+                <View style={[styles.cardSummary, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+                  <View>
+                    <ThemedText type="meta" themeColor="textSecondary">{t('dueAcrossCards')}</ThemedText>
+                    <View style={styles.cardSummaryMoney}>
+                      <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                      <ThemedText type="heading" tabular>
+                        {formatAmount(totalAsShown(dues.map((item) => item.remainingFils)), { decimals: false })}
+                      </ThemedText>
+                    </View>
+                  </View>
+                  <View style={[styles.cardSummaryBadge, { backgroundColor: theme.primarySoft }]}>
+                    <Icon name="bank" size={18} color={theme.primary} />
+                  </View>
+                </View>
+              )}
+              {dues.length > 1 && dues.map(({ due, status, daysLeft, remainingFils, belowMinimum }, i) => {
                 const account = state.accounts.find((a) => a.id === due.accountId);
                 const urgent = status === 'urgent' || status === 'overdue';
                 return (
@@ -402,15 +567,15 @@ export default function BillsScreen() {
                       },
                     ]}>
                     <View style={{ flex: 1, gap: 1 }}>
-                      <ThemedText type="default">{account?.name ?? 'Card'}</ThemedText>
+                      <ThemedText type="default">{account?.name ?? t('card')}</ThemedText>
                       <ThemedText
                         type="small"
                         style={{ color: urgent ? theme.expense : theme.textSecondary }}>
                         {status === 'overdue'
-                          ? `${-daysLeft}d overdue`
-                          : `Pay by ${shortDate(due.dueDate)} · ${daysLeft}d left`}
+                          ? tf('overdueDays', { days: -daysLeft })
+                          : tf('payByWithDays', { date: shortDate(due.dueDate), days: daysLeft })}
                         {belowMinimum
-                          ? ` · min ${formatAED(due.minDueFils, { decimals: false })}`
+                          ? ` · ${tf('minimumAmountShort', { amount: formatAED(due.minDueFils, { decimals: false }) })}`
                           : ''}
                       </ThemedText>
                     </View>
@@ -424,10 +589,10 @@ export default function BillsScreen() {
                       <Pressable
                         hitSlop={8}
                         onPress={() =>
-                          onPayDue(due.id, remainingFils, due.accountId, account?.name ?? 'Card')
+                          onPayDue(due.id, remainingFils, due.accountId, account?.name ?? t('card'))
                         }>
                         <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                          Mark paid
+                          {t('markPaid')}
                         </ThemedText>
                       </Pressable>
                     </View>
@@ -455,12 +620,49 @@ export default function BillsScreen() {
                   <ThemedText type="small" themeColor="textSecondary" style={styles.totalCaption}>
                     {t('detectedHint')}
                   </ThemedText>
-                  <ThemedText type="smallBold" tabular style={styles.totalAmount}>
-                    {formatAED(subsTotal, { decimals: false })}/mo
+                  <ThemedText type="smallBold" tabular>
+                    {tf('monthlyTotal', {
+                      amount: formatAmount(subsTotal, { decimals: false }),
+                    })}
                   </ThemedText>
                 </View>
               )}
               <View>{subs.map((sub, i) => renderRecurringRow(sub, i))}</View>
+
+              <View style={[styles.trackingRail, { borderColor: theme.cardBorder }]}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('cardPaymentsDue')}
+                  onPress={() => setSegment('cards')}
+                  style={styles.trackingLink}>
+                  <View style={[styles.trackingIcon, { backgroundColor: theme.primarySoft }]}>
+                    <Icon name="wallet" size={15} color={theme.primary} />
+                  </View>
+                  <View style={styles.trackingCopy}>
+                    <ThemedText type="smallBold">{t('cardPaymentsDue')}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {tf('itemsTracked', { count: dues.length })}
+                    </ThemedText>
+                  </View>
+                  <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('fixedPayments')}
+                  onPress={() => setSegment('utilities')}
+                  style={[styles.trackingLink, { borderTopColor: theme.cardBorder, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  <View style={[styles.trackingIcon, { backgroundColor: theme.backgroundSelected }]}>
+                    <Icon name="receipt" size={15} color={theme.textSecondary} />
+                  </View>
+                  <View style={styles.trackingCopy}>
+                    <ThemedText type="smallBold">{t('fixedPayments')}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {tf('itemsTracked', { count: loans.length + commitments.length + otherRepeats.length + rows.length })}
+                    </ThemedText>
+                  </View>
+                  <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                </Pressable>
+              </View>
 
               {stopped.length > 0 && (
                 <View style={styles.commitBlock}>
@@ -492,9 +694,9 @@ export default function BillsScreen() {
                   <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
                     <Icon name="repeat" size={26} color={theme.textSecondary} strokeWidth={1.7} />
                   </View>
-                  <ThemedText type="smallBold">No subscriptions detected yet</ThemedText>
+                  <ThemedText type="smallBold">{t('noSubscriptionsTitle')}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                    Import your bank SMS and repeat charges will show up here.
+                    {t('noSubscriptionsBody')}
                   </ThemedText>
                 </View>
               )}
@@ -565,7 +767,7 @@ export default function BillsScreen() {
                           {bill.title}
                         </ThemedText>
                         <ThemedText type="small" style={{ color: meta.color }}>
-                          {meta.label} · day {bill.dueDay}
+                          {meta.label} · {t('day')} {bill.dueDay}
                         </ThemedText>
                       </View>
                       <View style={styles.rowRight}>
@@ -575,7 +777,7 @@ export default function BillsScreen() {
                         {status !== 'paid' ? (
                           <Pressable onPress={() => onPay(bill.id)}>
                             <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                              Mark paid
+                              {t('markPaid')}
                             </ThemedText>
                           </Pressable>
                         ) : (
@@ -588,7 +790,7 @@ export default function BillsScreen() {
               </View>
               {rows.length > 0 && (
                 <ThemedText type="micro" themeColor="textSecondary" style={styles.hint}>
-                  Long-press a reminder to delete it.
+                  {t('longPressDeleteReminder')}
                 </ThemedText>
               )}
               {rows.length === 0 &&
@@ -599,10 +801,9 @@ export default function BillsScreen() {
                   <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
                     <Icon name="calendar" size={26} color={theme.textSecondary} strokeWidth={1.7} />
                   </View>
-                  <ThemedText type="smallBold">No utilities yet</ThemedText>
+                  <ThemedText type="smallBold">{t('noUtilitiesTitle')}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary" style={styles.emptyText}>
-                    Tap + to track DEWA, rent, or any monthly payment. Detected utility charges
-                    show up here on their own.
+                    {t('noUtilitiesBody')}
                   </ThemedText>
                 </View>
               )}
@@ -633,14 +834,17 @@ export default function BillsScreen() {
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
                         {detail.status === 'stopped'
-                          ? `stopped · last charged ${shortDate(detail.lastChargedISO)}`
-                          : `${detail.cadence} · ${formatAED(detail.monthlyEquivalentFils, { decimals: false })}/mo`}
+                          ? tf('stoppedLastCharged', { date: shortDate(detail.lastChargedISO) })
+                          : tf('detailCadenceMonthly', {
+                              cadence: cadenceLabel(detail.cadence),
+                              amount: formatAED(detail.monthlyEquivalentFils, { decimals: false }),
+                            })}
                       </ThemedText>
                     </View>
                   </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Close"
+                    accessibilityLabel={t('close')}
                     hitSlop={8}
                     onPress={() => setDetail(null)}>
                     <Icon name="close" size={20} color={theme.textSecondary} />
@@ -655,7 +859,7 @@ export default function BillsScreen() {
                     </ThemedText>
                     <ThemedText type="smallBold">{subscribedFor(detailData.firstISO)}</ThemedText>
                     <ThemedText type="micro" themeColor="textSecondary">
-                      since {shortDate(detailData.firstISO)}
+                      {tf('walletSince', { date: shortDate(detailData.firstISO) })}
                     </ThemedText>
                   </View>
                   <View style={styles.fact}>
@@ -684,7 +888,7 @@ export default function BillsScreen() {
                   <ThemedText type="small" numberOfLines={2}>
                     {detailData.accounts.length > 0
                       ? detailData.accounts.map((a) => a.name).join(', ')
-                      : 'Unknown account'}
+                      : t('unknownAccount')}
                   </ThemedText>
                 </View>
 
@@ -727,7 +931,7 @@ export default function BillsScreen() {
                     })}
                     {detailData.txs.length > 36 && (
                       <ThemedText type="micro" themeColor="textSecondary" style={styles.historyMore}>
-                        + {detailData.txs.length - 36} older charges
+                        {tf('olderCharges', { count: detailData.txs.length - 36 })}
                       </ThemedText>
                     )}
                   </ScrollView>
@@ -779,7 +983,7 @@ export default function BillsScreen() {
             onPress={() => {}}>
             <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
             <View style={styles.sheetHeader}>
-              <ThemedText type="heading">New reminder</ThemedText>
+              <ThemedText type="heading">{t('newReminder')}</ThemedText>
               <Pressable onPress={() => setAdderVisible(false)}>
                 <Icon name="close" size={20} color={theme.textSecondary} />
               </Pressable>
@@ -788,7 +992,7 @@ export default function BillsScreen() {
             <TextInput
               value={title}
               onChangeText={setTitle}
-              placeholder="Name (e.g. DEWA, Netflix, Rent)"
+              placeholder={t('reminderNamePlaceholder')}
               placeholderTextColor={theme.textSecondary}
               style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text }]}
             />
@@ -800,13 +1004,13 @@ export default function BillsScreen() {
                   value={amountText}
                   onChangeText={setAmountText}
                   keyboardType="numeric"
-                  placeholder="Amount"
+                  placeholder={t('amount')}
                   placeholderTextColor={theme.textSecondary}
                   style={[styles.amountInput, { color: theme.text }]}
                 />
               </View>
               <View style={[styles.amountBox, styles.dayBox, { backgroundColor: theme.backgroundSelected }]}>
-                <ThemedText type="smallBold" themeColor="textSecondary">Day</ThemedText>
+                <ThemedText type="smallBold" themeColor="textSecondary">{t('day')}</ThemedText>
                 <TextInput
                   value={dueDayText}
                   onChangeText={setDueDayText}
@@ -834,7 +1038,7 @@ export default function BillsScreen() {
                   opacity: !title.trim() || !parseAmountToFils(amountText) || !dueDayText ? 0.45 : 1,
                 },
               ]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Save reminder</ThemedText>
+              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('saveReminder')}</ThemedText>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -903,6 +1107,60 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: Spacing.two,
   },
+  cardSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: Radius.sheet,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
+  },
+  cardSummaryMoney: { flexDirection: 'row', alignItems: 'baseline', gap: 5, marginTop: 2 },
+  cardSummaryBadge: {
+    width: 42,
+    height: 42,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dueFocal: {
+    borderRadius: Radius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.four,
+    gap: Spacing.two + 2,
+  },
+  dueFocalTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+  },
+  dueFocalTitle: { flex: 1, minWidth: 0, gap: 1 },
+  dueProgress: { height: 7, borderRadius: 4, overflow: 'hidden' },
+  dueProgressFill: { height: '100%', borderRadius: 4 },
+  dueFacts: {
+    flexDirection: 'row',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  dueFact: { flex: 1, gap: 3, paddingVertical: Spacing.three },
+  dueFactDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
+  dueFocalActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.one },
+  duePayButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dueDetailsButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   totalRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -913,9 +1171,27 @@ const styles = StyleSheet.create({
   totalCaption: {
     flex: 1,
   },
-  totalAmount: {
-    flexShrink: 0,
+  trackingRail: {
+    marginTop: Spacing.four,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    overflow: 'hidden',
   },
+  trackingLink: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+  },
+  trackingIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trackingCopy: { flex: 1, minWidth: 0, gap: 1 },
   utilitiesBlock: {
     gap: Spacing.one,
   },
@@ -937,6 +1213,7 @@ const styles = StyleSheet.create({
   },
   rowInfo: {
     flex: 1,
+    minWidth: 0,
     gap: 1,
   },
   rowTitleLine: {
@@ -950,6 +1227,7 @@ const styles = StyleSheet.create({
   rowRight: {
     alignItems: 'flex-end',
     gap: 2,
+    marginStart: Spacing.two,
     // Never let the Remind me pill claim more than a third of the row.
     maxWidth: '38%',
   },

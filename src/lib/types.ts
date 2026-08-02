@@ -71,6 +71,19 @@ export interface Transaction {
   type: TransactionType;
   /** Amount in fils, always positive. */
   amountFils: number;
+  /** Original bank-alert amount when the charge was denominated outside AED. */
+  originalAmountMinor?: number;
+  /** ISO 4217 code for `originalAmountMinor` (for example USD or EUR). */
+  originalCurrency?: string;
+  /** AED units per one unit of the original currency. */
+  fxRate?: number;
+  /** Effective date of a fetched reference rate. */
+  fxRateDate?: string;
+  /**
+   * `bank`: the alert included its own AED equivalent; `reference`: a dated
+   * public rate was fetched; `fallback`: parser used its offline approximation.
+   */
+  fxSource?: 'bank' | 'reference' | 'fallback';
   category: CategoryId;
   accountId: string;
   title: string;
@@ -217,6 +230,14 @@ export interface AppState {
   monthStartDay: number;
   /** Wafra Pro entitlement (Play Billing purchase, or founder unlock on side-loads). */
   pro: boolean;
+  /**
+   * Strict local-only posture. Enabling it removes every retained diagnostic
+   * message body and prevents future imports from keeping raw text.
+   *
+   * Android capture is already local. On iOS the settings flow also disconnects
+   * the Shortcuts relay, because an HTTP Shortcut cannot be called "local-only".
+   */
+  privateMode: boolean;
   /** Epoch ms when the free Pro trial started (first launch). */
   trialStartTs: number;
   /** Market pack id (country). Auto-detected on first launch; user-changeable. */

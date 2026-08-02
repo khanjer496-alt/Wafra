@@ -1,6 +1,7 @@
-import { getCategory } from '@/lib/categories';
+import { categoryLabel, getCategory } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { formatAED, totalAsShown } from '@/lib/format';
+import { formatAED, shortDate, totalAsShown } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
   inPeriod,
@@ -200,22 +201,32 @@ export function buildInsights(
 
   // Change vs the previous period (pace projection only mid-current-month)
   if (prev && previous.expenseFils > 0 && current.expenseFils > 0) {
+    // A day-one or payday-heavy sample is not a trend. Wait for a full week
+    // before annualising the current pace; otherwise rent and salary-day bills
+    // can produce claims such as "1,511% higher" that no serious finance app
+    // should present as an insight.
     if (live) {
-      const pace = current.expenseFils / dayOfMonth;
-      const projected = pace * totalDaysInPeriod;
-      const delta = (projected - previous.expenseFils) / previous.expenseFils;
-      if (Math.abs(delta) >= 0.08) {
-        const pct = Math.round(Math.abs(delta) * 100);
-        insights.push({
-          id: 'pace',
-          tone: delta > 0 ? 'warning' : 'positive',
-          icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
-          title: delta > 0 ? `Trending ${pct}% higher` : `Trending ${pct}% lower`,
-          body: `At today's pace you'll spend about ${formatAED(Math.round(projected), { decimals: false })} this month, vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
-          // The entries the pace is measured over. Not '/flow': this list is
-          // DRAWN on Flow, so pushing Flow is a no-op and the card is inert.
-          href: dest('/transactions'),
-        });
+      if (dayOfMonth >= 7) {
+        const pace = current.expenseFils / dayOfMonth;
+        const projected = pace * totalDaysInPeriod;
+        const delta = (projected - previous.expenseFils) / previous.expenseFils;
+        if (Math.abs(delta) >= 0.08) {
+          const pct = Math.round(Math.abs(delta) * 100);
+          insights.push({
+            id: 'pace',
+            tone: delta > 0 ? 'warning' : 'positive',
+            icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
+            title: tf(delta > 0 ? 'insightTrendingHigher' : 'insightTrendingLower', { percent: pct }),
+            body: tf('insightPaceBody', {
+              projected: formatAED(Math.round(projected), { decimals: false }),
+              previous: formatAED(previous.expenseFils, { decimals: false }),
+              period: periodLabel(prev),
+            }),
+            // The entries the pace is measured over. Not '/flow': this list is
+            // DRAWN on Flow, so pushing Flow is a no-op and the card is inert.
+            href: dest('/transactions'),
+          });
+        }
       }
     } else {
       const delta = (current.expenseFils - previous.expenseFils) / previous.expenseFils;
@@ -225,8 +236,12 @@ export function buildInsights(
           id: 'mom',
           tone: delta > 0 ? 'warning' : 'positive',
           icon: delta > 0 ? 'arrow-up-right' : 'arrow-down-right',
-          title: `Spent ${pct}% ${delta > 0 ? 'more' : 'less'}`,
-          body: `${formatAED(current.expenseFils, { decimals: false })} vs ${formatAED(previous.expenseFils, { decimals: false })} in ${periodLabel(prev)}.`,
+          title: tf(delta > 0 ? 'insightSpentMore' : 'insightSpentLess', { percent: pct }),
+          body: tf('insightComparisonBody', {
+            current: formatAED(current.expenseFils, { decimals: false }),
+            previous: formatAED(previous.expenseFils, { decimals: false }),
+            period: periodLabel(prev),
+          }),
           href: dest('/transactions'),
         });
       }
@@ -244,8 +259,11 @@ export function buildInsights(
         id: `budget-over-${b.category}`,
         tone: 'warning',
         icon: 'alert',
-        title: `${cat.label} budget exceeded`,
-        body: `${formatAED(spent, { decimals: false })} spent of your ${formatAED(b.limitFils, { decimals: false })} limit.`,
+        title: tf('insightBudgetExceeded', { category: categoryLabel(cat) }),
+        body: tf('insightBudgetExceededBody', {
+          spent: formatAED(spent, { decimals: false }),
+          limit: formatAED(b.limitFils, { decimals: false }),
+        }),
         // What blew the limit, not the screen the warning is printed on.
         href: dest('/transactions', { category: b.category }),
       });
@@ -254,8 +272,11 @@ export function buildInsights(
         id: `budget-near-${b.category}`,
         tone: 'warning',
         icon: 'alert',
-        title: `${cat.label} almost at limit`,
-        body: `${Math.round(ratio * 100)}% used — ${formatAED(b.limitFils - spent, { decimals: false })} left for the month.`,
+        title: tf('insightBudgetNear', { category: categoryLabel(cat) }),
+        body: tf('insightBudgetNearBody', {
+          percent: Math.round(ratio * 100),
+          left: formatAED(b.limitFils - spent, { decimals: false }),
+        }),
         href: dest('/transactions', { category: b.category }),
       });
     }
@@ -269,8 +290,11 @@ export function buildInsights(
       id: 'top-category',
       tone: 'neutral',
       icon: cat.icon,
-      title: `${cat.label} leads your spending`,
-      body: `${formatAED(top.totalFils, { decimals: false })} — ${Math.round(top.share * 100)}% of this month's expenses.`,
+      title: tf('insightCategoryLeads', { category: categoryLabel(cat) }),
+      body: tf('insightCategoryLeadsBody', {
+        amount: formatAED(top.totalFils, { decimals: false }),
+        percent: Math.round(top.share * 100),
+      }),
       href: dest('/transactions', { category: top.category }),
     });
   }
@@ -283,8 +307,10 @@ export function buildInsights(
         id: 'savings',
         tone: 'positive',
         icon: 'leaf',
-        title: `Saving ${Math.round(rate * 100)}% of income`,
-        body: `${formatAED(current.incomeFils - current.expenseFils, { decimals: false })} kept aside${live ? ' so far this month' : ''}. Keep it up!`,
+        title: tf('insightSavingRate', { percent: Math.round(rate * 100) }),
+        body: tf(live ? 'insightSavingBodyLive' : 'insightSavingBodyPeriod', {
+          amount: formatAED(current.incomeFils - current.expenseFils, { decimals: false }),
+        }),
         // Where money that was kept aside actually lives: balances and goals.
         href: dest('/wallet'),
       });
@@ -293,8 +319,10 @@ export function buildInsights(
         id: 'overspend',
         tone: 'warning',
         icon: 'alert',
-        title: 'Spending exceeds income',
-        body: `Expenses are ${formatAED(current.expenseFils - current.incomeFils, { decimals: false })} above income${isMonthMode ? ' this month' : ' in this period'}.`,
+        title: t('insightSpendingExceeds'),
+        body: tf(isMonthMode ? 'insightOverspendMonth' : 'insightOverspendPeriod', {
+          amount: formatAED(current.expenseFils - current.incomeFils, { decimals: false }),
+        }),
         href: dest('/transactions'),
       });
     }
@@ -313,8 +341,12 @@ export function buildInsights(
       id: 'largest',
       tone: 'neutral',
       icon: 'diamond',
-      title: 'Biggest purchase',
-      body: `${largest.title} — ${formatAED(largest.amountFils, { decimals: false })} on ${largest.date.slice(8)}/${largest.date.slice(5, 7)}.`,
+      title: t('insightBiggestPurchase'),
+      body: tf('insightBiggestPurchaseBody', {
+        merchant: largest.title,
+        amount: formatAED(largest.amountFils, { decimals: false }),
+        date: shortDate(largest.date),
+      }),
       // That merchant's own history, which is the question a biggest-purchase
       // line provokes: is this a one-off or do I do this every month?
       href: dest('/transactions', { merchant: largest.title }),
@@ -333,8 +365,13 @@ export function buildInsights(
         id: 'subs-load',
         tone: 'warning',
         icon: 'repeat',
-        title: `${subs.length} subscriptions cost ${formatAED(monthly, { decimals: false })}/mo`,
-        body: `That's ${Math.round((monthly / current.incomeFils) * 100)}% of this month's income. Review them in Bills.`,
+        title: tf('insightSubscriptionsCost', {
+          count: subs.length,
+          amount: formatAED(monthly, { decimals: false }),
+        }),
+        body: tf('insightSubscriptionsShare', {
+          percent: Math.round((monthly / current.incomeFils) * 100),
+        }),
         href: dest('/bills'),
       });
     } else {
@@ -342,8 +379,10 @@ export function buildInsights(
         id: 'subs-total',
         tone: 'neutral',
         icon: 'repeat',
-        title: `${subs.length} active subscriptions`,
-        body: `About ${formatAED(monthly, { decimals: false })} per month combined.`,
+        title: tf('insightActiveSubscriptions', { count: subs.length }),
+        body: tf('insightActiveSubscriptionsBody', {
+          amount: formatAED(monthly, { decimals: false }),
+        }),
         href: dest('/bills'),
       });
     }
@@ -361,8 +400,11 @@ export function buildInsights(
       id: `price-up-${increased.title}`,
       tone: 'warning',
       icon: 'arrow-up-right',
-      title: `${increased.title} got pricier`,
-      body: `Last charge ${formatAED(increased.lastAmountFils, { decimals: false })} vs the usual ${formatAED(increased.priorTypicalFils, { decimals: false })}.`,
+      title: tf('insightGotPricier', { name: increased.title }),
+      body: tf('insightGotPricierBody', {
+        last: formatAED(increased.lastAmountFils, { decimals: false }),
+        usual: formatAED(increased.priorTypicalFils, { decimals: false }),
+      }),
       href: dest('/bills'),
     });
   }
@@ -373,8 +415,10 @@ export function buildInsights(
       id: 'daily',
       tone: 'neutral',
       icon: 'sun',
-      title: 'Daily average',
-      body: `You spend about ${formatAED(Math.round(current.expenseFils / dayOfMonth), { decimals: false })} per day${isMonthMode ? ' this month' : ' in this period'}.`,
+      title: t('insightDailyAverage'),
+      body: tf(isMonthMode ? 'insightDailyAverageMonth' : 'insightDailyAveragePeriod', {
+        amount: formatAED(Math.round(current.expenseFils / dayOfMonth), { decimals: false }),
+      }),
       href: dest('/transactions'),
     });
   }

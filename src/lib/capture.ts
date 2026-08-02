@@ -23,6 +23,10 @@ import {
   type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
+import {
+  clearBackgroundRelayRows,
+  readBackgroundRelayRows,
+} from '@/lib/background-relay';
 import { ackRelay, getRelayConfig, isRelayPlatform, syncRelay } from '@/lib/relay';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type { AppState } from '@/lib/types';
@@ -82,16 +86,44 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
   // Android heals its history. That asymmetry is a consequence of the
   // retention promise, not an oversight.
 
+  // Private Mode is local-only. Android already returned above through its
+  // on-device inbox pipe; iOS must stop here because a Shortcut can only hand
+  // its message to the app by making an HTTP request to the relay.
+  if (state.privateMode) return EMPTY;
+
   if (isRelayPlatform()) {
+    // A headless wake may already have collected and acknowledged rows while
+    // the UI process was not running. They live in SQLCipher until the normal
+    // import boundary durably folds them into the ledger.
+    const backgroundRows = await readBackgroundRelayRows();
     const cfg = await getRelayConfig();
-    if (!cfg) return { ...EMPTY, source: 'relay', needsSetup: true };
+    if (!cfg || cfg.setupState === 'paired') {
+      if (backgroundRows.length > 0) {
+        const newestTs = backgroundRows.reduce(
+          (max, p) => Math.max(max, p.smsTs ?? 0),
+          state.lastScanTs,
+        );
+        return {
+          parsed: backgroundRows,
+          newestTs,
+          source: 'relay',
+          commit: clearBackgroundRelayRows,
+          needsSetup: false,
+        };
+      }
+      return { ...EMPTY, source: 'relay', needsSetup: true };
+    }
     const { parsed, ids } = await syncRelay(cfg);
-    const newestTs = parsed.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
+    const collected = [...backgroundRows, ...parsed];
+    const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
     return {
-      parsed,
+      parsed: collected,
       newestTs,
       source: 'relay',
-      commit: ids.length ? () => ackRelay(cfg, ids) : NOOP,
+      commit: async () => {
+        if (ids.length > 0) await ackRelay(cfg, ids);
+        if (backgroundRows.length > 0) await clearBackgroundRelayRows();
+      },
       needsSetup: false,
     };
   }

@@ -1,7 +1,7 @@
 import React from 'react';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
-import { isRTL } from '@/lib/i18n';
+import { useLanguage } from '@/hooks/use-language';
 
 export type IconName =
   | 'home'
@@ -78,9 +78,11 @@ const DIRECTIONAL = new Set<IconName>(['chevron-right', 'chevron-left', 'arrow-u
 
 function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' } as const;
-  const flip = isRTL() && DIRECTIONAL.has(name);
+  const language = useLanguage();
+  const flip = language === 'ar' && DIRECTIONAL.has(name);
   return (
     <Svg
+      aria-hidden
       width={size}
       height={size}
       viewBox="0 0 24 24"

@@ -18,7 +18,7 @@ import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards
 import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 
 /**
  * Every card as a row: bank, last four, and the one figure that is actually
@@ -87,19 +87,19 @@ export default function CardsScreen() {
         ? [{ text: t('setCreditLimit'), onPress: () => askCreditLimit(card) }]
         : []),
       {
-        text: card.archived ? 'Unhide' : 'Hide card',
+        text: card.archived ? t('unhide') : t('hideCard'),
         onPress: () => editAccount(card.id, { archived: !card.archived }),
       },
       {
         text: t('deleteCardAndEntries'),
         style: 'destructive' as const,
         onPress: () =>
-          Alert.alert('Delete card?', `"${card.name}" and all its entries will be removed.`, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: () => deleteAccount(card.id) },
+          Alert.alert(t('deleteCardTitle'), tf('deleteCardBody', { name: card.name }), [
+            { text: t('cancel'), style: 'cancel' },
+            { text: t('delete'), style: 'destructive', onPress: () => deleteAccount(card.id) },
           ]),
       },
-      { text: 'Cancel', style: 'cancel' as const },
+      { text: t('cancel'), style: 'cancel' as const },
     ]);
   };
 
@@ -127,24 +127,24 @@ export default function CardsScreen() {
         onPress={() => setDetail(card)}
         onLongPress={() => cardOptions(card)}
         last={i === list.length - 1}
-        accessibilityLabel={`${card.name}, open statements and payments`}
+        accessibilityLabel={tf('cardOpenHistoryA11y', { name: card.name })}
         style={inactive ? styles.inactiveRow : undefined}>
         <AccountTile account={card} />
         <View style={styles.rowText}>
           <ThemedText type="small" numberOfLines={1}>
             {card.bankName ??
-              (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || 'Card')}
+              (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || t('card'))}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
-            {isCredit ? 'Credit' : 'Debit'} ·· {card.last4 ?? '????'}
+            {isCredit ? t('credit') : t('debit')} ·· {card.last4 ?? '????'}
             {due
-              ? ` · due ${shortDate(due.due.dueDate)}`
+              ? ` · ${tf('dueOn', { date: shortDate(due.due.dueDate) })}`
               : lastUsed
                 ? ` · ${t('lastUsed').toLowerCase()} ${shortDate(lastUsed)}`
                 : ''}
           </ThemedText>
         </View>
-        <View style={styles.rowFigure}>
+        <View style={[styles.rowFigure, { alignItems: state.language === 'ar' ? 'flex-start' : 'flex-end' }]}>
           <Money
             fils={outstanding ?? spent}
             prefix={false}
@@ -167,11 +167,11 @@ export default function CardsScreen() {
             themeColor="textTertiary"
             onPress={isCredit && limitLeft === null ? () => askCreditLimit(card) : undefined}
             style={isCredit && limitLeft === null ? { color: theme.primary } : undefined}>
-            {outstanding !== null ? 'Outstanding' : 'This month'}
+            {outstanding !== null ? t('outstandingTitle') : t('thisMonth')}
             {limitLeft !== null
-              ? ` · ${formatAmount(limitLeft, { decimals: false })} left`
+              ? ` · ${tf('creditLeft', { amount: formatAmount(limitLeft, { decimals: false }) })}`
               : isCredit
-                ? ' · Set limit'
+                ? ` · ${t('setLimit')}`
                 : ''}
           </ThemedText>
         </View>
@@ -191,7 +191,7 @@ export default function CardsScreen() {
             {activeCards.map((c, i) => renderCard(c, i, activeCards, false))}
             {activeCards.length === 0 && (
               <ThemedText type="default" themeColor="textSecondary">
-                No cards yet. One appears here as soon as a bank message names a card number.
+                {t('noCardsYet')}
               </ThemedText>
             )}
           </Section>
@@ -200,7 +200,7 @@ export default function CardsScreen() {
             <Section index={1}>
               <SectionHeader
                 title={`${t('inactiveCards')} · ${inactiveCards.length}`}
-                action={showInactive ? 'Hide' : 'Show'}
+                action={showInactive ? t('hide') : t('show')}
                 onAction={() => setShowInactive(!showInactive)}
               />
               {showInactive && inactiveCards.map((c, i) => renderCard(c, i, inactiveCards, true))}
@@ -215,13 +215,12 @@ export default function CardsScreen() {
 
       <CardDetailSheet account={detail} onClose={() => setDetail(null)} />
 
-      <BottomSheet visible={limitFor !== null} onClose={() => setLimitFor(null)} title="Credit limit">
+      <BottomSheet visible={limitFor !== null} onClose={() => setLimitFor(null)} title={t('creditLimitTitle')}>
         <ThemedText type="default" themeColor="textSecondary">
-          Banks quote the headroom left, never the limit itself. Enter it once and every masked
-          balance on {limitFor?.name ?? 'this card'} turns into a real figure.
+          {tf('creditLimitBody', { name: limitFor?.name ?? t('card') })}
         </ThemedText>
         <AmountField label={t('totalCreditLimit')} value={limitText} onChangeText={setLimitText} fontSize={34} />
-        <Button label="Save limit" onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
+        <Button label={t('saveLimit')} onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
       </BottomSheet>
     </ThemedView>
   );

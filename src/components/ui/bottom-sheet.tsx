@@ -13,7 +13,10 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { EASE, Elevation, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { useLanguage } from '@/hooks/use-language';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { t } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 const OFFSCREEN = 700;
@@ -33,24 +36,35 @@ interface BottomSheetProps {
  */
 export function BottomSheet({ visible, onClose, title, children }: BottomSheetProps) {
   const theme = useTheme();
+  const language = useLanguage();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
+  const reducedMotion = useReducedMotion();
   const y = useSharedValue(OFFSCREEN);
 
   useEffect(() => {
     if (visible) {
+      if (reducedMotion) {
+        y.value = 0;
+        return;
+      }
       y.value = OFFSCREEN;
       y.value = withSequence(
         withTiming(-12, { duration: Motion.sheet * 0.8, easing: EASING }),
         withTiming(0, { duration: Motion.sheet * 0.2, easing: EASING }),
       );
     }
-  }, [visible, y]);
+  }, [visible, y, reducedMotion]);
 
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }] }));
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent
+      animationType={reducedMotion ? 'none' : 'fade'}
+      onRequestClose={onClose}
+      statusBarTranslucent>
       {/*
         `accessible` must stay false on both wrappers. An accessibilityLabel —
         or a bare Pressable — makes the view an accessibility element, and an
@@ -63,6 +77,7 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
       <Pressable accessible={false} style={styles.backdrop} onPress={onClose}>
         <Animated.View
           accessibilityViewIsModal
+          onAccessibilityEscape={onClose}
           style={[
             styles.sheet,
             {
@@ -81,12 +96,12 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
           {/* Swallows taps so a press inside the sheet never dismisses it. */}
           <Pressable accessible={false} onPress={() => {}}>
             <View style={styles.header}>
-              <ThemedText type="micro" themeColor="textTertiary">
+              <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
                 {title}
               </ThemedText>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Close"
+                accessibilityLabel={t('close', language)}
                 hitSlop={8}
                 onPress={onClose}
                 style={[styles.close, { borderColor: theme.cardBorder }]}>
@@ -129,9 +144,9 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.three + 2,
   },
   close: {
-    width: 30,
-    height: 30,
-    borderRadius: Radius.tile,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',

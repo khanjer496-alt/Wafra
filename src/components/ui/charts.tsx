@@ -6,6 +6,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
+import { formatAED } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
 
 /**
  * One hue at five lightnesses. Composition is a question of proportion, not
@@ -34,13 +36,23 @@ interface ProgressBarProps {
   height?: number;
   /** Overrides the track on surfaces that ignore the OS theme. */
   trackColor?: string;
+  accessibilityLabel?: string;
 }
 
-export function ProgressBar({ ratio, color, height = 6, trackColor }: ProgressBarProps) {
+export function ProgressBar({
+  ratio,
+  color,
+  height = 6,
+  trackColor,
+  accessibilityLabel,
+}: ProgressBarProps) {
   const theme = useTheme();
-  const clamped = Math.max(0.02, Math.min(ratio, 1));
+  const clamped = Math.max(0, Math.min(ratio, 1));
   return (
     <View
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(clamped * 100) }}
       style={[styles.track, { backgroundColor: trackColor ?? theme.track, height, borderRadius: height / 2 }]}>
       <View
         style={{ width: `${clamped * 100}%`, height: '100%', backgroundColor: color, borderRadius: height / 2 }}
@@ -75,10 +87,21 @@ export function CompositionBar({
   const ramp = useRamp();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
-    return <View style={[styles.track, { backgroundColor: theme.track, height, borderRadius: height / 2 }]} />;
+    return (
+      <View
+        accessibilityRole="image"
+        accessibilityLabel={t('noSpendingComposition')}
+        style={[styles.track, { backgroundColor: theme.track, height, borderRadius: height / 2 }]}
+      />
+    );
   }
   return (
     <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={segments
+        .map((s) => tf('compositionPercent', { label: s.label, percent: Math.round((s.value / total) * 100) }))
+        .join('. ')}
       style={[
         styles.track,
         styles.composition,
@@ -87,8 +110,8 @@ export function CompositionBar({
       {segments.map((s, i) => (
         <Animated.View
           key={s.key}
+          accessible={false}
           entering={FadeIn.delay(i * 60).duration(Motion.sectionEnter)}
-          accessibilityLabel={`${s.label} ${Math.round((s.value / total) * 100)} percent`}
           style={{
             flexGrow: s.value,
             flexBasis: 0,
@@ -132,7 +155,11 @@ export function PairedBars({
         <Pressable
           key={m.label + i}
           accessibilityRole={onPressMonth ? 'button' : undefined}
-          accessibilityLabel={`${m.label}`}
+          accessibilityLabel={tf('monthCashflowA11y', {
+            month: m.label,
+            income: formatAED(m.inFils),
+            spending: formatAED(m.outFils),
+          })}
           disabled={!onPressMonth}
           onPress={() => onPressMonth?.(i)}
           style={styles.pairColumn}>
@@ -182,7 +209,12 @@ export function HistoryStrip({
   return (
     <View style={styles.pairRow}>
       {months.map((m, i) => (
-        <View key={m.label + i} style={styles.pairColumn}>
+        <View
+          key={m.label + i}
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={`${m.label}, ${formatAED(m.fils)}`}
+          style={styles.pairColumn}>
           <View style={[styles.historyBarWrap, { height }]}>
             <View
               style={[

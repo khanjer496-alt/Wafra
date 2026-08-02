@@ -94,7 +94,7 @@ class BankNotificationListenerService : NotificationListenerService() {
     // prefix-only tests and every one of its notifications was dropped here,
     // before anything downstream could see it.
     val MONEY_RE = Regex(
-      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
+      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
         "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE
     )

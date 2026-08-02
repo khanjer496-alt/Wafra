@@ -200,7 +200,8 @@ object InstantAlert {
   private const val CUR_AR = "درهم|ريال|د\\.إ|ر\\.س"
 
   private const val CUR =
-    "AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|USD|EUR|GBP|$CUR_AR"
+    "AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|" +
+      "JPY|CNY|CHF|TRY|GHS|$CUR_AR"
 
   /**
    * The amount, with the currency on either side of it.
@@ -244,7 +245,8 @@ object InstantAlert {
   // here as in English: مستحق ("due") and رصيد ("balance").
   private val DEBIT_RE = Regex(
     "purchase|was used|has been used|\\bdebited\\b|\\bspent\\b|withdraw(?:n|al)?|" +
-      "\\bdeducted\\b|\\bcharged to\\b|خصم|شراء|مشتريات|سحب|مخصوم",
+      "\\bdeducted\\b|\\bcharged to\\b|\\bwas done\\b|using your card|" +
+      "خصم|شراء|مشتريات|سحب|مخصوم",
     RegexOption.IGNORE_CASE,
   )
 

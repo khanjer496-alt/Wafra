@@ -8,13 +8,13 @@ import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/th
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
-import { EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
+import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
-import { alignEnd, t } from '@/lib/i18n';
+import { alignEnd, t, tf } from '@/lib/i18n';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -131,7 +131,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (threeMonthAverage > 0) {
       out.push({
         fils: roundToHundred(threeMonthAverage),
-        note: 'your 3-month average',
+        note: t('threeMonthAverageNote'),
         highlight: true,
       });
     }
@@ -143,7 +143,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     const add = (fils: number, note: string, highlight = false) => {
       if (!out.some((s) => s.fils === fils)) out.push({ fils, note, highlight });
     };
-    if (spent > 0) add(roundToHundred(spent * 0.9), '10% under this month');
+    if (spent > 0) add(roundToHundred(spent * 0.9), t('tenPercentUnderMonth'));
     for (const fils of [50_000, 100_000, 200_000]) add(fils, '');
     return out.slice(0, 4);
   }, [threeMonthAverage, spent]);
@@ -173,11 +173,13 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
           onPress={() => {}}>
           <View style={styles.header}>
             <ThemedText type="micro" themeColor="textTertiary">
-              {picked ? `${getCategory(picked).label} limit` : 'New limit'}
+              {picked
+                ? tf('categoryLimit', { category: categoryLabel(getCategory(picked)) })
+                : t('newLimitTitle')}
             </ThemedText>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={t('close')}
               onPress={onClose}
               hitSlop={10}>
               <Icon name="close" size={18} color={theme.textSecondary} />
@@ -205,7 +207,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                         },
                       ]}>
                       <ThemedText type="meta" style={{ color: on ? theme.background : theme.text }}>
-                        {c.label}
+                        {categoryLabel(c)}
                       </ThemedText>
                     </Pressable>
                   );
@@ -217,7 +219,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
               <View style={styles.current}>
                 <View style={styles.currentTop}>
                   <ThemedText type="meta" themeColor="textSecondary">
-                    Spent this month
+                    {t('spentThisMonth')}
                   </ThemedText>
                   <ThemedText
                     type="smallBold"
@@ -242,16 +244,16 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 </View>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {over
-                    ? `Over by ${formatAED(spent - limitFils, { decimals: false })}`
-                    : `${formatAED(limitFils - spent, { decimals: false })} left`}
-                  {daysLeft > 0 ? ` with ${daysLeft} day${daysLeft === 1 ? '' : 's'} still to go.` : '.'}
+                    ? tf('limitOverBy', { amount: formatAED(spent - limitFils, { decimals: false }) })
+                    : tf('limitAmountLeft', { amount: formatAED(limitFils - spent, { decimals: false }) })}
+                  {daysLeft > 0 ? tf('timeStillToGo', { days: daysLeft, s: daysLeft === 1 ? '' : 's' }) : '.'}
                 </ThemedText>
               </View>
             )}
 
             <View style={styles.amountBlock}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Monthly limit
+                {t('monthlyLimit')}
               </ThemedText>
               <View style={[styles.amountRow, { borderBottomColor: theme.text }]}>
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
@@ -326,7 +328,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                       { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                     ]}>
                     <ThemedText type="small" themeColor="textSecondary" style={styles.whereName}>
-                      {restCount} more merchant{restCount === 1 ? '' : 's'}
+                      {tf('moreMerchants', { count: restCount, s: restCount === 1 ? '' : 's' })}
                     </ThemedText>
                     <ThemedText type="smallBold" tabular themeColor="textSecondary" style={[styles.whereFigure, { textAlign: alignEnd() }]}>
                       {formatAED(restFils, { decimals: false })}
@@ -346,7 +348,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 }}
                 style={[styles.btn, { borderWidth: 1, borderColor: theme.expenseSoftBorder }]}>
                 <ThemedText type="micro" style={{ color: theme.expense }}>
-                  Remove
+                  {t('remove')}
                 </ThemedText>
               </Pressable>
             )}
@@ -359,7 +361,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 { backgroundColor: theme.primary, opacity: !picked || !limitFils ? 0.45 : 1 },
               ]}>
               <ThemedText type="micro" style={{ color: theme.onPrimary }}>
-                Save limit
+                {t('saveLimit')}
               </ThemedText>
             </Pressable>
           </View>

@@ -8,7 +8,7 @@
 const { webcrypto } = require('crypto');
 globalThis.crypto = webcrypto;
 
-const { seal, hashToken, randomToken, timingSafeEqual, b64decode, b64encode } =
+const { seal, hashToken, keyedFingerprint, randomToken, timingSafeEqual, b64decode, b64encode } =
   require('./build/crypto');
 
 let pass = 0, fail = 0;
@@ -75,6 +75,10 @@ async function open(privateKey, blob) {
   ok('token: two tokens differ', randomToken() !== randomToken());
   ok('token: hash is stable', (await hashToken(t)) === (await hashToken(t)));
   ok('token: hash is not the token', (await hashToken(t)) !== t);
+  ok('replay: same token and event are stable',
+    (await keyedFingerprint(t, 'event:one')) === (await keyedFingerprint(t, 'event:one')));
+  ok('replay: another token cannot correlate the same event',
+    (await keyedFingerprint(t, 'event:one')) !== (await keyedFingerprint(randomToken(), 'event:one')));
   ok('compare: equal strings match', timingSafeEqual('abc', 'abc'));
   ok('compare: different strings do not', !timingSafeEqual('abc', 'abd'));
   ok('compare: different lengths do not', !timingSafeEqual('abc', 'abcd'));

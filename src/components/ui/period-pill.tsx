@@ -4,7 +4,10 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
+import { tapped } from '@/lib/haptics';
+import { tf } from '@/lib/i18n';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 
@@ -17,13 +20,17 @@ import { usePeriod } from '@/lib/period-context';
  */
 export function PeriodPill({ onPress }: { onPress: () => void }) {
   const theme = useTheme();
+  const language = useLanguage();
   const { period } = usePeriod();
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        tapped();
+        onPress();
+      }}
       accessibilityRole="button"
-      accessibilityLabel={`Reporting period: ${periodLabel(period)}. Tap to change.`}
+      accessibilityLabel={tf('reportingPeriod', { period: periodLabel(period) }, language)}
       style={({ pressed }) => [
         styles.pill,
         {
@@ -40,7 +47,7 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
   );
 }
 
-/** A 34×34 bordered icon button — the square counterpart to the pill. */
+/** A 44×44 bordered icon button — the square counterpart to the pill. */
 export function IconButton({
   name,
   onPress,
@@ -53,7 +60,10 @@ export function IconButton({
   const theme = useTheme();
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        tapped();
+        onPress();
+      }}
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={6}
@@ -82,12 +92,18 @@ export function SectionHeader({
 }) {
   return (
     <View style={styles.sectionHeader}>
-      <ThemedText type="micro" themeColor="textTertiary">
+      <ThemedText type="micro" themeColor="textTertiary" style={styles.sectionTitle}>
         {title}
       </ThemedText>
       {right !== undefined &&
         (onPressRight ? (
-          <Pressable onPress={onPressRight} hitSlop={8}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              tapped();
+              onPressRight();
+            }}
+            style={styles.sectionAction}>
             <ThemedText type="micro" themeColor="primary">
               {right}
             </ThemedText>
@@ -111,11 +127,12 @@ const styles = StyleSheet.create({
     paddingStart: 12,
     paddingEnd: 11,
     paddingVertical: 6,
+    minHeight: 44,
   },
   iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: Radius.tile,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
@@ -124,6 +141,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.three,
     marginBottom: Spacing.two,
+  },
+  sectionTitle: {
+    flexShrink: 1,
+  },
+  sectionAction: {
+    flexShrink: 0,
+    minHeight: 44,
+    justifyContent: 'center',
+    marginVertical: -14,
   },
 });

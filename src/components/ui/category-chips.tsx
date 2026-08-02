@@ -4,9 +4,10 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
-import type { CategoryMeta } from '@/lib/categories';
+import { categoryLabel, type CategoryMeta } from '@/lib/categories';
 import type { CategoryId } from '@/lib/types';
 
 interface CategoryChipsProps {
@@ -33,6 +34,7 @@ export function CategoryChips({
   layout = 'scroll',
 }: CategoryChipsProps) {
   const theme = useTheme();
+  const language = useLanguage();
   const isOn = (id: CategoryId) =>
     selected instanceof Set ? selected.has(id) : selected === id;
 
@@ -65,6 +67,7 @@ export function CategoryChips({
 
   const chips = categories.map((c) => {
     const on = isOn(c.id);
+    const label = categoryLabel(c, language);
     return (
       <Pressable
         key={c.id}
@@ -74,6 +77,7 @@ export function CategoryChips({
         }}
         onLayout={(e) => remember(c.id, e.nativeEvent.layout.x)}
         accessibilityRole="button"
+        accessibilityLabel={label}
         accessibilityState={{ selected: on }}
         style={[
           styles.chip,
@@ -84,7 +88,7 @@ export function CategoryChips({
         ]}>
         <Icon name={c.icon} size={13} color={on ? theme.background : theme.textSecondary} />
         <ThemedText type="meta" style={{ color: on ? theme.background : theme.text }}>
-          {c.label}
+          {label}
         </ThemedText>
       </Pressable>
     );
@@ -110,6 +114,7 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 44,
     gap: 6,
     borderWidth: 1,
     borderRadius: Radius.full,

@@ -4,10 +4,61 @@ What a search for open bank-SMS parsers actually turned up, and what each one
 is worth to Wafra. Recorded so the next search starts where this one stopped
 instead of re-treading it.
 
-**There is no public UAE SMS corpus.** Every result is either an Indian
-parser, a Gulf parser with no sample data, or a bank marketing page saying
-*that* it sends alerts without ever quoting one. The only real UAE corpus this
-project has is the two accuracy exports in this directory, from real phones.
+There is no authoritative, machine-readable public UAE bank-alert corpus.
+Individual alert examples do appear in public support pages and public posts,
+and those can pin a grammar after sensitive values are replaced. The two
+accuracy exports in this directory are repository-supplied redacted fixtures;
+their original, unmasked bodies are not part of this repository.
+
+## Privacy and evidence rules
+
+- Never add an original, unredacted customer message.
+- Replace card/account digits, names, amounts and other identifying values in
+  public examples unless the source already masks them.
+- Label synthetic grammar probes as synthetic. They establish parser behavior,
+  not evidence that a bank sends that exact wording.
+- The tests keep fixture text in memory only. Production ingestion must persist
+  the structured transaction and discard the raw body after processing.
+
+## Eight-bank audit
+
+The audit covers the banks named in the product brief. “Redacted fixture”
+means stable repository test data, not a claim of access to customer inboxes.
+
+| Bank | Evidence pinned in tests | Remaining evidence gap |
+| --- | --- | --- |
+| Emirates NBD (ENBD) | Redacted purchase, ATM and available-limit families | More Arabic ENBD wording |
+| ADCB | Redacted card-use, Salik and statement families | More Arabic ADCB wording |
+| FAB | Broad redacted coverage: multiline card purchases, account credits, direct debits, statements and card payments | More Arabic FAB wording |
+| Mashreq | Public/redacted `was used for a purchase`, foreign-currency `using your card`, compact named-month dates, and aggregate catch-up refusal | Itemized delayed-settlement email format |
+| ADIB | Public/redacted compact masked-card purchase; official `Covered Card` terminology | Published Arabic alert bodies |
+| RAKBANK | Official alert-family list; a clearly labelled synthetic retail grammar probe | No public exact message body found—do not fabricate one |
+| Liv | Redacted `You spent`, ATM and transfer families | More statement and Arabic variants |
+| Wio | Public/redacted app-push wording with foreign amount plus AED equivalent | More debit, credit and transfer push bodies |
+
+### Named-bank sources used in the 2026-07 audit
+
+- [ADIB SMS Banking](https://www.adib.ae/en/personal/services/sms-banking)
+  confirms transaction alerts and the bank's “Covered Card” terminology. A
+  [public compact-format example](https://www.reddit.com/r/dubai/comments/10ehikd/)
+  pins the masked-card grammar after values are replaced.
+- [RAKBANK SMS Alerts](https://www.rakbank.ae/en/cards/card-safety/sms-alerts)
+  confirms retail, online, cash-withdrawal and other alert families, but does
+  not publish their bodies. The RAKBANK test is therefore explicitly
+  synthetic.
+- A [public Wio notification example](https://www.reddit.com/r/UAEcreditcards/comments/1s6ji00/automatically_track_all_your_card_spends_in_one/)
+  pins the “foreign amount (AED equivalent)” order. This is app-notification
+  evidence, not SMS evidence.
+- Public Mashreq examples pin a
+  [USD purchase with compact date](https://www.complaintlists.com/someone-used-credit-card-google-zabusamid/),
+  a [GHS purchase with day-month-name date](https://www.linkedin.com/posts/sweekar-b-r-46091b7a_mashreq-fraudulentactivity-mashreq-activity-7118200109640630272-AGye),
+  and an [aggregate delayed-settlement notice](https://www.reddit.com/r/dubai/comments/1edi2is/what_happened_to_mashreq/).
+  The aggregate is refused because one total cannot safely represent several
+  already-notified purchases.
+- The GHS fallback uses the
+  [Bank of Ghana daily interbank rate](https://www.bog.gov.gh/treasury-and-the-markets/daily-interbank-fx-rates/)
+  published for 2026-07-27. It is only an approximate parser fallback; ledger
+  FX should replace it with a dated transaction rate.
 
 ## Usable
 

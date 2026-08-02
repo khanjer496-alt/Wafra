@@ -370,5 +370,131 @@ function ktSources(dir) {
     Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)));
 }
 
+/* ── private ledger persistence ───────────────────────────────────────
+ *
+ * A finance app can look private while quietly storing its whole ledger in
+ * plaintext. These source/config contracts keep the native persistence path,
+ * migration order and native build configuration aligned. Runtime encryption
+ * is verified again in native build QA with PRAGMA cipher_version. */
+{
+  const config = JSON.parse(read('app.json')).expo;
+  const sqlite = config.plugins.find(
+    (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-sqlite',
+  );
+  ok('native SQLite is built with SQLCipher', sqlite?.[1]?.useSQLCipher === true);
+  ok('Android does not cloud-backup the encrypted database', config.android?.allowBackup === false);
+
+  const storage = read('src/lib/state-storage.native.ts');
+  const store = read('src/lib/store.tsx');
+  ok('the database key is generated on-device and kept device-only',
+    /getRandomBytesAsync\(32\)/.test(storage) &&
+      /WHEN_UNLOCKED_THIS_DEVICE_ONLY/.test(storage));
+  ok('SQLCipher receives its key before the ledger table is touched',
+    storage.indexOf('PRAGMA key') < storage.indexOf('CREATE TABLE'));
+  ok('the active store persists through the encrypted adapter',
+    /stateStorage\.multiSet/.test(store) &&
+      /stateStorage\.multiGet/.test(store) &&
+      !/AsyncStorage\./.test(store));
+  ok('plaintext legacy data is removed only after encrypted migration succeeds',
+    storage.indexOf('await encryptedStorage.multiSet(present)') <
+      storage.indexOf('await AsyncStorage.multiRemove(keys)'));
+}
+
+/* ── Private Mode is a data path, not a label ───────────────────────── */
+{
+  const types = read('src/lib/types.ts');
+  const store = read('src/lib/store.tsx');
+  const capture = read('src/lib/capture.ts');
+  const settings = read('src/app/settings.tsx');
+  const copy = read('src/lib/i18n.ts');
+
+  ok('Private Mode is persisted as part of app state', /privateMode: boolean/.test(types));
+  ok('Private Mode strips retained and newly imported raw text',
+    /transactions: action\.enabled[\s\S]*raw: _discard/.test(store) &&
+      /const base = authoritativeState\.current[\s\S]*raw: base\.privateMode \? undefined : t\.raw/.test(store));
+  ok('Private Mode stops the iOS relay but leaves Android capture first',
+    capture.indexOf('if (isSmsScanningAvailable())') <
+      capture.indexOf('if (state.privateMode) return EMPTY') &&
+      capture.indexOf('if (state.privateMode) return EMPTY') <
+      capture.indexOf('if (isRelayPlatform())'));
+  ok('enabling Private Mode disconnects an existing iOS relay first',
+    settings.indexOf('await unpairDevice(relay)') <
+      settings.indexOf('setPrivateMode(true)'));
+  ok('privacy copy names both platform paths and raw-body retention',
+    /Android alerts are parsed on-device/.test(copy) &&
+      /Shortcut sends selected bank alerts/.test(copy) &&
+      /deletes the raw text immediately/.test(copy));
+}
+
+/* ── relay acknowledgement follows encrypted durability ─────────────── */
+{
+  const store = read('src/lib/store.tsx');
+  const home = read('src/app/(tabs)/index.tsx');
+  const setup = read('src/app/ios-setup.tsx');
+  const homeDurableAt = home.indexOf('await receipt.durable');
+  const setupDurableAt = setup.indexOf('await durable');
+  ok('an import exposes an encrypted-write durability promise',
+    /interface ImportReceipt[\s\S]*durable: Promise<void>/.test(store) &&
+      /const next = dispatch\(action\)/.test(store) &&
+      /persist\(next\)/.test(store));
+  ok('routine relay sync waits for SQLCipher before commit',
+    homeDurableAt > home.indexOf('importBatch(plan.batch)') &&
+      home.indexOf('await commit()', homeDurableAt) > homeDurableAt);
+  ok('setup test waits for SQLCipher before acknowledging',
+    setupDurableAt > setup.indexOf('importBatch(plan.batch).durable') &&
+      setup.indexOf('await ackRelay(active, ids)', setupDurableAt) > setupDurableAt);
+}
+
+/* ── iOS relay wakes the app without carrying financial data ───────── */
+{
+  const config = JSON.parse(read('app.json')).expo;
+  const notifications = config.plugins.find(
+    (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-notifications',
+  );
+  const background = read('src/lib/background-relay.ts');
+  const relay = read('src/lib/relay.ts');
+  const home = read('src/app/(tabs)/index.tsx');
+  const onboarding = read('src/components/onboarding-gate.tsx');
+  const layout = read('src/app/_layout.tsx');
+  const worker = read('server/src/push.ts');
+  const wake = worker.match(/function wakePayload[\s\S]*?return \{([\s\S]*?)\n  \};/)?.[1] || '';
+
+  ok('iOS build enables background remote notifications',
+    notifications?.[1]?.enableBackgroundRemoteNotifications === true);
+  ok('the notification task is defined at module scope and loaded early',
+    /TaskManager\.defineTask/.test(background) &&
+      /import '@\/lib\/background-relay'/.test(layout));
+  ok('the wake contains no financial or visible notification fields',
+    /kind: 'wafra\.sync'/.test(wake) &&
+      /_contentAvailable: true/.test(wake) &&
+      !/\btitle:|\bbody:|merchant|amountFils/.test(wake));
+  ok('Android notification permission is never requested on cold launch',
+    !/requestNotificationPermission/.test(home) &&
+      !/requestNotificationPermission/.test(onboarding));
+  ok('headless sync writes SQLCipher before relay acknowledgement',
+    background.indexOf('await appendDurable(parsed)') <
+      background.indexOf('await ackRelay(cfg, acknowledge)'));
+  ok('background sync reserves setup proof markers for the foreground verifier',
+    /const reserved = new Set\(testIds\)/.test(background) &&
+      /ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(background));
+  ok('only a parsed Shortcut headless delivery records automation proof',
+    background.indexOf('await appendDurable(parsed)') <
+      background.indexOf('await recordRelayAutomationProof()') &&
+      /parsed\.some\(\(row\) => row\.captureSource === 'shortcut'\)/.test(background));
+  ok('email and PDF headless delivery cannot impersonate the Message automation',
+    /captureSource === 'shortcut'/.test(background) &&
+      !/captureSource === 'email'[^}]*recordRelayAutomationProof/s.test(background) &&
+      !/captureSource === 'pdf'[^}]*recordRelayAutomationProof/s.test(background));
+  ok('a synthetic relay probe cannot make Home claim automation is active',
+    /AUTOMATION_PROOF_KEY/.test(relay) &&
+      /cfg\?\.setupState === 'verified' && automationProof/.test(home) &&
+      /\? 'active'[\s\S]*\? 'pipe-ready'/.test(home));
+  ok('locked background credentials use the sync-only bearer',
+    /BackgroundRelayConfig = Pick<[\s\S]*'syncToken'[\s\S]*>;/.test(read('src/lib/relay.ts')) &&
+      !/BackgroundRelayConfig = Pick<[\s\S]*'adminToken'[\s\S]*>;/.test(read('src/lib/relay.ts')));
+  ok('the durable local inbox is cleared only by the UI import commit',
+    /commit: async \(\) => \{[\s\S]*clearBackgroundRelayRows/.test(read('src/lib/capture.ts')));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

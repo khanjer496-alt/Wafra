@@ -56,8 +56,15 @@ export function b64encode(bytes: Uint8Array): string {
   return out;
 }
 
-export function b64decode(s: string): Uint8Array {
-  const clean = s.replace(/[^A-Za-z0-9+/]/g, '');
+export function b64decode(s: string): Uint8Array<ArrayBuffer> {
+  if (
+    s.length === 0 ||
+    s.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(s)
+  ) {
+    throw new Error('Invalid base64');
+  }
+  const clean = s.replace(/=+$/, '');
   const out = new Uint8Array((clean.length * 3) >> 2);
   let p = 0;
   for (let i = 0; i < clean.length; i += 4) {

@@ -41,6 +41,14 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Relay typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      - name: Relay tests
+        working-directory: server
+        run: npm test
+
   # The browser suites catch what unit tests structurally cannot: a route that
   # resolves to nothing, a screen that renders blank, a total that disagrees
   # with the rows under it. They existed for weeks and ran only when someone

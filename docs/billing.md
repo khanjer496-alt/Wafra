@@ -7,10 +7,12 @@ the founder unlock still works.
 
 ## Why RevenueCat
 
-iOS is planned. The thing RevenueCat actually buys is **one entitlement fed by
-both stores**, so someone who subscribes on Android is still a subscriber when
-they pick up an iPhone. With a single store it would not be worth the
-dependency and `react-native-iap` would do.
+iOS and Android feed the same named entitlement, which keeps each platform's
+purchase logic consistent. That does **not** by itself transfer a subscription
+between a person's Android phone and iPhone: Wafra currently has no account or
+cross-platform identity, so RevenueCat's anonymous customer IDs are normally
+different on the two installs. Do not market cross-platform entitlement
+continuity unless a safe linking design is implemented and tested.
 
 It costs 1% of tracked revenue above roughly $2.5k/month.
 

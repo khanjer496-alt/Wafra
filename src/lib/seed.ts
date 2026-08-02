@@ -14,9 +14,36 @@ function mulberry32(seed: number) {
 }
 
 export const SEED_ACCOUNTS: Account[] = [
-  { id: 'acc-enbd', name: 'Emirates NBD', kind: 'bank', openingFils: 2_450_000, color: '#2DD4A8', last4: '9012', bankName: 'Emirates NBD' },
-  { id: 'acc-card', name: 'FAB Credit Card', kind: 'card', openingFils: 0, color: '#60A5FA', last4: '4821', cardType: 'credit', bankName: 'FAB' },
-  { id: 'acc-cash', name: 'Cash', kind: 'cash', openingFils: 120_000, color: '#E9B949' },
+  {
+    id: 'acc-enbd',
+    name: 'Emirates NBD',
+    kind: 'bank',
+    openingFils: 2_450_000,
+    color: '#2DD4A8',
+    last4: '9012',
+    bankName: 'Emirates NBD',
+    // The demo must obey the same truth rule as a real SMS-fed account: its
+    // balance is only shown when the bank quoted it. This keeps Wallet alive
+    // without inventing a running balance from partial message history.
+    snapshotFils: 6_875_000,
+    snapshotKind: 'balance',
+    snapshotTs: Date.UTC(2026, 6, 31, 18, 42),
+  },
+  {
+    id: 'acc-card',
+    name: 'FAB Credit Card',
+    kind: 'card',
+    openingFils: 0,
+    color: '#60A5FA',
+    last4: '4821',
+    cardType: 'credit',
+    bankName: 'FAB',
+    snapshotFils: 120_900,
+    snapshotKind: 'outstanding',
+    snapshotTs: Date.UTC(2026, 6, 31, 20, 8),
+    creditLimitFils: 5_000_000,
+  },
+  { id: 'acc-cash', name: 'Cash', kind: 'cash', openingFils: 850_000, color: '#E9B949' },
 ];
 
 export const SEED_BUDGETS: Budget[] = [
@@ -91,6 +118,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
         accountId: 'acc-enbd',
         title: 'Salary',
         date: dateOn(1),
+        source: 'sms',
       });
       push({
         type: 'expense',
@@ -99,6 +127,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
         accountId: 'acc-enbd',
         title: 'Apartment Rent',
         date: dateOn(1),
+        source: 'sms',
       });
     }
     if (rand() < 0.5 && lastDay > 12) {
@@ -109,6 +138,28 @@ export function generateSeedTransactions(now: Date): Transaction[] {
         accountId: 'acc-enbd',
         title: 'Freelance Project',
         date: dateOn(dayInMonth(8, 20)),
+        source: 'sms',
+      });
+    }
+
+    // Fixed dates make these genuinely monthly recurring charges rather than
+    // four loosely similar purchases. Bills is therefore populated on the
+    // very first launch with recognisable, credible UAE subscription data.
+    const subscriptions = [
+      { title: 'Netflix', amountFils: 5_699, day: 3 },
+      { title: 'Spotify', amountFils: 2_199, day: 11 },
+      { title: 'iCloud+', amountFils: 1_099, day: 19 },
+    ];
+    for (const sub of subscriptions) {
+      if (lastDay < sub.day) continue;
+      push({
+        type: 'expense',
+        amountFils: sub.amountFils,
+        category: 'entertainment',
+        accountId: 'acc-card',
+        title: sub.title,
+        date: dateOn(sub.day),
+        source: 'sms',
       });
     }
 
@@ -123,9 +174,58 @@ export function generateSeedTransactions(now: Date): Transaction[] {
           accountId: m.accountId,
           title: m.title,
           date: dateOn(1 + Math.floor(rand() * daysTotal)),
+          source: m.accountId === 'acc-cash' ? 'manual' : 'sms',
         });
       }
     }
+
+    // Bank alerts preserve both the original currency and the AED amount that
+    // settles into the ledger. Keep a few deterministic travel/online charges
+    // in every demo month so the currency surface is useful on first launch,
+    // rather than an immaculate empty state that hides the feature entirely.
+    const appleDate = dateOn(dayInMonth(4, 9));
+    const bookingDate = dateOn(dayInMonth(10, 16));
+    const tflDate = dateOn(dayInMonth(18, 24));
+    push({
+      type: 'expense',
+      amountFils: 18_358,
+      originalAmountMinor: 4_999,
+      originalCurrency: 'USD',
+      fxRate: 3.6723,
+      fxSource: 'bank',
+      category: 'shopping',
+      accountId: 'acc-card',
+      title: 'Apple Store US',
+      date: appleDate,
+      source: 'sms',
+    });
+    push({
+      type: 'expense',
+      amountFils: 86_535,
+      originalAmountMinor: 21_650,
+      originalCurrency: 'EUR',
+      fxRate: 3.997,
+      fxRateDate: bookingDate,
+      fxSource: 'reference',
+      category: 'travel',
+      accountId: 'acc-card',
+      title: 'Booking.com',
+      date: bookingDate,
+      source: 'sms',
+    });
+    push({
+      type: 'expense',
+      amountFils: 15_876,
+      originalAmountMinor: 3_240,
+      originalCurrency: 'GBP',
+      fxRate: 4.9,
+      fxSource: 'fallback',
+      category: 'transport',
+      accountId: 'acc-card',
+      title: 'TfL Travel Charge',
+      date: tflDate,
+      source: 'sms',
+    });
   }
 
   txs.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));

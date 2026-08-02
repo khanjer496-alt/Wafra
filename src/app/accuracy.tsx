@@ -12,9 +12,9 @@ import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormats } from '@/lib/accuracy';
-import { getCategory } from '@/lib/categories';
+import { categoryLabel } from '@/lib/categories';
 import { useStore } from '@/lib/store';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
 function maskDigits(s: string): string {
@@ -32,8 +32,8 @@ export default function AccuracyScreen() {
   const { state } = useStore();
 
   const rows = useMemo(
-    () => unreadFormats(state.transactions, (id) => getCategory(id).label),
-    [state.transactions],
+    () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
+    [state.transactions, state.language],
   );
 
   const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
@@ -50,14 +50,20 @@ export default function AccuracyScreen() {
           list
             .map(
               (r, i) =>
-                `#${i + 1} (seen ${r.count}x, read as "${r.title}" / ${r.category}):\n${maskDigits(r.raw)}`,
+                tf('accuracyShareRow', {
+                  index: i + 1,
+                  count: r.count,
+                  title: r.title,
+                  category: r.category,
+                  raw: maskDigits(r.raw),
+                }),
             )
             .join('\n\n');
     Share.share({
       message:
-        'Wafra — bank SMS the app is not reading well:' +
-        section('COULD NOT READ — no merchant found', unread) +
-        section('READ, BUT NO CATEGORY — merchant name is correct', uncategorized),
+        t('accuracyShareTitle') +
+        section(t('accuracyShareUnread'), unread) +
+        section(t('accuracyShareUncategorized'), uncategorized),
     }).catch(() => {});
   };
 
@@ -101,7 +107,7 @@ export default function AccuracyScreen() {
                         <Money fils={r.amountFils} prefix={false} />
                       </View>
                       <ThemedText type="meta" themeColor="textTertiary">
-                        {t('readAs')} {r.category} · seen {r.count}×
+                        {t('readAs')} {r.category} · {tf('seenCount', { count: r.count })}
                       </ThemedText>
                       <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
                         {maskDigits(r.raw)}

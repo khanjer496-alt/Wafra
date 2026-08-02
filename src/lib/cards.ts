@@ -1,5 +1,6 @@
 import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
+import { tf } from '@/lib/i18n';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
 export type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
@@ -418,9 +419,9 @@ export function isInactiveAccount(state: AppState, account: Account, today: Date
 
 /** Display name for an auto-created card account. */
 export function cardAccountName(last4: string, kind: 'credit' | 'debit' | 'account'): string {
-  if (kind === 'credit') return `Credit Card •${last4}`;
-  if (kind === 'debit') return `Debit Card •${last4}`;
-  return `Account •${last4}`;
+  if (kind === 'credit') return tf('creditCardWithDigits', { last4 });
+  if (kind === 'debit') return tf('debitCardWithDigits', { last4 });
+  return tf('accountWithDigits', { last4 });
 }
 
 const HINT_COLORS = ['#60A5FA', '#F472B6', '#A78BFA', '#FB923C', '#22D3EE', '#4ADE80'];

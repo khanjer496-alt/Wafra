@@ -1,5 +1,5 @@
 import { getActiveMarket } from '@/lib/markets';
-import { t } from '@/lib/i18n';
+import { getLanguage, t } from '@/lib/i18n';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -7,6 +7,15 @@ const MONTHS = [
 ];
 const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+const MONTHS_SHORT_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+const DAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
 function groupThousands(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -128,7 +137,11 @@ export function monthEndISO(key: string): string {
 
 export function monthLabel(key: string, short = false): string {
   const [y, m] = key.split('-').map(Number);
-  const name = (short ? MONTHS_SHORT : MONTHS)[(m ?? 1) - 1];
+  const arabic = getLanguage() === 'ar';
+  const names = arabic
+    ? (short ? MONTHS_SHORT_AR : MONTHS_AR)
+    : (short ? MONTHS_SHORT : MONTHS);
+  const name = names[(m ?? 1) - 1];
   return `${name} ${y}`;
 }
 
@@ -147,7 +160,8 @@ export function daysInMonth(key: string): number {
 export function shortDate(iso: string): string {
   const d = Number(iso.slice(8, 10));
   const m = Number(iso.slice(5, 7));
-  return `${d} ${MONTHS_SHORT[m - 1] ?? ''}`;
+  const months = getLanguage() === 'ar' ? MONTHS_SHORT_AR : MONTHS_SHORT;
+  return `${d} ${months[m - 1] ?? ''}`;
 }
 
 /** "Today", "Yesterday", or "Friday, 18 Jul". */
@@ -156,7 +170,10 @@ export function friendlyDate(iso: string, todayISO: string): string {
   const d = new Date(`${iso}T12:00:00`);
   const t2 = new Date(`${todayISO}T12:00:00`);
   if (Math.round((t2.getTime() - d.getTime()) / 86400000) === 1) return t('yesterday');
-  return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  const arabic = getLanguage() === 'ar';
+  const days = arabic ? DAYS_AR : DAYS;
+  const months = arabic ? MONTHS_SHORT_AR : MONTHS_SHORT;
+  return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 /**
@@ -196,7 +213,11 @@ export function transactionTime(tx: { ts?: number; smsKey?: string }): Date | nu
 /** "18 Jul 2026, 14:32" — the full stamp, for a detail view. */
 export function fullDateTime(tx: { date: string; ts?: number; smsKey?: string }): string {
   const day = new Date(`${tx.date}T12:00:00`);
-  const stamp = day.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const stamp = day.toLocaleDateString(getLanguage() === 'ar' ? 'ar-AE' : 'en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
   const at = transactionTime(tx);
   if (!at) return stamp;
   const hh = String(at.getHours()).padStart(2, '0');

@@ -21,7 +21,7 @@ export interface ParsedCard {
  * the whole inbox instead of the tail. Existing rows are not duplicated —
  * `seenSms` recognizes them by fingerprint — they are healed in place.
  */
-export const PARSER_VERSION = 6;
+export const PARSER_VERSION = 8;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -34,6 +34,16 @@ export interface ParsedSms {
   kind: 'transaction' | 'billDue' | 'cardStatement' | 'cardPayment';
   type: TransactionType;
   amountFils: number;
+  /** ISO 4217 currency of `amountFils` (the active market's ledger currency). */
+  currency: string;
+  /** Original foreign amount, when the alert names one (two-decimal minor units). */
+  originalAmountMinor?: number;
+  /** ISO 4217 currency code for `originalAmountMinor`. */
+  originalCurrency?: string;
+  /** Local-currency units per one original-currency unit. */
+  fxRate?: number;
+  /** Whether the local value came from the bank or the offline parser table. */
+  fxSource?: 'bank' | 'fallback';
   merchant: string;
   /** ISO date if the message contained one, otherwise null (caller defaults to today). */
   date: string | null;
@@ -43,6 +53,8 @@ export interface ParsedSms {
   minDueFils: number | null;
   /** Card/account the message refers to, when identifiable. */
   card: ParsedCard | null;
+  /** Bank transaction/reference identifier, with surrounding prose removed. */
+  reference: string | null;
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
   /** Balance / available-limit / outstanding figure the bank quoted, if any. */
@@ -176,7 +188,7 @@ const PROMO_RE =
  * credit verb and yield a readable amount before a row is produced.
  */
 const TXN_EVIDENCE_RE =
-  /purchase (?:of|amount)|(?:debit|credit)\s+card\s+purchase|was used for|has been made using|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available\s+(?:balance|credit|limit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
+  /purchase (?:of|amount)|(?:debit|credit)\s+card\s+purchase|was used for|using\s+your\s+card|has been made using|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available\s+(?:balance|credit|limit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
 
 /**
  * Currency-bound patterns compile from the ACTIVE MARKET's currency aliases
@@ -200,6 +212,10 @@ const UNITS_PER_USD: Record<string, number> = {
   USD: 1, AED: 3.6725, SAR: 3.75, EUR: 0.85, GBP: 0.74, QAR: 3.64,
   KWD: 0.307, BHD: 0.377, OMR: 0.385, INR: 83.5, PKR: 283, PHP: 56,
   EGP: 48, CAD: 1.37, AUD: 1.52, JPY: 150, CNY: 7.2, CHF: 0.8, TRY: 41,
+  // Bank of Ghana daily interbank midpoint, 27 Jul 2026. This is only the
+  // parser's approximate fallback when an alert gives no AED equivalent; the
+  // FX ledger replaces it with its dated rate when one is available.
+  GHS: 11.64,
 };
 
 function ensureCurrencyPatterns(): void {
@@ -240,8 +256,8 @@ function ensureCurrencyPatterns(): void {
   CARD_PAYMENT_RE = new RegExp(
     [
       `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\s+)?(?:credit\\s+)?card`,
-      `payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?credit\\s+card`,
-      `received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card`,
+      `payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?(?:credit|covered)\\s+card`,
+      `received\\s+payment\\s+for\\s+your\\s+(?:(?:credit|covered)\\s+)?card`,
       `thank you for (?:your )?payment.*card`,
       `card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`,
       // "payment instructions of AED 7,663.94 to 5492********3749"
@@ -257,7 +273,7 @@ function ensureCurrencyPatterns(): void {
   PAYMENT_FOR_RE = new RegExp(
     `payment\\s+for\\s+([A-Za-z0-9][^\\n]{1,48}?)\\s+of\\s+(?:${CUR})\\s*[\\d,]`, 'i');
   DEBIT_WORDS = new RegExp(
-    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|was used|charged`, 'i');
+    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|was used|using\\s+your\\s+card|charged`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
   FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // Same line only. "Card No XXXX4777 \n USD .00" used to read the card's last
@@ -291,7 +307,14 @@ function fxMinorPerUnit(code: string): number {
  * cross rate into the active market's currency. A local amount anywhere in
  * the message always wins over conversion.
  */
-function extractForeignAmountFils(raw: string): number | null {
+interface ForeignAmount {
+  currency: string;
+  amountMinor: number;
+  localFils: number;
+  rate: number;
+}
+
+function extractForeignAmount(raw: string): ForeignAmount | null {
   const pre = raw.match(FX_PREFIX_RE);
   const suf = pre ? null : raw.match(FX_SUFFIX_RE);
   const code = (pre?.[1] ?? suf?.[2])?.toUpperCase();
@@ -301,9 +324,20 @@ function extractForeignAmountFils(raw: string): number | null {
   // for the suffix form.
   const at = pre ? (pre.index ?? 0) + pre[0].length - num.length : (suf?.index ?? 0);
   if (isMaskedFigure(raw, at)) return null;
-  const fils = Math.round(Number(num.replace(/,/g, '')) * fxMinorPerUnit(code));
+  const original = Number(num.replace(/,/g, ''));
+  const rate = fxMinorPerUnit(code) / 100;
+  const fils = Math.round(original * rate * 100);
   if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
-  return fils;
+  return {
+    currency: code,
+    amountMinor: Math.round(original * 100),
+    localFils: fils,
+    rate,
+  };
+}
+
+function extractForeignAmountFils(raw: string): number | null {
+  return extractForeignAmount(raw)?.localFils ?? null;
 }
 /**
  * A single SMS transaction above AED 1,000,000 is almost certainly a misread
@@ -312,12 +346,55 @@ function extractForeignAmountFils(raw: string): number | null {
 const MAX_PLAUSIBLE_AMOUNT_FILS = 100_000_000;
 const BALANCE_PREFIX_RE = /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total)\s*(?:is|:|\.|-)?\s*$/i;
 
-/** Card identity: "Credit Card ending 1234", "Debit Card ..5678", "a/c XX9012", "card no. *1234". */
-const CARD_RE = /(credit|debit)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+)?\s*(\d{4})\b/i;
+/**
+ * Card identity: "Credit Card ending 1234", ADIB's "Covered Card ending
+ * 1234", "Debit Card ..5678", "a/c XX9012", "card no. *1234".
+ */
+const CARD_RE = /(credit|debit|covered)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+)?\s*(\d{4})\b/i;
 const ACCOUNT_RE =
   /a\/?c(?:count)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+in)?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+/** Account identity with a formatted masked middle: "095-XXX11XXX-0001". */
+const MASKED_ACCOUNT_RE =
+  /(?:a\/?c(?:count)?|acct?|account)\s*(?:no\.?|number)?\s+(?:\d{1,4}[- ]?)?(?:[Xx*·•]+\d*)+(?:[- ]+)?(\d{4})\b/i;
 /** Fully masked PAN like "4782********4833" — the LAST four digits identify the card. */
 const MASKED_PAN_RE = /\b\d{4,6}[Xx*•]{2,}(\d{4})\b/;
+/**
+ * ADIB's compact alert omits the word "card": "XXX456789 was used for AED
+ * ...". Restrict the shorter masked form to the completed-use phrase so a
+ * masked account/reference cannot be promoted to a card by accident.
+ */
+const USED_CARD_TAIL_RE = /[Xx*•]{2,}(\d{4,6})\s+was\s+used\s+for\b/i;
+
+/**
+ * Transaction identifiers are useful for dedupe and support, but the label is
+ * not part of the identifier. UAE alerts use REF, Reference No, IPI TT REF,
+ * Txn ID and Transaction Reference interchangeably.
+ *
+ * Four characters is the floor. Anything shorter is much more likely to be a
+ * sentence fragment after a bare "ref" than a bank-side identifier.
+ */
+const REFERENCE_LABEL_RE =
+  /\b(?:ipi\s+tt\s+ref|file\s+ref|reference(?:\s+(?:no|number))?|ref|txn\s+(?:id|ref(?:erence)?)|transaction\s+(?:id|ref(?:erence)?))\b/i;
+const REFERENCE_VALUE_RE =
+  /^[\s.]*(?:no\.?|number)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9Xx*·•-]{3,39})\b/i;
+
+function extractReference(raw: string): string | null {
+  const lower = raw.toLowerCase();
+  const mayHaveReference =
+    lower.startsWith('ref:') ||
+    lower.includes(' ref:') ||
+    lower.includes(' ref ') ||
+    lower.includes(' reference') ||
+    lower.includes(' txn id') ||
+    lower.includes(' txn ref') ||
+    lower.includes(' transaction id') ||
+    lower.includes(' transaction ref');
+  if (!mayHaveReference) return null;
+  const label = raw.match(REFERENCE_LABEL_RE);
+  if (!label || label.index === undefined) return null;
+  const tail = raw.slice(label.index + label[0].length);
+  return tail.match(REFERENCE_VALUE_RE)?.[1] ?? null;
+}
 
 const MERCHANT_STOP =
   // "from" and "at" end a name as surely as "with" does. Both directions of
@@ -577,7 +654,7 @@ const TRIP_PLACE_RE =
 
 /** Debit messages that are actually transfers: paying a card bill, moving between own accounts. */
 const TRANSFER_HINT_RE =
-  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance/i;
+  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:(?:credit|covered)\s+)?card|(?:credit|covered)\s+card|card\s+(?:no\.?\s*)?[\dXx*•])|(?:credit|covered)\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance/i;
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // First, because a direct-debit instalment names a bank and would otherwise
@@ -595,7 +672,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/max fashion|\bmax\b(?!imum|\s*(?:limit|amount))|new yorker|lefties|la senza|victoria\s?s secret|\bkoton\b|ardene|lovisa|\blevis\b|\bcider\b|mumuso|whsmith|rivoli|malabar gold|l'?oreal|stradivarius|genzy trendz|nice style|honeylove|globale/i, 'shopping'],
   [/alphamed|wellfit|pilates|\bwatsons?\b|oriana|al khabeer al awal/i, 'health'],
   [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b|valtrans|\bcar\s*par\b|golden bay car|yellow line car|smart green line car/i, 'transport'],
-  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|\bfresha\b|adobe|\bcanva\b|linkedin/i, 'entertainment'],
+  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|\bfresha\b|adobe|\bcanva\b|linkedin|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'entertainment'],
   [/\bunigaz\b/i, 'utilities'],
   [/carrefour|lulu|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
   [/talabat|deliveroo|zomato|noon food|careem food|eateasy|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
@@ -802,6 +879,8 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/steam\s*(?:purchase|games)|steampowered/i, 'Steam'],
   [/capital\.com/i, 'Capital.com'],
   [/name\.com/i, 'Name.com'],
+  [/google\s*\*?\s*domains|domains?\s+g\.co/i, 'Google Domains'],
+  [/\bcraft\s+docs?\b/i, 'Craft'],
   [/coursra\*|coursera/i, 'Coursera'],
   [/\bkeeta\b/i, 'Keeta'],
   [/grubtech/i, 'Grubtech'],
@@ -1074,7 +1153,10 @@ function extractCard(raw: string): ParsedCard | null {
   // "Credit Card 4782********4833" as the identity.
   const masked = raw.match(MASKED_PAN_RE);
   if (masked) {
-    return { last4: masked[1], kind: /credit/i.test(raw) ? 'credit' : 'debit' };
+    return {
+      last4: masked[1],
+      kind: /(?:credit|covered)\s+card/i.test(raw) ? 'credit' : 'debit',
+    };
   }
   const cardMatch = raw.match(CARD_RE);
   if (cardMatch) {
@@ -1089,11 +1171,22 @@ function extractCard(raw: string): ParsedCard | null {
     // and quietly breaks the whole card-due chain.
     const kindAfterNumber = /\d{4}\s*[;,]\s*credit\b/i.test(raw);
     const kind =
-      kindWord === 'credit' || (!kindWord && (/credit\s+card/i.test(raw) || kindAfterNumber))
+      kindWord === 'credit' ||
+      kindWord === 'covered' ||
+      (!kindWord && (/(?:credit|covered)\s+card/i.test(raw) || kindAfterNumber))
         ? 'credit'
         : 'debit';
     return { last4: cardMatch[2], kind };
   }
+  const usedTail = raw.match(USED_CARD_TAIL_RE);
+  if (usedTail) {
+    return {
+      last4: usedTail[1].slice(-4),
+      kind: /(?:credit|covered)\s+card/i.test(raw) ? 'credit' : 'debit',
+    };
+  }
+  const maskedAccount = raw.match(MASKED_ACCOUNT_RE);
+  if (maskedAccount) return { last4: maskedAccount[1], kind: 'account' };
   const accMatch = raw.match(ACCOUNT_RE);
   if (accMatch) return { last4: accMatch[1], kind: 'account' };
   return null;
@@ -1105,6 +1198,12 @@ const MONTH_NAMES: Record<string, number> = {
 };
 // ADCB style: "due by Jul 19 2026"
 const MONTH_DATE_RE = /\b(?:on|by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+/**
+ * Mashreq puts the day first and may remove every separator:
+ * "on 22Jan18 09:35 AM" / "on 21-SEP-2023 11:10 PM".
+ */
+const DAY_MONTH_DATE_RE =
+  /\b(?:on|by|before|is)\s+(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})(?=\s|$)/i;
 
 /**
  * Dates a statement introduces with PAY-BY language, as opposed to the date it
@@ -1137,7 +1236,8 @@ const DUE_PHRASE_NAMED_RE =
 
 function namedDate(monthWord: string, day: string, year: string): string | null {
   const month = MONTH_NAMES[monthWord.slice(0, 3).toLowerCase()];
-  return month ? isoDate(Number(year), month, Number(day)) : null;
+  const y = year.length === 2 ? 2000 + Number(year) : Number(year);
+  return month ? isoDate(y, month, Number(day)) : null;
 }
 
 /**
@@ -1215,11 +1315,13 @@ function extractDate(raw: string): string | null {
   }
   const named = raw.match(MONTH_DATE_RE);
   if (named) {
-    const month = MONTH_NAMES[named[1].slice(0, 3).toLowerCase()];
-    if (month) {
-      const iso = isoDate(Number(named[3]), month, Number(named[2]));
-      if (iso) return iso;
-    }
+    const iso = namedDate(named[1], named[2], named[3]);
+    if (iso) return iso;
+  }
+  const dayNamed = raw.match(DAY_MONTH_DATE_RE);
+  if (dayNamed) {
+    const iso = namedDate(dayNamed[2], dayNamed[1], dayNamed[3]);
+    if (iso) return iso;
   }
   return null;
 }
@@ -1327,6 +1429,8 @@ function parseReadable(
   const raw = message.trim();
   if (!raw) return null;
   ensureCurrencyPatterns();
+  const currency = getActiveMarket().currency.code;
+  const reference = extractReference(raw);
 
   if (OTP_RE.test(raw)) return null;
   if (DECLINED_RE.test(raw)) return null;
@@ -1348,6 +1452,19 @@ function parseReadable(
   // its own bank SMS, so importing these double-counts every instalment.
   if (
     /will be charged to your (?:default )?(?:card|payment method)|due tomorrow and will be charged|statement for (?:aed\s*)?[\d,.]+ is ready|charged to your (?:card|default payment method) (?:tomorrow|on \d)/i.test(
+      raw,
+    )
+  ) {
+    return null;
+  }
+  // Mashreq has sent aggregate catch-up notices after delayed settlements:
+  // "A few purchase transactions ... were not debited ... will be debited
+  // ... for total amount of AED ...". The quoted total spans several earlier
+  // purchases and has no merchant or line-item identity. Importing it as one
+  // purchase both invents a merchant and can double-count the original alerts;
+  // the accompanying itemized email is the safe import source.
+  if (
+    /\ba few purchase transactions\b[\s\S]{0,240}\bwere not debited\b[\s\S]{0,140}\bwill be debited\b/i.test(
       raw,
     )
   ) {
@@ -1385,11 +1502,13 @@ function parseReadable(
       kind: 'transaction',
       type: 'expense',
       amountFils: fils,
+      currency,
       merchant: 'Parking',
       date: extractDate(raw),
       dueDay: null,
       minDueFils: null,
       card: null,
+      reference,
       transferHint: false,
       snapshotFils: null,
       snapshotKind: null,
@@ -1418,11 +1537,13 @@ function parseReadable(
       kind: 'cardPayment',
       type: 'expense',
       amountFils,
+      currency,
       merchant: `Card •${card.last4} payment`,
       date,
       dueDay: null,
       minDueFils: null,
       card: { ...card, kind: 'credit' },
+      reference,
       transferHint: true,
       snapshotFils,
       snapshotKind,
@@ -1449,11 +1570,13 @@ function parseReadable(
         kind: 'cardPayment',
         type: 'expense',
         amountFils,
+        currency,
         merchant: `Card •${masked[1]} payment`,
         date,
         dueDay: null,
         minDueFils: null,
         card: { last4: masked[1], kind: 'credit' },
+        reference,
         transferHint: true,
         snapshotFils,
         snapshotKind,
@@ -1486,11 +1609,13 @@ function parseReadable(
       kind: 'transaction',
       type: 'expense',
       amountFils,
+      currency,
       merchant,
       date,
       dueDay: null,
       minDueFils: null,
       card,
+      reference,
       transferHint: false,
       snapshotFils,
       snapshotKind,
@@ -1532,11 +1657,13 @@ function parseReadable(
         kind: 'transaction',
         type: CREDIT_WORDS.test(raw) && !DEBIT_WORDS.test(raw) ? 'income' : 'expense',
         amountFils,
+        currency,
         merchant,
         date,
         dueDay: null,
         minDueFils: null,
         card,
+        reference,
         transferHint: false,
         snapshotFils,
         snapshotKind,
@@ -1568,11 +1695,13 @@ function parseReadable(
         kind: 'transaction',
         type: 'expense',
         amountFils,
+        currency,
         merchant: `Payment to •${last4}`,
         date,
         dueDay: null,
         minDueFils: null,
         card,
+        reference,
         transferHint: false,
         snapshotFils,
         snapshotKind,
@@ -1594,11 +1723,13 @@ function parseReadable(
       kind: 'transaction',
       type: 'expense',
       amountFils,
+      currency,
       merchant: /^outward remittance/i.test(raw) ? 'Outward remittance' : 'Telegraphic transfer',
       date,
       dueDay: null,
       minDueFils: null,
       card,
+      reference,
       transferHint: true,
       snapshotFils,
       snapshotKind,
@@ -1620,11 +1751,13 @@ function parseReadable(
       kind: 'transaction',
       type: /[\d.,]\+/.test(raw) ? 'income' : 'expense',
       amountFils,
+      currency,
       merchant: 'Bank transfer',
       date,
       dueDay: null,
       minDueFils: null,
       card,
+      reference,
       transferHint: true,
       snapshotFils,
       snapshotKind,
@@ -1642,12 +1775,13 @@ function parseReadable(
   // business revenue. A message announcing a bill must never become money
   // moving, in either direction, however little else we can tell about it.
   //
-  // Deliberately narrow: it demands the words "credit card" or "card
-  // statement", so a utility bill that happens to say "total amount due"
-  // still reaches the billDue path it belongs to.
+  // Deliberately narrow: it demands "credit card", ADIB's Sharia-compliant
+  // synonym "covered card", or "card statement", so a utility bill that
+  // happens to say "total amount due" still reaches the billDue path it
+  // belongs to.
   if (
     !card &&
-    /\bcredit\s*card\b|\bcard\s+statement\b/i.test(raw) &&
+    /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw) &&
     STATEMENT_RE.test(raw) &&
     BILL_DUE_WORDS.test(raw) &&
     !STATEMENT_TXN_BLOCK_RE.test(raw)
@@ -1676,11 +1810,13 @@ function parseReadable(
       kind: 'cardStatement',
       type: 'expense',
       amountFils,
+      currency,
       merchant: `Card •${card.last4}`,
       date: dueDate,
       dueDay: dueDate ? Number(dueDate.slice(8)) : null,
       minDueFils: minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null,
       card: { ...card, kind: 'credit' },
+      reference,
       transferHint: false,
       snapshotFils,
       snapshotKind,
@@ -1708,7 +1844,9 @@ function parseReadable(
   // reminder carrying a balance-sized amount is exactly the garbage the
   // carrier-billing guard above was added to stop. Nothing in the corpus needs
   // it; refusing the message is the honest answer.
-  const amountFils = amountWithFx(raw, false);
+  const bankLocalFils = extractAmountFils(raw, false);
+  const foreignAmount = extractForeignAmount(raw);
+  const amountFils = bankLocalFils ?? foreignAmount?.localFils ?? null;
   if (!amountFils) return null;
 
   // A refund reverses spending: money coming back IN, whatever verbs the
@@ -1917,11 +2055,24 @@ function parseReadable(
     kind: isBillDue ? 'billDue' : 'transaction',
     type,
     amountFils,
+    currency,
+    ...(foreignAmount
+      ? {
+          originalAmountMinor: foreignAmount.amountMinor,
+          originalCurrency: foreignAmount.currency,
+          fxRate:
+            bankLocalFils !== null
+              ? amountFils / foreignAmount.amountMinor
+              : foreignAmount.rate,
+          fxSource: bankLocalFils !== null ? ('bank' as const) : ('fallback' as const),
+        }
+      : {}),
     merchant,
     date,
     dueDay: isBillDue && date ? Number(date.slice(8)) : null,
     minDueFils: null,
     card,
+    reference,
     transferHint,
     snapshotFils,
     snapshotKind,

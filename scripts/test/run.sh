@@ -29,8 +29,8 @@ rm -rf build && mkdir -p build
 # feature is still landing.
 for f in types format categories ledger dedupe arabic-sms sms-parser import-plan bills insights seed \
          subscriptions cards analytics period purchases markets i18n balances brand-marks leaving-soon \
-         accounts heal accuracy \
-         relay-crypto fx splits db-schema; do
+         accounts heal accuracy onboarding \
+         relay-crypto relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx splits db-schema; do
   [ -f "../../src/lib/$f.ts" ] || continue
   sed -e "s|from '@/lib/|from './|g" \
       -e "s|import type { IconName } from '@/components/ui/icon';|type IconName = string;|" \
@@ -40,6 +40,7 @@ done
 cp ../../server/src/crypto.ts build/crypto.ts
 npx tsc build/*.ts --module commonjs --target es2022 --lib es2022,dom --outDir build --skipLibCheck
 node parser.test.js
+node bank-corpus.test.js
 node unit.test.js
 node worker.test.js
 # Properties that must hold for every message, not just the pinned ones.
@@ -57,8 +58,10 @@ node kotlin-regex.test.js
 node routes.test.js
 # Definitions that live in two places and must agree.
 node contracts.test.js
+node onboarding.test.js
+node report.test.js
 # Suites that arrive with the iOS relay and storage work. Run only once they
 # exist, so the file stays green while those features are still landing.
-for t in relay fx splits db; do
+for t in relay trusted-devices cloud-import fx splits db; do
   if [ -f "$t.test.js" ]; then node "$t.test.js"; fi
 done

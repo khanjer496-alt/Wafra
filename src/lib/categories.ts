@@ -1,4 +1,5 @@
 import type { IconName } from '@/components/ui/icon';
+import { getLanguage, type Lang } from '@/lib/i18n';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
 /**
@@ -12,41 +13,48 @@ import type { CategoryId, TransactionType } from '@/lib/types';
 export interface CategoryMeta {
   id: CategoryId;
   label: string;
+  labelAr: string;
   icon: IconName;
   type: TransactionType;
 }
 
 export const CATEGORIES: CategoryMeta[] = [
-  { id: 'groceries', label: 'Groceries', icon: 'cart', type: 'expense' },
-  { id: 'dining', label: 'Dining', icon: 'dining', type: 'expense' },
-  { id: 'transport', label: 'Transport', icon: 'car', type: 'expense' },
-  { id: 'utilities', label: 'Utilities', icon: 'bolt', type: 'expense' },
-  { id: 'telecom', label: 'Telecom', icon: 'phone', type: 'expense' },
-  { id: 'rent', label: 'Rent', icon: 'home', type: 'expense' },
-  { id: 'shopping', label: 'Shopping', icon: 'bag', type: 'expense' },
-  { id: 'health', label: 'Health', icon: 'heart', type: 'expense' },
+  { id: 'groceries', label: 'Groceries', labelAr: 'البقالة', icon: 'cart', type: 'expense' },
+  { id: 'dining', label: 'Dining', labelAr: 'المطاعم', icon: 'dining', type: 'expense' },
+  { id: 'transport', label: 'Transport', labelAr: 'المواصلات', icon: 'car', type: 'expense' },
+  { id: 'utilities', label: 'Utilities', labelAr: 'المرافق', icon: 'bolt', type: 'expense' },
+  { id: 'telecom', label: 'Telecom', labelAr: 'الاتصالات', icon: 'phone', type: 'expense' },
+  { id: 'rent', label: 'Rent', labelAr: 'الإيجار', icon: 'home', type: 'expense' },
+  { id: 'shopping', label: 'Shopping', labelAr: 'التسوق', icon: 'bag', type: 'expense' },
+  { id: 'health', label: 'Health', labelAr: 'الصحة', icon: 'heart', type: 'expense' },
   // Two categories the app had no home for. Running the accuracy corpus, 44 of
   // 94 message occurrences landed in "other", and the largest single block was
   // home and personal services — one cleaning company alone accounted for 15.
   // They are separate because they are separate habits: one is grooming, the
   // other is upkeep, and a limit on one says nothing about the other.
-  { id: 'personal-care', label: 'Personal care', icon: 'scissors', type: 'expense' },
-  { id: 'home-services', label: 'Home services', icon: 'tools', type: 'expense' },
-  { id: 'education', label: 'Education', icon: 'cap', type: 'expense' },
-  { id: 'travel', label: 'Travel', icon: 'plane', type: 'expense' },
-  { id: 'entertainment', label: 'Entertainment', icon: 'play', type: 'expense' },
-  { id: 'charity', label: 'Charity', icon: 'gift', type: 'expense' },
-  { id: 'government', label: 'Government', icon: 'bank', type: 'expense' },
-  { id: 'loan', label: 'Loan', icon: 'bank', type: 'expense' },
-  { id: 'other', label: 'Other', icon: 'receipt', type: 'expense' },
-  { id: 'salary', label: 'Salary', icon: 'briefcase', type: 'income' },
-  { id: 'business', label: 'Business', icon: 'chart', type: 'income' },
+  { id: 'personal-care', label: 'Personal care', labelAr: 'العناية الشخصية', icon: 'scissors', type: 'expense' },
+  { id: 'home-services', label: 'Home services', labelAr: 'خدمات المنزل', icon: 'tools', type: 'expense' },
+  { id: 'education', label: 'Education', labelAr: 'التعليم', icon: 'cap', type: 'expense' },
+  { id: 'travel', label: 'Travel', labelAr: 'السفر', icon: 'plane', type: 'expense' },
+  { id: 'entertainment', label: 'Entertainment', labelAr: 'الترفيه', icon: 'play', type: 'expense' },
+  { id: 'charity', label: 'Charity', labelAr: 'الصدقة', icon: 'gift', type: 'expense' },
+  { id: 'government', label: 'Government', labelAr: 'الخدمات الحكومية', icon: 'bank', type: 'expense' },
+  { id: 'loan', label: 'Loan', labelAr: 'القروض', icon: 'bank', type: 'expense' },
+  { id: 'other', label: 'Other', labelAr: 'أخرى', icon: 'receipt', type: 'expense' },
+  { id: 'salary', label: 'Salary', labelAr: 'الراتب', icon: 'briefcase', type: 'income' },
+  { id: 'business', label: 'Business', labelAr: 'الأعمال', icon: 'chart', type: 'income' },
 ];
 
 const byId = new Map(CATEGORIES.map((c) => [c.id, c]));
 
 export function getCategory(id: CategoryId): CategoryMeta {
   return byId.get(id) ?? byId.get('other')!;
+}
+
+/** Localized category name without duplicating category dictionaries in UI. */
+export function categoryLabel(category: CategoryMeta | CategoryId, language: Lang = getLanguage()): string {
+  const meta = typeof category === 'string' ? getCategory(category) : category;
+  return language === 'ar' ? meta.labelAr : meta.label;
 }
 
 export const EXPENSE_CATEGORIES = CATEGORIES.filter((c) => c.type === 'expense');

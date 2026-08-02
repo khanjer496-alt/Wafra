@@ -2,12 +2,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Spacing } from '@/constants/theme';
 
-/**
- * Height of the floating bar in tab-bar.tsx: vertical padding (2×8) plus the
- * tallest child, which is the 46px add button — a tab column comes to 21 icon
- * + 3 gap + 14 label + 2×4 padding = 46 as well, by design.
- */
-export const TAB_BAR_HEIGHT = 62;
+/** Visual height of the four-destination bar above the safe-area inset. */
+export const TAB_BAR_HEIGHT = 58;
 
 /**
  * Bottom padding a tab screen's scroll content needs so the floating tab bar
@@ -19,5 +15,5 @@ export const TAB_BAR_HEIGHT = 62;
  */
 export function useTabBarClearance() {
   const insets = useSafeAreaInsets();
-  return TAB_BAR_HEIGHT + Math.max(insets.bottom, Spacing.two) + Spacing.four;
+  return TAB_BAR_HEIGHT + Math.max(insets.bottom, Spacing.two) + Spacing.three;
 }

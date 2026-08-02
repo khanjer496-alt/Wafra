@@ -9,8 +9,10 @@ import { Money } from '@/components/ui/money';
 import { CategoryTile } from '@/components/ui/tile';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { formatOriginalCurrency } from '@/lib/fx';
+import { getActiveMarket } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
@@ -102,13 +104,13 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           : tf('merchantRuleOnly', { merchant }),
         sameMerchantCount > 0
           ? [
-              { text: 'No', style: 'cancel' },
-              { text: 'Just future', onPress: () => setMerchantOverride(merchant, category, false) },
-              { text: 'Yes, update all', onPress: () => setMerchantOverride(merchant, category, true) },
+              { text: t('no'), style: 'cancel' },
+              { text: t('justFuture'), onPress: () => setMerchantOverride(merchant, category, false) },
+              { text: t('yesUpdateAll'), onPress: () => setMerchantOverride(merchant, category, true) },
             ]
           : [
-              { text: 'No', style: 'cancel' },
-              { text: 'Remember', onPress: () => setMerchantOverride(merchant, category, false) },
+              { text: t('no'), style: 'cancel' },
+              { text: t('remember'), onPress: () => setMerchantOverride(merchant, category, false) },
             ],
       );
     }
@@ -117,9 +119,9 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
   const remove = () => {
     Alert.alert(t('deleteThisEntry'), `${transaction.title} · ${formatAmount(transaction.amountFils)}`, [
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('delete'),
         style: 'destructive',
         onPress: () => {
           deleteTransaction(transaction.id);
@@ -129,10 +131,16 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     ]);
   };
 
-  const sourceLabel = transaction.source === 'sms' ? 'Bank SMS' : t('addedByHand');
+  const sourceLabel = transaction.source === 'sms' ? t('bankSmsSource') : t('addedByHand');
+  const fxSourceLabel =
+    transaction.fxSource === 'bank'
+      ? t('bankQuotedRate')
+      : transaction.fxSource === 'reference' && transaction.fxRateDate
+        ? tf('datedReferenceRate', { date: shortDate(transaction.fxRateDate) })
+        : t('offlineFxEstimate');
 
   return (
-    <BottomSheet visible onClose={onClose} title={editing ? 'Edit entry' : 'Entry detail'}>
+    <BottomSheet visible onClose={onClose} title={editing ? t('editEntry') : t('entryDetail')}>
       <View style={styles.head}>
         <CategoryTile category={transaction.category} size={46} />
         <View style={styles.headText}>
@@ -161,25 +169,25 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
         <>
           <View style={styles.field}>
             <ThemedText type="micro" themeColor="textTertiary">
-              Description
+              {t('description')}
             </ThemedText>
             <TextInput
-              accessibilityLabel="Description"
+              accessibilityLabel={t('description')}
               value={title}
               onChangeText={setTitle}
               placeholderTextColor={theme.textTertiary}
               selectionColor={theme.primary}
-              style={[styles.input, { borderColor: theme.cardBorder, color: theme.text }]}
+              style={[styles.input, { borderColor: theme.cardBorder, color: theme.text, textAlign: state.language === 'ar' ? 'right' : 'left' }]}
             />
           </View>
 
           <View style={styles.pairRow}>
             <View style={[styles.field, styles.flex]}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Amount
+                {t('amount')}
               </ThemedText>
               <TextInput
-                accessibilityLabel="Amount"
+                accessibilityLabel={t('amount')}
                 value={amountText}
                 onChangeText={setAmountText}
                 keyboardType="decimal-pad"
@@ -197,10 +205,10 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
                     carries the full stamp — year included, and the clock the
                     bank sent — because that is the part the row cannot show
                     and the part that answers "which charge was this?". */}
-                Date · {stamp}
+                {t('date')} · {stamp}
               </ThemedText>
               <TextInput
-                accessibilityLabel="Date"
+                accessibilityLabel={t('date')}
                 value={dateText}
                 onChangeText={setDateText}
                 placeholder="YYYY-MM-DD"
@@ -219,19 +227,18 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
               has no spending category and is excluded from every total. */}
           {isTransfer ? (
             <ThemedText type="default" themeColor="textSecondary">
-              Transfers have no category — this moves money between your own accounts rather than
-              spending it.
+              {t('transfersNoCategory')}
             </ThemedText>
           ) : (
             <View style={styles.field}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Category
+                {t('category')}
               </ThemedText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
                 {categories.map((c) => (
                   <Chip
                     key={c.id}
-                    label={c.label}
+                    label={categoryLabel(c)}
                     active={category === c.id}
                     onPress={() => setCategory(c.id)}
                   />
@@ -242,7 +249,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
           <View style={styles.field}>
             <ThemedText type="micro" themeColor="textTertiary">
-              Account
+              {t('account')}
             </ThemedText>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
               {state.accounts.map((a) => (
@@ -258,7 +265,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
           <View style={styles.transferRow}>
             <View style={styles.flex}>
-              <ThemedText type="small">Transfer between my accounts</ThemedText>
+              <ThemedText type="small">{t('transferBetweenMine')}</ThemedText>
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('transferExplainer')}
               </ThemedText>
@@ -271,8 +278,8 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           </View>
 
           <View style={styles.actions}>
-            <Button inline label="Save changes" onPress={save} disabled={!canSave} />
-            <Button inline variant="outline" label="Cancel" onPress={() => setEditing(false)} />
+            <Button inline label={t('saveChanges')} onPress={save} disabled={!canSave} />
+            <Button inline variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
           </View>
         </>
       ) : (
@@ -280,36 +287,67 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           <LabelTable
             rows={[
               {
-                label: 'Category',
+                label: t('category'),
                 value: transaction.isTransfer ? (
-                  <ThemedText type="small">Transfer</ThemedText>
+                  <ThemedText type="small">{t('transferLabel')}</ThemedText>
                 ) : (
                   <ThemedText
                     type="small"
                     accessibilityRole="button"
                     onPress={() => setEditing(true)}
                     style={{ color: theme.primary }}>
-                    {meta.label}
+                    {categoryLabel(meta)}
                   </ThemedText>
                 ),
               },
               {
-                label: 'Account',
-                value: <ThemedText type="small">{account?.name ?? 'Unassigned'}</ThemedText>,
+                label: t('account'),
+                value: <ThemedText type="small">{account?.name ?? t('unassigned')}</ThemedText>,
               },
               {
-                label: 'Source',
+                label: t('source'),
                 value: (
                   <ThemedText type="small">
                     {sourceLabel}
-                    {transaction.source === 'sms' ? ` · filed ${shortDate(transaction.date)}` : ''}
+                    {transaction.source === 'sms' ? ` · ${tf('filedOn', { date: shortDate(transaction.date) })}` : ''}
                   </ThemedText>
                 ),
               },
+              ...(transaction.originalCurrency &&
+              transaction.originalAmountMinor !== undefined &&
+              transaction.fxRate !== undefined
+                ? [
+                    {
+                      label: t('originalAmount'),
+                      value: (
+                        <ThemedText type="small" tabular>
+                          {formatOriginalCurrency(
+                            transaction.originalAmountMinor,
+                            transaction.originalCurrency,
+                            state.language === 'ar' ? 'ar' : 'en',
+                          )}
+                        </ThemedText>
+                      ),
+                    },
+                    {
+                      label: t('exchangeRate'),
+                      value: (
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {tf('fxRateValue', {
+                            from: transaction.originalCurrency,
+                            to: getActiveMarket().currency.code,
+                            rate: transaction.fxRate.toFixed(4),
+                            source: fxSourceLabel,
+                          })}
+                        </ThemedText>
+                      ),
+                    },
+                  ]
+                : []),
               ...(transaction.raw
                 ? [
                     {
-                      label: 'Original',
+                      label: t('retainedBankMessage'),
                       value: (
                         <ThemedText type="default" themeColor="textSecondary" style={styles.raw}>
                           “{transaction.raw}”
@@ -326,16 +364,19 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           {!transaction.isTransfer && sameMerchantCount > 0 && (
             <Block>
               <ThemedText type="default" themeColor="textSecondary">
-                This merchant is always {meta.label} — change it once and the other{' '}
-                {sameMerchantCount} {transaction.title} charge{sameMerchantCount === 1 ? '' : 's'}{' '}
-                follow.
+                {tf('merchantCategoryRule', {
+                  category: categoryLabel(meta),
+                  count: sameMerchantCount,
+                  merchant: transaction.title,
+                  s: sameMerchantCount === 1 ? '' : 's',
+                })}
               </ThemedText>
             </Block>
           )}
 
           <View style={styles.actions}>
-            <Button inline label="Edit entry" onPress={() => setEditing(true)} />
-            <Button inline variant="danger" label="Delete" onPress={remove} />
+            <Button inline label={t('editEntry')} onPress={() => setEditing(true)} />
+            <Button inline variant="danger" label={t('delete')} onPress={remove} />
           </View>
         </>
       )}

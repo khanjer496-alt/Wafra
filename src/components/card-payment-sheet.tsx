@@ -13,7 +13,7 @@ import { formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import type { CardDue } from '@/lib/types';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 
 interface CardPaymentSheetProps {
   /** The statement to settle, or null to keep the sheet closed. */
@@ -69,11 +69,14 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     const name = account?.name ?? 'Card';
     Alert.alert(
       t('markStatementPaid'),
-      `Files a ${formatAmount(status.remainingFils)} payment to ${name} today.`,
+      tf('fileCardPaymentBody', {
+        amount: formatAmount(status.remainingFils),
+        name,
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Mark paid',
+          text: t('markPaid'),
           onPress: () => {
             payCardDue(
               due.id,
@@ -110,8 +113,8 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     // The scheduler puts card dues at three days out and again on the day
     // (notifications.ts). Promising two days was a number nothing produced.
     Alert.alert(
-      'Reminder set',
-      `You'll hear about this three days before ${shortDate(due.dueDate)}, and again on the day.`,
+      t('reminderSet'),
+      tf('cardReminderBody', { date: shortDate(due.dueDate) }),
     );
   };
 
@@ -120,11 +123,13 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       <View style={styles.card}>
         <View style={styles.cardHead}>
           <ThemedText type="micro" style={{ color: '#8C857A' }}>
-            Still owed
+            {t('stillOwed')}
           </ThemedText>
           <ThemedText type="nano" style={{ color: theme.expense }}>
-            Due {shortDate(due.dueDate)} ·{' '}
-            {status.daysLeft < 0 ? `${-status.daysLeft}d late` : `${status.daysLeft}d`}
+            {tf('dueDate', { date: shortDate(due.dueDate) })} ·{' '}
+            {status.daysLeft < 0
+              ? tf('lateDays', { days: -status.daysLeft })
+              : tf('daysShort', { days: status.daysLeft })}
           </ThemedText>
         </View>
         <Money
@@ -142,12 +147,14 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
           />
         </View>
         <ThemedText type="nano" style={{ color: '#8C857A' }}>
-          Paid {formatAmount(paid, { decimals: false })} of{' '}
-          {formatAmount(due.totalDueFils, { decimals: false })}
+          {tf('paidOfTotal', {
+            paid: formatAmount(paid, { decimals: false }),
+            total: formatAmount(due.totalDueFils, { decimals: false }),
+          })}
           {/* Only the bank knows the minimum. When it never stated one, say
               nothing rather than quote the app's own 5% guess back as "Min". */}
           {status.minimumKnown
-            ? ` · Min ${formatAmount(due.minDueFils, { decimals: false })}`
+            ? ` · ${tf('minimumShort', { amount: formatAmount(due.minDueFils, { decimals: false }) })}`
             : ''}
         </ThemedText>
         {status.belowMinimum && (
@@ -160,25 +167,31 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       <LabelTable
         rows={[
           {
-            label: 'Card',
-            value: <ThemedText type="small">{account?.name ?? 'Card'}</ThemedText>,
+            label: t('card'),
+            value: <ThemedText type="small">{account?.name ?? t('card')}</ThemedText>,
           },
           {
-            label: 'This month',
+            label: t('thisMonth'),
             value: (
               <ThemedText type="small" tabular>
-                {formatAmount(monthFils, { decimals: false })} across {charges} charge
-                {charges === 1 ? '' : 's'}
+                {tf('chargesAcross', {
+                  amount: formatAmount(monthFils, { decimals: false }),
+                  count: charges,
+                  s: charges === 1 ? '' : 's',
+                })}
               </ThemedText>
             ),
           },
           {
-            label: 'Matched',
+            label: t('matched'),
             value: (
               <ThemedText type="default" themeColor="textSecondary">
                 {payments === 0
                   ? t('noCardPaymentYet')
-                  : `${payments} payment${payments === 1 ? '' : 's'} on this card, walked oldest-first into the oldest statement each could belong to. An overpayment spills onto the next one.`}
+                  : tf('matchedPayments', {
+                      count: payments,
+                      s: payments === 1 ? '' : 's',
+                    })}
               </ThemedText>
             ),
           },
@@ -186,8 +199,8 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       />
 
       <View style={styles.actions}>
-        <Button inline label="Mark paid" onPress={markPaid} />
-        <Button inline variant="outline" label="Remind me" onPress={remindMe} />
+        <Button inline label={t('markPaid')} onPress={markPaid} />
+        <Button inline variant="outline" label={t('remindMe')} onPress={remindMe} />
       </View>
     </BottomSheet>
   );

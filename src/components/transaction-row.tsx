@@ -4,8 +4,9 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { getCategory } from '@/lib/categories';
+import { categoryLabel, getCategory } from '@/lib/categories';
 import { clockTime, formatAmount } from '@/lib/format';
 import { getActiveMarket } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
@@ -28,6 +29,7 @@ interface TransactionRowProps {
  */
 function TransactionRowInner({ transaction, account, onPress, internal }: TransactionRowProps) {
   const theme = useTheme();
+  const language = useLanguage();
   const press = onPress ? () => onPress(transaction) : undefined;
   const meta = getCategory(transaction.category);
   const clock = clockTime(transaction);
@@ -39,7 +41,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
   // income arriving twice — which is precisely what it looked like.
   const isTransfer = transaction.isTransfer || internal === true;
   const isIncome = transaction.type === 'income' && !isTransfer;
-  const where = isTransfer ? t('transferLabel') : meta.label;
+  const where = isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
 
   // Spoken as one sentence. Left to itself RN would concatenate the children,
   // which reads the sign as a stray "minus" and drops the currency entirely —
@@ -49,7 +51,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
     where,
     account?.name,
     clock,
-    `${isIncome ? 'plus' : 'minus'} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
+    `${isIncome ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
   ]
     .filter(Boolean)
     .join(', ');

@@ -1,130 +1,167 @@
 # Wafra Privacy Policy
 
-_Last updated: 25 July 2026_
+_Last updated: 2 August 2026_
 
-Wafra ("the app") is a personal money manager for Android. This policy
-explains what the app does with your information. It is short because the app
-does very little with it.
+Wafra ("the app") is a personal money manager for Android and iOS.
 
-**Not legal advice.** Have a lawyer review this before publishing, and keep it
-accurate — every claim below is a statement about how the app behaves, and
-each one must stay true as the app changes.
+**Not legal advice.** Have a lawyer review this before publishing. The relay
+hosting entity, processing region and support address must also be filled in
+before release.
 
 ## The short version
 
-Wafra has no server, no account, and no analytics. Your financial data is
-created on your phone, stored on your phone, and never sent anywhere by the
-app. We cannot see it, because there is nowhere for it to go.
+- **Android:** bank SMS and optional bank-app notifications are parsed on the
+  device. They are not sent to Wafra's relay.
+- **iPhone with automatic capture enabled:** a personal Apple Shortcut sends
+  alerts only from bank senders the user selects to Wafra's relay. The relay
+  parses the raw body in memory and discards it immediately. It persists only
+  a structured transaction sealed to that iPhone, until the phone acknowledges
+  it or for at most 30 days.
+- **Private Mode:** automatic iPhone relay capture is off. Imports and parsing
+  stay on the device, and raw text is dropped immediately after processing.
+- The ledger, accounts, budgets, bills, goals and settings live in encrypted
+  app storage on the device. Wafra has no advertising or third-party analytics.
 
-## What the app reads
+## Android bank-alert access
 
-**SMS messages (`READ_SMS`, `RECEIVE_SMS`).** Wafra reads bank alert messages
-to record transactions automatically — the amount, merchant, date, card and
-balance a bank quotes. It reads your inbox when you ask it to scan, and
-receives new messages as they arrive.
+**SMS (`READ_SMS`, `RECEIVE_SMS`).** If permission is granted, Wafra reads bank
+transaction alerts to extract an amount, merchant, date, card or account tail,
+direction and any quoted balance. Inbox scanning and parsing happen on the
+Android device.
 
-Messages that do not name a currency amount are discarded immediately and are
-never stored. Personal correspondence is not retained, not analysed, and not
-transmitted.
+Messages that do not look financial are ignored. When the parser cannot
+confidently understand a bank format, Android may keep a short local excerpt so
+the user can review or report it. That excerpt is not uploaded automatically
+and can be deleted in Settings.
 
-**Notifications (optional).** If you enable notification access, Wafra reads
-bank app notifications the same way and applies the same currency-amount
-filter. This is off unless you turn it on.
+**Bank-app notifications (optional).** If notification access is enabled,
+Wafra applies the same local processing to bank-app notifications. This is off
+until the user enables it.
 
-**Biometrics (optional).** If you enable the app lock, Wafra asks Android to
-verify your fingerprint or face. Android performs the check; the app only
-receives a yes or no. No biometric data reaches the app.
+## iPhone automatic capture
 
-## What the app stores, and where
+Apple does not give third-party apps access to the SMS inbox. Wafra therefore
+uses a personal automation that the user creates in Apple's Shortcuts app:
 
-Everything Wafra records — transactions, accounts, cards, budgets, bills,
-goals, settings — is stored in the app's private storage on your device. It
-is removed when you uninstall the app.
+1. The user selects the bank message senders that may trigger the automation.
+2. The automation sends that alert's raw text over HTTPS to the Wafra relay
+   using a device-specific bearer token.
+3. The relay parses the body in memory. It does not write, log or return the raw
+   message text.
+4. If the body is a supported financial alert, the relay keeps only the parsed
+   fields, encrypted to a public key whose private half stays on that iPhone.
+5. Wafra deletes the queued row after the app acknowledges it. Unacknowledged
+   rows expire after 30 days.
 
-Wafra keeps a short excerpt of a bank message only when it could not confidently
-read that message, so you can report the format and have it recognised in
-future. You can see and delete these from Settings.
+The relay also stores a random device identifier, the device's public key and a
+SHA-256 hash of the bearer token. It stores no name, email address, phone
+number, bank login or raw message archive. An inactive device registration is
+deleted after one year.
 
-## What leaves your device
+Shortcuts can send an alert while Wafra is closed. After the first unlock
+following a restart, iOS may wake Wafra silently and stage the sealed,
+structured transaction in a separate encrypted inbox. The protected main
+ledger incorporates it on foreground. APNs background delivery is best-effort,
+and Apple pauses silent wakes after the user force-quits Wafra until the next
+open, so Wafra does not promise a background update at an exact time.
 
-Nothing, unless you send it yourself.
+Private Mode disables this relay path. Because iOS has no local SMS-inbox API,
+automatic SMS capture is unavailable on iPhone while Private Mode is on.
 
-The app makes no network requests of its own. It has no backend, no telemetry,
-no crash reporting, no advertising and no third-party analytics.
+## What is stored on the device
 
-Two features move data, and both are actions you take deliberately:
+Transactions, accounts, cards, budgets, bills, goals and settings are stored in
+the app's private encrypted storage. The iPhone relay private key and
+foreground credentials are stored with iOS Keychain through Expo SecureStore.
+A least-privilege sync credential and separate SQLCipher inbox key are
+available only after the first unlock; neither contains the Shortcut ingest
+token or email-forwarding token.
 
-- **Backup and export.** You can write a JSON backup or a CSV export to a
-  location you choose. That file is yours; where it then goes is up to you.
-- **Reporting an unrecognised message.** If you choose to send us a sample
-  message so we can support that bank's format, that message is sent by you,
-  through your own email app, to an address you can see before sending.
+iOS Keychain items can survive an uninstall. To erase the relay registration
+and its local key deterministically, use **Settings → Erase all data** while
+online before uninstalling. If the relay cannot be reached, Wafra keeps the key
+so the user can retry deleting the remote registration.
 
-## Purchases
+## Biometrics
 
-Paid plans are handled by Google Play billing. Google processes the payment
-and tells the app whether a subscription is active. Wafra never sees your card
-or payment details. Google's handling of that transaction is covered by
-Google's own privacy policy.
+If app lock is enabled, Wafra asks the operating system to authenticate with
+the enrolled face, fingerprint or device credential. The operating system
+performs that check and returns success or failure. Wafra does not receive or
+store biometric templates.
 
-## Permissions, plainly
+## Other network activity
 
-| Permission | Why | Optional |
-| --- | --- | --- |
-| `READ_SMS` | Read bank alerts already in your inbox to build your history | Required for automatic tracking; the app works with manual entry without it |
-| `RECEIVE_SMS` | Record a bank alert as it arrives rather than at next open | Yes |
-| Notification access | Read bank app notifications where banks use push instead of SMS | Yes |
-| Biometric | App lock | Yes |
-| Notifications | Remind you before bills and card payments are due | Yes |
+- **Purchases:** when store billing is configured, Apple or Google processes
+  the payment and RevenueCat manages an anonymous subscription entitlement.
+  RevenueCat does not receive bank messages, ledger transactions or balances
+  from Wafra.
+- **Forwarded bank email:** if the user creates a private forwarding address,
+  the relay parses the forwarded MIME, text, HTML and supported PDF attachments
+  in memory. Raw email and attachments are not stored. Only structured rows,
+  sealed independently to the user's devices, can enter the delivery queue.
+- **PDF statement import:** a user-selected PDF of up to 5 MiB and 100 pages is
+  sent to the relay. PDF bytes and extracted text are discarded after parsing;
+  only conservative, structured debit or credit rows are sealed and queued.
+- **Trusted devices and family:** an owner may invite up to eight devices to
+  receive future captures. Each device has its own public key and credentials;
+  the relay stores device labels and roles but cannot decrypt sealed rows.
+  Revoking a device deletes its queued rows and credentials. Deleting the
+  vault removes every device and queue.
+- **Backup and export:** the user can create a backup or export and choose where
+  to send it. The resulting file is controlled by the user.
+- **Reporting an unrecognised format:** if the user deliberately shares a
+  sample through their own email app, they can review it before sending.
 
-You can revoke any of these in Android Settings at any time. The app keeps
-working; it just stops recording new transactions automatically.
+Wafra does not include advertising, third-party analytics or crash reporting.
 
 ## Automated processing
 
-Wafra reads your bank messages automatically and guesses a merchant and
-category for each transaction. That guess is a labelling convenience shown
-only to you. It is not a decision about you, it is not scored, profiled or
-shared, and it has no legal or financial effect. You can correct any of it,
-and your correction is what the app remembers.
+Wafra extracts transaction fields and suggests a merchant and category. These
+labels are visible only to the user, have no legal or financial effect and can
+be corrected. Wafra does not use bank alerts for advertising, credit decisions
+or training a server-side model.
 
-## Security incidents
+## Security and retention
 
-Wafra holds no user data on any server, so there is no central store to
-breach. The security of your data is the security of your device: keep it
-locked and up to date, and enable the in-app lock if you want a second layer.
-If we ever become aware of a vulnerability in the app itself that could expose
-your data, we will publish a fix and describe the issue in the release notes.
+Network traffic to the iPhone relay uses HTTPS. Queued structured rows use
+X25519, HKDF-SHA-256 and AES-256-GCM so the relay cannot decrypt them after
+sealing. Bearer tokens are stored by the relay only as SHA-256 hashes.
 
-## International transfers
+No system is risk-free. A relay security incident could expose transient raw
+text while a request is being processed, sealed queue data, public keys and
+token hashes. It should not expose a stored raw-message archive because no such
+archive exists.
 
-None. The app does not transmit your data, so it does not move it between
-countries.
+## Processing location
 
-## Your rights
+The iPhone relay is hosted using Cloudflare Workers and D1. Its production
+jurisdiction and the legal entity responsible for that processing are
+**[pending before release]**. Depending on that configuration, processing may
+occur outside the user's country. This section must be completed before the
+iOS build is published.
 
-Privacy law generally gives you rights to access, correct, export and delete
-your personal data. Because we hold none of it, you exercise those rights
-directly in the app: everything is visible in the app, editable in the app,
-exportable as JSON or CSV, and deleted when you clear your data or uninstall.
-There is no request to make of us and no copy of your data for us to return.
+## Your choices and deletion
 
-## If the app changes hands
+The user can:
 
-If the app is ever sold or transferred, the data on your device stays on your
-device. It is not part of any such transfer, because we do not hold it. Any
-change to this policy under new ownership would be surfaced in the app before
-it took effect.
+- decline Android SMS or notification access;
+- leave iPhone automatic capture unconfigured;
+- decline or revoke bank-email forwarding and trusted-device sharing;
+- enable Private Mode to keep new processing local;
+- edit, export or delete local financial records; and
+- erase the iPhone relay device and queue through **Erase all data** while
+  online.
+
+Acknowledged relay rows are deleted immediately. Unacknowledged structured rows
+expire within 30 days. A disconnected device registration is deleted
+immediately; an abandoned one expires after one year.
+
+Exported files remain wherever the user saved or shared them and must be
+deleted there separately.
 
 ## Children
 
 Wafra is not directed at children and is not intended for anyone under 13.
-
-## Your control over your data
-
-There is no account to close and no server-side copy to request. To delete
-everything Wafra holds, uninstall the app, or use Settings to clear your data.
-Any backup file you exported remains wherever you put it — delete it yourself.
 
 ## Changes
 

@@ -137,7 +137,7 @@ ok('home: past month names itself in the hero', !!(await visibleText(page, `in $
 // 3) Flow follows the same period.
 await tapTab(page, 'Flow');
 ok('flow: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
-ok('flow: subtitle states the out total', !!(await visibleText(page, /^Out /)));
+ok('flow: summary rail states the out total', !!(await visibleText(page, /^Total out$/i)));
 
 // 4) All time from Flow's own pill.
 await tapLabel(page, /Reporting period/, 1200);
@@ -166,7 +166,7 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 ok('persistence: reload keeps onboarded state',
   !(await visibleText(page, 'Your bank already texts you', 2500)));
-ok('persistence: reload keeps the ledger', !!(await visibleText(page, /LEAVING SOON|TODAY/i)));
+ok('persistence: reload keeps the ledger', !!(await visibleText(page, /Saved|Overspent/i)));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

@@ -24,9 +24,10 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
-import { getCategory, onRampColor, rampColor } from '@/lib/categories';
+import { categoryLabel, getCategory, onRampColor, rampColor } from '@/lib/categories';
 import {
   formatAED,
   formatAmount,
@@ -41,13 +42,14 @@ import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
-import { alignEnd, t } from '@/lib/i18n';
+import { alignEnd, t, tf } from '@/lib/i18n';
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
 const MAX_SLICES = 5;
 
 export default function FlowScreen() {
   const theme = useTheme();
+  const language = useLanguage();
   const router = useRouter();
   const dark = useColorScheme() === 'dark';
   const clearance = useTabBarClearance();
@@ -91,11 +93,13 @@ export default function FlowScreen() {
     () =>
       comp.slices.map((c, i) => ({
         ...c,
-        label: c.category ? getCategory(c.category).label : `${summary.byCategory.length - MAX_SLICES} more`,
+        label: c.category
+          ? categoryLabel(c.category, language)
+          : tf('moreCategories', { count: summary.byCategory.length - MAX_SLICES }, language),
         icon: (c.category ? getCategory(c.category).icon : 'sliders') as IconName,
         color: c.category ? rampColor(i, dark) : dark ? '#2A2620' : '#D9D3C6',
       })),
-    [comp, summary.byCategory.length, dark],
+    [comp, summary.byCategory.length, dark, language],
   );
 
   const limits = useMemo(
@@ -124,7 +128,6 @@ export default function FlowScreen() {
   const monthDays = live ? Math.max(1, daysInPeriod(period, now)) : 1;
   const elapsed = live ? Math.max(1, elapsedDays(period, now, state.transactions)) : monthDays;
   const monthShare = live ? Math.min(1, elapsed / monthDays) : 1;
-  const daysLeft = live ? Math.max(0, monthDays - elapsed) : 0;
 
   /** In and out for the six months ending at the selected one. */
   const trend = useMemo(() => {
@@ -161,39 +164,48 @@ export default function FlowScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <ThemedText type="title">Flow</ThemedText>
+            <ThemedText type="title">{t('tabFlow')}</ThemedText>
             <PeriodPill onPress={() => setPeriodOpen(true)} />
           </View>
 
-          <ThemedText type="meta" themeColor="textSecondary" style={styles.subtitle}>
-            Out{' '}
-            <ThemedText type="meta" tabular>
-              {/* Totalled as the rows below are shown. The composition list
-                  covers 100% of this figure — the tail is pooled into "N more"
-                  — so rounding once here and again per row made the column
-                  visibly fail to add up: three categories of AED 10.50 each
-                  read 11 · 11 · 11 under a heading of 32. */}
-              {formatAED(comp.totalFils, { decimals: false })}
-            </ThemedText>
-            {totalLimit > 0 ? (
-              <>
-                {' · '}
-                <ThemedText type="meta" tabular>
+          <View style={[styles.summaryRail, { borderColor: theme.cardBorder }]}>
+            <View style={styles.summaryCell}>
+              <ThemedText type="meta" themeColor="textTertiary">
+                {t('totalOut')}
+              </ThemedText>
+              <ThemedText type="smallBold" tabular numberOfLines={1}>
+                {formatAED(comp.totalFils, { decimals: false })}
+              </ThemedText>
+            </View>
+            {totalLimit > 0 && (
+              <View style={[styles.summaryCell, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('limitedSpend')}
+                </ThemedText>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
                   {formatAmount(limitedSpend, { decimals: false })}
+                  <ThemedText type="meta" tabular themeColor="textTertiary">
+                    {' / '}{formatAmount(totalLimit, { decimals: false })}
+                  </ThemedText>
                 </ThemedText>
-                {' of '}
-                <ThemedText type="meta" tabular>
-                  {formatAmount(totalLimit, { decimals: false })}
+              </View>
+            )}
+            {live && (
+              <View style={[styles.summaryCell, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('periodProgress')}
                 </ThemedText>
-                {' in limits'}
-              </>
-            ) : null}
-            {live ? ` · ${Math.round(monthShare * 100)}% of the month gone` : ''}
-          </ThemedText>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                  {Math.round(monthShare * 100)}%
+                </ThemedText>
+              </View>
+            )}
+          </View>
 
           {/* ── Composition ── */}
           {slices.length > 0 ? (
             <Animated.View entering={FadeInDown.duration(320)} style={styles.section}>
+              <SectionHeader title={t('whereItWent')} />
               {/* One stacked bar rather than a donut: a donut asks you to
                   compare arcs, and nobody can. A bar is read left to right in
                   the order the list beneath it is already sorted. */}
@@ -222,11 +234,10 @@ export default function FlowScreen() {
                   <Pressable
                     key={s.key}
                     accessibilityRole="button"
-                    accessibilityLabel={`${s.label}, see entries`}
+                    accessibilityLabel={tf('seeCategoryEntriesA11y', { category: s.label }, language)}
                     onPress={() => router.push(`/transactions?category=${s.categories.join(',')}`)}
                     style={({ pressed }) => [
                       styles.compRow,
-                      i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
                       pressed && { opacity: 0.6 },
                     ]}>
                     {/* The swatch carries the glyph. An 8px dot said only
@@ -240,7 +251,11 @@ export default function FlowScreen() {
                     <ThemedText type="small" style={styles.compLabel} numberOfLines={1}>
                       {s.label}
                     </ThemedText>
-                    <ThemedText type="meta" themeColor="textTertiary" tabular>
+                    <ThemedText
+                      type="meta"
+                      themeColor="textTertiary"
+                      tabular
+                      style={[styles.compShare, { textAlign: alignEnd() }]}>
                       {Math.round(s.share * 100)}%
                     </ThemedText>
                     <ThemedText type="smallBold" tabular style={[styles.compFigure, { textAlign: alignEnd() }]}>
@@ -260,8 +275,8 @@ export default function FlowScreen() {
           {/* ── Limits ── */}
           <Animated.View entering={FadeInDown.delay(40).duration(320)} style={styles.section}>
             <SectionHeader
-              title="Limits"
-              right={limits.length > 0 ? 'NEW LIMIT' : undefined}
+              title={t('limitsHeader')}
+              right={limits.length > 0 ? t('newLimit') : undefined}
               onPressRight={limits.length > 0 ? () => setLimitFor('new') : undefined}
             />
 
@@ -269,14 +284,13 @@ export default function FlowScreen() {
               <Pressable
                 onPress={() => setLimitFor('new')}
                 style={[styles.emptyLimits, { borderColor: theme.cardBorderStrong }]}>
-                <ThemedText type="small">Set a limit on a category</ThemedText>
+                <ThemedText type="small">{t('setLimitCategory')}</ThemedText>
                 <ThemedText type="meta" themeColor="textSecondary" style={styles.emptyBody}>
-                  Wafra already knows what you spend. Give one category a number and it will tell
-                  you whether you are on pace, not just what you have left.
+                  {t('setLimitBody')}
                 </ThemedText>
               </Pressable>
             ) : (
-              limits.map(({ budget, spent }, i) => {
+              limits.map(({ budget, spent }) => {
                 const ratio = budget.limitFils > 0 ? spent / budget.limitFils : 0;
                 const over = ratio >= 1;
                 const nearly = !over && ratio >= 0.85;
@@ -296,15 +310,16 @@ export default function FlowScreen() {
                   <Pressable
                     key={budget.category}
                     accessibilityRole="button"
-                    accessibilityLabel={`${getCategory(budget.category).label} limit`}
+                    accessibilityLabel={tf('categoryLimit', {
+                      category: categoryLabel(budget.category, language),
+                    }, language)}
                     onPress={() => setLimitFor(budget.category)}
-                    style={[
-                      styles.limit,
-                      i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-                    ]}>
+                    style={styles.limit}>
                     <View style={styles.limitTop}>
-                      <ThemedText type="small">{getCategory(budget.category).label}</ThemedText>
-                      <ThemedText type="smallBold" tabular style={{ color: health }}>
+                      <ThemedText type="small" numberOfLines={1} style={styles.limitLabel}>
+                        {categoryLabel(budget.category, language)}
+                      </ThemedText>
+                      <ThemedText type="smallBold" tabular style={[styles.limitFigure, { color: health }]}>
                         {formatAmount(spent, { decimals: false })}
                         <ThemedText type="meta" themeColor="textTertiary" tabular>
                           {'  / '}
@@ -327,13 +342,20 @@ export default function FlowScreen() {
                       />
                     </View>
 
-                    <ThemedText type="meta" themeColor="textTertiary">
-                      {over
-                        ? `Over by ${formatAED(spent - budget.limitFils, { decimals: false })}`
-                        : `${formatAED(budget.limitFils - spent, { decimals: false })} left`}
-                      {live && daysLeft > 0 ? ` · ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : ''}
-                      {fast ? ' · faster than the month' : ''}
-                    </ThemedText>
+                    <View style={styles.limitStatus}>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        {over
+                          ? tf('overByAmount', { amount: formatAED(spent - budget.limitFils, { decimals: false }) }, language)
+                          : tf('amountLeft', { amount: formatAED(budget.limitFils - spent, { decimals: false }) }, language)}
+                      </ThemedText>
+                      {fast && (
+                        <View style={[styles.paceBadge, { backgroundColor: `${theme.warning}18` }]}>
+                          <ThemedText type="nano" style={{ color: theme.warning }}>
+                            {t('fasterThanMonth')}
+                          </ThemedText>
+                        </View>
+                      )}
+                    </View>
                   </Pressable>
                 );
               })
@@ -344,7 +366,7 @@ export default function FlowScreen() {
           <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
             <SectionHeader
               title={t('inVsOut6')}
-              right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} avg`}
+              right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} ${t('averageSuffix')}`}
             />
             <View style={styles.trend}>
               {trend.map((m) => {
@@ -426,7 +448,7 @@ export default function FlowScreen() {
           {/* ── What that adds up to ── */}
           {insights.length > 0 && (
             <Animated.View entering={FadeInDown.delay(120).duration(320)} style={styles.section}>
-              <SectionHeader title="Worth knowing" />
+              <SectionHeader title={t('worthKnowing')} />
               <View style={styles.insights}>
                 {insights.map((insight) => (
                   <InsightCard key={insight.id} insight={insight} />
@@ -458,7 +480,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
-  subtitle: { marginTop: Spacing.two },
+  summaryRail: {
+    flexDirection: 'row',
+    marginTop: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  summaryCell: { flex: 1, minWidth: 0, gap: 3, paddingVertical: Spacing.two + 2 },
+  summaryDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
   section: { marginTop: Spacing.five },
 
   compBar: {
@@ -467,12 +496,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     overflow: 'hidden',
   },
-  compRows: { marginTop: Spacing.three },
+  compRows: { marginTop: Spacing.two, gap: 2 },
   compRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
-    paddingVertical: 11,
+    paddingVertical: 9,
   },
   compTile: {
     width: 26,
@@ -482,7 +511,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   compLabel: { flex: 1 },
-  compFigure: { minWidth: 62 },
+  compShare: { width: 38 },
+  compFigure: { width: 72 },
 
   emptyLimits: {
     borderWidth: 1,
@@ -492,13 +522,29 @@ const styles = StyleSheet.create({
     gap: Spacing.one,
   },
   emptyBody: { maxWidth: 320 },
-  limit: { paddingVertical: Spacing.three, gap: Spacing.two },
+  limit: { paddingVertical: Spacing.two + 2, gap: Spacing.two },
   limitTop: {
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'space-between',
+    gap: Spacing.three,
   },
+  limitLabel: { flex: 1, minWidth: 0 },
+  limitFigure: { flexShrink: 0 },
   limitTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  limitStatus: {
+    minHeight: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  paceBadge: {
+    flexShrink: 0,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 3,
+  },
 
   // The extra 16 at the top is headroom for the value sitting above the
   // tallest bar, which would otherwise be clipped by the row.

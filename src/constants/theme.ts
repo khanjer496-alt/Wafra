@@ -55,16 +55,16 @@ export const Colors = {
   dark: {
     text: '#F2EFE8',
     textSecondary: '#A9A29A', // 7.41:1
-    textTertiary: '#8C857A', // 5.12:1 on bg
+    textTertiary: '#9B948A',
     background: '#14120F', // warm charcoal. never #070D0B
     backgroundElement: '#1C1A16',
     backgroundSelected: '#232019',
     card: '#1C1A16',
-    cardBorder: '#302C25',
-    cardBorderStrong: '#3A352E',
+    cardBorder: '#3B362E',
+    cardBorderStrong: '#4A443A',
     primary: '#57B894',
     primarySoft: '#1E3A31',
-    primaryBorder: '#302C25',
+    primaryBorder: '#3B362E',
     onPrimary: '#0F2C23',
     income: '#6BC79E',
     expense: '#E0836B',
@@ -74,7 +74,7 @@ export const Colors = {
     incomeGraphic: '#6BC79E',
     expenseGraphic: '#E0836B',
     warningGraphic: '#D9AE62',
-    track: '#302C25',
+    track: '#3B362E',
     expenseSoftBg: '#2A1D18',
     expenseSoftBorder: '#4A322A',
     /** @deprecated */

@@ -18,9 +18,10 @@ import { CategoryChips } from '@/components/ui/category-chips';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { parseAmountToFils, toISODate } from '@/lib/format';
 import { committed } from '@/lib/haptics';
+import { t as tUi } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
@@ -60,7 +61,7 @@ export default function AddTransactionScreen() {
       amountFils,
       category,
       accountId,
-      title: title.trim() || getCategory(category).label,
+      title: title.trim() || categoryLabel(getCategory(category)),
       date,
       source: 'manual',
     });
@@ -81,13 +82,13 @@ export default function AddTransactionScreen() {
           <View style={styles.header}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={tUi('close')}
               onPress={() => router.back()}
               style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>
               <Icon name="close" size={18} color={theme.text} />
             </Pressable>
             <ThemedText type="smallBold" accessibilityRole="header" style={styles.headerTitle}>
-              New transaction
+              {tUi('newTransaction')}
             </ThemedText>
             <View style={styles.closeBtn} />
           </View>
@@ -106,7 +107,7 @@ export default function AddTransactionScreen() {
                     key={t}
                     accessibilityRole="tab"
                     accessibilityState={{ selected: active }}
-                    accessibilityLabel={t === 'expense' ? 'Expense' : 'Income'}
+                    accessibilityLabel={t === 'expense' ? tUi('expenseLabel') : tUi('incomeLabel')}
                     onPress={() => switchType(t)}
                     style={[
                       styles.segmentItem,
@@ -115,7 +116,7 @@ export default function AddTransactionScreen() {
                     <ThemedText
                       type="smallBold"
                       style={{ color: active ? color : theme.textSecondary }}>
-                      {t === 'expense' ? '− Expense' : '+ Income'}
+                      {t === 'expense' ? `− ${tUi('expenseLabel')}` : `+ ${tUi('incomeLabel')}`}
                     </ThemedText>
                   </Pressable>
                 );
@@ -132,7 +133,7 @@ export default function AddTransactionScreen() {
                 onChangeText={setAmountText}
                 keyboardType="decimal-pad"
                 placeholder="0"
-                accessibilityLabel="Amount in dirhams"
+                accessibilityLabel={tUi('amountInDirhams')}
                 autoFocus
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
@@ -141,7 +142,7 @@ export default function AddTransactionScreen() {
 
             {/* Category grid */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">Category</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('category')}</ThemedText>
               <CategoryChips
                 categories={categories}
                 selected={category}
@@ -152,7 +153,7 @@ export default function AddTransactionScreen() {
 
             {/* Account */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">Account</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('account')}</ThemedText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.accountRow}>
                 {state.accounts.map((a) => {
                   const active = accountId === a.id;
@@ -180,13 +181,13 @@ export default function AddTransactionScreen() {
 
             {/* Date quick-pick */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">When</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
               <View style={styles.dateRow}>
                 {[
-                  { label: 'Today', offset: 0 },
-                  { label: 'Yesterday', offset: 1 },
-                  { label: '2 days ago', offset: 2 },
-                  { label: '3 days ago', offset: 3 },
+                  { label: tUi('today'), offset: 0 },
+                  { label: tUi('yesterday'), offset: 1 },
+                  { label: tUi('twoDaysAgo'), offset: 2 },
+                  { label: tUi('threeDaysAgo'), offset: 3 },
                 ].map((d) => {
                   const active = dayOffset === d.offset;
                   return (
@@ -212,12 +213,12 @@ export default function AddTransactionScreen() {
 
             {/* Title */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">Description (optional)</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('descriptionOptional')}</ThemedText>
               <TextInput
                 value={title}
                 onChangeText={setTitle}
-                accessibilityLabel="Description, optional"
-                placeholder={`e.g. ${type === 'expense' ? 'Carrefour weekly shop' : 'July salary'}`}
+                accessibilityLabel={tUi('descriptionOptionalA11y')}
+                placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
                 placeholderTextColor={theme.textSecondary}
                 style={[
                   styles.titleInput,
@@ -225,6 +226,7 @@ export default function AddTransactionScreen() {
                     backgroundColor: theme.backgroundElement,
                     borderColor: theme.cardBorder,
                     color: theme.text,
+                    textAlign: state.language === 'ar' ? 'right' : 'left',
                   },
                 ]}
               />
@@ -234,7 +236,7 @@ export default function AddTransactionScreen() {
           <View style={styles.footer}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Save transaction"
+              accessibilityLabel={tUi('saveTransaction')}
               accessibilityState={{ disabled: !canSave }}
               onPress={save}
               disabled={!canSave}
@@ -244,7 +246,7 @@ export default function AddTransactionScreen() {
               ]}>
               <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
               <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                Save transaction
+                {tUi('saveTransaction')}
               </ThemedText>
             </Pressable>
           </View>

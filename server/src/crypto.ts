@@ -30,7 +30,14 @@ export function b64encode(bytes: ArrayBuffer | Uint8Array): string {
   return btoa(s);
 }
 
-export function b64decode(s: string): Uint8Array {
+export function b64decode(s: string): Uint8Array<ArrayBuffer> {
+  if (
+    s.length === 0 ||
+    s.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(s)
+  ) {
+    throw new Error('Invalid base64');
+  }
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -41,25 +48,34 @@ export function b64decode(s: string): Uint8Array {
 export async function seal(recipientPublicKeyB64: string, payload: unknown): Promise<SealedBlob> {
   const recipient = await crypto.subtle.importKey(
     'raw',
-    b64decode(recipientPublicKeyB64) as BufferSource,
+    b64decode(recipientPublicKeyB64),
     { name: 'X25519' },
     false,
     [],
   );
-  // generateKey is typed as CryptoKey | CryptoKeyPair; X25519 always yields a
-  // pair, but the DOM lib cannot narrow it from the algorithm name.
-  const ephemeral = (await crypto.subtle.generateKey({ name: 'X25519' }, true, [
-    'deriveBits',
-  ])) as CryptoKeyPair;
+  const generated = await crypto.subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+  if (!('publicKey' in generated)) throw new Error('X25519 did not return a keypair');
+  const ephemeral = generated;
+
+  // Wrangler's generated runtime type currently escapes this WebCrypto field
+  // as `$public`; the runtime follows the standard and requires `public`.
+  // Keep the unavoidable cast on this one boundary instead of weakening the
+  // types for the rest of the crypto module.
+  const deriveAlgorithm = {
+    name: 'X25519',
+    public: recipient,
+  } as unknown as Parameters<SubtleCrypto['deriveBits']>[0];
   const shared = await crypto.subtle.deriveBits(
-    { name: 'X25519', public: recipient },
+    deriveAlgorithm,
     ephemeral.privateKey,
     256,
   );
   // HKDF over the ECDH output — the raw shared secret is not uniformly random
   // and must never be used as a key directly.
   const ikm = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-  const epkRaw = await crypto.subtle.exportKey('raw', ephemeral.publicKey);
+  const exported = await crypto.subtle.exportKey('raw', ephemeral.publicKey);
+  if (!(exported instanceof ArrayBuffer)) throw new Error('X25519 raw export was not bytes');
+  const epkRaw = exported;
   const aes = await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(epkRaw), info: enc.encode('wafra/v1/seal') },
     ikm,
@@ -82,6 +98,22 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
  */
 export async function hashToken(token: string): Promise<string> {
   return b64encode(await crypto.subtle.digest('SHA-256', enc.encode(token)));
+}
+
+/**
+ * A keyed, one-way replay identifier. Unlike a plain message hash, a D1 dump
+ * cannot be searched against a guessed bank alert without the ingest token,
+ * and that token is never stored by the Worker.
+ */
+export async function keyedFingerprint(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return b64encode(await crypto.subtle.sign('HMAC', key, enc.encode(value)));
 }
 
 export function randomToken(): string {

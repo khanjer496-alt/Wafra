@@ -1,5 +1,4 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
@@ -7,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Elevation, Radius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
 import { t, type Lang, type StringKey } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
@@ -27,23 +27,13 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
-/**
- * Floating tab bar: four tabs, then the add button inline at the right end.
- *
- * The `+` used to be a raised circle in the middle, which meant the bar was
- * taller than itself and permanently covered the last row of every list — the
- * one row a scroll-to-bottom is usually looking for. Inline, the bar is a
- * single rectangle of known height, and `useTabBarClearance` can pad for it
- * honestly.
- *
- * Active state is colour and stroke weight only. A filled tile behind the icon
- * was a third competing surface in a system that otherwise groups with hairline
- * dividers.
- */
+/** Four durable destinations. Manual cash entry belongs in the ledger, not in
+ * the centre of the product's navigation: Wafra's promise is automatic
+ * capture, so the bar no longer makes hand-entry its largest control. */
 export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
+  const reducedMotion = useReducedMotion();
   /**
    * The language, read off the store and passed into every `t()` below.
    *
@@ -67,6 +57,7 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
       <Pressable
         key={route.key}
         accessibilityRole="tab"
+        accessibilityLabel={t(TAB_LABELS[route.name], lang)}
         accessibilityState={{ selected: focused }}
         style={styles.tab}
         onPress={() => {
@@ -90,8 +81,8 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
           strokeWidth={focused ? 2.1 : 1.8}
         />
         <ThemedText
-          type="nano"
-          style={{ color: focused ? theme.primary : theme.textTertiary }}>
+          type="meta"
+          style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
           {t(TAB_LABELS[route.name], lang)}
         </ThemedText>
       </Pressable>
@@ -99,65 +90,16 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   };
 
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
-      <Scrim color={theme.background} />
+    <View
+      style={[
+        styles.wrap,
+        { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
+      ]}>
       <Animated.View
-        entering={FadeIn}
-        style={[styles.barWrap, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}
-        pointerEvents="box-none">
-        <View
-          style={[
-            styles.bar,
-            Elevation,
-            { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-          ]}>
-          {routes.map(renderTab)}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('tabAdd', lang)}
-            onPress={() => {
-              tapped();
-              router.push('/add-transaction');
-            }}
-            style={({ pressed }) => [
-              styles.add,
-              {
-                backgroundColor: theme.primary,
-                transform: [{ scale: pressed ? 0.95 : 1 }],
-              },
-            ]}>
-            <Icon name="plus" size={22} color={theme.onPrimary} strokeWidth={2.2} />
-          </Pressable>
-        </View>
+        entering={reducedMotion ? undefined : FadeIn.duration(180)}
+        style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
+        {routes.map(renderTab)}
       </Animated.View>
-    </View>
-  );
-}
-
-const SCRIM_HEIGHT = 132;
-const SCRIM_STEPS = 12;
-
-/**
- * The fade behind the bar, built from stacked slices rather than a gradient:
- * `expo-linear-gradient` is not a dependency and the redesign is not worth one.
- * Twelve steps of a warm neutral at these alphas do not band — the largest
- * jump between adjacent slices is under 9% opacity, well below the threshold
- * where an edge becomes visible on a non-flat surface.
- */
-function Scrim({ color }: { color: string }) {
-  return (
-    <View style={styles.scrim} pointerEvents="none">
-      {Array.from({ length: SCRIM_STEPS }, (_, i) => (
-        <View
-          key={i}
-          style={{
-            height: SCRIM_HEIGHT / SCRIM_STEPS,
-            backgroundColor: color,
-            // Ease in, so the top of the fade is genuinely invisible.
-            opacity: Math.min(1, ((i + 1) / SCRIM_STEPS) ** 1.6 / 0.62),
-          }}
-        />
-      ))}
     </View>
   );
 }
@@ -168,38 +110,27 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
   },
-  scrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: SCRIM_HEIGHT,
-  },
-  barWrap: { alignItems: 'center' },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: Radius.tabbar,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
-    paddingVertical: Spacing.two,
-    gap: Spacing.two,
-    marginHorizontal: Spacing.three,
-    width: '92%',
-    maxWidth: 500,
+    paddingTop: 5,
+    paddingHorizontal: Spacing.two,
+    width: '100%',
+    maxWidth: 800,
   },
   tab: {
     flex: 1,
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: Spacing.one,
-  },
-  add: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 3,
+    paddingVertical: 5,
+  },
+  tabLabel: {
+    fontSize: 10.5,
+    lineHeight: 14,
   },
 });

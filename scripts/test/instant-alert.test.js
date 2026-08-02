@@ -26,6 +26,7 @@ const fs = require('fs');
 const path = require('path');
 
 const parser = require('./build/sms-parser');
+const namedBankFormats = require('./fixtures/uae-bank-formats');
 
 let pass = 0;
 let fail = 0;
@@ -129,8 +130,11 @@ function fixtureMessages() {
   return out;
 }
 
-const corpus = fixtureMessages();
-ok('the corpus is the real messages, not a handful', corpus.length > 80, `${corpus.length}`);
+const corpus = [
+  ...fixtureMessages(),
+  ...namedBankFormats.map((row) => row.body),
+];
+ok('the redacted corpus is broad, not a handful', corpus.length > 80, `${corpus.length}`);
 
 /* ── Safety: never announce something that did not happen ────────────── */
 
@@ -197,6 +201,8 @@ const cases = [
   ['Available Balance AED ····1985.47 on your account.', false, 'a masked balance gets no banner'],
   ['Your salary of AED 28,537.50 has been credited to your account 0002.', true, 'a salary credit gets a banner'],
   ['Purchase of AED 150.00 with Debit Card ending 2518 at BISSAN MEDICAL CENTRE, DUBAI. Avl Balance is AED 2,024.14.', true, 'an ordinary purchase gets a banner'],
+  ['Payment of INR 270 (AED 10.96) was done at Craft docs using your Wio Personal card 68XX with Own AED funds', true, 'a Wio completed push gets a banner'],
+  ['Thank you for using your card ending 0000 for GHS 120.00 at MAC LEGENDARY ENTERPRISE on 21-SEP-2023. Avl.Limit: AED 56,458.26', true, 'a Mashreq GHS purchase gets a banner'],
 ];
 for (const [message, expected, name] of cases) {
   ok(name, !!read(message) === expected);
@@ -237,7 +243,13 @@ for (const [message, expected, name] of cases) {
   ok('the banner quotes the charge, not the balance', r?.figure === '150.00', r?.figure);
 }
 
-/* ── How much of a real inbox actually speaks ────────────────────────── */
+{
+  const r = read('Thank you for using your card ending 0000 for GHS 120.00 at MAC LEGENDARY ENTERPRISE. Avl.Limit: AED 56,458.26');
+  ok('the native preview reads the GHS charge, not the AED limit',
+    r?.currency === 'GHS' && r?.figure === '120.00', JSON.stringify(r));
+}
+
+/* ── How much of the redacted corpus actually speaks ────────────────── */
 
 {
   const spoken = corpus.filter((m) => read(m)).length;
@@ -245,10 +257,10 @@ for (const [message, expected, name] of cases) {
     const p = parser.parseSms(m, '2026-07-20T10:00:00Z');
     return p && p.kind !== 'cardStatement' && p.kind !== 'billDue';
   }).length;
-  console.log(`\n  banners: ${spoken} of ${real} real transactions (${Math.round((spoken / (real || 1)) * 100)}%)`);
+  console.log(`\n  banners: ${spoken} of ${real} transaction fixtures (${Math.round((spoken / (real || 1)) * 100)}%)`);
   // Silence on everything would pass every assertion above. This is the floor
   // that stops "post nothing, ever" from looking like a healthy suite.
-  ok('most real transactions do get a banner', spoken >= real * 0.6, `${spoken}/${real}`);
+  ok('most transaction fixtures do get a banner', spoken >= real * 0.6, `${spoken}/${real}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

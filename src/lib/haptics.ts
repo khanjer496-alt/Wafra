@@ -25,12 +25,23 @@ const native = Platform.OS === 'ios' || Platform.OS === 'android';
 /** A choice registered: tab, chip, segment, toggle, period, row selection. */
 export function tapped(): void {
   if (!native) return;
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+  if (Platform.OS === 'android') {
+    // Expo SDK 55 recommends Android's haptics engine over a simulated
+    // Vibrator impact. Segment_Tick is the native semantic for a discrete
+    // choice and does not require the VIBRATE permission.
+    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Segment_Tick).catch(() => {});
+    return;
+  }
+  Haptics.selectionAsync().catch(() => {});
 }
 
 /** A commitment landed: saved, paid, imported, deleted, limit set. */
 export function committed(): void {
   if (!native) return;
+  if (Platform.OS === 'android') {
+    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Confirm).catch(() => {});
+    return;
+  }
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
 }
 
@@ -40,5 +51,9 @@ export function committed(): void {
  */
 export function failed(): void {
   if (!native) return;
+  if (Platform.OS === 'android') {
+    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Reject).catch(() => {});
+    return;
+  }
   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
 }

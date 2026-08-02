@@ -2,6 +2,7 @@ import type { IconName } from '@/components/ui/icon';
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
+import { t, tf } from '@/lib/i18n';
 
 import {
   activeSubscriptions,
@@ -61,7 +62,7 @@ export function leavingSoon(
       items.push({
         id: `card-${due.id}`,
         kind: 'card',
-        title: account?.name ?? 'Card payment',
+        title: account?.name ?? t('cardPaymentDue'),
         icon: 'wallet',
         amountFils: remainingFils,
         dateISO: due.dueDate,
@@ -136,8 +137,8 @@ export function outgoingTotalFils(items: Outgoing[]): number {
 
 /** "in 5 days", "today", "3 days late" — the phrase a row's meta line ends with. */
 export function daysPhrase(daysLeft: number): string {
-  if (daysLeft < 0) return `${-daysLeft} day${daysLeft === -1 ? '' : 's'} late`;
-  if (daysLeft === 0) return 'today';
-  if (daysLeft === 1) return 'tomorrow';
-  return `in ${daysLeft} days`;
+  if (daysLeft < 0) return tf('daysLatePhrase', { days: -daysLeft, s: daysLeft === -1 ? '' : 's' });
+  if (daysLeft === 0) return t('today').toLocaleLowerCase();
+  if (daysLeft === 1) return t('tomorrow');
+  return tf('inDaysPhrase', { days: daysLeft });
 }

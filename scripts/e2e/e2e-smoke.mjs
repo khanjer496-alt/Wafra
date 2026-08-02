@@ -258,7 +258,7 @@ const sample = await visibleText(page, 'Start with sample data', 6000);
 if (sample) { await sample.click(); await page.waitForTimeout(2200); }
 
 // ── Home ──────────────────────────────────────────────────────────────
-ok('home hero states in minus out', !!(await visibleText(page, /IN MINUS OUT/i)));
+ok('home hero states the saved result', !!(await visibleText(page, /Saved so far this month/i)));
 ok('home splits in and out', !!(await visibleText(page, /^OUT$/i)));
 ok('home lists what leaves next', !!(await visibleText(page, /LEAVING IN \d+ DAYS/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
@@ -413,6 +413,12 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 
 ok('flow shows the six-month pair chart', !!(await visibleText(page, /IN VS OUT/i)));
 
+// Bring the chart body itself into view. Finding the section heading is not
+// enough on a phone viewport: the header can sit just above the floating tab
+// bar while every month/value remains below it, and `paintedText` correctly
+// reports only pixels that are actually visible.
+await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
+
 /**
  * A bar you cannot read a number off is a shape, not a figure. Six columns,
  * two figures each, an average in the header — and nothing truncated: `nano`
@@ -479,7 +485,10 @@ ok('flow shows the six-month pair chart', !!(await visibleText(page, /IN VS OUT/
 
 // Limit editor sheet. The same category name also appears in the composition
 // list above, which deep-links to Activity — target the limit row by label.
-await tapLabel(page, 'Groceries limit', 1300);
+// Use a category that has current-period activity. A zero-spend category has
+// no merchants to list, so asking it to prove "where it went" tested a state
+// the sheet correctly does not render.
+await tapLabel(page, 'Transport limit', 1300);
 ok('limit sheet opens', !!(await visibleText(page, /MONTHLY LIMIT/i)));
 ok('limit sheet lists where it went', !!(await visibleText(page, /WHERE IT WENT/i)));
 await tapLabel(page, 'Close', 900);
@@ -493,44 +502,15 @@ await tapText(page, /Fixed \d/i, 1000);
 ok('bills fixed segment renders',
   !!(await visibleText(page, /Utilities & fixed bills|No utilities yet|Loans/i)));
 
-/**
- * The sample ledger has no detected subscriptions and no card due, so the two
- * segments that carry a total cannot be exercised by it. Write a ledger that
- * does: two monthly charges at .50, which the "AED X/mo" heading can only
- * match by totalling the rows the way they are shown; a utility, which varies
- * like a bill; and two merchants that recur without being either — the ones
- * that used to be filed under a utilities heading.
- */
-await page.evaluate(() => {
-  const K = 'wafra/state/v1';
-  const meta = JSON.parse(localStorage.getItem(K));
-  const chunks = Number(meta.txChunks) || 0;
-  const txs = [];
-  for (let i = 0; i < chunks; i++) {
-    txs.push(...JSON.parse(localStorage.getItem(`${K}:tx:${i}`) || '[]'));
-    localStorage.removeItem(`${K}:tx:${i}`);
-  }
-  const iso = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
-  let n = 0;
-  const add = (title, category, amountFils, daysAgo, accountId = 'acc-card') =>
-    txs.push({ id: `e2e-${n++}`, type: 'expense', amountFils, category, accountId, title, date: iso(daysAgo), source: 'sms' });
-  for (const d of [4, 34, 64, 94]) add('Netflix', 'entertainment', 5550, d);
-  for (const d of [9, 39, 69, 99]) add('Spotify', 'entertainment', 2250, d);
-  for (const [d, a] of [[6, 28000], [36, 45000], [66, 31000], [96, 39000]]) add('SEWA Bill', 'utilities', a, d, 'acc-enbd');
-  for (const d of [7, 37, 67, 97]) add('Urbanclap Home Services', 'home-services', 15000, d);
-  for (const d of [11, 41, 71, 101]) add('Al Adil Trading', 'groceries', 30000, d);
-  delete meta.txChunks;
-  meta.transactions = txs;
-  localStorage.setItem(K, JSON.stringify(meta));
-});
-await page.goto(BASE, { waitUntil: 'networkidle' });
-await page.waitForTimeout(2200);
-await tapTab(page, 'Bills');
+// The shipped UAE demo now deliberately includes stable subscription, card
+// due, utility and other-recurring histories. Exercise that public first-run
+// state directly instead of mutating private persistence internals here.
+await tapText(page, /Subs \d/i, 900);
 
-// The "AED X/mo" heading sits directly above the rows it totals.
+// The natural-language monthly heading sits directly above the rows it totals.
 {
   const t = await paintedText(page);
-  const head = t.find((x) => /\/mo$/.test(x.t));
+  const head = t.find((x) => /\/(?:mo| month)$/.test(x.t));
   const rows = t.filter((x) => /^AED [\d,]+$/.test(x.t) && head && x.y > head.y + 12).map((x) => money(x.t));
   const sum = rows.reduce((a, b) => a + b, 0);
   ok(`bills: the monthly total equals the subscription rows (${head?.t} vs ${sum})`,
@@ -566,12 +546,12 @@ await tapText(page, /Fixed \d/i, 1200);
   ok('bills fixed: "Other repeat payments" has its own section', !!other);
   ok('bills fixed: utilities are a separate block from it',
     !!other && !!utilities && other.y !== utilities.y);
-  // A grocer under a utilities heading reads as a bug even when the
+  // A travel charge under a utilities heading reads as a bug even when the
   // recurrence is real: it must sit below the "other" heading, not the
   // utilities one.
-  const grocer = t.find((x) => /Al Adil/i.test(x.t));
-  ok('bills fixed: a recurring shop is filed under "other", not utilities',
-    !!grocer && !!other && grocer.y > other.y);
+  const otherPayment = t.find((x) => /Booking\.com/i.test(x.t));
+  ok('bills fixed: a non-bill repeat is filed under "other", not utilities',
+    !!otherPayment && !!other && otherPayment.y > other.y);
   ok('bills fixed: no recurring row label is ellipsised',
     t.filter((x) => x.clipped).length === 0);
 }

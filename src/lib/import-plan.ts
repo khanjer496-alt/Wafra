@@ -26,6 +26,8 @@ export type ScannedSms = ParsedSms & {
   smsTs?: number;
   sender?: string;
   channel?: CaptureChannel;
+  /** Relay-only origin. It must never be inferred from the wake itself. */
+  captureSource?: 'shortcut' | 'email' | 'pdf';
 };
 
 export interface ImportPlan {
@@ -274,6 +276,10 @@ export function buildImportPlan(
     transactions.push({
       type: p.type,
       amountFils: p.amountFils,
+      originalAmountMinor: p.originalAmountMinor,
+      originalCurrency: p.originalCurrency,
+      fxRate: p.fxRate,
+      fxSource: p.fxSource,
       category: p.categoryGuess,
       accountId,
       title: p.merchant,
@@ -283,7 +289,10 @@ export function buildImportPlan(
       smsKey,
       viaPush: p.channel === 'push' || undefined,
       isTransfer: p.transferHint || undefined,
-      raw: lowConfidence ? p.raw.slice(0, 300) : undefined,
+      // Relay/email/PDF ingestion deliberately discards the source body
+      // before this device sees the structured row. Keep a diagnostic excerpt
+      // only on Android's local parser path, where one actually exists.
+      raw: lowConfidence ? p.raw?.slice(0, 300) : undefined,
     });
   }
 

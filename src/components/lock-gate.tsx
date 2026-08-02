@@ -73,7 +73,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         return;
       }
       setBiometric('prompting');
-      const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock Wafra' });
+      const result = await LocalAuthentication.authenticateAsync({ promptMessage: t('unlockWafra') });
       if (result.success) setUnlocked(true);
       else setBiometric('failed');
     } catch {
@@ -140,11 +140,10 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         <View style={styles.centre}>
           <WafraMark size={46} />
           <ThemedText type="micro" themeColor="textTertiary">
-            Locked
+            {t('locked')}
           </ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
-            Your balances are hidden until the phone says it&apos;s you. Nothing left the phone while
-            it was closed.
+            {t('lockedPrivacyBody')}
           </ThemedText>
         </View>
 
@@ -159,9 +158,9 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               },
             ]}>
             <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
-            <ThemedText type="small">This phone has no screen lock</ThemedText>
+            <ThemedText type="small">{t('phoneHasNoLock')}</ThemedText>
             <ThemedText type="meta" themeColor="textTertiary" style={styles.centreText}>
-              Set up a fingerprint, face unlock, or a PIN and Wafra can use it.
+              {t('setPhoneLockBody')}
             </ThemedText>
             <Button
               label={t('openPhoneSettings')}
@@ -183,7 +182,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
             <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Unlock with your fingerprint"
+              accessibilityLabel={t('unlockFingerprintA11y')}
               onPress={tryUnlock}
               style={[
                 styles.sensor,
@@ -193,13 +192,13 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               <Icon name="fingerprint" size={38} color={theme.text} />
             </Pressable>
             <ThemedText type="small">
-              {biometric === 'failed' ? t('trySensorAgain') : 'Touch the sensor to unlock'}
+              {biometric === 'failed' ? t('trySensorAgain') : t('touchSensor')}
             </ThemedText>
             <ThemedText type="meta" themeColor="textTertiary">
-              Fingerprint, face unlock, or your phone PIN
+              {t('biometricOrPin')}
             </ThemedText>
             <Button
-              label="Use PIN instead"
+              label={t('usePinInstead')}
               variant="outline"
               onPress={tryUnlock}
               style={styles.fullButton}

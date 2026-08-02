@@ -1,4 +1,3 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState as RNAppState, I18nManager, Platform } from 'react-native';
 import React, {
   createContext,
@@ -6,8 +5,8 @@ import React, {
   useContext,
   useEffect,
   useMemo,
-  useReducer,
   useRef,
+  useState,
 } from 'react';
 
 import { markCardsDistinct, mergeDuplicateAccounts, mergeRenewedCard } from '@/lib/accounts';
@@ -19,6 +18,8 @@ import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/see
 import { applyHealPatch, healPatch } from '@/lib/heal';
 import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
+import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
+import type { FxUpdate } from '@/lib/fx';
 
 import type {
   ImportBatchInput,
@@ -55,6 +56,7 @@ const EMPTY_STATE: AppState = {
   monthStartDay: 1,
   themePreference: 'system',
   pro: false,
+  privateMode: false,
   trialStartTs: 0,
   marketId: '',
   language: '',
@@ -106,6 +108,8 @@ type Action =
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
   | { type: 'setAppLock'; enabled: boolean }
+  | { type: 'setPrivateMode'; enabled: boolean }
+  | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
   | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
@@ -339,6 +343,30 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
     case 'setAppLock':
       return { ...state, appLock: action.enabled };
+    case 'setPrivateMode':
+      return {
+        ...state,
+        privateMode: action.enabled,
+        // The change is immediate and retroactive: no low-confidence message
+        // body survives after the switch says local-only.
+        transactions: action.enabled
+          ? state.transactions.map(({ raw: _discard, ...tx }) => tx)
+          : state.transactions,
+      };
+    case 'applyFxUpdates': {
+      const updates = new Map(action.updates.map((update) => [update.id, update]));
+      if (updates.size === 0) return state;
+      let changed = false;
+      const transactions = state.transactions.map((tx) => {
+        const update = updates.get(tx.id);
+        // A bank-quoted AED equivalent is final. A late response from a
+        // reference request must never replace it.
+        if (!update || tx.fxSource !== 'fallback') return tx;
+        changed = true;
+        return { ...tx, ...update };
+      });
+      return changed ? { ...state, transactions } : state;
+    }
     case 'setOnboarded':
       return { ...state, onboarded: true };
     case 'clearAll':
@@ -366,8 +394,16 @@ interface StoreValue {
   addTransaction: (t: Omit<Transaction, 'id'>) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   deleteTransaction: (id: string) => void;
-  /** Bulk import; returns the created transaction ids for undo. */
-  importBatch: (input: ImportBatchInput) => string[];
+  /**
+   * Bulk import. `durable` resolves only after SQLCipher has committed the
+   * rows; relay callers must await it before acknowledging the server queue.
+   */
+  importBatch: (input: ImportBatchInput) => ImportReceipt;
+  /**
+   * Flush the current authoritative snapshot to SQLCipher. Relay callers use
+   * this before acknowledging a row that deduped against in-memory state.
+   */
+  ensureDurable: () => Promise<void>;
   undoBatch: (ids: string[]) => void;
   upsertBudget: (b: Budget) => void;
   deleteBudget: (category: Budget['category']) => void;
@@ -391,6 +427,8 @@ interface StoreValue {
   deleteGoal: (id: string) => void;
   markParserVersion: () => void;
   setAppLock: (enabled: boolean) => void;
+  setPrivateMode: (enabled: boolean) => Promise<void>;
+  applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
@@ -400,10 +438,16 @@ interface StoreValue {
   exportBackup: () => string;
   restoreBackup: (json: string) => boolean;
   loadDemoData: () => void;
-  clearAll: () => void;
+  /** Cryptographically erase the SQLCipher file/key, then create a blank store. */
+  clearAll: () => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+
+export interface ImportReceipt {
+  ids: string[];
+  durable: Promise<void>;
+}
 
 const SEED_BILLS: Bill[] = [
   { id: 'bill-dewa', title: 'DEWA Bill', category: 'utilities', amountFils: 45_000, dueDay: 25, paidMonths: [] },
@@ -412,11 +456,24 @@ const SEED_BILLS: Bill[] = [
 ];
 
 function demoState(): Partial<Omit<AppState, 'hydrated'>> {
+  const due = new Date();
+  due.setHours(12, 0, 0, 0);
+  due.setDate(due.getDate() + 12);
   return {
     accounts: SEED_ACCOUNTS,
     transactions: generateSeedTransactions(new Date()),
     budgets: SEED_BUDGETS,
     bills: SEED_BILLS,
+    cardDues: [
+      {
+        id: 'due-fab-demo',
+        accountId: 'acc-card',
+        totalDueFils: 120_900,
+        minDueFils: 6_050,
+        dueDate: toISODate(due),
+        paidFils: 0,
+      },
+    ],
     goals: [{ id: 'goal-demo', title: 'Emergency fund', emoji: 'target', targetFils: 2_000_000, savedFils: 650_000 }],
     onboarded: true,
     userName: 'there',
@@ -424,10 +481,10 @@ function demoState(): Partial<Omit<AppState, 'hydrated'>> {
 }
 
 /**
- * Transactions are stored in chunks: Android's AsyncStorage keeps each key in
- * a single SQLite row capped at ~2MB, and a full SMS history in one blob blew
- * past it — the save "worked" but every read failed, so the app opened as if
- * brand new. Meta (small) lives at STORAGE_KEY; rows live at :tx:N keys.
+ * Transactions are stored in chunks. Older Android builds used AsyncStorage,
+ * where a single row could exceed the cursor limit; current native builds use
+ * the same chunk contract inside SQLCipher so migration is exact and writes
+ * stay bounded. Meta (small) lives at STORAGE_KEY; rows live at :tx:N keys.
  */
 const TX_CHUNK_SIZE = 400;
 /** Collapses a burst of dispatches — import, rename, undo — into one write. */
@@ -443,7 +500,10 @@ interface LoadedState {
 }
 
 async function loadPersisted(): Promise<LoadedState | null> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+  let raw = await stateStorage.getItem(STORAGE_KEY);
+  if (!raw && (await migrateLegacyState(STORAGE_KEY))) {
+    raw = await stateStorage.getItem(STORAGE_KEY);
+  }
   if (!raw) return null;
   const parsed = JSON.parse(raw) as PersistedMeta;
   const chunkBodies: string[] = [];
@@ -453,7 +513,7 @@ async function loadPersisted(): Promise<LoadedState | null> {
     const count = Number(parsed.txChunks) || 0;
     const txs: Transaction[] = [];
     if (count > 0) {
-      const pairs = await AsyncStorage.multiGet(
+      const pairs = await stateStorage.multiGet(
         Array.from({ length: count }, (_, i) => txChunkKey(i)),
       );
       for (const [, v] of pairs) {
@@ -494,7 +554,19 @@ async function loadPersisted(): Promise<LoadedState | null> {
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, EMPTY_STATE);
+  const [state, setState] = useState(EMPTY_STATE);
+  /**
+   * React may batch renders, but capture can deliver two relay batches in the
+   * same turn. This ref is the ordered source of truth for every dispatch, so
+   * the second batch always reduces over the first even before React renders.
+   */
+  const authoritativeState = useRef(EMPTY_STATE);
+  const dispatch = useCallback((action: Action): AppState => {
+    const next = reducer(authoritativeState.current, action);
+    authoritativeState.current = next;
+    setState(next);
+    return next;
+  }, []);
   const prevChunkCount = useRef(0);
   /** Last successfully written body per chunk, so unchanged ones are skipped. */
   const prevChunks = useRef<string[]>([]);
@@ -656,7 +728,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * debounced write may still be in flight — and two overlapping saves is a
    * data-loss bug, not a performance one.
    */
-  const persist = useCallback((snapshot: AppState) => {
+  const persist = useCallback((snapshot: AppState): Promise<boolean> => {
     const { hydrated: _hydrated, transactions, ...meta } = snapshot;
     const txChanged = prevTransactions.current !== transactions;
 
@@ -686,19 +758,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Chaining makes the last save's meta the one that survives, which is the
     // only correct answer, and lets the diff be computed against a cache that
     // is actually current.
-    writeQueue.current = writeQueue.current.then(async () => {
+    const operation = writeQueue.current.then(async () => {
       try {
         // Computed in here, not outside: out here `prevChunks` may still be
         // the value from before the write that is currently in flight.
         const changed = chunks
           ? chunks.filter(([, body], i) => prevChunks.current[i] !== body)
           : [];
-        await AsyncStorage.multiSet([
+        await stateStorage.multiSet([
           [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunkCount })],
           ...changed,
         ]);
         if (chunks && prevChunkCount.current > chunks.length) {
-          await AsyncStorage.multiRemove(
+          await stateStorage.multiRemove(
             Array.from({ length: prevChunkCount.current - chunks.length }, (_, i) =>
               txChunkKey(chunks!.length + i),
             ),
@@ -709,28 +781,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           prevChunks.current = chunks.map(([, body]) => body);
         }
         prevTransactions.current = transactions;
+        return true;
       } catch {
         // Persistence is best-effort; the in-memory state stays authoritative.
         // The caches are cleared so the next save rewrites every chunk rather
         // than assuming a failed write landed.
         prevChunks.current = [];
         prevTransactions.current = null;
+        return false;
       }
     });
-    return writeQueue.current;
+    // Keep the shared queue non-rejecting so one failed device write cannot
+    // prevent every later save from running. Callers that require durability
+    // inspect `operation` separately.
+    writeQueue.current = operation.then(() => undefined);
+    return operation;
   }, []);
-
-  // Keeps the debounced flush reading the newest state without re-arming the
-  // AppState subscription on every dispatch.
-  const latest = useRef(state);
-  latest.current = state;
 
   useEffect(() => {
     if (!state.hydrated) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
-      persist(latest.current);
+      persist(authoritativeState.current);
     }, SAVE_DEBOUNCE_MS);
   }, [state, persist]);
 
@@ -742,14 +815,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!saveTimer.current) return;
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
-      persist(latest.current);
+      persist(authoritativeState.current);
     });
     return () => {
       sub.remove();
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
-        persist(latest.current);
+        persist(authoritativeState.current);
       }
     };
   }, [persist]);
@@ -766,7 +839,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteTransaction', id });
   }, []);
 
-  const importBatch = useCallback((input: ImportBatchInput) => {
+  const importBatch = useCallback((input: ImportBatchInput): ImportReceipt => {
     const newAccounts: Account[] = input.newAccounts.map((a) => ({ ...a, id: makeId('acc') }));
     // Hints pointing at a numeric index refer to a just-created account.
     const newHints: Record<string, string> = {};
@@ -776,8 +849,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? newAccounts[idx].id
         : ref;
     }
+    const base = authoritativeState.current;
     const transactions: Transaction[] = input.transactions.map((t) => ({
       ...t,
+      // Private Mode keeps the structured row and drops source text at the
+      // ingestion boundary, before it can reach React state or persistence.
+      raw: base.privateMode ? undefined : t.raw,
       // Resolve index-refs in accountId the same way.
       accountId:
         /^\d+$/.test(t.accountId) && Number(t.accountId) < newAccounts.length
@@ -805,7 +882,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
       bankNames[id] = bank;
     }
-    dispatch({
+    const action: Action = {
       type: 'importBatch',
       transactions,
       newAccounts,
@@ -815,9 +892,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       bankNames,
       lastScanTs: input.lastScanTs,
       updates: input.updates ?? [],
+    };
+    // React dispatch is intentionally not treated as persistence. Compute the
+    // exact next snapshot from the same action and enqueue its encrypted write
+    // now, bypassing the ordinary 700 ms UI debounce.
+    // A timer armed by an earlier UI action must not enqueue its older
+    // snapshot behind this durability write. All future timers read the
+    // authoritative ref, and this one is cancelled before the import lands.
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch(action);
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('Encrypted ledger write failed');
     });
-    return transactions.map((t) => t.id);
-  }, []);
+    return { ids: transactions.map((t) => t.id), durable };
+  }, [dispatch, persist]);
+
+  const ensureDurable = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const written = await persist(authoritativeState.current);
+    if (!written) throw new Error('Encrypted ledger write failed');
+  }, [persist]);
 
   const undoBatch = useCallback((ids: string[]) => {
     dispatch({ type: 'undoBatch', ids });
@@ -918,6 +1018,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setAppLock', enabled });
   }, []);
 
+  const setPrivateMode = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setPrivateMode', enabled });
+    const written = await persist(next);
+    if (!written) throw new Error('Private Mode could not be saved');
+  }, [dispatch, persist]);
+
+  const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
+    dispatch({ type: 'applyFxUpdates', updates });
+  }, []);
+
   const setOnboarded = useCallback(() => {
     dispatch({ type: 'setOnboarded' });
   }, []);
@@ -964,9 +1078,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'loadDemo', state: demoState() });
   }, []);
 
-  const clearAll = useCallback(() => {
+  const clearAll = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    // Move the UI and authoritative ref to the blank state first. Any timer
+    // or mutation that arrives while the erase is in flight can therefore
+    // only write the blank/new state, never resurrect the old ledger.
     dispatch({ type: 'clearAll' });
-  }, []);
+
+    // All older encrypted writes finish before the cryptographic erase. The
+    // queue remains non-rejecting for future writes, while this caller keeps
+    // the real result so Settings cannot report success on failure.
+    const destroyOperation = writeQueue.current.then(() => stateStorage.destroy(STORAGE_KEY));
+    writeQueue.current = destroyOperation.then(
+      () => undefined,
+      () => undefined,
+    );
+    await destroyOperation;
+
+    prevChunkCount.current = 0;
+    prevChunks.current = [];
+    prevTransactions.current = null;
+
+    // Recreate only the minimal blank state under a fresh random key. Waiting
+    // here makes "Erase" a completed operation, not a 700 ms intention.
+    const written = await persist(authoritativeState.current);
+    if (!written) throw new Error('Blank encrypted store could not be created');
+  }, [dispatch, persist]);
 
   const value = useMemo(
     () => ({
@@ -975,6 +1116,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       deleteTransaction,
       importBatch,
+      ensureDurable,
       undoBatch,
       upsertBudget,
       deleteBudget,
@@ -996,6 +1138,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       markParserVersion,
       setAppLock,
+      setPrivateMode,
+      applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
       setPro,
@@ -1013,6 +1157,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       deleteTransaction,
       importBatch,
+      ensureDurable,
       undoBatch,
       upsertBudget,
       deleteBudget,
@@ -1034,6 +1179,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       markParserVersion,
       setAppLock,
+      setPrivateMode,
+      applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
       setPro,

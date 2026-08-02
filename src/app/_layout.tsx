@@ -10,8 +10,12 @@ import { LockGate } from '@/components/lock-gate';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
+import { LanguageProvider } from '@/hooks/use-language';
 import { PeriodProvider } from '@/lib/period-context';
 import { StoreProvider, useStore } from '@/lib/store';
+// Required at module scope so expo-task-manager can load the wake-only relay
+// handler when iOS launches the JS bundle in the background.
+import '@/lib/background-relay';
 
 /**
  * Mirrors the whole app left-to-right or right-to-left, live.
@@ -34,10 +38,21 @@ import { StoreProvider, useStore } from '@/lib/store';
  */
 function Direction({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
+  const language = state.language === 'ar' ? 'ar' : 'en';
   return (
-    <View style={[StyleSheet.absoluteFill, { direction: state.language === 'ar' ? 'rtl' : 'ltr' }]}>
-      {children}
-    </View>
+    <LanguageProvider language={language}>
+      <View
+        // Static translation lookups are legal throughout the existing app, but
+        // React Compiler cannot see the module-level language they read and
+        // may retain their first result. A language change is intentionally a
+        // one-off navigator remount: all compiled text is evaluated again
+        // after the reducer has updated the language, and screen-local form
+        // state cannot straddle two opposite writing directions.
+        key={language}
+        style={[StyleSheet.absoluteFill, { direction: language === 'ar' ? 'rtl' : 'ltr' }]}>
+        {children}
+      </View>
+    </LanguageProvider>
   );
 }
 
@@ -109,6 +124,7 @@ export default function RootLayout() {
                 rows, the subscription insight — landed on Unmatched Route. */}
             <Stack.Screen name="cards" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="trusted-devices" options={{ animation: 'slide_from_right' }} />
           </Stack>
           </ToastProvider>
           </OnboardingGate>

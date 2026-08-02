@@ -22,7 +22,7 @@ function t(name, msg, expect) {
   else { pass++; console.log(`✓ ${name}`); }
 }
 
-// ── The exact failure modes from the user's phone ──
+// ── Failure modes pinned by the repository's redacted fixtures ──
 t('merchant stops at "with"',
   'Purchase of AED 50.00 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00',
   { merchant: 'Tabby', amountFils: 5000, category: 'shopping', type: 'expense' });
@@ -108,11 +108,23 @@ if (pay && pay.kind === 'cardPayment' && pay.amountFils === 324000 && pay.card.l
 
 t('multi-currency prefers AED in parens',
   'Purchase of USD 9.99 (AED 36.70) at NETFLIX with Credit Card ending 4821',
-  { amountFils: 3670, merchant: 'Netflix', category: 'entertainment' });
+  {
+    amountFils: 3670,
+    merchant: 'Netflix',
+    category: 'entertainment',
+    originalCurrency: 'USD',
+    originalAmountMinor: 999,
+    fxSource: 'bank',
+  });
 
 t('foreign-only currency converts to AED at the peg',
   'Purchase of USD 49.99 at STEAM GAMES with Credit Card ending 4821',
-  { amountFils: 18359 });
+  {
+    amountFils: 18359,
+    originalCurrency: 'USD',
+    originalAmountMinor: 4999,
+    fxSource: 'fallback',
+  });
 
 const ov = parseSms('Purchase of AED 55.00 at MYSTERY VENDOR with card ending 11', { 'mystery vendor': 'health' });
 if (ov && ov.categoryGuess === 'health') { pass++; console.log('✓ merchant override applied'); }
@@ -338,6 +350,93 @@ t('ADCB style: transaction with available balance suffix',
 t('DIB style: Dhs alias amount parses',
   'Dhs 320.00 debited from your account for payment to SEWA on 16/07/2026',
   { merchant: 'SEWA', amountFils: 32000, category: 'utilities' });
+
+// ── public/redacted named-bank formats ────────────────────────────────
+//
+// These fixtures preserve publicly posted wording while replacing account,
+// card, amount and merchant values where the source did not already redact
+// them. They are format tests, not customer data. Source links and the exact
+// redaction posture live in fixtures/public-sources.md.
+
+const adibCompact = parseSms(
+  'XXX456789 was used for AED 42.50 on Jan 17 2023 1:04PM at CARREFOUR,AE.');
+if (adibCompact && adibCompact.amountFils === 4250 &&
+    adibCompact.merchant === 'Carrefour' && adibCompact.date === '2023-01-17' &&
+    adibCompact.card && adibCompact.card.last4 === '6789') {
+  pass++; console.log('✓ ADIB compact masked-card alert keeps the last four digits');
+} else {
+  fail++; console.log('✗ ADIB compact masked-card alert keeps the last four digits',
+    JSON.stringify(adibCompact && {
+      a: adibCompact.amountFils, m: adibCompact.merchant,
+      d: adibCompact.date, c: adibCompact.card,
+    }));
+}
+
+const adibCovered = parseSms(
+  'Your ADIB Covered Card ending 4321 was used for AED 84.20 at LULU HYPERMARKET on 31/07/2026.');
+if (adibCovered && adibCovered.card && adibCovered.card.last4 === '4321' &&
+    adibCovered.card.kind === 'credit' && adibCovered.categoryGuess === 'groceries') {
+  pass++; console.log('✓ ADIB Covered Card is linked as a credit card');
+} else {
+  fail++; console.log('✗ ADIB Covered Card is linked as a credit card',
+    JSON.stringify(adibCovered && { c: adibCovered.card, cat: adibCovered.categoryGuess }));
+}
+
+t('ADIB Covered Card statement without digits is never imported as money',
+  'Your ADIB Covered Card statement is ready. Total amount due AED 1,200.00 by 15/08/2026.',
+  null);
+
+t('Wio push: AED equivalent beats INR and Craft is recognized',
+  'Payment of INR 270 (AED 10.96) was done at Craft docs using your Wio Personal card 68XX with Own AED funds',
+  { merchant: 'Craft', amountFils: 1096, category: 'entertainment', type: 'expense' });
+
+const mashreqDomains = parseSms(
+  'Please note the details of a recent transaction on your Mashreq Credit Card. Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at GOOGLE *Domains g.co/helppay# US on 22Jan18 09:35 AM. Available limit is AED 2207.33.');
+if (mashreqDomains && mashreqDomains.amountFils === 8814 &&
+    mashreqDomains.merchant === 'Google Domains' &&
+    mashreqDomains.categoryGuess === 'entertainment' &&
+    mashreqDomains.date === '2018-01-22' &&
+    mashreqDomains.card && mashreqDomains.card.last4 === '0000' &&
+    mashreqDomains.card.kind === 'credit' &&
+    mashreqDomains.snapshotKind === 'limit' && mashreqDomains.snapshotFils === 220733) {
+  pass++; console.log('✓ Mashreq compact-date FX purchase ignores the co-brand when categorizing');
+} else {
+  fail++; console.log('✗ Mashreq compact-date FX purchase ignores the co-brand when categorizing',
+    JSON.stringify(mashreqDomains && {
+      a: mashreqDomains.amountFils, m: mashreqDomains.merchant,
+      cat: mashreqDomains.categoryGuess, d: mashreqDomains.date,
+      c: mashreqDomains.card, sk: mashreqDomains.snapshotKind,
+      sf: mashreqDomains.snapshotFils,
+    }));
+}
+
+const mashreqGhs = parseSms(
+  'Thank you for using your card ending 0000 for GHS 120.00 at MAC LEGENDARY ENTERPRISE on 21-SEP-2023 11:10 PM. Avl.Limit: AED 56,458.26');
+if (mashreqGhs && mashreqGhs.amountFils === 3786 &&
+    mashreqGhs.merchant === 'Mac Legendary Enterprise' &&
+    mashreqGhs.date === '2023-09-21' &&
+    mashreqGhs.card && mashreqGhs.card.last4 === '0000' &&
+    mashreqGhs.snapshotKind === 'limit' && mashreqGhs.snapshotFils === 5645826) {
+  pass++; console.log('✓ Mashreq "using your card" GHS alert parses instead of disappearing');
+} else {
+  fail++; console.log('✗ Mashreq "using your card" GHS alert parses instead of disappearing',
+    JSON.stringify(mashreqGhs && {
+      a: mashreqGhs.amountFils, m: mashreqGhs.merchant,
+      d: mashreqGhs.date, c: mashreqGhs.card,
+      sk: mashreqGhs.snapshotKind, sf: mashreqGhs.snapshotFils,
+    }));
+}
+
+t('Mashreq aggregate catch-up notice is not invented as one purchase',
+  'A few purchase transactions made on your Mashreq Debit Card between 01 April & 02 May\'24 and notified via SMS/email at the time were not debited from your account and will be debited on 31 July\'24 for total amount of AED 120.00. Transaction details have been sent to your email. Kindly ensure sufficient funds in your account to cover the amount.',
+  null);
+
+// RAKBANK's official alert page confirms retail-spend alerts but publishes no
+// message body. This is deliberately a grammar probe, not presented as a real
+// corpus row; it keeps named-bank coverage visible without fabricating a quote.
+t('RAKBANK retail-alert grammar probe',
+  'Your RAKBANK Credit Card ending 0000 was used for AED 120.00 at CARREFOUR on 31/07/2026. Available credit limit AED 8,700.00',
+  { merchant: 'Carrefour', amountFils: 12000, category: 'groceries', date: '2026-07-31' });
 
 // ── FAB account credit: "Your balance is" quotes the balance with no Avl prefix ──
 const fabCredit = parseSms(
@@ -899,7 +998,7 @@ t('a bare article never becomes the merchant',
   'Dear Customer, Your payment to the account number 124822 has been processed. Amount Due: AED 408.45 Amount Paid: AED 408.45',
   { merchant: 'Payment to •4822', amountFils: 40845 });
 
-// ── The second corpus from the user's phone ──
+// ── The repository's second redacted corpus ──
 
 // Masked figures. The bank redacts leading digits; what is left is a fragment,
 // and reading it invented a 32,031.55 purchase out of a card number.
@@ -1192,7 +1291,7 @@ t('29 Feb in a non-leap year is rejected',
   'Purchase of AED 10.00 with Credit Card ending 4833 at LULU on 29/02/2025',
   { date: null });
 
-// ── Formats from a second user's inbox (a 346-message accuracy report) ──
+// ── Formats from the second repository-supplied redacted accuracy report ──
 // Every case below was in that report because the parser could not read it.
 
 // The single biggest family: the payee sits BEFORE the amount, with none of

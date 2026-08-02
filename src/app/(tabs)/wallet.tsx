@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
@@ -23,31 +24,32 @@ import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useLanguage } from '@/hooks/use-language';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { isSpending } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthSeries } from '@/lib/analytics';
+import { summarizeForeignActivity } from '@/lib/fx-summary';
 import {
-  cardTitle,
   formatAED,
   formatAmount,
   monthKey,
   monthLabel,
   parseAmountToFils,
-  shortDate,
-  toISODate,
   totalAsShown,
 } from '@/lib/format';
 import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
-import { t } from '@/lib/i18n';
+import { t, tf, type StringKey } from '@/lib/i18n';
 
 
-const KIND_META: Record<AccountKind, { label: string; icon: import('@/components/ui/icon').IconName }> = {
-  bank: { label: 'Bank', icon: 'bank' },
-  card: { label: 'Card', icon: 'wallet' },
-  cash: { label: 'Cash', icon: 'cash' },
+const KIND_META: Record<AccountKind, { labelKey: StringKey; icon: import('@/components/ui/icon').IconName }> = {
+  bank: { labelKey: 'accountKindBank', icon: 'bank' },
+  card: { labelKey: 'accountKindCard', icon: 'wallet' },
+  cash: { labelKey: 'accountKindCash', icon: 'cash' },
 };
 
 const ACCOUNT_COLORS = ['#2DD4A8', '#60A5FA', '#E3B54A', '#F472B6', '#A78BFA', '#FB923C'];
@@ -60,16 +62,19 @@ const isIconName = (v: string): v is (typeof GOAL_ICONS)[number] =>
 /** "4 minutes ago", "yesterday" — a timestamp nobody has to decode. */
 function relativeSince(ts: number, now: Date): string {
   const mins = Math.max(0, Math.round((now.getTime() - ts) / 60_000));
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  if (mins < 1) return t('justNow');
+  if (mins < 60) return tf('minutesAgo', { count: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  if (hours < 24) return tf('hoursAgo', { count: hours });
   const days = Math.round(hours / 24);
-  return days === 1 ? 'yesterday' : `${days} days ago`;
+  return days === 1 ? t('yesterday') : tf('daysAgo', { count: days });
 }
 
 export default function WalletScreen() {
   const theme = useTheme();
+  const dark = useColorScheme() === 'dark';
+  const language = useLanguage();
+  const reducedMotion = useReducedMotion();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const {
@@ -77,7 +82,6 @@ export default function WalletScreen() {
     addAccount,
     editAccount,
     deleteAccount,
-    payCardDue,
     addGoal,
     editGoal,
     deleteGoal,
@@ -86,7 +90,6 @@ export default function WalletScreen() {
   } = useStore();
 
   const now = useMemo(() => new Date(), []);
-  const todayISO = toISODate(now);
 
   const [adderVisible, setAdderVisible] = useState(false);
   const [name, setName] = useState('');
@@ -106,8 +109,9 @@ export default function WalletScreen() {
    * Movement since the start of the six-month window. A single figure with no
    * direction is a number; with a direction it is an answer.
    */
+  const worthSeries = useMemo(() => netWorthSeries(state).slice(-6), [state]);
   const worthChange = useMemo(() => {
-    const series = netWorthSeries(state);
+    const series = worthSeries;
     if (series.length < 2) return null;
     const first = series[0];
     // Both ends come from the series. Subtracting the headline `total` from
@@ -117,7 +121,18 @@ export default function WalletScreen() {
     // not a movement — it is the gap between two ways of measuring.
     const last = series[series.length - 1];
     return { fils: last.fils - first.fils, since: monthLabel(first.key, true) };
-  }, [state]);
+  }, [worthSeries]);
+  const worthChart = useMemo(() => {
+    if (worthSeries.length === 0) return [];
+    const values = worthSeries.map((point) => point.fils);
+    const low = Math.min(...values);
+    const high = Math.max(...values);
+    const span = Math.max(1, high - low);
+    return worthSeries.map((point) => ({
+      ...point,
+      height: 10 + Math.round(((point.fils - low) / span) * 30),
+    }));
+  }, [worthSeries]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const reissues = useMemo(() => reissueSuggestions(state, now), [state, now]);
   // Totalled AS SHOWN, because this figure is printed directly above the
@@ -167,6 +182,18 @@ export default function WalletScreen() {
     return map;
   }, [state.transactions, now]);
 
+  const currencies = useMemo(() => {
+    const key = monthKey(now);
+    return summarizeForeignActivity(
+      state.transactions,
+      (transaction) => monthKey(transaction.date) === key,
+    ).groups;
+  }, [state.transactions, now]);
+  const currenciesTotalFils = useMemo(
+    () => totalAsShown(currencies.map((group) => group.localFils)),
+    [currencies],
+  );
+
   const saveAccount = () => {
     if (!name.trim()) return;
     addAccount({
@@ -192,8 +219,8 @@ export default function WalletScreen() {
   const addToGoal = (goalId: string, goalTitle2: string) => {
     if (Platform.OS === 'web') return;
     Alert.prompt?.(
-      `Add to ${goalTitle2}`,
-      'Amount in AED',
+      tf('addToGoal', { goal: goalTitle2 }),
+      t('amountInAed'),
       (text) => {
         const fils = parseAmountToFils(text ?? '');
         const goal = state.goals.find((g) => g.id === goalId);
@@ -212,11 +239,11 @@ export default function WalletScreen() {
 
   const confirmDeleteAccount = (id: string, accName: string) => {
     Alert.alert(
-      'Remove account?',
-      `"${accName}" and all its transactions will be deleted. This cannot be undone.`,
+      t('removeAccountTitle'),
+      tf('removeAccountBody', { name: accName }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteAccount(id) },
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('delete'), style: 'destructive', onPress: () => deleteAccount(id) },
       ],
     );
   };
@@ -228,41 +255,12 @@ export default function WalletScreen() {
         onPress: () => editAccount(account.id, { archived: !account.archived }),
       },
       {
-        text: 'Delete',
+        text: t('delete'),
         style: 'destructive',
         onPress: () => confirmDeleteAccount(account.id, account.name),
       },
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('cancel'), style: 'cancel' },
     ]);
-  };
-
-  const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
-    Alert.alert(
-      `Pay ${accName}?`,
-      `Marks ${formatAED(remainingFils, { decimals: false })} as paid and records the transfer.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark paid',
-          onPress: () =>
-            payCardDue(
-              dueId,
-              remainingFils,
-              {
-                type: 'income',
-                amountFils: remainingFils,
-                category: 'other',
-                accountId,
-                title: `${accName} payment`,
-                date: todayISO,
-                source: 'manual',
-                isTransfer: true,
-              },
-              true,
-            ),
-        },
-      ],
-    );
   };
 
   return (
@@ -274,12 +272,12 @@ export default function WalletScreen() {
             <View style={styles.headerActions}>
               <IconButton
                 name="sliders"
-                label="Settings"
+                label={t('settingsTitle')}
                 onPress={() => router.push('/settings')}
               />
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="New account"
+                accessibilityLabel={t('newAccount')}
                 onPress={() => setAdderVisible(true)}
                 style={[styles.addBtn, { backgroundColor: theme.primary }]}>
                 <Icon name="plus" size={19} color={theme.onPrimary} strokeWidth={2.2} />
@@ -288,7 +286,14 @@ export default function WalletScreen() {
           </View>
 
           {/* The one figure this screen exists to show. */}
-          <View style={styles.worth}>
+          <View style={[styles.worth, { borderColor: theme.primaryBorder }]}>
+            <LinearGradient
+              pointerEvents="none"
+              colors={dark ? ['#173D35', '#172A24', '#151A17'] : ['#DDF8EF', '#F2F7F3', '#F8F8F5']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
             <ThemedText type="micro" themeColor="textTertiary">
               {t('netWorth')}
             </ThemedText>
@@ -305,88 +310,126 @@ export default function WalletScreen() {
                 type="meta"
                 tabular
                 style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
-                {worthChange.fils >= 0 ? '+' : '−'}
-                {formatAmount(Math.abs(worthChange.fils), { decimals: false })} since{' '}
-                {worthChange.since}
+                {tf('walletChangeSince', {
+                  amount: `${worthChange.fils >= 0 ? '+' : '−'}${formatAmount(
+                    Math.abs(worthChange.fils),
+                    { decimals: false },
+                  )}`,
+                  date: worthChange.since,
+                })}
               </ThemedText>
             )}
+            {worthChart.length > 1 && (
+              <View
+                accessible
+                accessibilityLabel={t('netWorth6mo')}
+                style={styles.worthChart}>
+                {worthChart.map((point, index) => (
+                  <Animated.View
+                    key={point.key}
+                    entering={
+                      reducedMotion
+                        ? undefined
+                        : FadeInDown.delay(index * 45).duration(360)
+                    }
+                    style={styles.worthChartColumn}>
+                    <View
+                      style={[
+                        styles.worthChartBar,
+                        {
+                          height: point.height,
+                          backgroundColor:
+                            index === worthChart.length - 1
+                              ? theme.primary
+                              : `${theme.primary}4d`,
+                        },
+                      ]}
+                    />
+                  </Animated.View>
+                ))}
+              </View>
+            )}
+            {worthChart.length > 1 && (
+              <View style={styles.worthChartLabels}>
+                <ThemedText type="nano" themeColor="textTertiary">
+                  {monthLabel(worthChart[0].key, true)}
+                </ThemedText>
+                <ThemedText type="nano" themeColor="textTertiary">
+                  {monthLabel(worthChart[worthChart.length - 1].key, true)}
+                </ThemedText>
+              </View>
+            )}
           </View>
+
+          {currencies.length > 0 && (
+            <View style={styles.section}>
+              <SectionHeader
+                title={t('walletCurrencies')}
+                right={t('review')}
+                onPressRight={() => router.push('/currency')}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('walletCurrencies')}
+                onPress={() => {
+                  tapped();
+                  router.push('/currency');
+                }}
+                style={({ pressed }) => [
+                  styles.summaryLink,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                  },
+                ]}>
+                <View style={[styles.summaryIcon, { backgroundColor: theme.primarySoft }]}>
+                  <Icon name="plane" size={17} color={theme.primary} />
+                </View>
+                <View style={styles.summaryCopy}>
+                  <ThemedText type="smallBold">{t('currencyActivityTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                    {currencies.slice(0, 3).map((group) => group.currency).join(' · ')}
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                  {formatAED(currenciesTotalFils, { decimals: false })}
+                </ThemedText>
+                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+              </Pressable>
+            </View>
+          )}
 
           {/* Card dues */}
           {dues.length > 0 && (
             <View style={styles.section}>
-              <SectionHeader
-                title={t('cardPaymentsDue')}
-                right={`${formatAED(duesTotalFils, { decimals: false })} total`}
-              />
-              {dues.map(({ due, status, daysLeft, remainingFils, belowMinimum }, i) => {
-                const account = state.accounts.find((a) => a.id === due.accountId);
-                const urgent = status === 'urgent' || status === 'overdue';
-                // Only the most pressing due is shouted in the alert color. A
-                // column of identical red rows reads as one alarm and hides
-                // which card actually needs paying first.
-                const leading = i === 0 && urgent;
-                return (
-                  <Animated.View key={due.id} entering={FadeInDown.duration(300)}>
-                    <View
-                      style={[
-                        styles.dueRow,
-                        i > 0 && {
-                          borderTopWidth: StyleSheet.hairlineWidth,
-                          borderTopColor: theme.cardBorder,
-                        },
-                      ]}>
-                      <View
-                        style={[
-                          styles.dueMarker,
-                          { backgroundColor: leading ? theme.expenseGraphic : urgent ? `${theme.expenseGraphic}55` : theme.track },
-                        ]}
-                      />
-                      <View style={styles.dueInfo}>
-                        <ThemedText type="default" numberOfLines={1}>
-                          {cardTitle(account?.name ?? 'Card')}
-                        </ThemedText>
-                        <ThemedText
-                          type="small"
-                          themeColor={leading ? undefined : 'textSecondary'}
-                          style={leading ? { color: theme.expense } : undefined}>
-                          {status === 'overdue'
-                            ? `${-daysLeft}d overdue`
-                            : `Pay by ${shortDate(due.dueDate)} · ${daysLeft}d left`}
-                          {belowMinimum ? ` · min ${formatAED(due.minDueFils, { decimals: false })}` : ''}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.dueRight}>
-                        <ThemedText
-                          type="heading"
-                          tabular
-                          style={leading ? { color: theme.expense } : undefined}>
-                          {formatAED(remainingFils, { decimals: false })}
-                        </ThemedText>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Mark ${account?.name ?? 'card'} as paid`}
-                          onPress={() =>
-                            onPayDue(due.id, remainingFils, due.accountId, account?.name ?? 'Card')
-                          }
-                          hitSlop={8}
-                          style={({ pressed }) => [
-                            styles.payBtn,
-                            {
-                              backgroundColor: pressed ? `${theme.primary}2e` : `${theme.primary}17`,
-                              borderColor: `${theme.primary}44`,
-                              transform: [{ scale: pressed ? 0.97 : 1 }],
-                            },
-                          ]}>
-                          <ThemedText type="nano" style={{ color: theme.primary }}>
-                            Mark paid
-                          </ThemedText>
-                        </Pressable>
-                      </View>
-                    </View>
-                  </Animated.View>
-                );
-              })}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('cardPaymentsDue')}
+                onPress={() => {
+                  tapped();
+                  router.push('/bills');
+                }}
+                style={({ pressed }) => [
+                  styles.summaryLink,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                  },
+                ]}>
+                <View style={[styles.summaryIcon, { backgroundColor: theme.expenseSoftBg }]}>
+                  <Icon name="wallet" size={17} color={theme.expense} />
+                </View>
+                <View style={styles.summaryCopy}>
+                  <ThemedText type="smallBold">{t('cardPaymentsDue')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {tf('itemsTracked', { count: dues.length })}
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                  {formatAED(duesTotalFils, { decimals: false })}
+                </ThemedText>
+                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+              </Pressable>
             </View>
           )}
 
@@ -412,33 +455,36 @@ export default function WalletScreen() {
                   <View
                     key={r.newAccountId}
                     style={[styles.reissue, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-                    <ThemedText type="small">Same card, renewed?</ThemedText>
+                    <ThemedText type="small">{t('sameCardRenewed')}</ThemedText>
                     <ThemedText type="meta" themeColor="textSecondary">
-                      {`•${fresh.last4} has a statement but nothing spent on it. Is it ${prior.name} with new digits? Linking moves the history across so your payments settle the bill.`}
+                      {tf('renewedCardDetected', { last4: fresh.last4 ?? '••••', name: prior.name })}
                     </ThemedText>
                     <View style={styles.reissueActions}>
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={`Link ${prior.last4} to ${fresh.last4}`}
+                        accessibilityLabel={tf('linkCardsA11y', {
+                          old: prior.last4 ?? '••••',
+                          next: fresh.last4 ?? '••••',
+                        })}
                         onPress={() => {
                           tapped();
                           mergeRenewedCard(prior.id, fresh.id);
                         }}
                         style={[styles.reissueBtn, { backgroundColor: theme.primary }]}>
                         <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                          {`Yes · same as •${prior.last4}`}
+                          {tf('sameAsCard', { last4: prior.last4 ?? '••••' })}
                         </ThemedText>
                       </Pressable>
                       <Pressable
                         accessibilityRole="button"
-                        accessibilityLabel={`Keep ${fresh.last4} separate`}
+                        accessibilityLabel={tf('keepCardSeparateA11y', { last4: fresh.last4 ?? '••••' })}
                         onPress={() => {
                           tapped();
                           markCardsDistinct(fresh.id);
                         }}
                         style={[styles.reissueBtn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
                         <ThemedText type="nano" themeColor="textSecondary">
-                          Different card
+                          {t('differentCard')}
                         </ThemedText>
                       </Pressable>
                     </View>
@@ -479,19 +525,24 @@ export default function WalletScreen() {
                         <AccountTile account={account} />
                         <View style={styles.accountInfo}>
                           <ThemedText type="default" numberOfLines={1}>
-                            {isCredit ? 'Credit' : 'Debit'}
+                            {isCredit ? t('credit') : t('debit')}
                             {account.last4 ? ` ·· ${account.last4}` : ''}
                           </ThemedText>
                           <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
                             {spent > 0
-                              ? `${formatAED(spent, { decimals: false })} ${t('spentThisMonthCaption')}`
+                              ? tf('cardSpentThisMonth', {
+                                  amount: formatAmount(spent, { decimals: false }),
+                                })
                               : t('nothingSpentThisMonth')}
                           </ThemedText>
                         </View>
                         <View style={styles.accountRight}>
-                          <ThemedText
-                            type="smallBold"
-                            tabular
+                          <View style={styles.compactMoney}>
+                            <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                            <ThemedText
+                              type="smallBold"
+                              tabular
+                              numberOfLines={1}
                             style={{
                               color:
                                 figure.kind === 'owed' && (figure.fils ?? 0) > 0
@@ -499,10 +550,11 @@ export default function WalletScreen() {
                                   : theme.text,
                               fontSize: 15,
                             }}>
-                            {figure.fils === null
-                              ? '—'
-                              : formatAED(Math.abs(figure.fils), { decimals: false })}
-                          </ThemedText>
+                              {figure.fils === null
+                                ? '—'
+                                : formatAmount(Math.abs(figure.fils), { decimals: false })}
+                            </ThemedText>
+                          </View>
                           <ThemedText type="micro" themeColor="textSecondary">
                             {figure.kind === 'owed'
                               ? t('owed')
@@ -541,14 +593,17 @@ export default function WalletScreen() {
                         {account.name}
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
-                        {meta.label}
+                        {t(meta.labelKey)}
                         {account.last4 ? ` ·· ${account.last4}` : ''}
                       </ThemedText>
                     </View>
                     <View style={styles.accountRight}>
-                      <ThemedText type="smallBold" tabular style={{ fontSize: 15 }}>
-                        {balance !== null ? formatAED(balance, { decimals: false }) : '—'}
-                      </ThemedText>
+                      <View style={styles.compactMoney}>
+                        <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                        <ThemedText type="smallBold" tabular numberOfLines={1} style={{ fontSize: 15 }}>
+                          {balance !== null ? formatAmount(balance, { decimals: false }) : '—'}
+                        </ThemedText>
+                      </View>
                       {fromBank ? (
                         <ThemedText type="micro" themeColor="textSecondary">
                           {t('perBankSms')}
@@ -606,7 +661,7 @@ export default function WalletScreen() {
                     </Pressable>
                   ))}
                   <ThemedText type="micro" themeColor="textSecondary" style={styles.hint}>
-                    Long-press to unhide or delete
+                    {t('longPressInactive')}
                   </ThemedText>
                 </View>
               )}
@@ -627,9 +682,9 @@ export default function WalletScreen() {
                   key={goal.id}
                   onPress={() => addToGoal(goal.id, goal.title)}
                   onLongPress={() =>
-                    Alert.alert('Delete goal?', goal.title, [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Delete', style: 'destructive', onPress: () => deleteGoal(goal.id) },
+                    Alert.alert(t('deleteGoalTitle'), goal.title, [
+                      { text: t('cancel'), style: 'cancel' },
+                      { text: t('delete'), style: 'destructive', onPress: () => deleteGoal(goal.id) },
                     ])
                   }
                   style={styles.goalRow}>
@@ -669,9 +724,9 @@ export default function WalletScreen() {
                   <Icon name="target" size={17} color={theme.primary} strokeWidth={1.8} />
                 </View>
                 <View style={styles.accountInfo}>
-                  <ThemedText type="smallBold">Set a savings goal</ThemedText>
+                  <ThemedText type="smallBold">{t('setSavingsGoal')}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    Umrah, a car, a rainy-day fund — track it here.
+                    {t('savingsGoalHint')}
                   </ThemedText>
                 </View>
                 <Icon name="chevron-right" size={16} color={theme.textSecondary} />
@@ -701,16 +756,23 @@ export default function WalletScreen() {
               <Icon name="mail" size={17} color={theme.textSecondary} />
               <View style={styles.scanText}>
                 <ThemedText type="small">
-                  {!isSmsScanningAvailable()
+                  {Platform.OS === 'ios'
+                    ? t('importBankActivity')
+                    : !isSmsScanningAvailable()
                     ? t('pasteBankMessage')
                     : state.lastScanTs > 0
-                      ? `Inbox scanned ${relativeSince(state.lastScanTs, now)}`
+                      ? tf('inboxScannedAgo', { time: relativeSince(state.lastScanTs, now) })
                       : t('inboxNotRead')}
                 </ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary" tabular>
-                  {!isSmsScanningAvailable()
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {Platform.OS === 'ios'
+                    ? t('importBankActivityIosDetail')
+                    : !isSmsScanningAvailable()
                     ? t('inboxNeedsAndroid')
-                    : `${smsCount} entr${smsCount === 1 ? 'y' : 'ies'} read on this device · nothing uploaded`}
+                    : tf('entriesReadLocally', {
+                        count: smsCount,
+                        ending: smsCount === 1 ? 'y' : 'ies',
+                      })}
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />
@@ -727,8 +789,8 @@ export default function WalletScreen() {
             onPress={() => {}}>
             <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
             <View style={styles.sheetHeader}>
-              <ThemedText type="heading">New account</ThemedText>
-              <Pressable onPress={() => setAdderVisible(false)}>
+              <ThemedText type="heading">{t('newAccount')}</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('close')} onPress={() => setAdderVisible(false)}>
                 <Icon name="close" size={20} color={theme.textSecondary} />
               </Pressable>
             </View>
@@ -736,9 +798,9 @@ export default function WalletScreen() {
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder="Account name (e.g. ADCB Savings)"
+              placeholder={t('accountNamePlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
             />
 
             <View style={styles.kindRow}>
@@ -755,7 +817,7 @@ export default function WalletScreen() {
                   ]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <Icon name={KIND_META[k].icon} size={13} color={theme.text} />
-                    <ThemedText type="small">{KIND_META[k].label}</ThemedText>
+                    <ThemedText type="small">{t(KIND_META[k].labelKey)}</ThemedText>
                   </View>
                 </Pressable>
               ))}
@@ -767,7 +829,7 @@ export default function WalletScreen() {
                 value={openingText}
                 onChangeText={setOpeningText}
                 keyboardType="numeric"
-                placeholder="Opening balance (optional)"
+                placeholder={t('openingBalanceOptional')}
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
               />
@@ -790,7 +852,7 @@ export default function WalletScreen() {
               onPress={saveAccount}
               disabled={!name.trim()}
               style={[styles.saveBtn, { backgroundColor: theme.primary, opacity: name.trim() ? 1 : 0.45 }]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Add account</ThemedText>
+              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('addAccount')}</ThemedText>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -804,8 +866,8 @@ export default function WalletScreen() {
             onPress={() => {}}>
             <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
             <View style={styles.sheetHeader}>
-              <ThemedText type="heading">New goal</ThemedText>
-              <Pressable onPress={() => setGoalVisible(false)}>
+              <ThemedText type="heading">{t('newGoalTitle')}</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('close')} onPress={() => setGoalVisible(false)}>
                 <Icon name="close" size={20} color={theme.textSecondary} />
               </Pressable>
             </View>
@@ -813,9 +875,9 @@ export default function WalletScreen() {
             <TextInput
               value={goalTitle}
               onChangeText={setGoalTitle}
-              placeholder="Goal (e.g. Umrah trip, new car)"
+              placeholder={t('goalPlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
             />
 
             <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
@@ -824,7 +886,7 @@ export default function WalletScreen() {
                 value={goalTarget}
                 onChangeText={setGoalTarget}
                 keyboardType="numeric"
-                placeholder="Target amount"
+                placeholder={t('targetAmount')}
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
               />
@@ -857,7 +919,7 @@ export default function WalletScreen() {
                   opacity: !goalTitle.trim() || !parseAmountToFils(goalTarget) ? 0.45 : 1,
                 },
               ]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Create goal</ThemedText>
+              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('createGoal')}</ThemedText>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -906,9 +968,31 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     gap: Spacing.five,
   },
-  worth: { gap: Spacing.two, marginTop: -Spacing.two },
+  worth: {
+    gap: Spacing.two,
+    marginTop: -Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.xl,
+    padding: Spacing.four,
+    overflow: 'hidden',
+  },
   worthRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
+  worthChart: {
+    height: 42,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 5,
+    marginTop: Spacing.one,
+  },
+  worthChartColumn: { flex: 1, justifyContent: 'flex-end' },
+  worthChartBar: { width: '100%', borderRadius: 4 },
+  worthChartLabels: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: -Spacing.one,
+  },
   scan: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -937,6 +1021,22 @@ const styles = StyleSheet.create({
   section: {
     gap: Spacing.two,
   },
+  summaryLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.two + 2,
+  },
+  summaryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryCopy: { flex: 1, minWidth: 0, gap: 1 },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -955,12 +1055,16 @@ const styles = StyleSheet.create({
   },
   dueInfo: {
     flex: 1,
+    minWidth: 0,
     gap: 1,
   },
   dueRight: {
+    flexShrink: 0,
+    maxWidth: '42%',
     alignItems: 'flex-end',
     gap: Spacing.one + 2,
   },
+  compactMoney: { flexDirection: 'row', alignItems: 'baseline', gap: 4, flexShrink: 0 },
   payBtn: {
     paddingHorizontal: Spacing.two + 2,
     paddingVertical: Spacing.one + 3,
@@ -985,10 +1089,13 @@ const styles = StyleSheet.create({
   },
   accountInfo: {
     flex: 1,
+    minWidth: 0,
     gap: 1,
   },
   accountRight: {
+    flexShrink: 0,
     alignItems: 'flex-end',
+    marginStart: Spacing.two,
   },
   hint: {
     opacity: 0.8,
@@ -1020,6 +1127,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.three,
   },
   settingRow: {
     flexDirection: 'row',

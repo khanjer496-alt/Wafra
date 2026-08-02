@@ -16,33 +16,31 @@
  */
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo } from 'react-native';
+import { useReducedMotion as useReanimatedReducedMotion } from 'react-native-reanimated';
 
 export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+  // Reanimated exposes the launch-time value synchronously, so an entering
+  // animation cannot race the async AccessibilityInfo query on first paint.
+  const launchReduced = useReanimatedReducedMotion();
+  const [motionReduced, setMotionReduced] = useState(launchReduced);
+  const [screenReader, setScreenReader] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    const apply = (values: boolean[]) => {
-      if (alive) setReduced(values.some(Boolean));
-    };
-
-    Promise.all([
-      AccessibilityInfo.isReduceMotionEnabled(),
-      AccessibilityInfo.isScreenReaderEnabled(),
-    ])
-      .then(apply)
-      .catch(() => {
-        // Web and older platforms may not implement either query. Animating is
-        // the safe default there; it is what every user got before this hook.
-      });
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((value) => {
+        if (alive) setMotionReduced(value);
+      })
+      .catch(() => {});
+    AccessibilityInfo.isScreenReaderEnabled()
+      .then((value) => {
+        if (alive) setScreenReader(value);
+      })
+      .catch(() => {});
 
     const subs = [
-      AccessibilityInfo.addEventListener('reduceMotionChanged', (v) =>
-        setReduced((prev) => v || prev),
-      ),
-      AccessibilityInfo.addEventListener('screenReaderChanged', (v) =>
-        setReduced((prev) => v || prev),
-      ),
+      AccessibilityInfo.addEventListener('reduceMotionChanged', setMotionReduced),
+      AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReader),
     ];
     return () => {
       alive = false;
@@ -50,5 +48,5 @@ export function useReducedMotion(): boolean {
     };
   }, []);
 
-  return reduced;
+  return motionReduced || screenReader;
 }

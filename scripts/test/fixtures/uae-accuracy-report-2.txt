@@ -1,6 +1,6 @@
-# Second accuracy export from the same UAE inbox, after the first round of
-# parser work. The app masks long digit runs before it exports, so this file
-# carries no account numbers.
+# Repository-supplied second redacted accuracy export. The app masks long
+# digit runs before export, so this fixture must carry no full account/card
+# numbers, names, or other directly identifying customer data.
 #
 # The headline is NOT that these could not be read. Look at the "read as"
 # values: the merchant is almost always right. What they have in common is

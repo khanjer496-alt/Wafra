@@ -1,4 +1,8 @@
-# Wafra — Play Store listing (copy-paste ready)
+# Wafra — store listing source copy
+
+Platform claims must be selected for the binary being submitted. Android parses
+bank alerts locally. iPhone automatic capture uses the user-configured Shortcut
+and relay described below.
 
 ## English (default)
 
@@ -10,15 +14,18 @@ Automatic expense tracker for UAE banks. SMS-based, private, AED-first.
 
 **Full description (4000 chars max):**
 
-Wafra reads the transaction alerts your banks already send you and turns
-them into a living picture of your money — every card, every credit-card
-due date, every subscription. No bank logins. Nothing leaves your phone.
+Wafra turns the transaction alerts your banks already send you into
+a living picture of your money — every card, every credit-card
+due date, every subscription. No bank logins and no transaction typing.
 
 TRACK AUTOMATICALLY
-• Every purchase, transfer, salary and fee logged by itself from bank SMS
-• Full history on first scan — years of spending in about a minute
-• Works with 16+ UAE banks: FAB, Emirates NBD, ADCB, ADIB, DIB, Mashreq,
-  RAKBANK, HSBC, Wio, Liv and more — each card recognized by its last digits
+• Android: purchases, transfers, salaries and fees parsed from bank SMS on-device
+• Android: full history on first scan
+• iPhone: a personal Shortcut forwards alerts only from bank senders you select
+• Public-example formats for Emirates NBD, ADCB, FAB, Mashreq, ADIB, Liv,
+  and Wio — each card recognized by its last digits
+• RAKBANK support is a labelled synthetic grammar probe until an attributable
+  message example is available
 
 NEVER MISS A CARD PAYMENT
 • Statement SMS become due dates with countdowns and reminders
@@ -44,19 +51,22 @@ MADE FOR THE UAE
 
 YOUR DATA STAYS YOUR BUSINESS
 • No sign-up — no email, no phone number, no account
-• Everything is processed and stored on your phone. No servers, ever
+• Android bank alerts are processed locally and never sent to Wafra's relay
+• On iPhone, the relay discards raw text immediately and keeps only a structured
+  transaction sealed to that iPhone until acknowledgement, at most 30 days
+• Private Mode keeps processing local and turns iPhone relay capture off
 • Optional fingerprint app lock
 • One-tap backup to a file you own
 
 WHY WAFRA NEEDS SMS PERMISSION
-SMS permission is optional and used only for automatic tracking: banks send
+On Android, SMS permission is optional and used only for automatic tracking: banks send
 an SMS for every transaction, statement and bill, and Wafra reads these
 messages on your device to log them. Messages never leave your phone, and
 non-bank messages are ignored. You can also use Wafra with manual entry.
 
 Try everything free for 3 days. Wafra Pro keeps automatic tracking running
-after that — a small subscription that funds an app with no ads and no data
-collection, ever.
+after that — a small subscription that funds an app with no ads and no sale
+of financial data.
 
 ---
 
@@ -66,19 +76,20 @@ collection, ever.
 وفرة: متتبع مصاريفك في الإمارات
 
 **Short description:**
-تتبع تلقائي لمصاريفك من رسائل البنك. خاص وآمن على هاتفك فقط.
+تتبع تلقائي لمصاريفك من تنبيهات البنك، مصمم للإمارات.
 
 **Full description:**
 
 وفرة يقرأ رسائل التنبيه التي ترسلها بنوكك أصلاً ويحوّلها إلى صورة حيّة
 لأموالك — كل بطاقة، كل استحقاق بطاقة ائتمان، كل اشتراك. بدون تسجيل دخول
-للبنك، ولا شيء يغادر هاتفك.
+للبنك، ودون كتابة العمليات يدوياً.
 
 تتبع تلقائي
-• كل عملية شراء وتحويل وراتب ورسوم تُسجَّل تلقائياً من رسائل البنك
-• السجل الكامل من أول فحص — سنوات من المصاريف في دقيقة تقريباً
-• يدعم أكثر من ١٦ بنكاً إماراتياً: بنك أبوظبي الأول، الإمارات دبي الوطني،
-  أبوظبي التجاري، المشرق، راك بنك وغيرها
+• على أندرويد تُحلَّل رسائل البنك على الجهاز ويُستورد السجل من أول فحص
+• على الآيفون يمرّر اختصار شخصي تنبيهات مرسلي البنوك الذين تختارهم فقط
+• صيغ بأمثلة عامة للإمارات دبي الوطني وأبوظبي التجاري وأبوظبي الأول والمشرق
+  ومصرف أبوظبي الإسلامي وLiv وWio
+• دعم راك بنك حالياً اختبار نحوي اصطناعي موضّح إلى أن يتوفر مثال رسالة موثّق
 
 لا تفوّت دفعة بطاقة
 • كشوف الحساب تتحول إلى تواريخ استحقاق مع عدّاد وتذكيرات
@@ -95,11 +106,14 @@ collection, ever.
 
 خصوصيتك أولاً
 • بدون تسجيل — لا بريد ولا رقم هاتف ولا حساب
-• كل شيء يُعالج ويُخزَّن على هاتفك. لا خوادم أبداً
+• لا تغادر تنبيهات البنك جهاز أندرويد
+• على الآيفون يُحذف النص الخام فور تحليله، ولا تبقى سوى العملية المنظمة
+  المشفّرة لهذا الآيفون حتى الاستلام ولمدة لا تتجاوز ٣٠ يوماً
+• يُبقي الوضع الخاص المعالجة محلية ويوقف ترحيل الآيفون
 • قفل بالبصمة ونسخ احتياطي بملف تملكه أنت
 
 جرّب كل شيء مجاناً ٣ أيام، ثم اشتراك صغير يُبقي التتبع التلقائي يعمل —
-تطبيق بلا إعلانات وبلا جمع بيانات، أبداً.
+تطبيق بلا إعلانات وبلا بيع للبيانات المالية.
 
 ---
 
@@ -108,10 +122,17 @@ collection, ever.
 - **Category:** Finance
 - **Tags:** personal finance, expense tracker
 - **Content rating questionnaire:** no violence/sex/drugs/gambling, no
-  user-generated content, no location sharing, no personal data collected
-  → lands at PEGI 3 / Everyone.
-- **Data safety:** No data collected. No data shared. Data encrypted in
-  transit: N/A (no transmission). Deletion: users erase in-app or uninstall.
+  user-generated content, no location sharing → lands at PEGI 3 / Everyone.
+- **Android Data safety:** bank SMS and notification content is processed
+  on-device and is not sent to the Wafra relay. RevenueCat purchase/anonymous
+  identifier handling must be declared from its current SDK disclosure.
+- **iOS App Privacy:** selected bank-alert content is transmitted to perform the
+  user-configured Shortcut service. Raw text is discarded immediately; a sealed
+  structured financial row can remain for up to 30 days. Confirm the final
+  App Store answers with counsel and the deployed relay jurisdiction.
+- **Deletion:** in-app erase deletes the local ledger and, on iPhone while
+  online, the relay device and queue. Do not claim uninstall alone clears
+  iOS Keychain.
 - **Ads:** No ads.
 - **Target audience:** 18+ (finance).
 - **Countries:** United Arab Emirates first (add Saudi Arabia when the SA

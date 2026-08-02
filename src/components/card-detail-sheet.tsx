@@ -13,7 +13,7 @@ import { duePaidFils } from '@/lib/cards';
 import { shortDate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 
 interface CardDetailSheetProps {
   /** The card to show, or null to keep the sheet closed. */
@@ -69,7 +69,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
   const settledShare = data.billed > 0 ? Math.min(1, (data.billed - data.outstanding) / data.billed) : 0;
 
   return (
-    <BottomSheet visible onClose={onClose} title="Card detail">
+    <BottomSheet visible onClose={onClose} title={t('cardDetail')}>
       <View style={styles.head}>
         <AccountTile account={account} size={46} />
         <View style={styles.headText}>
@@ -77,7 +77,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
             {account.bankName ?? account.name}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
-            {account.cardType === 'credit' ? 'Credit' : 'Debit'}
+            {account.cardType === 'credit' ? t('credit') : t('debit')}
             {account.last4 ? ` ·· ${account.last4}` : ''}
           </ThemedText>
         </View>
@@ -88,10 +88,13 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
         <View style={styles.summary}>
           <View style={styles.summaryRow}>
             <ThemedText type="micro" themeColor="textTertiary">
-              Still owed
+              {t('stillOwed')}
             </ThemedText>
             <ThemedText type="nano" themeColor="textTertiary">
-              {data.openCount} open statement{data.openCount === 1 ? '' : 's'}
+              {tf('openStatements', {
+                count: data.openCount,
+                s: data.openCount === 1 ? '' : 's',
+              })}
             </ThemedText>
           </View>
           <Money fils={data.outstanding} type="sheetAmount" prefix={false} color={theme.expense} />
@@ -102,7 +105,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       )}
 
       <View>
-        <SectionHeader title="Statements" />
+        <SectionHeader title={t('statements')} />
         {data.statements.length === 0 ? (
           <ThemedText type="default" themeColor="textSecondary">
             {t('noStatementYet')}
@@ -117,9 +120,15 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
                   style={[styles.dot, { backgroundColor: settled ? theme.income : theme.expense }]}
                 />
                 <View style={styles.rowText}>
-                  <ThemedText type="small">Due {shortDate(d.dueDate)}</ThemedText>
+                  <ThemedText type="small">
+                    {tf('dueDate', { date: shortDate(d.dueDate) })}
+                  </ThemedText>
                   <ThemedText type="meta" themeColor="textTertiary" tabular>
-                    {settled ? 'Settled' : `${Math.round((paid / d.totalDueFils) * 100)}% paid`}
+                    {settled
+                      ? t('settled')
+                      : tf('percentPaid', {
+                          percent: Math.round((paid / d.totalDueFils) * 100),
+                        })}
                   </ThemedText>
                 </View>
                 <Money fils={d.totalDueFils} prefix={false} />
@@ -131,7 +140,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
 
       <View>
         <SectionHeader
-          title="Payments made"
+          title={t('paymentsMade')}
           trailing={<Money fils={data.paidTotal} prefix={false} type="nano" />}
         />
         {data.payments.length === 0 ? (

@@ -14,9 +14,10 @@
  * dues, bills, and subscriptions. The user does not think of those as three
  * kinds of thing. They are all money that leaves on a date.
  */
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState as RNAppState, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { AppState as RNAppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -34,20 +35,27 @@ import { SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { enableRelayBackgroundSync } from '@/lib/background-relay';
 import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
+import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
+import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { committed, tapped } from '@/lib/haptics';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
-import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
+import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { refreshEntitlement } from '@/lib/billing';
+import { getActiveMarket } from '@/lib/markets';
+import { getRelayAutomationProof, getRelayConfig } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
@@ -71,6 +79,181 @@ let lastScanAt = 0;
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
 
+type CaptureSurfaceState =
+  | 'checking'
+  | 'active'
+  | 'pipe-ready'
+  | 'needs-test'
+  | 'off'
+  | 'paused'
+  | 'unsupported';
+
+/**
+ * The product promise, above the fold. This is deliberately a live status and
+ * an action rather than marketing copy: it says whether capture is actually
+ * connected on this platform, and tapping it either syncs now or finishes the
+ * platform-specific setup.
+ */
+function AutomaticCapture({
+  status,
+  lastCaptureDate,
+  onPress,
+}: {
+  status: CaptureSurfaceState;
+  lastCaptureDate?: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const reducedMotion = useReducedMotion();
+  const active = status === 'active';
+  const title =
+    status === 'paused'
+      ? t('trialEndedBanner')
+      : status === 'checking'
+      ? t('captureChecking')
+      : status === 'unsupported'
+        ? t('capturePhoneOnly')
+        : Platform.OS === 'ios'
+          ? active
+            ? t('captureIosOn')
+            : status === 'pipe-ready'
+              ? t('captureIosPipeReady')
+            : status === 'needs-test'
+              ? t('captureIosNeedsTest')
+              : t('captureIosOff')
+          : active
+            ? t('captureAndroidOn')
+            : t('turnOnTracking');
+  const detail = status === 'paused'
+    ? t('trialEndedBannerSub')
+    : status === 'checking' || status === 'unsupported'
+      ? t('capturePhoneOnly')
+      : active
+    ? lastCaptureDate
+      ? tf('captureLatest', { date: shortDate(lastCaptureDate) })
+      : Platform.OS === 'ios'
+        ? t('captureSyncNow')
+        : t('captureAndroidPrivate')
+    : status === 'pipe-ready'
+      ? t('iosTestLimit')
+    : Platform.OS === 'android'
+      ? t('trackingPrivacy')
+      : t('captureIosSetupDetail');
+  const badge = status === 'paused'
+    ? t('pausedBadge')
+    : active
+    ? t('captureReady')
+    : status === 'pipe-ready'
+      ? t('captureVerify')
+    : status === 'needs-test'
+      ? t('captureFinish')
+      : status === 'checking' || status === 'unsupported'
+        ? null
+        : t('captureEnable');
+
+  return (
+    <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(280)}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${t('automaticCapture')}. ${title}. ${detail}`}
+        disabled={status === 'checking' || status === 'unsupported'}
+        onPress={() => {
+          tapped();
+          onPress();
+        }}
+        style={({ pressed }) => [
+          styles.capture,
+          {
+            backgroundColor: active ? theme.primarySoft : theme.backgroundElement,
+            borderColor: active ? theme.primaryBorder : theme.cardBorder,
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
+        ]}>
+        <View
+          style={[
+            styles.captureIcon,
+            { backgroundColor: active ? theme.primary : theme.backgroundSelected },
+          ]}>
+          <Icon name="spark" size={18} color={active ? theme.onPrimary : theme.textSecondary} />
+        </View>
+        <View style={styles.captureText}>
+          <View style={styles.captureTitleRow}>
+            {active && <View style={[styles.liveDot, { backgroundColor: theme.primary }]} />}
+            <ThemedText type="smallBold" numberOfLines={2} style={styles.captureTitle}>
+              {title}
+            </ThemedText>
+          </View>
+          <ThemedText type="meta" themeColor="textTertiary">
+            {detail}
+          </ThemedText>
+        </View>
+        {badge ? (
+          <ThemedText type="nano" style={{ color: active ? theme.primary : theme.warning }}>
+            {badge}
+          </ThemedText>
+        ) : null}
+        {status !== 'checking' && status !== 'unsupported' ? (
+          <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+        ) : null}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }) {
+  const theme = useTheme();
+  const router = useRouter();
+  const language = useStore().state.language === 'ar' ? 'ar' : 'en';
+  if (summary.groups.length === 0) return null;
+  const top = summary.groups.slice(0, 2);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${t('foreignActivity')}, ${formatAED(summary.totalLocalFils)}`}
+      onPress={() => {
+        tapped();
+        router.push('/currency');
+      }}
+      style={({ pressed }) => [
+        styles.currencyPreview,
+        {
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.cardBorder,
+          transform: [{ scale: pressed ? 0.985 : 1 }],
+        },
+      ]}>
+      <View style={styles.currencyPreviewTop}>
+        <View style={styles.currencyPreviewHeading}>
+          <Icon name="plane" size={17} color={theme.primary} />
+          <ThemedText type="micro" themeColor="textTertiary">
+            {t('foreignActivity')}
+          </ThemedText>
+        </View>
+        <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+      </View>
+      <ThemedText type="heading" tabular>
+        {formatAED(summary.totalLocalFils, { decimals: false })}
+      </ThemedText>
+      <View style={styles.currencyRows}>
+        {top.map((group) => (
+          <View key={group.currency} style={styles.currencyRow}>
+            <ThemedText type="smallBold" tabular style={{ color: theme.primary }}>
+              {group.currency}
+            </ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1} style={styles.currencyOriginal}>
+              {formatOriginalCurrency(group.originalMinor, group.currency, language)}
+            </ThemedText>
+            <ThemedText type="small" tabular>
+              {formatAED(group.localFils, { decimals: false })}
+            </ThemedText>
+          </View>
+        ))}
+      </View>
+    </Pressable>
+  );
+}
+
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
 
@@ -89,6 +272,8 @@ function Hero({
 }) {
   const theme = useTheme();
   const router = useRouter();
+  const reducedMotion = useReducedMotion();
+  const dark = useColorScheme() === 'dark';
 
   const caption =
     (netFils >= 0 ? t('saved') : t('overspent')) +
@@ -97,12 +282,20 @@ function Hero({
       ? t('soFarThisMonth')
       : period.mode === 'all'
         ? t('allTime')
-        : `${t('inWord')} ${periodLabel(period)}`) +
-    ` · ${t('inMinusOut')}`;
+        : `${t('inWord')} ${periodLabel(period)}`);
 
   return (
-    <Animated.View entering={FadeInDown.duration(320)}>
-      <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
+    <Animated.View
+      entering={reducedMotion ? undefined : FadeInDown.duration(320)}
+      style={[styles.heroShell, { borderColor: theme.primaryBorder }]}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={dark ? ['#173D35', '#172A24', '#151A17'] : ['#DDF8EF', '#F2F7F3', '#F8F8F5']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
 
@@ -129,13 +322,18 @@ function Hero({
       <View style={styles.split}>
         {(
           [
-            ['In', incomeFils, theme.income, '/transactions?type=income'],
-            ['Out', expenseFils, theme.expense, '/transactions?type=expense'],
+            [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
+            [t('outLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
         ).map(([label, fils, color, href], i) => (
           <Pressable
             key={label}
-            onPress={() => router.push(href)}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
+            onPress={() => {
+              tapped();
+              router.push(href);
+            }}
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
@@ -177,6 +375,7 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
   const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
@@ -197,7 +396,9 @@ function LeavingSoon({
   const hidden = items.length - shown.length;
 
   return (
-    <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
+    <Animated.View
+      entering={reducedMotion ? undefined : FadeInDown.delay(80).duration(320)}
+      style={styles.section}>
       <SectionHeader
         title={
           late > 0
@@ -239,7 +440,7 @@ function LeavingSoon({
       {hidden > 0 && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`See all ${items.length} upcoming payments`}
+          accessibilityLabel={tf('seeUpcomingPaymentsA11y', { count: items.length })}
           // Expand in place. This used to push to Bills, which opens on its
           // Cards segment — so tapping "3 more" under three card rows showed
           // the SAME three cards, and the three items actually being counted
@@ -255,7 +456,7 @@ function LeavingSoon({
           <Icon name="chevron-right" size={17} color={theme.textTertiary} />
           <View style={styles.leaveText}>
             <ThemedText type="small" themeColor="textSecondary">
-              {hidden} more
+              {tf('moreItems', { count: hidden })}
             </ThemedText>
           </View>
           <ThemedText type="small" tabular themeColor="textSecondary">
@@ -286,7 +487,7 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Report ${formats} unrecognised bank message formats`}
+      accessibilityLabel={tf('reportUnreadFormatsA11y', { count: formats })}
       onPress={() => router.push('/accuracy')}
       style={({ pressed }) => [
         styles.notice,
@@ -298,10 +499,10 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
       <Icon name="search" size={17} color={theme.warning} />
       <View style={styles.noticeText}>
         <ThemedText type="small">
-          {formats} message {formats === 1 ? 'format' : 'formats'} we couldn&apos;t read
+          {tf('unreadFormatCount', { count: formats, s: formats === 1 ? '' : 's' })}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary">
-          Send them over and they get recognised next release. Digits are masked.
+          {t('unreadMessageHint')}
         </ThemedText>
       </View>
       <Icon name="chevron-right" size={16} color={theme.textTertiary} />
@@ -313,21 +514,71 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
-  const { state, importBatch, undoBatch, markParserVersion, setPro } = useStore();
+  const {
+    state,
+    importBatch,
+    ensureDurable,
+    undoBatch,
+    markParserVersion,
+    setPro,
+    applyFxUpdates,
+  } = useStore();
   const { period } = usePeriod();
 
   const now = useMemo(() => new Date(), []);
   const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
+  const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
+  const lastFxAttempt = React.useRef('');
+
+  // Read the real platform capability whenever Home regains focus. This makes
+  // the card turn on immediately after returning from Settings or iOS setup,
+  // without making the user relaunch to see that their choice worked.
+  useFocusEffect(
+    useCallback(() => {
+      let current = true;
+      void (async () => {
+        if (Platform.OS === 'ios') {
+          const [cfg, automationProof] = await Promise.all([
+            getRelayConfig(),
+            getRelayAutomationProof(),
+          ]);
+          if (!current) return;
+          setCaptureState(
+            cfg?.setupState === 'verified' && automationProof
+              ? 'active'
+              : cfg?.setupState === 'verified'
+                ? 'pipe-ready'
+              : cfg
+                ? 'needs-test'
+                : 'off',
+          );
+          return;
+        }
+        if (Platform.OS === 'android' && isSmsScanningAvailable()) {
+          const granted = await hasSmsPermission().catch(() => false);
+          if (!current) return;
+          setNeedsPermission(!granted);
+          setCaptureState(granted ? 'active' : 'off');
+          return;
+        }
+        if (current) setCaptureState('unsupported');
+      })();
+      return () => {
+        current = false;
+      };
+    }, []),
+  );
 
   /** A dated outgoing opens the sheet for whatever kind of thing it is. */
   const openOutgoing = useCallback(
@@ -387,6 +638,39 @@ export default function HomeScreen() {
     [state.transactions, period],
   );
 
+  const foreignActivity = useMemo(
+    () => summarizeForeignActivity(state.transactions, (tx) => inPeriod(tx.date, period)),
+    [state.transactions, period],
+  );
+
+  const lastAutomatic = useMemo(
+    () => state.transactions.find((tx) => tx.source === 'sms'),
+    [state.transactions],
+  );
+
+  // Foreign-only alerts arrive with an offline estimate so capture never
+  // blocks on a network. Once the ledger is visible, replace only those
+  // estimates with a dated public reference rate. A bank-quoted AED
+  // equivalent is authoritative and Private Mode makes no request at all.
+  useEffect(() => {
+    if (!state.hydrated || state.privateMode) return;
+    const pending = state.transactions
+      .filter((tx) => tx.fxSource === 'fallback')
+      .slice(0, 16);
+    if (pending.length === 0) return;
+    const signature = pending
+      .map((tx) => `${tx.id}:${tx.originalCurrency}:${tx.date}`)
+      .join('|');
+    if (signature === lastFxAttempt.current) return;
+    lastFxAttempt.current = signature;
+    void buildReferenceFxUpdates(
+      pending,
+      getActiveMarket().currency.code,
+    ).then((updates) => {
+      if (updates.length > 0) applyFxUpdates(updates);
+    });
+  }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
+
   const runAutoImport = useCallback(
     async (interactive: boolean) => {
       // Never scan against a ledger that has not finished loading. Every
@@ -412,12 +696,14 @@ export default function HomeScreen() {
         if (!granted && interactive) granted = await requestSmsPermission();
         if (!granted) {
           setNeedsPermission(true);
+          setCaptureState('off');
           return;
         }
         setNeedsPermission(false);
+        setCaptureState('active');
       }
 
-      const { plan, commit, needsSetup } = await planNewMessages(state);
+      const { plan, source, commit, needsSetup } = await planNewMessages(state);
       if (needsSetup) {
         // The relay is not paired yet, so silence here means "not connected",
         // not "nothing new". Only say so when the user actually asked.
@@ -430,24 +716,39 @@ export default function HomeScreen() {
       if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
         markParserVersion();
         // Nothing arrived, so nothing is owed — but acking is still correct:
-        // the relay may have queued rows that parsed to nothing at all.
+        // the relay may have queued rows that deduped against an earlier
+        // in-memory import whose first disk write failed. Flush the current
+        // authoritative ledger before dropping those server rows.
+        if (source === 'relay') await ensureDurable();
         await commit();
         if (interactive) toast.show(t('upToDateNoNew'));
         return;
       }
-      const ids = importBatch(plan.batch);
-      // Only now is it safe to drop the relay's copy.
+      const receipt = importBatch(plan.batch);
+      // A React dispatch is not a disk commit. Wait for the encrypted SQLite
+      // transaction; only then is it safe to drop the relay's sealed copy.
+      await receipt.durable;
       await commit();
       committed();
       toast.show(
-        `Imported ${plan.txCount} transaction${plan.txCount === 1 ? '' : 's'}${plan.newAccountCount > 0 ? ` · ${plan.newAccountCount} new card${plan.newAccountCount === 1 ? '' : 's'}` : ''}`,
+        tf('importedTransactions', {
+          count: plan.txCount,
+          s: plan.txCount === 1 ? '' : 's',
+          cards:
+            plan.newAccountCount > 0
+              ? tf('importedNewCards', {
+                  count: plan.newAccountCount,
+                  s: plan.newAccountCount === 1 ? '' : 's',
+                })
+              : '',
+        }),
         [
-          { label: 'Undo', onPress: () => undoBatch(ids) },
-          { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
+          { label: t('undo'), onPress: () => undoBatch(receipt.ids) },
+          { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
         ],
       );
     },
-    [state, importBatch, undoBatch, markParserVersion, toast, router],
+    [state, importBatch, ensureDurable, undoBatch, markParserVersion, toast, router],
   );
 
   // Silent auto-import on open, and again every time the app comes back to
@@ -493,7 +794,10 @@ export default function HomeScreen() {
           // Entitlement is best-effort; the cached flag stands.
         }
         try {
-          await requestNotificationPermission();
+          await enableRelayBackgroundSync();
+          // Never prompt on launch. Reminder/instant-alert surfaces ask only
+          // after the user explicitly enables them; this call is a no-op when
+          // notification authorization has not already been granted.
           await syncPaymentReminders(state);
         } catch {
           // Reminders are best-effort; the ledger does not depend on them.
@@ -535,7 +839,7 @@ export default function HomeScreen() {
                 label={t('seeAll')}
                 onPress={() => router.push('/transactions')}
               />
-              <IconButton name="sliders" label="Settings" onPress={() => router.push('/settings')} />
+              <IconButton name="sliders" label={t('settingsTitle')} onPress={() => router.push('/settings')} />
             </View>
           </View>
 
@@ -556,41 +860,23 @@ export default function HomeScreen() {
             expenseFils={hero.expenseFils}
           />
 
-          {!isProActive(state) && (
-            <Pressable
-              onPress={() => router.push('/pro')}
-              style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-              <Icon name="diamond" size={17} color={theme.warning} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('trialEndedBanner')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('trialEndedBannerSub')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
+          <AutomaticCapture
+            status={!isProActive(state) ? 'paused' : needsPermission ? 'off' : captureState}
+            lastCaptureDate={lastAutomatic?.date}
+            onPress={() => {
+              if (!isProActive(state)) router.push('/pro');
+              else if (Platform.OS === 'ios') router.push('/ios-setup');
+              else void runAutoImport(true);
+            }}
+          />
 
-          {needsPermission && isProActive(state) && (
-            <Pressable
-              onPress={() => runAutoImport(true)}
-              style={[styles.notice, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-              <Icon name="spark" size={17} color={theme.primary} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('turnOnTracking')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('trackingPrivacy')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
+          <ForeignActivityPreview summary={foreignActivity} />
 
           {/* One sentence, with somewhere to go. A carousel of five of these
               was five things to skim and nothing to act on. */}
           {insight && (
             <Animated.View
-              entering={FadeInDown.delay(40).duration(320)}
+              entering={reducedMotion ? undefined : FadeInDown.delay(40).duration(320)}
               style={[
                 styles.insight,
                 { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
@@ -604,17 +890,25 @@ export default function HomeScreen() {
               </ThemedText>
               <View style={styles.insightActions}>
                 <Pressable
-                  onPress={() => router.push(insight.href ?? '/flow')}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tapped();
+                    router.push(insight.href ?? '/flow');
+                  }}
                   style={[styles.btn, { backgroundColor: theme.primary }]}>
                   <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                    See the breakdown
+                    {t('seeBreakdown')}
                   </ThemedText>
                 </Pressable>
                 <Pressable
-                  onPress={() => setDismissedInsight(insight.id)}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tapped();
+                    setDismissedInsight(insight.id);
+                  }}
                   style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
                   <ThemedText type="nano" themeColor="textSecondary">
-                    Dismiss
+                    {t('dismiss')}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -625,10 +919,12 @@ export default function HomeScreen() {
 
           <UnreadFormatsPrompt state={state} />
 
-          <Animated.View entering={FadeInDown.delay(120).duration(320)} style={styles.section}>
+          <Animated.View
+            entering={reducedMotion ? undefined : FadeInDown.delay(120).duration(320)}
+            style={styles.section}>
             <SectionHeader
               title={live ? t('recentActivity') : periodLabel(period)}
-              right="ALL ACTIVITY"
+              right={t('allActivity')}
               onPressRight={() => router.push('/transactions')}
             />
             {today.map((tx, i) => (
@@ -659,10 +955,9 @@ export default function HomeScreen() {
                 <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
                   AED 0
                 </ThemedText>
-                <ThemedText type="small">No entries in this period yet</ThemedText>
+                <ThemedText type="small">{t('noEntriesPeriod')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>
-                  Pull down to read your inbox, or add the last thing you paid for — one entry is
-                  enough to start the month.
+                  {t('emptyPeriodBody')}
                 </ThemedText>
               </View>
             )}
@@ -686,11 +981,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.three,
   },
   topActions: { flexDirection: 'row', gap: Spacing.two },
 
+  capture: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 11,
+    marginTop: Spacing.four,
+  },
+  captureIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captureText: { flex: 1, gap: 2 },
+  captureTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  captureTitle: { flexShrink: 1 },
+  liveDot: { width: 6, height: 6, borderRadius: 3 },
+
   heroLabel: { marginBottom: Spacing.two },
+  heroShell: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.xl,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.two,
+    overflow: 'hidden',
+  },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
   split: { flexDirection: 'row', marginTop: Spacing.four },
@@ -707,6 +1032,23 @@ const styles = StyleSheet.create({
   splitFigure: { fontSize: 17, lineHeight: 22 },
   dot: { width: 5, height: 5, borderRadius: 3 },
 
+  currencyPreview: {
+    marginTop: Spacing.four,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  currencyPreviewTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  currencyPreviewHeading: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  currencyRows: { gap: 5, marginTop: Spacing.one },
+  currencyRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  currencyOriginal: { flex: 1 },
+
   section: { marginTop: Spacing.five },
 
   insight: {
@@ -721,6 +1063,7 @@ const styles = StyleSheet.create({
   insightActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
   btn: {
     borderRadius: Radius.tile,
+    minHeight: 44,
     paddingVertical: 9,
     paddingHorizontal: 14,
     alignItems: 'center',

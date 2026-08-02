@@ -89,6 +89,7 @@ const AMOUNT_CASES = [
   ['عملية شراء بمبلغ AED 250.00 لدى نون', '250.00'],
   ['Purchase of AED 10.00 with Card ending 001 SR at CARREFOUR', '10.00'],
   ['Purchase of AED 120.00 at CARREFOUR', '120.00'],
+  ['Using your card for GHS 120.00 at SHOP. Avl Limit AED 5,000.00', '120.00'],
 ];
 
 /* ── hand it to javac ────────────────────────────────────────────────── */
