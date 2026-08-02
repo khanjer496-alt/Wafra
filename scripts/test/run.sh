@@ -56,6 +56,9 @@ node instant-alert.test.js
 node kotlin-regex.test.js
 # Every route the app navigates to must have a file behind it.
 node routes.test.js
+# The Android tab-switch performance config, and the upstream behaviour it
+# depends on. A one-prop fix that only a signed Release build can falsify.
+node perf-config.test.js
 # Definitions that live in two places and must agree.
 node contracts.test.js
 node onboarding.test.js
