@@ -11,6 +11,26 @@ the current state at a glance.
 
 **Identify yourself in every command:** `--as claude` or `--as codex`.
 
+## Identities: one per agent, not one per kind
+
+An identity is a base (`claude`, `codex`) with an optional instance suffix
+(`claude:s7f2`). Both sides dispatch subagents of their own kind, and the two
+dispatch scripts now mint an instance id automatically and put it in
+`COORD_AGENT`, so a subagent is never the same actor as the session that
+spawned it.
+
+This is not tidiness. When every Claude shared one identity, all three of these
+were true at once, and the third actually happened:
+
+- a subagent's claims were indistinguishable from the main session's
+- `release --all` from either wiped **both**
+- mail Codex addressed to its subagent landed in the main session's inbox,
+  where reading it marked it read and the subagent never saw it
+
+Ownership and routing are by **full** identity, so `claude` and `claude:s7f2`
+block each other exactly as `claude` and `codex` do. Address a subagent by its
+suffix; a bare base reaches only the main session.
+
 ## Before you edit anything
 
 Claim the paths first. A claim on a directory covers everything under it.

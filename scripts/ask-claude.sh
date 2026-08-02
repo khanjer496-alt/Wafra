@@ -49,7 +49,20 @@ CLAUDE_BIN="$HOME/.local/bin/claude"
 [[ -x "$CLAUDE_BIN" ]] || CLAUDE_BIN="$(command -v claude)" || {
   echo "ask-claude: no claude binary found" >&2; exit 1; }
 
+# A distinct board identity per dispatch. Without it every Claude on this
+# machine was the same actor to the board: a subagent's claims looked like the
+# main session's, `release --all` from either wiped both, and mail addressed to
+# one was read by the other.
+COORD_ID="claude:s$(printf '%04x' $$)"
+export COORD_AGENT="$COORD_ID"
+
 SHARED="You are Claude, working as a subagent alongside Codex in a SHARED working tree at $ROOT.
+
+YOUR BOARD IDENTITY IS \`$COORD_ID\` — not plain 'claude'. Always pass --as $COORD_ID.
+Plain 'claude' is a DIFFERENT agent (the main session) and may hold claims you must not touch.
+Check your own mail with: node scripts/coord.mjs inbox --as $COORD_ID
+Say your identity when you report, so you can be replied to directly.
+
 Never run git commit, push, checkout, reset, or stash."
 
 # Bash commands a review/investigate agent needs without stalling on a prompt.
@@ -72,9 +85,9 @@ case "$MODE" in
   write)
     PREAMBLE="$SHARED
 Before editing ANY file you MUST claim it:
-    node scripts/coord.mjs claim <paths> --as claude --task \"<short description>\"
+    node scripts/coord.mjs claim <paths> --as $COORD_ID --task \"<short description>\"
 If that exits non-zero, Codex owns the path — do NOT edit it. Report the conflict instead.
-When finished: node scripts/coord.mjs release --as claude --all
+When finished: node scripts/coord.mjs release --as $COORD_ID --all
 Leave changes uncommitted for review."
     # acceptEdits auto-approves file writes but NOT Bash, and both the claim
     # protocol and the test suite are Bash. Allowing only coord meant write

@@ -27,7 +27,23 @@ const BOARD = path.join(DIR, 'BOARD.md')
 const LOG = path.join(DIR, 'log.jsonl')
 const MUTEX = path.join(DIR, '.mutex')
 
-const AGENTS = ['claude', 'codex']
+/**
+ * Who can be on the board.
+ *
+ * An identity is a BASE (`claude`, `codex`) with an optional instance suffix
+ * (`claude:s7f2`). The suffix exists because both sides dispatch subagents of
+ * their own kind, and without it every Claude on the machine was literally the
+ * same actor here: a subagent's claims were indistinguishable from the main
+ * session's, `release --all` from either wiped BOTH, and — the one that
+ * actually bit — messages Codex addressed to its subagent landed in the main
+ * session's inbox, where reading them marked them read and the subagent never
+ * saw them.
+ *
+ * Ownership and routing are by FULL identity, so `claude` and `claude:s7f2`
+ * are two different agents that can block each other, which is the point.
+ */
+const BASES = ['claude', 'codex']
+const IDENTITY_RE = /^(claude|codex)(?::[a-z0-9-]{1,16})?$/
 const LOCK_TTL_MIN = 90
 const MUTEX_STALE_MS = 15_000
 
@@ -184,14 +200,18 @@ function renderBoard(state) {
     out.push('')
   }
 
-  for (const agent of AGENTS) {
+  // Every identity that has unread mail, not just the two bases — a subagent's
+  // inbox is its own and must be visible as its own.
+  const recipients = [...new Set(state.messages.filter((m) => !m.read).map((m) => m.to))].sort()
+  for (const agent of recipients) {
     const unread = state.messages.filter((m) => m.to === agent && !m.read)
-    if (unread.length) {
-      out.push(`## Unread for ${agent} (${unread.length})`, '')
-      for (const m of unread) out.push(`- **from ${m.from}**, ${ago(m.at)}: ${m.text}`)
-      out.push('')
-    }
+    out.push(`## Unread for ${agent} (${unread.length})`, '')
+    for (const m of unread) out.push(`- **from ${m.from}**, ${ago(m.at)}: ${m.text}`)
+    out.push('')
   }
+
+  const active = [...new Set([...live.map((l) => l.agent), ...state.messages.map((m) => m.from)])].sort()
+  if (active.length) out.push('## Identities seen', '', active.map((a) => `\`${a}\``).join(' · '), '')
 
   return out.join('\n')
 }
@@ -218,10 +238,16 @@ function parseArgs(argv) {
 
 function whoami(flags) {
   const who = flags.as || process.env.COORD_AGENT
-  if (!who) die('who are you? pass --as claude|codex (or set COORD_AGENT)')
-  if (!AGENTS.includes(who)) die(`unknown agent "${who}" — expected one of ${AGENTS.join(', ')}`)
+  if (!who) die('who are you? pass --as claude|codex[:instance] (or set COORD_AGENT)')
+  if (!IDENTITY_RE.test(who))
+    die(
+      `bad identity "${who}" — expected ${BASES.join('|')} with an optional :instance suffix, e.g. claude or claude:s7f2`,
+    )
   return who
 }
+
+/** `claude:s7f2` → `claude`. Used only for display grouping, never for ownership. */
+const baseOf = (identity) => identity.split(':')[0]
 
 // --- commands --------------------------------------------------------------
 
@@ -344,8 +370,15 @@ const commands = {
   send({ flags, positional }) {
     const me = whoami(flags)
     const to = flags.to
-    if (!AGENTS.includes(to)) die('--to must be claude or codex')
+    if (typeof to !== 'string' || !IDENTITY_RE.test(to))
+      die('--to must be claude|codex, optionally with an :instance suffix (e.g. claude:s7f2)')
     if (to === me) die('you cannot message yourself')
+    // Addressing a bare base reaches the MAIN session only. A subagent has an
+    // instance suffix and must be addressed by it, or its mail goes to the
+    // session that dispatched nothing and gets marked read there.
+    const seen = load()
+    if (to.includes(':') && !seen.messages.some((m) => m.from === to) && !seen.locks.some((l) => l.agent === to))
+      process.stderr.write(`warning: no agent "${to}" has been seen on this board yet\n`)
     const text = positional.join(' ').trim()
     if (!text) die('empty message')
     withMutex(() => {

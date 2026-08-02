@@ -53,7 +53,18 @@ OUT="$(mktemp -t codex-reply)"
 : > "$OUT"
 trap 'rm -f "$OUT"' EXIT
 
+# A distinct board identity per dispatch — see the same comment in
+# ask-claude.sh for why sharing one identity across instances was a real bug.
+COORD_ID="codex:s$(printf '%04x' $$)"
+export COORD_AGENT="$COORD_ID"
+
 SHARED="You are Codex, working as a subagent alongside Claude Code in a SHARED working tree at $ROOT.
+
+YOUR BOARD IDENTITY IS \`$COORD_ID\` — not plain 'codex'. Always pass --as $COORD_ID.
+Plain 'codex' is a DIFFERENT agent (the main session) and may hold claims you must not touch.
+Check your own mail with: node scripts/coord.mjs inbox --as $COORD_ID
+Say your identity when you report, so you can be replied to directly.
+
 Never run git commit, push, checkout, reset, or stash."
 
 case "$MODE" in
@@ -61,9 +72,9 @@ case "$MODE" in
     SANDBOX="workspace-write"
     PREAMBLE="$SHARED
 Before editing ANY file you MUST claim it:
-    node scripts/coord.mjs claim <paths> --as codex --task \"<short description>\"
+    node scripts/coord.mjs claim <paths> --as $COORD_ID --task \"<short description>\"
 If that exits non-zero, Claude owns the path — do NOT edit it. Report the conflict instead.
-When finished: node scripts/coord.mjs release --as codex --all
+When finished: node scripts/coord.mjs release --as $COORD_ID --all
 Leave changes uncommitted for review."
     ;;
   review)
