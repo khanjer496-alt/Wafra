@@ -11,7 +11,7 @@ import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { unreadFormats } from '@/lib/accuracy';
+import { cardDiagnostics, unreadFormats } from '@/lib/accuracy';
 import { categoryLabel } from '@/lib/categories';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
@@ -67,6 +67,10 @@ export default function AccuracyScreen() {
     }).catch(() => {});
   };
 
+  const shareCards = () => {
+    Share.share({ message: cardDiagnostics(state) }).catch(() => {});
+  };
+
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -86,6 +90,19 @@ export default function AccuracyScreen() {
                 onPress={shareAll}
               />
             )}
+            {/* Always offered, even when nothing is unread: the card bugs this
+                answers — a payment counted twice, a statement filed against the
+                wrong account — happen to messages the parser read CONFIDENTLY,
+                so they never appear in the list above. */}
+            <Button
+              label={t('shareCardDiagnostic')}
+              icon="upload"
+              variant="outline"
+              onPress={shareCards}
+            />
+            <ThemedText type="meta" themeColor="textTertiary">
+              {t('shareCardDiagnosticHint')}
+            </ThemedText>
           </Section>
 
           {([

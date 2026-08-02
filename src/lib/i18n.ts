@@ -1496,6 +1496,15 @@ const S = {
   undo: { en: 'Undo', ar: 'تراجع' },
   allActivity: { en: 'All activity', ar: 'كل العمليات' },
   seenCount: { en: 'seen {count}×', ar: 'ظهرت {count}×' },
+  // Card diagnostic. Offered even when nothing is unread, because the bugs it
+  // answers — a payment counted twice, a statement filed against the wrong
+  // card — happen to messages the parser read confidently and so never show up
+  // in the unrecognised list.
+  shareCardDiagnostic: { en: 'Share card diagnostic', ar: 'مشاركة تشخيص البطاقات' },
+  shareCardDiagnosticHint: {
+    en: 'Cards, statements, and every row filed against a card — with what each was counted as.',
+    ar: 'البطاقات وكشوفها وكل عملية مرتبطة ببطاقة، مع كيفية احتسابها.',
+  },
   accuracyShareTitle: {
     en: 'Wafra — bank SMS the app is not reading well:',
     ar: 'وفرة — رسائل بنكية لا يقرأها التطبيق جيداً:',
