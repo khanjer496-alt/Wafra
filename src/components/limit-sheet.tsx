@@ -7,7 +7,7 @@ import { SectionHeader } from '@/components/ui/period-pill';
 import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
-import { isSpending } from '@/lib/ledger';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
@@ -56,9 +56,29 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, category]);
 
+  /**
+   * The same two exclusions Flow's budget bar applies.
+   *
+   * Without them this sheet answered a different question from the screen that
+   * opened it: Flow's bar drops hidden accounts and both halves of a move
+   * between the user's own accounts, and this sheet counted them. One AED
+   * 200,000 sweep between two of their own accounts is a category that reads
+   * "0 spent" on Flow and "200,000 spent, limit exceeded" in the editor for
+   * that very limit — and the three-month average it then suggests is built
+   * from the same inflated months.
+   */
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+
   const spent = useMemo(
-    () => (picked ? spentInMonthForCategory(state.transactions, key, picked) : 0),
-    [state.transactions, key, picked],
+    () =>
+      picked
+        ? spentInMonthForCategory(state.transactions, key, picked, liveAccounts, internal)
+        : 0,
+    [state.transactions, key, picked, liveAccounts, internal],
   );
 
   /**
@@ -74,10 +94,16 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (!picked) return 0;
     let total = 0;
     for (let i = 1; i <= 3; i++) {
-      total += spentInMonthForCategory(state.transactions, shiftMonthKey(key, -i), picked);
+      total += spentInMonthForCategory(
+        state.transactions,
+        shiftMonthKey(key, -i),
+        picked,
+        liveAccounts,
+        internal,
+      );
     }
     return Math.round(total / 3);
-  }, [state.transactions, key, picked]);
+  }, [state.transactions, key, picked, liveAccounts, internal]);
 
   /**
    * Who the money went to, so the number has something behind it.
@@ -93,7 +119,10 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (!picked) return { merchants: [], restFils: 0, restCount: 0 };
     const map = new Map<string, { title: string; totalFils: number; count: number }>();
     for (const t of state.transactions) {
-      if (!isSpending(t)) continue;
+      // Same filter as `spent` above, or the rows listed here do not add up to
+      // the total printed over them — the exact defect the comment above this
+      // block describes, reintroduced through a different door.
+      if (!isSpending(t, liveAccounts, internal)) continue;
       if (t.category !== picked || !inPeriod(t.date, key)) continue;
       const k = t.title.trim().toLowerCase();
       const cur = map.get(k);
@@ -112,7 +141,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
       restFils: rest.reduce((s, m) => s + m.totalFils, 0),
       restCount: rest.length,
     };
-  }, [state.transactions, key, picked]);
+  }, [state.transactions, key, picked, liveAccounts, internal]);
 
   const limitFils = parseAmountToFils(text);
   const ratio = limitFils ? spent / limitFils : 0;

@@ -82,6 +82,59 @@ export function cardIdentity(accounts: Account[]): (accountId: string) => string
 }
 
 /**
+ * Merge statement rows at the ingestion boundary.
+ *
+ * A parser-version rescan can see the same reminder again, and several UAE
+ * banks send both an issue alert and a due-date reminder. Those are one
+ * statement only when the physical card and due date both agree. Distinct due
+ * dates remain history; distinct banks that share last-four digits remain
+ * distinct cards. Payment evidence is monotonic and is never reset by a
+ * reminder whose imported `paidFils` starts at zero.
+ */
+export function mergeImportedCardDues(
+  existing: CardDue[],
+  incoming: CardDue[],
+  accounts: Account[],
+): CardDue[] {
+  const keyOf = cardIdentity(accounts);
+  const merged: CardDue[] = [];
+
+  for (const due of [...existing, ...incoming]) {
+    const key = `${keyOf(due.accountId)}|${due.dueDate}`;
+    const at = merged.findIndex((row) => `${keyOf(row.accountId)}|${row.dueDate}` === key);
+    if (at < 0) {
+      merged.push(due);
+      continue;
+    }
+
+    const prior = merged[at];
+    const priorKnown = !prior.minDueEstimated;
+    const nextKnown = !due.minDueEstimated;
+    const minimum =
+      priorKnown && !nextKnown
+        ? prior.minDueFils
+        : !priorKnown && nextKnown
+          ? due.minDueFils
+          : Math.max(prior.minDueFils, due.minDueFils);
+    const settledAt = [prior.settledAt, due.settledAt]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+
+    merged[at] = {
+      ...prior,
+      totalDueFils: Math.max(prior.totalDueFils, due.totalDueFils),
+      minDueFils: minimum,
+      minDueEstimated: priorKnown || nextKnown ? undefined : true,
+      paidFils: Math.max(prior.paidFils, due.paidFils),
+      settledAt,
+    };
+  }
+
+  return merged;
+}
+
+/**
  * Every account row that describes the same physical card as `accountId`.
  *
  * Allocation used to run per account row while the display deduped per card,
@@ -129,7 +182,13 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
       (t) =>
         t.isTransfer === true &&
         ids.has(t.accountId) &&
-        (t.type === 'income' || creditIds.has(t.accountId)),
+        (t.type === 'income' ||
+          // Older builds stored card payments in the wrong direction. Keep
+          // that compatibility path, but only for a row whose title says it
+          // is a card settlement. Treating every transfer OUT of a credit card
+          // as a payment can falsely settle the bill after a cash transfer.
+          (creditIds.has(t.accountId) &&
+            /(?:card.*(?:payment|settlement)|(?:payment|settlement).*card)/i.test(t.title))),
     )
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -377,6 +436,94 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
     if (!seen || d.remainingFils > seen.remainingFils) byStatement.set(key, d);
   }
   return [...byStatement.values()].sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
+/**
+ * Everything the card detail sheet shows about one physical card.
+ *
+ * This lived in the component, which is why it could disagree with the rest of
+ * the app without any test noticing: nothing in the harness can load a .tsx.
+ * The rules it has to keep are the same ones `openDues` and `allocatePayments`
+ * keep, and each of the three was got wrong in the component at least once:
+ *
+ *  - Scope is the CARD, not the account row. Two rows can describe one card,
+ *    and a sheet that took its headline from the card and its list from the
+ *    row said "AED 8,144 still owed · 1 open statement" directly above "No
+ *    statement yet".
+ *  - A payment is credited through `duePaidFils`, which allocates across every
+ *    row on the card. A `paidFils` read raw, or a lookup whose key set was
+ *    built from a narrower list, shows a settled statement at 0% paid with its
+ *    full balance still owed.
+ *  - A card carries ONE obligation — the newest statement, whose total already
+ *    contains whatever went unpaid before it. Summing the unpaid history
+ *    charged the user twice for the same money.
+ *
+ * Unlike `openDues` this does NOT drop archived accounts. Hiding a card is a
+ * statement about the list it appears in, not about the debt; the sheet is
+ * reached by opening that very card, and answering 0 there is how a balance
+ * disappears with nothing anywhere saying it was dropped.
+ */
+export interface CardStatementView {
+  /** Every statement on this physical card, newest due date first. */
+  statements: CardDue[];
+  /** Payments onto the card, newest first. */
+  payments: Transaction[];
+  paidTotalFils: number;
+  /** Due id → what has been paid toward it. Covers every row in `statements`. */
+  paidByDueId: Map<string, number>;
+  /** The single statement the card currently owes, or empty when settled. */
+  open: CardDue[];
+  outstandingFils: number;
+  billedFils: number;
+}
+
+export function cardStatementView(state: AppState, accountId: string): CardStatementView {
+  const keyOf = cardIdentity(state.accounts);
+  const cardKey = keyOf(accountId);
+
+  const statements = state.cardDues
+    .filter((d) => keyOf(d.accountId) === cardKey)
+    .slice()
+    .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
+
+  // The direction test matters: import also stamps `isTransfer` on expense
+  // rows whose message carried a transfer hint, so dropping it counted an
+  // outgoing AED 2,000 as two thousand paid TOWARD the card.
+  const payments = state.transactions
+    .filter((t) => keyOf(t.accountId) === cardKey && t.isTransfer === true && t.type === 'income')
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const paidByDueId = new Map(statements.map((d) => [d.id, duePaidFils(state, d)] as const));
+
+  const newestDueDate = statements[0]?.dueDate;
+  const open = statements
+    .filter(
+      (d) =>
+        d.dueDate === newestDueDate && !d.settledAt && (paidByDueId.get(d.id) ?? 0) < d.totalDueFils,
+    )
+    // Two records agreeing on the card and the date are one statement stored
+    // twice; the copy still owing more is the one quoting the fuller total.
+    .sort(
+      (a, b) =>
+        b.totalDueFils -
+        (paidByDueId.get(b.id) ?? 0) -
+        (a.totalDueFils - (paidByDueId.get(a.id) ?? 0)),
+    )
+    .slice(0, 1);
+
+  return {
+    statements,
+    payments,
+    paidTotalFils: payments.reduce((s, t) => s + t.amountFils, 0),
+    paidByDueId,
+    open,
+    outstandingFils: open.reduce(
+      (s, d) => s + Math.max(0, d.totalDueFils - (paidByDueId.get(d.id) ?? 0)),
+      0,
+    ),
+    billedFils: open.reduce((s, d) => s + d.totalDueFils, 0),
+  };
 }
 
 /**

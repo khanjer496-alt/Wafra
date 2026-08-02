@@ -32,6 +32,7 @@ import {
   toISODate,
   totalAsShown,
 } from '@/lib/format';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import {
   activeSubscriptions,
   billCommitments,
@@ -89,9 +90,15 @@ export default function BillsScreen() {
     [state.bills, state.transactions, now],
   );
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
   const detected = useMemo(
-    () => detectSubscriptions(state.transactions, state.notSubscriptions),
-    [state.transactions, state.notSubscriptions],
+    () =>
+      detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
+    [state.transactions, state.notSubscriptions, now, liveAccounts, internal],
   );
   const subs = useMemo(() => activeSubscriptions(trueSubscriptions(detected)), [detected]);
   const stopped = useMemo(() => stoppedSubscriptions(trueSubscriptions(detected)), [detected]);

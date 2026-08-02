@@ -134,19 +134,51 @@ export function buildImportPlan(
   // Bank identity per account, learned from SMS sender IDs (existing accounts
   // that predate this get theirs backfilled).
   const bankNames: Record<string, string> = {};
+  const hintKey = (bankName: string | undefined, last4: string, kind: string) =>
+    `${bankName ?? '?'}|${kind}|${last4}`;
+  const matchesCard = (
+    account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName'> | undefined,
+    last4: string,
+    kind: 'credit' | 'debit' | 'account',
+    bankName: string | undefined,
+  ): boolean => {
+    if (!account || account.last4 !== last4) return false;
+    if (kind === 'account' ? account.kind !== 'bank' : account.cardType !== kind) return false;
+    // A missing bank can be learned from this sender. A different known bank
+    // cannot: last four digits are not globally unique.
+    return !bankName || !account.bankName || account.bankName === bankName;
+  };
+  const accountAtRef = (ref: string): Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName'> | undefined => {
+    if (/^\d+$/.test(ref)) return newAccounts[Number(ref)];
+    return state.accounts.find((a) => a.id === ref);
+  };
   const resolveAccount = (p: ScannedSms): string => {
     if (!p.card) return fallbackAccountId;
     const { last4, kind } = p.card;
     const bank = bankFromSender(p.sender);
-    if (hints[last4]) {
-      if (bank) bankNames[hints[last4]] ??= bank.name;
-      return hints[last4];
+    const scoped = hintKey(bank?.name, last4, kind);
+    for (const key of [scoped, last4]) {
+      const ref = hints[key];
+      if (!ref || !matchesCard(accountAtRef(ref), last4, kind, bank?.name)) continue;
+      hints[scoped] = ref;
+      newHints[scoped] = ref;
+      if (bank) bankNames[ref] ??= bank.name;
+      return ref;
     }
-    // An account the user created earlier with a matching last4 wins.
-    const existing = state.accounts.find((a) => a.last4 === last4);
+    // Prefer a bank-exact account. A hand-created row with no bank is safe only
+    // when it is the sole otherwise-compatible candidate.
+    const compatible = state.accounts.filter((a) => matchesCard(a, last4, kind, undefined));
+    const exact = bank ? compatible.find((a) => a.bankName === bank.name) : undefined;
+    const unnamed = compatible.filter((a) => !a.bankName);
+    const existing = exact ?? (bank && unnamed.length === 1 ? unnamed[0] : !bank && compatible.length === 1 ? compatible[0] : undefined);
     if (existing) {
-      hints[last4] = existing.id;
-      newHints[last4] = existing.id;
+      hints[scoped] = existing.id;
+      newHints[scoped] = existing.id;
+      // Keep the legacy key only while it is unambiguous/compatible.
+      if (!hints[last4] || matchesCard(accountAtRef(hints[last4]), last4, kind, bank?.name)) {
+        hints[last4] = existing.id;
+        newHints[last4] = existing.id;
+      }
       if (bank && !existing.bankName) bankNames[existing.id] ??= bank.name;
       return existing.id;
     }
@@ -162,12 +194,39 @@ export function buildImportPlan(
       color: bank?.color ?? colorForHint(last4),
     });
     const ref = String(idx);
-    hints[last4] = ref;
-    newHints[last4] = ref;
+    hints[scoped] = ref;
+    newHints[scoped] = ref;
+    if (!hints[last4] || matchesCard(accountAtRef(hints[last4]), last4, kind, bank?.name)) {
+      hints[last4] = ref;
+      newHints[last4] = ref;
+    }
     return ref;
   };
 
-  for (const p of parsed) {
+  const cardPaymentSideOf = (p: ScannedSms): 'debit' | 'receipt' | undefined => {
+    if (p.kind !== 'cardPayment' || !p.raw) return undefined;
+    if (
+      /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)/i.test(
+        p.raw,
+      )
+    ) return 'debit';
+    if (
+      /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+payment|has\s+been\s+paid|thank you for (?:your )?payment/i.test(
+        p.raw,
+      )
+    ) return 'receipt';
+    return undefined;
+  };
+
+  // Prefer the fuller SMS when a notification and SMS for one event are in
+  // the same scan. Processing a slightly-earlier push first used to leave the
+  // guard with no persisted id to supersede, so both rows were appended.
+  const ordered = [
+    ...parsed.filter((p) => p.channel !== 'push'),
+    ...parsed.filter((p) => p.channel === 'push'),
+  ];
+
+  for (const p of ordered) {
     const date = p.date ?? toISODate(new Date());
     if (p.kind === 'billDue') {
       if (p.merchant !== 'Bill payment') billDues.push(p);
@@ -205,10 +264,12 @@ export function buildImportPlan(
       const accountId = resolveAccount(p);
       noteSnapshot(accountId, p);
       const smsKey = smsKeyOf(p);
+      const cardPaymentSide = cardPaymentSideOf(p);
       // A card payment lands as income into the card account.
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
-        type: 'income' as const, smsKey, channel: p.channel,
+        type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel,
+        accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
       };
       if (guard.has(candidate)) {
         // A row imported as a plain expense before this message was
@@ -227,6 +288,7 @@ export function buildImportPlan(
         ts: p.smsTs,
         source: 'sms',
         smsKey,
+        cardPaymentSide,
         isTransfer: true,
       });
       continue;
@@ -238,7 +300,8 @@ export function buildImportPlan(
     const smsKey = smsKeyOf(p);
     const candidate = {
       date, amountFils: p.amountFils, title: p.merchant,
-      type: p.type, smsKey, channel: p.channel,
+      type: p.type, smsKey, ts: p.smsTs, channel: p.channel,
+      accountId, eventKind: 'transaction' as const,
     };
     if (guard.has(candidate)) {
       healFromReparse(smsKey, p);
@@ -254,6 +317,10 @@ export function buildImportPlan(
         title: p.merchant,
         category: p.categoryGuess,
         type: p.type,
+        accountId,
+        ts: p.smsTs,
+        smsKey,
+        viaPush: false,
       });
       guard.add(candidate);
       continue;

@@ -85,6 +85,13 @@ const SUBSCRIPTION_CATEGORIES = new Set<CategoryId>(['entertainment', 'shopping'
  * Real subscription detection: per-merchant charge cadence with amount
  * stability, boosted by a known-subscription merchant list. Merchants the
  * user marked "not a subscription" are skipped entirely.
+ *
+ * `liveAccounts`/`internalTransfers` are optional so callers working from a
+ * bare transaction list (tests) still get the base transfer-flag rule, but
+ * every screen with the accounts to hand should pass both — otherwise a
+ * recurring own-account sweep that predates the transfer flag (caught only by
+ * `internalTransferIds`' structural title match) reads as a monthly
+ * commitment instead of the user's own money moving pockets.
  */
 /** Materially different — the same threshold the rise test uses. */
 function differs(a: number, b: number): boolean {
@@ -117,11 +124,13 @@ export function detectSubscriptions(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
   today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
 ): Subscription[] {
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
   for (const t of transactions) {
-    if (!isSpending(t)) continue;
+    if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const k = t.title.trim().toLowerCase();
     if (!k || dismissed.has(k)) continue;
     const list = groups.get(k) ?? [];

@@ -1,3 +1,4 @@
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
 
 export interface ExpenseReportOptions {
@@ -64,16 +65,27 @@ export function escapeReportHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * The rows a financial export can stand behind: real spending, on an account
+ * still in play, excluding both legs of a move between the user's own
+ * accounts — the same rule every other total in the app applies. `liveAccounts`
+ * and `internalTransfers` are optional so a bare transaction list (tests)
+ * still gets the base transfer-flag rule, but callers with the accounts to
+ * hand should pass both, or a legacy own-account sweep (no transfer flag,
+ * caught only by `internalTransferIds`' structural title match) prints on the
+ * report the user hands to someone else as a real expense.
+ */
 export function reportExpenses(
   transactions: Transaction[],
   from: string,
   to: string,
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
 ): Transaction[] {
   return transactions
     .filter(
       (tx) =>
-        tx.type === 'expense' &&
-        !tx.isTransfer &&
+        isSpending(tx, liveAccounts, internalTransfers) &&
         tx.date >= from &&
         tx.date <= to,
     )
@@ -126,7 +138,9 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
         foot: 'Generated on-device by Wafra. Review entries before submitting this report.',
       };
   const categories = arabic ? ARABIC_CATEGORIES : ENGLISH_CATEGORIES;
-  const rows = reportExpenses(options.transactions, from, to);
+  const liveAccounts = liveAccountIds(accounts);
+  const internal = internalTransferIds(options.transactions, liveAccounts);
+  const rows = reportExpenses(options.transactions, from, to, liveAccounts, internal);
   const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
   const totalFils = rows.reduce((sum, tx) => sum + tx.amountFils, 0);
   const money = new Intl.NumberFormat(locale, {

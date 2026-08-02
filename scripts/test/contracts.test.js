@@ -496,5 +496,168 @@ function ktSources(dir) {
     /commit: async \(\) => \{[\s\S]*clearBackgroundRelayRows/.test(read('src/lib/capture.ts')));
 }
 
+/* ── Android inbox scans stay off the interaction critical path ─────── */
+{
+  const scan = read('src/lib/auto-import.ts');
+  const home = read('src/app/(tabs)/index.tsx');
+  const slice = Number(scan.match(/const PARSE_SLICE_SIZE = (\d+)/)?.[1]);
+
+  ok('SMS parsing yields frequently enough for responsive input',
+    slice > 0 && slice <= 32 && /await yieldToUi\(\)/.test(scan),
+    `slice=${slice}`);
+  ok('concurrent Home capture requests join one scan',
+    /const existing = importInFlight\.current;[\s\S]*if \(existing\) return existing;/.test(home) &&
+      /importInFlight\.current = operation/.test(home));
+}
+
+/* ── the budget editor answers the same question as the budget bar ──── */
+//
+// Flow's budget row excludes hidden accounts and both halves of a move
+// between the user's own accounts. The sheet that EDITS that same limit read
+// the raw ledger, so one AED 200,000 sweep between two of the user's own
+// accounts showed "0 spent" on Flow and "limit exceeded" in the editor for
+// that limit — and the three-month average it offered was built from the same
+// inflated months. Both screens have to pass the same two sets.
+{
+  const sheet = read('src/components/limit-sheet.tsx');
+  // Whitespace-free, so reformatting the argument list does not read as the
+  // exclusions having been dropped.
+  const flat = sheet.replace(/\s/g, '').replace(/,\)/g, ')');
+  const calls = flat.split('spentInMonthForCategory(').length - 1;
+
+  ok('the budget editor derives the live-account and internal-transfer sets',
+    /liveAccountIds\(state\.accounts\)/.test(sheet) &&
+      /internalTransferIds\(state\.transactions, liveAccounts\)/.test(sheet));
+  ok('every spend figure in the budget editor applies both exclusions',
+    calls === 2 &&
+      flat.includes('spentInMonthForCategory(state.transactions,key,picked,liveAccounts,internal)') &&
+      flat.includes(
+        'spentInMonthForCategory(state.transactions,shiftMonthKey(key,-i),picked,liveAccounts,internal)',
+      ),
+    `${calls} call sites`);
+  ok('the merchant breakdown adds up to the total printed above it',
+    /isSpending\(t, liveAccounts, internal\)/.test(sheet));
+}
+
+/* ── one card's obligation is decided in one place ──────────────────── */
+//
+// The detail sheet held its own copy of the "newest statement only", "scope by
+// card not by account row" and "credit payments through duePaidFils" rules,
+// and got each of them wrong at least once — invisibly, because no suite here
+// can load a .tsx. The rules belong beside openDues, under test.
+{
+  const sheet = read('src/components/card-detail-sheet.tsx');
+  ok('the card detail sheet reads its figures from cards.ts',
+    /cardStatementView\(state, account\.id\)/.test(sheet));
+  ok('the card detail sheet keeps no statement rules of its own',
+    !/state\.cardDues/.test(sheet) && !/duePaidFils/.test(sheet),
+    sheet.match(/state\.cardDues|duePaidFils/g));
+}
+
+/* ── the same rule, written the other way round ─────────────────────── */
+//
+// The scan above looks for `type !== 'expense' || t.isTransfer` — the shape
+// the hand-rolled definitions happened to be written in on the day it was
+// written. categoryTrend used the POSITIVE form of the same thing,
+// `type === 'expense' && !t.isTransfer`, and was therefore invisible to it for
+// as long as it existed. A rule spelled by hand is the defect; which way round
+// the author typed it is not.
+//
+// Scoped to src/lib, where a match is always a money rollup. Screens filter
+// row LISTS with this shape for display, which is a different question.
+{
+  const offenders = [];
+  for (const file of sources('src/lib')) {
+    const rel = path.relative(ROOT, file);
+    if (rel.includes('lib/ledger.ts')) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/type === 'expense' && !\w+\.isTransfer/g)) {
+      offenders.push(`${rel}: ${m[0]}`);
+    }
+  }
+  ok('no library rollup spells spending out in the positive form either',
+    offenders.length === 0, offenders.join(' | '));
+
+  // Every rollup in analytics.ts takes both sets and hands both to isSpending.
+  // netWorthSeries is exempt: it derives its own from the state it is given.
+  const an = read('src/lib/analytics.ts');
+  const calls = an.match(/isSpending\([^)]*\)/g) ?? [];
+  ok('every analytics rollup applies both exclusions',
+    calls.length === 4 && calls.every((c) => c === 'isSpending(t, live, internal)'),
+    calls.join(' | '));
+
+  // The one insight that names a single row rather than a total. It sits on
+  // the same card as figures derived from summarizeMonth, so it has to be
+  // drawn from the same rows they are.
+  const insights = read('src/lib/insights.ts');
+  ok('the biggest-purchase insight is chosen from countable spending',
+    /isSpending\(t, liveAccounts, internalTransfers\)/.test(insights));
+}
+
+/* ── per-account spend agrees about what spending is ────────────────── */
+//
+// Cards and Wallet both print "this month" under an account. Both read the
+// raw ledger, so a legacy own-account sweep — a structural title, no transfer
+// flag, because it predates the flag — was reported as that account having
+// spent AED 19,000 in a month Home showed 3,000 for.
+//
+// They deliberately do NOT apply the live-account set. These are per-account
+// figures on an account's own row, and Cards shows hidden cards on purpose;
+// filtering by account there would print "AED 0" beside a card that plainly
+// spent money. Nothing sums either map, so no total can disagree with Home.
+for (const rel of ['src/app/cards.tsx', 'src/app/(tabs)/wallet.tsx']) {
+  const screen = read(rel);
+  ok(`${rel} derives the internal-transfer set`,
+    /internalTransferIds\(state\.transactions, liveAccounts\)/.test(screen));
+  ok(`${rel} excludes own-account moves from per-account spend`,
+    /isSpending\(\w+, undefined, internal\)/.test(screen),
+    screen.match(/isSpending\([^)]*\)/g));
+}
+
+/* ── subscriptions and the expense export learn the same two exclusions ── */
+//
+// detectSubscriptions and reportExpenses/buildExpenseReportHtml both totalled
+// every title's own history without ever consulting internalTransferIds or
+// the live-account set. A legacy own-account sweep — a structural title, no
+// transfer flag, because it predates the flag — repeats on a stable monthly
+// cadence exactly like a subscription, so it surfaced in Bills as a recurring
+// commitment and printed on the PDF handed to someone else as reimbursable
+// spend. Unlike the per-account figures above, these are app-level totals, so
+// they DO apply the live-account set too.
+{
+  const subs = read('src/lib/subscriptions.ts');
+  ok('detectSubscriptions applies the live-account and internal-transfer exclusions',
+    /isSpending\(t, liveAccounts, internalTransfers\)/.test(subs));
+
+  const report = read('src/lib/reimbursement-report.ts');
+  ok('reportExpenses applies the same two exclusions',
+    /isSpending\(tx, liveAccounts, internalTransfers\)/.test(report));
+  ok('buildExpenseReportHtml derives the live-account and internal-transfer sets from its own inputs',
+    /liveAccountIds\(accounts\)/.test(report) &&
+      /internalTransferIds\(options\.transactions, liveAccounts\)/.test(report));
+
+  // Every call site that builds subscriptions or the export from a full
+  // AppState has to derive both sets and thread them through, or the merchant
+  // it drops is the one on this list, not the one under test above.
+  for (const [rel, callNeedle] of [
+    ['src/app/settings.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
+    ["src/app/(tabs)/bills.tsx", 'detectSubscriptions(state.transactions,state.notSubscriptions,now,liveAccounts,internal)'],
+    ['src/lib/leaving-soon.ts', 'detectSubscriptions(state.transactions,state.notSubscriptions,today,liveAccounts,internal)'],
+    ['src/lib/notifications.ts', 'detectSubscriptions(state.transactions,state.notSubscriptions,now,liveAccounts,internal,)'],
+  ]) {
+    const text = read(rel);
+    const flat = text.replace(/\s/g, '');
+    ok(`${rel} derives the live-account and internal-transfer sets`,
+      /liveAccountIds\(state\.accounts\)/.test(text) &&
+        /internalTransferIds\(state\.transactions, ?liveAccounts\)/.test(text));
+    ok(`${rel} threads both sets into its subscription/export call`,
+      flat.includes(callNeedle), rel);
+  }
+
+  const insights = read('src/lib/insights.ts');
+  ok('the subscription-load insight applies the live-account and internal-transfer exclusions',
+    /detectSubscriptions\(transactions, notSubscriptions, today, liveAccounts, internalTransfers\)/.test(insights));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

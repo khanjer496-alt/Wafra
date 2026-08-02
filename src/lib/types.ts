@@ -115,6 +115,12 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  /**
+   * A card settlement can generate two bank alerts: money leaving the current
+   * account and the card acknowledging receipt. Keeping the side lets import
+   * collapse that pair without collapsing two genuine equal payments.
+   */
+  cardPaymentSide?: 'debit' | 'receipt';
   /** Credit-card payments etc — excluded from spending/income analytics. */
   isTransfer?: boolean;
   /**
@@ -268,6 +274,13 @@ export interface TxHealUpdate {
    */
   type?: TransactionType;
   isTransfer?: boolean;
+  /** Authoritative account/card learned from the fuller SMS after a push. */
+  accountId?: string;
+  /** Replace the push clock/fingerprint with the bank SMS identity. */
+  ts?: number;
+  smsKey?: string;
+  viaPush?: boolean;
+  cardPaymentSide?: 'debit' | 'receipt';
   /**
    * The stored source text, or `null` to CLEAR it.
    *

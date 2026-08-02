@@ -86,6 +86,11 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.category !== undefined) next.category = patch.category;
   if (patch.type !== undefined) next.type = patch.type;
   if (patch.isTransfer !== undefined) next.isTransfer = patch.isTransfer;
+  if (patch.accountId !== undefined) next.accountId = patch.accountId;
+  if (patch.ts !== undefined) next.ts = patch.ts;
+  if (patch.smsKey !== undefined) next.smsKey = patch.smsKey;
+  if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
+  if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
     else next.raw = patch.raw;

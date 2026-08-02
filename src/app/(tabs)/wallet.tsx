@@ -27,7 +27,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
-import { isSpending } from '@/lib/ledger';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
@@ -176,15 +176,29 @@ export default function WalletScreen() {
     [state.transactions],
   );
 
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+  /**
+   * Both halves of a move between the user's own accounts are excluded, as
+   * they are on Home and Flow — otherwise the second line under a card reads
+   * back the sweep that left it as money spent.
+   *
+   * The live-account set is deliberately not applied, for the reason spelled
+   * out over the same map on the Cards screen: this is a per-account figure
+   * shown on that account's own row, and no total is built from it.
+   */
   const monthSpendByAccount = useMemo(() => {
     const key = monthKey(now);
     const map = new Map<string, number>();
     for (const t of state.transactions) {
-      if (!isSpending(t) || monthKey(t.date) !== key) continue;
+      if (!isSpending(t, undefined, internal) || monthKey(t.date) !== key) continue;
       map.set(t.accountId, (map.get(t.accountId) ?? 0) + t.amountFils);
     }
     return map;
-  }, [state.transactions, now]);
+  }, [state.transactions, now, internal]);
 
   const currencies = useMemo(() => {
     const key = monthKey(now);

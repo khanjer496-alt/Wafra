@@ -9,7 +9,7 @@ import { Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { duePaidFils } from '@/lib/cards';
+import { cardStatementView } from '@/lib/cards';
 import { shortDate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
@@ -31,42 +31,21 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
   const theme = useTheme();
   const { state } = useStore();
 
-  const data = useMemo(() => {
-    if (!account) return null;
-    const statements = state.cardDues
-      .filter((d) => d.accountId === account.id)
-      .slice()
-      .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
-    // A payment into the card is an income-side transfer. The direction test
-    // matters: `auto-import` also stamps `isTransfer` on expense rows whose
-    // message carried a transfer hint, so dropping it counted an outgoing
-    // AED 2,000 as two thousand paid TOWARD the card. This is the same filter
-    // `allocatePayments` uses, and the two have to agree or this sheet
-    // contradicts every other screen.
-    const payments = state.transactions
-      .filter((t) => t.accountId === account.id && t.isTransfer && t.type === 'income')
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-    const paidTotal = payments.reduce((s, t) => s + t.amountFils, 0);
-    // A payment that arrived by SMS is a transfer on the card, not a write to
-    // paidFils — that field only moves for a manual "Mark paid". Reading it
-    // raw showed a statement the bank had already confirmed paid as "0% paid"
-    // and kept its full balance in "Still owed". duePaidFils is the figure
-    // that accounts for both, and it is what every other screen uses.
-    const paidOf = new Map(statements.map((d) => [d.id, duePaidFils(state, d)] as const));
-    const open = statements.filter(
-      (d) => !d.settledAt && (paidOf.get(d.id) ?? 0) < d.totalDueFils,
-    );
-    const outstanding = open.reduce(
-      (s, d) => s + Math.max(0, d.totalDueFils - (paidOf.get(d.id) ?? 0)),
-      0,
-    );
-    const billed = open.reduce((s, d) => s + d.totalDueFils, 0);
-    return { statements, payments, paidTotal, outstanding, billed, paidOf, openCount: open.length };
-  }, [account, state]);
+  // Every rule about what a card owes lives in cards.ts, next to `openDues`
+  // and `allocatePayments` — and, unlike a .tsx, under test. This sheet got
+  // each of those rules wrong at some point precisely because it held its own
+  // copy of them.
+  const data = useMemo(
+    () => (account ? cardStatementView(state, account.id) : null),
+    [account, state],
+  );
 
   if (!account || !data) return null;
 
-  const settledShare = data.billed > 0 ? Math.min(1, (data.billed - data.outstanding) / data.billed) : 0;
+  const settledShare =
+    data.billedFils > 0
+      ? Math.min(1, (data.billedFils - data.outstandingFils) / data.billedFils)
+      : 0;
 
   return (
     <BottomSheet visible onClose={onClose} title={t('cardDetail')}>
@@ -84,7 +63,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       </View>
 
       {/* The one figure the user opened this for, before any list. */}
-      {data.openCount > 0 && (
+      {data.open.length > 0 && (
         <View style={styles.summary}>
           <View style={styles.summaryRow}>
             <ThemedText type="micro" themeColor="textTertiary">
@@ -92,12 +71,17 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
             </ThemedText>
             <ThemedText type="nano" themeColor="textTertiary">
               {tf('openStatements', {
-                count: data.openCount,
-                s: data.openCount === 1 ? '' : 's',
+                count: data.open.length,
+                s: data.open.length === 1 ? '' : 's',
               })}
             </ThemedText>
           </View>
-          <Money fils={data.outstanding} type="sheetAmount" prefix={false} color={theme.expense} />
+          <Money
+            fils={data.outstandingFils}
+            type="sheetAmount"
+            prefix={false}
+            color={theme.expense}
+          />
           {/* Progress is only honest once something has been paid; a
               full-width empty track reads as a bug. */}
           {settledShare > 0 && <ProgressBar ratio={settledShare} color={theme.income} height={5} />}
@@ -112,7 +96,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
           </ThemedText>
         ) : (
           data.statements.map((d, i) => {
-            const paid = data.paidOf.get(d.id) ?? 0;
+            const paid = data.paidByDueId.get(d.id) ?? 0;
             const settled = !!d.settledAt || paid >= d.totalDueFils;
             return (
               <Row key={d.id} last={i === data.statements.length - 1}>
@@ -141,7 +125,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       <View>
         <SectionHeader
           title={t('paymentsMade')}
-          trailing={<Money fils={data.paidTotal} prefix={false} type="nano" />}
+          trailing={<Money fils={data.paidTotalFils} prefix={false} type="nano" />}
         />
         {data.payments.length === 0 ? (
           <ThemedText type="default" themeColor="textSecondary">

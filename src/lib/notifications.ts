@@ -5,6 +5,7 @@ import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { formatAED } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { detectSubscriptions, daysUntilNext } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
@@ -147,7 +148,15 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
 
   // Subscriptions: 1 day before the next expected charge. Merchants already
   // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(state.transactions, state.notSubscriptions)) {
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internal = internalTransferIds(state.transactions, liveAccounts);
+  for (const sub of detectSubscriptions(
+    state.transactions,
+    state.notSubscriptions,
+    now,
+    liveAccounts,
+    internal,
+  )) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
     if (billTitles.has(sub.title.toLowerCase())) continue;
     const days = daysUntilNext(sub, now);

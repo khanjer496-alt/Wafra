@@ -9,6 +9,18 @@ import type { ScannedSms } from '@/lib/import-plan';
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 40; // 40k messages is far beyond any real inbox
+/**
+ * Parsing is synchronous JavaScript. A 1,000-message page takes roughly
+ * 100 ms even on a desktop Hermes-class CPU and several times that on a
+ * mid-range phone, so doing the whole page in one turn visibly freezes taps
+ * and scrolling. Yield often enough to keep each slice below a frame while
+ * preserving the exact same ordered parse result.
+ */
+const PARSE_SLICE_SIZE = 24;
+
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 export function isSmsScanningAvailable(): boolean {
   return Platform.OS === 'android' && SmsReader != null;
@@ -70,18 +82,26 @@ export async function scanInbox(
     const batch: RawSms[] = await SmsReader.getInboxSms(sinceMs, untilMs, PAGE_SIZE);
     if (batch.length === 0) break;
     scannedCount += batch.length;
-    for (const sms of batch) {
+    for (let i = 0; i < batch.length; i++) {
+      const sms = batch[i];
       if (sms.date > newestTs) newestTs = sms.date;
       inboxBodies.add(bodyPrint(sms.body));
       const p = parseSms(sms.body, overrides);
-      if (!p) continue;
-      parsed.push({
-        ...p,
-        date: p.date ?? toISODate(new Date(sms.date)),
-        smsTs: sms.date,
-        sender: sms.address,
-        channel: 'inbox',
-      });
+      if (p) {
+        parsed.push({
+          ...p,
+          date: p.date ?? toISODate(new Date(sms.date)),
+          smsTs: sms.date,
+          sender: sms.address,
+          channel: 'inbox',
+        });
+      }
+      // The native inbox query is already asynchronous; the expensive part is
+      // the regex grammar above after the 1,000 bodies cross the bridge. A
+      // timer turn lets React Native present pending frames and input events.
+      if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < batch.length) {
+        await yieldToUi();
+      }
     }
     onProgress?.(scannedCount, parsed.length);
     untilMs = batch[batch.length - 1].date; // page ends exclusive, walk backwards
@@ -94,7 +114,9 @@ export async function scanInbox(
   // Duplicates collapse on the date/amount/title fingerprint in the plan.
   if (SmsReader.getReceived) {
     try {
-      for (const sms of await SmsReader.getReceived(sinceMs)) {
+      const received = await SmsReader.getReceived(sinceMs);
+      for (let i = 0; i < received.length; i++) {
+        const sms = received[i];
         scannedCount += 1;
         if (sms.date > newestTs) newestTs = sms.date;
         // The inbox pass above almost always found this same message. Its
@@ -102,16 +124,21 @@ export async function scanInbox(
         // carrier's, which differ by seconds — enough for the fingerprint
         // built from that timestamp to call them two different charges. The
         // body is the one thing both copies agree on exactly.
-        if (inboxBodies.has(bodyPrint(sms.body))) continue;
-        const p = parseSms(sms.body, overrides);
-        if (!p) continue;
-        parsed.push({
-          ...p,
-          date: p.date ?? toISODate(new Date(sms.date)),
-          smsTs: sms.date,
-          sender: sms.address,
-          channel: 'delivery',
-        });
+        if (!inboxBodies.has(bodyPrint(sms.body))) {
+          const p = parseSms(sms.body, overrides);
+          if (p) {
+            parsed.push({
+              ...p,
+              date: p.date ?? toISODate(new Date(sms.date)),
+              smsTs: sms.date,
+              sender: sms.address,
+              channel: 'delivery',
+            });
+          }
+        }
+        if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < received.length) {
+          await yieldToUi();
+        }
       }
       onProgress?.(scannedCount, parsed.length);
     } catch {
@@ -124,19 +151,24 @@ export async function scanInbox(
   if (NotificationReader?.isEnabled?.()) {
     try {
       const captured = await NotificationReader.getCaptured(sinceMs);
-      for (const n of captured) {
+      for (let i = 0; i < captured.length; i++) {
+        const n = captured[i];
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         const p = parseSms(`${n.title} ${n.text}`.trim(), overrides);
-        if (!p) continue;
-        parsed.push({
-          ...p,
-          date: p.date ?? toISODate(new Date(n.ts)),
-          smsTs: n.ts,
-          // Package names usually contain the bank ("com.enbd...", "adcb...").
-          sender: `${n.pkg} ${n.title}`,
-          channel: 'push',
-        });
+        if (p) {
+          parsed.push({
+            ...p,
+            date: p.date ?? toISODate(new Date(n.ts)),
+            smsTs: n.ts,
+            // Package names usually contain the bank ("com.enbd...", "adcb...").
+            sender: `${n.pkg} ${n.title}`,
+            channel: 'push',
+          });
+        }
+        if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < captured.length) {
+          await yieldToUi();
+        }
       }
       onProgress?.(scannedCount, parsed.length);
     } catch {
@@ -148,4 +180,3 @@ export async function scanInbox(
   parsed.sort((a, b) => a.smsTs - b.smsTs);
   return { parsed, newestTs, scannedCount };
 }
-

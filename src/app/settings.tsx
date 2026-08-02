@@ -37,6 +37,7 @@ import { unreadFormatCount } from '@/lib/accuracy';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { getRelayConfig, unpairDevice } from '@/lib/relay';
@@ -279,7 +280,15 @@ export default function SettingsScreen() {
   };
 
   const createExpenseReport = async (scope: 'month' | 'all') => {
-    const expenses = state.transactions.filter((tx) => tx.type === 'expense' && !tx.isTransfer);
+    // Same rule every other total in the app applies: real spending, on an
+    // account still in play, neither leg of a move between the user's own
+    // accounts. Without it, a legacy own-account sweep (no transfer flag,
+    // caught only by internalTransferIds' structural title match) could both
+    // stretch an "all time" report back to its date and print on it as a
+    // reimbursable expense.
+    const liveAccounts = liveAccountIds(state.accounts);
+    const internal = internalTransferIds(state.transactions, liveAccounts);
+    const expenses = state.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
     const currentMonth = monthKey(new Date());
     const from =
       scope === 'month'
@@ -290,7 +299,7 @@ export default function SettingsScreen() {
         ? monthEndISO(currentMonth)
         : expenses.reduce((latest, tx) => (tx.date > latest ? tx.date : latest), '0000-01-01');
 
-    if (expenses.length === 0 || reportExpenses(expenses, from, to).length === 0) {
+    if (expenses.length === 0 || reportExpenses(expenses, from, to, liveAccounts, internal).length === 0) {
       Alert.alert(t('noExpensesToExport'));
       return;
     }

@@ -3,6 +3,7 @@ import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
 import { t, tf } from '@/lib/i18n';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 
 import {
   activeSubscriptions,
@@ -103,7 +104,11 @@ export function leavingSoon(
   }
 
   if (kinds.has('subscription')) {
-    const subs = activeSubscriptions(detectSubscriptions(state.transactions, state.notSubscriptions, today));
+    const liveAccounts = liveAccountIds(state.accounts);
+    const internal = internalTransferIds(state.transactions, liveAccounts);
+    const subs = activeSubscriptions(
+      detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
+    );
     for (const sub of subs) {
       // A bill and a detected subscription can describe the same debit; the
       // bill wins, because the user set it up by hand.

@@ -119,12 +119,13 @@ export function spentInMonthForCategory(
   period: PeriodLike,
   category: CategoryId,
   live?: Set<string>,
+  internal?: Set<string>,
 ): number {
   let total = 0;
   for (const t of transactions) {
     // amountInCategory does the category match itself, and counts each part of
     // a split row separately — so the row's headline category is not consulted.
-    if (inPeriod(t.date, period) && isSpending(t, live)) {
+    if (inPeriod(t.date, period) && isSpending(t, live, internal)) {
       total += amountInCategory(t, category);
     }
   }
@@ -185,12 +186,16 @@ export function buildInsights(
   periodLike: PeriodLike,
   today: Date,
   notSubscriptions: string[] = [],
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
-  const current = summarizeMonth(transactions, period);
+  const current = summarizeMonth(transactions, period, liveAccounts, internalTransfers);
   const prev = previousPeriod(period);
-  const previous = prev ? summarizeMonth(transactions, prev) : { incomeFils: 0, expenseFils: 0, byCategory: [] };
+  const previous = prev
+    ? summarizeMonth(transactions, prev, liveAccounts, internalTransfers)
+    : { incomeFils: 0, expenseFils: 0, byCategory: [] };
   const live = isCurrentMonth(period, today);
   const isMonthMode = period.mode === 'month';
   const dayOfMonth = Math.max(1, elapsedDays(period, today, transactions));
@@ -250,7 +255,13 @@ export function buildInsights(
 
   // Budget alerts (budgets are monthly — skip in year/range/all views)
   for (const b of isMonthMode ? budgets : []) {
-    const spent = spentInMonthForCategory(transactions, period, b.category);
+    const spent = spentInMonthForCategory(
+      transactions,
+      period,
+      b.category,
+      liveAccounts,
+      internalTransfers,
+    );
     if (b.limitFils <= 0) continue;
     const ratio = spent / b.limitFils;
     const cat = getCategory(b.category);
@@ -329,10 +340,18 @@ export function buildInsights(
   }
 
   // Largest single expense
+  //
+  // Every other figure on this card is derived from `current`, which applies
+  // both exclusions. This loop applied neither, so the one insight that names
+  // a specific row could name a row none of the other insights counted: a
+  // purchase on a card the user had hidden, or the leaving side of a move
+  // between their own accounts stored before transfers carried a flag. The
+  // headline read "Biggest purchase — AED 19,000, Outgoing Transfer" over a
+  // month whose Out was 3,000.
   let largest: Transaction | null = null;
   for (const t of transactions) {
-    if (t.isTransfer) continue;
-    if (t.type === 'expense' && inPeriod(t.date, period) && t.category !== 'rent' && t.category !== 'business') {
+    if (!isSpending(t, liveAccounts, internalTransfers)) continue;
+    if (inPeriod(t.date, period) && t.category !== 'rent' && t.category !== 'business') {
       if (!largest || t.amountFils > largest.amountFils) largest = t;
     }
   }
@@ -356,7 +375,9 @@ export function buildInsights(
   // Subscription load + price increases (true subscriptions only — rent and
   // utilities are fixed commitments, not cancellable services)
   const subs = activeSubscriptions(
-    trueSubscriptions(detectSubscriptions(transactions, notSubscriptions, today)),
+    trueSubscriptions(
+      detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
+    ),
   );
   if (subs.length >= 2) {
     const monthly = subscriptionsMonthlyTotal(subs);

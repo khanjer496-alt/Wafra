@@ -17,10 +17,11 @@ export function topMerchants(
   period: PeriodLike,
   limit = 5,
   live?: Set<string>,
+  internal?: Set<string>,
 ): MerchantStat[] {
   const map = new Map<string, MerchantStat>();
   for (const t of transactions) {
-    if (!isSpending(t, live) || !inPeriod(t.date, period)) continue;
+    if (!isSpending(t, live, internal) || !inPeriod(t.date, period)) continue;
     const k = t.title.trim().toLowerCase();
     const cur = map.get(k);
     if (cur) {
@@ -46,6 +47,7 @@ export function categoryMovers(
   periodLike: PeriodLike,
   limit = 4,
   live?: Set<string>,
+  internal?: Set<string>,
 ): CategoryMover[] {
   const period = toPeriod(periodLike);
   const prevPeriod = previousPeriod(period);
@@ -53,7 +55,7 @@ export function categoryMovers(
   const cur = new Map<CategoryId, number>();
   const prev = new Map<CategoryId, number>();
   for (const t of transactions) {
-    if (!isSpending(t, live)) continue;
+    if (!isSpending(t, live, internal)) continue;
     // Split rows contribute to several categories at once, so movers are
     // computed over allocations rather than the row's headline category.
     const target = inPeriod(t.date, period) ? cur : inPeriod(t.date, prevPeriod) ? prev : null;
@@ -80,10 +82,11 @@ export function dayOfWeekSpend(
   transactions: Transaction[],
   period: PeriodLike,
   live?: Set<string>,
+  internal?: Set<string>,
 ): number[] {
   const buckets = new Array(7).fill(0);
   for (const t of transactions) {
-    if (!isSpending(t, live) || !inPeriod(t.date, period)) continue;
+    if (!isSpending(t, live, internal) || !inPeriod(t.date, period)) continue;
     const day = new Date(`${t.date}T12:00:00`).getDay();
     buckets[day] += t.amountFils;
   }
@@ -129,11 +132,25 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   });
 }
 
-/** Per-month expense totals for one category over the last `months` months (oldest first). */
+/**
+ * Per-month expense totals for one category over the last `months` months
+ * (oldest first).
+ *
+ * This one spelled the spending rule out by hand, and in the positive form —
+ * an expense that is not flagged — which is the mirror of the shape the
+ * contract scan for hand-rolled definitions was looking for, so it never saw
+ * it. It therefore skipped only the flagged side of a transfer: a hidden card
+ * kept contributing to the trend line under
+ * a category whose monthly total on Flow excluded it, and a legacy own-account
+ * sweep (stored with a structural title and no flag) drew a spike in a month
+ * where Flow showed nothing. Same two sets as everywhere else.
+ */
 export function categoryTrend(
   transactions: Transaction[],
   category: CategoryId,
   months = 6,
+  live?: Set<string>,
+  internal?: Set<string>,
 ): { key: string; fils: number }[] {
   const nowKey = monthKey(new Date());
   const keys: string[] = [];
@@ -141,7 +158,7 @@ export function categoryTrend(
   return keys.map((key) => {
     let fils = 0;
     for (const t of transactions) {
-      if (t.type === 'expense' && !t.isTransfer && monthKey(t.date) === key) {
+      if (isSpending(t, live, internal) && monthKey(t.date) === key) {
         fils += amountInCategory(t, category);
       }
     }

@@ -18,6 +18,8 @@ import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/see
 import { applyHealPatch, healPatch } from '@/lib/heal';
 import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
+import { mergeImportedCardDues } from '@/lib/cards';
+import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { FxUpdate } from '@/lib/fx';
 
@@ -141,7 +143,12 @@ function reducer(state: AppState, action: Action): AppState {
       setLanguage(next.language === 'ar' ? 'ar' : 'en');
       // Older states can carry two rows for one card. Collapse on the way in,
       // once, rather than teaching every screen to tolerate it.
-      return mergeDuplicateAccounts(next);
+      const accountsMerged = mergeDuplicateAccounts(next);
+      return {
+        ...accountsMerged,
+        transactions: sortTxs(reconcileCaptureDuplicates(accountsMerged.transactions)),
+        cardDues: mergeImportedCardDues([], accountsMerged.cardDues, accountsMerged.accounts),
+      };
     }
     case 'markParserVersion':
       // A full re-read that changed nothing still proves the stored rows were
@@ -197,12 +204,6 @@ function reducer(state: AppState, action: Action): AppState {
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
     case 'importBatch': {
-      const dues = [...state.cardDues];
-      for (const due of action.newDues) {
-        const i = dues.findIndex((d) => d.accountId === due.accountId && !d.settledAt);
-        if (i >= 0) dues[i] = { ...due, id: dues[i].id };
-        else dues.push(due);
-      }
       const accounts = [...state.accounts, ...action.newAccounts].map((a) => {
         const snap = action.snapshots[a.id];
         const bank = !a.bankName ? action.bankNames[a.id] : undefined;
@@ -213,6 +214,7 @@ function reducer(state: AppState, action: Action): AppState {
         if (bank) next = { ...next, bankName: bank };
         return next;
       });
+      const dues = mergeImportedCardDues(state.cardDues, action.newDues, accounts);
       // Heal existing rows the parser now reads better.
       const patches = new Map(action.updates.map((u) => [u.id, u]));
       const existing =
@@ -226,7 +228,7 @@ function reducer(state: AppState, action: Action): AppState {
           : state.transactions;
       return {
         ...state,
-        transactions: sortTxs([...action.transactions, ...existing]),
+        transactions: sortTxs(reconcileCaptureDuplicates([...action.transactions, ...existing])),
         accounts,
         accountHints: { ...state.accountHints, ...action.newHints },
         cardDues: dues,
@@ -279,13 +281,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, bills, transactions: sortTxs([action.transaction, ...state.transactions]) };
     }
     case 'upsertCardDue': {
-      const i = state.cardDues.findIndex(
-        (d) => d.accountId === action.due.accountId && !d.settledAt,
-      );
-      const cardDues = [...state.cardDues];
-      if (i >= 0) cardDues[i] = { ...action.due, id: cardDues[i].id };
-      else cardDues.push(action.due);
-      return { ...state, cardDues };
+      return {
+        ...state,
+        cardDues: mergeImportedCardDues(state.cardDues, [action.due], state.accounts),
+      };
     }
     case 'payCardDue': {
       const cardDues = state.cardDues.map((d) =>
@@ -891,7 +890,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       snapshots,
       bankNames,
       lastScanTs: input.lastScanTs,
-      updates: input.updates ?? [],
+      updates: (input.updates ?? []).map((update) => ({
+        ...update,
+        accountId:
+          update.accountId && /^\d+$/.test(update.accountId) && Number(update.accountId) < newAccounts.length
+            ? newAccounts[Number(update.accountId)].id
+            : update.accountId,
+      })),
     };
     // React dispatch is intentionally not treated as persistence. Compute the
     // exact next snapshot from the same action and enqueue its encrypted write

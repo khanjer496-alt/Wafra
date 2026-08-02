@@ -1228,6 +1228,16 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('paid card: an outgoing transfer on a bank account is not a card payment',
     cardsLib.duePaidFils(onBank, onBank.cardDues[0]) === 0);
 
+  // Legacy compatibility must be narrow. Treating EVERY expense-side transfer
+  // on a credit card as a payment lets an actual cash/balance transfer OUT of
+  // the card settle its bill. Only rows whose stored title identifies a card
+  // settlement can use the old expense-direction fallback.
+  const outOfCard = {
+    ...wrong, id: 'cash-out', title: 'Bank transfer', accountId: 'cc',
+  };
+  ok('paid card: an outgoing transfer from a credit card does not settle its statement',
+    cardsLib.duePaidFils({ ...settled, transactions: [outOfCard] }, settled.cardDues[0]) === 0);
+
   // A row the user edited by hand is never overwritten by a rescan.
   ok('paid card: a hand-edited row is left alone',
     heal.healPatch({ ...wrong, userEdited: true }, parsed) === null);
@@ -1248,6 +1258,164 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('paid card: after a relaunch it carries no source text', relaunched.raw === undefined);
   ok('paid card: a relaunched row settles the statement',
     cardsGuardLib.openDues({ ...settled, transactions: [relaunched] }, new Date(2026, 6, 20)).length === 0);
+}
+
+// ── what the card detail sheet says a card owes ──
+//
+// This lived inside a .tsx, where nothing in this harness could reach it, and
+// it drifted from every other screen three separate ways. It is `cards.ts`
+// now, so these are the sequences that drift would have to survive.
+{
+  // One physical card, two account rows: the SMS scan found it, and the user
+  // had already added it by hand. Which row the statement and the payment
+  // landed on is an accident of message wording.
+  const found = {
+    id: 'scanned', name: 'FAB Credit Card •4833', kind: 'card', cardType: 'credit',
+    last4: '4833', bankName: 'FAB', openingFils: 0, color: '#fff',
+  };
+  const byHand = {
+    id: 'manual', name: 'My FAB card', kind: 'card', cardType: 'credit',
+    last4: '4833', openingFils: 0, color: '#fff',
+  };
+  const twinCard = {
+    accounts: [found, byHand],
+    cardDues: [{
+      id: 'due-aug', accountId: 'scanned', totalDueFils: 814440, minDueFils: 40722,
+      dueDate: '2026-08-20', paidFils: 0,
+    }],
+    transactions: [{
+      id: 'pay-aug', type: 'income', amountFils: 814440, category: 'other',
+      accountId: 'manual', title: 'Card •4833 payment', date: '2026-08-05',
+      source: 'sms', isTransfer: true,
+    }],
+  };
+  // Opened from the row that holds neither the statement nor the payment.
+  const view = cardsLib.cardStatementView(twinCard, 'manual');
+  ok('card sheet: a statement on the twin row is still this card\'s statement',
+    view.statements.length === 1, view.statements.length);
+  ok('card sheet: a payment on the twin row settles what the sheet shows',
+    view.outstandingFils === 0 && view.open.length === 0,
+    { outstanding: view.outstandingFils, open: view.open.length });
+  ok('card sheet: the paid lookup covers every statement it lists',
+    view.statements.every((d) => view.paidByDueId.has(d.id)));
+  ok('card sheet: the payment total is the card\'s, not the row\'s',
+    view.paidTotalFils === 814440, view.paidTotalFils);
+
+  // Hiding a card says where it appears, not what it costs. openDues drops
+  // archived rows on purpose; this sheet is reached BY opening that card, so
+  // answering 0 there is a debt vanishing with nothing to say it was dropped.
+  const hidden = {
+    ...twinCard,
+    accounts: [{ ...found, archived: true }, { ...byHand, archived: true }],
+    transactions: [],
+  };
+  const hiddenView = cardsLib.cardStatementView(hidden, 'scanned');
+  ok('card sheet: a hidden card still owes what it owes',
+    hiddenView.outstandingFils === 814440 && hiddenView.open.length === 1,
+    { outstanding: hiddenView.outstandingFils, open: hiddenView.open.length });
+
+  // A credit card rolls its unpaid balance into the next statement, so the
+  // history is history — adding it up bills the user twice for one debt.
+  const rolled = {
+    ...twinCard,
+    transactions: [],
+    cardDues: [
+      { id: 'due-jul', accountId: 'scanned', totalDueFils: 500000, minDueFils: 25000, dueDate: '2026-07-20', paidFils: 0 },
+      { id: 'due-aug', accountId: 'scanned', totalDueFils: 814440, minDueFils: 40722, dueDate: '2026-08-20', paidFils: 0 },
+    ],
+  };
+  const rolledView = cardsLib.cardStatementView(rolled, 'scanned');
+  ok('card sheet: only the newest statement is owed',
+    rolledView.open.length === 1 && rolledView.outstandingFils === 814440,
+    { open: rolledView.open.length, outstanding: rolledView.outstandingFils });
+  ok('card sheet: the older statement stays visible as history',
+    rolledView.statements.length === 2);
+
+  // The direction test: import stamps isTransfer on the expense-side leg too,
+  // so dropping it counts money LEAVING the card as money paid toward it.
+  const outgoing = {
+    ...rolled,
+    cardDues: [rolled.cardDues[1]],
+    transactions: [{
+      id: 'cash-out', type: 'expense', amountFils: 814440, category: 'other',
+      accountId: 'scanned', title: 'Bank transfer', date: '2026-08-05',
+      source: 'sms', isTransfer: true,
+    }],
+  };
+  const outgoingView = cardsLib.cardStatementView(outgoing, 'scanned');
+  ok('card sheet: money leaving the card is not money paid toward it',
+    outgoingView.paidTotalFils === 0 && outgoingView.outstandingFils === 814440,
+    { paid: outgoingView.paidTotalFils, outstanding: outgoingView.outstandingFils });
+
+  // Two banks whose cards end in the same four digits are two cards.
+  const collision = {
+    accounts: [
+      { ...found, id: 'fab', bankName: 'FAB' },
+      { ...found, id: 'enbd', bankName: 'Emirates NBD' },
+    ],
+    cardDues: [
+      { id: 'fab-due', accountId: 'fab', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-20', paidFils: 0 },
+      { id: 'enbd-due', accountId: 'enbd', totalDueFils: 700000, minDueFils: 35000, dueDate: '2026-08-20', paidFils: 0 },
+    ],
+    transactions: [],
+  };
+  const fabView = cardsLib.cardStatementView(collision, 'fab');
+  ok('card sheet: another bank\'s card sharing last4 is not this card',
+    fabView.statements.length === 1 && fabView.outstandingFils === 100000,
+    { statements: fabView.statements.length, outstanding: fabView.outstandingFils });
+}
+
+// ── importing statement reminders never erases payment state ──
+//
+// Android re-reads inbox history on a parser-version scan. The reducer used
+// to replace whichever open due it found with the reminder row and preserve
+// only the id, resetting paidFils and settledAt. A card the user had paid then
+// reopened after launch. The pure merge helper is what the store calls now.
+{
+  const card = {
+    id: 'cc', name: 'ENBD Credit Card •8575', kind: 'card', cardType: 'credit',
+    last4: '8575', bankName: 'Emirates NBD', openingFils: 0, color: '#fff',
+  };
+  const existing = [{
+    id: 'due-old', accountId: 'cc', totalDueFils: 406169, minDueFils: 20308,
+    dueDate: '2026-08-20', paidFils: 406169, settledAt: '2026-08-10T08:00:00Z',
+  }];
+  const reminder = [{
+    id: 'due-rescan', accountId: 'cc', totalDueFils: 406169, minDueFils: 20308,
+    dueDate: '2026-08-20', paidFils: 0,
+  }];
+  const merged = cardsLib.mergeImportedCardDues(existing, reminder, [card]);
+  ok('statement merge: a repeated reminder remains one statement', merged.length === 1);
+  ok('statement merge: a repeated reminder preserves the paid amount',
+    merged[0].paidFils === 406169);
+  ok('statement merge: a repeated reminder preserves settlement proof',
+    merged[0].settledAt === '2026-08-10T08:00:00Z');
+
+  // Full-history input is oldest-first, but relay batches and manual imports
+  // are not required to be. An older reminder arriving after the current one
+  // must never roll the card backwards.
+  const current = [{
+    id: 'due-current', accountId: 'cc', totalDueFils: 510000, minDueFils: 25500,
+    dueDate: '2026-09-20', paidFils: 100000,
+  }];
+  const stale = [{
+    id: 'due-stale', accountId: 'cc', totalDueFils: 406169, minDueFils: 20308,
+    dueDate: '2026-08-20', paidFils: 0,
+  }];
+  const afterStale = cardsLib.mergeImportedCardDues(current, stale, [card]);
+  ok('statement merge: an older reminder cannot replace the current statement',
+    afterStale.some((d) => d.id === 'due-current' && d.paidFils === 100000) &&
+      cardsLib.openDues({ accounts: [card], transactions: [], cardDues: afterStale }, new Date(2026, 8, 10))[0]?.due.id === 'due-current');
+
+  const fab = { ...card, id: 'fab', bankName: 'FAB' };
+  const enbd = { ...card, id: 'enbd', bankName: 'Emirates NBD' };
+  const separate = cardsLib.mergeImportedCardDues(
+    [{ ...current[0], id: 'fab-due', accountId: 'fab' }],
+    [{ ...current[0], id: 'enbd-due', accountId: 'enbd' }],
+    [fab, enbd],
+  );
+  ok('statement merge: two banks sharing last4 remain separate obligations',
+    separate.length === 2);
 }
 
 // ── One card, whichever account row the bank's messages landed on ──
@@ -1650,6 +1818,67 @@ ok('stale: a stale statement that gets paid leaves openDues',
       }));
   }
 
+  // Day + amount + direction is not an event identity. A person can make the
+  // same AED 35 purchase again later that day, and the second one may arrive
+  // only through the bank notification channel. The old loose Set swallowed
+  // it merely because an SMS for the first purchase existed that day.
+  {
+    const first = {
+      id: 'first-coffee', type: 'expense', amountFils: 3500, category: 'dining',
+      accountId: 'fab', title: 'Costa', date: '2026-07-25', source: 'sms',
+      smsKey: 's1753400000000-3500', ts: 1753400000000,
+    };
+    const laterPush = {
+      date: '2026-07-25', amountFils: 3500, title: 'Costa Coffee',
+      type: 'expense', smsKey: 's1753400480000-3500', channel: 'push',
+      ts: 1753400480000,
+    };
+    ok('duplicate: a later same-value push is a second real purchase',
+      !duplicateGuard([first]).has(laterPush));
+  }
+
+  // The fix must reach ledgers that already contain the old bug. Repair is
+  // conservative and prefers the fuller SMS row (including its card account).
+  {
+    const push = {
+      id: 'old-push', type: 'expense', amountFils: 31000, category: 'shopping',
+      accountId: 'fallback', title: 'The One', date: '2026-07-25', source: 'sms',
+      viaPush: true, smsKey: 's1753400900000-31000', ts: 1753400900000,
+    };
+    const sms = {
+      ...push, id: 'better-sms', accountId: 'card-9876', title: 'The One Home',
+      viaPush: undefined, smsKey: 's1753400903000-31000', ts: 1753400903000,
+    };
+    const repaired = require('./build/dedupe').reconcileCaptureDuplicates([push, sms]);
+    ok('duplicate repair: an existing push/SMS pair becomes one row', repaired.length === 1);
+    ok('duplicate repair: the fuller SMS account and identity win',
+      repaired[0].id === 'better-sms' && repaired[0].accountId === 'card-9876' && !repaired[0].viaPush);
+
+    const distinct = require('./build/dedupe').reconcileCaptureDuplicates([
+      { ...sms, id: 'coffee-1', amountFils: 3500, title: 'Costa', ts: 1753400000000, smsKey: 's1753400000000-3500' },
+      { ...sms, id: 'coffee-2', amountFils: 3500, title: 'Costa', ts: 1753400480000, smsKey: 's1753400480000-3500' },
+    ]);
+    ok('duplicate repair: two genuine later purchases are preserved', distinct.length === 2);
+
+    const edited = require('./build/dedupe').reconcileCaptureDuplicates([
+      { ...push, userEdited: true }, sms,
+    ]);
+    ok('duplicate repair: a user-edited row is never deleted', edited.length === 2);
+
+    const large = Array.from({ length: 5_000 }, (_, index) => ({
+      ...sms,
+      id: `bulk-${index}`,
+      amountFils: 1000 + index,
+      ts: 1753400000000 + index * 60_000,
+      smsKey: `s${1753400000000 + index * 60_000}-${1000 + index}`,
+    }));
+    const started = process.hrtime.bigint();
+    const largeResult = require('./build/dedupe').reconcileCaptureDuplicates(large);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    ok(`duplicate repair: 5,000-row ledger stays linear (${elapsedMs.toFixed(0)}ms)`,
+      largeResult.length === 5_000 && elapsedMs < 500);
+  }
+
   // Adding to the guard has to close the door behind it, or a batch
   // duplicates against itself.
   {
@@ -1983,9 +2212,9 @@ ok('stale: a stale statement that gets paid leaves openDues',
   });
 
   const moved = [
-    row('out19', 'expense', 'a2', 1900000, '2026-06-26'),
+    row('out19', 'expense', 'a2', 1900000, '2026-06-26', { title: 'Outgoing transfer', isTransfer: true }),
     row('in19', 'income', 'a4', 1900000, '2026-06-26'),
-    row('out5', 'expense', 'a2', 500000, '2026-06-26'),
+    row('out5', 'expense', 'a2', 500000, '2026-06-26', { title: 'Outgoing transfer', isTransfer: true }),
     row('in5', 'income', 'a4', 500000, '2026-06-26'),
     // Real salary, from outside — must survive.
     row('pay', 'income', 'a2', 2882800, '2026-06-26', { category: 'salary' }),
@@ -2002,7 +2231,7 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const period = { mode: 'month', key: '2026-06' };
   const before = ins.summarizeMonth(moved, period, live);
   const after = ins.summarizeMonth(moved, period, live, internal);
-  ok('internal: In counted the move before', before.incomeFils === 2882800 + 2400000, String(before.incomeFils));
+  ok('internal: In counted the arriving move before pairing', before.incomeFils === 2882800 + 2400000, String(before.incomeFils));
   ok('internal: In is just the salary now', after.incomeFils === 2882800, String(after.incomeFils));
   ok('internal: Out drops the outgoing half too', after.expenseFils === 12000, String(after.expenseFils));
 
@@ -2024,12 +2253,276 @@ ok('stale: a stale statement that gets paid leaves openDues',
 
   // Each row pairs once: two arrivals cannot both cancel one departure.
   const oneOut = [
-    row('o', 'expense', 'a2', 50000, '2026-06-10'),
+    row('o', 'expense', 'a2', 50000, '2026-06-10', { title: 'Outgoing transfer', isTransfer: true }),
     row('i1', 'income', 'a4', 50000, '2026-06-10'),
     row('i2', 'income', 'a4', 50000, '2026-06-11'),
   ];
   ok('internal: one departure cancels one arrival, not two',
     ledger.internalTransferIds(oneOut, live).size === 2);
+
+  // Coincidental money is not a transfer. The old matcher considered every
+  // expense a possible outgoing leg, so a same-value purchase could erase a
+  // real client payment or salary from both In and Out.
+  const coincidence = [
+    row('coffee', 'expense', 'a2', 50000, '2026-06-10', {
+      title: 'Carrefour', category: 'groceries',
+    }),
+    row('client', 'income', 'a4', 50000, '2026-06-10', {
+      title: 'Client payment', category: 'business',
+    }),
+  ];
+  ok('internal: ordinary spend and real income of the same value are not paired',
+    ledger.internalTransferIds(coincidence, live).size === 0);
+
+  const salaryCoincidence = [
+    row('sweep', 'expense', 'a2', 500000, '2026-06-10', {
+      title: 'Outgoing transfer', isTransfer: true,
+    }),
+    row('salary-same', 'income', 'a4', 500000, '2026-06-10', {
+      title: 'Salary', category: 'salary',
+    }),
+  ];
+  ok('internal: a salary is never consumed as an arriving transfer leg',
+    ledger.internalTransferIds(salaryCoincidence, live).size === 0);
+
+  // Older rows can carry the structural title but predate isTransfer. The
+  // headline already used the paired set; budgets and insight cards did not,
+  // so one screen simultaneously said Out=0 and "budget exceeded".
+  const legacyMove = [
+    row('legacy-out', 'expense', 'a2', 200000, '2026-06-15', {
+      title: 'Outgoing transfer', category: 'other',
+    }),
+    row('legacy-in', 'income', 'a4', 200000, '2026-06-15', {
+      title: 'Incoming transfer', category: 'business',
+    }),
+  ];
+  const legacyInternal = ledger.internalTransferIds(legacyMove, live);
+  ok('internal: legacy structural transfer titles still pair safely', legacyInternal.size === 2);
+  ok('internal: the category budget agrees with the transfer-safe headline',
+    ins.spentInMonthForCategory(legacyMove, period, 'other', live, legacyInternal) === 0);
+  const transferInsights = ins.buildInsights(
+    legacyMove,
+    [{ category: 'other', limitFils: 100000 }],
+    period,
+    new Date(2026, 5, 20),
+    [],
+    live,
+    legacyInternal,
+  );
+  ok('internal: insights do not call an own-account move a budget overrun',
+    !transferInsights.some((item) => item.id === 'budget-over-other'));
+}
+
+// ── the rest of the totals learn the same two exclusions ──
+//
+// The headline, the categories, the budget bar and the budget editor were
+// taught to skip hidden accounts and both halves of an own-account move. Five
+// figures were not, and each of them is printed within one tap of a figure
+// that was: the "Biggest purchase" insight, and the four analytics rollups.
+//
+// categoryTrend was the worst of them, because it spelled the rule out by
+// hand in the POSITIVE form — `type === 'expense' && !t.isTransfer` — which is
+// the one shape the contract scan for hand-rolled spending was not looking
+// for. It skipped only the flagged side of a transfer and knew nothing about
+// hidden accounts at all.
+{
+  const ledger = require('./build/ledger');
+  const ins = require('./build/insights');
+  const an = require('./build/analytics');
+  const fmt = require('./build/format');
+
+  // Blocks above move the month boundary and put it back. Say so here rather
+  // than inherit it, because every date below is built from monthKey(today).
+  fmt.setMonthStartDay(1);
+
+  const accounts = [
+    { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'a4', name: 'FAB •0004', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'hidden', name: 'Old card', kind: 'card', openingFils: 0, color: '#000', archived: true },
+  ];
+  const live = ledger.liveAccountIds(accounts);
+
+  // The trend series is keyed off the real clock, so the rows have to land in
+  // the month the code will ask for rather than a month pinned in the file.
+  const key = fmt.monthKey(new Date());
+  const day = (n) => `${key}-${String(n).padStart(2, '0')}`;
+  const period = { mode: 'month', key };
+
+  const row = (id, type, accountId, amountFils, date, over = {}) => ({
+    id, type, amountFils, accountId, date, source: 'sms',
+    category: 'shopping', title: 'Carrefour', ...over,
+  });
+
+  const rows = [
+    // A legacy own-account sweep: structural title, no isTransfer flag,
+    // because it was imported before the flag existed. Both legs pair.
+    row('sweep-out', 'expense', 'a2', 2400000, day(15), { title: 'Outgoing transfer' }),
+    row('sweep-in', 'income', 'a4', 2400000, day(15), { title: 'Incoming transfer' }),
+    // Spending on a card the user has hidden.
+    row('hidden-buy', 'expense', 'hidden', 900000, day(16), { title: 'Emirates' }),
+    // Real spending, which every one of these figures must still show.
+    row('real', 'expense', 'a2', 30000, day(17), { title: 'Carrefour' }),
+    row('apple', 'expense', 'a4', 1900000, day(18), { title: 'Apple Store' }),
+  ];
+  const internal = ledger.internalTransferIds(rows, live);
+  ok('residual: the sweep pairs and nothing else does',
+    internal.size === 2 && internal.has('sweep-out') && internal.has('sweep-in'),
+    [...internal].join(','));
+
+  // A purchase of exactly the sweep's value, on the account the sweep landed
+  // in, on the same day. It is the outgoing leg the matcher would reach for if
+  // amount and date were enough — and it is an AED 24,000 purchase, so pairing
+  // it would erase a real expense AND leave the real sweep counted.
+  const decoy = [
+    row('leg-out', 'expense', 'a2', 2400000, day(10), { title: 'Outgoing transfer' }),
+    row('same-value-buy', 'expense', 'a4', 2400000, day(10), { title: 'Apple Store' }),
+    row('leg-in', 'income', 'a4', 2400000, day(10), { title: 'Incoming transfer' }),
+  ];
+  const decoyInternal = ledger.internalTransferIds(decoy, live);
+  ok('residual: a same-value purchase is not mistaken for the outgoing leg',
+    decoyInternal.size === 2 && decoyInternal.has('leg-out')
+      && !decoyInternal.has('same-value-buy'), [...decoyInternal].join(','));
+
+  // ── the insight that names one specific row ──
+  const biggest = (extra) =>
+    ins.buildInsights(rows, [], period, new Date(`${day(28)}T12:00:00`), [], ...extra)
+      .find((i) => i.id === 'largest');
+
+  const unguarded = biggest([]);
+  ok('residual: unguarded, the biggest purchase was the sweep',
+    !!unguarded && /transfer/i.test(unguarded.body), unguarded && unguarded.body);
+
+  const guarded = biggest([live, internal]);
+  ok('residual: the biggest purchase is a purchase',
+    !!guarded && !/transfer/i.test(guarded.body) && !/Emirates/.test(guarded.body),
+    guarded && guarded.body);
+  ok('residual: the biggest surviving purchase is the one named',
+    !!guarded && /Apple Store/.test(guarded.body), guarded && guarded.body);
+
+  // It must agree with the headline it sits beside: the row it names has to be
+  // one of the rows the month's Out actually counted.
+  const summary = ins.summarizeMonth(rows, period, live, internal);
+  ok('residual: Out counts only the two surviving purchases',
+    summary.expenseFils === 30000 + 1900000, String(summary.expenseFils));
+
+  // ── the four analytics rollups ──
+  const trendBefore = an.categoryTrend(rows, 'shopping', 1);
+  const trendAfter = an.categoryTrend(rows, 'shopping', 1, live, internal);
+  ok('residual: categoryTrend counted the hidden card and the sweep',
+    trendBefore[0].fils === 30000 + 900000 + 1900000 + 2400000, String(trendBefore[0].fils));
+  ok('residual: categoryTrend agrees with the month it is drawn under',
+    trendAfter[0].fils === summary.expenseFils, String(trendAfter[0].fils));
+
+  const merchants = an.topMerchants(rows, period, 5, live, internal);
+  ok('residual: no merchant is a transfer or a hidden card',
+    !merchants.some((m) => /transfer/i.test(m.title) || m.title === 'Emirates'),
+    merchants.map((m) => m.title).join(','));
+  ok('residual: topMerchants totals what the headline totals',
+    merchants.reduce((s, m) => s + m.totalFils, 0) === summary.expenseFils);
+
+  ok('residual: dayOfWeekSpend totals what the headline totals',
+    an.dayOfWeekSpend(rows, period, live, internal).reduce((s, n) => s + n, 0)
+      === summary.expenseFils);
+
+  // Movers compare against the previous month, which is empty here — so every
+  // surviving dirham shows up as the whole rise, and nothing else may.
+  const movers = an.categoryMovers(rows, period, 4, live, internal);
+  ok('residual: categoryMovers rises by exactly the surviving spend',
+    movers.reduce((s, m) => s + m.currentFils, 0) === summary.expenseFils,
+    JSON.stringify(movers));
+}
+
+// ── a legacy own-account sweep must not become a subscription or an export line ──
+//
+// detectSubscriptions and the expense-report export both totalled every
+// title's own history without ever consulting internalTransferIds or the
+// live-account set — the same gap the "residual" block above closed for the
+// headline, categoryTrend, topMerchants, dayOfWeekSpend and categoryMovers.
+// A monthly sweep between the user's own accounts, old enough to carry only
+// the structural "Outgoing/Incoming transfer" title (no isTransfer flag),
+// repeats on a stable monthly cadence exactly like a subscription — so it
+// surfaced in Bills as a recurring commitment, and printed on the PDF handed
+// to someone else as three months of reimbursable spend.
+{
+  const ledger = require('./build/ledger');
+  const subsLib = require('./build/subscriptions');
+  const report = require('./build/reimbursement-report');
+
+  const accounts = [
+    { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },
+    { id: 'a4', name: 'FAB •0004', kind: 'bank', openingFils: 0, color: '#000' },
+  ];
+  const live = ledger.liveAccountIds(accounts);
+
+  const row = (id, type, accountId, amountFils, date, over = {}) => ({
+    id, type, amountFils, accountId, date, source: 'sms',
+    category: 'other', title: 'Outgoing transfer', ...over,
+  });
+
+  const sweep = [
+    row('sweep-out-1', 'expense', 'a2', 500000, '2026-04-15'),
+    row('sweep-in-1', 'income', 'a4', 500000, '2026-04-15', { title: 'Incoming transfer', category: 'business' }),
+    row('sweep-out-2', 'expense', 'a2', 500000, '2026-05-15'),
+    row('sweep-in-2', 'income', 'a4', 500000, '2026-05-15', { title: 'Incoming transfer', category: 'business' }),
+    row('sweep-out-3', 'expense', 'a2', 500000, '2026-06-15'),
+    row('sweep-in-3', 'income', 'a4', 500000, '2026-06-15', { title: 'Incoming transfer', category: 'business' }),
+    // A legitimate recurring expense on the same cadence — must survive.
+    row('netflix-1', 'expense', 'a2', 3999, '2026-04-20', { title: 'Netflix', category: 'entertainment' }),
+    row('netflix-2', 'expense', 'a2', 3999, '2026-05-20', { title: 'Netflix', category: 'entertainment' }),
+    row('netflix-3', 'expense', 'a2', 3999, '2026-06-20', { title: 'Netflix', category: 'entertainment' }),
+    // A one-off purchase worth exactly the sweep's amount, on the day the
+    // final sweep leg lands, on the account it lands in — the classic decoy
+    // for a matcher that goes by amount and date alone, and real spending
+    // every one of these figures must still show.
+    row('decoy-buy', 'expense', 'a4', 500000, '2026-06-15', { title: 'Furniture Store', category: 'shopping' }),
+  ];
+
+  const internal = ledger.internalTransferIds(sweep, live);
+  ok('sweep: all three months of the sweep pair off',
+    internal.size === 6, [...internal].join(','));
+  ok('sweep: the same-value furniture purchase is not swept into the pairing',
+    !internal.has('decoy-buy'));
+
+  const today = new Date(2026, 6, 25);
+
+  const unguardedSubs = subsLib.detectSubscriptions(sweep, [], today);
+  ok('sweep: without the exclusion, the sweep itself is detected as recurring',
+    unguardedSubs.some((s) => s.title === 'Outgoing transfer'),
+    unguardedSubs.map((s) => s.title).join(','));
+
+  const guardedSubs = subsLib.detectSubscriptions(sweep, [], today, live, internal);
+  ok('sweep: with live accounts and internal transfers passed in, the sweep never becomes a subscription',
+    !guardedSubs.some((s) => s.title === 'Outgoing transfer'),
+    guardedSubs.map((s) => s.title).join(','));
+  ok('sweep: the real Netflix subscription still surfaces',
+    guardedSubs.some((s) => s.title === 'Netflix'));
+  ok('sweep: a one-off purchase is not treated as a recurring commitment',
+    !guardedSubs.some((s) => s.title === 'Furniture Store'));
+
+  // ── the expense export applies the same rule ──
+  const unguardedRows = report.reportExpenses(sweep, '2026-04-01', '2026-06-30');
+  ok('export: without the exclusion, all three sweep legs print as expenses',
+    unguardedRows.filter((t) => t.title === 'Outgoing transfer').length === 3,
+    unguardedRows.map((t) => t.id).join(','));
+
+  const guardedRows = report.reportExpenses(sweep, '2026-04-01', '2026-06-30', live, internal);
+  ok('export: with live accounts and internal transfers passed in, no sweep leg reaches the report',
+    guardedRows.every((t) => t.title !== 'Outgoing transfer'),
+    guardedRows.map((t) => t.id).join(','));
+  ok('export: the real Netflix charges still print',
+    guardedRows.filter((t) => t.title === 'Netflix').length === 3);
+  ok('export: the same-value furniture purchase still prints',
+    guardedRows.some((t) => t.id === 'decoy-buy'));
+
+  // ── spending on an archived account must not reach the export either ──
+  const archivedAccounts = [...accounts, { id: 'old', name: 'Old card', kind: 'card', openingFils: 0, color: '#000', archived: true }];
+  const liveWithHidden = ledger.liveAccountIds(archivedAccounts);
+  const hiddenRow = row('hidden-gym', 'expense', 'old', 15000, '2026-06-05', { title: 'Fitness First', category: 'health' });
+  const withHidden = [...sweep, hiddenRow];
+  const hiddenInternal = ledger.internalTransferIds(withHidden, liveWithHidden);
+  const guardedWithHidden = report.reportExpenses(withHidden, '2026-04-01', '2026-06-30', liveWithHidden, hiddenInternal);
+  ok('export: spending on an archived account does not print',
+    !guardedWithHidden.some((t) => t.id === 'hidden-gym'));
 }
 
 // ── a price that halved must not say "price up" ──

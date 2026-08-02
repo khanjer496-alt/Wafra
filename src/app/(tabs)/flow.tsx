@@ -79,8 +79,17 @@ export default function FlowScreen() {
   );
 
   const insights = useMemo(
-    () => buildInsights(state.transactions, state.budgets, period, now, state.notSubscriptions),
-    [state.transactions, state.budgets, period, now, state.notSubscriptions],
+    () =>
+      buildInsights(
+        state.transactions,
+        state.budgets,
+        period,
+        now,
+        state.notSubscriptions,
+        liveAccounts,
+        internal,
+      ),
+    [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal],
   );
 
   /**
@@ -107,10 +116,16 @@ export default function FlowScreen() {
       state.budgets
         .map((b) => ({
           budget: b,
-          spent: spentInMonthForCategory(state.transactions, key, b.category, liveAccounts),
+          spent: spentInMonthForCategory(
+            state.transactions,
+            key,
+            b.category,
+            liveAccounts,
+            internal,
+          ),
         }))
         .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils),
-    [state.budgets, state.transactions, key, liveAccounts],
+    [state.budgets, state.transactions, key, liveAccounts, internal],
   );
 
   const totalLimit = limits.reduce((s, r) => s + r.budget.limitFils, 0);

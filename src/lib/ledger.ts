@@ -98,7 +98,18 @@ export function internalTransferIds(
   const paired = new Set<string>();
   const outgoing = new Map<number, Transaction[]>();
   for (const t of transactions) {
-    if (t.type !== 'expense' || !accountIds.has(t.accountId)) continue;
+    if (
+      t.type !== 'expense' ||
+      !accountIds.has(t.accountId) ||
+      // Amount + date is correlation, not proof. The old matcher admitted
+      // every purchase here, so an AED 500 grocery run could cancel an AED
+      // 500 client payment on another account. Require the parser's transfer
+      // flag, or one of the narrow structural titles stored by older builds.
+      !(
+        t.isTransfer === true ||
+        /^(?:outgoing|bank|own account|self|savings) transfer$/i.test(t.title.trim())
+      )
+    ) continue;
     const list = outgoing.get(t.amountFils);
     if (list) list.push(t);
     else outgoing.set(t.amountFils, [t]);
@@ -106,16 +117,32 @@ export function internalTransferIds(
 
   const DAY = 86400000;
   for (const t of transactions) {
-    if (t.type !== 'income' || t.isTransfer || !accountIds.has(t.accountId)) continue;
+    if (
+      t.type !== 'income' ||
+      t.isTransfer ||
+      !accountIds.has(t.accountId) ||
+      t.category === 'salary' ||
+      // A salary, refund or client invoice can coincidentally equal a sweep.
+      // Only an arrival the bank itself described as a transfer is eligible.
+      !/^(?:incoming|bank|own account|self) transfer$/i.test(t.title.trim())
+    ) continue;
     const candidates = outgoing.get(t.amountFils);
     if (!candidates) continue;
-    const arrived = Date.parse(`${t.date}T12:00:00Z`);
-    const match = candidates.find(
-      (o) =>
-        !paired.has(o.id) &&
-        o.accountId !== t.accountId &&
-        Math.abs(Date.parse(`${o.date}T12:00:00Z`) - arrived) <= 3 * DAY,
-    );
+    const arrived = t.ts ?? Date.parse(`${t.date}T12:00:00Z`);
+    const match = candidates
+      .filter(
+        (o) =>
+          !paired.has(o.id) &&
+          o.accountId !== t.accountId &&
+          Math.abs((o.ts ?? Date.parse(`${o.date}T12:00:00Z`)) - arrived) <= 3 * DAY,
+      )
+      // Repeated equal transfers are common. Pair the nearest alert, not the
+      // first row in whatever display sort happened to reach this function.
+      .sort(
+        (a, b) =>
+          Math.abs((a.ts ?? Date.parse(`${a.date}T12:00:00Z`)) - arrived) -
+          Math.abs((b.ts ?? Date.parse(`${b.date}T12:00:00Z`)) - arrived),
+      )[0];
     if (!match) continue;
     paired.add(match.id);
     paired.add(t.id);

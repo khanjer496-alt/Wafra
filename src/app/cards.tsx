@@ -13,7 +13,7 @@ import { AmountField, Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { isSpending } from '@/lib/ledger';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
@@ -60,15 +60,36 @@ export default function CardsScreen() {
     [cards, state, now],
   );
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+  /**
+   * This month's spend per card.
+   *
+   * Both halves of a move between the user's own accounts are excluded, the
+   * same as on Home and Flow: a legacy sweep is stored with a structural title
+   * and no transfer flag, so `isSpending` alone let AED 19,000 of the user's
+   * own money read as a month's spending on the card it left.
+   *
+   * The live-account set is deliberately NOT applied. Every other total in the
+   * app is a single figure that a hidden account must not contribute to; this
+   * is a per-card figure printed on the card's own row, and this screen shows
+   * hidden cards on purpose in the drawer below. Filtering by account here
+   * would print "AED 0 this month" beside a card that plainly spent money —
+   * hiding a card must stop it counting in the headline, not rewrite its own
+   * history. Nothing sums this map, so no total can disagree with Home.
+   */
   const monthSpend = useMemo(() => {
     const key = monthKey(now);
     const map = new Map<string, number>();
     for (const tx of state.transactions) {
-      if (!isSpending(tx) || monthKey(tx.date) !== key) continue;
+      if (!isSpending(tx, undefined, internal) || monthKey(tx.date) !== key) continue;
       map.set(tx.accountId, (map.get(tx.accountId) ?? 0) + tx.amountFils);
     }
     return map;
-  }, [state.transactions, now]);
+  }, [state.transactions, now, internal]);
 
   const askCreditLimit = (card: Account) => {
     setLimitText(card.creditLimitFils ? String(Math.round(card.creditLimitFils / 100)) : '');

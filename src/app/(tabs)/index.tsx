@@ -540,6 +540,13 @@ export default function HomeScreen() {
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const lastFxAttempt = React.useRef('');
+  /**
+   * Foreground resume, pull-to-refresh and the capture card can all request a
+   * scan within the same second. Reading and parsing the same inbox twice is
+   * both expensive and a race against two import plans built from one stale
+   * ledger. Every caller joins the scan already in progress instead.
+   */
+  const importInFlight = React.useRef<Promise<void> | null>(null);
 
   // Read the real platform capability whenever Home regains focus. This makes
   // the card turn on immediately after returning from Settings or iOS setup,
@@ -629,13 +636,24 @@ export default function HomeScreen() {
       period,
       now,
       state.notSubscriptions,
+      liveAccounts,
+      internal,
     );
     return all.find((i) => i.id !== dismissedInsight) ?? null;
-  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, dismissedInsight]);
+  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, dismissedInsight]);
 
   const today = useMemo(
-    () => state.transactions.filter((t) => !t.isTransfer && inPeriod(t.date, period)).slice(0, 6),
-    [state.transactions, period],
+    () =>
+      state.transactions
+        .filter(
+          (transaction) =>
+            !transaction.isTransfer &&
+            !internal.has(transaction.id) &&
+            liveAccounts.has(transaction.accountId) &&
+            inPeriod(transaction.date, period),
+        )
+        .slice(0, 6),
+    [state.transactions, period, internal, liveAccounts],
   );
 
   const foreignActivity = useMemo(
@@ -671,7 +689,7 @@ export default function HomeScreen() {
     });
   }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
 
-  const runAutoImport = useCallback(
+  const performAutoImport = useCallback(
     async (interactive: boolean) => {
       // Never scan against a ledger that has not finished loading. Every
       // duplicate check in the plan is a lookup against state.transactions,
@@ -749,6 +767,20 @@ export default function HomeScreen() {
       );
     },
     [state, importBatch, ensureDurable, undoBatch, markParserVersion, toast, router],
+  );
+
+  const runAutoImport = useCallback(
+    (interactive: boolean): Promise<void> => {
+      const existing = importInFlight.current;
+      if (existing) return existing;
+
+      const operation = performAutoImport(interactive).finally(() => {
+        if (importInFlight.current === operation) importInFlight.current = null;
+      });
+      importInFlight.current = operation;
+      return operation;
+    },
+    [performAutoImport],
   );
 
   // Silent auto-import on open, and again every time the app comes back to

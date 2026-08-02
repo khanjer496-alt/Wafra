@@ -48,7 +48,14 @@ export interface DuplicateCandidate {
   type: TransactionType;
   /** `s{timestamp}-{amount}`, when the message carried a timestamp. */
   smsKey?: string;
+  /** Capture time, independent of the channel-specific SMS fingerprint. */
+  ts?: number;
   channel?: CaptureChannel;
+  /** Resolved account/card. Required for high-confidence settlement pairing. */
+  accountId?: string;
+  eventKind?: 'transaction' | 'cardPayment';
+  /** Which bank alert described the card settlement. Opposite sides are one event. */
+  cardPaymentSide?: 'debit' | 'receipt';
   /** Set only for rows already in the ledger, so a later SMS can replace them. */
   id?: string;
 }
@@ -79,11 +86,34 @@ export interface DuplicateGuard {
  * coffee bought twice — are minutes apart at the very least.
  */
 const SAME_EVENT_MS = 120_000;
+/** Push and SMS clocks may drift, but a day-wide match erases real purchases. */
+const CROSS_CHANNEL_EVENT_MS = 120_000;
+/** Debit-account confirmation and card receipt can be several minutes apart. */
+const CARD_PAYMENT_PAIR_MS = 30 * 60_000;
 
 /** The timestamp inside `s{ts}-{amount}`, or null if there isn't one. */
 function keyTime(smsKey: string | undefined): number | null {
   const m = smsKey?.match(/^s(\d+)-/);
   return m ? Number(m[1]) : null;
+}
+
+function candidateTime(c: Pick<DuplicateCandidate, 'ts' | 'smsKey'>): number | null {
+  return Number.isFinite(c.ts) ? c.ts! : keyTime(c.smsKey);
+}
+
+interface SeenEvent {
+  ts: number | null;
+  channel: CaptureChannel;
+  id?: string;
+}
+
+interface SeenCardPayment {
+  ts: number | null;
+  side: 'debit' | 'receipt';
+}
+
+function closeEnough(a: number | null, b: number | null, windowMs: number): boolean {
+  return a !== null && b !== null && Math.abs(a - b) <= windowMs;
 }
 
 export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
@@ -98,15 +128,34 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
     note(dedupeKey(t.date, t.amountFils, t.title), keyTime(t.smsKey));
   }
   const seenSms = new Set(existing.map((t) => t.smsKey).filter(Boolean) as string[]);
-  const seenLoose = new Set(
-    existing
-      .filter((t) => t.source === 'sms')
-      .map((t) => crossChannelKey(t.date, t.amountFils, t.type)),
-  );
-  /** crossChannelKey → id, for rows that came from a push notification. */
-  const pushRows = new Map<string, string>();
+  /** A day/amount/direction key still needs a capture time to identify an event. */
+  const crossChannel = new Map<string, SeenEvent[]>();
+  const noteCross = (key: string, event: SeenEvent) => {
+    const rows = crossChannel.get(key);
+    if (rows) rows.push(event);
+    else crossChannel.set(key, [event]);
+  };
+  /** Opposite alerts for one card payment: bank-account debit + card receipt. */
+  const cardPayments = new Map<string, SeenCardPayment[]>();
+  const noteCardPayment = (key: string, event: SeenCardPayment) => {
+    const rows = cardPayments.get(key);
+    if (rows) rows.push(event);
+    else cardPayments.set(key, [event]);
+  };
   for (const t of existing) {
-    if (t.viaPush) pushRows.set(crossChannelKey(t.date, t.amountFils, t.type), t.id);
+    if (t.source === 'sms') {
+      noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
+        ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
+        channel: t.viaPush ? 'push' : 'inbox',
+        id: t.id,
+      });
+    }
+    if (t.cardPaymentSide) {
+      noteCardPayment(`${t.date}|${t.amountFils}|${t.accountId}`, {
+        ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
+        side: t.cardPaymentSide,
+      });
+    }
   }
 
   return {
@@ -114,7 +163,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       if (c.smsKey && seenSms.has(c.smsKey)) return true;
       const at = seen.get(dedupeKey(c.date, c.amountFils, c.title));
       if (at) {
-        const mine = keyTime(c.smsKey);
+        const mine = candidateTime(c);
         // Same day, same amount, same name. That is one event captured twice
         // UNLESS both sides carry a timestamp and those are far enough apart
         // to be two separate visits. Without this the second identical charge
@@ -128,22 +177,162 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       // the money, the day and the direction — SMS has the fuller text and
       // the better parse, so it wins. When the SMS is the one arriving
       // second, `supersedes` replaces the push row instead of dropping this.
-      if (c.channel === 'push' && seenLoose.has(crossChannelKey(c.date, c.amountFils, c.type))) {
-        return true;
+      if (c.channel === 'push') {
+        const mine = candidateTime(c);
+        const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
+        if (
+          rows.some(
+            (row) => row.channel !== 'push' && closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
+          )
+        ) return true;
+      }
+      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
+        const mine = candidateTime(c);
+        const rows = cardPayments.get(`${c.date}|${c.amountFils}|${c.accountId}`) ?? [];
+        if (
+          rows.some(
+            (row) =>
+              row.side !== c.cardPaymentSide && closeEnough(row.ts, mine, CARD_PAYMENT_PAIR_MS),
+          )
+        ) return true;
       }
       return false;
     },
     supersedes(c) {
       if (c.channel === 'push') return null;
-      return pushRows.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? null;
+      const mine = candidateTime(c);
+      const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
+      let best: SeenEvent | null = null;
+      for (const row of rows) {
+        if (row.channel !== 'push' || !row.id || !closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS)) {
+          continue;
+        }
+        if (!best || Math.abs(row.ts! - mine!) < Math.abs(best.ts! - mine!)) best = row;
+      }
+      return best?.id ?? null;
     },
     add(c) {
-      note(dedupeKey(c.date, c.amountFils, c.title), keyTime(c.smsKey));
+      const ts = candidateTime(c);
+      note(dedupeKey(c.date, c.amountFils, c.title), ts);
       if (c.smsKey) seenSms.add(c.smsKey);
-      seenLoose.add(crossChannelKey(c.date, c.amountFils, c.type));
-      if (c.channel === 'push' && c.id) {
-        pushRows.set(crossChannelKey(c.date, c.amountFils, c.type), c.id);
+      noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
+        ts,
+        channel: c.channel ?? 'inbox',
+        id: c.id,
+      });
+      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
+        noteCardPayment(`${c.date}|${c.amountFils}|${c.accountId}`, {
+          ts,
+          side: c.cardPaymentSide,
+        });
       }
     },
   };
+}
+
+/**
+ * Repair duplicates already persisted by older capture code.
+ *
+ * This is intentionally narrower than import-time matching. A migration is
+ * allowed to merge only when source identity is strong: the exact same SMS
+ * fingerprint, a push/SMS pair within the event window, or two byte-equivalent
+ * parsed SMS rows within 30 seconds (provider inbox + delivery receiver).
+ * User-edited rows are never touched, and same-day/same-value alone is never
+ * enough. The fuller SMS row wins over a push, including its card account.
+ */
+export function reconcileCaptureDuplicates(transactions: Transaction[]): Transaction[] {
+  const kept: Transaction[] = [];
+  let changed = false;
+  const bySmsKey = new Map<string, number[]>();
+  const byCrossBucket = new Map<string, number[]>();
+  const byTitleBucket = new Map<string, number[]>();
+
+  const timeOf = (t: Transaction): number | null =>
+    Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey);
+
+  const pushIndex = (map: Map<string, number[]>, key: string, index: number) => {
+    const rows = map.get(key);
+    if (rows) rows.push(index);
+    else map.set(key, [index]);
+  };
+  const bucket = (ts: number, width: number) => Math.floor(ts / width);
+  const noteAt = (row: Transaction, index: number) => {
+    if (row.smsKey) pushIndex(bySmsKey, row.smsKey, index);
+    const ts = timeOf(row);
+    if (ts === null || row.source !== 'sms') return;
+    const cross = crossChannelKey(row.date, row.amountFils, row.type);
+    pushIndex(byCrossBucket, `${cross}|${bucket(ts, CROSS_CHANNEL_EVENT_MS)}`, index);
+    const title = dedupeKey(row.date, row.amountFils, row.title);
+    pushIndex(byTitleBucket, `${title}|${bucket(ts, 30_000)}`, index);
+  };
+
+  for (const row of transactions) {
+    if (row.userEdited || row.source !== 'sms') {
+      kept.push(row);
+      noteAt(row, kept.length - 1);
+      continue;
+    }
+    const rowTime = timeOf(row);
+    const candidates = new Set<number>();
+    if (row.smsKey) for (const index of bySmsKey.get(row.smsKey) ?? []) candidates.add(index);
+    if (rowTime !== null) {
+      const cross = crossChannelKey(row.date, row.amountFils, row.type);
+      const title = dedupeKey(row.date, row.amountFils, row.title);
+      for (const offset of [-1, 0, 1]) {
+        for (const index of
+          byCrossBucket.get(
+            `${cross}|${bucket(rowTime, CROSS_CHANNEL_EVENT_MS) + offset}`,
+          ) ?? []) candidates.add(index);
+        for (const index of
+          byTitleBucket.get(`${title}|${bucket(rowTime, 30_000) + offset}`) ?? []) {
+          candidates.add(index);
+        }
+      }
+    }
+    const duplicateAt = [...candidates].find((index) => {
+      const prior = kept[index];
+      if (prior.userEdited || prior.source !== 'sms') return false;
+      if (row.smsKey && prior.smsKey === row.smsKey) return true;
+      if (
+        row.date !== prior.date ||
+        row.amountFils !== prior.amountFils ||
+        row.type !== prior.type
+      ) return false;
+      const priorTime = timeOf(prior);
+      if (row.viaPush !== prior.viaPush && (row.viaPush || prior.viaPush)) {
+        return closeEnough(rowTime, priorTime, CROSS_CHANNEL_EVENT_MS);
+      }
+      return (
+        !row.viaPush &&
+        !prior.viaPush &&
+        dedupeKey(row.date, row.amountFils, row.title) ===
+          dedupeKey(prior.date, prior.amountFils, prior.title) &&
+        closeEnough(rowTime, priorTime, 30_000)
+      );
+    });
+    if (duplicateAt === undefined) {
+      kept.push(row);
+      noteAt(row, kept.length - 1);
+      continue;
+    }
+
+    changed = true;
+    const prior = kept[duplicateAt];
+    const preferred = prior.viaPush && !row.viaPush ? row : prior;
+    const secondary = preferred === prior ? row : prior;
+    kept[duplicateAt] = {
+      ...secondary,
+      ...preferred,
+      // Preserve optional user-facing detail if only the poorer capture had
+      // it; neither row is userEdited, but old builds could attach a note.
+      note: preferred.note ?? secondary.note,
+      splits: preferred.splits ?? secondary.splits,
+    };
+    // Maps may retain the old row's keys at this index; every candidate is
+    // revalidated above, and adding the preferred keys keeps future lookups
+    // complete without an O(n) map cleanup.
+    noteAt(kept[duplicateAt], duplicateAt);
+  }
+
+  return changed ? kept : transactions;
 }

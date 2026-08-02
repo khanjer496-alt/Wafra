@@ -141,7 +141,7 @@ const afterFirst = apply(BASE, first);
 
   // Now the SMS about the very same charge turns up, worded differently.
   const sms = [{
-    body: 'Purchase of AED 310.00 with Debit Card ending 1234 at THE ONE HOME, DUBAI.',
+    body: 'Purchase of AED 310.00 with Debit Card ending 9876 at THE ONE HOME, DUBAI.',
     ts: T0 + 903_000,
   }];
   const s = scan(sms);
@@ -149,6 +149,84 @@ const afterFirst = apply(BASE, first);
   ok('the SMS for a charge already captured by push is not a second row',
     plan.txCount === 0,
     { txCount: plan.txCount, titles: plan.batch.transactions.map((t) => t.title) });
+  const replacement = plan.batch.updates.find((u) => u.id === firstPlan.batch.transactions[0].id) ?? plan.batch.updates[0];
+  ok('the better SMS moves the retained row onto the card it actually names',
+    replacement && replacement.accountId === '0', replacement);
+  ok('the retained row stops masquerading as a push capture',
+    replacement && replacement.viaPush === false && replacement.smsKey === `s${sms[0].ts}-31000`, replacement);
+
+  // A routine Android scan reads both buffers together. If the notification
+  // timestamp is slightly earlier, it still must not append first and leave
+  // an id-less pending row that the SMS cannot supersede.
+  const together = buildImportPlan([...pushed.parsed, ...s.parsed], afterFirst, s.newestTs);
+  ok('push and SMS in one Android scan become one authoritative SMS row',
+    together.txCount === 1 &&
+      together.batch.transactions[0].accountId === '0' &&
+      !together.batch.transactions[0].viaPush,
+    together.batch.transactions);
+}
+
+/* ── two alerts for the two sides of one card settlement ────────────── */
+
+{
+  const cardState = {
+    ...BASE,
+    accounts: [{
+      id: 'fab4833', name: 'FAB Credit Card •4833', kind: 'card', cardType: 'credit',
+      last4: '4833', bankName: 'FAB', openingFils: 0, color: '#fff',
+    }],
+    accountHints: { '4833': 'fab4833' },
+  };
+  const pair = [
+    {
+      body: 'Your payment instructions of AED 8,144.40 to 5492********4833 has been processed on 05/07/2026 01:19',
+      ts: T0 + 1_200_000,
+      sender: 'FAB',
+    },
+    {
+      body: 'Payment of AED 8,144.40 has been received towards your credit card ending 4833 on 05/07/2026',
+      ts: T0 + 1_800_000,
+      sender: 'FAB',
+    },
+  ];
+  const s = scan(pair);
+  ok('both settlement-side messages parse', s.parsed.length === 2, s.parsed.map((p) => p.kind));
+  const plan = buildImportPlan(s.parsed, cardState, s.newestTs);
+  ok('the debit confirmation and card receipt become one card payment',
+    plan.txCount === 1, plan.batch.transactions.map((t) => ({ title: t.title, at: t.ts })));
+
+  const twoRealReceipts = scan([
+    { ...pair[1], ts: T0 + 2_400_000 },
+    { ...pair[1], ts: T0 + 3_000_000 },
+  ]);
+  const twoPlan = buildImportPlan(twoRealReceipts.parsed, cardState, twoRealReceipts.newestTs);
+  ok('two genuine equal card payments on the same side stay two payments',
+    twoPlan.txCount === 2, twoPlan.txCount);
+}
+
+/* ── last four digits are not globally unique across banks ──────────── */
+
+{
+  const collision = {
+    ...BASE,
+    accounts: [
+      { id: 'fab', name: 'FAB Credit Card •1234', kind: 'card', cardType: 'credit', last4: '1234', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      { id: 'enbd', name: 'ENBD Credit Card •1234', kind: 'card', cardType: 'credit', last4: '1234', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' },
+    ],
+    // Legacy state can only carry one global last-four hint. It points at the
+    // other bank, which must not steal this ENBD statement.
+    accountHints: { '1234': 'fab' },
+  };
+  const statement = {
+    kind: 'cardStatement', type: 'expense', amountFils: 200000, currency: 'AED',
+    merchant: 'Card statement', date: '2026-08-20', dueDay: 20, minDueFils: 10000,
+    card: { last4: '1234', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs: T0 + 4_000_000, sender: 'ENBD', channel: 'inbox',
+  };
+  const plan = buildImportPlan([statement], collision, statement.smsTs, new Date(2026, 7, 2));
+  ok('same last4 at two banks attaches the statement to the sender bank',
+    plan.batch.newDues[0]?.accountId === 'enbd', plan.batch.newDues[0]);
 }
 
 /* ── what must STILL import ──────────────────────────────────────────── */
