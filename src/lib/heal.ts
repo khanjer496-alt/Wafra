@@ -11,12 +11,19 @@ import type { Transaction, TxHealUpdate } from '@/lib/types';
  *
  * Returns null when there is nothing to change.
  */
-export function healPatch(prior: Transaction, p: ParsedSms): TxHealUpdate | null {
+export function healPatch(
+  prior: Transaction,
+  p: Omit<ParsedSms, 'raw'> & {
+    raw?: string;
+    cardPaymentSide?: 'debit' | 'receipt';
+  },
+): TxHealUpdate | null {
   // Never re-heal a row the user corrected by hand — a rescan that undoes
   // their edit teaches them that correcting anything is pointless.
   if (prior.userEdited) return null;
 
   const patch: TxHealUpdate = { id: prior.id };
+  const directionChanged = p.kind === 'transaction' && prior.type !== p.type;
 
   // Retitle rows whose old title was generic OR whose category never got past
   // "other" (that combination is where garbage titles live) — but never
@@ -28,10 +35,34 @@ export function healPatch(prior: Transaction, p: ParsedSms): TxHealUpdate | null
   ) {
     patch.title = p.merchant;
   }
+  if (directionChanged) {
+    patch.type = p.type;
+    // Direction and category are one parser conclusion. Keeping an old
+    // groceries category on a newly recognized refund (or Business on a
+    // newly recognized purchase) makes the healed row internally impossible.
+    patch.category = p.categoryGuess;
+    if (p.merchant !== 'Card purchase' && p.merchant !== prior.title) {
+      patch.title = p.merchant;
+    }
+    if (prior.isTransfer !== p.transferHint) patch.isTransfer = p.transferHint;
+  }
   if (prior.category === 'other' && p.categoryGuess !== 'other' && !prior.isTransfer) {
     patch.category = p.categoryGuess;
   }
   if (p.transferHint && !prior.isTransfer) patch.isTransfer = true;
+  // Older parser versions marked every inbound remittance as a transfer and
+  // therefore removed genuine external money from Income. Inbound account
+  // transfers now stay countable unless ledger pairing finds the matching
+  // outgoing leg; a reparse must clear the stale flag as well as fixing new
+  // imports. Card payments remain transfers on their dedicated branch.
+  if (
+    prior.isTransfer &&
+    p.kind === 'transaction' &&
+    p.type === 'income' &&
+    !p.transferHint
+  ) {
+    patch.isTransfer = false;
+  }
 
   // A card payment whose wording the parser did not recognize was imported as
   // an EXPENSE carrying a transfer hint. Nothing downstream could use it:
@@ -41,6 +72,9 @@ export function healPatch(prior: Transaction, p: ParsedSms): TxHealUpdate | null
   if (p.kind === 'cardPayment') {
     if (prior.type !== 'income') patch.type = 'income';
     if (!prior.isTransfer) patch.isTransfer = true;
+    if (p.cardPaymentSide && prior.cardPaymentSide !== p.cardPaymentSide) {
+      patch.cardPaymentSide = p.cardPaymentSide;
+    }
   }
 
   // Keep the raw message on rows the parser still cannot read, so the accuracy
@@ -57,7 +91,7 @@ export function healPatch(prior: Transaction, p: ParsedSms): TxHealUpdate | null
     (titleAfter === 'Card purchase' ||
       (catAfter === 'other' && !p.categoryDeliberate && !STRUCTURAL_TITLES.has(titleAfter)));
   if (stillLow) {
-    if (!prior.raw) patch.raw = p.raw.slice(0, 300);
+    if (!prior.raw && p.raw) patch.raw = p.raw.slice(0, 300);
   } else if (prior.raw) {
     // The row is readable now — a name, a category, or a direction correction
     // landed above. Drop the source text, or the accuracy report keeps offering

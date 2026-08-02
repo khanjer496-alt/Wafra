@@ -35,7 +35,12 @@ module.exports = Object.freeze([
     },
   },
   {
-    id: 'adcb-salik-card-debit',
+    // Renamed from 'adcb-salik-card-debit'. "Acc/Cr.Card" is ADCB's explicit
+    // credit abbreviation, and "Avl.Limit" corroborates it — so this is a
+    // CREDIT card, not the debit the old expectation asserted and not untyped
+    // either. Reading it as unknown would leave a real credit card
+    // unidentified, the opposite failure to the one `unknown` prevents.
+    id: 'adcb-salik-card-credit',
     bank: 'ADCB',
     channel: 'sms',
     evidence: 'repository-redacted',
@@ -49,7 +54,7 @@ module.exports = Object.freeze([
       currency: 'AED',
       merchant: 'Salik',
       date: '2025-02-11',
-      card: { last4: '7720', kind: 'debit' },
+      card: { last4: '7720', kind: 'credit' },
       reference: null,
       transferHint: false,
       snapshotFils: 250831,
@@ -141,7 +146,7 @@ module.exports = Object.freeze([
       currency: 'AED',
       merchant: 'Carrefour',
       date: '2023-01-17',
-      card: { last4: '6789', kind: 'debit' },
+      card: { last4: '6789', kind: 'unknown' },
       reference: null,
       transferHint: false,
       snapshotFils: null,

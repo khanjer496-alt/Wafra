@@ -179,6 +179,24 @@ export function bankBrandForName(
   return null;
 }
 
+/**
+ * Stable identity key for a displayed bank name.
+ *
+ * Known brands collapse their aliases first. Unknown names remain distinct
+ * in every script: stripping to ASCII made all Arabic-only banks normalize to
+ * the same empty marker, which is unsafe anywhere last4 is only a weak hint.
+ */
+export function bankIdentityForName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const branded = bankBrandForName(name)?.name ?? name;
+  const normalized = branded
+    .normalize('NFKC')
+    .toLocaleLowerCase('en-US')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return normalized || undefined;
+}
+
 /** Logo domain for a bank NAME shown in the UI (any market's pack). */
 export function bankDomainForName(name: string): string | null {
   return bankBrandForName(name)?.domain ?? null;

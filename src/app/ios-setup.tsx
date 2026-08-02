@@ -522,6 +522,7 @@ export default function IosSetupScreen() {
                 <ThemedText type="nano">{t('iosAutomationSenders')}</ThemedText>
                 <ThemedText type="nano">{t('iosAutomationImmediate')}</ThemedText>
                 <ThemedText type="nano">{t('iosAutomationAction')}</ThemedText>
+                <ThemedText type="nano">{t('iosAutomationInput')}</ThemedText>
               </Block>
 
               {banks.length > 0 && (

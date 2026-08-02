@@ -342,8 +342,9 @@ ok('openDues: one statement per account and due date',
     twoDates[0].remainingFils === 520000);
 }
 
-// One physical card stored as two account rows. Home listed the same FAB
-// statement twice, one directly above the other, and counted it twice.
+// Similar metadata is not enough to collapse active accounts. A confirmed
+// link or proven-empty artifact cleanup must happen before accounting pools
+// anything, because two real cards can share bank/type/last4.
 {
   const twoRows = {
     accounts: [
@@ -359,10 +360,10 @@ ok('openDues: one statement per account and due date',
     ],
   };
   const rows = cardsGuardLib.openDues(twoRows, new Date(2026, 6, 20));
-  ok('dues: one card stored twice still lists once',
-    rows.filter(d => d.due.dueDate === '2026-07-15' && d.remainingFils === 814400).length === 1);
-  ok('dues: a different bank with the same last4 stays its own card',
-    rows.length === 2);
+  ok('dues: two active same-bank same-suffix accounts both remain visible',
+    rows.filter(d => d.due.dueDate === '2026-07-15' && d.remainingFils === 814400).length === 2);
+  ok('dues: a different bank with the same last4 remains visible too',
+    rows.length === 3 && rows.some((d) => d.due.accountId === 'enbd'));
 }
 
 // Archived (hidden) cards drop out of dues too
@@ -1139,42 +1140,209 @@ ok('stale: a stale statement that gets paid leaves openDues',
     paidSeries[paidSeries.length - 1].fils);
 }
 
-// ── merging two account rows that are one card ──
-// This rewrites the ledger, so it is tested at the level it runs: the ids on
-// every transaction and due have to follow the surviving account.
+// ── removing only proven-empty parser account artifacts ──
 {
   const acc = require('./build/accounts');
   const dup = {
     accounts: [
       { id: 'a1', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
-      { id: 'a2', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      { id: 'a2', name: 'FAB Debit Card •5793', kind: 'card', cardType: 'debit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
       { id: 'b1', name: 'ENBD Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' },
       { id: 'cash', name: 'Cash', kind: 'cash', openingFils: 5000, color: '#fff' },
     ],
     transactions: [
       { id: 't1', type: 'expense', amountFils: 1000, category: 'dining', accountId: 'a1', title: 'A', date: '2026-07-01', source: 'sms' },
-      { id: 't2', type: 'expense', amountFils: 2000, category: 'dining', accountId: 'a1', title: 'B', date: '2026-07-02', source: 'sms' },
-      { id: 't3', type: 'expense', amountFils: 3000, category: 'dining', accountId: 'a2', title: 'C', date: '2026-07-03', source: 'sms' },
     ],
-    cardDues: [{ id: 'd1', accountId: 'a2', totalDueFils: 100, minDueFils: 5, dueDate: '2026-07-15', paidFils: 0 }],
+    cardDues: [{ id: 'd1', accountId: 'a1', totalDueFils: 100, minDueFils: 5, dueDate: '2026-07-15', paidFils: 0 }],
+    bills: [],
     accountHints: { '5793': 'a2' },
   };
   const merged = acc.mergeDuplicateAccounts(dup);
-  ok('merge: the two FAB rows become one', merged.accounts.filter(a => a.bankName === 'FAB').length === 1);
-  ok('merge: a different bank is untouched', merged.accounts.some(a => a.id === 'b1'));
-  ok('merge: accounts with no digits are untouched', merged.accounts.some(a => a.id === 'cash'));
-  ok('merge: the row with more history survives', merged.accounts.some(a => a.id === 'a1'));
-  ok('merge: no transaction is orphaned',
-    merged.transactions.every(t => merged.accounts.some(a => a.id === t.accountId)));
-  ok('merge: no transaction is lost', merged.transactions.length === 3);
-  ok('merge: dues follow the survivor', merged.cardDues.every(d => d.accountId === 'a1'));
-  ok('merge: the last-four hint follows too', merged.accountHints['5793'] === 'a1');
+  ok('artifact cleanup: empty debit fallback beside active credit is removed',
+    merged.accounts.filter(a => a.bankName === 'FAB').length === 1 && !merged.accounts.some(a => a.id === 'a2'),
+    merged.accounts);
+  ok('artifact cleanup: a different bank and cash account stay untouched',
+    merged.accounts.some(a => a.id === 'b1') && merged.accounts.some(a => a.id === 'cash'));
+  ok('artifact cleanup: the hint follows the only substantive target',
+    merged.accountHints['5793'] === 'a1', merged.accountHints);
   // Idempotent, because it runs on every hydrate.
   const twice = acc.mergeDuplicateAccounts(merged);
-  ok('merge: running it again changes nothing', twice === merged);
+  ok('artifact cleanup: running it again changes nothing', twice === merged);
+
+  const meaningfulVariants = [
+    { openingFils: 1 },
+    { creditLimitFils: 1 },
+    { snapshotFils: 1, snapshotKind: 'outstanding', snapshotTs: 1 },
+    { renewedFrom: 'older-card' },
+    { archived: true },
+  ];
+  for (const [i, patch] of meaningfulVariants.entries()) {
+    const protectedState = {
+      ...dup,
+      accounts: [dup.accounts[0], { ...dup.accounts[1], id: `protected-${i}`, ...patch }],
+      accountHints: {},
+    };
+    ok(`artifact cleanup: account metadata variant ${i + 1} blocks deletion`,
+      acc.mergeDuplicateAccounts(protectedState) === protectedState, patch);
+  }
+  const referenced = {
+    ...dup,
+    accounts: [dup.accounts[0], dup.accounts[1]],
+    transactions: dup.transactions, cardDues: [],
+    bills: [{ id: 'bill', title: 'Card fee', category: 'other', amountFils: 100, dueDay: 1, accountId: 'a2', paidMonths: [] }],
+    accountHints: {},
+  };
+  ok('artifact cleanup: a bill reference blocks deletion',
+    acc.mergeDuplicateAccounts(referenced) === referenced);
+  const namedByUser = {
+    ...dup,
+    accounts: [dup.accounts[0], { ...dup.accounts[1], name: 'My travel card' }],
+    accountHints: {},
+  };
+  ok('artifact cleanup: a user-named empty card is not a proven parser artifact',
+    acc.mergeDuplicateAccounts(namedByUser) === namedByUser);
+  const activeSiblings = {
+    ...dup,
+    accounts: [dup.accounts[0], dup.accounts[1]],
+    transactions: [
+      dup.transactions[0],
+      { ...dup.transactions[0], id: 't2', accountId: 'a2' },
+    ],
+    cardDues: [], bills: [], accountHints: {},
+  };
+  ok('artifact cleanup: two active same-last4 siblings are never auto-merged',
+    acc.mergeDuplicateAccounts(activeSiblings) === activeSiblings);
+  const emptyTypedSiblings = {
+    ...dup,
+    accounts: [
+      { ...dup.accounts[0], id: 'adcb-credit', bankName: 'ADCB', name: 'ADCB Credit Card •5793' },
+      { ...dup.accounts[1], id: 'adcb-debit', bankName: 'ADCB', name: 'ADCB Debit Card •5793' },
+    ],
+    transactions: [], cardDues: [], bills: [],
+    accountHints: {
+      'ADCB|credit|5793': 'adcb-credit',
+      'ADCB|debit|5793': 'adcb-debit',
+    },
+  };
+  const untouchedTyped = acc.mergeDuplicateAccounts(emptyTypedSiblings);
+  ok('artifact cleanup: two empty explicit debit/credit siblings remain ambiguous',
+    untouchedTyped === emptyTypedSiblings && untouchedTyped.accounts.length === 2,
+    untouchedTyped.accounts);
+  ok('artifact cleanup: ambiguous typed hints are never remapped by array order',
+    untouchedTyped.accountHints['ADCB|credit|5793'] === 'adcb-credit' &&
+      untouchedTyped.accountHints['ADCB|debit|5793'] === 'adcb-debit',
+    untouchedTyped.accountHints);
+  const activeUnknownHolding = {
+    ...emptyTypedSiblings,
+    accounts: [
+      ...emptyTypedSiblings.accounts,
+      { id: 'holding', name: 'ADCB Card •5793', kind: 'card', last4: '5793', bankName: 'ADCB', openingFils: 0, color: '#fff' },
+    ],
+    transactions: [{
+      id: 'holding-tx', type: 'expense', amountFils: 1000, category: 'other',
+      accountId: 'holding', title: 'Card purchase', date: '2026-08-01', source: 'sms',
+    }],
+  };
+  const holdingCleaned = acc.mergeDuplicateAccounts(activeUnknownHolding);
+  ok('artifact cleanup: an unknown holding with transactions is never dropped',
+    holdingCleaned.accounts.some((a) => a.id === 'holding') &&
+      holdingCleaned.transactions[0].accountId === 'holding',
+    holdingCleaned);
+  const unknownBanks = {
+    ...dup,
+    accounts: [
+      { ...dup.accounts[0], bankName: undefined, name: 'Credit Card •5793' },
+      { ...dup.accounts[1], bankName: undefined, name: 'Debit Card •5793' },
+    ],
+    accountHints: {},
+  };
+  ok('artifact cleanup: unknown bank is not proof two same-last4 rows share a bank',
+    acc.mergeDuplicateAccounts(unknownBanks) === unknownBanks);
+  const distinctArabicBanks = {
+    ...dup,
+    accounts: [
+      {
+        id: 'arabic-active', name: 'بنك أبوظبي بطاقة •5793', kind: 'card',
+        last4: '5793', bankName: 'بنك أبوظبي', openingFils: 100, color: '#fff',
+      },
+      {
+        id: 'arabic-empty', name: 'مصرف الشارقة بطاقة •5793', kind: 'card',
+        last4: '5793', bankName: 'مصرف الشارقة', openingFils: 0, color: '#fff',
+      },
+    ],
+    transactions: [], cardDues: [], bills: [], accountHints: {},
+  };
+  ok('artifact cleanup: distinct Arabic bank names never collapse into one identity',
+    acc.mergeDuplicateAccounts(distinctArabicBanks) === distinctArabicBanks,
+    acc.mergeDuplicateAccounts(distinctArabicBanks).accounts);
   // And a clean state is returned untouched, not rebuilt.
-  ok('merge: a state with no duplicates is returned as-is',
+  ok('artifact cleanup: a state with no duplicates is returned as-is',
     acc.mergeDuplicateAccounts(guardState) === guardState);
+}
+
+// ── card-payment title/account mismatch repair ──
+{
+  const acc = require('./build/accounts');
+  const cardsLib = require('./build/cards');
+  const wrong = {
+    accounts: [
+      { id: 'fab3324', name: 'FAB Credit Card •3324', kind: 'card', cardType: 'credit', last4: '3324', bankName: 'FAB', openingFils: 0, color: '#09f' },
+      { id: 'fab3749', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'FAB', openingFils: 0, color: '#09f' },
+      { id: 'enbd3749', name: 'ENBD Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'Emirates NBD', openingFils: 0, color: '#00f' },
+    ],
+    transactions: [{
+      id: 'wrong-payment', type: 'income', amountFils: 744800, category: 'other',
+      accountId: 'fab3324', title: 'Card •3749 payment', date: '2026-07-03',
+      source: 'sms', isTransfer: true, cardPaymentSide: 'receipt',
+    }],
+    cardDues: [{
+      id: 'due3749', accountId: 'fab3749', totalDueFils: 744800, minDueFils: 37240,
+      dueDate: '2026-07-10', paidFils: 0,
+    }],
+    accountHints: {},
+  };
+  const repaired = acc.repairCardPaymentAccounts(wrong);
+  ok('payment account repair: Card •3749 payment moves off FAB •3324',
+    repaired.transactions[0].accountId === 'fab3749', repaired.transactions[0]);
+  ok('payment account repair: same last4 at another bank cannot steal it',
+    repaired.transactions[0].accountId !== 'enbd3749', repaired.transactions[0]);
+  ok('payment account repair: the corrected payment settles the named card',
+    cardsLib.openDues(repaired, new Date(2026, 6, 8)).length === 0,
+    cardsLib.cardStatementView(repaired, 'fab3749'));
+
+  const debitMisfiled = {
+    ...wrong,
+    accounts: [
+      { ...wrong.accounts[1], id: 'fab3749-debit', name: 'FAB Debit Card •3749', cardType: 'debit' },
+      wrong.accounts[1],
+    ],
+    transactions: [{ ...wrong.transactions[0], accountId: 'fab3749-debit' }],
+  };
+  const creditTargeted = acc.repairCardPaymentAccounts(debitMisfiled);
+  ok('payment account repair: same-suffix debit row yields to the unique credit card',
+    creditTargeted.transactions[0].accountId === 'fab3749', creditTargeted.transactions[0]);
+  ok('payment account repair: debit-to-credit correction settles the credit statement',
+    cardsLib.openDues(creditTargeted, new Date(2026, 6, 8)).length === 0,
+    cardsLib.cardStatementView(creditTargeted, 'fab3749'));
+
+  const ambiguous = {
+    ...wrong,
+    accounts: [...wrong.accounts, { ...wrong.accounts[1], id: 'fab3749-second' }],
+  };
+  ok('payment account repair: two same-bank targets are ambiguous and stay untouched',
+    acc.repairCardPaymentAccounts(ambiguous) === ambiguous);
+  const edited = {
+    ...wrong,
+    transactions: [{ ...wrong.transactions[0], userEdited: true }],
+  };
+  ok('payment account repair: a user-edited account choice is never overwritten',
+    acc.repairCardPaymentAccounts(edited) === edited);
+  const unknownBank = {
+    ...wrong,
+    accounts: wrong.accounts.map((a) => ({ ...a, bankName: undefined })),
+  };
+  ok('payment account repair: no bank identity means no automatic reassignment',
+    acc.repairCardPaymentAccounts(unknownBank) === unknownBank);
 }
 
 // ── a paid card stops saying it is overdue ──
@@ -1273,6 +1441,49 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('paid card: after a relaunch it carries no source text', relaunched.raw === undefined);
   ok('paid card: a relaunched row settles the statement',
     cardsGuardLib.openDues({ ...settled, transactions: [relaunched] }, new Date(2026, 6, 20)).length === 0);
+
+  const remittanceRaw = 'Inward remittance of AED 7,300.00 has been credited to your account.';
+  const legacyRemittance = {
+    ...wrong, id: 'legacy-remittance', type: 'income', title: 'Inward remittance',
+    amountFils: 730000, isTransfer: true, raw: remittanceRaw,
+  };
+  const reparsedRemittance = {
+    ...parsed, kind: 'transaction', type: 'income', merchant: 'Inward remittance',
+    amountFils: 730000, card: null, transferHint: false, cardPaymentSide: undefined,
+    raw: remittanceRaw,
+  };
+  const remittancePatch = heal.healPatch(legacyRemittance, reparsedRemittance);
+  const healedRemittance = heal.applyHealPatch(legacyRemittance, remittancePatch);
+  ok('income healing: a raw-bearing legacy inward remittance clears the stale transfer flag',
+    remittancePatch?.isTransfer === false && healedRemittance.isTransfer === false,
+    remittancePatch);
+  ok('income healing: a user-edited inward remittance remains byte-for-byte untouched',
+    heal.healPatch({ ...legacyRemittance, userEdited: true }, reparsedRemittance) === null);
+
+  const oldExpense = {
+    ...legacyRemittance, id: 'old-expense', type: 'expense', category: 'groceries',
+    title: 'Carrefour', isTransfer: undefined,
+  };
+  const nowRefund = {
+    ...reparsedRemittance, merchant: 'Refund', categoryGuess: 'other', transferHint: false,
+  };
+  const refundPatch = heal.healPatch(oldExpense, nowRefund);
+  ok('direction healing: expense to income also replaces stale category and merchant',
+    refundPatch?.type === 'income' && refundPatch.category === 'other' &&
+      refundPatch.title === 'Refund', refundPatch);
+
+  const oldIncome = {
+    ...legacyRemittance, id: 'old-income', category: 'business', title: 'Client payment',
+    isTransfer: undefined,
+  };
+  const nowPurchase = {
+    ...reparsedRemittance, type: 'expense', merchant: 'Carrefour',
+    categoryGuess: 'groceries', transferHint: false,
+  };
+  const purchasePatch = heal.healPatch(oldIncome, nowPurchase);
+  ok('direction healing: income to expense also replaces stale category and merchant',
+    purchasePatch?.type === 'expense' && purchasePatch.category === 'groceries' &&
+      purchasePatch.title === 'Carrefour', purchasePatch);
 }
 
 // ── what the card detail sheet says a card owes ──
@@ -1281,9 +1492,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
 // it drifted from every other screen three separate ways. It is `cards.ts`
 // now, so these are the sequences that drift would have to survive.
 {
-  // One physical card, two account rows: the SMS scan found it, and the user
-  // had already added it by hand. Which row the statement and the payment
-  // landed on is an accident of message wording.
+  // Two similar rows are not declared one physical card until the user links
+  // them (which remaps the ledger to one surviving account id).
   const found = {
     id: 'scanned', name: 'FAB Credit Card •4833', kind: 'card', cardType: 'credit',
     last4: '4833', bankName: 'FAB', openingFils: 0, color: '#fff',
@@ -1304,16 +1514,17 @@ ok('stale: a stale statement that gets paid leaves openDues',
       source: 'sms', isTransfer: true,
     }],
   };
-  // Opened from the row that holds neither the statement nor the payment.
+  // Opened from the row that holds the payment but not the statement.
   const view = cardsLib.cardStatementView(twinCard, 'manual');
-  ok('card sheet: a statement on the twin row is still this card\'s statement',
-    view.statements.length === 1, view.statements.length);
-  ok('card sheet: a payment on the twin row settles what the sheet shows',
-    view.outstandingFils === 0 && view.open.length === 0,
-    { outstanding: view.outstandingFils, open: view.open.length });
+  ok('card sheet: an unconfirmed sibling statement is not silently pooled',
+    view.statements.length === 0, view.statements.length);
+  const scannedView = cardsLib.cardStatementView(twinCard, 'scanned');
+  ok('card sheet: a payment on an unconfirmed sibling does not settle this card',
+    scannedView.outstandingFils === 814440 && scannedView.open.length === 1,
+    { outstanding: scannedView.outstandingFils, open: scannedView.open.length });
   ok('card sheet: the paid lookup covers every statement it lists',
     view.statements.every((d) => view.paidByDueId.has(d.id)));
-  ok('card sheet: the payment total is the card\'s, not the row\'s',
+  ok('card sheet: the payment total stays on its resolved account',
     view.paidTotalFils === 814440, view.paidTotalFils);
 
   // Hiding a card says where it appears, not what it costs. openDues drops
@@ -1463,14 +1674,11 @@ ok('stale: a stale statement that gets paid leaves openDues',
     separate.length === 2);
 }
 
-// ── One card, whichever account row the bank's messages landed on ──
+// ── Card accounting identity requires an explicit link/remap ──
 //
-// Allocation ran per ACCOUNT ROW while the display deduped per CARD. Two rows
-// for one physical card — a hand-added card the scan had already found, or
-// state written by an older version — meant the payment SMS was filed against
-// one row and the statement against its twin, and neither could see the other.
-// The dedupe then kept whichever copy owed more, which is always the one the
-// payment never reached: a paid card, permanently overdue, in the total.
+// Bank + type + last4 is not proof: two active cards can share all three.
+// Parser artifacts are cleaned separately, and confirmed links physically
+// remap their ledger references before these accounting helpers run.
 {
   const fabA = { id: 'fab-a', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' };
   // The twin, added by hand: same card, no bank name, because the user typed
@@ -1484,16 +1692,15 @@ ok('stale: a stale statement that gets paid leaves openDues',
       date: '2026-07-05', category: 'other', title: 'Card •5793 payment', source: 'sms',
     }],
   };
-  ok('one card: a payment on one row settles the statement on its twin',
-    cardsLib.duePaidFils(split, split.cardDues[0]) === 814440);
-  ok('one card: and the card drops out of the open list',
-    cardsLib.openDues(split, new Date(2026, 6, 27)).length === 0);
+  ok('card identity: an unconfirmed sibling payment cannot settle this statement',
+    cardsLib.duePaidFils(split, split.cardDues[0]) === 0);
+  ok('card identity: the unconfirmed statement remains open',
+    cardsLib.openDues(split, new Date(2026, 6, 27)).length === 1);
 
-  // An unknown bank is not a different bank — that split is what made
-  // `FAB|5793|credit` and `|5793|credit` two cards.
+  // Missing bank metadata is not proof either.
   const key = cardsLib.cardIdentity([fabA, fabB]);
-  ok('one card: a row with no bank name joins the bank holding those digits',
-    key('fab-a') === key('fab-b'));
+  ok('card identity: a row with no bank name stays separate until confirmed',
+    key('fab-a') !== key('fab-b'));
 
   // But two banks really can issue cards ending in the same four digits.
   const enbd = { id: 'enbd', name: 'ENBD Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' };
@@ -1521,12 +1728,39 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('one card: a payment to one card at a bank leaves the other alone',
     cardsLib.duePaidFils(twoCards, twoCards.cardDues[0]) === 0 &&
     cardsLib.duePaidFils(twoCards, twoCards.cardDues[1]) === 744800);
+
+  const sameSuffixAccounts = [
+    { ...fabA, id: 'fab-3749-a', name: 'FAB Credit Card •3749', last4: '3749' },
+    { ...fabA, id: 'fab-3749-b', name: 'FAB Credit Card •3749', last4: '3749' },
+  ];
+  const sameSuffixDues = [
+    { id: 'due-a', accountId: 'fab-3749-a', totalDueFils: 400000, minDueFils: 20000, dueDate: '2026-08-20', paidFils: 0 },
+    { id: 'due-b', accountId: 'fab-3749-b', totalDueFils: 400000, minDueFils: 20000, dueDate: '2026-08-20', paidFils: 0 },
+  ];
+  const sameSuffix = {
+    accounts: sameSuffixAccounts,
+    cardDues: sameSuffixDues,
+    transactions: [{
+      id: 'payment-a', type: 'income', isTransfer: true, accountId: 'fab-3749-a',
+      amountFils: 400000, date: '2026-08-10', category: 'other',
+      title: 'Card •3749 payment', source: 'sms',
+    }],
+  };
+  const stillOpen = cardsLib.openDues(sameSuffix, new Date(2026, 7, 10));
+  ok('card identity: one same-suffix card payment settles only its own due',
+    stillOpen.length === 1 && stillOpen[0].due.accountId === 'fab-3749-b' &&
+      stillOpen[0].remainingFils === 400000,
+    stillOpen);
+  const separateSameSuffix = cardsLib.mergeImportedCardDues(
+    [sameSuffixDues[0]], [sameSuffixDues[1]], sameSuffixAccounts);
+  ok('statement merge: two active same-bank same-suffix cards stay separate',
+    separateSameSuffix.length === 2, separateSameSuffix);
 }
 
 // ── Which statement a payment belongs to ──
 //
-// The matching window is ~40 days before the due date to 20 after, which is
-// wider than the statement cycle: consecutive statements overlap, and the rule
+// The matching window starts around statement issue and ends only when a
+// replacement statement is issued: consecutive statements overlap, and the rule
 // that keeps every payment counted exactly once is that they are poured
 // oldest-first into the oldest statement they could belong to.
 {
@@ -1563,6 +1797,15 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('window: a payment split across two messages settles the statement',
     cardsLib.duePaidFils(inTwo, inTwo.cardDues[0]) === 100000 &&
     cardsLib.openDues(inTwo, new Date(2026, 6, 20)).length === 0);
+
+  const paid25DaysLate = st(
+    [stmt('jul', '2026-07-15', 100000)], [pay('late25', 100000, '2026-08-09')]);
+  ok('window: the newest statement accepts a payment 25 days late',
+    cardsLib.duePaidFils(paid25DaysLate, paid25DaysLate.cardDues[0]) === 100000);
+  const paid60DaysLate = st(
+    [stmt('jul', '2026-07-15', 100000)], [pay('late60', 100000, '2026-09-13')]);
+  ok('window: the newest statement accepts a payment 60 days late',
+    cardsLib.duePaidFils(paid60DaysLate, paid60DaysLate.cardDues[0]) === 100000);
 
   // The invariant this module exists for, restated against two overlapping
   // statements and one payment: counted once, never twice.
@@ -1880,6 +2123,62 @@ ok('stale: a stale statement that gets paid leaves openDues',
     };
     ok('duplicate: a later same-value push is a second real purchase',
       !duplicateGuard([first]).has(laterPush));
+
+    const withoutSmsKey = { ...first, smsKey: undefined };
+    const laterSameTitle = {
+      date: first.date, amountFils: first.amountFils, title: first.title,
+      type: first.type, channel: 'inbox', ts: first.ts + 9 * 60 * 60_000,
+    };
+    ok('duplicate: persisted event time keeps a later smsKey-less repeat purchase',
+      !duplicateGuard([withoutSmsKey]).has(laterSameTitle));
+  }
+
+  // Settlement pairing is cardinality-safe: one bank-side debit can explain
+  // one receipt, never every equal receipt that follows it that day.
+  {
+    const guard = duplicateGuard([]);
+    const debit = {
+      date: '2026-08-10', amountFils: 400000, title: 'Card •3749 payment',
+      type: 'income', smsKey: 's1786320000000-400000', ts: 1786320000000,
+      channel: 'inbox', accountId: 'fab-3749', eventKind: 'cardPayment',
+      cardPaymentSide: 'debit',
+    };
+    guard.add(debit);
+    const receipt = {
+      ...debit, smsKey: `s${debit.ts + 10 * 60_000}-400000`,
+      ts: debit.ts + 10 * 60_000, cardPaymentSide: 'receipt',
+    };
+    ok('duplicate: one opposite settlement receipt consumes the debit alert',
+      guard.has(receipt));
+    const secondReceipt = {
+      ...receipt, smsKey: `s${debit.ts + 20 * 60_000}-400000`,
+      ts: debit.ts + 20 * 60_000,
+    };
+    ok('duplicate: a second real receipt is not consumed by the same debit',
+      !guard.has(secondReceipt));
+
+    const manualGuard = duplicateGuard([{
+      id: 'manual-paid', type: 'income', amountFils: debit.amountFils,
+      category: 'other', accountId: debit.accountId, title: 'FAB card payment',
+      date: debit.date, source: 'manual', isTransfer: true,
+    }]);
+    ok('duplicate: Mark paid suppresses the matching bank debit side',
+      manualGuard.has(debit));
+    ok('duplicate: the same Mark paid also suppresses its matching receipt side',
+      manualGuard.has(receipt));
+    const nextDebit = {
+      ...debit, ts: debit.ts + 60 * 60_000,
+      smsKey: `s${debit.ts + 60 * 60_000}-400000`,
+    };
+    ok('duplicate: a second real payment is not consumed by the manual token',
+      !manualGuard.has(nextDebit));
+    manualGuard.add(nextDebit);
+    const nextReceipt = {
+      ...receipt, ts: nextDebit.ts + 10 * 60_000,
+      smsKey: `s${nextDebit.ts + 10 * 60_000}-400000`,
+    };
+    ok('duplicate: the second real payment still coalesces its own opposite side',
+      manualGuard.has(nextReceipt));
   }
 
   // The fix must reach ledgers that already contain the old bug. Repair is
@@ -1908,7 +2207,104 @@ ok('stale: a stale statement that gets paid leaves openDues',
     const edited = require('./build/dedupe').reconcileCaptureDuplicates([
       { ...push, userEdited: true }, sms,
     ]);
-    ok('duplicate repair: a user-edited row is never deleted', edited.length === 2);
+    ok('duplicate repair: an edited strong-identity copy wins without double counting',
+      edited.length === 1 && edited[0].id === 'old-push' &&
+        edited[0].title === 'The One' && edited[0].accountId === 'fallback', edited);
+
+    const bothEdited = require('./build/dedupe').reconcileCaptureDuplicates([
+      { ...push, userEdited: true }, { ...sms, userEdited: true },
+    ]);
+    ok('duplicate repair: two edited copies are never destructively reconciled',
+      bothEdited.length === 2, bothEdited);
+
+    const debit = {
+      id: 'payment-debit', type: 'expense', amountFils: 400000, category: 'other',
+      accountId: 'fab-3749', title: 'Card •3749 payment', date: '2026-08-10',
+      source: 'sms', isTransfer: true, cardPaymentSide: 'debit',
+      ts: 1786320000000, smsKey: 's1786320000000-400000',
+    };
+    const receipt = {
+      ...debit, id: 'payment-receipt', type: 'income', cardPaymentSide: 'receipt',
+      ts: debit.ts + 10 * 60_000, smsKey: `s${debit.ts + 10 * 60_000}-400000`,
+    };
+    const settlement = require('./build/dedupe').reconcileCaptureDuplicates([debit, receipt]);
+    ok('duplicate repair: opposite settlement alerts become one retained payment',
+      settlement.length === 1 && settlement[0].cardPaymentSide === 'receipt', settlement);
+
+    const midnightTs = Date.parse('2026-08-10T23:59:00Z');
+    const crossMidnightDebit = {
+      ...debit, id: 'midnight-debit', date: '2026-08-10', ts: midnightTs,
+      smsKey: `s${midnightTs}-400000`,
+    };
+    const crossMidnightReceipt = {
+      ...receipt, id: 'midnight-receipt', date: '2026-08-11',
+      ts: midnightTs + 3 * 60_000,
+      smsKey: `s${midnightTs + 3 * 60_000}-400000`,
+    };
+    const midnightSettlement = require('./build/dedupe').reconcileCaptureDuplicates([
+      crossMidnightDebit, crossMidnightReceipt,
+    ]);
+    ok('duplicate repair: opposite settlement sides across midnight become one payment',
+      midnightSettlement.length === 1, midnightSettlement);
+    const midnightSameSide = require('./build/dedupe').reconcileCaptureDuplicates([
+      {
+        ...crossMidnightReceipt, id: 'same-side-before', date: '2026-08-10',
+        ts: midnightTs, smsKey: `s${midnightTs}-400000`,
+      },
+      crossMidnightReceipt,
+    ]);
+    ok('duplicate repair: same-side payments on adjacent dates stay distinct',
+      midnightSameSide.length === 2, midnightSameSide);
+    const due = {
+      id: 'due-7000', accountId: 'fab-3749', totalDueFils: 700000,
+      minDueFils: 35000, dueDate: '2026-08-20', paidFils: 0,
+    };
+    const settlementState = {
+      accounts: [{
+        id: 'fab-3749', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit',
+        last4: '3749', bankName: 'FAB', openingFils: 0, color: '#fff',
+      }],
+      transactions: settlement,
+      cardDues: [due],
+    };
+    const remainder = cardsGuardLib.dueWithStatus(
+      settlementState, due, new Date(2026, 7, 10));
+    ok('duplicate repair: one AED 4,000 settlement leaves AED 3,000 of AED 7,000 open',
+      remainder.remainingFils === 300000, remainder);
+
+    const secondReceipt = {
+      ...receipt, id: 'payment-receipt-2',
+      ts: debit.ts + 20 * 60_000, smsKey: `s${debit.ts + 20 * 60_000}-400000`,
+    };
+    const onePairPlusReal = require('./build/dedupe').reconcileCaptureDuplicates([
+      debit, receipt, secondReceipt,
+    ]);
+    ok('duplicate repair: one debit consumes only one of two real receipts',
+      onePairPlusReal.length === 2, onePairPlusReal);
+
+    const twoDebits = {
+      ...debit, id: 'payment-debit-2',
+      ts: debit.ts + 2 * 60_000, smsKey: `s${debit.ts + 2 * 60_000}-400000`,
+    };
+    const twoReceipts = {
+      ...receipt, id: 'payment-receipt-2',
+      ts: debit.ts + 12 * 60_000, smsKey: `s${debit.ts + 12 * 60_000}-400000`,
+    };
+    const twoGenuinePayments = require('./build/dedupe').reconcileCaptureDuplicates([
+      debit, twoDebits, receipt, twoReceipts,
+    ]);
+    ok('duplicate repair: two genuine settlement pairs remain two payments',
+      twoGenuinePayments.length === 2, twoGenuinePayments);
+
+    const editedSettlement = require('./build/dedupe').reconcileCaptureDuplicates([
+      { ...debit, userEdited: true }, receipt,
+    ]);
+    ok('duplicate repair: weak settlement pairing never removes a user-edited row',
+      editedSettlement.length === 2, editedSettlement);
+
+    const otherCardReceipt = { ...receipt, id: 'other-card', accountId: 'fab-1111' };
+    ok('duplicate repair: equal settlements on different cards remain separate',
+      require('./build/dedupe').reconcileCaptureDuplicates([debit, otherCardReceipt]).length === 2);
 
     const large = Array.from({ length: 5_000 }, (_, index) => ({
       ...sms,
@@ -2172,8 +2568,64 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('reissue: candidates are ranked by most recent use',
     cardsLib.reissueSuggestions(three, today)[0].candidateIds[0] === 'old');
 
+  const livSplit = {
+    accounts: [
+      card('liv-history', '8575', { name: 'Liv Debit Card •8575', bankName: 'Liv', cardType: 'debit' }),
+      card('enbd-statement', '8575', { name: 'Emirates NBD Credit Card •8575', bankName: 'Emirates NBD' }),
+    ],
+    transactions: [
+      spend('liv-buy', 'liv-history', '2026-07-02', 14900),
+      { id: 'enbd-pay', type: 'income', amountFils: 5000, category: 'other', accountId: 'enbd-statement', title: 'Card •8575 payment', date: '2026-07-10', source: 'sms', isTransfer: true, cardPaymentSide: 'receipt' },
+    ],
+    cardDues: [{ id: 'liv-due', accountId: 'enbd-statement', totalDueFils: 14900, minDueFils: 745, dueDate: '2026-07-14', paidFils: 0 }],
+    accountHints: {}, bills: [],
+  };
+  const livCandidate = cardsLib.reissueSuggestions(livSplit, today);
+  ok('link suggestion: Liv/ENBD same-last4 split is offered for confirmation',
+    livCandidate[0]?.newAccountId === 'enbd-statement' &&
+      livCandidate[0]?.candidateIds[0] === 'liv-history', livCandidate);
+  ok('link suggestion: a payment row does not hide the split-card prompt',
+    livCandidate.length === 1, livCandidate);
+  ok('link suggestion: issuer context never auto-merges the rows',
+    acc.mergeDuplicateAccounts(livSplit) === livSplit);
+
+  const adcbSplit = {
+    ...livSplit,
+    accounts: [
+      card('adcb-debit', '1111', { name: 'ADCB Debit Card •1111', bankName: 'ADCB', cardType: 'debit' }),
+      card('adcb-credit', '1111', { name: 'ADCB Credit Card •1111', bankName: 'ADCB' }),
+    ],
+    transactions: [spend('adcb-buy', 'adcb-debit', '2026-07-02', 14900)],
+    cardDues: [{ ...livSplit.cardDues[0], id: 'adcb-due', accountId: 'adcb-credit' }],
+  };
+  const adcbCandidate = cardsLib.reissueSuggestions(adcbSplit, today);
+  ok('link suggestion: same-bank debit/credit split is offered, not auto-merged',
+    adcbCandidate[0]?.newAccountId === 'adcb-credit' &&
+      adcbCandidate[0]?.candidateIds[0] === 'adcb-debit' &&
+      acc.mergeDuplicateAccounts(adcbSplit) === adcbSplit,
+    adcbCandidate);
+
+  const unrelatedSameDigits = {
+    ...adcbSplit,
+    accounts: [
+      card('fab-debit', '1111', { name: 'FAB Debit Card •1111', bankName: 'FAB', cardType: 'debit' }),
+      card('adcb-credit', '1111', { name: 'ADCB Credit Card •1111', bankName: 'ADCB' }),
+    ],
+    transactions: [spend('fab-buy', 'fab-debit', '2026-07-02', 14900)],
+  };
+  ok('link suggestion: unrelated banks sharing last4 are not suggested',
+    cardsLib.reissueSuggestions(unrelatedSameDigits, today).length === 0);
+
   // The merge is what actually settles the statement.
-  const merged = acc.mergeRenewedCard(state, 'old', 'new');
+  const stateWithMetadata = {
+    ...state,
+    accounts: [
+      card('old', '5793', { creditLimitFils: 5000000, snapshotFils: 123400, snapshotKind: 'outstanding', snapshotTs: 200 }),
+      card('new', '3324'),
+    ],
+    bills: [{ id: 'fee', title: 'Annual fee', category: 'other', amountFils: 10000, dueDay: 1, accountId: 'old', paidMonths: [] }],
+  };
+  const merged = acc.mergeRenewedCard(stateWithMetadata, 'old', 'new');
   ok('reissue: the old row is gone', merged.accounts.length === 1);
   ok('reissue: the survivor is the NEW number', merged.accounts[0].id === 'new');
   ok('reissue: it remembers what it replaced', merged.accounts[0].renewedFrom === 'old');
@@ -2182,6 +2634,12 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('reissue: the last-four hints follow', merged.accountHints['5793'] === 'new');
   ok('reissue: the due is on the same card as the history',
     merged.cardDues[0].accountId === 'new');
+  ok('reissue: account metadata and bill references survive the confirmed link',
+    merged.accounts[0].creditLimitFils === 5000000 &&
+      merged.accounts[0].snapshotFils === 123400 &&
+      merged.accounts[0].snapshotKind === 'outstanding' &&
+      merged.bills[0].accountId === 'new',
+    { account: merged.accounts[0], bills: merged.bills });
 
   // And once merged, a payment made under the OLD digits settles the
   // statement issued under the new ones. That is the whole point.
@@ -2279,6 +2737,26 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('internal: In counted the arriving move before pairing', before.incomeFils === 2882800 + 2400000, String(before.incomeFils));
   ok('internal: In is just the salary now', after.incomeFils === 2882800, String(after.incomeFils));
   ok('internal: Out drops the outgoing half too', after.expenseFils === 12000, String(after.expenseFils));
+
+  const externalRemittance = row(
+    'external-remit', 'income', 'a4', 730000, '2026-06-27',
+    { title: 'Inward remittance', category: 'other', isTransfer: false },
+  );
+  const externalInternal = ledger.internalTransferIds([externalRemittance], live);
+  ok('internal: an unpaired inward remittance remains real income',
+    externalInternal.size === 0 && ledger.isIncome(externalRemittance, live, externalInternal));
+
+  const ownRemittance = [
+    row('remit-out', 'expense', 'a2', 730000, '2026-06-27', {
+      title: 'Outgoing transfer', isTransfer: true,
+    }),
+    externalRemittance,
+  ];
+  const ownRemittanceInternal = ledger.internalTransferIds(ownRemittance, live);
+  ok('internal: a matched inward remittance is excluded only with its own-account leg',
+    ownRemittanceInternal.size === 2 &&
+      !ledger.isIncome(externalRemittance, live, ownRemittanceInternal),
+    [...ownRemittanceInternal]);
 
   // Strictness. A same-amount pair on ONE account is not a move between two.
   const sameAccount = [

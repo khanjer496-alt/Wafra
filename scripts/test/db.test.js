@@ -266,6 +266,106 @@ ok('the storage layer reports its failures',
 
 const store = stripComments(read('src/lib/store.tsx'));
 
+/**
+ * Load the pure hydration exports from store.tsx without mounting React
+ * Native. The production functions themselves execute; only their platform
+ * dependencies are replaced with deterministic test doubles. Transpiling at
+ * test time means a focused `node db.test.js` never reads a stale build.
+ */
+function loadHydrationExports() {
+  const ts = require('typescript');
+  const execute = (rel, requireModule) => {
+    const filename = path.join(ROOT, rel);
+    const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        jsx: ts.JsxEmit.ReactJSX,
+        esModuleInterop: true,
+      },
+      fileName: filename,
+    }).outputText;
+    const loaded = { exports: {} };
+    Function('require', 'module', 'exports', '__filename', '__dirname', output)(
+      requireModule,
+      loaded,
+      loaded.exports,
+      filename,
+      path.dirname(filename),
+    );
+    return loaded.exports;
+  };
+
+  const dedupe = execute('src/lib/dedupe.ts', (id) => {
+    throw new Error(`unexpected dedupe dependency ${id}`);
+  });
+  const parser = {
+    PARSER_VERSION: 999,
+    normalizeServiceName: (title) => title === 'Legacy service' ? 'Canonical service' : null,
+    guessCategory: (title) => title === 'Unclassified merchant' ? 'dining' : 'other',
+    parseSms: (raw) =>
+      raw === 'now a statement'
+        ? { kind: 'cardStatement' }
+        : raw === 'now a bill'
+          ? { kind: 'billDue' }
+          : raw.startsWith('temporarily unsupported')
+            ? null
+            : { kind: 'transaction' },
+  };
+  const heal = {
+    healPatch: (tx) => ({ id: tx.id, title: 'Reparsed merchant', category: 'dining', raw: null }),
+    applyHealPatch: (tx, patch) => {
+      const next = { ...tx, ...patch };
+      if (patch.raw === null) delete next.raw;
+      return next;
+    },
+  };
+  const react = {
+    createContext: () => ({}),
+    useCallback: (fn) => fn,
+    useContext: () => null,
+    useEffect: () => {},
+    useMemo: (fn) => fn(),
+    useRef: (value) => ({ current: value }),
+    useState: (value) => [value, () => {}],
+  };
+  const identityState = (state) => state;
+  const modules = {
+    'react/jsx-runtime': { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') },
+    react,
+    'react-native': {
+      AppState: { addEventListener: () => ({ remove() {} }) },
+      I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
+      Platform: { OS: 'web' },
+    },
+    '@/lib/accounts': {
+      markCardsDistinct: identityState,
+      mergeDuplicateAccounts: identityState,
+      mergeRenewedCard: identityState,
+      repairCardPaymentAccounts: identityState,
+    },
+    '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
+    '@/lib/theme-preference': { setThemePreference() {} },
+    '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
+    '@/lib/markets': { detectMarketId: () => 'AE', setActiveMarket() {} },
+    '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
+    '@/lib/heal': heal,
+    '@/lib/sms-parser': parser,
+    '@/lib/ledger': { internalTransferIds: () => new Set() },
+    '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
+    '@/lib/dedupe': dedupe,
+    '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
+    '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
+    './balances': {},
+  };
+  return execute('src/lib/store.tsx', (id) => {
+    if (Object.hasOwn(modules, id)) return modules[id];
+    throw new Error(`unexpected store dependency ${id}`);
+  });
+}
+
+const hydration = loadHydrationExports();
+
 ok('a failed hydration latches writes off',
   /storageBlocked\.current = true/.test(store) &&
     /if \(storageBlocked\.current\) return Promise\.resolve\(false\)/.test(store),
@@ -431,6 +531,326 @@ ok('an in-flight hydration can be superseded',
   /hydrationRun\.current !== run/.test(store) && /const run = \+\+hydrationRun\.current/.test(store),
   'a retry started while the first read is still running would otherwise let the older ' +
     'attempt dispatch its result last');
+
+// ---------------------------------------------------------------------------
+// 2c. Persisted-ledger migrations are lossless for authoritative user data.
+// ---------------------------------------------------------------------------
+
+const account = (id, extra = {}) => ({
+  id,
+  name: `Card •${id.slice(-4)}`,
+  kind: 'card',
+  openingFils: 0,
+  color: '#000000',
+  ...extra,
+});
+const due = (id, accountId, dueDate) => ({
+  id,
+  accountId,
+  totalDueFils: 100000,
+  minDueFils: 5000,
+  dueDate,
+  paidFils: 0,
+});
+const tx = (id, extra = {}) => ({
+  id,
+  type: 'expense',
+  amountFils: 2500,
+  category: 'other',
+  accountId: 'card-0001',
+  title: 'Ordinary merchant',
+  date: '2026-08-01',
+  source: 'sms',
+  ...extra,
+});
+
+{
+  const legacy = {
+    accounts: [
+      account('legacy-unknown', { cardType: undefined, snapshotFils: 500000, snapshotKind: 'balance' }),
+      account('legacy-debit', { cardType: 'debit' }),
+    ],
+    cardDues: [
+      due('old-unreplaced', 'legacy-unknown', '2025-01-01'),
+      due('debit-due', 'legacy-debit', '2026-07-01'),
+      due('orphan-due', 'missing-account', '2020-01-01'),
+    ],
+  };
+  const migrated = hydration.migratePersistedState(legacy);
+  const unknown = migrated.accounts.find((row) => row.id === 'legacy-unknown');
+  const debit = migrated.accounts.find((row) => row.id === 'legacy-debit');
+  ok('hydration preserves an unreplaced unsettled due older than 60 days',
+    migrated.cardDues.some((row) => row.id === 'old-unreplaced'));
+  ok('hydration preserves a due even when its legacy account cannot be repaired safely',
+    migrated.cardDues.some((row) => row.id === 'orphan-due'));
+  ok('a CardDue upgrades its legacy unknown account to credit and fixes snapshot semantics',
+    unknown?.kind === 'card' &&
+      unknown?.cardType === 'credit' &&
+      unknown?.snapshotKind === 'limit' &&
+      unknown?.snapshotFils === 500000);
+  ok('a CardDue overrides a legacy debit fallback with authoritative credit evidence',
+    debit?.kind === 'card' && debit?.cardType === 'credit');
+}
+
+{
+  const backup = JSON.stringify({
+    app: 'wafra',
+    version: 1,
+    data: {
+      transactions: [],
+      accounts: [
+        account('backup-legacy', {
+          cardType: 'debit',
+          snapshotFils: 875000,
+          snapshotKind: 'balance',
+        }),
+      ],
+      cardDues: [due('backup-due', 'backup-legacy', '2025-03-01')],
+    },
+  });
+  const restored = hydration.parseBackupForRestore(backup);
+  const card = restored?.accounts?.find((row) => row.id === 'backup-legacy');
+  ok('old backup restore applies the same due-authoritative migration as launch hydration',
+    restored?.cardDues?.some((row) => row.id === 'backup-due') &&
+      card?.kind === 'card' &&
+      card?.cardType === 'credit' &&
+      card?.snapshotKind === 'limit' &&
+      card?.snapshotFils === 875000);
+  ok('backup restore still rejects an invalid envelope',
+    hydration.parseBackupForRestore(JSON.stringify({ app: 'not-wafra', data: { transactions: [] } })) === null);
+}
+
+{
+  const edited = [
+    tx('edited-pan', { title: '4782********4833 User title', userEdited: true }),
+    tx('edited-large', { amountFils: 100_000_001, userEdited: true }),
+    tx('edited-income', { type: 'income', category: 'dining', userEdited: true }),
+    tx('edited-service', { title: 'Legacy service', userEdited: true }),
+    tx('edited-category', { title: 'Unclassified merchant', userEdited: true }),
+    tx('edited-raw', { title: 'My correction', raw: 'parser would replace this', userEdited: true }),
+  ];
+  const before = new Map(edited.map((row) => [row.id, JSON.stringify(row)]));
+  const automatic = [
+    tx('auto-pan', { title: '4782********4833 Machine title' }),
+    tx('auto-large', { amountFils: 100_000_001 }),
+    tx('auto-income', { type: 'income', category: 'dining' }),
+    tx('auto-service', { title: 'Legacy service' }),
+    tx('auto-category', { title: 'Unclassified merchant' }),
+    tx('auto-raw', { raw: 'reparse me' }),
+  ];
+  const migrated = hydration.migratePersistedState({ transactions: [...edited, ...automatic] });
+  const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
+  ok('automatic hydration transforms preserve every userEdited row byte-for-byte',
+    edited.every((row) => JSON.stringify(byId.get(row.id)) === before.get(row.id)),
+    'masked PAN repair, income refile, service normalization, recategorization and raw ' +
+      'reparse must leave exact persisted objects intact; large amounts are authoritative too');
+  ok('the same hydration migration still repairs unedited rows',
+    byId.get('auto-pan')?.title === 'Card payment' &&
+      byId.get('auto-large')?.amountFils === 100_000_001 &&
+      byId.get('auto-income')?.category === 'business' &&
+      byId.get('auto-service')?.title === 'Canonical service' &&
+      byId.get('auto-category')?.category === 'dining' &&
+      byId.get('auto-raw')?.title === 'Reparsed merchant' &&
+      byId.get('auto-raw')?.raw === undefined);
+}
+
+{
+  const propertyTransfer = tx('property-transfer', {
+    type: 'income',
+    title: 'Property completion transfer',
+    category: 'business',
+    amountFils: 250_000_000,
+    isTransfer: true,
+  });
+  const before = JSON.stringify(propertyTransfer);
+  const migrated = hydration.migratePersistedState({ transactions: [propertyTransfer] });
+  ok('hydration retains a legitimate persisted SMS transfer above AED 1M',
+    migrated.transactions.length === 1 &&
+      migrated.transactions[0].amountFils === 250_000_000 &&
+      JSON.stringify(migrated.transactions[0]) === before);
+
+  const unsupported = tx('unsupported-old-row', {
+    title: 'Legacy property payment',
+    category: 'business',
+    raw: 'temporarily unsupported',
+  });
+  const unsupportedBefore = JSON.stringify(unsupported);
+  const reparsed = hydration.migratePersistedState({ transactions: [unsupported] });
+  ok('a temporary parser miss retains the persisted transaction and its raw evidence',
+    reparsed.transactions.length === 1 &&
+      JSON.stringify(reparsed.transactions[0]) === unsupportedBefore);
+}
+
+{
+  const business = tx('anonymous-business', {
+    type: 'income', title: 'Incoming transfer', category: 'business',
+  });
+  const dining = tx('anonymous-dining', {
+    type: 'income', title: 'Inward remittance', category: 'dining',
+  });
+  const withPayer = tx('named-business', {
+    type: 'income',
+    title: 'Incoming transfer',
+    category: 'business',
+    raw: 'temporarily unsupported File Ref 123B/O ACME LLCClient payment',
+  });
+  const edited = tx('edited-anonymous-income', {
+    type: 'income',
+    title: 'Incoming transfer',
+    category: 'business',
+    userEdited: true,
+  });
+  const manual = tx('manual-anonymous-income', {
+    type: 'income', title: 'Incoming transfer', category: 'business', source: 'manual',
+  });
+  const editedBefore = JSON.stringify(edited);
+  const migrated = hydration.migratePersistedState({
+    transactions: [business, dining, withPayer, edited, manual],
+  });
+  const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
+  ok('anonymous structural SMS income is migrated from business and spending to Other',
+    byId.get(business.id)?.category === 'other' && byId.get(dining.id)?.category === 'other');
+  ok('raw payer evidence prevents anonymous-income recategorization',
+    byId.get(withPayer.id)?.category === 'business' &&
+      byId.get(withPayer.id)?.raw === withPayer.raw);
+  ok('anonymous-income migration stays narrow and preserves user intent',
+    JSON.stringify(byId.get(edited.id)) === editedBefore &&
+      byId.get(manual.id)?.category === 'business');
+
+  const backup = JSON.stringify({
+    app: 'wafra', data: { transactions: [business], accounts: [], cardDues: [] },
+  });
+  ok('backup restore also refiles legacy anonymous business income to Other',
+    hydration.parseBackupForRestore(backup)?.transactions?.[0]?.category === 'other');
+}
+
+{
+  const stale = tx('stale-remittance', {
+    type: 'income',
+    title: 'Inward remittance',
+    isTransfer: true,
+  });
+  const edited = tx('edited-remittance', {
+    type: 'income',
+    title: 'Inward remittance',
+    isTransfer: true,
+    userEdited: true,
+  });
+  const neighbours = [
+    edited,
+    tx('raw-remittance', {
+      type: 'income', title: 'Inward remittance', isTransfer: true, raw: 'still parsable',
+    }),
+    tx('manual-remittance', {
+      type: 'income', title: 'Inward remittance', isTransfer: true, source: 'manual',
+    }),
+    tx('incoming-transfer', {
+      type: 'income', title: 'Incoming transfer', isTransfer: true,
+    }),
+  ];
+  const editedBefore = JSON.stringify(edited);
+  const migrated = hydration.migratePersistedState({ transactions: [stale, ...neighbours] });
+  const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
+  ok('hydration clears only the stale rawless SMS inward-remittance transfer flag',
+    byId.has(stale.id) && !('isTransfer' in byId.get(stale.id)) &&
+      byId.get('raw-remittance')?.isTransfer === true &&
+      byId.get('manual-remittance')?.isTransfer === true &&
+      byId.get('incoming-transfer')?.isTransfer === true);
+  ok('the inward-remittance migration keeps userEdited rows byte-for-byte',
+    JSON.stringify(byId.get(edited.id)) === editedBefore);
+
+  const backup = JSON.stringify({
+    app: 'wafra',
+    data: { transactions: [stale], accounts: [], cardDues: [] },
+  });
+  const restored = hydration.parseBackupForRestore(backup);
+  ok('backup restore clears the same stale inward-remittance transfer flag',
+    restored?.transactions?.length === 1 &&
+      restored.transactions[0].id === stale.id &&
+      !('isTransfer' in restored.transactions[0]));
+}
+
+{
+  const statement = tx('legacy-statement', { raw: 'now a statement' });
+  const bill = tx('legacy-bill', { raw: 'now a bill' });
+  const state = {
+    transactions: [statement, bill],
+    cardDues: [],
+    bills: [],
+    lastScanTs: 1785582000000,
+  };
+  const migrated = hydration.migratePersistedState(state);
+  ok('hydration retains a raw row newly recognized as a card statement until a due exists',
+    migrated.transactions.some((row) => row.id === statement.id) &&
+      migrated.cardDues.length === 0 &&
+      migrated.lastScanTs === state.lastScanTs);
+  ok('hydration retains a raw row newly recognized as a bill until a bill exists',
+    migrated.transactions.some((row) => row.id === bill.id) &&
+      migrated.bills.length === 0 &&
+      migrated.lastScanTs === state.lastScanTs);
+}
+
+{
+  const first = tx('coffee-one', {
+    title: 'Same coffee',
+    amountFils: 2200,
+    ts: 1785582000000,
+    smsKey: 's1785582000000-2200',
+  });
+  const second = tx('coffee-two', {
+    title: 'Same coffee',
+    amountFils: 2200,
+    ts: 1785582600000,
+    smsKey: 's1785582600000-2200',
+  });
+  const genuine = hydration.finalizeHydrationTransactions([first, second]);
+  ok('hydration preserves two genuine same-day equal purchases',
+    genuine.length === 2 && genuine.some((row) => row.id === first.id) &&
+      genuine.some((row) => row.id === second.id));
+
+  const edited = tx('edited-capture', {
+    title: 'My coffee correction',
+    note: 'keep exactly',
+    userEdited: true,
+    ts: 1785582000000,
+    smsKey: 's1785582000000-2200',
+  });
+  const poorer = tx('poorer-capture', {
+    title: 'Bank notification',
+    viaPush: true,
+    ts: 1785582001000,
+    smsKey: edited.smsKey,
+  });
+  const before = JSON.stringify(edited);
+  const reconciled = hydration.finalizeHydrationTransactions([poorer, edited]);
+  ok('capture reconciliation preserves the userEdited winner byte-for-byte',
+    reconciled.some((row) => row.id === edited.id && JSON.stringify(row) === before));
+}
+
+const persistedMigrationBody = bodyOf(store, 'export function migratePersistedState');
+ok('the coarse pre-hydration day/amount/direction/title dedupe is gone',
+  !!persistedMigrationBody &&
+    !/const best = new Map/.test(persistedMigrationBody) &&
+    !/importTs/.test(persistedMigrationBody) &&
+    /finalizeHydrationTransactions/.test(store));
+
+ok('hydration no longer ages out authoritative CardDue records',
+  !!persistedMigrationBody &&
+    !/60\s*\*\s*86400000/.test(persistedMigrationBody) &&
+    !/cardDues\s*=\s*parsed\.cardDues\.filter/.test(persistedMigrationBody));
+
+ok('hydration has no amount-only destructive transaction filter',
+  !!persistedMigrationBody &&
+    !/100_000_000/.test(persistedMigrationBody) &&
+    !/amountFils\s*[<>]=?\s*\d+[\s\S]{0,120}?return \[\]/.test(persistedMigrationBody));
+
+ok('a parser miss retains the old row instead of deleting it',
+  !!persistedMigrationBody && /if \(!p\) return \[t\]/.test(persistedMigrationBody));
+
+const restoreBackupBody = bodyOf(store, 'const restoreBackup = useCallback');
+ok('backup restore migrates old state before dispatching it',
+  !!restoreBackupBody &&
+    inOrder(restoreBackupBody, 'parseBackupForRestore(json)', "dispatch({ type: 'restore'"));
 
 const clearAllBody = bodyOf(store, 'const clearAll = useCallback');
 ok('a successful erase clears the latch BEFORE writing the blank store',

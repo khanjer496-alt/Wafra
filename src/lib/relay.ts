@@ -687,8 +687,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
       ids.push(sealed.id);
       continue;
     }
-    const ts = row.receivedAt ? Date.parse(row.receivedAt) : NaN;
-    parsed.push({ ...row, smsTs: Number.isFinite(ts) ? ts : Date.now() });
+    parsed.push(relayRowToScannedSms(row));
     ids.push(sealed.id);
   }
 
@@ -698,28 +697,204 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   return { parsed, ids, unreadable, testReceived, testIds };
 }
 
-function isParsedRelayRow(
-  value: unknown,
-): value is ParsedSms & {
+export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
+  /** The Worker discards raw Message Content before sealing the row. */
+  raw?: never;
   receivedAt?: string;
   captureSource?: 'shortcut' | 'email' | 'pdf';
-} {
-  if (typeof value !== 'object' || value === null) return false;
-  const row = value as Partial<ParsedSms> & {
-    receivedAt?: unknown;
-    captureSource?: unknown;
-  };
+  /** Structured sender label only; raw Message Content never reaches sync. */
+  sender?: string;
+};
+
+const MAX_RELAY_SENDER_LENGTH = 80;
+const RELAY_CATEGORIES = new Set([
+  'groceries',
+  'dining',
+  'transport',
+  'utilities',
+  'telecom',
+  'rent',
+  'shopping',
+  'health',
+  'personal-care',
+  'home-services',
+  'education',
+  'travel',
+  'entertainment',
+  'charity',
+  'government',
+  'loan',
+  'salary',
+  'business',
+  'other',
+]);
+
+function validIsoDate(value: unknown): value is string | null {
+  if (value === null) return true;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function validParsedCard(value: unknown): value is ParsedRelayRow['card'] {
+  if (value === null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const card = value as { last4?: unknown; kind?: unknown };
   return (
-    typeof row.merchant === 'string' &&
-    typeof row.amountFils === 'number' &&
-    Number.isSafeInteger(row.amountFils) &&
-    (typeof row.date === 'string' || row.date === null) &&
-    (row.receivedAt === undefined || typeof row.receivedAt === 'string') &&
-    (row.captureSource === undefined ||
-      row.captureSource === 'shortcut' ||
-      row.captureSource === 'email' ||
-      row.captureSource === 'pdf')
+    typeof card.last4 === 'string' &&
+    /^\d{4}$/.test(card.last4) &&
+    (card.kind === 'credit' ||
+      card.kind === 'debit' ||
+      card.kind === 'account' ||
+      card.kind === 'unknown')
   );
+}
+
+function validNullableSafeFils(value: unknown): value is number | null {
+  return value === null || (Number.isSafeInteger(value) && (value as number) >= 0);
+}
+
+/**
+ * Sender is optional for manual tests and old Shortcut payloads. When present,
+ * accept one compact, displayable label only: no surrounding whitespace,
+ * control characters, multiline text or bidi overrides that could disguise
+ * which bank produced a row.
+ */
+export function validRelaySender(value: unknown): value is string | undefined {
+  return (
+    value === undefined ||
+    (typeof value === 'string' &&
+      value === value.trim() &&
+      [...value].length >= 1 &&
+      [...value].length <= MAX_RELAY_SENDER_LENGTH &&
+      !/[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/u.test(value))
+  );
+}
+
+export function isParsedRelayRow(
+  value: unknown,
+): value is ParsedRelayRow {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if ('raw' in row) return false;
+  if (
+    row.kind !== 'transaction' &&
+    row.kind !== 'billDue' &&
+    row.kind !== 'cardStatement' &&
+    row.kind !== 'cardPayment'
+  ) return false;
+  if (row.type !== 'expense' && row.type !== 'income') return false;
+  if (!Number.isSafeInteger(row.amountFils) || (row.amountFils as number) <= 0) return false;
+  if (typeof row.currency !== 'string' || !/^[A-Z]{3}$/.test(row.currency)) return false;
+  if (
+    typeof row.merchant !== 'string' ||
+    row.merchant !== row.merchant.trim() ||
+    row.merchant.length < 1 ||
+    row.merchant.length > 160 ||
+    /[\u0000-\u001F\u007F-\u009F]/u.test(row.merchant)
+  ) return false;
+  if (!validIsoDate(row.date)) return false;
+  if (!validParsedCard(row.card)) return false;
+  if (
+    row.reference !== null &&
+    (typeof row.reference !== 'string' ||
+      row.reference !== row.reference.trim() ||
+      row.reference.length < 1 ||
+      row.reference.length > 128 ||
+      /[\u0000-\u001F\u007F-\u009F]/u.test(row.reference))
+  ) return false;
+  if (typeof row.transferHint !== 'boolean') return false;
+  if (!RELAY_CATEGORIES.has(row.categoryGuess as string)) return false;
+  if (row.categoryDeliberate !== undefined && typeof row.categoryDeliberate !== 'boolean') {
+    return false;
+  }
+
+  const dueKind = row.kind === 'billDue' || row.kind === 'cardStatement';
+  if (
+    row.dueDay !== null &&
+    (!Number.isInteger(row.dueDay) || (row.dueDay as number) < 1 || (row.dueDay as number) > 31)
+  ) return false;
+  if (!dueKind && row.dueDay !== null) return false;
+  if (dueKind && row.date !== null && row.dueDay !== Number(row.date.slice(8))) return false;
+  if (!validNullableSafeFils(row.minDueFils)) return false;
+  if (row.kind !== 'cardStatement' && row.minDueFils !== null) return false;
+
+  if (!validNullableSafeFils(row.snapshotFils)) return false;
+  if (
+    row.snapshotKind !== null &&
+    row.snapshotKind !== 'balance' &&
+    row.snapshotKind !== 'limit' &&
+    row.snapshotKind !== 'outstanding'
+  ) return false;
+  if ((row.snapshotFils === null) !== (row.snapshotKind === null)) return false;
+
+  const fxFields = [row.originalAmountMinor, row.originalCurrency, row.fxRate, row.fxSource];
+  const hasFx = fxFields.some((field) => field !== undefined);
+  if (
+    hasFx &&
+    (!Number.isSafeInteger(row.originalAmountMinor) ||
+      (row.originalAmountMinor as number) <= 0 ||
+      typeof row.originalCurrency !== 'string' ||
+      !/^[A-Z]{3}$/.test(row.originalCurrency) ||
+      typeof row.fxRate !== 'number' ||
+      !Number.isFinite(row.fxRate) ||
+      row.fxRate <= 0 ||
+      (row.fxSource !== 'bank' && row.fxSource !== 'fallback'))
+  ) return false;
+
+  if (
+    row.receivedAt !== undefined &&
+    (typeof row.receivedAt !== 'string' || !Number.isFinite(Date.parse(row.receivedAt)))
+  ) return false;
+  if (
+    row.captureSource !== undefined &&
+    row.captureSource !== 'shortcut' &&
+    row.captureSource !== 'email' &&
+    row.captureSource !== 'pdf'
+  ) return false;
+  if (!validRelaySender(row.sender)) return false;
+
+  if (
+    row.cardPaymentSide !== undefined &&
+    row.cardPaymentSide !== 'debit' &&
+    row.cardPaymentSide !== 'receipt'
+  ) return false;
+  if (row.kind !== 'cardPayment' && row.cardPaymentSide !== undefined) return false;
+  if (row.kind === 'cardStatement') {
+    const card = row.card as { kind?: unknown } | null;
+    if (
+      row.type !== 'expense' ||
+      (card !== null && card.kind !== 'credit') ||
+      row.categoryGuess !== 'other' ||
+      row.transferHint
+    ) {
+      return false;
+    }
+  }
+  if (row.kind === 'cardPayment') {
+    const card = row.card as { kind?: unknown } | null;
+    if (
+      row.type !== 'expense' ||
+      card?.kind !== 'credit' ||
+      row.categoryGuess !== 'other' ||
+      !row.transferHint
+    ) {
+      return false;
+    }
+  }
+  if (row.kind === 'billDue' && (row.type !== 'expense' || row.transferHint)) return false;
+
+  return true;
+}
+
+/** Preserve the validated sender for bank/card identity in buildImportPlan. */
+export function relayRowToScannedSms(
+  row: ParsedRelayRow,
+  fallbackTs = Date.now(),
+): ScannedSms {
+  const ts = row.receivedAt ? Date.parse(row.receivedAt) : NaN;
+  const { receivedAt: _receipt, ...structured } = row;
+  return { ...structured, smsTs: Number.isFinite(ts) ? ts : fallbackTs };
 }
 
 /** Drop collected rows from the queue. Call only after they are persisted. */

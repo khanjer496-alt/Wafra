@@ -124,7 +124,9 @@ export function internalTransferIds(
       t.category === 'salary' ||
       // A salary, refund or client invoice can coincidentally equal a sweep.
       // Only an arrival the bank itself described as a transfer is eligible.
-      !/^(?:incoming|bank|own account|self) transfer$/i.test(t.title.trim())
+      !/^(?:(?:incoming|bank|own account|self) transfer|inward remittance)$/i.test(
+        t.title.trim(),
+      )
     ) continue;
     const candidates = outgoing.get(t.amountFils);
     if (!candidates) continue;

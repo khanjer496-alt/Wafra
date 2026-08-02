@@ -6,6 +6,10 @@ const root = path.join(__dirname, '..');
 const schema = fs.readFileSync(path.join(root, 'schema.sql'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8');
 const imports = fs.readFileSync(path.join(root, 'src/imports.ts'), 'utf8');
+const ingestRow = fs.readFileSync(path.join(root, 'src/ingest-row.ts'), 'utf8');
+const ingest = worker.slice(
+  worker.indexOf("url.pathname === '/v1/ingest'"),
+  worker.indexOf("url.pathname === '/v1/import/capabilities'"));
 const deviceListQuery = worker.match(/`SELECT id, role, friendly_name, created_at, last_seen,[\s\S]*?ORDER BY CASE role[\s\S]*?`/)?.[0] ?? '';
 let passed = 0;
 let failed = 0;
@@ -88,6 +92,44 @@ ok('vault devices can be listed, named and revoked without exposing credentials'
 ok('the last owner requires explicit vault deletion',
   /return json\(\{ error: 'last_owner' \}, 409\)/.test(worker) &&
     /url\.pathname === '\/v1\/vault'/.test(worker));
+
+// ── The bank label the Shortcut may send (see docs/ios-shortcut-spec.md) ──
+//
+// iOS had no bank identity at all until this field existed, so a card ending
+// 3749 at one bank and a card ending 3749 at another were the same card as far
+// as the import planner could tell. What makes the field safe rather than a
+// second way in for message text is that it is validated, small, and sealed —
+// it is not stored, not logged, and not echoed.
+ok('the Shortcut sender is validated by one module, not inline in the route',
+  /import \{ relaySender \} from '\.\/ingest-row';/.test(worker) &&
+    /export function relaySender\(value: unknown\): string \| null \| undefined/.test(ingestRow));
+ok('a malformed sender is refused before the row is built',
+  /const sender = relaySender\(body\?\.sender\);/.test(ingest) &&
+    /if \(sender === undefined\) return json\(\{ error: 'bad_sender' \}, 400\);/.test(ingest) &&
+    ingest.indexOf("error: 'bad_sender'") < ingest.indexOf('const rowWithReceipt'));
+ok('sender stays optional, so older Shortcut payloads still ingest',
+  /sender\?: unknown/.test(worker) && /if \(value === undefined \|\| value === null\) return null;/.test(ingestRow));
+ok('the sender is bounded and never truncated into the row',
+  /export const MAX_RELAY_SENDER_LENGTH = \d{1,3};/.test(ingestRow) &&
+    /if \(\[\.\.\.normalized\]\.length > MAX_RELAY_SENDER_LENGTH\) return undefined;/.test(ingestRow));
+ok('the sender reaches the sealed row and nothing else',
+  /\.\.\.\(!isTest && sender \? \{ sender \} : \{\}\),/.test(ingest) &&
+    !/\.bind\([^)]*\bsender\b/.test(worker) &&
+    !/\bsender\w*\s+(?:TEXT|BLOB|INTEGER)\b/i.test(schema));
+ok('a refused sender is not echoed back to the caller',
+  !/json\(\{[^}]*\bsender\b[^}]*\}, 4\d\d\)/.test(worker));
+ok('the sender module has no persistence or logging surface',
+  !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(ingestRow));
+
+// The parser decides which leg of a card settlement a message is, because the
+// relay drops the wording the app used to re-read. Nothing here needs to know
+// the field by name — but it does need to keep passing fields it does not
+// recognise through the raw discard, which is what a spread guarantees and an
+// allow-list would have quietly broken.
+ok('structured parser fields cross the raw discard by spread, not by allow-list',
+  /const \{ raw: _discard, \.\.\.structured \} = parsed;/.test(worker) &&
+    /return structured;/.test(worker) &&
+    /const \{ raw: _discard, \.\.\.structured \} = parsed!;/.test(ingest));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

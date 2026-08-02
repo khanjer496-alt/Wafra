@@ -1,5 +1,5 @@
 import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
-import { bankFromSender } from '@/lib/markets';
+import { bankBrandForName, bankFromSender, bankIdentityForName } from '@/lib/markets';
 import { duplicateGuard } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
@@ -22,10 +22,14 @@ import type { Account, AppState, CardDue, ImportBatchInput, Transaction, TxHealU
  * Nothing here touches a native module.
  */
 
-export type ScannedSms = ParsedSms & {
+export type ScannedSms = Omit<ParsedSms, 'raw'> & {
+  /** Present only when parsing happened locally; relay rows discard the body. */
+  raw?: string;
   smsTs?: number;
   sender?: string;
   channel?: CaptureChannel;
+  /** Structured settlement side survives server raw-body discard on iOS. */
+  cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
   captureSource?: 'shortcut' | 'email' | 'pdf';
 };
@@ -37,7 +41,7 @@ export interface ImportPlan {
   dueCount: number;
   /** Already-imported rows the parser now reads better (renamed/recategorized). */
   healedCount: number;
-  billDues: ParsedSms[];
+  billDues: ScannedSms[];
 }
 
 
@@ -58,6 +62,7 @@ function emptyPlan(): ImportPlan {
       newDues: [],
       snapshots: {},
       bankNames: {},
+      cardTypes: {},
       lastScanTs: 0,
       updates: [],
     },
@@ -101,92 +106,227 @@ export function buildImportPlan(
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
   const priorBySmsKey = new Map<string, Transaction>();
+  const priorById = new Map<string, Transaction>();
   for (const t of state.transactions) {
+    priorById.set(t.id, t);
     if (t.smsKey && t.source === 'sms') priorBySmsKey.set(t.smsKey, t);
   }
   const updates: TxHealUpdate[] = [];
-  const healFromReparse = (smsKey: string | undefined, p: ScannedSms) => {
+  const healFromReparse = (
+    smsKey: string | undefined,
+    p: ScannedSms,
+    resolvedAccountId?: string,
+    cardPaymentSide?: 'debit' | 'receipt',
+  ) => {
     const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
-    if (!prior) return;
-    const patch = healPatch(prior, p);
-    if (patch) updates.push(patch);
+    if (!prior || prior.userEdited) return;
+    // Older rows predate structured settlement sides. Pass the side resolved
+    // from either the parser field or the Android-only raw fallback so a
+    // reparse can make persisted one-to-one settlement reconciliation work.
+    const patch = healPatch(
+      prior,
+      cardPaymentSide ? { ...p, cardPaymentSide } : p,
+    );
+    const accountChanged =
+      resolvedAccountId !== undefined && resolvedAccountId !== prior.accountId;
+    if (patch || accountChanged) {
+      updates.push({
+        ...(patch ?? { id: prior.id }),
+        ...(accountChanged ? { accountId: resolvedAccountId } : {}),
+      });
+    }
   };
   const smsKeyOf = (p: ScannedSms): string | undefined =>
     p.smsTs !== undefined ? `s${p.smsTs}-${p.amountFils}` : undefined;
   // Newest bank-quoted balance/limit per account — even from messages whose
   // transaction is already imported (rescans refresh the figures).
   const snapshots: ImportBatchInput['snapshots'] = {};
-  const noteSnapshot = (accountRef: string, p: ScannedSms) => {
-    if (p.snapshotFils === null || !p.snapshotKind || p.smsTs === undefined || !accountRef) return;
-    const cur = snapshots[accountRef];
-    if (!cur || p.smsTs > cur.ts) {
-      snapshots[accountRef] = { fils: p.snapshotFils, kind: p.snapshotKind, ts: p.smsTs };
-    }
-  };
   const hints: Record<string, string> = { ...state.accountHints };
   const newAccounts: Omit<Account, 'id'>[] = [];
   const newHints: Record<string, string> = {};
   const transactions: Omit<Transaction, 'id'>[] = [];
   const newDues: Omit<CardDue, 'id'>[] = [];
-  const billDues: ParsedSms[] = [];
+  const billDues: ScannedSms[] = [];
   const fallbackAccountId = state.accounts[0]?.id ?? '';
 
   // Bank identity per account, learned from SMS sender IDs (existing accounts
   // that predate this get theirs backfilled).
   const bankNames: Record<string, string> = {};
+  const cardTypes: NonNullable<ImportBatchInput['cardTypes']> = {};
+  type ResolvedCardKind = 'credit' | 'debit' | 'account' | 'unknown';
+  interface AccountResolution {
+    accountId: string;
+    /** False when multiple compatible accounts made attribution unsafe. */
+    confident: boolean;
+  }
   const hintKey = (bankName: string | undefined, last4: string, kind: string) =>
     `${bankName ?? '?'}|${kind}|${last4}`;
-  const matchesCard = (
-    account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName'> | undefined,
-    last4: string,
-    kind: 'credit' | 'debit' | 'account',
+  const unassignedCardRef = (
     bankName: string | undefined,
-  ): boolean => {
-    if (!account || account.last4 !== last4) return false;
-    if (kind === 'account' ? account.kind !== 'bank' : account.cardType !== kind) return false;
-    // A missing bank can be learned from this sender. A different known bank
-    // cannot: last four digits are not globally unique.
-    return !bankName || !account.bankName || account.bankName === bankName;
-  };
-  const accountAtRef = (ref: string): Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName'> | undefined => {
+    last4: string,
+    kind: ResolvedCardKind,
+  ): string =>
+    `__unassigned-card__:${bankName ? bankIdentityForName(bankName) : 'unknown'}:${kind}:${last4}`;
+  const accountAtRef = (
+    ref: string,
+  ): Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> | undefined => {
     if (/^\d+$/.test(ref)) return newAccounts[Number(ref)];
     return state.accounts.find((a) => a.id === ref);
   };
-  const resolveAccount = (p: ScannedSms): string => {
-    if (!p.card) return fallbackAccountId;
-    const { last4, kind } = p.card;
+  const effectiveCardType = (
+    ref: string,
+    account: Pick<Account, 'cardType'> | undefined = accountAtRef(ref),
+  ): Account['cardType'] => cardTypes[ref] ?? account?.cardType;
+  const matchesCard = (
+    ref: string,
+    account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName'> | undefined,
+    last4: string,
+    kind: ResolvedCardKind,
+    bankName: string | undefined,
+  ): boolean => {
+    if (!account || account.last4 !== last4) return false;
+    if (kind === 'account') {
+      if (account.kind !== 'bank') return false;
+    } else {
+      if (account.kind !== 'card') return false;
+      const effectiveType = effectiveCardType(ref, account);
+      if (kind !== 'unknown' && effectiveType !== undefined && effectiveType !== kind) {
+        return false;
+      }
+    }
+    // A missing bank can be learned from this sender. A different known bank
+    // cannot: last four digits are not globally unique.
+    return (
+      !bankName ||
+      !account.bankName ||
+      bankIdentityForName(account.bankName) === bankIdentityForName(bankName)
+    );
+  };
+  const accountCandidates = () => [
+    ...state.accounts.map((account) => ({ ref: account.id, account })),
+    ...newAccounts.map((account, index) => ({ ref: String(index), account })),
+  ];
+  const isGeneratedUnknownHolding = (
+    ref: string,
+    account: Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'>,
+    last4: string,
+  ): boolean => {
+    if (account.kind !== 'card' || effectiveCardType(ref, account) !== undefined) return false;
+    const suffixes = [`Card •${last4}`, `بطاقة •${last4}`];
+    const prefixes = account.bankName
+      ? [account.bankName, bankBrandForName(account.bankName)?.name].filter(
+          (name): name is string => Boolean(name),
+        )
+      : [];
+    return [
+      ...suffixes,
+      ...prefixes.flatMap((prefix) => suffixes.map((suffix) => `${prefix} ${suffix}`)),
+    ].includes(account.name.trim());
+  };
+  const resolveAccount = (
+    p: ScannedSms,
+    ambiguousFallbackAccountId?: string,
+    refuseAmbiguous = false,
+  ): AccountResolution => {
+    if (!p.card) return { accountId: fallbackAccountId, confident: true };
+    const { last4 } = p.card;
+    // The parser owns card-kind evidence, including Arabic forms such as
+    // Mada. Reinterpreting its structured result from English-only raw-text
+    // heuristics silently downgraded explicit Arabic debit cards to unknown.
+    const kind = p.card.kind as ResolvedCardKind;
     const bank = bankFromSender(p.sender);
     const scoped = hintKey(bank?.name, last4, kind);
-    for (const key of [scoped, last4]) {
-      const ref = hints[key];
-      if (!ref || !matchesCard(accountAtRef(ref), last4, kind, bank?.name)) continue;
-      hints[scoped] = ref;
-      newHints[scoped] = ref;
-      if (bank) bankNames[ref] ??= bank.name;
-      return ref;
-    }
-    // Prefer a bank-exact account. A hand-created row with no bank is safe only
-    // when it is the sole otherwise-compatible candidate.
-    const compatible = state.accounts.filter((a) => matchesCard(a, last4, kind, undefined));
-    const exact = bank ? compatible.find((a) => a.bankName === bank.name) : undefined;
-    const unnamed = compatible.filter((a) => !a.bankName);
-    const existing = exact ?? (bank && unnamed.length === 1 ? unnamed[0] : !bank && compatible.length === 1 ? compatible[0] : undefined);
-    if (existing) {
-      hints[scoped] = existing.id;
-      newHints[scoped] = existing.id;
-      // Keep the legacy key only while it is unambiguous/compatible.
-      if (!hints[last4] || matchesCard(accountAtRef(hints[last4]), last4, kind, bank?.name)) {
-        hints[last4] = existing.id;
-        newHints[last4] = existing.id;
+    const noteType = (ref: string) => {
+      if (kind === 'account' || kind === 'unknown') return;
+      const known = effectiveCardType(ref);
+      // A statement or payment's explicit credit evidence is stronger than a
+      // purchase alert whose missing type made the parser fall back to debit.
+      if (kind === 'credit' || known !== 'credit') cardTypes[ref] = kind;
+      if (kind === 'credit' && snapshots[ref]?.kind === 'balance') {
+        snapshots[ref] = { ...snapshots[ref], kind: 'limit' };
       }
-      if (bank && !existing.bankName) bankNames[existing.id] ??= bank.name;
-      return existing.id;
+    };
+    const resolved = (ref: string, confident = true): AccountResolution => {
+      if (confident) {
+        hints[scoped] = ref;
+        newHints[scoped] = ref;
+      }
+      // Bank identity is learned only from an unambiguous attribution. A
+      // reused legacy holding is deliberately non-confident; stamping the SMS
+      // sender onto it would make later resolver passes treat that guess as
+      // established identity.
+      if (bank && confident) bankNames[ref] ??= bank.name;
+      noteType(ref);
+      return { accountId: ref, confident };
+    };
+    const compatible = accountCandidates().filter(({ ref, account }) =>
+      matchesCard(ref, account, last4, kind, bank?.name));
+    // Explicit type evidence may safely choose the sole account already known
+    // to have that type. Untyped candidates remain upgradeable only when no
+    // typed account exists.
+    const typedCompatible =
+      kind === 'credit' || kind === 'debit'
+        ? compatible.filter(({ ref, account }) => effectiveCardType(ref, account) === kind)
+        : [];
+    const eligible = typedCompatible.length > 0 ? typedCompatible : compatible;
+    // A legacy last4-only hint cannot distinguish two real same-bank cards.
+    // Every hint, including a scoped one, is accepted only when it names the
+    // sole compatible account in current state plus this batch.
+    const hintKeys = kind === 'unknown' ? [scoped] : [scoped, last4];
+    for (const key of hintKeys) {
+      const ref = hints[key];
+      if (!ref || !matchesCard(ref, accountAtRef(ref), last4, kind, bank?.name)) continue;
+      if (eligible.length === 1 && eligible[0].ref === ref) return resolved(ref);
+    }
+    const existing = eligible.length === 1 ? eligible[0] : undefined;
+    if (existing) {
+      hints[last4] = existing.ref;
+      newHints[last4] = existing.ref;
+      return resolved(existing.ref);
+    }
+    // A reparse of an existing row may learn the PAN while still finding two
+    // real compatible cards. Preserve its current account rather than moving
+    // it to an arbitrary hinted row or minting a third account solely for a
+    // deduped message.
+    if (eligible.length > 1 && ambiguousFallbackAccountId !== undefined) {
+      return { accountId: ambiguousFallbackAccountId, confident: false };
+    }
+    if (kind === 'unknown' && eligible.length > 1) {
+      const holdings = eligible.filter(({ ref, account }) =>
+        isGeneratedUnknownHolding(ref, account, last4));
+      if (holdings.length > 0) {
+        // Old builds could already have produced several generic buckets.
+        // Reuse one stable bucket so every later alert cannot mint another;
+        // this is routing, not proof that the legacy rows are one real card.
+        const holding = [...holdings].sort((a, b) => a.ref.localeCompare(b.ref))[0];
+        return resolved(holding.ref, false);
+      }
+    }
+    if (eligible.length > 1 && refuseAmbiguous) {
+      return { accountId: '', confident: false };
+    }
+    // Explicit evidence still cannot identify one of two real cards that
+    // share bank, type and suffix. Preserve a money event against a stable,
+    // deliberately non-account ref instead of either guessing a real card or
+    // dropping the event while the scan watermark advances. The ref includes
+    // only parser-proven identity, is never added to Accounts, and deliberately
+    // bypasses resolved() so no hint, bank-name, card-type, or snapshot
+    // backfill can turn this staging bucket into an asserted attribution.
+    // Statements opt into refuseAmbiguous above because an unattached due is
+    // not a ledger event; transactions and card payments must be lossless.
+    if (kind !== 'unknown' && eligible.length > 1) {
+      return {
+        accountId: unassignedCardRef(bank?.name, last4, kind),
+        confident: false,
+      };
     }
     // Auto-create; reference by index until the store assigns real ids.
     const idx = newAccounts.length;
     newAccounts.push({
-      name: bank ? `${bank.name} ${cardAccountName(last4, kind)}` : cardAccountName(last4, kind),
-      kind: kind === 'credit' || kind === 'debit' ? 'card' : 'bank',
+      name: bank
+        ? `${bank.name} ${cardAccountName(last4, kind)}`
+        : cardAccountName(last4, kind),
+      kind: kind === 'credit' || kind === 'debit' || kind === 'unknown' ? 'card' : 'bank',
       cardType: kind === 'credit' ? 'credit' : kind === 'debit' ? 'debit' : undefined,
       last4,
       bankName: bank?.name,
@@ -194,16 +334,29 @@ export function buildImportPlan(
       color: bank?.color ?? colorForHint(last4),
     });
     const ref = String(idx);
-    hints[scoped] = ref;
-    newHints[scoped] = ref;
-    if (!hints[last4] || matchesCard(accountAtRef(hints[last4]), last4, kind, bank?.name)) {
+    const confident = eligible.length === 0;
+    if (confident) {
       hints[last4] = ref;
       newHints[last4] = ref;
     }
-    return ref;
+    return resolved(ref, confident);
+  };
+
+  const noteSnapshot = (accountRef: string, p: ScannedSms) => {
+    if (p.snapshotFils === null || !p.snapshotKind || p.smsTs === undefined || !accountRef) return;
+    const knownType = cardTypes[accountRef] ?? accountAtRef(accountRef)?.cardType;
+    // When a credit-card purchase omitted the word "credit", the parser saw a
+    // debit card and called "Avl Bal" a cash balance. Once account resolution
+    // knows the instrument is credit, that figure is available headroom.
+    const kind = knownType === 'credit' && p.snapshotKind === 'balance' ? 'limit' : p.snapshotKind;
+    const cur = snapshots[accountRef];
+    if (!cur || p.smsTs > cur.ts) {
+      snapshots[accountRef] = { fils: p.snapshotFils, kind, ts: p.smsTs };
+    }
   };
 
   const cardPaymentSideOf = (p: ScannedSms): 'debit' | 'receipt' | undefined => {
+    if (p.cardPaymentSide) return p.cardPaymentSide;
     if (p.kind !== 'cardPayment' || !p.raw) return undefined;
     if (
       /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)/i.test(
@@ -237,16 +390,62 @@ export function buildImportPlan(
       // dropped now that the parser recognizes what it is.
       const staleKey = smsKeyOf(p);
       const misread = staleKey ? priorBySmsKey.get(staleKey) : undefined;
-      if (misread && !misread.isTransfer) updates.push({ id: misread.id, remove: true });
-      if (!p.card || !p.date) continue;
+      if (misread && !misread.isTransfer && !misread.userEdited) {
+        updates.push({ id: misread.id, remove: true });
+      }
+      if (!p.date) continue;
       if (p.date < staleDueCutoff) continue;
-      const accountId = resolveAccount(p);
+      const statementBank = bankFromSender(p.sender);
+      const bankOnlyCandidates = !p.card && statementBank
+        ? accountCandidates().filter(
+            ({ ref, account }) =>
+              account.kind === 'card' &&
+              effectiveCardType(ref, account) === 'credit' &&
+              account.bankName !== undefined &&
+              bankIdentityForName(account.bankName) ===
+                bankIdentityForName(statementBank.name),
+          )
+        : [];
+      // A statement without a PAN is useful only when its authenticated sender
+      // identifies exactly one credit card. Otherwise keep it staged rather
+      // than inventing a card or turning the quoted due into a transaction.
+      if (!p.card && bankOnlyCandidates.length !== 1) continue;
+      const bankOnlyAccountId = bankOnlyCandidates[0]?.ref;
+      const matchingDues = state.cardDues.filter(
+        (due) =>
+          due.dueDate === p.date &&
+          due.totalDueFils === p.amountFils &&
+          (p.card
+            ? matchesCard(
+                due.accountId,
+                accountAtRef(due.accountId),
+                p.card.last4,
+                p.card.kind as ResolvedCardKind,
+                statementBank?.name,
+              )
+            : due.accountId === bankOnlyAccountId),
+      );
+      const dueAccounts = [...new Set(matchingDues.map((due) => due.accountId))];
+      // Two matching obligations are already ambiguous; another reminder is
+      // not evidence for choosing one or inventing a third card.
+      if (dueAccounts.length > 1) continue;
+      const accountId = p.card
+        ? resolveAccount(p, dueAccounts[0], true).accountId
+        : bankOnlyAccountId ?? '';
+      if (!accountId) continue;
       noteSnapshot(accountId, p);
-      // Statement dues only exist for credit cards. If this last4 already
-      // resolved to a debit card or bank account, the "statement" is a
-      // misread — never attach a due to it.
-      const existing = state.accounts.find((a) => a.id === accountId);
-      if (existing && existing.cardType !== 'credit') continue;
+      const existingDue = matchingDues.find((due) => due.accountId === accountId);
+      const improvesMinimum =
+        existingDue !== undefined &&
+        p.minDueFils !== null &&
+        (existingDue.minDueEstimated === true || existingDue.minDueFils !== p.minDueFils);
+      // A parser-version rescan of an identical obligation is idempotent. A
+      // newly authoritative minimum is the one reason to re-offer it to the
+      // reducer's monotonic due merge.
+      if (existingDue && !improvesMinimum) continue;
+      // The parser reaches this branch only with statement structure and
+      // forces card.kind=credit. That is authoritative evidence which upgrades
+      // a debit fallback; rejecting it is what stranded real statements.
       newDues.push({
         accountId,
         totalDueFils: p.amountFils,
@@ -261,9 +460,12 @@ export function buildImportPlan(
       continue;
     }
     if (p.kind === 'cardPayment') {
-      const accountId = resolveAccount(p);
-      noteSnapshot(accountId, p);
       const smsKey = smsKeyOf(p);
+      const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+      const resolution = resolveAccount(p, prior?.accountId);
+      const { accountId } = resolution;
+      if (!accountId) continue;
+      if (resolution.confident) noteSnapshot(accountId, p);
       const cardPaymentSide = cardPaymentSideOf(p);
       // A card payment lands as income into the card account.
       const candidate = {
@@ -274,7 +476,12 @@ export function buildImportPlan(
       if (guard.has(candidate)) {
         // A row imported as a plain expense before this message was
         // recognized as a card payment becomes a transfer now.
-        healFromReparse(smsKey, p);
+        healFromReparse(
+          smsKey,
+          p,
+          resolution.confident ? accountId : undefined,
+          cardPaymentSide,
+        );
         continue;
       }
       guard.add(candidate);
@@ -295,16 +502,27 @@ export function buildImportPlan(
     }
     // Plain transaction. transferHint = the bank-side leg of a card payment /
     // own-account transfer: keep it for balances, exclude it from spending.
-    const accountId = resolveAccount(p);
-    noteSnapshot(accountId, p);
     const smsKey = smsKeyOf(p);
-    const candidate = {
+    const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+    const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel,
-      accountId, eventKind: 'transaction' as const,
+      eventKind: 'transaction' as const,
     };
+    const protectedSupersededId = guard.supersedes(captureCandidate);
+    if (protectedSupersededId && priorById.get(protectedSupersededId)?.userEdited) {
+      // The fuller SMS still proves the notification was a duplicate, but it
+      // must not overwrite the user's corrected title/category/account.
+      guard.add(captureCandidate);
+      continue;
+    }
+    const resolution = resolveAccount(p, prior?.accountId);
+    const { accountId } = resolution;
+    if (!accountId) continue;
+    if (resolution.confident) noteSnapshot(accountId, p);
+    const candidate = { ...captureCandidate, accountId };
     if (guard.has(candidate)) {
-      healFromReparse(smsKey, p);
+      healFromReparse(smsKey, p, resolution.confident ? accountId : undefined);
       continue;
     }
     // The same charge already in the ledger from a bank-app notification.
@@ -312,16 +530,18 @@ export function buildImportPlan(
     // becoming a second one.
     const supersededId = guard.supersedes(candidate);
     if (supersededId) {
-      updates.push({
-        id: supersededId,
-        title: p.merchant,
-        category: p.categoryGuess,
-        type: p.type,
-        accountId,
-        ts: p.smsTs,
-        smsKey,
-        viaPush: false,
-      });
+      if (!priorById.get(supersededId)?.userEdited) {
+        updates.push({
+          id: supersededId,
+          title: p.merchant,
+          category: p.categoryGuess,
+          type: p.type,
+          accountId,
+          ts: p.smsTs,
+          smsKey,
+          viaPush: false,
+        });
+      }
       guard.add(candidate);
       continue;
     }
@@ -363,8 +583,16 @@ export function buildImportPlan(
     });
   }
 
+  // A balance may have been noted while the card kind was still unknown and
+  // authoritative credit evidence may have arrived later in the same batch.
+  for (const [ref, type] of Object.entries(cardTypes)) {
+    if (type === 'credit' && snapshots[ref]?.kind === 'balance') {
+      snapshots[ref] = { ...snapshots[ref], kind: 'limit' };
+    }
+  }
+
   return {
-    batch: { transactions, newAccounts, newHints, newDues, snapshots, bankNames, lastScanTs: newestTs, updates },
+    batch: { transactions, newAccounts, newHints, newDues, snapshots, bankNames, cardTypes, lastScanTs: newestTs, updates },
     txCount: transactions.length,
     newAccountCount: newAccounts.length,
     dueCount: newDues.length,

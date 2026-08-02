@@ -194,11 +194,15 @@ const hits = parsed.filter((x) => x.p);
 }
 
 {
-  // Statements and payments only exist on credit cards.
+  // Payments name a credit card. A PAN-less statement may deliberately keep
+  // card=null for sender-bank resolution on-device, but can never claim a
+  // debit/account identity.
   const bad = hits.filter(
-    (x) => (x.p.kind === 'cardStatement' || x.p.kind === 'cardPayment') && x.p.card?.kind !== 'credit',
+    (x) =>
+      (x.p.kind === 'cardPayment' && x.p.card?.kind !== 'credit') ||
+      (x.p.kind === 'cardStatement' && x.p.card !== null && x.p.card.kind !== 'credit'),
   );
-  ok('statements and payments are only ever on a credit card', bad.length === 0);
+  ok('statements never claim a non-credit card identity', bad.length === 0);
 }
 
 /* ── Behaviour ───────────────────────────────────────────────────────── */

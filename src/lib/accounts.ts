@@ -1,58 +1,96 @@
-import { cardIdentity } from '@/lib/cards';
+import { bankBrandForName, bankIdentityForName } from '@/lib/markets';
 import type { Account, AppState } from '@/lib/types';
 
 /**
- * Collapse account rows that describe the same physical card.
+ * Remove structurally empty parser artifacts beside one proven account.
  *
  * One card, two records: Home listed "FAB Credit Card •5793 · 15 Jun · 8,144"
  * twice, one directly above the other, and counted it twice in the total.
  * Reading past it, Wallet counts its balance twice too.
  *
- * Two rows are the same card only when they agree on the last four digits AND
- * the card type AND the bank — a person can hold a FAB and an ENBD card whose
- * digits happen to match, and those must stay apart. A row with no digits is
- * never merged, because there is nothing to compare.
- *
- * The survivor is the row with the most history, so the merge never costs the
- * user the record with more in it. Transactions, dues and the last-four hints
- * are repointed; nothing is deleted except the emptied duplicate.
+ * Last four digits are not unique, even within one bank, so active siblings
+ * are never merged unattended. A row is removable only when its generated
+ * name and every financial/reference field prove it is empty, and there is
+ * exactly one non-empty target. Ambiguous active siblings stay visible for an
+ * explicit user decision.
  */
 export function mergeDuplicateAccounts(state: AppState): AppState {
-  // The same identity rule the DISPLAY uses, not a second spelling of it.
-  //
-  // This used to key on `${bankName ?? ''}|${last4}|${type}`, which splits
-  // exactly the rows it exists to merge: a hand-added card has no bank name,
-  // because only the SMS sender ID teaches the app the bank, so "FAB|5793"
-  // and "|5793" were two different cards. `openDues` was taught that an
-  // unknown bank is not a different bank; the data has to agree, or the
-  // display keeps papering over twins that never merge underneath.
-  const identify = cardIdentity(state.accounts);
+  // This grouping is intentionally NOT display identity. It crosses card
+  // types only so an empty debit fallback can be compared with the substantive
+  // credit card it shadows. Known brands stay distinct: Liv and ENBD may share
+  // an issuer, but they are separate products and only become link candidates.
   const groups = new Map<string, Account[]>();
   for (const a of state.accounts) {
-    if (!a.last4) continue;
-    groups.set(identify(a.id), [...(groups.get(identify(a.id)) ?? []), a]);
+    // Unknown bank is not a shared bank. Two unattributed rows with the same
+    // four digits could belong to entirely different institutions.
+    if (a.kind !== 'card' || !a.last4 || !a.bankName) continue;
+    const bankIdentity = bankIdentityForName(a.bankName);
+    if (!bankIdentity) continue;
+    const key = `${bankIdentity}|${a.last4}`;
+    groups.set(key, [...(groups.get(key) ?? []), a]);
   }
   const dupes = [...groups.values()].filter((g) => g.length > 1);
   if (dupes.length === 0) return state;
 
-  const weight = (id: string) =>
-    state.transactions.reduce((n, t) => (t.accountId === id ? n + 1 : n), 0) +
-    state.cardDues.reduce((n, d) => (d.accountId === id ? n + 1 : n), 0);
+  const txIds = new Set(state.transactions.map((t) => t.accountId));
+  const dueIds = new Set(state.cardDues.map((d) => d.accountId));
+  const billIds = new Set(
+    (state.bills ?? [])
+      .map((b) => b.accountId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const generatedName = (account: Account): boolean => {
+    if (!account.last4) return false;
+    const suffixes = [
+      `Credit Card •${account.last4}`,
+      `Debit Card •${account.last4}`,
+      `Card •${account.last4}`,
+      `بطاقة ائتمانية •${account.last4}`,
+      `بطاقة خصم •${account.last4}`,
+      `بطاقة •${account.last4}`,
+    ];
+    const bankPrefixes = account.bankName
+      ? [account.bankName, bankBrandForName(account.bankName)?.name].filter(
+          (name): name is string => Boolean(name),
+        )
+      : [];
+    const allowed = [
+      ...suffixes,
+      ...bankPrefixes.flatMap((bank) => suffixes.map((suffix) => `${bank} ${suffix}`)),
+    ];
+    return allowed.includes(account.name.trim());
+  };
+  const isEmptyArtifact = (account: Account): boolean =>
+    account.kind === 'card' &&
+    generatedName(account) &&
+    account.openingFils === 0 &&
+    account.snapshotFils === undefined &&
+    account.snapshotKind === undefined &&
+    account.snapshotTs === undefined &&
+    account.creditLimitFils === undefined &&
+    account.renewedFrom === undefined &&
+    !account.archived &&
+    !txIds.has(account.id) &&
+    !dueIds.has(account.id) &&
+    !billIds.has(account.id);
 
   /** old account id → surviving account id */
   const remap = new Map<string, string>();
   const dropped = new Set<string>();
   for (const group of dupes) {
-    // Strictly greater, so a tie leaves the incumbent in place: the earliest
-    // row is the one other state is likelier to already point at, and a
-    // deterministic winner means the merge cannot flip between launches.
-    const keep = group.reduce((best, a) => (weight(a.id) > weight(best.id) ? a : best));
-    for (const a of group) {
-      if (a.id === keep.id) continue;
-      remap.set(a.id, keep.id);
-      dropped.add(a.id);
+    const substantive = group.filter((a) => !isEmptyArtifact(a));
+    // More than one real row is ambiguous. Nothing in a four-digit suffix can
+    // choose between them safely, including where a third empty row's hint
+    // should point, so leave the entire group alone.
+    if (substantive.length !== 1) continue;
+    const keep = substantive[0];
+    for (const artifact of group) {
+      if (artifact.id === keep.id || !isEmptyArtifact(artifact)) continue;
+      remap.set(artifact.id, keep.id);
+      dropped.add(artifact.id);
     }
   }
+  if (dropped.size === 0) return state;
   const to = (id: string) => remap.get(id) ?? id;
 
   return {
@@ -64,10 +102,52 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
     cardDues: state.cardDues.map((d) =>
       remap.has(d.accountId) ? { ...d, accountId: to(d.accountId) } : d,
     ),
+    bills: (state.bills ?? []).map((b) =>
+      b.accountId && remap.has(b.accountId) ? { ...b, accountId: to(b.accountId) } : b,
+    ),
     accountHints: Object.fromEntries(
-      Object.entries(state.accountHints).map(([last4, id]) => [last4, to(id)]),
+      Object.entries(state.accountHints ?? {}).map(([last4, id]) => [last4, to(id)]),
     ),
   };
+}
+
+/**
+ * Repair card-payment rows whose own title and attached account disagree.
+ *
+ * Older parser versions could understand "Card •3749 payment" only after the
+ * row had already been stored against FAB •3324. Healing fixed its direction
+ * but left accountId untouched, so the right card never settled. The title's
+ * digits come from the masked PAN in the bank message; reassignment is safe
+ * only when exactly one credit card at the same bank carries those digits.
+ */
+export function repairCardPaymentAccounts(state: AppState): AppState {
+  let changed = false;
+  const transactions = state.transactions.map((tx) => {
+    if (tx.source !== 'sms' || tx.userEdited || !tx.isTransfer) return tx;
+    const named = tx.title.match(/\bcard\s*•?(\d{4})\s*(?:payment|settlement)\b/i);
+    if (!named) return tx;
+    const current = state.accounts.find((a) => a.id === tx.accountId);
+    if (
+      current?.kind === 'card' &&
+      current.cardType === 'credit' &&
+      current.last4 === named[1]
+    ) return tx;
+    if (!current?.bankName) return tx;
+    const currentBank = bankIdentityForName(current.bankName);
+    if (!currentBank) return tx;
+    const candidates = state.accounts.filter(
+      (a) =>
+        a.kind === 'card' &&
+        a.cardType === 'credit' &&
+        a.last4 === named[1] &&
+        a.bankName !== undefined &&
+        bankIdentityForName(a.bankName) === currentBank,
+    );
+    if (candidates.length !== 1) return tx;
+    changed = true;
+    return { ...tx, accountId: candidates[0].id };
+  });
+  return changed ? { ...state, transactions } : state;
 }
 
 /**
@@ -79,10 +159,9 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
  * under the new ones finally sit on the same card — which is the whole point:
  * until they do, the due can never be settled by any payment.
  *
- * Deliberately separate from `mergeDuplicateAccounts`. That one collapses
- * rows the app is CERTAIN describe one card (same bank, same digits) and runs
- * unattended on every load. This one acts on a guess the user confirmed, and
- * must never run by itself.
+ * Deliberately separate from `mergeDuplicateAccounts`. That one removes only
+ * structurally empty generated artifacts beside one substantive target. This
+ * one acts on a guess the user confirmed, and must never run by itself.
  */
 export function mergeRenewedCard(state: AppState, oldId: string, newId: string): AppState {
   const older = state.accounts.find((a) => a.id === oldId);
@@ -90,6 +169,12 @@ export function mergeRenewedCard(state: AppState, oldId: string, newId: string):
   if (!older || !newer || oldId === newId) return state;
 
   const to = (id: string) => (id === oldId ? newId : id);
+  const snapshotSource =
+    (older.snapshotTs ?? 0) > (newer.snapshotTs ?? 0) ? older : newer;
+  const snapshotKind =
+    newer.cardType === 'credit' && snapshotSource.snapshotKind === 'balance'
+      ? 'limit'
+      : snapshotSource.snapshotKind;
   return {
     ...state,
     accounts: state.accounts
@@ -105,6 +190,13 @@ export function mergeRenewedCard(state: AppState, oldId: string, newId: string):
               bankName: a.bankName ?? older.bankName,
               openingFils: a.openingFils + older.openingFils,
               creditLimitFils: a.creditLimitFils ?? older.creditLimitFils,
+              ...(snapshotSource.snapshotFils !== undefined
+                ? {
+                    snapshotFils: snapshotSource.snapshotFils,
+                    snapshotKind,
+                    snapshotTs: snapshotSource.snapshotTs,
+                  }
+                : {}),
             }
           : a,
       ),
@@ -112,6 +204,9 @@ export function mergeRenewedCard(state: AppState, oldId: string, newId: string):
       t.accountId === oldId ? { ...t, accountId: newId } : t,
     ),
     cardDues: state.cardDues.map((d) => (d.accountId === oldId ? { ...d, accountId: newId } : d)),
+    bills: (state.bills ?? []).map((b) =>
+      b.accountId === oldId ? { ...b, accountId: newId } : b,
+    ),
     accountHints: Object.fromEntries(
       Object.entries(state.accountHints).map(([last4, id]) => [last4, to(id)]),
     ),

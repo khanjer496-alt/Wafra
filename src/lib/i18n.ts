@@ -1104,8 +1104,8 @@ const S = {
     ar: 'يفحص اختبار آمن المسار؛ ويتحقق أول تنبيه بنكي من المشغّل.',
   },
   iosPrivacyNote: {
-    en: 'The raw alert is deleted immediately after parsing. Only its encrypted transaction can wait for this iPhone, for up to 30 days.',
-    ar: 'يُحذف نص التنبيه فور تحليله. لا تنتظر هذا الآيفون سوى العملية المشفّرة، ولمدة لا تتجاوز ٣٠ يوماً.',
+    en: 'The relay discards raw Message Content after parsing. It keeps only the structured transaction and, when the Shortcut supplies it, the bank Sender label used to identify its card or account; both are sealed to this iPhone and queued for up to 30 days.',
+    ar: 'يتخلّص خادم الترحيل من محتوى الرسالة الخام بعد تحليله. ولا يحتفظ إلا ببيانات العملية المنظمة، وباسم مرسل البنك عندما يرسله الاختصار، لتحديد البطاقة أو الحساب؛ وتُشفّر هذه البيانات لهذا الآيفون وقد تبقى في قائمة الانتظار حتى ٣٠ يوماً.',
   },
   iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
   iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
@@ -1155,8 +1155,8 @@ const S = {
 
   iosShortcutTitle: { en: 'Install the Shortcut', ar: 'ثبّت الاختصار' },
   iosShortcutBody: {
-    en: 'Copy and install Wafra Capture, then paste the setup code once when Shortcuts asks.',
-    ar: 'انسخ اختصار Wafra Capture وثبّته، ثم الصق رمز الإعداد مرة واحدة عندما يطلبه تطبيق الاختصارات.',
+    en: 'Copy and install Wafra Capture, then paste the setup code once when Shortcuts asks. The required Shortcut version must accept the received Message object and plain text for its manual test. Treat this as setup instructions—not proof that Apple exposes Sender—until a real alert confirms it.',
+    ar: 'انسخ اختصار Wafra Capture وثبّته، ثم الصق رمز الإعداد مرة واحدة عندما يطلبه تطبيق الاختصارات. يجب أن يقبل إصدار الاختصار المطلوب كائن الرسالة المستلمة والنص العادي للاختبار اليدوي. هذه تعليمات إعداد وليست دليلاً على إتاحة آبل لحقل المرسل؛ ولا يُثبت ذلك إلا تنبيه حقيقي.',
   },
   iosSetupCode: { en: 'THIS IPHONE’S SETUP CODE', ar: 'رمز إعداد هذا الآيفون' },
   iosYourAddress: { en: 'YOUR ADDRESS', ar: 'عنوانك' },
@@ -1176,8 +1176,8 @@ const S = {
 
   iosAutomationTitle: { en: 'Make it run by itself', ar: 'اجعله يعمل تلقائياً' },
   iosAutomationBody: {
-    en: 'In Shortcuts → Automation, create a Message automation with these four choices:',
-    ar: 'في الاختصارات ← الأتمتة، أنشئ أتمتة «رسالة» بهذه الخيارات الأربعة:',
+    en: 'In Shortcuts → Automation, create a Message automation with these five choices:',
+    ar: 'في الاختصارات ← الأتمتة، أنشئ أتمتة «رسالة» بهذه الخيارات الخمسة:',
   },
   iosAutomationTrigger: {
     en: '1. Trigger: Message',
@@ -1195,6 +1195,10 @@ const S = {
     en: '4. Action: Run Shortcut → Wafra Capture',
     ar: '٤. الإجراء: تشغيل اختصار ← Wafra Capture',
   },
+  iosAutomationInput: {
+    en: '5. Required input: pass Received Message—not Content—to Wafra Capture. This specifies the intended setup; it does not prove Sender is exposed. The first real alert must file under the right bank. If it does not, bank attribution is unavailable and automatic capture is not parity-ready.',
+    ar: '٥. الإدخال المطلوب: مرّر «الرسالة المستلمة» إلى Wafra Capture، لا «المحتوى» وحده. هذا يحدد الإعداد المقصود ولا يثبت إتاحة حقل المرسل. يجب إسناد أول تنبيه حقيقي للبنك الصحيح؛ وإلا فلن يتوفر تحديد البنك ولن يكون الالتقاط التلقائي جاهزاً للتكافؤ.',
+  },
   iosAutomationReady: {
     en: 'I chose Run Immediately',
     ar: 'اخترت «تشغيل فوراً»',
@@ -1206,8 +1210,8 @@ const S = {
     ar: 'شغّل اختباراً آمناً واحداً عبر الاختصار المثبّت ثم عد إلى هنا. لن يضيف عملية شراء وهمية.',
   },
   iosTestLimit: {
-    en: 'This manual test cannot prove Apple’s Message sender trigger. The next real alert from each selected bank is the final check.',
-    ar: 'لا يستطيع هذا الاختبار اليدوي إثبات مشغّل مرسل الرسالة لدى آبل. التنبيه الحقيقي التالي من كل بنك محدد هو الفحص النهائي.',
+    en: 'This manual test cannot prove Apple’s Message sender trigger or that Sender is exposed. The next real alert must file under the right bank. If it does not, bank attribution is unavailable and automatic capture is not parity-ready.',
+    ar: 'لا يستطيع هذا الاختبار اليدوي إثبات مشغّل مرسل الرسالة لدى آبل أو إتاحة حقل المرسل. يجب إسناد التنبيه الحقيقي التالي للبنك الصحيح؛ وإلا فلن يتوفر تحديد البنك ولن يكون الالتقاط التلقائي جاهزاً للتكافؤ.',
   },
   iosCaught: {
     en: 'Captured and filed through the same path future alerts use.',
@@ -1417,10 +1421,10 @@ const S = {
   minutesAgo: { en: '{count}m ago', ar: 'قبل {count} د' },
   hoursAgo: { en: '{count}h ago', ar: 'قبل {count} س' },
   differentCard: { en: 'Different card', ar: 'بطاقة مختلفة' },
-  sameCardRenewed: { en: 'Same card, renewed?', ar: 'البطاقة نفسها بعد التجديد؟' },
+  sameCardRenewed: { en: 'Same physical card?', ar: 'هل هذه البطاقة نفسها؟' },
   renewedCardBody: {
-    en: 'Move entries from {old} to {next}. Use this only when your bank replaced the same card.',
-    ar: 'انقل العمليات من {old} إلى {next}. استخدم هذا فقط إذا استبدل البنك البطاقة نفسها.',
+    en: 'Move entries from {old} to {next}. Link only when both rows are the same physical card.',
+    ar: 'انقل العمليات من {old} إلى {next}. اربطهما فقط إذا كان السطران للبطاقة الفعلية نفسها.',
   },
   longPressInactive: { en: 'Long-press to unhide or delete', ar: 'اضغط مطولاً للإظهار أو الحذف' },
   setSavingsGoal: { en: 'Set a savings goal', ar: 'ضع هدفاً للادخار' },
@@ -1455,8 +1459,8 @@ const S = {
   markAccountPaidA11y: { en: 'Mark {name} as paid', ar: 'علّم {name} كمدفوع' },
   totalSuffix: { en: '{amount} total', ar: 'الإجمالي {amount}' },
   renewedCardDetected: {
-    en: 'Card •{last4} has a statement but no spending. Is it {name} with new digits? Linking moves its history so your payments settle the bill.',
-    ar: 'للبطاقة •{last4} كشف حساب دون مصروفات. هل هي {name} بأرقام جديدة؟ ينقل الربط سجلها حتى تسدّد دفعاتك الفاتورة.',
+    en: 'Card •{last4} has a statement but its spending is under {name}. Link only if they are the same card; then payments can settle the right bill.',
+    ar: 'للبطاقة •{last4} كشف حساب، لكن مصروفاتها ظهرت تحت {name}. اربطهما فقط إذا كانتا البطاقة نفسها؛ عندها تسوّي الدفعات الفاتورة الصحيحة.',
   },
   linkCardsA11y: { en: 'Link {old} to {next}', ar: 'اربط {old} بـ {next}' },
   sameAsCard: { en: 'Yes · same as •{last4}', ar: 'نعم · نفسها •{last4}' },
@@ -1577,6 +1581,7 @@ const S = {
   notificationRenewalBody: { en: 'Around {amount} will be charged.', ar: 'سيُخصم نحو {amount}.' },
   creditCardWithDigits: { en: 'Credit Card •{last4}', ar: 'بطاقة ائتمانية •{last4}' },
   debitCardWithDigits: { en: 'Debit Card •{last4}', ar: 'بطاقة خصم •{last4}' },
+  cardWithDigits: { en: 'Card •{last4}', ar: 'بطاقة •{last4}' },
   accountWithDigits: { en: 'Account •{last4}', ar: 'حساب •{last4}' },
 } as const;
 

@@ -1,6 +1,7 @@
 import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
 import { tf } from '@/lib/i18n';
+import { isSpending } from '@/lib/ledger';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
 export type DueStatus = 'overdue' | 'urgent' | 'upcoming' | 'settled';
@@ -22,22 +23,14 @@ export interface DueWithStatus {
 }
 
 /**
- * How a card is identified, since two account rows can describe one physical
- * card — a hand-added card the SMS scan had already discovered, or state
- * written by an older version.
+ * Accounting identity is the persisted account id, never inferred card data.
  *
- * Not the digits alone: a person can hold a FAB and an Emirates NBD card whose
- * last four happen to match, and collapsing those would hide a real statement.
- * But not `bank|last4|type` literally either, which is what this was: one row
- * carries the bank learned from the sender ID and its twin, added by hand,
- * carries none, so `FAB|5793|credit` and `|5793|credit` read as two cards and
- * the statement was listed — and counted — twice.
- *
- * An unknown bank is not a different bank. Rows with no bank name join the one
- * named bank holding those digits; only when TWO banks both have a card ending
- * in those digits is an unnamed row genuinely unattributable, and then it
- * stands alone rather than guessing. Accounts with no digits at all cannot be
- * compared this way and fall back to their own id.
+ * Bank, last four digits and card type are not a unique instrument identifier:
+ * two active cards can legitimately share all three. Empty parser artifacts
+ * are removed by `mergeDuplicateAccounts`, and a user-confirmed reissue/link
+ * is physically remapped by `mergeRenewedCard`. Until one of those operations
+ * has happened, pooling dues or payments would silently move money between two
+ * possibly real cards.
  */
 /**
  * The minimum a UAE bank asks for when the statement did not say.
@@ -55,30 +48,8 @@ export function estimatedMinimumFils(totalFils: number): number {
   return Math.round(totalFils * ESTIMATED_MINIMUM_RATE);
 }
 
-export function cardIdentity(accounts: Account[]): (accountId: string) => string {
-  /** last4|type → the distinct bank names seen on those rows. */
-  const banks = new Map<string, Set<string>>();
-  for (const a of accounts) {
-    if (!a.last4) continue;
-    const group = `${a.last4}|${a.cardType ?? a.kind}`;
-    const seen = banks.get(group) ?? new Set<string>();
-    if (a.bankName) seen.add(a.bankName);
-    banks.set(group, seen);
-  }
-  const keys = new Map<string, string>();
-  for (const a of accounts) {
-    if (!a.last4) {
-      keys.set(a.id, `id:${a.id}`);
-      continue;
-    }
-    const group = `${a.last4}|${a.cardType ?? a.kind}`;
-    const named = banks.get(group) ?? new Set<string>();
-    if (a.bankName) keys.set(a.id, `${a.bankName}|${group}`);
-    else if (named.size === 1) keys.set(a.id, `${[...named][0]}|${group}`);
-    else if (named.size === 0) keys.set(a.id, `|${group}`);
-    else keys.set(a.id, `id:${a.id}`);
-  }
-  return (accountId: string) => keys.get(accountId) ?? `id:${accountId}`;
+export function cardIdentity(_accounts: Account[]): (accountId: string) => string {
+  return (accountId: string) => `id:${accountId}`;
 }
 
 /**
@@ -86,10 +57,9 @@ export function cardIdentity(accounts: Account[]): (accountId: string) => string
  *
  * A parser-version rescan can see the same reminder again, and several UAE
  * banks send both an issue alert and a due-date reminder. Those are one
- * statement only when the physical card and due date both agree. Distinct due
- * dates remain history; distinct banks that share last-four digits remain
- * distinct cards. Payment evidence is monotonic and is never reset by a
- * reminder whose imported `paidFils` starts at zero.
+ * statement only when the resolved account id and due date both agree.
+ * Payment evidence is monotonic and is never reset by a reminder whose
+ * imported `paidFils` starts at zero.
  */
 export function mergeImportedCardDues(
   existing: CardDue[],
@@ -135,13 +105,10 @@ export function mergeImportedCardDues(
 }
 
 /**
- * Every account row that describes the same physical card as `accountId`.
+ * The account ids whose payments may settle `accountId`.
  *
- * Allocation used to run per account row while the display deduped per card,
- * and the two disagreeing is how a paid card kept reading as owed: the payment
- * SMS landed on one row, the statement sat on its twin, and neither could see
- * the other. The dedupe then kept whichever copy still owed the most — which
- * is always the one the payment never reached.
+ * Confirmed links are remapped before accounting runs, so a surviving account
+ * id is the only safe member. Similar bank metadata is never proof of identity.
  */
 function cardAccountIds(state: AppState, accountId: string): Set<string> {
   const keyOf = cardIdentity(state.accounts);
@@ -221,8 +188,8 @@ interface Statement {
 /**
  * Payments spread across a card's statements, each payment counted once.
  *
- * A due's matching window (~40 days before to 20 after) is wider than the
- * monthly statement cycle, so consecutive statements overlap. Crediting every
+ * A due's matching window begins around statement issue. Consecutive
+ * statements overlap until the next one is issued. Crediting every
  * payment inside the window to each due independently meant one payment could
  * settle two statements at once — the second month's balance silently
  * vanished from the app while it was still owed.
@@ -289,14 +256,14 @@ function allocatePayments(
       const outstanding = s.totalFils - s.paidFils;
       if (outstanding <= 0) continue;
       if (payment.date < shiftISO(s.dueDate, -40)) continue;
-      let until = shiftISO(s.dueDate, 20);
       const next = statements[i + 1]?.dueDate;
-      if (next) {
-        const replaced = shiftISO(next, -25);
-        if (replaced < until) until = replaced;
-      }
-      if (s.settledOn && s.settledOn > until) until = s.settledOn;
-      if (payment.date > until) continue;
+      // A newer statement closes this one's allocation window when it was
+      // issued. The newest known statement has no arbitrary +20-day cutoff:
+      // people pay late, and until a replacement exists that payment still
+      // settles the only balance Wafra knows about.
+      let until = next ? shiftISO(next, -25) : null;
+      if (s.settledOn && (!until || s.settledOn > until)) until = s.settledOn;
+      if (until && payment.date > until) continue;
       const take = Math.min(outstanding, left);
       s.paidFils += take;
       left -= take;
@@ -310,8 +277,8 @@ function allocatePayments(
 
 /**
  * What has been paid toward a due: explicit paidFils (manual "Mark paid")
- * plus its share of the payments made to that CARD — every account row that
- * describes it, not just the row this statement happens to be filed under.
+ * plus payments made to its resolved card account. Confirmed links have
+ * already remapped every ledger reference onto that one account id.
  */
 export function duePaidFils(state: AppState, due: CardDue): number {
   return allocatePayments(state, due.accountId, due).get(due.id) ?? due.paidFils;
@@ -405,9 +372,8 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
     // the next statement, so a superseded statement is not a second debt — its
     // total is already inside the newer one, and listing both said the user
     // owed the same money twice. This used to hold only for statements more
-    // than 30 days overdue, which let every card with two open rows (two
-    // account rows for one card, or a reminder filed under a second due date)
-    // count itself twice on Home.
+    // than 30 days overdue, which let reminder rows on one resolved account
+    // count the same rolling obligation twice on Home.
     //
     // The newer statement supersedes whether or not it is settled: what
     // settles it is a payment covering a total that included the older one.
@@ -436,11 +402,9 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
   // decide this — copies of one statement share one allocation now, so the two
   // rows only differ in what the bank said they were for.
   //
-  // Keyed on the CARD, not the account row. Two account records can describe
-  // one physical card — a hand-added card that the SMS scan had already
-  // discovered, or state written by an older version — and keying on the
-  // account id let both through: Home listed "FAB Credit Card •5793 · 15 Jun ·
-  // 8,144" twice, one above the other, and counted it twice in the total.
+  // Keyed on the resolved account id. Two records on that same account and due
+  // date are one statement; similar metadata on different active accounts is
+  // not enough to hide either obligation.
   const byStatement = new Map<string, DueWithStatus>();
   for (const d of open) {
     const key = `${keyOf(d.due.accountId)}|${d.due.dueDate}`;
@@ -458,14 +422,11 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
  * The rules it has to keep are the same ones `openDues` and `allocatePayments`
  * keep, and each of the three was got wrong in the component at least once:
  *
- *  - Scope is the CARD, not the account row. Two rows can describe one card,
- *    and a sheet that took its headline from the card and its list from the
- *    row said "AED 8,144 still owed · 1 open statement" directly above "No
- *    statement yet".
- *  - A payment is credited through `duePaidFils`, which allocates across every
- *    row on the card. A `paidFils` read raw, or a lookup whose key set was
- *    built from a narrower list, shows a settled statement at 0% paid with its
- *    full balance still owed.
+ *  - Scope is the resolved card account. Similar account metadata never pulls
+ *    another active card's statements into this sheet.
+ *  - A payment is credited through `duePaidFils`. A `paidFils` read raw, or a
+ *    lookup whose key set was built from a narrower list, shows a settled
+ *    statement at 0% paid with its full balance still owed.
  *  - A card carries ONE obligation — the newest statement, whose total already
  *    contains whatever went unpaid before it. Summing the unpaid history
  *    charged the user twice for the same money.
@@ -576,9 +537,13 @@ export function isInactiveAccount(state: AppState, account: Account, today: Date
 }
 
 /** Display name for an auto-created card account. */
-export function cardAccountName(last4: string, kind: 'credit' | 'debit' | 'account'): string {
+export function cardAccountName(
+  last4: string,
+  kind: 'credit' | 'debit' | 'account' | 'unknown',
+): string {
   if (kind === 'credit') return tf('creditCardWithDigits', { last4 });
   if (kind === 'debit') return tf('debitCardWithDigits', { last4 });
+  if (kind === 'unknown') return tf('cardWithDigits', { last4 });
   return tf('accountWithDigits', { last4 });
 }
 
@@ -593,7 +558,7 @@ export function colorForHint(last4: string): string {
 export { bankFromSender } from '@/lib/markets';
 
 /**
- * A card that was reissued, and the card it is probably a reissue OF.
+ * A statement-only card row and the row that may hold its spending history.
  *
  * When a UAE bank renews a credit card the account survives and the last four
  * digits change. The app has no notion of that, so the two halves of one card
@@ -604,11 +569,10 @@ export { bankFromSender } from '@/lib/markets';
  * That split is why a statement stays open forever. The due is on a row no
  * payment will ever land on, and the payments are on a row with no due.
  *
- * The signal is simpler than any date arithmetic: a credit-card row that has
- * a STATEMENT but NO TRANSACTIONS AT ALL. Nobody receives a bill for a card
- * they have never spent on. The exception is a card genuinely just opened,
- * which looks identical — which is exactly why this SUGGESTS and never acts.
- * Merging two real cards corrupts the ledger in a way the user cannot see.
+ * The common case is a reissue with changed digits. Another is parser
+ * fragmentation: bare card wording sat under debit/unknown while its statement
+ * sat under credit, including Liv/ENBD issuer aliases. None is proof. This only
+ * suggests; merging two real cards corrupts the ledger invisibly.
  */
 export interface ReissueSuggestion {
   /** The row holding the statement and nothing else. */
@@ -618,29 +582,44 @@ export interface ReissueSuggestion {
 }
 
 export function reissueSuggestions(state: AppState, today: Date): ReissueSuggestion[] {
-  const txCount = new Map<string, number>();
+  const spendingCount = new Map<string, number>();
   for (const t of state.transactions) {
-    txCount.set(t.accountId, (txCount.get(t.accountId) ?? 0) + 1);
+    if (isSpending(t)) {
+      spendingCount.set(t.accountId, (spendingCount.get(t.accountId) ?? 0) + 1);
+    }
   }
   const hasOpenDue = new Set(openDues(state, today).map((d) => d.due.accountId));
+  const issuerCandidate = (bankName: string | undefined): string | undefined => {
+    if (bankName === 'Liv' || bankName === 'Emirates NBD') return 'Emirates NBD issuer';
+    return bankName;
+  };
 
   const out: ReissueSuggestion[] = [];
   for (const a of state.accounts) {
     if (a.cardType !== 'credit' || a.archived) continue;
     // Already answered — the user linked it, or said these are different.
     if (a.renewedFrom) continue;
-    if (!hasOpenDue.has(a.id) || (txCount.get(a.id) ?? 0) > 0) continue;
+    // A payment row on the statement account is not spending history. It must
+    // not suppress the repair prompt that can finally put that payment beside
+    // the purchases and settle the statement.
+    if (!hasOpenDue.has(a.id) || (spendingCount.get(a.id) ?? 0) > 0) continue;
 
     const candidates = state.accounts
       .filter(
-        (b) =>
-          b.id !== a.id &&
-          b.cardType === 'credit' &&
-          !b.archived &&
-          // Same bank, or an unknown bank on one side — a hand-added row has
-          // no bank name because only the SMS sender teaches the app one.
-          (!a.bankName || !b.bankName || a.bankName === b.bankName) &&
-          (txCount.get(b.id) ?? 0) > 0,
+        (b) => {
+          if (b.id === a.id || b.kind !== 'card' || b.archived) return false;
+          if ((spendingCount.get(b.id) ?? 0) === 0) return false;
+          const sameBank = !a.bankName || !b.bankName || a.bankName === b.bankName;
+          const sameDigits = Boolean(a.last4 && b.last4 === a.last4);
+          // Liv/ENBD is issuer context only. It may make a same-number split
+          // worth asking about, but it is never proof and never auto-merges.
+          const sameIssuer =
+            issuerCandidate(a.bankName) !== undefined &&
+            issuerCandidate(a.bankName) === issuerCandidate(b.bankName);
+          const sameNumberAlias = sameDigits && (sameBank || sameIssuer);
+          const possibleReissue = b.cardType === 'credit' && sameBank;
+          return sameNumberAlias || possibleReissue;
+        },
       )
       // Most recently used first: a card renewed last month is a likelier
       // predecessor than one silent since 2023.

@@ -202,6 +202,142 @@ const afterFirst = apply(BASE, first);
   const twoPlan = buildImportPlan(twoRealReceipts.parsed, cardState, twoRealReceipts.newestTs);
   ok('two genuine equal card payments on the same side stay two payments',
     twoPlan.txCount === 2, twoPlan.txCount);
+
+  const rawlessPair = [
+    {
+      ...s.parsed[0], raw: undefined, smsTs: T0 + 3_300_000,
+      cardPaymentSide: 'debit', sender: 'FAB', channel: 'inbox', captureSource: 'shortcut',
+    },
+    {
+      ...s.parsed[1], raw: undefined, smsTs: T0 + 3_900_000,
+      cardPaymentSide: 'receipt', sender: 'FAB', channel: 'inbox', captureSource: 'shortcut',
+    },
+  ];
+  const rawlessPlan = buildImportPlan(rawlessPair, cardState, rawlessPair[1].smsTs);
+  ok('iOS rawless settlement sides still become one card payment',
+    rawlessPlan.txCount === 1 &&
+      rawlessPlan.batch.transactions[0]?.cardPaymentSide === 'debit',
+    rawlessPlan.batch.transactions);
+
+  const priorWithoutSide = {
+    ...cardState,
+    transactions: [{
+      id: 'legacy-payment', type: 'expense', amountFils: rawlessPair[0].amountFils,
+      category: 'other', accountId: 'fab4833', title: 'Card payment',
+      date: rawlessPair[0].date, source: 'sms',
+      smsKey: `s${rawlessPair[0].smsTs}-${rawlessPair[0].amountFils}`,
+    }],
+  };
+  const sideHeal = buildImportPlan(
+    [rawlessPair[0]], priorWithoutSide, rawlessPair[0].smsTs);
+  ok('rawless reparse heals direction and structured debit side onto a legacy payment',
+    sideHeal.txCount === 0 && sideHeal.batch.updates.some((u) =>
+      u.id === 'legacy-payment' && u.type === 'income' && u.isTransfer === true &&
+      u.cardPaymentSide === 'debit'),
+    sideHeal.batch.updates);
+
+  const legacyPair = {
+    ...cardState,
+    transactions: s.parsed.map((p, index) => ({
+      id: `legacy-side-${index}`,
+      type: 'expense', amountFils: p.amountFils, category: 'other',
+      accountId: 'fab4833', title: 'Card payment', date: p.date,
+      source: 'sms', smsKey: `s${p.smsTs}-${p.amountFils}`,
+    })),
+  };
+  const legacyPairPlan = buildImportPlan(s.parsed, legacyPair, s.newestTs);
+  const healedPair = legacyPair.transactions.map((tx) => {
+    const update = legacyPairPlan.batch.updates.find((u) => u.id === tx.id);
+    return update ? { ...tx, ...update } : tx;
+  });
+  const reconciledPair = require('./build/dedupe.js').reconcileCaptureDuplicates(healedPair);
+  ok('legacy opposite raw settlement rows heal sides then reconcile to one payment',
+    legacyPairPlan.txCount === 0 &&
+      legacyPairPlan.batch.updates.some((u) => u.cardPaymentSide === 'debit') &&
+      legacyPairPlan.batch.updates.some((u) => u.cardPaymentSide === 'receipt') &&
+      reconciledPair.length === 1,
+    { updates: legacyPairPlan.batch.updates, reconciledPair });
+
+  const midnightDebitTs = Date.parse('2026-08-10T23:59:00Z');
+  const crossMidnightPair = [
+    { ...rawlessPair[0], date: '2026-08-10', smsTs: midnightDebitTs },
+    { ...rawlessPair[1], date: '2026-08-11', smsTs: midnightDebitTs + 3 * 60_000 },
+  ];
+  const crossMidnightPlan = buildImportPlan(
+    crossMidnightPair, cardState, crossMidnightPair[1].smsTs);
+  ok('settlement pairing: opposite sides across midnight become one payment',
+    crossMidnightPlan.txCount === 1, crossMidnightPlan.batch.transactions);
+  const crossMidnightSameSide = buildImportPlan(
+    [
+      { ...crossMidnightPair[1], date: '2026-08-10', smsTs: midnightDebitTs },
+      crossMidnightPair[1],
+    ],
+    cardState,
+    crossMidnightPair[1].smsTs,
+  );
+  ok('settlement pairing: same-side payments on adjacent dates stay distinct',
+    crossMidnightSameSide.txCount === 2, crossMidnightSameSide.batch.transactions);
+
+  const manualDate = '2026-08-10';
+  const manualPayment = {
+    id: 'manual-payment', type: 'income', amountFils: rawlessPair[1].amountFils,
+    category: 'other', accountId: 'fab4833', title: 'FAB Credit Card •4833 payment',
+    date: manualDate, source: 'manual', isTransfer: true,
+  };
+  const manualState = {
+    ...cardState,
+    transactions: [manualPayment],
+    cardDues: [
+      { id: 'due-current', accountId: 'fab4833', totalDueFils: manualPayment.amountFils, minDueFils: 40000, dueDate: '2026-08-20', paidFils: 0 },
+      { id: 'due-next', accountId: 'fab4833', totalDueFils: manualPayment.amountFils, minDueFils: 40000, dueDate: '2026-09-20', paidFils: 0 },
+    ],
+  };
+  const laterReceipt = {
+    ...rawlessPair[1], date: manualDate, smsTs: Date.parse('2026-08-10T18:00:00Z'),
+  };
+  const manualReceiptPlan = buildImportPlan(
+    [laterReceipt], manualState, laterReceipt.smsTs);
+  const cardMath = require('./build/cards.js');
+  ok('manual payment correlation: a same-day bank receipt is not imported twice',
+    manualReceiptPlan.txCount === 0, manualReceiptPlan.batch.transactions);
+  ok('manual payment correlation: one payment settles only the current due',
+    cardMath.duePaidFils(manualState, manualState.cardDues[0]) === manualPayment.amountFils &&
+      cardMath.duePaidFils(manualState, manualState.cardDues[1]) === 0);
+  const manualPlusTwoReceipts = buildImportPlan(
+    [laterReceipt, { ...laterReceipt, smsTs: laterReceipt.smsTs + 10 * 60_000 }],
+    manualState,
+    laterReceipt.smsTs + 10 * 60_000,
+  );
+  ok('manual payment correlation: one manual row consumes only one real receipt',
+    manualPlusTwoReceipts.txCount === 1,
+    manualPlusTwoReceipts.batch.transactions);
+}
+
+/* A raw-discarded relay duplicate must never be dereferenced during healing. */
+{
+  const smsTs = T0 + 3_950_000;
+  const rawlessUnknown = {
+    kind: 'transaction', type: 'expense', amountFils: 1999, currency: 'AED',
+    merchant: 'Card purchase', date: '2026-07-20', dueDay: null, minDueFils: null,
+    card: null, reference: null, transferHint: false, snapshotFils: null,
+    snapshotKind: null, categoryGuess: 'other', categoryDeliberate: false,
+    raw: undefined, smsTs, sender: 'FAB', channel: 'inbox', captureSource: 'shortcut',
+  };
+  const rawlessState = {
+    ...BASE,
+    accounts: [{
+      id: 'cash', name: 'Current account', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    transactions: [{
+      id: 'rawless-prior', type: 'expense', amountFils: 1999, category: 'other',
+      accountId: 'cash', title: 'Card purchase', date: '2026-07-20', source: 'sms',
+      smsKey: `s${smsTs}-1999`,
+    }],
+  };
+  const plan = buildImportPlan([rawlessUnknown], rawlessState, smsTs);
+  ok('rawless relay duplicate healing is safe and does not invent stored source text',
+    plan.txCount === 0 && plan.batch.updates.length === 0,
+    plan.batch.updates);
 }
 
 /* ── last four digits are not globally unique across banks ──────────── */
@@ -229,7 +365,482 @@ const afterFirst = apply(BASE, first);
     plan.batch.newDues[0]?.accountId === 'enbd', plan.batch.newDues[0]);
 }
 
+/* A parser upgrade must never delete a statement row the user corrected. */
+{
+  const smsTs = T0 + 4_200_000;
+  const statement = {
+    kind: 'cardStatement', type: 'expense', amountFils: 125000, currency: 'AED',
+    merchant: 'Card statement', date: '2026-08-20', dueDay: 20, minDueFils: 6250,
+    card: { last4: '5678', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs, sender: 'FAB', channel: 'inbox',
+  };
+  const corrected = {
+    ...BASE,
+    accounts: [{
+      id: 'fab5678', name: 'FAB Credit Card •5678', kind: 'card', cardType: 'credit',
+      last4: '5678', bankName: 'FAB', openingFils: 0, color: '#fff',
+    }],
+    transactions: [{
+      id: 'edited-statement', type: 'expense', amountFils: 125000, category: 'other',
+      accountId: 'fab5678', title: 'My corrected transaction', date: '2026-08-20',
+      source: 'sms', smsKey: `s${smsTs}-125000`, userEdited: true,
+    }],
+  };
+  const plan = buildImportPlan([statement], corrected, smsTs, new Date(2026, 7, 2));
+  ok('statement reparse never removes a user-edited matching row',
+    !plan.batch.updates.some((u) => u.id === 'edited-statement' && u.remove),
+    plan.batch.updates);
+}
+
 /* ── what must STILL import ──────────────────────────────────────────── */
+
+/* Ambiguous identity is never auto-merged from issuer + last4 alone. */
+{
+  const existingLivDebit = {
+    ...BASE,
+    accounts: [{
+      id: 'liv8575', name: 'Liv Debit Card •8575', kind: 'card', cardType: 'debit',
+      last4: '8575', bankName: 'Liv', openingFils: 0, color: '#00D3B9',
+    }],
+    accountHints: { 'Liv|debit|8575': 'liv8575', '8575': 'liv8575' },
+  };
+  const statement = {
+    kind: 'cardStatement', type: 'expense', amountFils: 406169, currency: 'AED',
+    merchant: 'Card statement', date: '2026-08-20', dueDay: 20, minDueFils: 20308,
+    card: { last4: '8575', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs: T0 + 4_500_000, sender: 'ENBD', channel: 'inbox',
+  };
+  const plan = buildImportPlan([statement], existingLivDebit, statement.smsTs, new Date(2026, 7, 2));
+  ok('identity safety: Liv and ENBD same-last4 are not silently merged',
+    plan.newAccountCount === 1 && plan.batch.newDues[0]?.accountId === '0', plan.batch);
+  ok('identity safety: the new statement account is authoritatively credit',
+    plan.batch.cardTypes?.['0'] === 'credit', plan.batch.cardTypes);
+}
+
+{
+  const unknownPurchase = {
+    kind: 'transaction', type: 'expense', amountFils: 3500, currency: 'AED', merchant: 'Costa',
+    date: '2026-08-03', dueDay: null, minDueFils: null,
+    card: { last4: '1111', kind: 'unknown' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'dining', raw: '',
+    smsTs: T0 + 4_700_000, sender: 'ADCB', channel: 'inbox',
+  };
+  const creditStatement = {
+    kind: 'cardStatement', type: 'expense', amountFils: 3500, currency: 'AED', merchant: 'Card statement',
+    date: '2026-08-20', dueDay: 20, minDueFils: 175,
+    card: { last4: '1111', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs: T0 + 4_800_000, sender: 'ADCB', channel: 'inbox',
+  };
+  const knownCredit = {
+    ...BASE,
+    accounts: [{ id: 'adcb1111', name: 'ADCB Credit Card •1111', kind: 'card', cardType: 'credit', last4: '1111', bankName: 'ADCB', openingFils: 0, color: '#f00' }],
+    accountHints: {},
+  };
+  const againstKnown = buildImportPlan([unknownPurchase], knownCredit, unknownPurchase.smsTs);
+  ok('identity resolution: bare card wording reuses one unambiguous known card',
+    againstKnown.newAccountCount === 0 && againstKnown.batch.transactions[0]?.accountId === 'adcb1111',
+    againstKnown.batch);
+
+  const sameBatch = buildImportPlan([unknownPurchase, creditStatement], BASE, creditStatement.smsTs, new Date(2026, 7, 2));
+  ok('identity resolution: bare purchase plus statement creates one account in one scan',
+    sameBatch.newAccountCount === 1 &&
+      sameBatch.batch.transactions[0]?.accountId === '0' &&
+      sameBatch.batch.newDues[0]?.accountId === '0',
+    sameBatch.batch);
+  ok('identity resolution: statement upgrades the unknown account to credit',
+    sameBatch.batch.cardTypes?.['0'] === 'credit', sameBatch.batch.cardTypes);
+
+  const explicitDebit = { ...unknownPurchase, card: { last4: '1111', kind: 'debit' }, raw: 'Debit Card ending 1111' };
+  const twoReal = buildImportPlan([explicitDebit, creditStatement], BASE, creditStatement.smsTs, new Date(2026, 7, 2));
+  ok('identity safety: explicit debit and credit cards sharing last4 remain separate',
+    twoReal.newAccountCount === 2 &&
+      twoReal.batch.transactions[0]?.accountId !== twoReal.batch.newDues[0]?.accountId,
+    twoReal.batch);
+
+  const ambiguous = {
+    ...BASE,
+    accounts: [
+      { id: 'debit1111', name: 'ADCB Debit Card •1111', kind: 'card', cardType: 'debit', last4: '1111', bankName: 'ADCB', openingFils: 0, color: '#f00' },
+      { id: 'credit1111', name: 'ADCB Credit Card •1111', kind: 'card', cardType: 'credit', last4: '1111', bankName: 'ADCB', openingFils: 0, color: '#f00' },
+    ],
+    accountHints: {},
+  };
+  const ambiguousPlan = buildImportPlan([unknownPurchase], ambiguous, unknownPurchase.smsTs);
+  ok('identity safety: bare wording never guesses between two genuine candidates',
+    ambiguousPlan.newAccountCount === 1 &&
+      !['debit1111', 'credit1111'].includes(ambiguousPlan.batch.transactions[0]?.accountId),
+    ambiguousPlan.batch);
+
+  const secondUnknown = {
+    ...unknownPurchase, amountFils: 4700, merchant: 'Bakery',
+    smsTs: unknownPurchase.smsTs + 180_000,
+  };
+  const holdingPlan = buildImportPlan(
+    [unknownPurchase, secondUnknown], ambiguous, secondUnknown.smsTs);
+  ok('identity safety: repeated ambiguous bare alerts share one holding account',
+    holdingPlan.newAccountCount === 1 &&
+      holdingPlan.batch.transactions.length === 2 &&
+      holdingPlan.batch.transactions.every((t) => t.accountId === '0'),
+    holdingPlan.batch);
+  const holdingState = {
+    ...ambiguous,
+    accounts: [
+      ...ambiguous.accounts,
+      { ...holdingPlan.batch.newAccounts[0], id: 'holding1111' },
+    ],
+    transactions: holdingPlan.batch.transactions.map((t, index) => ({
+      ...t, id: `holding-tx-${index}`, accountId: 'holding1111',
+    })),
+  };
+  const nextUnknown = {
+    ...secondUnknown, amountFils: 5900, merchant: 'Bookshop',
+    smsTs: secondUnknown.smsTs + 180_000,
+  };
+  const reusedHolding = buildImportPlan([nextUnknown], holdingState, nextUnknown.smsTs);
+  ok('identity safety: a later scan reuses the one generated unknown holding account',
+    reusedHolding.newAccountCount === 0 &&
+      reusedHolding.batch.transactions[0]?.accountId === 'holding1111',
+    reusedHolding.batch);
+
+  const explicitCreditA = {
+    ...nextUnknown, amountFils: 6100, merchant: 'Pharmacy',
+    card: { last4: '1111', kind: 'credit' }, smsTs: nextUnknown.smsTs + 180_000,
+  };
+  const explicitCreditB = {
+    ...explicitCreditA, amountFils: 7200, merchant: 'Grocer',
+    smsTs: explicitCreditA.smsTs + 180_000,
+  };
+  const typedPastHolding = buildImportPlan(
+    [explicitCreditA, explicitCreditB], holdingState, explicitCreditB.smsTs);
+  ok('identity safety: an unknown holding never poisons unique explicit credit routing',
+    typedPastHolding.newAccountCount === 0 &&
+      typedPastHolding.batch.transactions.length === 2 &&
+      typedPastHolding.batch.transactions.every((t) => t.accountId === 'credit1111'),
+    typedPastHolding.batch);
+
+  const twoExplicitCredits = {
+    ...BASE,
+    accounts: [
+      { id: 'fab3749-a', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'FAB', openingFils: 0, color: '#09f' },
+      { id: 'fab3749-b', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'FAB', openingFils: 0, color: '#09f' },
+    ],
+  };
+  const creditAlertA = {
+    ...explicitCreditA, card: { last4: '3749', kind: 'credit' }, sender: 'FAB',
+    smsTs: explicitCreditA.smsTs + 600_000,
+  };
+  const creditAlertB = {
+    ...creditAlertA, amountFils: creditAlertA.amountFils + 100,
+    merchant: 'Second purchase', smsTs: creditAlertA.smsTs + 180_000,
+  };
+  const stagedExplicit = buildImportPlan(
+    [creditAlertA, creditAlertB], twoExplicitCredits, creditAlertB.smsTs);
+  const stagedRef = stagedExplicit.batch.transactions[0]?.accountId;
+  ok('identity safety: ambiguous explicit transactions are retained without account growth',
+    stagedExplicit.newAccountCount === 0 && stagedExplicit.txCount === 2 &&
+      stagedRef?.startsWith('__unassigned-card__:fab:credit:3749') &&
+      stagedExplicit.batch.transactions.every((t) => t.accountId === stagedRef),
+    stagedExplicit.batch);
+  ok('identity safety: ambiguous staging asserts no hint, bank, type, or snapshot',
+    Object.keys(stagedExplicit.batch.newHints).length === 0 &&
+      Object.keys(stagedExplicit.batch.bankNames).length === 0 &&
+      Object.keys(stagedExplicit.batch.cardTypes).length === 0 &&
+      Object.keys(stagedExplicit.batch.snapshots).length === 0,
+    stagedExplicit.batch);
+  const afterStagedExplicit = apply(twoExplicitCredits, stagedExplicit);
+  const stagedExplicitReplay = buildImportPlan(
+    [creditAlertA, creditAlertB], afterStagedExplicit, creditAlertB.smsTs);
+  ok('identity safety: ambiguous explicit transaction replay is idempotent',
+    stagedExplicitReplay.txCount === 0 && stagedExplicitReplay.newAccountCount === 0 &&
+      afterStagedExplicit.lastScanTs === creditAlertB.smsTs,
+    stagedExplicitReplay.batch);
+
+  const twoLegacyHoldings = {
+    ...ambiguous,
+    accounts: [
+      ...ambiguous.accounts,
+      {
+        id: 'holding-b', name: 'Card •1111', kind: 'card', last4: '1111',
+        openingFils: 0, color: '#999',
+      },
+      {
+        id: 'holding-a', name: 'Card •1111', kind: 'card', last4: '1111',
+        openingFils: 0, color: '#999',
+      },
+    ],
+  };
+  const cappedHoldingPlan = buildImportPlan(
+    [nextUnknown], twoLegacyHoldings, nextUnknown.smsTs);
+  ok('identity safety: multiple legacy unknown holdings never mint another account',
+    cappedHoldingPlan.newAccountCount === 0 &&
+      cappedHoldingPlan.batch.transactions[0]?.accountId === 'holding-a',
+    cappedHoldingPlan.batch);
+  ok('identity safety: ambiguous holding reuse does not backfill guessed bank identity',
+    cappedHoldingPlan.batch.bankNames['holding-a'] === undefined,
+    cappedHoldingPlan.batch.bankNames);
+}
+
+/* PAN-less statements attach only through one unambiguous sender-bank card. */
+{
+  const raw = 'Your ADCB credit card statement is ready. Total due AED 714.74, minimum due AED 100.00, due on 18/08/2026.';
+  const parsed = parseSms(raw);
+  const smsTs = T0 + 5_250_000;
+  const oneAdcb = {
+    ...BASE,
+    accounts: [
+      { id: 'adcb-card', name: 'ADCB Credit Card', kind: 'card', cardType: 'credit', bankName: 'ADCB', openingFils: 0, color: '#f00' },
+      { id: 'fab-card', name: 'FAB Credit Card', kind: 'card', cardType: 'credit', bankName: 'FAB', openingFils: 0, color: '#09f' },
+    ],
+  };
+  const uniquePlan = buildImportPlan(
+    [{ ...parsed, smsTs, sender: 'ADCB', channel: 'inbox' }],
+    oneAdcb,
+    smsTs,
+    new Date(2026, 7, 2),
+  );
+  ok('PAN-less statement: parser keeps structured due with no invented card',
+    parsed?.kind === 'cardStatement' && parsed.card === null && parsed.amountFils === 71474,
+    parsed);
+  ok('PAN-less statement: unique sender-bank credit card receives the due',
+    uniquePlan.dueCount === 1 && uniquePlan.batch.newDues[0]?.accountId === 'adcb-card' &&
+      uniquePlan.txCount === 0,
+    uniquePlan.batch);
+  const ambiguousPlan = buildImportPlan(
+    [{ ...parsed, smsTs, sender: 'ADCB', channel: 'inbox' }],
+    { ...oneAdcb, accounts: [...oneAdcb.accounts, { ...oneAdcb.accounts[0], id: 'adcb-card-2' }] },
+    smsTs,
+    new Date(2026, 7, 2),
+  );
+  ok('PAN-less statement: ambiguous sender-bank cards stay staged',
+    ambiguousPlan.dueCount === 0 && ambiguousPlan.txCount === 0 &&
+      ambiguousPlan.newAccountCount === 0,
+    ambiguousPlan.batch);
+}
+
+/* A rescan must move an old card-payment row to the PAN it now recognizes. */
+{
+  const smsTs = T0 + 5_000_000;
+  const payment = {
+    kind: 'cardPayment', type: 'expense', amountFils: 744800, currency: 'AED',
+    merchant: 'Card •3749 payment', date: '2026-08-05', dueDay: null, minDueFils: null,
+    card: { last4: '3749', kind: 'credit' }, reference: null, transferHint: true,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs, sender: 'FAB', channel: 'inbox',
+  };
+  const wrong = {
+    ...BASE,
+    accounts: [
+      { id: 'fab3324', name: 'FAB Credit Card •3324', kind: 'card', cardType: 'credit', last4: '3324', bankName: 'FAB', openingFils: 0, color: '#09f' },
+      { id: 'fab3749', name: 'FAB Credit Card •3749', kind: 'card', cardType: 'credit', last4: '3749', bankName: 'FAB', openingFils: 0, color: '#09f' },
+    ],
+    transactions: [{
+      id: 'old-pay', type: 'expense', amountFils: 744800, category: 'other', accountId: 'fab3324',
+      title: 'Card payment', date: '2026-08-05', source: 'sms', smsKey: `s${smsTs}-744800`, isTransfer: true,
+    }],
+    accountHints: {},
+  };
+  const plan = buildImportPlan([payment], wrong, smsTs);
+  ok('payment healing: the duplicate is not appended again', plan.txCount === 0, plan.batch.transactions);
+  ok('payment healing: Card •3749 payment moves from FAB •3324 to FAB •3749',
+    plan.batch.updates.some((u) => u.id === 'old-pay' && u.accountId === 'fab3749' && u.type === 'income'),
+    plan.batch.updates);
+
+  const ambiguous = {
+    ...wrong,
+    accounts: [
+      ...wrong.accounts,
+      { ...wrong.accounts[1], id: 'fab3749-second' },
+    ],
+    accountHints: {
+      'FAB|credit|3749': 'fab3749',
+      '3749': 'fab3749',
+    },
+  };
+  const ambiguousPlan = buildImportPlan([payment], ambiguous, smsTs);
+  ok('payment healing: scoped and legacy hints cannot choose between two real cards',
+    ambiguousPlan.newAccountCount === 0 &&
+      !ambiguousPlan.batch.updates.some((u) => u.id === 'old-pay' && u.accountId),
+    ambiguousPlan.batch);
+
+  const unmatchedPayment = {
+    ...payment,
+    amountFils: 888800,
+    smsTs: smsTs + 240_000,
+  };
+  const stagedPayment = buildImportPlan(
+    [unmatchedPayment], ambiguous, unmatchedPayment.smsTs);
+  const stagedPaymentRef = stagedPayment.batch.transactions[0]?.accountId;
+  ok('payment safety: an ambiguous new card payment is retained without account growth',
+    stagedPayment.txCount === 1 && stagedPayment.newAccountCount === 0 &&
+      stagedPaymentRef?.startsWith('__unassigned-card__:fab:credit:3749') &&
+      stagedPayment.batch.transactions[0]?.type === 'income' &&
+      stagedPayment.batch.transactions[0]?.isTransfer === true,
+    stagedPayment.batch);
+  ok('payment safety: ambiguous staging does not assert an account identity',
+    Object.keys(stagedPayment.batch.newHints).length === 0 &&
+      Object.keys(stagedPayment.batch.bankNames).length === 0 &&
+      Object.keys(stagedPayment.batch.cardTypes).length === 0,
+    stagedPayment.batch);
+  const afterStagedPayment = apply(ambiguous, stagedPayment);
+  const stagedPaymentReplay = buildImportPlan(
+    [unmatchedPayment], afterStagedPayment, unmatchedPayment.smsTs);
+  ok('payment safety: ambiguous card-payment replay is idempotent',
+    stagedPaymentReplay.txCount === 0 && stagedPaymentReplay.newAccountCount === 0 &&
+      afterStagedPayment.lastScanTs === unmatchedPayment.smsTs,
+    stagedPaymentReplay.batch);
+
+  const ordinary = {
+    ...payment,
+    kind: 'transaction', type: 'expense', merchant: 'Card purchase',
+    transferHint: false, categoryGuess: 'shopping',
+  };
+  const ordinaryPlan = buildImportPlan([ordinary], ambiguous, smsTs);
+  ok('transaction healing: ambiguous duplicate rescan mints no third account',
+    ordinaryPlan.newAccountCount === 0 && ordinaryPlan.txCount === 0,
+    ordinaryPlan.batch);
+  ok('transaction healing: ambiguous duplicate rescan preserves its current account',
+    !ordinaryPlan.batch.updates.some((u) => u.id === 'old-pay' && u.accountId),
+    ordinaryPlan.batch.updates);
+
+  const uniqueOrdinaryPlan = buildImportPlan([ordinary], wrong, smsTs);
+  ok('transaction healing: explicit unique card moves a duplicate off the wrong account',
+    uniqueOrdinaryPlan.batch.updates.some(
+      (u) => u.id === 'old-pay' && u.accountId === 'fab3749'),
+    uniqueOrdinaryPlan.batch.updates);
+
+  const statement = {
+    kind: 'cardStatement', type: 'expense', amountFils: 700000, currency: 'AED',
+    merchant: 'Card statement', date: '2026-08-20', dueDay: 20, minDueFils: 35000,
+    card: { last4: '3749', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs: smsTs + 60_000, sender: 'FAB', channel: 'inbox',
+  };
+  const withKnownDue = {
+    ...ambiguous,
+    transactions: [],
+    cardDues: [{
+      id: 'known-due', accountId: 'fab3749', totalDueFils: 700000,
+      minDueFils: 35000, dueDate: '2026-08-20', paidFils: 0,
+    }],
+  };
+  const statementRescan = buildImportPlan(
+    [statement], withKnownDue, statement.smsTs, new Date(2026, 7, 2));
+  ok('statement rescan: unique existing obligation prevents an ambiguous new account',
+    statementRescan.newAccountCount === 0, statementRescan.batch);
+  ok('statement rescan: identical obligation is not minted again',
+    statementRescan.batch.newDues.length === 0, statementRescan.batch.newDues);
+
+  const ungroundedStatement = buildImportPlan(
+    [statement], { ...ambiguous, transactions: [], cardDues: [] },
+    statement.smsTs, new Date(2026, 7, 2));
+  ok('statement import: ambiguous cards without obligation context are refused safely',
+    ungroundedStatement.newAccountCount === 0 && ungroundedStatement.dueCount === 0,
+    ungroundedStatement.batch);
+}
+
+/* Card type learned in this batch is authoritative for identity and snapshots. */
+{
+  const unknown = {
+    kind: 'transaction', type: 'expense', amountFils: 3500, currency: 'AED', merchant: 'Cafe',
+    date: '2026-08-03', dueDay: null, minDueFils: null,
+    card: { last4: '2468', kind: 'unknown' }, reference: null, transferHint: false,
+    snapshotFils: 965000, snapshotKind: 'balance', categoryGuess: 'dining', raw: '',
+    smsTs: T0 + 5_300_000, sender: 'ADCB', channel: 'inbox',
+  };
+  const debit = {
+    ...unknown, amountFils: 4600, merchant: 'Fuel',
+    card: { last4: '2468', kind: 'debit' }, snapshotFils: null,
+    snapshotKind: null, raw: 'Debit Card ending 2468', smsTs: T0 + 5_400_000,
+  };
+  const credit = {
+    kind: 'cardStatement', type: 'expense', amountFils: 3500, currency: 'AED',
+    merchant: 'Card statement', date: '2026-08-20', dueDay: 20, minDueFils: 175,
+    card: { last4: '2468', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs: T0 + 5_500_000, sender: 'ADCB', channel: 'inbox',
+  };
+  const unknownThenCredit = buildImportPlan(
+    [unknown, credit], BASE, credit.smsTs, new Date(2026, 7, 2));
+  ok('snapshot identity: unknown balance upgraded later to credit becomes limit',
+    unknownThenCredit.batch.snapshots['0']?.kind === 'limit',
+    unknownThenCredit.batch.snapshots);
+  const creditThenUnknown = buildImportPlan(
+    [credit, unknown], BASE, unknown.smsTs, new Date(2026, 7, 2));
+  ok('snapshot identity: credit learned first also normalizes later balance to limit',
+    creditThenUnknown.batch.snapshots['0']?.kind === 'limit',
+    creditThenUnknown.batch.snapshots);
+
+  const debitThenCredit = buildImportPlan(
+    [unknown, debit, credit], BASE, credit.smsTs, new Date(2026, 7, 2));
+  ok('same-batch type identity: unknown→debit→credit keeps explicit cards separate',
+    debitThenCredit.newAccountCount === 2 &&
+      debitThenCredit.batch.transactions[0]?.accountId ===
+        debitThenCredit.batch.transactions[1]?.accountId &&
+      debitThenCredit.batch.newDues[0]?.accountId !==
+        debitThenCredit.batch.transactions[0]?.accountId,
+    debitThenCredit.batch);
+  const creditThenDebit = buildImportPlan(
+    [unknown, credit, debit], BASE, debit.smsTs, new Date(2026, 7, 2));
+  ok('same-batch type identity: unknown→credit→debit keeps explicit cards separate',
+    creditThenDebit.newAccountCount === 2 &&
+      creditThenDebit.batch.transactions[0]?.accountId ===
+        creditThenDebit.batch.newDues[0]?.accountId &&
+      creditThenDebit.batch.transactions[1]?.accountId !==
+        creditThenDebit.batch.transactions[0]?.accountId,
+    creditThenDebit.batch);
+}
+
+/* Structured Arabic debit evidence must survive the import resolver. */
+{
+  const arabicMada = `مشتريات نقاط البيع
+بطاقة: **4567;مدى
+من: xx005
+مبلغ: 34.00 SAR
+لدى: Some restaurant
+في: 2019-05-07 23:44`;
+  const parsed = parseSms(arabicMada);
+  const plan = buildImportPlan(
+    [{ ...parsed, smsTs: T0 + 5_700_000, sender: 'ADCB', channel: 'inbox' }],
+    BASE,
+    T0 + 5_700_000,
+  );
+  ok('Arabic Mada import: parser debit kind is preserved through account resolution',
+    parsed?.card?.kind === 'debit' &&
+      plan.batch.cardTypes?.['0'] === 'debit' &&
+      plan.batch.newAccounts[0]?.cardType === 'debit',
+    { parsed: parsed?.card, batch: plan.batch });
+}
+
+/* A better SMS may dedupe an edited push, but may not overwrite it. */
+{
+  const pushTs = T0 + 5_900_000;
+  const smsTs = pushTs + 3_000;
+  const corrected = {
+    ...BASE,
+    accounts: [{
+      id: 'corrected-account', name: 'My card', kind: 'card', cardType: 'debit',
+      last4: '9999', bankName: 'FAB', openingFils: 0, color: '#fff',
+    }],
+    transactions: [{
+      id: 'edited-push', type: 'expense', amountFils: 12000, category: 'utilities',
+      accountId: 'corrected-account', title: 'My corrected title', date: '2026-07-20',
+      source: 'sms', viaPush: true, smsKey: `s${pushTs}-12000`, ts: pushTs,
+      userEdited: true,
+    }],
+  };
+  const incoming = scan([{
+    body: 'Purchase of AED 120.00 with Debit Card ending 1234 at CARREFOUR on 20/07/2026',
+    ts: smsTs, sender: 'FAB',
+  }]).parsed;
+  const plan = buildImportPlan(incoming, corrected, smsTs);
+  ok('push supersession: fuller SMS adds no duplicate of a user-edited push',
+    plan.txCount === 0 && plan.newAccountCount === 0, plan.batch);
+  ok('push supersession: corrected title/category/account receive no overwrite patch',
+    !plan.batch.updates.some((u) => u.id === 'edited-push'), plan.batch.updates);
+}
 
 {
   // Two genuine charges of the same amount on the same day are two charges.

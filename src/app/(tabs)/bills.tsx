@@ -444,9 +444,13 @@ export default function BillsScreen() {
                       monthKey(transaction.date) === key,
                   )
                   .reduce((sum, transaction) => sum + transaction.amountFils, 0);
+                // `openDues` has already allocated imported card-payment
+                // transactions across statements. Keep every focal figure on
+                // that one result: raw due.paidFils only records manual edits.
+                const paidFils = Math.max(0, item.due.totalDueFils - item.remainingFils);
                 const paidShare = Math.max(
                   0,
-                  Math.min(1, item.due.paidFils / Math.max(1, item.due.totalDueFils)),
+                  Math.min(1, paidFils / Math.max(1, item.due.totalDueFils)),
                 );
                 return (
                   <View
@@ -501,7 +505,7 @@ export default function BillsScreen() {
                     </View>
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {tf('paidOfTotal', {
-                        paid: formatAED(item.due.paidFils, { decimals: false }),
+                        paid: formatAED(paidFils, { decimals: false }),
                         total: formatAED(item.due.totalDueFils, { decimals: false }),
                       })}
                     </ThemedText>

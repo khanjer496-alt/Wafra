@@ -311,6 +311,12 @@ export interface ImportBatchInput {
   snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
   /** accountRef → bank name learned from the SMS sender (backfill only). */
   bankNames: Record<string, string>;
+  /**
+   * accountRef → strongest card type learned in this scan.
+   * Credit is monotonic: a statement/payment can upgrade the parser's debit
+   * fallback, while a later debit-worded purchase never downgrades it.
+   */
+  cardTypes?: Record<string, 'credit' | 'debit'>;
   lastScanTs: number;
   updates?: TxHealUpdate[];
 }

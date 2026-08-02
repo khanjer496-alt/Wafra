@@ -496,6 +496,37 @@ function ktSources(dir) {
     /commit: async \(\) => \{[\s\S]*clearBackgroundRelayRows/.test(read('src/lib/capture.ts')));
 }
 
+/* iOS Message automation forwards sender identity. */
+{
+  const setup = read('src/app/ios-setup.tsx');
+  const copy = read('src/lib/i18n.ts');
+  const actionAt = setup.indexOf("t('iosAutomationAction')");
+  const inputAt = setup.indexOf("t('iosAutomationInput')");
+
+  ok('iOS setup explicitly passes the received Message object after choosing Wafra Capture',
+    actionAt !== -1 && inputAt > actionAt &&
+      /pass Received Message—not Content/.test(copy));
+  ok('the installed Shortcut copy keeps its plain-text manual test compatible',
+    /plain text for its manual test/.test(copy));
+  ok('iOS setup discloses sender retention while raw Content is discarded',
+    /discards raw Message Content after parsing/.test(copy) &&
+      /when the Shortcut supplies it, the bank Sender label/.test(copy) &&
+      /used to identify its card or account/.test(copy));
+  ok('iOS setup treats Message-object forwarding as a spec until physical Sender proof',
+    /setup instructions—not proof that Apple exposes Sender/.test(copy) &&
+      /first real alert must file under the right bank/.test(copy) &&
+      /bank attribution is unavailable and automatic capture is not parity-ready/.test(copy) &&
+      /manual test cannot prove[\s\S]*that Sender is exposed/.test(copy) &&
+      !/one automation per bank|fixed sender label/.test(copy));
+  ok('the Message-object and sender-retention instructions have first-class Arabic copy',
+    /مرّر «الرسالة المستلمة»/.test(copy) &&
+      /تعليمات إعداد وليست دليلاً/.test(copy) &&
+      /لن يتوفر تحديد البنك/.test(copy) &&
+      /لن يكون الالتقاط التلقائي جاهزاً للتكافؤ/.test(copy) &&
+      /محتوى الرسالة الخام/.test(copy) &&
+      /اسم مرسل البنك/.test(copy));
+}
+
 /* ── Android inbox scans stay off the interaction critical path ─────── */
 {
   const scan = read('src/lib/auto-import.ts');
@@ -561,6 +592,47 @@ function ktSources(dir) {
   ok('the card detail sheet keeps no statement rules of its own',
     !/state\.cardDues/.test(sheet) && !/duePaidFils/.test(sheet),
     sheet.match(/state\.cardDues|duePaidFils/g));
+}
+
+/* ── Bills uses the payment allocation behind its outstanding figure ── */
+//
+// Imported SMS card payments are transactions; they intentionally leave the
+// due's raw `paidFils` at zero. openDues/dueWithStatus allocates those rows and
+// returns the remainder. The single-card focal used that remainder for
+// "Outstanding", but raw paidFils for both the progress bar and "paid of
+// total", so the three figures contradicted one another on the same card.
+{
+  const cards = require('./build/cards');
+  const account = {
+    id: 'sms-card', name: 'FAB Credit Card', kind: 'card', cardType: 'credit',
+    openingFils: 0, color: '#fff',
+  };
+  const due = {
+    id: 'sms-due', accountId: account.id, totalDueFils: 100000,
+    minDueFils: 5000, dueDate: '2026-08-20', paidFils: 0,
+  };
+  const state = {
+    accounts: [account],
+    cardDues: [due],
+    transactions: [{
+      id: 'sms-payment', type: 'income', isTransfer: true,
+      accountId: account.id, amountFils: 40000, date: '2026-08-05',
+      category: 'other', title: 'Credit card payment received', source: 'sms',
+    }],
+  };
+  const allocated = cards.dueWithStatus(state, due, new Date(2026, 7, 10));
+  const allocatedPaidFils = due.totalDueFils - allocated.remainingFils;
+  ok('an SMS card payment supplies the paid and outstanding focal figures',
+    due.paidFils === 0 && allocatedPaidFils === 40000 && allocated.remainingFils === 60000,
+    `raw=${due.paidFils} paid=${allocatedPaidFils} outstanding=${allocated.remainingFils}`);
+
+  const bills = read('src/app/(tabs)/bills.tsx');
+  const focal = bills.match(/dues\.length === 1[\s\S]*?dues\.length > 1/)?.[0] ?? '';
+  ok('the Bills focal derives progress and paid-of-total from the allocated remainder',
+    /const paidFils = Math\.max\(0, item\.due\.totalDueFils - item\.remainingFils\)/.test(focal) &&
+      /Math\.min\(1, paidFils \/ Math\.max\(1, item\.due\.totalDueFils\)\)/.test(focal) &&
+      /paid: formatAED\(paidFils, \{ decimals: false \}\)/.test(focal) &&
+      !/item\.due\.paidFils/.test(focal));
 }
 
 /* ── the same rule, written the other way round ─────────────────────── */

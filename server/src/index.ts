@@ -35,6 +35,7 @@ import {
   parseRawEmail,
   parseStatementText,
 } from './imports';
+import { relaySender } from './ingest-row';
 import {
   decryptPushToken,
   encryptPushToken,
@@ -636,12 +637,12 @@ export default {
 
       const incoming = await readBody(req, MAX_BODY_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
-      const body = ((): { text?: string; eventId?: unknown } | null => {
+      const body = ((): { text?: string; eventId?: unknown; sender?: unknown } | null => {
         try {
           const parsed = JSON.parse(incoming.text) as unknown;
           if (typeof parsed === 'string') return { text: parsed };
           if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            return parsed as { text?: string; eventId?: unknown };
+            return parsed as { text?: string; eventId?: unknown; sender?: unknown };
           }
           return null;
         } catch {
@@ -658,6 +659,12 @@ export default {
       ) {
         return json({ error: 'bad_event_id' }, 400);
       }
+      // Optional, so a Shortcut built against the older two-field contract and
+      // the manual setup test both keep working unchanged.
+      const sender = relaySender(body?.sender);
+      // The rejected value is never echoed: an error that quotes what it
+      // refused is a way to read data back out of a write-only endpoint.
+      if (sender === undefined) return json({ error: 'bad_sender' }, 400);
 
       const isTest = text.trim() === RELAY_TEST_MESSAGE;
       const parsed = isTest ? null : parseSms(text);
@@ -678,6 +685,9 @@ export default {
       const rowWithReceipt = {
         ...row,
         ...(!isTest && { captureSource: 'shortcut' as const }),
+        // Sealed alongside the parsed row and nowhere else. The setup probe is
+        // not a bank message, so it gets no bank label.
+        ...(!isTest && sender ? { sender } : {}),
         // Relay receipt time is authoritative. Accepting a caller-provided date
         // lets a broken Shortcut place a valid transaction years in the past.
         receivedAt: new Date().toISOString(),
@@ -685,7 +695,11 @@ export default {
       const replayMaterial =
         typeof eventId === 'string'
           ? `event:${eventId}`
-          : `body:${text.trim().replace(/\s+/g, ' ')}`;
+          : // Without an eventId the body is the identity, and the sender is
+            // part of that body: two banks can send the same wording for the
+            // same amount on the same day, and collapsing those loses a real
+            // transaction. Absent sender leaves the old material untouched.
+            `body:${sender ? `${sender}:` : ''}${text.trim().replace(/\s+/g, ' ')}`;
       const replayKey = await keyedFingerprint(device.requestSecret, replayMaterial);
       const insertedTargets = await queueStructuredRow(
         env,

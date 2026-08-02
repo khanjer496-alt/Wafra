@@ -1,6 +1,8 @@
-const { parseSms } = require('./build/sms-parser');
+const { parseSms, PARSER_VERSION } = require('./build/sms-parser');
 
 let pass = 0, fail = 0;
+if (PARSER_VERSION === 9) { pass++; console.log('✓ parser v9 forces v8 ledgers through healing'); }
+else { fail++; console.log('✗ parser v9 forces v8 ledgers through healing', PARSER_VERSION); }
 function t(name, msg, expect) {
   const p = parseSms(msg);
   const errs = [];
@@ -155,6 +157,74 @@ if (maskedPaid2 && maskedPaid2.kind === 'cardPayment' && maskedPaid2.card && mas
   pass++; console.log('✓ masked-PAN payment-received keeps the LAST four digits');
 } else { fail++; console.log('✗ masked-PAN payment-received keeps the LAST four digits', JSON.stringify(maskedPaid2 && maskedPaid2.card)); }
 
+// ── which LEG of a card settlement a message is ──
+//
+// One payment produces two SMS. Reading them both as money arriving on the
+// card pays the statement twice, and the only thing that separates them is the
+// verb. That used to be re-read from `raw` downstream, which iOS cannot do:
+// the relay drops the text before the row reaches the phone. So the side has
+// to be decided here and survive as a structured field.
+const legs = [
+  ['receipt leg: payment received towards the card',
+    'Payment of AED 3,240.00 received towards your Credit Card ending 4821. Thank you.', 'receipt'],
+  ['receipt leg: card has been paid',
+    'Your Credit Card 4782********4833 Has Been Paid AED 10,700.00. Thank you for banking with us.', 'receipt'],
+  ['receipt leg: payment received on a masked card',
+    'Payment of AED 7,663.00 has been received on your Credit Card 5492********4711.', 'receipt'],
+  ['debit leg: deducted from the account towards payment of the card',
+    'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.', 'debit'],
+  ['debit leg: payment instructions to a masked PAN',
+    'Your payment instructions of AED 7,663.94 to 5492********4711 has been processed', 'debit'],
+];
+for (const [name, message, side] of legs) {
+  const row = parseSms(message);
+  if (row && row.kind === 'cardPayment' && row.cardPaymentSide === side) {
+    pass++; console.log(`✓ ${name}`);
+  } else {
+    fail++;
+    console.log(`✗ ${name}`, JSON.stringify(row && { k: row.kind, s: row.cardPaymentSide }));
+  }
+}
+
+// The two legs of ONE settlement must not read as the same side, or the
+// downstream pair guard has nothing to pair.
+const receiptLeg = parseSms('Payment of AED 4,061.69 received towards your Credit Card ending 8575.');
+const debitLeg = parseSms('AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.');
+if (receiptLeg && debitLeg && receiptLeg.cardPaymentSide === 'receipt' && debitLeg.cardPaymentSide === 'debit') {
+  pass++; console.log('✓ the two legs of one settlement read as opposite sides');
+} else {
+  fail++;
+  console.log('✗ the two legs of one settlement read as opposite sides',
+    JSON.stringify([receiptLeg && receiptLeg.cardPaymentSide, debitLeg && debitLeg.cardPaymentSide]));
+}
+
+// The field is structured, not a re-reading of the text: it has to still be
+// there once `raw` is gone, which is exactly what the relay sends.
+const withoutRaw = (() => { const { raw, ...rest } = receiptLeg; return rest; })();
+if (withoutRaw.raw === undefined && withoutRaw.cardPaymentSide === 'receipt') {
+  pass++; console.log('✓ the side survives a row with its message text discarded');
+} else {
+  fail++; console.log('✗ the side survives a row with its message text discarded', JSON.stringify(withoutRaw));
+}
+
+// Silence, not a guess. A message that names no leg must leave the field
+// absent so consumers keep their "unknown" branch.
+const noLeg = parseSms('Payment of AED 500.00 against your Credit Card ending 4821.');
+if (noLeg && noLeg.kind === 'cardPayment' && noLeg.cardPaymentSide === undefined) {
+  pass++; console.log('✓ wording that names no leg leaves the side unset');
+} else {
+  fail++; console.log('✗ wording that names no leg leaves the side unset', JSON.stringify(noLeg && { k: noLeg.kind, s: noLeg.cardPaymentSide }));
+}
+
+// Nothing else carries a side. A purchase with one would be read as half of a
+// settlement pair.
+const plainPurchase = parseSms('Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026');
+if (plainPurchase && plainPurchase.cardPaymentSide === undefined) {
+  pass++; console.log('✓ an ordinary purchase carries no card-payment side');
+} else {
+  fail++; console.log('✗ an ordinary purchase carries no card-payment side', JSON.stringify(plainPurchase && plainPurchase.cardPaymentSide));
+}
+
 const maskedDebit = parseSms('AED 10,700.00 debited from your a/c XX9012 towards Credit Card 4782********4833 payment.');
 if (maskedDebit && maskedDebit.transferHint === true && !/[*Xx]{2,}/.test(maskedDebit.merchant)) {
   pass++; console.log('✓ debit leg toward a masked card is a transfer, PAN never a merchant');
@@ -251,9 +321,9 @@ if (chq && chq.merchant === 'Cheque' && chq.type === 'expense') { pass++; consol
 else { fail++; console.log('✗ cheque debit titled Cheque', JSON.stringify(chq && chq.merchant)); }
 
 const remit = parseSms('Inward remittance of 5,000.00 AED has been credited to your account XX0002.');
-if (remit && remit.type === 'income' && remit.transferHint === true && remit.merchant === 'Inward remittance') {
-  pass++; console.log('✓ inward remittance is a transfer, not income');
-} else { fail++; console.log('✗ inward remittance is a transfer, not income', JSON.stringify(remit && { t: remit.type, h: remit.transferHint, m: remit.merchant })); }
+if (remit && remit.type === 'income' && remit.transferHint === false && remit.merchant === 'Inward remittance') {
+  pass++; console.log('✓ an unpaired inward remittance remains income');
+} else { fail++; console.log('✗ an unpaired inward remittance remains income', JSON.stringify(remit && { t: remit.type, h: remit.transferHint, m: remit.merchant })); }
 
 // ── balance/limit snapshots captured from alerts ──
 const snapLimit = parseSms('Purchase of AED 250.00 with Credit Card ending 4821 at IKEA. Avl Limit AED 5,939.00');
@@ -624,8 +694,8 @@ if (fabDue && fabDue.kind === 'cardStatement' && fabDue.amountFils === 814440 &&
 
 const tt = parseSms(
   'From HSBC: 20MAR25 TT Payment to 041-339***-001 AED 1,108.00+ Your available balance is AED 946.48');
-if (tt && tt.merchant === 'Bank transfer' && tt.transferHint === true && tt.type === 'income' && tt.amountFils === 110800) {
-  pass++; console.log('✓ HSBC TT payment is a bank transfer, not a garbage-titled expense');
+if (tt && tt.merchant === 'Bank transfer' && tt.transferHint === false && tt.type === 'income' && tt.amountFils === 110800) {
+  pass++; console.log('✓ an unpaired incoming HSBC TT remains income');
 } else {
   fail++; console.log('✗ HSBC TT payment is a bank transfer',
     JSON.stringify(tt && { m: tt.merchant, t: tt.transferHint, ty: tt.type, a: tt.amountFils }));
@@ -1110,6 +1180,90 @@ t('a salary is still a salary',
 t('a refund is still an offset, not revenue',
   'AED 250.00 refunded to your card ending 4110.',
   { category: 'other', type: 'income' });
+
+function ok2(name, cond) {
+  if (cond) { pass++; console.log(`\u2713 ${name}`); }
+  else { fail++; console.log(`\u2717 ${name}`); }
+}
+// A card the message never described must not be given a type.
+//
+// "Card ending 7720" used to come back as a DEBIT card, which the message
+// never said. "Credit Card ending 7720" came back as credit. Same physical
+// card, two accounts — one real and one phantom that every later alert missed.
+// A real ledger held twelve FAB accounts and four ADCB accounts for two cards,
+// and because the statement and the payment landed on different ones, no card
+// ever showed as settled.
+function cardKindOf(msg) {
+  const p = parseSms(msg);
+  return p && p.card ? p.card.kind : null;
+}
+ok2('bare card wording asserts no type',
+  cardKindOf('Purchase of AED 96.00 with Card ending 7720 at CARREFOUR, DUBAI. Avl Balance is AED 258.91.') === 'unknown');
+ok2('an untyped card number asserts no type',
+  cardKindOf('AED 150.00 was spent using card no. XXXX7720 at NOON, DUBAI.') === 'unknown');
+ok2('"Debit Card" still proves debit',
+  cardKindOf('Purchase of AED 96.00 with Debit Card ending 4502 at URBANCLAP, DUBAI. Avl Balance is AED 258.91.') === 'debit');
+ok2('"Credit Card" still proves credit',
+  cardKindOf('Payment for GINNYS of AED 2.25 has been made using Credit Card ending with 4110. Available limit AED 59,797.61.') === 'credit');
+ok2('a covered card is still credit',
+  cardKindOf('Your Covered Card ending 6383 was used for AED 710.00 at MSPLUS. Your available limit is AED 3019.69') === 'credit');
+ok2('"Cr.Card" is an explicit credit abbreviation, not an untyped card',
+  cardKindOf('AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.Avl.Limit is AED 2508.31') === 'credit');
+ok2('a balance line is context, not proof of debit',
+  cardKindOf('AED 20.00 spent on Card ending 9960. Avl Balance is AED 1,430.28') === 'unknown');
+
+// ── the type is a claim about THIS transaction, not about the message ──
+//
+// The evidence used to be gathered from the whole message, so the last sentence
+// could overrule the first three words. Banks advertise credit cards in the
+// footer of debit-card alerts, so this was not a corner case: an AED 45 coffee
+// paid with debit card 4833 was filed against a credit card 4833, and once the
+// two accounts exist, the statement and the payment land on different ones and
+// the card never reads as settled.
+const PROMO_FOOTER =
+  'Debit Card Purchase Card No 5492********4833 AED 45.00 STARBUCKS DUBAI MALL. ' +
+  'Avl Bal AED 1,200.00. Apply for a Credit Card today.';
+ok2('an explicit debit purchase is not converted by a credit-card advert below it',
+  cardKindOf(PROMO_FOOTER) === 'debit');
+{
+  // The knock-on: "Avl Bal" is re-read as available LIMIT on a credit card. A
+  // debit card's balance is the money, and calling it headroom is a wrong
+  // number, not a wrong label.
+  const promo = parseSms(PROMO_FOOTER);
+  ok2('...and its Avl Bal stays a balance, not credit headroom',
+    !!promo && promo.snapshotKind === 'balance' && promo.snapshotFils === 120000);
+}
+ok2('a credit-card advert cannot type an otherwise untyped card either',
+  cardKindOf('Purchase of AED 96.00 with Card ending 7720 at CARREFOUR, DUBAI. ' +
+    'Apply for a Credit Card today and get 10% back.') === 'unknown');
+// The mirror. A debit-card footer must not downgrade a real credit card, or
+// every charge on it stops counting toward the statement it belongs to.
+ok2('a debit-card advert does not downgrade an explicit credit card',
+  cardKindOf('Purchase of AED 2.25 with Credit Card ending 4110 at GINNYS. ' +
+    'Your new Debit Card is ready for collection.') === 'credit');
+
+// Evidence the footer rule must NOT swallow: the header and the Arabic
+// kind-after-number form are both inside the transaction, one before the digits
+// and one after, so the window has to reach in both directions.
+ok2('a multi-line header still types the card named two lines down',
+  cardKindOf('Credit Card Purchase\nCard No XXXX4711\nEUR 2.99\nALLDEBRID.COM MONTROUGE FRA\n' +
+    '03/07/26 05:53\nAvl Bal AED 9705.65') === 'credit');
+ok2('a header sentence still types the card named in the next one',
+  cardKindOf('Please note the details of a recent transaction on your Mashreq Credit Card. ' +
+    'Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at ' +
+    'GOOGLE *Domains US on 22Jan18 09:35 AM. Available limit is AED 2207.33.') === 'credit');
+ok2('the kind stated after the number is still read (Arabic shim form)',
+  cardKindOf('POS purchase\nCard **1234; credit\nat Some merchant\nAED 12.00') === 'credit');
+
+// Two types, one card, one clause. There is no tie-break that is not a guess,
+// and a guessed type is exactly what mints the phantom account.
+ok2('conflicting evidence inside the transaction refuses to pick a side',
+  cardKindOf('Debit Card Purchase on your Credit Card No 5492********4833 AED 45.00 at STARBUCKS.') === 'unknown');
+ok2('...and a conflicted card is still identified, not dropped',
+  (() => {
+    const p = parseSms('Debit Card Purchase on your Credit Card No 5492********4833 AED 45.00 at STARBUCKS.');
+    return !!p && !!p.card && p.card.last4 === '4833' && p.amountFils === 4500;
+  })());
 
 // Transfer rails name the rail, not a shop.
 t('a FastPay transfer names the person',
@@ -2001,12 +2155,12 @@ t('a bare "hold of" hold is still refused',
 // ready. Total due AED 714.74" imported as INCOME of 714.74, filed as
 // business revenue. A message announcing a bill must never become money
 // moving, in either direction, however little else can be told about it.
-t('statement with no card digits is refused',
+t('statement with no card digits stays a structured statement',
   'Your ADCB credit card statement is ready. Total due AED 714.74, minimum due AED 100.00, due on 18/08/2026.',
-  null);
-t('statement with no card digits is refused (FAB wording)',
+  { kind: 'cardStatement', amountFils: 71474, card: null });
+t('statement with no card digits stays structured (FAB wording)',
   'Your FAB Credit Card statement is ready. Total amount due AED 8,909.00, minimum due AED 445.00, payment due date 14/07/2026.',
-  null);
+  { kind: 'cardStatement', amountFils: 890900, card: null });
 // Narrow on purpose: a utility bill that says "total amount due" is a real
 // bill reminder and must still reach the billDue path.
 t('a utility bill saying total amount due is still a bill',

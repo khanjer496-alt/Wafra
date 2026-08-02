@@ -8,8 +8,37 @@
 const { webcrypto } = require('crypto');
 globalThis.crypto = webcrypto;
 
+const fs = require('fs');
+const path = require('path');
+const ts = require('typescript');
+
 const { seal, hashToken, keyedFingerprint, randomToken, timingSafeEqual, b64decode, b64encode } =
   require('./build/crypto');
+
+const repoRoot = path.join(__dirname, '..', '..');
+
+/**
+ * Load a server module that run.sh does not transpile into build/.
+ *
+ * The ingest validators are Worker source with no Worker dependencies, and the
+ * point of testing them is to test the code that ships rather than a copy of
+ * its rules written into a test file.
+ */
+function loadServerModule(relativePath) {
+  const filename = path.join(repoRoot, relativePath);
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: filename,
+  }).outputText;
+  const loaded = { exports: {} };
+  Function('require', 'module', 'exports', '__filename', '__dirname', output)(
+    require, loaded, loaded.exports, filename, path.dirname(filename),
+  );
+  return loaded.exports;
+}
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail = '') {
@@ -97,6 +126,116 @@ async function open(privateKey, blob) {
     openedRow.merchant === '% Arabica' && openedRow.amountFils === 4000 &&
     openedRow.categoryGuess === 'dining');
 
+  // ── What has to survive the raw discard ──
+  //
+  // Two facts about a message used to be recoverable only by re-reading its
+  // text: which leg of a card settlement it is, and which bank sent it.
+  // Android re-reads both, because Android still has the message. The relay
+  // does not — it parses, drops the text, and seals what is left — so on iOS
+  // either fact is simply gone unless it crosses as a structured field. The
+  // cost is not cosmetic: two legs of one payment settle a statement twice,
+  // and a card ending 3749 at one bank is indistinguishable from a card
+  // ending 3749 at another.
+  const { relaySender, MAX_RELAY_SENDER_LENGTH } =
+    loadServerModule('server/src/ingest-row.ts');
+
+  const settlement = parseSms(
+    'Payment of AED 4,061.69 received towards your Credit Card ending 8575. Thank you.');
+  ok('relay: the parser decides the settlement leg before the text is dropped',
+    settlement.kind === 'cardPayment' && settlement.cardPaymentSide === 'receipt',
+    JSON.stringify(settlement && { k: settlement.kind, s: settlement.cardPaymentSide }));
+
+  // Exactly what the ingest handler seals: raw destructured away, the
+  // validated sender attached, the relay's own receipt time.
+  const { raw: _settlementText, ...settlementRow } = settlement;
+  const sender = relaySender('  ADCB   Alerts ');
+  const shortcutRow = {
+    ...settlementRow,
+    captureSource: 'shortcut',
+    ...(sender ? { sender } : {}),
+    receivedAt: new Date().toISOString(),
+  };
+  const openedShortcut = await open(device.privateKey, await seal(pub, shortcutRow));
+  ok('relay: a Shortcut row carries the settlement leg and the bank, not the message',
+    openedShortcut.cardPaymentSide === 'receipt' &&
+      openedShortcut.sender === 'ADCB Alerts' &&
+      openedShortcut.raw === undefined &&
+      !JSON.stringify(openedShortcut).includes('Thank you'),
+    JSON.stringify(openedShortcut));
+
+  // The debit leg is the other half of the same payment, and it must not read
+  // as the same side once the wording is gone.
+  const debitLeg = parseSms(
+    'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.');
+  const { raw: _debitText, ...debitRow } = debitLeg;
+  const openedDebit = await open(device.privateKey, await seal(pub, debitRow));
+  ok('relay: the opposite leg of one payment stays distinguishable without its text',
+    openedDebit.cardPaymentSide === 'debit' && openedShortcut.cardPaymentSide === 'receipt',
+    JSON.stringify([openedDebit.cardPaymentSide, openedShortcut.cardPaymentSide]));
+
+  // ── What may be called a sender ──
+  //
+  // The refusals are spelled by codepoint rather than pasted in: every one of
+  // them is invisible on the page, and a test whose input cannot be read is a
+  // test nobody can check.
+  const NUL = String.fromCharCode(0x00);
+  const LINE_FEED = String.fromCharCode(0x0a);
+  const TAB = String.fromCharCode(0x09);
+  const RIGHT_TO_LEFT_OVERRIDE = String.fromCharCode(0x202e);
+  const LEFT_TO_RIGHT_ISOLATE = String.fromCharCode(0x2066);
+
+  ok('sender: an ordinary bank label is accepted and trimmed',
+    relaySender('Emirates NBD') === 'Emirates NBD' && relaySender(' ADCB ') === 'ADCB');
+  ok('sender: absent, null and blank all mean "no bank label", not an error',
+    relaySender(undefined) === null && relaySender(null) === null && relaySender('   ') === null);
+  ok('sender: a non-string is refused rather than coerced',
+    relaySender(42) === undefined && relaySender({ name: 'ADCB' }) === undefined &&
+      relaySender(['ADCB']) === undefined && relaySender(true) === undefined);
+  ok('sender: control characters are refused',
+    relaySender(`ADCB${LINE_FEED}Purchase of AED 40.00`) === undefined &&
+      relaySender(`ADCB${NUL}`) === undefined &&
+      relaySender(`ADCB${TAB}X`) === undefined);
+  ok('sender: bidi overrides that could disguise the bank are refused',
+    relaySender(`${RIGHT_TO_LEFT_OVERRIDE}ADCB`) === undefined &&
+      relaySender(`AD${LEFT_TO_RIGHT_ISOLATE}CB`) === undefined);
+  // The failure mode this guards: a broken automation passing the message body
+  // where the sender belongs. Refusing keeps eighty characters of a bank alert
+  // out of the one field on the row that is not parser output.
+  ok('sender: an over-long value is refused, never truncated into the row',
+    relaySender('A'.repeat(MAX_RELAY_SENDER_LENGTH)) === 'A'.repeat(MAX_RELAY_SENDER_LENGTH) &&
+      relaySender('A'.repeat(MAX_RELAY_SENDER_LENGTH + 1)) === undefined);
+
+  // A sender this side accepts but the app rejects does not lose a label, it
+  // loses the transaction: isParsedRelayRow drops the whole row, and by then
+  // the message text is gone for good.
+  const clientLimit = Number(
+    /const MAX_RELAY_SENDER_LENGTH = (\d+);/.exec(
+      fs.readFileSync(path.join(repoRoot, 'src/lib/relay.ts'), 'utf8'))?.[1]);
+  ok('sender: the relay never accepts a label longer than the app will take',
+    Number.isFinite(clientLimit) && MAX_RELAY_SENDER_LENGTH <= clientLimit,
+    `server ${MAX_RELAY_SENDER_LENGTH} vs app ${clientLimit}`);
+
+  // ── The ingest handler's side of the bargain ──
+  const workerSource = fs.readFileSync(path.join(repoRoot, 'server/src/index.ts'), 'utf8');
+  const ingest = workerSource.slice(
+    workerSource.indexOf("url.pathname === '/v1/ingest'"),
+    workerSource.indexOf("url.pathname === '/v1/import/capabilities'"));
+  ok('ingest: the sender is validated before anything is done with it',
+    /const sender = relaySender\(body\?\.sender\);/.test(ingest) &&
+      /if \(sender === undefined\) return json\(\{ error: 'bad_sender' \}, 400\);/.test(ingest));
+  ok('ingest: a refused sender is not echoed back to the caller',
+    !/json\(\{[^}]*\bsender\b[^}]*\}, 4\d\d\)/.test(ingest));
+  ok('ingest: the sender reaches the sealed row and is never bound as plaintext or logged',
+    /\.\.\.\(!isTest && sender \? \{ sender \} : \{\}\),/.test(ingest) &&
+      !/\.bind\([^)]*\bsender\b/.test(ingest) && !/console\./.test(ingest));
+  ok('ingest: the setup probe stays a probe, with no bank label attached',
+    /!isTest && sender/.test(ingest));
+  // The text itself is still parsed and dropped; sender did not open a second
+  // door for it. Nothing in the handler binds `text` to a statement either.
+  ok('ingest: the message text is still discarded before anything is sealed',
+    /const \{ raw: _discard, \.\.\.structured \} = parsed!/.test(ingest) &&
+      !/\.bind\([^)]*\btext\b/.test(ingest));
+
   // ── The real device half ──
   //
   // Everything above proves the Worker agrees with the `open()` written in
@@ -112,6 +251,16 @@ async function open(privateKey, blob) {
   ok('client: opens what the Worker sealed',
     byClient.merchant === '% Arabica' && byClient.amountFils === 4000,
     JSON.stringify(byClient));
+
+  // The relay row the phone actually has to read, opened by the code that
+  // ships rather than by this file's stand-in.
+  const shortcutByClient = client.openSealed(
+    kp.privateKey, await seal(kp.publicKey, shortcutRow));
+  ok('client: the shipping client reads back the bank and the settlement leg',
+    shortcutByClient.sender === 'ADCB Alerts' &&
+      shortcutByClient.cardPaymentSide === 'receipt' &&
+      shortcutByClient.raw === undefined,
+    JSON.stringify(shortcutByClient));
 
   // Arabic merchants are ordinary in this corpus, and a UTF-8 bug here would
   // only ever show up as mojibake in someone's ledger.

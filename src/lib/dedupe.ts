@@ -108,12 +108,31 @@ interface SeenEvent {
 }
 
 interface SeenCardPayment {
+  date: string;
   ts: number | null;
   side: 'debit' | 'receipt';
+  title: string;
+  /** One bank-side alert can consume only one card-side receipt. */
+  paired: boolean;
+}
+
+interface SeenManualPayment {
+  /** One explicit Mark-paid row can explain one alert on each bank side. */
+  consumedSides: Set<'debit' | 'receipt' | 'unknown'>;
 }
 
 function closeEnough(a: number | null, b: number | null, windowMs: number): boolean {
   return a !== null && b !== null && Math.abs(a - b) <= windowMs;
+}
+
+function sameOrAdjacentDate(a: string, b: string): boolean {
+  const aTime = Date.parse(`${a}T12:00:00Z`);
+  const bTime = Date.parse(`${b}T12:00:00Z`);
+  return (
+    Number.isFinite(aTime) &&
+    Number.isFinite(bTime) &&
+    Math.abs(aTime - bTime) <= 86_400_000
+  );
 }
 
 export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
@@ -125,7 +144,10 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
     else seen.set(key, [ts]);
   };
   for (const t of existing) {
-    note(dedupeKey(t.date, t.amountFils, t.title), keyTime(t.smsKey));
+    // Locally-created and migrated rows may have no SMS fingerprint but still
+    // carry a precise event clock. Treating those as timeless made every
+    // identical purchase later that day look like the same event.
+    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t));
   }
   const seenSms = new Set(existing.map((t) => t.smsKey).filter(Boolean) as string[]);
   /** A day/amount/direction key still needs a capture time to identify an event. */
@@ -142,6 +164,12 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
     if (rows) rows.push(event);
     else cardPayments.set(key, [event]);
   };
+  const manualPayments = new Map<string, SeenManualPayment[]>();
+  const noteManualPayment = (key: string) => {
+    const rows = manualPayments.get(key);
+    if (rows) rows.push({ consumedSides: new Set() });
+    else manualPayments.set(key, [{ consumedSides: new Set() }]);
+  };
   for (const t of existing) {
     if (t.source === 'sms') {
       noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
@@ -151,26 +179,69 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       });
     }
     if (t.cardPaymentSide) {
-      noteCardPayment(`${t.date}|${t.amountFils}|${t.accountId}`, {
+      noteCardPayment(`${t.amountFils}|${t.accountId}`, {
+        date: t.date,
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
         side: t.cardPaymentSide,
+        title: t.title,
+        paired: false,
       });
+    }
+    if (t.source === 'manual' && t.type === 'income' && t.isTransfer === true) {
+      noteManualPayment(`${t.date}|${t.amountFils}|${t.accountId}`);
     }
   }
 
   return {
     has(c) {
       if (c.smsKey && seenSms.has(c.smsKey)) return true;
-      const at = seen.get(dedupeKey(c.date, c.amountFils, c.title));
-      if (at) {
-        const mine = candidateTime(c);
-        // Same day, same amount, same name. That is one event captured twice
-        // UNLESS both sides carry a timestamp and those are far enough apart
-        // to be two separate visits. Without this the second identical charge
-        // of the day was silently dropped and the user's spending under-read
-        // — the comment here claimed both rows survived; the code kept one.
-        if (mine === null || at.some((t) => t === null || Math.abs(t - mine) <= SAME_EVENT_MS)) {
+      const mine = candidateTime(c);
+      if (c.eventKind === 'cardPayment' && c.accountId) {
+        const side = c.cardPaymentSide ?? 'unknown';
+        const manual = (
+          manualPayments.get(`${c.date}|${c.amountFils}|${c.accountId}`) ?? []
+        ).find((row) => !row.consumedSides.has(side));
+        if (manual) {
+          manual.consumedSides.add(side);
           return true;
+        }
+      }
+      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
+        const rows = cardPayments.get(`${c.amountFils}|${c.accountId}`) ?? [];
+        const paired = rows.find(
+          (row) =>
+            !row.paired &&
+            row.side !== c.cardPaymentSide &&
+            sameOrAdjacentDate(row.date, c.date) &&
+            closeEnough(row.ts, mine, CARD_PAYMENT_PAIR_MS),
+        );
+        if (paired) {
+          paired.paired = true;
+          return true;
+        }
+        // Provider/delivery copies on the SAME side can still race by seconds.
+        // Once an opposite side has been consumed, however, it cannot act as
+        // a generic title duplicate for every later genuine receipt.
+        if (
+          rows.some(
+            (row) =>
+              row.side === c.cardPaymentSide &&
+              row.date === c.date &&
+              row.title.toLowerCase() === c.title.toLowerCase() &&
+              closeEnough(row.ts, mine, SAME_EVENT_MS),
+          )
+        ) return true;
+      } else {
+        const at = seen.get(dedupeKey(c.date, c.amountFils, c.title));
+        if (at) {
+          // Same day, same amount, same name. That is one event captured twice
+          // UNLESS both sides carry a timestamp and those are far enough apart
+          // to be two separate visits. Without this the second identical charge
+          // of the day was silently dropped and the user's spending under-read
+          // — the comment here claimed both rows survived; the code kept one.
+          if (mine === null || at.some((t) => t === null || Math.abs(t - mine) <= SAME_EVENT_MS)) {
+            return true;
+          }
         }
       }
       // Deliberately asymmetric. Only a PUSH is dropped for merely matching
@@ -178,21 +249,10 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       // the better parse, so it wins. When the SMS is the one arriving
       // second, `supersedes` replaces the push row instead of dropping this.
       if (c.channel === 'push') {
-        const mine = candidateTime(c);
         const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
         if (
           rows.some(
             (row) => row.channel !== 'push' && closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
-          )
-        ) return true;
-      }
-      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
-        const mine = candidateTime(c);
-        const rows = cardPayments.get(`${c.date}|${c.amountFils}|${c.accountId}`) ?? [];
-        if (
-          rows.some(
-            (row) =>
-              row.side !== c.cardPaymentSide && closeEnough(row.ts, mine, CARD_PAYMENT_PAIR_MS),
           )
         ) return true;
       }
@@ -221,9 +281,12 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         id: c.id,
       });
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
-        noteCardPayment(`${c.date}|${c.amountFils}|${c.accountId}`, {
+        noteCardPayment(`${c.amountFils}|${c.accountId}`, {
+          date: c.date,
           ts,
           side: c.cardPaymentSide,
+          title: c.title,
+          paired: false,
         });
       }
     },
@@ -236,9 +299,12 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
  * This is intentionally narrower than import-time matching. A migration is
  * allowed to merge only when source identity is strong: the exact same SMS
  * fingerprint, a push/SMS pair within the event window, or two byte-equivalent
- * parsed SMS rows within 30 seconds (provider inbox + delivery receiver).
- * User-edited rows are never touched, and same-day/same-value alone is never
- * enough. The fuller SMS row wins over a push, including its card account.
+ * parsed SMS rows within 30 seconds (provider inbox + delivery receiver), or
+ * the opposite alerts for one card settlement on the exact same account.
+ * A user-edited row is never removed or overwritten: when one strong-identity
+ * copy is edited only the unedited copy is discarded; two edited copies stay.
+ * Same-day/same-value alone is never enough. The fuller SMS otherwise wins
+ * over a push, including its card account.
  */
 export function reconcileCaptureDuplicates(transactions: Transaction[]): Transaction[] {
   const kept: Transaction[] = [];
@@ -246,6 +312,8 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
   const bySmsKey = new Map<string, number[]>();
   const byCrossBucket = new Map<string, number[]>();
   const byTitleBucket = new Map<string, number[]>();
+  const byCardPaymentBucket = new Map<string, number[]>();
+  const pairedCardPayments = new Set<number>();
 
   const timeOf = (t: Transaction): number | null =>
     Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey);
@@ -264,10 +332,28 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     pushIndex(byCrossBucket, `${cross}|${bucket(ts, CROSS_CHANNEL_EVENT_MS)}`, index);
     const title = dedupeKey(row.date, row.amountFils, row.title);
     pushIndex(byTitleBucket, `${title}|${bucket(ts, 30_000)}`, index);
+    if (row.cardPaymentSide && row.isTransfer === true) {
+      const payment = `${row.amountFils}|${row.accountId}`;
+      pushIndex(byCardPaymentBucket, `${payment}|${bucket(ts, CARD_PAYMENT_PAIR_MS)}`, index);
+    }
   };
+  const isOppositeCardPaymentPair = (
+    row: Transaction,
+    prior: Transaction,
+    rowTime: number | null,
+  ): boolean =>
+    row.isTransfer === true &&
+    prior.isTransfer === true &&
+    Boolean(row.cardPaymentSide) &&
+    Boolean(prior.cardPaymentSide) &&
+    row.cardPaymentSide !== prior.cardPaymentSide &&
+    row.accountId === prior.accountId &&
+    sameOrAdjacentDate(row.date, prior.date) &&
+    row.amountFils === prior.amountFils &&
+    closeEnough(rowTime, timeOf(prior), CARD_PAYMENT_PAIR_MS);
 
   for (const row of transactions) {
-    if (row.userEdited || row.source !== 'sms') {
+    if (row.source !== 'sms') {
       kept.push(row);
       noteAt(row, kept.length - 1);
       continue;
@@ -287,12 +373,26 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
           byTitleBucket.get(`${title}|${bucket(rowTime, 30_000) + offset}`) ?? []) {
           candidates.add(index);
         }
+        if (row.cardPaymentSide && row.isTransfer === true) {
+          const payment = `${row.amountFils}|${row.accountId}`;
+          for (const index of
+            byCardPaymentBucket.get(
+              `${payment}|${bucket(rowTime, CARD_PAYMENT_PAIR_MS) + offset}`,
+            ) ?? []) candidates.add(index);
+        }
       }
     }
     const duplicateAt = [...candidates].find((index) => {
       const prior = kept[index];
-      if (prior.userEdited || prior.source !== 'sms') return false;
-      if (row.smsKey && prior.smsKey === row.smsKey) return true;
+      if (prior.source !== 'sms') return false;
+      const bothEdited = Boolean(row.userEdited && prior.userEdited);
+      if (row.smsKey && prior.smsKey === row.smsKey) return !bothEdited;
+      if (
+        !pairedCardPayments.has(index) &&
+        !row.userEdited &&
+        !prior.userEdited &&
+        isOppositeCardPaymentPair(row, prior, rowTime)
+      ) return true;
       if (
         row.date !== prior.date ||
         row.amountFils !== prior.amountFils ||
@@ -300,9 +400,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       ) return false;
       const priorTime = timeOf(prior);
       if (row.viaPush !== prior.viaPush && (row.viaPush || prior.viaPush)) {
-        return closeEnough(rowTime, priorTime, CROSS_CHANNEL_EVENT_MS);
+        return !bothEdited && closeEnough(rowTime, priorTime, CROSS_CHANNEL_EVENT_MS);
       }
       return (
+        !row.userEdited &&
+        !prior.userEdited &&
         !row.viaPush &&
         !prior.viaPush &&
         dedupeKey(row.date, row.amountFils, row.title) ===
@@ -318,16 +420,26 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
 
     changed = true;
     const prior = kept[duplicateAt];
-    const preferred = prior.viaPush && !row.viaPush ? row : prior;
+    const cardPaymentPair = isOppositeCardPaymentPair(row, prior, rowTime);
+    const preferred = row.userEdited !== prior.userEdited
+      ? row.userEdited ? row : prior
+      : cardPaymentPair
+        ? row.cardPaymentSide === 'receipt' ? row : prior
+        : prior.viaPush && !row.viaPush ? row : prior;
     const secondary = preferred === prior ? row : prior;
     kept[duplicateAt] = {
       ...secondary,
       ...preferred,
       // Preserve optional user-facing detail if only the poorer capture had
       // it; neither row is userEdited, but old builds could attach a note.
-      note: preferred.note ?? secondary.note,
-      splits: preferred.splits ?? secondary.splits,
+      ...(preferred.userEdited
+        ? {}
+        : {
+            note: preferred.note ?? secondary.note,
+            splits: preferred.splits ?? secondary.splits,
+          }),
     };
+    if (cardPaymentPair) pairedCardPayments.add(duplicateAt);
     // Maps may retain the old row's keys at this index; every candidate is
     // revalidated above, and adding the preferred keys keeps future lookups
     // complete without an O(n) map cleanup.

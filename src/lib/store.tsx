@@ -9,7 +9,12 @@ import React, {
   useState,
 } from 'react';
 
-import { markCardsDistinct, mergeDuplicateAccounts, mergeRenewedCard } from '@/lib/accounts';
+import {
+  markCardsDistinct,
+  mergeDuplicateAccounts,
+  mergeRenewedCard,
+  repairCardPaymentAccounts,
+} from '@/lib/accounts';
 import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
@@ -75,6 +80,217 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
   return [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+/**
+ * Automatic repairs may discard a poorer duplicate, but they must never
+ * rewrite or discard the row the user chose to correct. Restore those rows
+ * from the exact objects that entered the migration, including optional
+ * fields that a duplicate merge could otherwise add or remove.
+ */
+export function preserveUserEditedTransactions(
+  original: Transaction[],
+  migrated: Transaction[],
+): Transaction[] {
+  const pinned = new Map(original.filter((t) => t.userEdited).map((t) => [t.id, t]));
+  if (pinned.size === 0) return migrated;
+
+  const restoredIds = new Set<string>();
+  const restored = migrated.map((t) => {
+    const exact = pinned.get(t.id);
+    if (!exact) return t;
+    restoredIds.add(t.id);
+    return exact;
+  });
+  for (const [id, exact] of pinned) {
+    if (!restoredIds.has(id)) restored.push(exact);
+  }
+  return restored;
+}
+
+/** Conservative persisted-capture cleanup shared by every hydration path. */
+export function finalizeHydrationTransactions(
+  transactions: Transaction[],
+  authoritativeOriginal: Transaction[] = transactions,
+): Transaction[] {
+  return sortTxs(
+    preserveUserEditedTransactions(
+      authoritativeOriginal,
+      reconcileCaptureDuplicates(transactions),
+    ),
+  );
+}
+
+/** Payer evidence shared with the parser's anonymous-income policy. */
+const PERSISTED_INCOME_ORIGINATOR_RE =
+  /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b|inc\b)/i;
+
+/**
+ * Upgrade persisted data whose meaning became clearer in newer parsers.
+ *
+ * Every transaction transform explicitly treats `userEdited` as immutable.
+ * The final hydration reducer protects it again around account repair and
+ * conservative capture reconciliation, so this contract does not depend on
+ * every future migration author remembering every downstream transform.
+ */
+export function migratePersistedState(
+  parsed: Partial<Omit<AppState, 'hydrated'>>,
+): Partial<Omit<AppState, 'hydrated'>> {
+  if (parsed.transactions) {
+    parsed.transactions = parsed.transactions
+      .map((t) =>
+        t.userEdited
+          ? t
+          : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
+            ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
+            : t,
+      )
+      // Income mis-filed into spending categories (a Talabat payout is
+      // revenue, not dining): re-file as business/salary.
+      .map((t) =>
+        t.userEdited
+          ? t
+          : t.source === 'sms' &&
+              t.type === 'income' &&
+              !['salary', 'business', 'other'].includes(t.category)
+            ? { ...t, category: 'business' as const }
+            : t,
+      )
+      // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
+      // clearly and group as one subscription.
+      .map((t) => {
+        if (t.userEdited || t.source !== 'sms') return t;
+        const canonical = normalizeServiceName(t.title);
+        return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
+      })
+      // Parser versions before T215 filed anonymous incoming money as
+      // Business (or even retained a spending category). Structural titles
+      // mean no payer was identified. Refile only those exact SMS rows, while
+      // retaining salary/Other and raw messages carrying explicit originator
+      // or company evidence.
+      .map((t) => {
+        if (
+          t.userEdited ||
+          t.source !== 'sms' ||
+          t.type !== 'income' ||
+          (t.title !== 'Incoming transfer' && t.title !== 'Inward remittance') ||
+          t.category === 'salary' ||
+          t.category === 'other' ||
+          (t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
+        ) {
+          return t;
+        }
+        return { ...t, category: 'other' as const };
+      })
+      // Older imports marked every inward remittance as a transfer. An
+      // unpaired arrival is real income; only ledger pairing can prove it
+      // moved between the user's own accounts. Raw-bearing rows can reparse,
+      // so migrate only the exact stranded legacy shape.
+      .map((t) => {
+        if (
+          t.userEdited ||
+          t.source !== 'sms' ||
+          t.raw !== undefined ||
+          t.type !== 'income' ||
+          t.title !== 'Inward remittance' ||
+          t.isTransfer !== true
+        ) {
+          return t;
+        }
+        const { isTransfer: _stale, ...income } = t;
+        return income;
+      });
+
+    // Re-file rows stuck in Other: each parser release widens the merchant
+    // vocabulary, so imported-as-Other rows get another chance without
+    // needing a rescan. User overrides still win.
+    parsed.transactions = parsed.transactions.map((t) => {
+      if (
+        t.userEdited ||
+        t.source !== 'sms' ||
+        t.isTransfer ||
+        t.category !== 'other' ||
+        t.type !== 'expense'
+      ) {
+        return t;
+      }
+      const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+      return guessed !== 'other' ? { ...t, category: guessed } : t;
+    });
+
+    // Rows that kept their raw SMS re-parse under the CURRENT grammar on
+    // every launch. A hand-corrected row is the user's answer, not the
+    // parser's, so it remains the exact object supplied to this migration.
+    if (parsed.marketId) setActiveMarket(parsed.marketId);
+    parsed.transactions = parsed.transactions.flatMap((t) => {
+      if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
+      const p = parseSms(t.raw, parsed.merchantOverrides);
+      // Parser regressions and formats this release does not understand are
+      // not evidence that a persisted transaction never happened. Preserve
+      // the old row and its raw text for a future rescan instead of deleting
+      // the only local record.
+      if (!p) return [t];
+      if (p.kind === 'billDue' || p.kind === 'cardStatement') {
+        // This migration can heal transactions but cannot materialize the
+        // CardDue/Bill that now represents this message. Keep the legacy row
+        // until a rescan can atomically create that obligation; deleting it
+        // here loses the only record when lastScanTs prevents re-offering it.
+        return [t];
+      }
+      const patch = healPatch(t, p);
+      return [patch ? applyHealPatch(t, patch) : t];
+    });
+  }
+
+  if (parsed.cardDues?.length && parsed.accounts?.length) {
+    // A CardDue can only describe a credit-card statement. Older parsers
+    // sometimes left the referenced account untyped or labelled debit; the
+    // due is stronger evidence than that fallback. Preserve every statement
+    // (including long-overdue, unreplaced ones) and repair the account rather
+    // than deleting the only record of money still owed.
+    const dueAccountIds = new Set(parsed.cardDues.map((due) => due.accountId));
+    parsed.accounts = parsed.accounts.map((account) => {
+      if (!dueAccountIds.has(account.id)) return account;
+      if (
+        account.kind === 'card' &&
+        account.cardType === 'credit' &&
+        account.snapshotKind !== 'balance'
+      ) {
+        return account;
+      }
+      return {
+        ...account,
+        kind: 'card' as const,
+        cardType: 'credit' as const,
+        // Legacy credit-card "balance" alerts represented available
+        // headroom. Once the card type is authoritative, so is this meaning.
+        ...(account.snapshotKind === 'balance' ? { snapshotKind: 'limit' as const } : {}),
+      };
+    });
+  }
+
+  return parsed;
+}
+
+/** Validate and migrate an imported backup before it reaches the reducer. */
+export function parseBackupForRestore(
+  json: string,
+): Partial<Omit<AppState, 'hydrated'>> | null {
+  try {
+    const parsed = JSON.parse(json) as { app?: unknown; data?: unknown };
+    if (
+      parsed.app !== 'wafra' ||
+      typeof parsed.data !== 'object' ||
+      parsed.data === null ||
+      !('transactions' in parsed.data) ||
+      !Array.isArray(parsed.data.transactions)
+    ) {
+      return null;
+    }
+    return migratePersistedState(parsed.data as Partial<Omit<AppState, 'hydrated'>>);
+  } catch {
+    return null;
+  }
+}
+
 type Action =
   | { type: 'hydrate'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'addTransaction'; transaction: Transaction }
@@ -88,6 +304,7 @@ type Action =
       newDues: CardDue[];
       snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
       bankNames: Record<string, string>;
+      cardTypes: Record<string, 'credit' | 'debit'>;
       lastScanTs: number;
       updates: TxHealUpdate[];
     }
@@ -145,10 +362,11 @@ function reducer(state: AppState, action: Action): AppState {
       // Older states can carry two rows for one card. Collapse on the way in,
       // once, rather than teaching every screen to tolerate it.
       const accountsMerged = mergeDuplicateAccounts(next);
+      const paymentsRepaired = repairCardPaymentAccounts(accountsMerged);
       return {
-        ...accountsMerged,
-        transactions: sortTxs(reconcileCaptureDuplicates(accountsMerged.transactions)),
-        cardDues: mergeImportedCardDues([], accountsMerged.cardDues, accountsMerged.accounts),
+        ...paymentsRepaired,
+        transactions: finalizeHydrationTransactions(paymentsRepaired.transactions, next.transactions),
+        cardDues: mergeImportedCardDues([], paymentsRepaired.cardDues, paymentsRepaired.accounts),
       };
     }
     case 'markParserVersion':
@@ -208,11 +426,26 @@ function reducer(state: AppState, action: Action): AppState {
       const accounts = [...state.accounts, ...action.newAccounts].map((a) => {
         const snap = action.snapshots[a.id];
         const bank = !a.bankName ? action.bankNames[a.id] : undefined;
+        const learnedType = action.cardTypes[a.id];
         let next = a;
         if (snap && snap.ts > (a.snapshotTs ?? 0)) {
           next = { ...next, snapshotFils: snap.fils, snapshotKind: snap.kind, snapshotTs: snap.ts };
         }
         if (bank) next = { ...next, bankName: bank };
+        if (
+          learnedType &&
+          (learnedType === 'credit' || next.cardType === undefined) &&
+          next.cardType !== learnedType
+        ) {
+          next = { ...next, kind: 'card', cardType: learnedType };
+        }
+        // A balance-shaped snapshot captured before the parser learned this
+        // is a credit card is available headroom, not cash in an account.
+        // Normalize persisted snapshots too, including batches where no newer
+        // snapshot arrived alongside the authoritative card type.
+        if (learnedType === 'credit' && next.snapshotKind === 'balance') {
+          next = { ...next, snapshotKind: 'limit' };
+        }
         return next;
       });
       const dues = mergeImportedCardDues(state.cardDues, action.newDues, accounts);
@@ -227,14 +460,18 @@ function reducer(state: AppState, action: Action): AppState {
                 return u ? applyHealPatch(t, u) : t;
               })
           : state.transactions;
-      return {
+      const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
         ...state,
-        transactions: sortTxs(reconcileCaptureDuplicates([...action.transactions, ...existing])),
+        transactions: [...action.transactions, ...existing],
         accounts,
         accountHints: { ...state.accountHints, ...action.newHints },
         cardDues: dues,
         lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
         parserVersion: PARSER_VERSION,
+      }));
+      return {
+        ...merged,
+        transactions: sortTxs(reconcileCaptureDuplicates(merged.transactions)),
       };
     }
     case 'undoBatch': {
@@ -684,93 +921,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         prevTransactions.current = parsed.transactions ?? [];
         // Pre-onboarding builds stored data without the flag; count them as onboarded.
         if (parsed.onboarded === undefined) parsed.onboarded = true;
-        // Repair rows imported before the masked-PAN parser fix: titles like
-        // "4782********4833 Has Bee..." are card settlements, not spending.
-        if (parsed.transactions) {
-          parsed.transactions = parsed.transactions
-            .map((t) =>
-              t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
-                ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
-                : t,
-            )
-            // Amounts above AED 1M in a single SMS are misread balances/refs.
-            .filter((t) => t.source !== 'sms' || t.amountFils <= 100_000_000)
-            // Income mis-filed into spending categories (a Talabat payout is
-            // revenue, not dining): re-file as business/salary.
-            .map((t) =>
-              t.source === 'sms' &&
-              t.type === 'income' &&
-              !['salary', 'business', 'other'].includes(t.category)
-                ? { ...t, category: 'business' as const }
-                : t,
-            )
-            // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc.
-            // read clearly and group as one subscription.
-            .map((t) => {
-              if (t.source !== 'sms') return t;
-              const canonical = normalizeServiceName(t.title);
-              return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
-            });
-          // Collapse exact SMS duplicates left by rescans across parser
-          // versions (same day/amount/type/title). Keep the newest import —
-          // it carries the best parsing and the right card account.
-          const importTs = (id: string) => Number(id.split('-')[1]) || 0;
-          const best = new Map<string, (typeof parsed.transactions)[number]>();
-          for (const t of parsed.transactions) {
-            if (t.source !== 'sms') continue;
-            const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
-            const cur = best.get(k);
-            if (!cur || importTs(t.id) > importTs(cur.id)) best.set(k, t);
-          }
-          parsed.transactions = parsed.transactions.filter((t) => {
-            if (t.source !== 'sms') return true;
-            const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
-            return best.get(k)?.id === t.id;
-          });
-          // Re-file rows stuck in Other: each parser release widens the
-          // merchant vocabulary, so imported-as-Other rows get another
-          // chance without needing a rescan. User overrides still win.
-          parsed.transactions = parsed.transactions.map((t) => {
-            if (t.source !== 'sms' || t.isTransfer || t.category !== 'other' || t.type !== 'expense') {
-              return t;
-            }
-            const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
-            return guessed !== 'other' ? { ...t, category: guessed } : t;
-          });
-          // Rows that kept their raw SMS re-parse under the CURRENT grammar
-          // on every launch: junk that no longer parses (promos, BNPL
-          // previews, reminders) disappears, misread rows get their real
-          // title/category/transfer flag, and rows the grammar now fully
-          // understands drop their raw. No rescan needed.
-          if (parsed.marketId) setActiveMarket(parsed.marketId);
-          parsed.transactions = parsed.transactions.flatMap((t) => {
-            if (!t.raw || t.source !== 'sms') return [t];
-            // A hand-corrected row is the user's answer, not the parser's.
-            if (t.userEdited) return [t];
-            const p = parseSms(t.raw, parsed.merchantOverrides);
-            if (!p) return []; // no longer a transaction at all
-            if (p.kind === 'billDue' || p.kind === 'cardStatement') return []; // was a reminder
-            // Same rules as a rescan — deliberately the same function. This
-            // used to be a second copy that had drifted: it flagged a card
-            // payment as a transfer but left it an expense, which is exactly
-            // the shape `allocatePayments` refuses, so a paid card kept
-            // showing as owed on the path that runs on every launch.
-            const patch = healPatch(t, p);
-            return [patch ? applyHealPatch(t, patch) : t];
-          });
-        }
-        // Drop stale unsettled card dues, and dues attached to anything that
-        // is not a credit card (statement dues only exist for credit cards).
-        if (parsed.cardDues) {
-          const cutoff = toISODate(new Date(Date.now() - 60 * 86400000));
-          const creditIds = new Set(
-            (parsed.accounts ?? []).filter((a) => a.cardType === 'credit').map((a) => a.id),
-          );
-          parsed.cardDues = parsed.cardDues.filter(
-            (d) => (d.settledAt || d.dueDate >= cutoff) && creditIds.has(d.accountId),
-          );
-        }
-        next = parsed;
+        next = migratePersistedState(parsed);
       }
       // The read SUCCEEDED. This is the only place writes are reopened, and
       // `loaded === null` — a database that is genuinely empty — reaches it
@@ -1020,6 +1171,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
       bankNames[id] = bank;
     }
+    const cardTypes: NonNullable<ImportBatchInput['cardTypes']> = {};
+    for (const [ref, cardType] of Object.entries(input.cardTypes ?? {})) {
+      const id =
+        /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
+      cardTypes[id] = cardType;
+    }
     const action: Action = {
       type: 'importBatch',
       transactions,
@@ -1028,6 +1185,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       newDues,
       snapshots,
       bankNames,
+      cardTypes,
       lastScanTs: input.lastScanTs,
       updates: (input.updates ?? []).map((update) => ({
         ...update,
@@ -1206,17 +1364,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   const restoreBackup = useCallback((json: string): boolean => {
-    try {
-      const parsed = JSON.parse(json);
-      if (parsed?.app !== 'wafra' || !parsed?.data || !Array.isArray(parsed.data.transactions)) {
-        return false;
-      }
-      dispatch({ type: 'restore', state: parsed.data });
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+    const restored = parseBackupForRestore(json);
+    if (!restored) return false;
+    dispatch({ type: 'restore', state: restored });
+    return true;
+  }, [dispatch]);
 
   const loadDemoData = useCallback(() => {
     dispatch({ type: 'loadDemo', state: demoState() });

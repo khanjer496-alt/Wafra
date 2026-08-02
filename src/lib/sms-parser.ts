@@ -4,7 +4,21 @@ import type { CategoryId, TransactionType } from '@/lib/types';
 
 export interface ParsedCard {
   last4: string;
-  kind: 'credit' | 'debit' | 'account';
+  /**
+   * `unknown` when the message names a card but never says which sort.
+   *
+   * This used to fall back to `debit`, which is evidence the message did not
+   * contain. "Card ending 7720" and "Credit Card ending 7720" are the same
+   * physical card, but the invented debit made them two accounts — one real,
+   * one a phantom that every later alert missed. A real ledger ended up with
+   * twelve FAB accounts and four ADCB accounts for two cards, and because the
+   * statement and the payment landed on different ones, no card ever showed as
+   * settled.
+   *
+   * The resolver decides what to attach an unknown-kind alert to. The parser's
+   * job is only to stop asserting a fact it was never told.
+   */
+  kind: 'credit' | 'debit' | 'account' | 'unknown';
 }
 
 /**
@@ -21,7 +35,7 @@ export interface ParsedCard {
  * the whole inbox instead of the tail. Existing rows are not duplicated —
  * `seenSms` recognizes them by fingerprint — they are healed in place.
  */
-export const PARSER_VERSION = 8;
+export const PARSER_VERSION = 9;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -53,6 +67,22 @@ export interface ParsedSms {
   minDueFils: number | null;
   /** Card/account the message refers to, when identifiable. */
   card: ParsedCard | null;
+  /**
+   * For `cardPayment`: WHICH LEG of the settlement this message is — the
+   * account the money left (`debit`) or the card it landed on (`receipt`).
+   *
+   * One payment produces two SMS, and importing both as money arriving on the
+   * card settles the statement twice. Telling them apart was done downstream
+   * by re-reading `raw`, which works on Android and cannot work on iOS: the
+   * relay parses the message and drops the text before the row is ever sealed,
+   * so by the time the phone sees it there is no wording left to read. The
+   * side is therefore decided here, while the message is still in hand, and
+   * travels as a structured field that survives the raw discard.
+   *
+   * Absent when the wording names neither leg, and absent on every other kind.
+   * Consumers must keep treating that as "unknown", not as one side.
+   */
+  cardPaymentSide?: 'debit' | 'receipt';
   /** Bank transaction/reference identifier, with surrounding prose removed. */
   reference: string | null;
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
@@ -99,6 +129,34 @@ const STATEMENT_RE =
 const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
 /** Payment INTO a card: settles dues rather than spending. */
 // CARD_PAYMENT_RE is market-compiled below.
+
+/**
+ * Which leg of a card settlement the wording describes.
+ *
+ * The account side says money was DEBITED or DEDUCTED towards a payment, or
+ * that payment INSTRUCTIONS were carried out. The card side says a payment was
+ * RECEIVED or CREDITED, or that the card has been paid. Both arrive for one
+ * settlement, and both parse as `cardPayment`, so the pair has to be
+ * recognisable as a pair rather than as two payments.
+ *
+ * These are deliberately market-agnostic (no currency token) — the leg is a
+ * fact about the verb, not about the amount — and they are deliberately the
+ * same two patterns the import planner used to apply to `raw`, so a message
+ * read on Android and the same message read through the iOS relay reach the
+ * same answer. Changing one without the other is how the two platforms start
+ * disagreeing about whether a card is paid.
+ */
+const CARD_PAYMENT_DEBIT_LEG_RE =
+  /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)/i;
+const CARD_PAYMENT_RECEIPT_LEG_RE =
+  /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
+
+/** Undefined means the message named neither leg — never a guess. */
+function cardPaymentLeg(raw: string): 'debit' | 'receipt' | undefined {
+  if (CARD_PAYMENT_DEBIT_LEG_RE.test(raw)) return 'debit';
+  if (CARD_PAYMENT_RECEIPT_LEG_RE.test(raw)) return 'receipt';
+  return undefined;
+}
 
 /** OTP / verification messages describe an ATTEMPT, not a completed transaction. */
 const OTP_RE = /\botp\b|one[\s-]?time\s+(?:password|pin|code)|verification code|auth(?:oris|oriz)ation code|do not share|never share/i;
@@ -1219,41 +1277,129 @@ function extractSnapshot(raw: string): { fils: number; kind: SnapshotKind } | nu
   return null;
 }
 
+/**
+ * The message SAYS credit — spelled out, abbreviated, or Arabic's
+ * kind-after-number form.
+ *
+ * `Cr.Card` is ADCB's abbreviation and is explicit, not a guess: it arrives as
+ * "debited from Acc/Cr.Card XXX7720 ... Avl.Limit is AED 2508.31", where the
+ * available LIMIT corroborates it. Reading that as untyped would leave a real
+ * credit card unidentified, which is the opposite failure to the one `unknown`
+ * exists to prevent.
+ */
+function saysCredit(raw: string): boolean {
+  return (
+    /(?:credit|covered)\s+card/i.test(raw) ||
+    /\bcr\.?\s*card\b/i.test(raw) ||
+    /\d{4}\s*[;,]\s*credit\b/i.test(raw)
+  );
+}
+
+/**
+ * The message SAYS debit.
+ *
+ * Deliberately narrow. "Debit Card" is the only phrasing that proves it; a
+ * balance line or an ATM withdrawal is a debit-ish CONTEXT, not a statement
+ * about which card was used, and treating context as proof is how the phantom
+ * accounts were minted in the first place.
+ */
+function saysDebit(raw: string): boolean {
+  // The kind-after-number form is the mirror of the credit rule above, and it
+  // is how Arabic states it: "بطاقة: **4567;مدى" normalises to "**4567; debit".
+  // مدى is Saudi Arabia's debit network, so that IS the message saying debit.
+  return /\bdebit\s+card\b/i.test(raw) || /\d{4}\s*[;,]\s*debit\b/i.test(raw);
+}
+
+/**
+ * The end of the clause the card number sits in.
+ *
+ * A break is a sentence end followed by whitespace, or a line end. Both halves
+ * of that matter: UAE alerts are full of periods that end nothing — `AED300.00`,
+ * `Acc/Cr.Card`, `App.Avl.Limit` — and every one of them is followed by a digit
+ * or a letter rather than a space, so none of them splits a clause.
+ */
+const CLAUSE_BREAK_RE = /[.!?]\s|\n/;
+
+/**
+ * The stretch of message that is talking about THIS transaction: everything
+ * from the start through the end of the clause carrying the card number.
+ *
+ * It runs from the start rather than from the card number because the header is
+ * where banks put the type. FAB heads the message `Credit Card Purchase` and
+ * names the card two lines down; Mashreq says `on your Mashreq Credit Card.` a
+ * sentence before `Your Etisalat Card ending with 0000`. It runs THROUGH the
+ * card's own clause rather than stopping at the digits because Arabic states
+ * the type immediately after them — `**1234;الإئتمانية` reaches here as
+ * `Card **1234; credit`.
+ *
+ * What it leaves out is everything after that clause, which is where the
+ * marketing lives.
+ */
+function transactionWindow(raw: string, cardEnd: number): string {
+  const brk = raw.slice(cardEnd).search(CLAUSE_BREAK_RE);
+  return brk === -1 ? raw : raw.slice(0, cardEnd + brk);
+}
+
+/**
+ * credit if this transaction says so, debit if it says so, otherwise admit we
+ * were not told.
+ *
+ * Read locally, because the type is a claim about the card that was charged and
+ * a message says more than one thing. Scanning the whole message for the words
+ * "credit card" meant a footer could outvote the header:
+ *
+ *   Debit Card Purchase Card No 5492********4833 AED 45.00 STARBUCKS ...
+ *   Apply for a Credit Card today.
+ *
+ * — an advert for a card the customer does not own, filing a debit-card coffee
+ * against a credit card that may not exist. The transaction says `Debit Card`
+ * in its own first three words; nothing below the transaction gets to overrule
+ * that.
+ */
+function cardKindNear(raw: string, cardEnd: number): 'credit' | 'debit' | 'unknown' {
+  const local = transactionWindow(raw, cardEnd);
+  const credit = saysCredit(local);
+  const debit = saysDebit(local);
+  // Both, about one card, in one clause. There is no honest tie-break here:
+  // whichever we picked would be a guess, and a guessed type mints a phantom
+  // account that every later alert misses. `unknown` is the answer the resolver
+  // knows how to ask about.
+  if (credit && debit) return 'unknown';
+  if (credit) return 'credit';
+  if (debit) return 'debit';
+  return 'unknown';
+}
+
+/** Where a match ends, which is where its clause is still open. */
+function endOf(m: RegExpMatchArray): number {
+  return (m.index ?? 0) + m[0].length;
+}
+
 function extractCard(raw: string): ParsedCard | null {
   // Masked PANs first: CARD_RE would otherwise grab the FIRST four digits of
   // "Credit Card 4782********4833" as the identity.
   const masked = raw.match(MASKED_PAN_RE);
   if (masked) {
-    return {
-      last4: masked[1],
-      kind: /(?:credit|covered)\s+card/i.test(raw) ? 'credit' : 'debit',
-    };
+    return { last4: masked[1], kind: cardKindNear(raw, endOf(masked)) };
   }
   const cardMatch = raw.match(CARD_RE);
   if (cardMatch) {
     const kindWord = cardMatch[1]?.toLowerCase();
-    // Multi-line formats say "Credit Card Purchase" in the header and
-    // "Card No XXXX4711" further down — when the number clause carries no
-    // kind word, look at the whole message before assuming debit.
-    // Arabic states the kind AFTER the number, not before it: the corpus line
-    // "بطاقة: **1234;الإئتمانية" arrives here as "Card **1234; credit". With
-    // only the "credit card" adjacency to go on, every Arabic credit card was
-    // filed as a debit card — which routes its charges away from the statement
-    // and quietly breaks the whole card-due chain.
-    const kindAfterNumber = /\d{4}\s*[;,]\s*credit\b/i.test(raw);
-    const kind =
-      kindWord === 'credit' ||
-      kindWord === 'covered' ||
-      (!kindWord && (/(?:credit|covered)\s+card/i.test(raw) || kindAfterNumber))
+    // A kind word attached to the number is the card describing itself, and
+    // nothing else in the message competes with it.
+    const kind: ParsedCard['kind'] =
+      kindWord === 'credit' || kindWord === 'covered'
         ? 'credit'
-        : 'debit';
+        : kindWord === 'debit'
+          ? 'debit'
+          : cardKindNear(raw, endOf(cardMatch));
     return { last4: cardMatch[2], kind };
   }
   const usedTail = raw.match(USED_CARD_TAIL_RE);
   if (usedTail) {
     return {
       last4: usedTail[1].slice(-4),
-      kind: /(?:credit|covered)\s+card/i.test(raw) ? 'credit' : 'debit',
+      kind: cardKindNear(raw, endOf(usedTail)),
     };
   }
   const maskedAccount = raw.match(MASKED_ACCOUNT_RE);
@@ -1614,6 +1760,7 @@ function parseReadable(
       dueDay: null,
       minDueFils: null,
       card: { ...card, kind: 'credit' },
+      cardPaymentSide: cardPaymentLeg(raw),
       reference,
       transferHint: true,
       snapshotFils,
@@ -1647,6 +1794,10 @@ function parseReadable(
         dueDay: null,
         minDueFils: null,
         card: { last4: masked[1], kind: 'credit' },
+        // The branch guard is the account-side wording itself, so this is
+        // always 'debit'; it goes through the shared rule so the two card
+        // payment branches can never drift apart.
+        cardPaymentSide: cardPaymentLeg(raw),
         reference,
         transferHint: true,
         snapshotFils,
@@ -1818,9 +1969,10 @@ function parseReadable(
     const m = raw.match(/(?:aed|dhs|sar|usd|eur|gbp)\s*([\d,]+(?:\.\d{1,2})?)/i);
     const amountFils = m ? Math.round(Number(m[1].replace(/,/g, '')) * 100) : null;
     if (!amountFils) return null;
+    const incoming = /[\d.,]\+/.test(raw);
     return {
       kind: 'transaction',
-      type: /[\d.,]\+/.test(raw) ? 'income' : 'expense',
+      type: incoming ? 'income' : 'expense',
       amountFils,
       currency,
       merchant: 'Bank transfer',
@@ -1829,7 +1981,10 @@ function parseReadable(
       minDueFils: null,
       card,
       reference,
-      transferHint: true,
+      // An arrival is income unless ledger correlation finds its matching
+      // own-account outgoing leg. Marking every inbound rail as a transfer
+      // hid genuine external remittances from the monthly In total.
+      transferHint: !incoming,
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
@@ -1857,7 +2012,31 @@ function parseReadable(
     BILL_DUE_WORDS.test(raw) &&
     !STATEMENT_TXN_BLOCK_RE.test(raw)
   ) {
-    return null;
+    const totalMatch = raw.match(TOTAL_DUE_RE);
+    const amountFils = totalMatch
+      ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100)
+      : amountWithFx(raw, true);
+    if (!amountFils) return null;
+    const minMatch = raw.match(MIN_DUE_RE);
+    const dueDate = extractDueDate(raw) ?? date;
+    return {
+      kind: 'cardStatement',
+      type: 'expense',
+      amountFils,
+      currency,
+      merchant: 'Card statement',
+      date: dueDate,
+      dueDay: dueDate ? Number(dueDate.slice(8)) : null,
+      minDueFils: minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null,
+      card: null,
+      reference,
+      transferHint: false,
+      snapshotFils,
+      snapshotKind,
+      categoryGuess: 'other',
+      categoryDeliberate: true,
+      raw,
+    };
   }
 
   // Credit-card statement with dues. Statements only exist for credit cards.
@@ -1945,7 +2124,10 @@ function parseReadable(
       if (paymentFor) merchant = paymentFor[1].trim();
     }
   }
-  let transferHint = !isBillDue && TRANSFER_HINT_RE.test(raw);
+  // Outgoing structural rails can be excluded immediately. Incoming money is
+  // countable by default and becomes internal only when ledger correlation
+  // finds the opposite leg on another owned account.
+  let transferHint = type === 'expense' && !isBillDue && TRANSFER_HINT_RE.test(raw);
   descriptor = merchant;
   merchant = cleanDescriptor(merchant);
   // HSBC embeds the merchant BEFORE the verb:
