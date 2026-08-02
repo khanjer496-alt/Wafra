@@ -1089,6 +1089,28 @@ t('a processor name that opens a real shop name is not noise',
   'Purchase of AED 25.00 with Debit Card ending 8783 at TELR CAFE, DUBAI. Avl Balance is AED 100.00.',
   { merchant: 'Telr Cafe' });
 
+// Money arriving that we could not attribute to anyone is NOT revenue.
+//
+// The income branch returned `business` for anything that was not a salary or
+// a refund, so every unnamed credit — a friend paying you back, a transfer
+// from your own other bank, a remittance — was filed as business income and
+// counted as earnings. One real ledger read +AED 60,964 for a month on the
+// strength of it. `business` is a claim about where money came from, and an
+// unnamed credit is precisely the case where we do not know.
+t('an unnamed credit is not business revenue',
+  'AED 665.00 has been credited to your account ending 0002.',
+  { merchant: 'Incoming transfer', category: 'other', type: 'income' });
+t('an unnamed transfer in is not business revenue',
+  'Your account 0002 has been credited with AED 3,478.00 by transfer.',
+  { merchant: 'Incoming transfer', category: 'other', type: 'income' });
+// The two readings that must survive that change.
+t('a salary is still a salary',
+  'AED 18,500 salary credited to your account 5678.',
+  { category: 'salary', type: 'income' });
+t('a refund is still an offset, not revenue',
+  'AED 250.00 refunded to your card ending 4110.',
+  { category: 'other', type: 'income' });
+
 // Transfer rails name the rail, not a shop.
 t('a FastPay transfer names the person',
   'Dear Ahmed Salem, AED 750.00 has been debited from your Saving Bank Account ending with 2501 for a FastPay transfer to Khalid Rashid. If this is not you; contact us immediately.',

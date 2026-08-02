@@ -840,6 +840,20 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
  * rules, a vocabulary rule that resolves to `other` on purpose — is a decision
  * the parser stands behind, and callers need to tell the two apart.
  */
+/**
+ * Something in the message that names WHO sent the money.
+ *
+ * `B/O` is "by order of", the field banks put an originator in. A legal suffix
+ * is the other reliable tell: an unnamed credit does not carry an LLC.
+ *
+ * Both markers are anchored on ONE side only, because the real message that
+ * proved this arrives with the fields run together — "File Ref 1234535B/O
+ * DELIVERY HERO TALABAT DB LLCTalabat Biweekly Payment". A leading \b before
+ * the B and a trailing \b after the C both fail on that string, and it is a
+ * genuine business payout.
+ */
+const ORIGINATOR_RE = /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b|inc\b)/i;
+
 function categoryOf(
   text: string,
   type: TransactionType,
@@ -859,6 +873,31 @@ function categoryOf(
     // other, so a chargeback credit read as business REVENUE.
     if (/refund|revers(?:al|ed)|cashback|\binterest\b|\bprofit\b/i.test(text)) {
       return { id: 'other', deliberate: true };
+    }
+    // Money arrived and we could not say from whom. `business` is a claim
+    // about WHERE money came from, and a structurally-titled credit — the
+    // parser's own words for "a credit with no payer in it" — is exactly the
+    // case where there is no such claim to make. Filing those as revenue read
+    // one real ledger as +AED 60,964 earned in a month, almost all of it
+    // transfers between the user's own accounts and people paying them back.
+    //
+    // `deliberate: false` on purpose: this is the parser saying it does not
+    // know, so the row stays visible in the accuracy report where the user can
+    // correct it, instead of being hidden behind a confident wrong answer.
+    //
+    // "No payer" means no payer ANYWHERE in the message, not merely one the
+    // merchant grammar failed to lift out. A Talabat payout arrives as
+    // "credited ... B/O DELIVERY HERO TALABAT DB LLC Talabat Biweekly Payment":
+    // the title is still the structural "Incoming transfer" because the payer
+    // is not where a merchant is normally found, but the payer is plainly
+    // there, and that is real business revenue. An originator marker or a
+    // company suffix is enough to keep the claim.
+    if (
+      merchant &&
+      STRUCTURAL_TITLES.has(merchant.trim()) &&
+      !ORIGINATOR_RE.test(text)
+    ) {
+      return { id: 'other', deliberate: false };
     }
     return { id: 'business', deliberate: true };
   }
