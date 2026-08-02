@@ -11,6 +11,7 @@ import {
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { StorageRecovery } from '@/components/storage-recovery';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
@@ -220,6 +221,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const reducedMotion = useReducedMotion();
   const {
     state,
+    storageFailure,
+    hydrationFailed,
     importBatch,
     setOnboarded,
     loadDemoData,
@@ -249,8 +252,24 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const currency = answers.marketId === 'SA' ? 'SAR' : 'AED';
   const capture = captureCopy();
 
+  /**
+   * A failed read is not a first run, and this gate is where that distinction
+   * has to be made.
+   *
+   * `state.onboarded === false` means one of two completely different things:
+   * this phone has never run the app, or the ledger could not be read and the
+   * store is presenting an empty state it did not get from disk. They looked
+   * identical here, so an unreadable database was answered with a welcome
+   * screen and a "Start with sample data" button — an invitation to replace a
+   * ledger that is still on the device. `hydrationFailed` is the store's answer
+   * to which one it is, and while it is set NOTHING below runs: not the
+   * questionnaire, not the demo data, not the welcome step.
+   */
+  const showRecovery = hydrationFailed;
+
   // The guided iOS setup is itself onboarding. Do not paint this gate over it.
-  const showOverlay = state.hydrated && !state.onboarded && pathname !== '/ios-setup';
+  const showOverlay =
+    !showRecovery && state.hydrated && !state.onboarded && pathname !== '/ios-setup';
   const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
 
   const updateAnswer = <K extends keyof OnboardingAnswers>(
@@ -345,6 +364,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     committed();
     setOnboarded();
   };
+
+  /**
+   * Recovery replaces the app outright rather than overlaying it.
+   *
+   * The onboarding overlay keeps `children` mounted underneath because
+   * expo-router's state does not survive the navigator being swapped out. Here
+   * that trade does not apply and the opposite one does: the screens under
+   * this would be rendering an empty ledger as though it were the user's, and
+   * `storageFailure` tells us it is not. Nothing reads better than nothing.
+   */
+  if (showRecovery) return <StorageRecovery failure={storageFailure} />;
 
   if (!showOverlay) return <>{children}</>;
 

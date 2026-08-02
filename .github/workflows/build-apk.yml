@@ -80,6 +80,35 @@ jobs:
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
 
+      # The one build setting that fails SILENTLY and INVISIBLY.
+      #
+      # `PRAGMA key` on a plain SQLite build is an unrecognised pragma, and
+      # SQLite ignores unrecognised pragmas WITHOUT ERROR. So a build without
+      # SQLCipher does not crash, does not warn, and does not fail a single
+      # test — it writes the user's entire bank ledger to disk in plaintext
+      # while every layer above believes it is encrypted. There is nothing at
+      # runtime that would tell us, and nothing in the JS tests that can.
+      #
+      # `android/` is gitignored and regenerated here, so the checked-in tree
+      # has no answer to check; this step runs immediately after prebuild
+      # because that is the first moment the real, generated value exists —
+      # and before Gradle, so a plaintext build is never produced at all.
+      # `expo.sqlite.useSQLCipher` is written by expo-sqlite's config plugin
+      # from the `useSQLCipher` prop in app.json.
+      - name: Verify SQLCipher survived prebuild
+        run: |
+          set -euo pipefail
+          if [ ! -f android/gradle.properties ]; then
+            echo "::error::android/gradle.properties is missing after prebuild."
+            exit 1
+          fi
+          if ! grep -qxE 'expo\.sqlite\.useSQLCipher=true' android/gradle.properties; then
+            echo "::error::expo.sqlite.useSQLCipher=true is not in android/gradle.properties after prebuild. SQLCipher would not be compiled in, PRAGMA key would be silently ignored, and the ledger would be written in PLAINTEXT. Check the expo-sqlite plugin entry in app.json."
+            exit 1
+          fi
+          echo "### 🔐 SQLCipher enabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`expo.sqlite.useSQLCipher=true\` present in the generated Gradle properties." >> "$GITHUB_STEP_SUMMARY"
+
       # Sign releases with the Play upload key. Required repo secrets:
       #
       #   WAFRA_KEYSTORE_B64        base64 of wafra-upload.jks (base64 -w0)

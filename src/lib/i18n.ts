@@ -728,6 +728,44 @@ const S = {
   notifAccessFull: { en: 'Some banks send push notifications instead of SMS. Grant Wafra notification access and money alerts import automatically. Only alerts that mention an amount are kept, and they never leave this phone.', ar: 'ترسل بعض البنوك إشعارات بدل الرسائل. امنح وفرة إذن قراءة الإشعارات لتُستورد تنبيهات المال تلقائياً. تُحفظ فقط التنبيهات التي تذكر مبلغاً، ولا تغادر هذا الهاتف أبداً.' },
   startWithSample: { en: 'Start with sample data', ar: 'ابدأ ببيانات تجريبية' },
   alsoReadNotifs: { en: 'Also read bank notifications', ar: 'اقرأ أيضاً إشعارات البنوك' },
+  // Storage recovery. Shown INSTEAD of onboarding when the encrypted ledger
+  // could not be read: the app cannot tell a new phone from an unreadable one,
+  // and offering a fresh start to the second is how the ledger gets destroyed.
+  // The copy has one job — say that nothing has been lost yet — so it must not
+  // hedge, and it must never carry a native error string.
+  storageRecoveryTitle: { en: 'Your ledger could not be opened', ar: 'تعذّر فتح سجلك' },
+  storageRecoveryBody: {
+    en: 'Wafra could not read the encrypted ledger on this device. Nothing has been changed or deleted — your entries are still here, and saving is paused so nothing can write over them.',
+    ar: 'تعذّر على وفرة قراءة السجل المشفّر على هذا الجهاز. لم يُغيَّر أو يُحذف أي شيء — عملياتك ما زالت موجودة، وأُوقف الحفظ مؤقتاً كي لا يُكتب فوقها شيء.',
+  },
+  // The one failure where "try again" would be a lie: the file is intact and
+  // the key that opens it is gone, so no number of retries can decrypt it.
+  storageRecoveryKeyBody: {
+    en: 'The encrypted ledger is still on this device, but the key that opens it is no longer in this phone’s secure storage. Nothing has been changed or deleted, and saving is paused. Trying again will not recover it.',
+    ar: 'السجل المشفّر ما زال على هذا الجهاز، لكن المفتاح الذي يفتحه لم يعد في التخزين الآمن للهاتف. لم يُغيَّر أو يُحذف أي شيء، وأُوقف الحفظ مؤقتاً. إعادة المحاولة لن تستعيده.',
+  },
+  storageRecoveryHint: {
+    en: 'Unlocking this phone and trying again resolves most cases.',
+    ar: 'فتح قفل الهاتف ثم إعادة المحاولة يحلّ معظم الحالات.',
+  },
+  storageRecoveryRetry: { en: 'Try again', ar: 'إعادة المحاولة' },
+  storageRecoveryRetrying: { en: 'Trying again…', ar: 'جارٍ إعادة المحاولة…' },
+  storageRecoveryRetryFailed: {
+    en: 'Still could not open your ledger. Nothing has been changed.',
+    ar: 'ما زال تعذّر فتح سجلك. لم يُغيَّر أي شيء.',
+  },
+  storageRecoveryEraseCta: { en: 'Erase and start over', ar: 'محو والبدء من جديد' },
+  storageRecoveryEraseTitle: { en: 'Erase everything on this device?', ar: 'محو كل شيء على هذا الجهاز؟' },
+  storageRecoveryEraseBody: {
+    en: 'This destroys the encrypted ledger and its key. Every entry, account and budget on this phone is gone permanently. It cannot be undone and there is no copy anywhere else.',
+    ar: 'سيؤدي هذا إلى إتلاف السجل المشفّر ومفتاحه. كل عملية وحساب وميزانية على هذا الهاتف ستزول نهائياً. لا يمكن التراجع، ولا توجد نسخة في أي مكان آخر.',
+  },
+  storageRecoveryEraseConfirm: { en: 'Erase permanently', ar: 'محو نهائي' },
+  storageRecoveryEraseKeep: { en: 'Keep my data', ar: 'احتفظ ببياناتي' },
+  storageRecoveryEraseFailed: {
+    en: 'The erase did not finish. Nothing on this device has been changed.',
+    ar: 'لم يكتمل المحو. لم يتغيّر أي شيء على هذا الجهاز.',
+  },
   onboardHeadline: { en: 'Your bank already texts you. Wafra reads it.', ar: 'بنكك يراسلك أصلاً. وفرة يقرأ الرسائل.' },
   onboardSub: {
     en: 'Bank alerts become filed transactions. On device, in your currency, with no account to create.',

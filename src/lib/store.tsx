@@ -21,6 +21,7 @@ import { internalTransferIds } from '@/lib/ledger';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
+import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import type { FxUpdate } from '@/lib/fx';
 
 import type {
@@ -390,6 +391,38 @@ export type { TxHealUpdate } from '@/lib/types';
 
 interface StoreValue {
   state: AppState;
+  /**
+   * Non-null when persistence has failed in this process.
+   *
+   * Deliberately NOT part of `AppState`: `persist` writes everything in
+   * AppState except `hydrated`, so a storage-failure flag living there would
+   * be serialised into the very record whose write just failed.
+   *
+   * When this is set because HYDRATION failed, the state above was not read
+   * from disk and saving is latched off — so `state.onboarded === false` here
+   * means "we could not read your ledger", not "you are a new user". A screen
+   * that shows onboarding needs to check this before it offers a fresh start.
+   */
+  storageFailure: StorageFailure | null;
+  /**
+   * True when HYDRATION failed and writes are latched off.
+   *
+   * Narrower than `storageFailure`, which is also set by a failed save. This
+   * is the one that means "what is on screen is not the user's data", and it
+   * is what the recovery screen keys on: while it is true, no surface may
+   * offer onboarding, a fresh start or sample data, because the first save
+   * afterwards would write that over a ledger that is still on the device.
+   */
+  hydrationFailed: boolean;
+  /** A retry is in flight. The recovery screen stays up either way. */
+  retryingHydration: boolean;
+  /**
+   * Read the ledger again. Resolves to whether the read SUCCEEDED — returned
+   * rather than left to `hydrationFailed`, because a caller awaiting this has
+   * a stale closure over that flag and would have to guess from whether it is
+   * still mounted.
+   */
+  retryHydration: () => Promise<boolean>;
   addTransaction: (t: Omit<Transaction, 'id'>) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   deleteTransaction: (id: string) => void;
@@ -579,6 +612,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Serialises saves — see the comment where it is used. */
   const writeQueue = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Latched when hydration failed. While it is set, `persist` refuses to write
+   * anything: the in-memory state was not read from disk, so saving it would
+   * overwrite a ledger we could not load. See the hydration catch above.
+   */
+  const storageBlocked = useRef(false);
+  const [storageFailure, setStorageFailure] = useState<StorageFailure | null>(null);
+  /**
+   * The renderable half of `storageBlocked`.
+   *
+   * The ref is what `persist` reads, because that guard has to be exact on the
+   * same tick it is set; a ref does not re-render, and the recovery screen has
+   * to appear. They are set together and only together.
+   *
+   * This is deliberately narrower than `storageFailure`, which is also set when
+   * a SAVE fails. A failed save happens mid-session over data that was read
+   * correctly, and taking the whole app away from someone at that point would
+   * be worse than the failure — only an unreadable ledger justifies the
+   * takeover, because only then is what is on screen not the user's data.
+   */
+  const [hydrationFailed, setHydrationFailed] = useState(false);
+  const [retryingHydration, setRetryingHydration] = useState(false);
+  const retryInFlight = useRef(false);
+  /**
+   * Supersedes an in-flight hydration. A retry started while the previous read
+   * is still running, or an unmount, must not let the older attempt dispatch.
+   */
+  const hydrationRun = useRef(0);
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -591,121 +652,189 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.hydrated, state.language]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const loaded = await loadPersisted();
-        if (cancelled) return;
-        if (loaded) {
-          const parsed = loaded.state;
-          prevChunkCount.current = Math.ceil((parsed.transactions?.length ?? 0) / TX_CHUNK_SIZE);
-          // Seed the write cache with what is already on disk. Without this the
-          // first save after every launch believes no chunk has ever been
-          // written and rewrites the entire history — about a megabyte on a
-          // heavy ledger, for no change at all.
-          prevChunks.current = loaded.chunkBodies;
-          prevTransactions.current = parsed.transactions ?? [];
-          // Pre-onboarding builds stored data without the flag; count them as onboarded.
-          if (parsed.onboarded === undefined) parsed.onboarded = true;
-          // Repair rows imported before the masked-PAN parser fix: titles like
-          // "4782********4833 Has Bee..." are card settlements, not spending.
-          if (parsed.transactions) {
-            parsed.transactions = parsed.transactions
-              .map((t) =>
-                t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
-                  ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
-                  : t,
-              )
-              // Amounts above AED 1M in a single SMS are misread balances/refs.
-              .filter((t) => t.source !== 'sms' || t.amountFils <= 100_000_000)
-              // Income mis-filed into spending categories (a Talabat payout is
-              // revenue, not dining): re-file as business/salary.
-              .map((t) =>
-                t.source === 'sms' &&
-                t.type === 'income' &&
-                !['salary', 'business', 'other'].includes(t.category)
-                  ? { ...t, category: 'business' as const }
-                  : t,
-              )
-              // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc.
-              // read clearly and group as one subscription.
-              .map((t) => {
-                if (t.source !== 'sms') return t;
-                const canonical = normalizeServiceName(t.title);
-                return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
-              });
-            // Collapse exact SMS duplicates left by rescans across parser
-            // versions (same day/amount/type/title). Keep the newest import —
-            // it carries the best parsing and the right card account.
-            const importTs = (id: string) => Number(id.split('-')[1]) || 0;
-            const best = new Map<string, (typeof parsed.transactions)[number]>();
-            for (const t of parsed.transactions) {
-              if (t.source !== 'sms') continue;
-              const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
-              const cur = best.get(k);
-              if (!cur || importTs(t.id) > importTs(cur.id)) best.set(k, t);
+  /**
+   * Read the ledger and present it — on launch, and again on every retry.
+   *
+   * This used to be an anonymous IIFE inside the mount effect, which meant the
+   * only way to try a second time was to relaunch the app. A read can fail for
+   * reasons that go away on their own — the device was still locked, the file
+   * was momentarily unavailable — and "force-stop and reopen" is not a
+   * recovery instruction to give someone whose ledger is on the line.
+   *
+   * The contract for the recovery screen is at the bottom: the latch and the
+   * failure record are cleared ONLY after a read that actually succeeded, and
+   * a read that legitimately finds nothing counts as a success. Everything
+   * else leaves both exactly as it found them, so a retry cannot flicker
+   * onboarding into view on its way to failing again.
+   */
+  const hydrate = useCallback(async (): Promise<boolean> => {
+    const run = ++hydrationRun.current;
+    try {
+      const loaded = await loadPersisted();
+      if (hydrationRun.current !== run) return false;
+      let next: Partial<Omit<AppState, 'hydrated'>> = { onboarded: false };
+      if (loaded) {
+        const parsed = loaded.state;
+        prevChunkCount.current = Math.ceil((parsed.transactions?.length ?? 0) / TX_CHUNK_SIZE);
+        // Seed the write cache with what is already on disk. Without this the
+        // first save after every launch believes no chunk has ever been
+        // written and rewrites the entire history — about a megabyte on a
+        // heavy ledger, for no change at all.
+        prevChunks.current = loaded.chunkBodies;
+        prevTransactions.current = parsed.transactions ?? [];
+        // Pre-onboarding builds stored data without the flag; count them as onboarded.
+        if (parsed.onboarded === undefined) parsed.onboarded = true;
+        // Repair rows imported before the masked-PAN parser fix: titles like
+        // "4782********4833 Has Bee..." are card settlements, not spending.
+        if (parsed.transactions) {
+          parsed.transactions = parsed.transactions
+            .map((t) =>
+              t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
+                ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
+                : t,
+            )
+            // Amounts above AED 1M in a single SMS are misread balances/refs.
+            .filter((t) => t.source !== 'sms' || t.amountFils <= 100_000_000)
+            // Income mis-filed into spending categories (a Talabat payout is
+            // revenue, not dining): re-file as business/salary.
+            .map((t) =>
+              t.source === 'sms' &&
+              t.type === 'income' &&
+              !['salary', 'business', 'other'].includes(t.category)
+                ? { ...t, category: 'business' as const }
+                : t,
+            )
+            // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc.
+            // read clearly and group as one subscription.
+            .map((t) => {
+              if (t.source !== 'sms') return t;
+              const canonical = normalizeServiceName(t.title);
+              return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
+            });
+          // Collapse exact SMS duplicates left by rescans across parser
+          // versions (same day/amount/type/title). Keep the newest import —
+          // it carries the best parsing and the right card account.
+          const importTs = (id: string) => Number(id.split('-')[1]) || 0;
+          const best = new Map<string, (typeof parsed.transactions)[number]>();
+          for (const t of parsed.transactions) {
+            if (t.source !== 'sms') continue;
+            const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
+            const cur = best.get(k);
+            if (!cur || importTs(t.id) > importTs(cur.id)) best.set(k, t);
+          }
+          parsed.transactions = parsed.transactions.filter((t) => {
+            if (t.source !== 'sms') return true;
+            const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
+            return best.get(k)?.id === t.id;
+          });
+          // Re-file rows stuck in Other: each parser release widens the
+          // merchant vocabulary, so imported-as-Other rows get another
+          // chance without needing a rescan. User overrides still win.
+          parsed.transactions = parsed.transactions.map((t) => {
+            if (t.source !== 'sms' || t.isTransfer || t.category !== 'other' || t.type !== 'expense') {
+              return t;
             }
-            parsed.transactions = parsed.transactions.filter((t) => {
-              if (t.source !== 'sms') return true;
-              const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
-              return best.get(k)?.id === t.id;
-            });
-            // Re-file rows stuck in Other: each parser release widens the
-            // merchant vocabulary, so imported-as-Other rows get another
-            // chance without needing a rescan. User overrides still win.
-            parsed.transactions = parsed.transactions.map((t) => {
-              if (t.source !== 'sms' || t.isTransfer || t.category !== 'other' || t.type !== 'expense') {
-                return t;
-              }
-              const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
-              return guessed !== 'other' ? { ...t, category: guessed } : t;
-            });
-            // Rows that kept their raw SMS re-parse under the CURRENT grammar
-            // on every launch: junk that no longer parses (promos, BNPL
-            // previews, reminders) disappears, misread rows get their real
-            // title/category/transfer flag, and rows the grammar now fully
-            // understands drop their raw. No rescan needed.
-            if (parsed.marketId) setActiveMarket(parsed.marketId);
-            parsed.transactions = parsed.transactions.flatMap((t) => {
-              if (!t.raw || t.source !== 'sms') return [t];
-              // A hand-corrected row is the user's answer, not the parser's.
-              if (t.userEdited) return [t];
-              const p = parseSms(t.raw, parsed.merchantOverrides);
-              if (!p) return []; // no longer a transaction at all
-              if (p.kind === 'billDue' || p.kind === 'cardStatement') return []; // was a reminder
-              // Same rules as a rescan — deliberately the same function. This
-              // used to be a second copy that had drifted: it flagged a card
-              // payment as a transfer but left it an expense, which is exactly
-              // the shape `allocatePayments` refuses, so a paid card kept
-              // showing as owed on the path that runs on every launch.
-              const patch = healPatch(t, p);
-              return [patch ? applyHealPatch(t, patch) : t];
-            });
-          }
-          // Drop stale unsettled card dues, and dues attached to anything that
-          // is not a credit card (statement dues only exist for credit cards).
-          if (parsed.cardDues) {
-            const cutoff = toISODate(new Date(Date.now() - 60 * 86400000));
-            const creditIds = new Set(
-              (parsed.accounts ?? []).filter((a) => a.cardType === 'credit').map((a) => a.id),
-            );
-            parsed.cardDues = parsed.cardDues.filter(
-              (d) => (d.settledAt || d.dueDate >= cutoff) && creditIds.has(d.accountId),
-            );
-          }
-          dispatch({ type: 'hydrate', state: parsed });
-        } else {
-          dispatch({ type: 'hydrate', state: { onboarded: false } });
+            const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+            return guessed !== 'other' ? { ...t, category: guessed } : t;
+          });
+          // Rows that kept their raw SMS re-parse under the CURRENT grammar
+          // on every launch: junk that no longer parses (promos, BNPL
+          // previews, reminders) disappears, misread rows get their real
+          // title/category/transfer flag, and rows the grammar now fully
+          // understands drop their raw. No rescan needed.
+          if (parsed.marketId) setActiveMarket(parsed.marketId);
+          parsed.transactions = parsed.transactions.flatMap((t) => {
+            if (!t.raw || t.source !== 'sms') return [t];
+            // A hand-corrected row is the user's answer, not the parser's.
+            if (t.userEdited) return [t];
+            const p = parseSms(t.raw, parsed.merchantOverrides);
+            if (!p) return []; // no longer a transaction at all
+            if (p.kind === 'billDue' || p.kind === 'cardStatement') return []; // was a reminder
+            // Same rules as a rescan — deliberately the same function. This
+            // used to be a second copy that had drifted: it flagged a card
+            // payment as a transfer but left it an expense, which is exactly
+            // the shape `allocatePayments` refuses, so a paid card kept
+            // showing as owed on the path that runs on every launch.
+            const patch = healPatch(t, p);
+            return [patch ? applyHealPatch(t, patch) : t];
+          });
         }
-      } catch {
-        if (!cancelled) dispatch({ type: 'hydrate', state: { onboarded: false } });
+        // Drop stale unsettled card dues, and dues attached to anything that
+        // is not a credit card (statement dues only exist for credit cards).
+        if (parsed.cardDues) {
+          const cutoff = toISODate(new Date(Date.now() - 60 * 86400000));
+          const creditIds = new Set(
+            (parsed.accounts ?? []).filter((a) => a.cardType === 'credit').map((a) => a.id),
+          );
+          parsed.cardDues = parsed.cardDues.filter(
+            (d) => (d.settledAt || d.dueDate >= cutoff) && creditIds.has(d.accountId),
+          );
+        }
+        next = parsed;
       }
-    })();
+      // The read SUCCEEDED. This is the only place writes are reopened, and
+      // `loaded === null` — a database that is genuinely empty — reaches it
+      // exactly like a database full of rows, because "there is nothing here"
+      // is a real answer and only a THROW means we failed to get one.
+      storageBlocked.current = false;
+      setHydrationFailed(false);
+      setStorageFailure(null);
+      dispatch({ type: 'hydrate', state: next });
+      return true;
+    } catch (error) {
+      if (hydrationRun.current !== run) return false;
+      /**
+       * A storage failure is NOT a first run, and this is the line that used
+       * to say it was.
+       *
+       * `loadPersisted` returns null when there is genuinely nothing stored
+       * and throws when the database could not be read. Both landed here and
+       * both produced `onboarded: false` — so a phone whose ledger was
+       * unreadable was shown onboarding, and then the first debounced save
+       * 700ms later wrote a fresh empty state over the data we had just
+       * failed to read. A transient read error became permanent data loss.
+       *
+       * So writes are latched off. The state we are about to present is not
+       * derived from what is on disk, and it must never be allowed to replace
+       * it. `hydrationFailed` puts the recovery screen over the top of it, so
+       * the empty state dispatched here is never offered as onboarding.
+       */
+      storageBlocked.current = true;
+      setHydrationFailed(true);
+      setStorageFailure(recordStorageFailure('read', error));
+      dispatch({ type: 'hydrate', state: { onboarded: false } });
+      return false;
+    }
+  }, [dispatch]);
+
+  useEffect(() => {
+    void hydrate();
+    // Bumping the run counter supersedes the in-flight read rather than
+    // cancelling it: the same mechanism a retry uses.
     return () => {
-      cancelled = true;
+      hydrationRun.current += 1;
     };
-  }, []);
+  }, [hydrate]);
+
+  /**
+   * Try the read again, without relaunching.
+   *
+   * Nothing is cleared on the way in. Writes stay latched and the recovery
+   * screen stays up for the whole attempt, so a retry that fails again changes
+   * nothing the user can see except the spinner, and a retry that succeeds
+   * moves straight from the recovery screen to the real ledger.
+   */
+  const retryHydration = useCallback(async (): Promise<boolean> => {
+    if (retryInFlight.current) return false;
+    retryInFlight.current = true;
+    setRetryingHydration(true);
+    try {
+      return await hydrate();
+    } finally {
+      retryInFlight.current = false;
+      setRetryingHydration(false);
+    }
+  }, [hydrate]);
 
   /**
    * Persist. Three guards, because this runs on EVERY dispatch.
@@ -728,6 +857,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * data-loss bug, not a performance one.
    */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Fail closed. Hydration could not read the ledger, so nothing derived
+    // from this session is allowed to replace it on disk.
+    if (storageBlocked.current) return Promise.resolve(false);
+
     const { hydrated: _hydrated, transactions, ...meta } = snapshot;
     const txChanged = prevTransactions.current !== transactions;
 
@@ -781,12 +914,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         prevTransactions.current = transactions;
         return true;
-      } catch {
+      } catch (error) {
         // Persistence is best-effort; the in-memory state stays authoritative.
         // The caches are cleared so the next save rewrites every chunk rather
         // than assuming a failed write landed.
+        //
+        // "Best-effort" used to mean the error vanished here, which is how a
+        // write path that failed on EVERY save on Android went unnoticed
+        // through two signed releases. It is recorded now, and the reason is
+        // readable both in logcat and from the device.
         prevChunks.current = [];
         prevTransactions.current = null;
+        setStorageFailure(recordStorageFailure('write', error));
         return false;
       }
     });
@@ -1089,6 +1228,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       saveTimer.current = null;
     }
 
+    /**
+     * Latch writes off BEFORE the blank state exists anywhere.
+     *
+     * Cancelling the debounce above is not enough, and neither is the write
+     * queue. The dispatch below moves `authoritativeState` to blank and
+     * re-renders, which schedules a FRESH 700 ms save of that blank state —
+     * and every save reads the ref at fire time, so it is the blank state it
+     * will write. That is intended when the erase succeeds. It is data loss
+     * when the erase fails:
+     *
+     *   dispatch(clearAll)          → authoritative ref is blank, timer armed
+     *   destroy() rejects           → the ledger is STILL ON DISK, readable
+     *   writeQueue recovery resolves → the queue is deliberately non-rejecting
+     *   timer fires at t+700ms      → persist(blank) chains onto that queue
+     *   multiSet(blank)             → the retained ledger is overwritten
+     *
+     * The queue orders those writes correctly; correct ordering is exactly
+     * what lands the blank write on the surviving database. `destroy` can
+     * fail with the file and the key both intact — `state-storage.native.ts`
+     * records a key error and a database error and still throws — and those
+     * two failures are coupled in practice: expo-sqlite refuses to delete an
+     * open database when `closeAsync` failed, and SecureStore cannot delete a
+     * key while the Keystore is unavailable. The old database then reopens
+     * with its retained key and the blank write commits, while Settings is
+     * telling the user the erase failed.
+     *
+     * So the latch closes here, before the dispatch, and stays closed for the
+     * whole operation. It is reopened below only on the success path.
+     */
+    storageBlocked.current = true;
+
+    // What the ledger actually held before this call touched anything. The
+    // dispatch below overwrites `authoritativeState.current` with blank, so
+    // this has to be taken first — it is what gets put back on screen if the
+    // erase fails.
+    const previousState = authoritativeState.current;
+
     // Move the UI and authoritative ref to the blank state first. Any timer
     // or mutation that arrives while the erase is in flight can therefore
     // only write the blank/new state, never resurrect the old ledger.
@@ -1102,14 +1278,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       () => undefined,
       () => undefined,
     );
-    await destroyOperation;
+    try {
+      // Throws if the erase failed. A ledger we failed to erase is still on
+      // disk and still readable, and until the catch below runs, the screen
+      // is showing blank — a lie about what is actually retained.
+      await destroyOperation;
+    } catch (error) {
+      // Put back what was on screen before this call, so a failed erase
+      // looks like a failed erase, not a successful one that also lost the
+      // ledger from view.
+      //
+      // The latch stays CLOSED here, not restored to whatever it was on
+      // entry: `destroy` can fail with the key or the database file only
+      // partially removed, and there is no way from here to tell which.
+      // Reopening writes onto a store in that state is the exact bug this
+      // latch exists to prevent. `hydrationFailed` goes up too, so the
+      // recovery screen blocks further unsaved edits until the app restarts
+      // or a backup is restored — the alternative is a user typing new
+      // transactions into a session that can never save them.
+      dispatch({ type: 'restore', state: previousState });
+      setStorageFailure(recordStorageFailure('destroy', error));
+      setHydrationFailed(true);
+      throw error;
+    }
 
     prevChunkCount.current = 0;
     prevChunks.current = [];
     prevTransactions.current = null;
 
+    /**
+     * The erase SUCCEEDED, so the latch has nothing left to protect. This is
+     * the ONLY path that reopens writes during an erase — reached after the
+     * await, so a rejection can never arrive here.
+     *
+     * `storageBlocked` exists to stop this session's empty state from
+     * overwriting a ledger we failed to read. That ledger no longer exists:
+     * its file is deleted and its key is gone from the Keychain. Leaving the
+     * latch closed here was the bug — `destroy` really did erase everything,
+     * then `persist` returned false because the latch was still set, and
+     * `clearAll` threw "Blank encrypted store could not be created". Settings
+     * reported a failure for an erase that had completely succeeded, and the
+     * user was left with no ledger and a screen saying so.
+     *
+     * Cleared BEFORE the write, not after, because it is the write that the
+     * latch would otherwise refuse.
+     */
+    storageBlocked.current = false;
+    setHydrationFailed(false);
+    setStorageFailure(null);
+
     // Recreate only the minimal blank state under a fresh random key. Waiting
-    // here makes "Erase" a completed operation, not a 700 ms intention.
+    // here makes "Erase" a completed operation, not a 700 ms intention. A
+    // failure here is a real one and is reported as such: `persist` records it
+    // and puts it back on `storageFailure`, so the screen shows what happened
+    // rather than a success it cannot back up.
     const written = await persist(authoritativeState.current);
     if (!written) throw new Error('Blank encrypted store could not be created');
   }, [dispatch, persist]);
@@ -1117,6 +1339,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       state,
+      storageFailure,
+      hydrationFailed,
+      retryingHydration,
+      retryHydration,
       addTransaction,
       editTransaction,
       deleteTransaction,
@@ -1158,6 +1384,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      storageFailure,
+      hydrationFailed,
+      retryingHydration,
+      retryHydration,
       addTransaction,
       editTransaction,
       deleteTransaction,
