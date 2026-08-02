@@ -155,6 +155,10 @@ export default function WalletScreen() {
     [state, now],
   );
   const cardGroups = useMemo(() => groupCardsByBank(cards), [cards]);
+  // One physical-feeling object gives Wallet an immediate anchor. The same
+  // account is omitted from the compact rows below, so this is hierarchy —
+  // not duplicated financial information.
+  const featuredCard = cards[0] ?? null;
   const nonCardAccounts = useMemo(
     () =>
       state.accounts.filter(
@@ -491,19 +495,112 @@ export default function WalletScreen() {
                   </View>
                 );
               })}
+              {featuredCard && (() => {
+                const figure = cardFigure(state, featuredCard, now);
+                const spent = monthSpendByAccount.get(featuredCard.id) ?? 0;
+                const issuer =
+                  cardGroups.find((group) =>
+                    group.accounts.some((account) => account.id === featuredCard.id),
+                  )?.bank ?? featuredCard.name;
+                return (
+                  <Pressable
+                    accessibilityLabel={`${featuredCard.name} ${featuredCard.last4 ?? ''}`}
+                    onLongPress={() => accountOptions(featuredCard)}
+                    style={({ pressed }) => [
+                      styles.featuredCard,
+                      {
+                        borderColor: dark ? '#4C7A69' : '#285D4C',
+                        transform: [{ scale: pressed ? 0.985 : 1 }],
+                      },
+                    ]}>
+                    <LinearGradient
+                      pointerEvents="none"
+                      colors={dark ? ['#285D4C', '#183C31', '#152820'] : ['#2D725A', '#1D503F', '#193A30']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <View pointerEvents="none" style={styles.featuredOrbLarge} />
+                    <View pointerEvents="none" style={styles.featuredOrbSmall} />
+
+                    <View style={styles.featuredTop}>
+                      <View style={styles.featuredIssuer}>
+                        <View style={styles.featuredMark}>
+                          <Icon name="bank" size={15} color="#F7FBF8" strokeWidth={1.9} />
+                        </View>
+                        <ThemedText type="smallBold" numberOfLines={1} style={styles.featuredText}>
+                          {issuer}
+                        </ThemedText>
+                      </View>
+                      <ThemedText type="micro" style={styles.featuredMuted}>
+                        {featuredCard.cardType === 'credit' ? t('credit') : t('debit')}
+                      </ThemedText>
+                    </View>
+
+                    <View style={styles.featuredChip}>
+                      <View style={styles.featuredChipLine} />
+                      <View style={styles.featuredChipLine} />
+                    </View>
+
+                    <View style={styles.featuredBalanceRow}>
+                      <View style={styles.featuredBalanceCopy}>
+                        <ThemedText type="micro" style={styles.featuredMuted}>
+                          {figure.kind === 'owed'
+                            ? t('owed')
+                            : figure.kind === 'balance'
+                              ? t('perBankSms')
+                              : t('noBalanceYet')}
+                        </ThemedText>
+                        <View style={styles.featuredMoney}>
+                          <ThemedText type="micro" style={styles.featuredMuted}>AED</ThemedText>
+                          <ThemedText type="heading" tabular style={styles.featuredText}>
+                            {figure.fils === null
+                              ? '—'
+                              : formatAmount(Math.abs(figure.fils), { decimals: false })}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <ThemedText type="small" tabular style={styles.featuredText}>
+                        •••• {featuredCard.last4 ?? '••••'}
+                      </ThemedText>
+                    </View>
+
+                    <View style={styles.featuredFooter}>
+                      <ThemedText type="meta" numberOfLines={1} style={styles.featuredMuted}>
+                        {featuredCard.name}
+                      </ThemedText>
+                      <View style={styles.featuredSpend}>
+                        <ThemedText type="nano" style={styles.featuredMuted}>
+                          {t('thisMonth')}
+                        </ThemedText>
+                        <ThemedText type="smallBold" tabular numberOfLines={1} style={styles.featuredText}>
+                          {spent > 0
+                            ? formatAED(spent, { decimals: false })
+                            : t('nothingSpentThisMonth')}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })()}
               {/* Grouped under the bank that issued them. Eleven flat rows,
                   six of them called "FAB Credit Card", told the user nothing
                   about whether that was six cards or one card the app had
                   failed to recognise. Under a FAB heading it is obviously
                   six FAB cards — and if that is wrong, it is obviously
                   wrong. */}
-              {cardGroups.map((group) => (
+              {cardGroups.map((group) => {
+                const compactAccounts = group.accounts.filter(
+                  (account) => account.id !== featuredCard?.id,
+                );
+                if (compactAccounts.length === 0) return null;
+                return (
                 <View key={group.bank} style={styles.bankGroup}>
                   <ThemedText type="micro" themeColor="textTertiary" style={styles.bankName}>
                     {group.bank}
-                    {group.accounts.length > 1 ? ` · ${group.accounts.length}` : ''}
+                    {compactAccounts.length > 1 ? ` · ${compactAccounts.length}` : ''}
                   </ThemedText>
-                  {group.accounts.map((account, i) => {
+                  {compactAccounts.map((account, i) => {
                     const isCredit = account.cardType === 'credit';
                     // One meaning per row: what you owe, or what you have.
                     // Spending moves to the second line, where it reads as
@@ -567,7 +664,8 @@ export default function WalletScreen() {
                     );
                   })}
                 </View>
-              ))}
+                );
+              })}
             </View>
           )}
 
@@ -929,6 +1027,85 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
+  featuredCard: {
+    minHeight: 184,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.bottomSheet,
+    padding: Spacing.four,
+    overflow: 'hidden',
+    justifyContent: 'space-between',
+  },
+  featuredOrbLarge: {
+    position: 'absolute',
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    borderWidth: 32,
+    borderColor: 'rgba(255,255,255,0.055)',
+    top: -92,
+    right: -58,
+  },
+  featuredOrbSmall: {
+    position: 'absolute',
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    bottom: -52,
+    left: 52,
+  },
+  featuredTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  featuredIssuer: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  featuredMark: {
+    width: 30,
+    height: 30,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  featuredChip: {
+    width: 30,
+    height: 23,
+    borderRadius: 6,
+    paddingVertical: 5,
+    justifyContent: 'space-around',
+    backgroundColor: '#D8B873',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.42)',
+  },
+  featuredChipLine: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(72,55,24,0.55)',
+  },
+  featuredBalanceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  featuredBalanceCopy: { gap: 1 },
+  featuredMoney: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
+  featuredFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  featuredSpend: { flexShrink: 0, alignItems: 'flex-end', gap: 1 },
+  featuredText: { color: '#F7FBF8' },
+  featuredMuted: { color: 'rgba(247,251,248,0.72)' },
   bankGroup: {
     paddingTop: Spacing.two,
   },

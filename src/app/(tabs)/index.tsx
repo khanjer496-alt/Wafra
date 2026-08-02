@@ -870,8 +870,6 @@ export default function HomeScreen() {
             }}
           />
 
-          <ForeignActivityPreview summary={foreignActivity} />
-
           {/* One sentence, with somewhere to go. A carousel of five of these
               was five things to skim and nothing to act on. */}
           {insight && (
@@ -916,6 +914,12 @@ export default function HomeScreen() {
           )}
 
           <LeavingSoon state={state} now={now} onOpen={openOutgoing} />
+
+          {/* Foreign-currency detail is useful but secondary on Home (and has
+              a full destination in Wallet). Keeping it below the month's one
+              insight and upcoming outgoings prevents four peer cards from
+              competing directly under the hero. */}
+          <ForeignActivityPreview summary={foreignActivity} />
 
           <UnreadFormatsPrompt state={state} />
 

@@ -268,12 +268,15 @@ export default function BillsScreen() {
         <Pressable
           onPress={() => setDetail(sub)}
           onLongPress={() => onDismissSub(sub)}
-          style={[
-            styles.row,
-            i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          style={({ pressed }) => [
+            styles.recurringRow,
+            {
+              borderColor: theme.cardBorder,
+              backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+            },
           ]}>
           <MerchantAvatar title={sub.title} category={sub.category} size={36} />
-          <View style={styles.rowInfo}>
+          <View style={styles.recurringBody}>
             <View style={styles.rowTitleLine}>
               <ThemedText type="default" numberOfLines={1} style={styles.rowTitle}>
                 {sub.title}
@@ -285,11 +288,18 @@ export default function BillsScreen() {
                   </ThemedText>
                 </View>
               )}
+              <View style={styles.recurringAmount}>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                  {formatAED(sub.monthlyEquivalentFils, { decimals: false })}
+                </ThemedText>
+                <ThemedText type="nano" themeColor="textTertiary">
+                  {t('perMonthShort')}
+                </ThemedText>
+              </View>
             </View>
-            {/* Three facts did not fit beside the Remind me pill, so every
-                row ellipsised mid-sentence: "next 21 A…". The last charge is
-                the one the user can look up in the sheet; what leaves next is
-                the one they cannot. */}
+            {/* Schedule metadata owns the full body width. Keeping the amount
+                and action in a separate right column left barely half a line
+                at 360dp, so even two-line metadata was still clipped. */}
             <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
               {sub.status === 'stopped'
                 ? tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })
@@ -304,52 +314,49 @@ export default function BillsScreen() {
                       days: -next,
                     })}
             </ThemedText>
-          </View>
-          <View style={styles.rowRight}>
-            {/* The monthly equivalent, because the heading above this list is
-                a monthly total and a column has to add up to its own heading.
-                A yearly charge of AED 2,399 printed raw under a heading of
-                "AED 256/mo" was two different quantities in one table. The
-                actual charge is not lost — it is on the line below, with the
-                cadence that explains it. */}
-            <ThemedText type="smallBold" tabular>
-              {formatAED(sub.monthlyEquivalentFils, { decimals: false })}
-            </ThemedText>
-            {sub.cadence !== 'monthly' && sub.status !== 'stopped' && (
-              <ThemedText type="nano" themeColor="textTertiary" tabular>
-                {formatAED(sub.avgAmountFils, { decimals: false })}
-                {sub.cadence === 'yearly' ? t('perYearShort') : t('perWeekShort')}
+            <View style={styles.recurringFooter}>
+              {/* The monthly equivalent above adds to the section total. For
+                  non-monthly charges this smaller figure preserves the actual
+                  debit and the cadence that explains the conversion. */}
+              <ThemedText type="nano" themeColor="textTertiary" tabular style={styles.recurringActual}>
+                {sub.cadence !== 'monthly' && sub.status !== 'stopped'
+                  ? `${formatAED(sub.avgAmountFils, { decimals: false })}${
+                      sub.cadence === 'yearly' ? t('perYearShort') : t('perWeekShort')
+                    }`
+                  : tracked
+                    ? t('tracked')
+                    : cadenceLabel(sub.cadence)}
               </ThemedText>
-            )}
-            {!tracked && sub.status !== 'stopped' && next >= 0 && next <= 7 ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={tf('remindAboutA11y', { title: sub.title })}
-                hitSlop={8}
-                onPress={() =>
-                  addBill({
-                    title: sub.title,
-                    category: sub.category,
-                    amountFils: sub.avgAmountFils,
-                    dueDay: Number(sub.nextExpectedISO.slice(8)),
-                    autoDetected: true,
-                  })
-                }
-                style={({ pressed }) => [
-                  styles.remindBtn,
-                  {
-                    backgroundColor: pressed ? `${theme.primary}2e` : `${theme.primary}17`,
-                    borderColor: `${theme.primary}44`,
-                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                  },
-                ]}>
-                <ThemedText type="smallBold" style={{ color: theme.primary }}>
-                  {t('remindMe')}
-                </ThemedText>
-              </Pressable>
-            ) : (
-              <Icon name="chevron-right" size={14} color={theme.textTertiary} />
-            )}
+              {!tracked && sub.status !== 'stopped' && next >= 0 && next <= 7 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={tf('remindAboutA11y', { title: sub.title })}
+                  hitSlop={8}
+                  onPress={() =>
+                    addBill({
+                      title: sub.title,
+                      category: sub.category,
+                      amountFils: sub.avgAmountFils,
+                      dueDay: Number(sub.nextExpectedISO.slice(8)),
+                      autoDetected: true,
+                    })
+                  }
+                  style={({ pressed }) => [
+                    styles.remindBtn,
+                    {
+                      backgroundColor: pressed ? `${theme.primary}2e` : `${theme.primary}17`,
+                      borderColor: `${theme.primary}44`,
+                      transform: [{ scale: pressed ? 0.97 : 1 }],
+                    },
+                  ]}>
+                  <ThemedText type="smallBold" style={{ color: theme.primary }}>
+                    {t('remindMe')}
+                  </ThemedText>
+                </Pressable>
+              ) : (
+                <Icon name="chevron-right" size={14} color={theme.textTertiary} />
+              )}
+            </View>
           </View>
         </Pressable>
       </Animated.View>
@@ -1052,7 +1059,7 @@ const styles = StyleSheet.create({
   /** Matches the "Mark paid" chip on Wallet dues: a real target, not bare text. */
   remindBtn: {
     paddingHorizontal: Spacing.two + 2,
-    paddingVertical: Spacing.one + 3,
+    paddingVertical: Spacing.one + 1,
     borderRadius: Radius.full,
     borderWidth: StyleSheet.hairlineWidth,
     alignSelf: 'flex-end',
@@ -1230,6 +1237,36 @@ const styles = StyleSheet.create({
     marginStart: Spacing.two,
     // Never let the Remind me pill claim more than a third of the row.
     maxWidth: '38%',
+  },
+  recurringRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two + 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    marginBottom: Spacing.two,
+  },
+  recurringBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: Spacing.one,
+  },
+  recurringAmount: {
+    flexShrink: 0,
+    alignItems: 'flex-end',
+  },
+  recurringFooter: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    marginTop: Spacing.one,
+  },
+  recurringActual: {
+    flex: 1,
+    minWidth: 0,
   },
   badge: {
     paddingHorizontal: 6,

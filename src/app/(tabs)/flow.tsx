@@ -168,7 +168,11 @@ export default function FlowScreen() {
             <PeriodPill onPress={() => setPeriodOpen(true)} />
           </View>
 
-          <View style={[styles.summaryRail, { borderColor: theme.cardBorder }]}>
+          <View
+            style={[
+              styles.summaryRail,
+              { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+            ]}>
             <View style={styles.summaryCell}>
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('totalOut')}
@@ -204,7 +208,13 @@ export default function FlowScreen() {
 
           {/* ── Composition ── */}
           {slices.length > 0 ? (
-            <Animated.View entering={FadeInDown.duration(320)} style={styles.section}>
+            <Animated.View
+              entering={FadeInDown.duration(320)}
+              style={[
+                styles.section,
+                styles.surfaceSection,
+                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+              ]}>
               <SectionHeader title={t('whereItWent')} />
               {/* One stacked bar rather than a donut: a donut asks you to
                   compare arcs, and nobody can. A bar is read left to right in
@@ -363,7 +373,13 @@ export default function FlowScreen() {
           </Animated.View>
 
           {/* ── In vs out ── */}
-          <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
+          <Animated.View
+            entering={FadeInDown.delay(80).duration(320)}
+            style={[
+              styles.section,
+              styles.surfaceSection,
+              { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+            ]}>
             <SectionHeader
               title={t('inVsOut6')}
               right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} ${t('averageSuffix')}`}
@@ -483,12 +499,18 @@ const styles = StyleSheet.create({
   summaryRail: {
     flexDirection: 'row',
     marginTop: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
   },
   summaryCell: { flex: 1, minWidth: 0, gap: 3, paddingVertical: Spacing.two + 2 },
   summaryDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
   section: { marginTop: Spacing.five },
+  surfaceSection: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.bottomSheet,
+    padding: Spacing.three,
+  },
 
   compBar: {
     flexDirection: 'row',
