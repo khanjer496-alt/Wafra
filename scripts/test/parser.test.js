@@ -1047,6 +1047,48 @@ t('a .com merchant keeps its domain',
   'Purchase of USD 84.00 with Debit Card ending 4733 at Name.com, Inc, 720-2374. Avl Balance is AED 14,315.39.',
   { merchant: 'Name.com' });
 
+// A web descriptor is the shop's own name wearing a URL. NOON.COM already read
+// as "Noon"; the identical row with the WWW. the bank actually sends read as
+// "Card purchase", because candidate splitting stops at the first dot and the
+// bare "www" is skipped. Every UAE brand that bills through its website — noon,
+// talabat, namshi, amazon.ae — landed in that hole unless it happened to be
+// hardcoded in the service table, which is why WWW.GRAB.COM looked fine.
+t('a www descriptor names the shop, not "Card purchase"',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at WWW.NOON.COM, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Noon' });
+t('a www descriptor works for a brand no service table knows',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at WWW.NAMSHI.COM, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Namshi' });
+t('a country-code web descriptor keeps the brand',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at WWW.TALABAT.COM, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Talabat' });
+
+// In "GATEWAY*MERCHANT" the shop is AFTER the star. The named-acquirer list
+// (SQ*, PAYPAL*, ZIINA*) already knew that; a gateway that arrives as a bare
+// domain did not, so 2C2P's rows kept the processor and lost the ride.
+t('a domain-form payment gateway is not the merchant',
+  'Purchase of AED 0.10 with Debit Card ending 8783 at WWW.2C2P.COM*2C2P BOLT (M, BANGKOK. Avl Balance is AED 35,848.02.',
+  { merchant: 'Bolt' });
+t('a named star gateway still yields the shop',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at CHECKOUT.COM*BAR SHOP, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Bar Shop' });
+
+// The gateway list is NAMED, and the first attempt at it was generic. A star
+// after a domain means "gateway" only when the domain is one — otherwise it is
+// a shop billing for its own product, and matching any host.tld* deleted the
+// brand and kept the product: "Renewal", "Marketplace".
+t('a shop billing for its own product keeps the shop, not the product',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at NAME.COM*RENEWAL, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Name' });
+t('a brand star product keeps the brand',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at AMAZON.AE*MARKETPLACE, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Amazon' });
+// Stripping a processor's name from ANY descriptor turned "TELR CAFE" into
+// "Cafe". The repeat is only noise directly behind that processor's own star.
+t('a processor name that opens a real shop name is not noise',
+  'Purchase of AED 25.00 with Debit Card ending 8783 at TELR CAFE, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Telr Cafe' });
+
 // Transfer rails name the rail, not a shop.
 t('a FastPay transfer names the person',
   'Dear Ahmed Salem, AED 750.00 has been debited from your Saving Bank Account ending with 2501 for a FastPay transfer to Khalid Rashid. If this is not you; contact us immediately.',

@@ -412,6 +412,13 @@ const MERCHANT_STOP =
 // "%" leads a real brand ("% ARABICA"); "·•" appear inside acquirer terminal
 // IDs ("BLOOMFIELD TREAT-····5814"). Both used to break the match outright and
 // cost the whole merchant name.
+/**
+ * Card-not-present processors that bill under their own domain, so a descriptor
+ * reads "<processor>.com*<shop>". Only names that are processors and nothing
+ * else — the moment a real shop's domain gets in here, its rows lose their name.
+ */
+const PAYMENT_GATEWAYS = '2c2p|checkout|telr|payfort|ccavenue|paytabs|stripe|adyen';
+
 const MERCHANT_RE = new RegExp(
   // The optional domain tail keeps "CAPITAL.COM" and "Name.com, Inc" whole —
   // MERCHANT_STOP treats "." as a sentence end, so both used to arrive as
@@ -419,7 +426,32 @@ const MERCHANT_RE = new RegExp(
   // The Arabic range is here because a shop in an Arabic message is named in
   // Arabic ("لدى: بيسان الطبي" → "at بيسان الطبي"). It cannot widen anything
   // on the English path: no English bank SMS contains an Arabic letter.
-  String.raw`(?:\bat|\bto|\bfrom|@)\s+([A-Za-z0-9%ء-ي][A-Za-z0-9%ء-ي·• &'\-*/()]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
+  // Two things that sit in front of the name and are not part of it. Both are
+  // skipped rather than captured, so the body still starts at the brand:
+  //
+  //   www.        "WWW.NOON.COM" is the same shop as "NOON.COM", which already
+  //               read as Noon. The body cannot hold a dot, and only ONE domain
+  //               tail is allowed, so the www form captured the bare "WWW" and
+  //               was dropped as noise — noon, talabat, namshi and amazon.ae
+  //               all arrived as "Card purchase" unless the service table
+  //               happened to name them, which is the only reason WWW.GRAB.COM
+  //               ever looked right.
+  //   <gateway>.  A processor that bills under its own domain. The named-
+  //   tld*        acquirer list in cleanDescriptor already knows SQ*/PAYPAL*/
+  //               ZIINA*; the domain form is the same convention and the shop
+  //               is likewise after the star.
+  //
+  //               NAMED, never generic. A generic `host.tld\*` turned
+  //               "NAME.COM*RENEWAL" into "Renewal" and "AMAZON.AE*MARKETPLACE"
+  //               into "Marketplace" — a star after a domain means "gateway"
+  //               only when the domain IS one, otherwise it is a shop billing
+  //               for its own product.
+  //
+  //               The optional repeat handles a processor that stamps its name
+  //               twice: "WWW.2C2P.COM*2C2P BOLT" is a Bolt ride. It is tied to
+  //               the gateway match on purpose — stripping those words from any
+  //               descriptor turned "TELR CAFE" into "Cafe".
+  String.raw`(?:\bat|\bto|\bfrom|@)\s+(?:www\.)?(?:(?:${PAYMENT_GATEWAYS})\.(?:com|ae|net)\*(?:(?:${PAYMENT_GATEWAYS})\s+)?)?([A-Za-z0-9%ء-ي][A-Za-z0-9%ء-ي·• &'\-*/()]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
     MERCHANT_STOP,
   'gi',
 );
