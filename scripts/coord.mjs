@@ -177,6 +177,16 @@ function renderBoard(state) {
   const live = liveLocks(state)
   const out = ['# Agent coordination board', '', `_Generated ${now()} — do not hand-edit; use scripts/coord.mjs._`, '']
 
+  // First, above everything. A question that is owed an answer outranks any
+  // amount of status: the whole point is that it cannot be scrolled past.
+  const open = state.messages.filter((m) => m.question && !m.answeredBy)
+  if (open.length) {
+    out.push(`## ⚠️ ${open.length} QUESTION(S) AWAITING AN ANSWER`, '')
+    for (const q of open)
+      out.push(`- **Q#${q.id}** ${q.from} → **${q.to}**, ${ago(q.at)}: ${q.text}`, `  _close with:_ \`node scripts/coord.mjs answer ${q.id} --as ${q.to} "..."\``)
+    out.push('')
+  }
+
   out.push('## Claimed paths', '')
   if (!live.length) out.push('_Nothing claimed. The tree is free._', '')
   else {
@@ -191,12 +201,12 @@ function renderBoard(state) {
     out.push('')
   }
 
-  const open = state.tasks.filter((t) => t.status !== 'done')
+  const openTasks = state.tasks.filter((t) => t.status !== 'done')
   out.push('## Tasks', '')
-  if (!open.length) out.push('_No open tasks._', '')
+  if (!openTasks.length) out.push('_No open tasks._', '')
   else {
     out.push('| # | Status | Owner | Title |', '| --- | --- | --- | --- |')
-    for (const t of open) out.push(`| ${t.id} | ${t.status} | ${t.owner || '—'} | ${t.title} |`)
+    for (const t of openTasks) out.push(`| ${t.id} | ${t.status} | ${t.owner || '—'} | ${t.title} |`)
     out.push('')
   }
 
@@ -391,6 +401,92 @@ const commands = {
     })
   },
 
+  /**
+   * A message that is OWED AN ANSWER, and stays visible until it gets one.
+   *
+   * Plain `send` was not enough and the record says why. Over 77 messages, six
+   * of nine questions got answered and the misses were not rudeness — they were
+   * structural. Messages averaged 1,991 characters from one side against 508
+   * from the other, so a question sat at the bottom of forty lines of report and
+   * was skimmed past; nothing marked it as outstanding; and neither agent ever
+   * scrolled back. The human ended up relaying questions between two agents
+   * sitting in the same repo.
+   *
+   * An `ask` survives being skimmed. It is listed at the TOP of the board, it is
+   * counted in every `status`, and it does not go away when it is read — only
+   * `answer` clears it.
+   */
+  ask({ flags, positional }) {
+    const me = whoami(flags)
+    const to = flags.to
+    if (typeof to !== 'string' || !IDENTITY_RE.test(to)) die('--to must be claude|codex[:instance]')
+    if (to === me) die('you cannot question yourself')
+    const text = positional.join(' ').trim()
+    if (!text) die('empty question')
+    withMutex(() => {
+      const state = load()
+      state.seq++
+      state.messages.push({
+        id: state.seq,
+        from: me,
+        to,
+        text,
+        at: now(),
+        read: false,
+        question: true,
+        answeredBy: null,
+      })
+      save(state)
+      append({ event: 'ask', from: me, to, text })
+      process.stdout.write(`asked ${to} (Q#${state.seq}) — stays open until they run: coord answer ${state.seq} --as ${to} "..."\n`)
+    })
+  },
+
+  /** Close an open question. The only thing that clears it. */
+  answer({ flags, positional }) {
+    const me = whoami(flags)
+    const [id, ...rest] = positional
+    const qid = Number(id)
+    const text = rest.join(' ').trim()
+    if (!Number.isFinite(qid)) die('answer <question-id> --as X "<your answer>"')
+    if (!text) die('an answer needs words')
+    withMutex(() => {
+      const state = load()
+      const q = state.messages.find((m) => m.id === qid && m.question)
+      if (!q) die(`no open question #${qid}`)
+      if (q.to !== me) die(`Q#${qid} was asked of ${q.to}, not you`)
+      q.answeredBy = me
+      q.read = true
+      state.seq++
+      state.messages.push({
+        id: state.seq,
+        from: me,
+        to: q.from,
+        text: `ANSWER to Q#${qid} ("${q.text.slice(0, 60)}${q.text.length > 60 ? '…' : ''}"):\n${text}`,
+        at: now(),
+        read: false,
+      })
+      save(state)
+      append({ event: 'answer', agent: me, qid })
+      process.stdout.write(`Q#${qid} answered and closed\n`)
+    })
+  },
+
+  /** Every question still owed an answer, both directions. */
+  open({ flags }) {
+    const state = load()
+    const who = flags.as || process.env.COORD_AGENT
+    const open = state.messages.filter((m) => m.question && !m.answeredBy)
+    if (!open.length) {
+      process.stdout.write('no open questions\n')
+      return
+    }
+    for (const q of open) {
+      const mine = who && q.to === who ? '  <-- YOU OWE THIS' : ''
+      process.stdout.write(`Q#${q.id} ${q.from} -> ${q.to} (${ago(q.at)})${mine}\n    ${q.text}\n`)
+    }
+  },
+
   inbox({ flags }) {
     const me = whoami(flags)
     withMutex(() => {
@@ -496,6 +592,9 @@ if (!cmd || cmd === 'help' || cmd === '--help') {
       '  renew --as X                             reset the clock on your claims',
       '  release [paths...] --as X | --all        give paths back',
       '  send --as X --to Y <text>                message the other agent',
+      '  ask --as X --to Y <text>                 message that MUST be answered',
+      '  answer <id> --as X <text>                close an open question',
+      '  open [--as X]                            questions still owed an answer',
       '  inbox --as X [--peek]                    read your messages',
       '  task add <title> [--owner X]             add a task',
       '  task start|done|block <id> --as X        move a task',

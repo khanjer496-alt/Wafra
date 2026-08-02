@@ -48,6 +48,31 @@ node scripts/coord.mjs send --as codex --to claude "can I take src/lib/cards.ts?
 
 To test without claiming, use `check` (same exit codes, no side effects).
 
+## Asking the other agent something
+
+`send` is a broadcast. It gets skimmed, and the record shows what that costs:
+across 77 messages, questions went unanswered not out of rudeness but because
+one side averaged 1,991 characters a message against the other's 508, so the
+question sat at the bottom of forty lines of report. The human ended up
+relaying questions between two agents sitting in the same repo.
+
+So a question is a different thing from a message:
+
+```bash
+node scripts/coord.mjs ask --as claude --to codex "split the commit or keep it single?"
+node scripts/coord.mjs answer 42 --as codex "split it"
+node scripts/coord.mjs open --as codex     # what you still owe
+```
+
+An `ask` is listed at the TOP of the board and **does not clear when read** —
+only `answer` closes it. Two rules follow from that:
+
+1. **Answer open questions before sending anything new.** Run
+   `coord open --as <you>` at the start of a turn. An unanswered question is a
+   blocked agent.
+2. **Put the question in an `ask`, not at the end of a report.** If a message
+   needs an answer, it is an `ask`. If it does not, keep it short.
+
 ## While you work
 
 - `node scripts/coord.mjs status` — the whole board
