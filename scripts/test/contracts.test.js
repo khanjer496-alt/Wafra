@@ -668,5 +668,39 @@ for (const rel of ['src/app/cards.tsx', 'src/app/(tabs)/wallet.tsx']) {
     /detectSubscriptions\(transactions, notSubscriptions, today, liveAccounts, internalTransfers\)/.test(insights));
 }
 
+// ---------------------------------------------------------------------------
+// The reporting period and the month start day.
+//
+// currentMonthPeriod() reads a module global that only receives its real value
+// during hydration, which is AFTER PeriodProvider first renders. A provider
+// that answers "which month is it" once and never again therefore opens on the
+// wrong month for every user whose month does not start on the 1st, and shows
+// them zeros over a full ledger.
+const periodCtx = read('src/lib/period-context.tsx');
+ok('PeriodProvider re-answers which month it is once the start day is known',
+  /useEffect\(/.test(periodCtx) && /state\.monthStartDay/.test(periodCtx),
+  'without this it keeps the month it guessed before settings loaded');
+ok('a period the user picked is not overwritten by that recompute',
+  /chosenByUser/.test(periodCtx),
+  'resyncing unconditionally would yank them out of the month they opened');
+
+// ---------------------------------------------------------------------------
+// Direction and meaning are two questions; one flag cannot answer both.
+//
+// A transfer is kept out of income because of what it COUNTS as. That is not
+// licence to state the wrong direction: "Inward remittance −265" was printed
+// for money that had just landed. The sign follows the type; the colour is
+// what separates earned from merely moved.
+const txRow = read('src/components/transaction-row.tsx');
+ok('the sign follows the direction of the money, not whether it counts as income',
+  /\{arrived \? '\+' : '−'\}/.test(txRow),
+  'an arriving transfer was rendered with a minus');
+ok('green is still reserved for money actually earned',
+  /color: isIncome \? theme\.income : theme\.text/.test(txRow),
+  'painting transfer arrivals green made the list read as income landing twice');
+ok('the spoken label agrees with the sign on screen',
+  /\$\{arrived \? t\('plusWord'/.test(txRow),
+  'a screen reader saying "minus" over a plus is worse than either alone');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

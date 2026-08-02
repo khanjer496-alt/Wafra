@@ -40,7 +40,23 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
   // second account was painted green with a + on it, and the list read as
   // income arriving twice — which is precisely what it looked like.
   const isTransfer = transaction.isTransfer || internal === true;
+  /**
+   * Green, and read as money earned. A transfer is deliberately excluded: the
+   * arriving leg of a move between your own accounts is worded by the bank
+   * exactly like being paid, and painting it as income made the list look like
+   * the same money landed twice.
+   */
   const isIncome = transaction.type === 'income' && !isTransfer;
+  /**
+   * Which way the money went — NOT the same question as whether it was earned.
+   *
+   * The two used to be one flag, so an arriving transfer was given a minus:
+   * "Inward remittance −265" for money that had just landed in the account.
+   * Being excluded from income is a statement about what a movement COUNTS as;
+   * it is not licence to state the wrong direction. The colour still separates
+   * earned from moved, which is all the original rule actually needed.
+   */
+  const arrived = transaction.type === 'income';
   const where = isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
 
   // Spoken as one sentence. Left to itself RN would concatenate the children,
@@ -51,7 +67,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
     where,
     account?.name,
     clock,
-    `${isIncome ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
+    `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
   ]
     .filter(Boolean)
     .join(', ');
@@ -76,7 +92,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
         </ThemedText>
       </View>
       <ThemedText type="small" tabular style={{ color: isIncome ? theme.income : theme.text }}>
-        {isIncome ? '+' : '−'}
+        {arrived ? '+' : '−'}
         {formatAmount(transaction.amountFils, { decimals: false })}
       </ThemedText>
     </Pressable>

@@ -538,6 +538,21 @@ ok('salary month: elapsed days counted from the start day',
   per.elapsedDays({ mode: 'month', key: '2026-06' }, new Date(2026, 6, 24), []) === 30);
 ok('salary month: period end for a past month',
   per.periodEndISO({ mode: 'month', key: '2026-05' }, new Date(2026, 6, 24)) === '2026-06-24');
+// The month-start bug the user hit: the reporting period is chosen on first
+// render, when the start day is still the default 1, and hydration then moves
+// every date into a DIFFERENT month key. Nothing recomputed the period, so the
+// app sat on a month that had not begun and showed zeros over a full ledger.
+// This asserts the two keys really do disagree, which is what makes recomputing
+// after hydration necessary rather than merely tidy.
+fmt.setMonthStartDay(1);
+const keyBeforeHydration = fmt.monthKey('2026-08-02');
+fmt.setMonthStartDay(27);
+const keyAfterHydration = fmt.monthKey('2026-08-02');
+ok('the month a date belongs to CHANGES when the start day loads',
+  keyBeforeHydration === '2026-08' && keyAfterHydration === '2026-07');
+ok('a period fixed before hydration would hold none of that day\'s spending',
+  keyBeforeHydration !== keyAfterHydration);
+
 fmt.setMonthStartDay(1);
 ok('calendar months restore cleanly', fmt.monthKey('2026-07-24') === '2026-07');
 
