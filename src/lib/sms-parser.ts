@@ -264,8 +264,18 @@ const DEBIT_CLAUSE_RE =
  * the prepositions MERCHANT_RE looks for, so these rows used to arrive titled
  * "Account debit" and could never group or carry an override.
  */
-const BILLER_SETTLED_RE =
-  /\b(?:credited|received|posted|applied)(?:\s+[^\n]{0,24}?)?\s+(?:to|towards?|for|against)\s+(?:your|the)\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\b/i;
+// Both word orders, because banks use both and only one was covered.
+// Verb-first  — "...has been credited to your du account"
+// Subject-first — "Your Etisalat account has been credited with AED 320.00"
+// The second is what telecoms and toll operators actually send, and with only
+// the first alternative present it read as money ARRIVING: an AED 320 phone
+// bill became AED 320 of income, so the spend vanished and revenue appeared.
+// Same 2x swing the verb-first rule was written to stop.
+const BILLER_SETTLED_RE = new RegExp(
+  String.raw`\b(?:credited|received|posted|applied)(?:\s+[^\n]{0,24}?)?\s+(?:to|towards?|for|against)\s+(?:your|the)\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\b` +
+    String.raw`|\byour\s+([A-Za-z][A-Za-z0-9 &.'\-]{0,24}?)\s+(?:bill\s+|postpaid\s+|prepaid\s+)?(?:account|wallet|a\/c)\s+(?:has\s+been|have\s+been|was|is|been)\s+(?:credited|recharged|topped[\s-]?up|reloaded|replenished)\b`,
+  'i',
+);
 /** The user's OWN payment as the subject: "your payment ... has been credited". */
 const PAYMENT_SUBJECT_RE = /\b(?:your|the|a)\s+payment\b/i;
 /** Words that describe the account itself, never the biller that owns it. */
@@ -294,7 +304,8 @@ const BILLER_CATEGORIES: CategoryId[] = ['telecom', 'utilities', 'transport', 'g
  */
 function billerSettlement(prose: string): string | null {
   const m = prose.match(BILLER_SETTLED_RE);
-  const name = m?.[1].trim();
+  // Group 1 is the verb-first order, group 2 the subject-first one.
+  const name = (m?.[1] ?? m?.[2])?.trim();
   if (!name || NOT_A_BILLER_RE.test(name) || BANK_NAME_RE.test(name)) return null;
   if (PAYMENT_SUBJECT_RE.test(prose)) return name;
   return BILLER_CATEGORIES.includes(guessCategory(name, 'expense')) ? name : null;
@@ -311,7 +322,12 @@ const AR_DEBIT_WORDS =
 // posted expense the user never made. Only anchored forms ("تم دفع", "سداد
 // بمبلغ") are safe. This is the Arabic twin of the `payment(?!\s+due…)` guard
 // on DEBIT_WORDS.
-const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
+// "due 20/08/2026" and "due 15 Aug 2026" are as common as "due on" and "due
+// by", and recognising only the prepositional forms left a statement notice to
+// fall through to the transaction path — where it became a AED 425 purchase at
+// a merchant named "July Is Available", harvested out of "statement for July
+// is available".
+const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
 const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
 /** "فاتورة هيئة كهرباء ومياه دبي بمبلغ ..." — the biller follows the noun. */
 const AR_BILL_MERCHANT_RE = new RegExp(
@@ -320,7 +336,7 @@ const AR_BILL_MERCHANT_RE = new RegExp(
 
 /** Credit-card statement: has "statement"/"total due" language plus a card reference. */
 const STATEMENT_RE =
-  /statement|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+payment\s+of|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
+  /statement|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
 /** Purchase-style verbs that disqualify the statement branch (NOT "paid"). */
 const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
 /** Payment INTO a card: settles dues rather than spending. */
@@ -426,7 +442,7 @@ const OTP_FOOTER_RE = new RegExp(
 // footer still dies on the hold phrasing ("debited provisionally ... Pending
 // settlement"), which is where the suppression belongs.
 const PREAUTH_RE =
-  /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|amount\s+(?:has been\s+)?blocked|blocked on your card|hold\s+(?:of|on|for|amount|placed)|\bon hold\b|temporary\s+(?:hold|charge|debit)|held on your (?:card|account)|earmark(?:ed)?|ring[\s-]?fenced|reserved on your card|has been (?:reserved|frozen)|provisional(?:ly)?\s+(?:debit|charge)|debited provisionally|pending\s+(?:transaction|authoris|authoriz)|not yet (?:posted|settled)|تم حجز|حجز مبلغ|مبلغ محجوز|تفويض مسبق/i;
+  /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|amount\s+(?:has been\s+)?blocked|blocked on your(?:\s+\w+){0,2}\s+card|hold\s+(?:of|on|for|amount|placed)|\bon hold\b|temporary\s+(?:hold|charge|debit)|held on your (?:card|account)|earmark(?:ed)?|ring[\s-]?fenced|reserved on your card|has been (?:reserved|frozen)|provisional(?:ly)?\s+(?:debit|charge)|debited provisionally|pending\s+(?:transaction|authoris|authoriz)|not yet (?:posted|settled)|تم حجز|حجز مبلغ|مبلغ محجوز|تفويض مسبق/i;
 /**
  * THE RELEASE OF A HOLD IS THE SETTLEMENT NOTICE, not the hold.
  *
@@ -607,8 +623,11 @@ const SPEND_SUMMARY_RE = new RegExp(
  * Gated on hasPostedEvidence all the same, so a bank that staples an offer to
  * a real alert keeps the transaction.
  */
+// A DISCOUNT CEILING is not a purchase. "Get AED 100.00 off your next purchase
+// at NOON with your ADCB card" booked a AED 100 expense at Noon — the figure is
+// the most the user might SAVE, and the purchase is explicitly a future one.
 const OFFER_RE =
-  /^\s*(?:offer|promo(?:tion)?|deal)\s*[:!-]|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b/i;
+  /^\s*(?:offer|promo(?:tion)?|deal)\s*[:!-]|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b|\boff\s+your\s+(?:next|first)\b|\b(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+off\b|\bup\s+to\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+(?:off|cashback|back)\b/i;
 
 /**
  * A FUTURE OR SCHEDULED EVENT HAS NOT MOVED ANY MONEY — and the bank sends the
@@ -707,8 +726,13 @@ function ensureCurrencyPatterns(): void {
     `([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
   MIN_DUE_RE = new RegExp(
     `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+of)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  // "Closing balance" and "statement balance" are what a statement calls its
+  // total. Without them the branch fell through to first-amount extraction and
+  // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
+  // statement, which is the same class of error as reading a balance as an
+  // amount, only quieter.
   TOTAL_DUE_RE = new RegExp(
-    `total\\s+(?:amount\\s+due|due|billed\\s+am(?:oun)?t)\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `(?:total\\s+(?:amount\\s+due|due|billed\\s+am(?:oun)?t)|closing\\s+balance|statement\\s+balance|new\\s+balance)\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // Arabic renders the currency AFTER the figure as often as before it
   // ("3,240.00 درهم"), so both due patterns make it optional on the left.
   // MIN_DUE_RE was English-only, which left every Arabic statement with a null
@@ -840,8 +864,20 @@ const MAX_PLAUSIBLE_AMOUNT_FILS = 100_000_000;
 // available limit is now AED 50,000.00" was imported as a AED 50,000 card
 // payment, and auto-import turned the same figure into a CardDue of AED 50,000
 // with a AED 2,500 minimum — thousands of dirhams of debt that does not exist.
+// The balance noun and its figure are not always adjacent: a card reference
+// routinely sits between them — "Your available credit limit ON CARD 4110 is
+// now AED 42,000.00". With only the adjacent form recognised, that message
+// stated no transaction amount and the parser took the LIMIT as one, inventing
+// a AED 42,000 expense. Downstream it is worse than cosmetic: auto-import turns
+// a statement into a CardDue of that size, i.e. thousands of dirhams of debt
+// that does not exist.
+//
+// The gap is deliberately only a card/account reference rather than a general
+// wildcard. A loose gap would let a real amount be read as a balance in
+// "Balance AED 5,000. Purchase of AED 250 at NOON" — the opposite failure, and
+// the one that silently deletes a purchase.
 const BALANCE_PREFIX_RE =
-  /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$/i;
+  /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)(?:\s+(?:on|for|of|in)\s+(?:your\s+)?(?:credit\s+|debit\s+|covered\s+)?(?:card|a\/c|account)\s*(?:no\.?|number|ending(?:\s+with)?)?\s*[\dXx*•\-]{0,16})?\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$/i;
 
 /** Card identity: "Credit Card ending 1234", "Debit Card ..5678", "a/c XX9012", "card no. *1234". */
 // "Covered Card" is what every Sharia-compliant issuer (DIB, ADIB, EIB, Ajman,
@@ -1077,6 +1113,27 @@ function merchantFromLines(raw: string): string {
 /** Debit messages that are actually transfers: paying a card bill, moving between own accounts. */
 // The Arabic side uses the card STEM ("سداد بطاقتك"), so a literal "بطاقه"
 // would miss every possessive form.
+// MONEY THAT NEVER LEFT THE USER.
+//
+// The destination is the signal, and only the phrase "own account" was
+// recognised — which is not how banks word it. "AED 500.00 was transferred from
+// your account 1234 to YOUR ACCOUNT 5678" and "...to your SAVINGS ACCOUNT 5678"
+// both landed as AED 500 of spending, so moving money into savings made the
+// user look poorer by the amount they had just saved. Paying a credit card from
+// a bank account had the same shape, and double-counted against the statement
+// row already on the ledger.
+//
+// The possessive is what makes this safe: "to your savings account" is the
+// user's, while "to Ahmed's account" or "to account 5678" is somebody else's
+// and stays a real transfer out.
+// Both halves are required. The destination alone marks every INCOMING credit
+// as a transfer too ("AED 5,000 credited to your account 1234"), which strips
+// real income out of the ledger — the same error pointed the other way. Money
+// has to be leaving somewhere AND arriving somewhere the user owns.
+const OWN_DESTINATION_RE =
+  /\bto\s+your\s+(?:own\s+)?(?:savings?|current|deposit|call|salary|joint|linked|other|second(?:ary)?|new)?\s*(?:account|a\/c|wallet|pot|goal|credit\s+card|debit\s+card|card)\b/i;
+const OUTGOING_MOVE_RE =
+  /\b(?:transferred|transfer|debited|deducted|withdrawn|moved|sent|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\b/i;
 const TRANSFER_HINT_RE =
   /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
@@ -1417,7 +1474,9 @@ function extractAmountFils(raw: string): number | null {
 
   for (const c of candidates) {
     if (!Number.isFinite(c.value) || c.value <= 0 || c.value > MAX_PLAUSIBLE_AMOUNT_FILS) continue;
-    const prefix = raw.slice(Math.max(0, c.index - 24), c.index);
+    // 56, not 24: the window has to hold a balance noun plus the card
+    // reference that can sit between it and the figure.
+    const prefix = raw.slice(Math.max(0, c.index - 56), c.index);
     if (BALANCE_PREFIX_RE.test(prefix)) continue;
     return c.value;
   }
@@ -2118,7 +2177,19 @@ export function parseSms(
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
   // "AED 500.00 has been reversed to your Card ending 1234" names no verb from
   // either list and used to die right here — money returned, silently dropped.
-  if (!hasDebit && !hasCredit && !isRefund && !isBillDue) return null;
+  //
+  // A TERSE FIELD-LIST ALERT names no verb either: "Txn alert: AED 45.00,
+  // TALABAT, Credit Card 4110, 30/07/2026." The debit twin survived only by
+  // accident — bare "debit" is in DEBIT_WORDS, while "credit" is guarded
+  // against the noun phrase "Credit Card", so the identical alert parsed on a
+  // debit card and vanished on a credit card. hasPostedEvidence already
+  // encodes what a posting looks like without a verb (amount + card +
+  // merchant); defer to it rather than requiring vocabulary the bank did not
+  // use. Direction resolves below, and with no credit clause it settles on
+  // expense — which is what a card alert with a merchant always is.
+  if (!hasDebit && !hasCredit && !isRefund && !isBillDue && !hasPostedEvidence(raw, card)) {
+    return null;
+  }
 
   const amountFils = amountWithFx(raw);
   if (!amountFils) return null;
@@ -2186,7 +2257,10 @@ export function parseSms(
       if (billName) merchant = billName[1].trim();
     }
   }
-  let transferHint = !isBillDue && TRANSFER_HINT_RE.test(raw);
+  let transferHint =
+    !isBillDue &&
+    (TRANSFER_HINT_RE.test(raw) ||
+      (OWN_DESTINATION_RE.test(prose) && OUTGOING_MOVE_RE.test(prose)));
   descriptor = merchant;
   merchant = cleanDescriptor(merchant);
   // HSBC embeds the merchant BEFORE the verb:

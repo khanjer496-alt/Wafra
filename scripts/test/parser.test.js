@@ -1219,6 +1219,64 @@ t(
   'AED 25.00 has been debited from your account 1234 as an insufficient balance fee. Avl Bal AED 400.00',
   { type: 'expense', amountFils: 2500 },
 );
+// ══ Money that is not a purchase, and purchases that are not money ══
+// Every one of these was verified against the compiled parser before the fix.
+t(
+  'crediting a BILLER account is the user paying a bill, in either word order',
+  'Your Etisalat account has been credited with AED 320.00. Thank you for your payment.',
+  { type: 'expense', amountFils: 32000, merchant: 'Etisalat', categoryGuess: 'telecom' },
+);
+t(
+  '...and a toll account too, with no "your payment" to lean on',
+  'Your Salik account has been credited with AED 100.00.',
+  { type: 'expense', amountFils: 10000, merchant: 'Salik', categoryGuess: 'transport' },
+);
+t(
+  'crediting the user OWN account is still income',
+  'Your account 1234 has been credited with AED 5,000.00. Avl Bal AED 12,000.00',
+  { type: 'income', amountFils: 500000 },
+);
+t(
+  'a bare credit-limit notice states no transaction amount',
+  'Thank you for your payment. Your available credit limit on Card 4110 is now AED 42,000.00.',
+  null,
+);
+t(
+  '...but a limit quoted AFTER a real purchase does not eat the purchase',
+  'AED 250.00 spent at NOON with Credit Card 4110. Available limit on card 4110 is now AED 9,750.00',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon' },
+);
+t(
+  'a discount ceiling is not a purchase',
+  'Get AED 100.00 off your next purchase at NOON with your ADCB card.',
+  null,
+);
+t(
+  'a statement records its CLOSING BALANCE, not its minimum payment',
+  'Your card 4110 statement for July is available. Closing balance AED 8,500.00. Minimum payment AED 425.00 due 20/08/2026.',
+  { kind: 'cardStatement', amountFils: 850000, minDueFils: 42500 },
+);
+t(
+  'a verbless field-list alert parses on a CREDIT card, as it already did on debit',
+  'Txn alert: AED 45.00, TALABAT, Credit Card 4110, 30/07/2026.',
+  { type: 'expense', amountFils: 4500, card: { last4: '4110', kind: 'credit' } },
+);
+t(
+  'moving money into your own savings is not spending',
+  'AED 5,000.00 transferred from your Current Account 1234 to your Savings Account 5678.',
+  { type: 'expense', amountFils: 500000, transferHint: true },
+);
+t(
+  'paying your own credit card from your account is a settlement, not spending',
+  'You have transferred AED 500.00 from account 1234 to your credit card 4110.',
+  { type: 'expense', amountFils: 50000, transferHint: true },
+);
+t(
+  '...but paying a PERSON is a real transfer out',
+  'AED 500.00 was transferred from your account 1234 to MOHAMMED ALI.',
+  { type: 'expense', amountFils: 50000, transferHint: false },
+);
+
 // Controls: the suppressions above must still fire where they belong.
 t(
   'a genuine OTP quoting the transaction it protects is still suppressed',
