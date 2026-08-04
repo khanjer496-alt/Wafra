@@ -808,8 +808,15 @@ let compiledForMarket = '';
  * name, and a card reached through one of them was never what the payment was
  * made towards.
  */
+// The separator is `\s+` OR a dot glued to the next word. ADCB writes the
+// abbreviation with no space — "towards Cr.Card XXX7720" — and requiring
+// whitespace meant that spelling was not a card payment at all: it booked as
+// plain spending with transferHint false, and since the account-side leg of the
+// same settlement also parses, one payment landed on the ledger TWICE.
+// `\.(?=\w)` and not `\.` so a sentence boundary cannot be crossed: "…towards
+// your account. Card 1234 was used…" must stay two clauses.
 const CARD_GAP =
-  String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+\s+){0,3}?card`;
+  String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+(?:\s+|\.(?=\w))){0,3}?card`;
 
 /** Units of each currency per 1 USD — cross rates derive from this table. */
 const UNITS_PER_USD: Record<string, number> = {
@@ -1400,8 +1407,14 @@ const OWN_DESTINATION_RE =
   /\bto\s+your\s+(?:own\s+)?(?:savings?|current|deposit|call|salary|joint|linked|other|second(?:ary)?|new)?\s*(?:account|a\/c|wallet|pot|goal|credit\s+card|debit\s+card|card)\b/i;
 const OUTGOING_MOVE_RE =
   /\b(?:transferred|transfer|debited|deducted|withdrawn|moved|sent|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\b/i;
+// `Cr.Card` is listed explicitly alongside the spelled-out forms. This is the
+// DEBIT leg of the same settlement CARD_GAP handles on the receipt side —
+// "debited from your account 1234 towards Cr.Card XXX7720" — and with only the
+// receipt leg recognised the account side still counted as spending. Both legs
+// have to carry the hint, because it is the pair of them sharing a dedupe key
+// that stops one payment landing on the ledger twice.
 const TRANSFER_HINT_RE =
-  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
+  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // First, because a direct-debit instalment names a bank and would otherwise

@@ -1211,6 +1211,28 @@ t('"voided" is a decline', 'Your Card ending 1234 was used for AED 500.00 at NOO
 t('a cancelled payment is a decline', 'Your payment of AED 500.00 at NOON has been cancelled.', null);
 t('bare "failed" is a decline, not only "has failed"', 'AED 500.00 spent at NOON. Payment failed.', null);
 
+// ══ The dotted card abbreviation ══
+// ADCB writes "Cr.Card XXX7720" with no space. Requiring whitespace before
+// "card" meant neither leg of a settlement was recognised, so a card payment
+// booked as spending on BOTH sides and one payment landed on the ledger twice.
+// No corpus message and no test on either branch covered this wording, which is
+// why two full suites stayed green over it.
+t(
+  'a dotted Cr.Card receipt is a card payment, not a purchase',
+  'Thank you for your payment of AED 500.00 towards Cr.Card XXX7720.',
+  { kind: 'cardPayment', amountFils: 50000, transferHint: true },
+);
+t(
+  '...and its account-side leg is a transfer, so the pair cannot double-count',
+  'AED 500.00 has been debited from your account 1234 towards Cr.Card XXX7720.',
+  { type: 'expense', amountFils: 50000, transferHint: true },
+);
+t(
+  'a full stop before "Card" is still two clauses, not an abbreviation',
+  'Your payment of AED 200.00 was received towards your account. Card 1234 was used at NOON.',
+  { type: 'expense', amountFils: 20000, transferHint: false },
+);
+
 // ══ Suppression must never beat evidence ══
 // Each of these was a REAL posting that a boilerplate footer deleted. They are
 // invisible failures: no row, no error, and the money simply is not there.
