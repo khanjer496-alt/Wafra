@@ -8,7 +8,7 @@ import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAED } from '@/lib/format';
-import { t, tf } from '@/lib/i18n';
+import { isRTL, t, tf } from '@/lib/i18n';
 
 /**
  * One hue at five lightnesses. Composition is a question of proportion, not
@@ -309,7 +309,17 @@ export function TrendCurve({
   // A little air top and bottom so the last point never sits on the edge.
   const pad = Spacing.two;
   const plot = height - pad * 2;
-  const x = (i: number) => (i / (points.length - 1)) * width;
+  // Under RTL the month axis is mirrored by the layout — أغسطس (newest) on the
+  // left through مارس (oldest) on the right — but an SVG path is drawn in its
+  // own coordinate space and `direction: rtl` does not touch it. With only the
+  // labels flipped, a rising series ran UPHILL TOWARDS THE OLDEST MONTH, so an
+  // Arabic reader saw their net worth falling while the caption directly under
+  // the chart said "+40,470 since March". Mirror the plot with the axis.
+  const rtl = isRTL();
+  const x = (i: number) => {
+    const at = (i / (points.length - 1)) * width;
+    return rtl ? width - at : at;
+  };
   const y = (fils: number) => pad + (1 - (fils - lo) / span) * plot;
 
   const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i)},${y(p.fils)}`).join(' ');

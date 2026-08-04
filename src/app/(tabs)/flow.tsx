@@ -21,7 +21,7 @@ import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
-import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { LinkPill, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
@@ -181,7 +181,17 @@ export default function FlowScreen() {
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <ThemedText type="title">{t('tabFlow')}</ThemedText>
-            <PeriodPill onPress={() => setPeriodOpen(true)} />
+            {/* The one way into /stats, and it has to exist here. The old
+                "ALL STATS" link hung off the six-month chart below and landed
+                on a pixel-identical copy of that chart — the least rewarding
+                tap in the app — so it was removed. Removing it without putting
+                this back left the screen registered, routed and tested, and
+                reachable from nowhere. Labelled rather than a glyph: the only
+                fitting icon is the chart mark, which is the Flow tab's own. */}
+            <View style={styles.headerActions}>
+              <PeriodPill onPress={() => setPeriodOpen(true)} />
+              <LinkPill label={t('statsTitle')} onPress={() => router.push('/stats')} />
+            </View>
           </View>
 
           <View
@@ -513,6 +523,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center' },
   safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
   content: { paddingHorizontal: ScreenPadding, paddingTop: Spacing.three },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two - 2 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
