@@ -53,7 +53,7 @@ import {
   trendShape,
 } from '@/lib/analytics';
 import { getCategory } from '@/lib/categories';
-import { formatAED, monthLabel } from '@/lib/format';
+import { formatAED, monthKey, monthLabel } from '@/lib/format';
 import { summarizeMonth } from '@/lib/insights';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -82,6 +82,12 @@ export default function StatsScreen() {
   const router = useRouter();
   const { state } = useStore();
   const { period } = usePeriod();
+  const now = useMemo(() => new Date(), []);
+
+  // The category trend is a monthly window and it ends where the report ends;
+  // a year or a custom range falls back to the calendar month rather than
+  // pretending otherwise.
+  const key = period.mode === 'month' ? period.key : monthKey(now);
 
   const [periodOpen, setPeriodOpen] = useState(false);
   const [trendCategory, setTrendCategory] = useState<CategoryId | null>(null);
@@ -114,8 +120,10 @@ export default function StatsScreen() {
 
   const trend = useMemo(
     () =>
-      shownCategory ? categoryTrend(state.transactions, shownCategory, TREND_MONTHS) : [],
-    [state.transactions, shownCategory],
+      shownCategory
+        ? categoryTrend(state.transactions, shownCategory, TREND_MONTHS, key)
+        : [],
+    [state.transactions, shownCategory, key],
   );
 
   const merchantMax = merchants[0]?.totalFils ?? 0;

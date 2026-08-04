@@ -417,6 +417,45 @@ ok('analytics: dining moved down vs June', mv.some(m => m.category === 'dining' 
 const dw = an.dayOfWeekSpend(aTx, '2026-07');
 ok('analytics: transfers excluded from weekday spend', dw.reduce((a, b) => a + b, 0) === 100000);
 
+// A weekday chart is a claim about habit, so a fixed commitment cannot be in
+// it. One AED 5,500 rent charge is 55x a grocery run: leave it in and the bar
+// for whichever weekday the standing order fell on is the entire chart, and
+// the "heaviest day" reading flips if the landlord takes it a day later.
+const rentTx = aTx.concat([
+  { id: 'r1', type: 'expense', amountFils: 550000, category: 'rent', accountId: 'a', title: 'Apartment Rent', date: '2026-07-01' },
+  { id: 'b1', type: 'expense', amountFils: 300000, category: 'business', accountId: 'a', title: 'Supplier', date: '2026-07-02' },
+]);
+const dwRent = an.dayOfWeekSpend(rentTx, '2026-07');
+ok('analytics: rent excluded from weekday spend', dwRent.reduce((a, b) => a + b, 0) === 100000);
+ok('analytics: business costs excluded from weekday spend', dwRent.every((v, i) => v === dw[i]));
+// 1 Jul 2026 is a Wednesday. With rent counted it owned the chart outright;
+// without it, Saturday (the AED 500 Talabat on the 4th) is the heaviest day.
+const heaviest = dwRent.indexOf(Math.max(...dwRent));
+ok('analytics: heaviest day is a real habit, not rent day', heaviest === 6 && dwRent[3] === 0);
+
+// The trend window ends where the report ends, not at today: a screen
+// reporting on June must not draw a strip that runs to August.
+const junTrend = an.categoryTrend(aTx, 'dining', 3, '2026-06');
+ok('analytics: trend window ends at the month asked for', junTrend.length === 3 && junTrend[2].key === '2026-06' && junTrend[2].fils === 90000);
+ok('analytics: trend window walks backwards from there', junTrend[0].key === '2026-04' && junTrend[0].fils === 0);
+
+// ── trend shape: the flat case is a finding, not a template hole ──
+const flatSeries = [550000, 550000, 550000, 550000, 550000, 550000].map(fils => ({ fils }));
+const flatShape = an.trendShape(flatSeries);
+ok('trendShape: identical months read flat', flatShape.flat === true && flatShape.averageFils === 550000);
+// A standing order that wobbles a few fils has still not moved.
+const wobbly = an.trendShape([550000, 550100, 549900, 550000, 550050, 550000].map(fils => ({ fils })));
+ok('trendShape: sub-1% wobble still reads flat', wobbly.flat === true);
+const risingShape = an.trendShape([10000, 10000, 10000, 10000, 10000, 20000].map(fils => ({ fils })));
+ok('trendShape: a rising series is not flat', risingShape.flat === false);
+ok('trendShape: average across the window', risingShape.averageFils === 11667);
+ok('trendShape: latest against average', Math.round(risingShape.latestVsAverage * 100) === 71);
+ok('trendShape: latest recognised as the peak', risingShape.latestIsHighest === true && risingShape.latestIsLowest === false);
+const fallingShape = an.trendShape([20000, 20000, 20000, 20000, 20000, 10000].map(fils => ({ fils })));
+ok('trendShape: latest recognised as the floor', fallingShape.latestIsLowest === true && fallingShape.latestVsAverage < 0);
+const emptyShape = an.trendShape([]);
+ok('trendShape: empty series is flat and zero', emptyShape.flat === true && emptyShape.averageFils === 0 && emptyShape.latestVsAverage === 0);
+
 // ── period model ──
 const per = require('./build/period');
 const pTx = [

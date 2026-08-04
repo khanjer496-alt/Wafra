@@ -1447,6 +1447,315 @@ t('"is now" is a balance sentence like "is"',
   { amountFils: 50000, snapshotFils: 914934 });
 
 
+// ══ ROUND 2: THE SAME PRINCIPLE, THE OTHER NINETEEN MESSAGES ══
+//
+// Every fixture below is a message that was still wrong after the first pass
+// at "suppression must never beat evidence" — either because a suppression
+// rule was widened without being anchored (a footer deleting a real purchase)
+// or because an anchor was drawn so tightly that it caught the wrong noun (a
+// bare "account" read as a biller). They are pinned as a class because the
+// failure mode is always one of exactly two shapes:
+//
+//   money the user has, deleted        a footer, a reason code or a hold
+//                                      phrase matched anywhere in the body
+//   money the user never spent, made   a threshold, a forecast or a summary
+//                                      read as if it had posted
+//
+// Both are silent. Neither produces an error, and the user is never told.
+
+// ── Money paid INTO your own account is income ──
+// The biller fix required nothing after "credited to your", so the bare noun
+// "credited to your ACCOUNT" was treated exactly like "credited to your DU
+// account" — and money arriving, with a RISING balance quoted in the same
+// sentence, was booked as an EXPENSE. That is the same 2x swing the biller fix
+// exists to prevent, pointed the other way.
+t('a payment credited to your OWN account is income, not an expense',
+  'A payment of AED 2,000.00 has been credited to your account 1234 on 12/07/2026. New balance AED 32,000.00',
+  { kind: 'transaction', type: 'income', amountFils: 200000, merchant: 'Incoming transfer',
+    card: { last4: '1234', kind: 'account' }, snapshotFils: 3200000, transfer: false });
+t('...with the payer named in the sentence',
+  'A payment of AED 2,000.00 is credited to your account 1234 by ACME TRADING LLC.',
+  { type: 'income', amountFils: 200000, merchant: 'Incoming transfer' });
+t('...on the short-gap "has been credited" variant',
+  'Dear Customer, a payment of AED 1,500.00 has been credited to your account 1234. Ref TRF12345.',
+  { type: 'income', amountFils: 150000 });
+t('..."your payment" into your own account is still income',
+  'Your payment of AED 5,000.00 has been credited to your account 1234. Balance AED 20,000.00',
+  { type: 'income', amountFils: 500000, snapshotFils: 2000000 });
+t('...and with no account number at all',
+  'Your payment of AED 2,000.00 has been credited to your account. Available balance AED 32,000.00',
+  { type: 'income', amountFils: 200000, snapshotFils: 3200000 });
+// The negative control that located the bug: one word before "payment" used to
+// defeat the rule and bring the sign back.
+t('a dividend payment credited to your account is income',
+  'A dividend payment of AED 1,200.00 has been credited to your account 1234.',
+  { type: 'income', amountFils: 120000 });
+// A bank is never the payee of money arriving in your own account.
+t('a salary payment credited to a BANK-named account is still income',
+  'Your salary payment of AED 12,000.00 has been credited to your RAKBANK account 1234.',
+  { type: 'income', amountFils: 1200000, merchant: 'Incoming transfer', category: 'salary' });
+t('profit credited to an Islamic savings account is income',
+  'Profit of AED 34.22 has been credited to your ADIB Savings Account 1234.',
+  { type: 'income', amountFils: 3422, merchant: 'Incoming transfer' });
+
+// ── Paying a biller is spending, whatever verb the biller chose ──
+// The first pass covered "credited" only, so the rest of the family still
+// booked a bill payment as REVENUE: the spend vanishes and income appears.
+t('a payment RECEIVED TOWARDS a biller account is a bill',
+  'Payment of AED 350.00 received towards your DEWA account. Thank you.',
+  { kind: 'transaction', type: 'expense', amountFils: 35000, merchant: 'DEWA',
+    category: 'utilities', transfer: false });
+t('..."received for your <biller> account" too',
+  'Payment of AED 350.00 received for your DEWA account 123456. Thank you.',
+  { type: 'expense', amountFils: 35000, merchant: 'DEWA', category: 'utilities' });
+t('..."we have received X towards your <biller> account"',
+  'We have received AED 350.00 towards your Etisalat account 9876.',
+  { type: 'expense', amountFils: 35000, merchant: 'Etisalat', category: 'telecom' });
+t('...and with no payment noun anywhere in the sentence',
+  'Thank you. AED 500.00 received towards your Salik account.',
+  { type: 'expense', amountFils: 50000, merchant: 'Salik', category: 'transport' });
+t('a bare "credited to your du account" is a phone bill',
+  'AED 200.00 has been credited to your du account 1234567.',
+  { type: 'expense', amountFils: 20000, merchant: 'Du', category: 'telecom' });
+t('...and so is "credited to your du BILL account"',
+  'An amount of AED 200.00 was credited to your du bill account.',
+  { type: 'expense', amountFils: 20000, merchant: 'Du', category: 'telecom' });
+
+// ── A reporting period makes it a summary, however it is spelled ──
+// "this month" was covered and "in the last 30 days" was not, so the same
+// marketing message fabricated the same AED 4,320 purchase one word away from
+// the fixture that was pinned.
+t('a "last 30 days" recap does not fabricate a purchase',
+  'Dear Customer, you spent AED 4,320.00 in the last 30 days. Download the ADCB app.', null);
+t('...nor does it when the card is named',
+  'You spent AED 4,320.00 in the last 30 days with your ADCB Credit Card.', null);
+// "year to date" also hid behind the merchant gate: MERCHANT_RE read the "to"
+// and filed the row under a shop called "Date".
+t('a "year to date" recap is a summary, and "Date" is not a shop',
+  'You spent AED 4,320.00 year to date with your ADCB Credit Card.', null);
+
+// ── A figure in an offer is a threshold, not a posting ──
+// No card, no merchant, no posting verb — just a number you would have to
+// spend to qualify.
+t('an instalment-plan threshold does not fabricate a purchase',
+  'Enjoy 0% instalment plans on purchases above AED 1,000.00 with your Mashreq card.', null);
+t('a points offer at "any store" does not fabricate a purchase',
+  'Offer: Purchase of AED 250.00 at any store earns you double points this month.', null);
+// The controls that were already right and must stay so.
+t('a cashback offer is still skipped',
+  'Get 50% cashback up to AED 200.00 when you use your ADCB card at Carrefour this weekend.', null);
+t('a credit-limit increase is not a transaction',
+  'Your credit limit has been increased to AED 50,000.00.', null);
+
+// ── A future or scheduled event has not moved any money ──
+// The real debit or credit arrives as its own SMS, so posting the forecast
+// counts the same money twice.
+t('a salary that WILL be credited is not credited yet',
+  'Your salary of AED 15,000.00 will be credited on 25 Aug.', null);
+t('a scheduled payment has not left the account',
+  'A payment of AED 1,000.00 is scheduled from your account 1234 tomorrow.', null);
+t('a fee the card WILL be charged is not charged yet',
+  'Your ADCB card ending 4110 will be charged AED 199.00 for annual fee next month.', null);
+t('an instalment that WILL be deducted is not deducted yet',
+  'Loan instalment of AED 2,500.00 will be deducted from account 1234 on 05 Aug.', null);
+// A returned cheque is money that stayed put, and it is stated in the perfect
+// tense so no future rule can see it.
+t('a cheque returned unpaid is money that did NOT leave',
+  'Your cheque number 000123 for AED 2,500.00 has been returned unpaid.', null);
+// The boundary: a real posting that mentions a future event in its footer
+// keeps its row, and so does a standing instruction that has just RUN.
+t('a future-instalment footer does not delete the posting it sits on',
+  'AED 2,500.00 has been debited from your account 1234 for your loan. The next instalment will be deducted on 05 Sep.',
+  { kind: 'transaction', type: 'expense', amountFils: 250000 });
+t('a cashback-will-be-credited footer does not delete the purchase',
+  'AED 250.00 spent at NOON with Credit Card 4110. Avl Cr AED 9,000.00. AED 25.00 cashback will be credited next month.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon' });
+t('"your SCHEDULED payment has been processed" is a posting, not a schedule',
+  'Your scheduled payment of AED 1,000.00 has been processed from account 1234.',
+  { kind: 'transaction', type: 'expense', amountFils: 100000 });
+
+// ── The word OTP in a do-not-share clause is a footer ──
+// This is the single commonest footer on a UAE card alert, and matching the
+// bare noun deleted every purchase that carried one. Remove five characters —
+// OTP for PIN — and the identical message imported fine, which is how 424
+// passing tests sat on top of a live deletion.
+const CARREFOUR_BAL = 'AED 89.50 spent at CARREFOUR using Debit Card 1234. Balance AED 5,376.00. ';
+const CARREFOUR_ROW = {
+  kind: 'transaction', type: 'expense', amountFils: 8950, merchant: 'Carrefour',
+  category: 'groceries', card: { last4: '1234', kind: 'debit' }, snapshotFils: 537600,
+  transfer: false,
+};
+for (const footer of [
+  'Do not share your OTP or PIN with anyone.',
+  'Never share your OTP with anyone.',
+  'Bank will never ask for your OTP.',
+  'Do not share your one-time password with anyone.',
+  'For your security, never share your password or OTP.',
+  'Do not share your security code with anyone.',
+  'Bank will never ask for your verification code.',
+  'Never share your security code.',
+  'Beware of fraud: do not share your verification code.',
+  'Do not disclose your PIN.',
+]) {
+  t(`a purchase survives the footer "${footer}"`, CARREFOUR_BAL + footer, CARREFOUR_ROW);
+}
+t('...and the "Avl Bal" rendering of the same alert',
+  'AED 89.50 spent at CARREFOUR using Debit Card 1234. Avl Bal AED 5,376.00. Do not share your OTP with anyone.',
+  { type: 'expense', amountFils: 8950, merchant: 'Carrefour', snapshotFils: 537600 });
+t('the authentic ENBD "Do not share your OTP/PIN" footer keeps its purchase',
+  'Your Credit Card 4110 was used for AED 250.00 at NOON on 31/07/2026. Avl Cr Limit AED 9,000.00. Do not share your OTP/PIN with anyone.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon',
+    card: { last4: '4110', kind: 'credit' }, snapshotFils: 900000, snapshotKind: 'limit' });
+t('a one-time-password footer keeps its purchase',
+  'AED 1,200.00 spent at EMIRATES using Credit Card 4110. Avl Cr AED 9,000.00. Your one-time password should never be shared.',
+  { type: 'expense', amountFils: 120000 });
+t('an OTP footer on an outgoing transfer keeps the transfer',
+  'AED 5,000.00 transferred to AHMED ALI from your account 1234. Do not share your OTP.',
+  { kind: 'transaction', type: 'expense', amountFils: 500000,
+    card: { last4: '1234', kind: 'account' } });
+
+// The boundary that keeps all of the above honest: a message whose SUBJECT is
+// the code quotes its digits, and every one of those still dies. The
+// discriminator is the digits, not the noun — a footer names the OTP too.
+t('an OTP that quotes its code is still an OTP',
+  'Your OTP is 458213 for a purchase of AED 260.00 at AMAZON.AE.', null);
+t('"OTP for your transaction ... is NNNNNN" is still an OTP',
+  'OTP for your transaction of AED 260.00 at NOON is 458213.', null);
+t('a one-time password quoting its code is still an OTP',
+  'Your one-time password is 458213. Valid for 5 minutes.', null);
+t('"NNNNNN is your verification code" is still an OTP',
+  '458213 is your verification code for a purchase of AED 260.00 at NOON with Credit Card 4110.', null);
+t('"Use NNNNNN to complete" is still an OTP',
+  'Use 458213 to complete your purchase of AED 260.00 at NOON.', null);
+
+// ── The fraud-reporting footer is not a decline ──
+// "If this was not authorised by you, please call ..." is stapled to POSTED
+// alerts by nearly every UAE issuer, and DECLINED_RE's "not authoris" and
+// "unauthoris" deleted the posting underneath it. Blast radius: every issuer
+// that uses it.
+t('an "if this was not authorised" footer does not delete the purchase',
+  'Dear Customer, AED 89.50 was spent at CARREFOUR on your Debit Card ending 1234. If this was not authorised by you, please call 600 54 0000 immediately.',
+  { kind: 'transaction', type: 'expense', amountFils: 8950, merchant: 'Carrefour',
+    category: 'groceries', card: { last4: '1234', kind: 'debit' } });
+for (const footer of [
+  'If you have not authorised this transaction, call 600522228.',
+  'To report an unauthorised transaction call 600522228.',
+  'Report unauthorised use to 600522228.',
+  'Please call us if this was not you.',
+]) {
+  t(`a purchase survives the fraud footer "${footer}"`,
+    `AED 89.50 spent at CARREFOUR using Debit Card 1234. Avl Bal AED 5,376.00. ${footer}`,
+    { type: 'expense', amountFils: 8950, merchant: 'Carrefour', snapshotFils: 537600,
+      card: { last4: '1234', kind: 'debit' } });
+}
+t('"if you did not authorise this" is a footer, not a decline',
+  'A purchase of AED 250.00 at NOON was made using your Credit Card 4110. If you did not authorise this, call us.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon',
+    card: { last4: '4110', kind: 'credit' } });
+
+// ...and the indicative form, which is a real decline, still deletes it.
+t('"your transaction was not authorised" is a decline',
+  'Your transaction of AED 250.00 at NOON was not authorised.', null);
+t('a card declined for insufficient funds is a decline',
+  'Your card was declined for AED 250.00 at NOON due to insufficient funds.', null);
+
+// ── A refusal the merchant descriptor swallowed is still a refusal ──
+// maskMerchantNames blanks the descriptor so a shop called TIMEOUT MARKET
+// cannot read as a reason code — but the descriptor runs to the end of the
+// clause, so it also HID the refusal, and a declined AED 250 was imported as a
+// real purchase titled "Noon Declined Due To Insufficient Funds".
+t('a decline whose verb sits inside the descriptor is still a decline',
+  'Your transaction of AED 250.00 at NOON declined due to insufficient funds.', null);
+t('...on insufficient BALANCE too',
+  'Transaction of AED 250.00 at SPINNEYS declined due to insufficient balance.', null);
+t('...on a timeout',
+  'Your transaction of AED 250.00 at NOON timed out. Please retry.', null);
+t('...on a bare failure',
+  'Your transaction of AED 250.00 at CARREFOUR failed. Please retry.', null);
+t('...and on a failed biller payment',
+  'Your payment of AED 250.00 to DEWA failed. Please retry.', null);
+// The collision this must not reintroduce: the shop names stay shops, because
+// the unmasked pass only reads VERBAL forms no descriptor contains.
+t('TIME OUT MARKET survives the unmasked decline pass',
+  'AED 32.00 spent at TIMEOUT MARKET DUBAI with Debit Card 1234',
+  { type: 'expense', amountFils: 3200, merchant: 'Timeout Market' });
+t('ACCESS DENIED CAFE survives the unmasked decline pass',
+  'AED 25.00 spent at ACCESS DENIED CAFE with Debit Card 1234',
+  { type: 'expense', amountFils: 2500 });
+
+// ── An EPP offer is appended to the purchase it advertises against ──
+// ADCB, RAKBANK and Emirates NBD all staple the conversion pitch to the alert
+// for the purchase that triggered it, so this gate deleted exactly the large
+// purchases banks pitch EPP on.
+t('a "Convert now to 0% EPP" footer does not delete the purchase',
+  'AED 1,850.00 spent at SHARAF DG on Credit Card 4110. Convert now to 0% EPP. Avl Cr AED 10,000.00',
+  { kind: 'transaction', type: 'expense', amountFils: 185000, merchant: 'Sharaf Dg',
+    category: 'shopping', card: { last4: '4110', kind: 'credit' } });
+t('...nor does an "Easy Payment Plan" footer',
+  'AED 3,000.00 spent at SHARAF DG with Credit Card 4110. Avl Cr AED 12,000.00. Convert now to Easy Payment Plan.',
+  { type: 'expense', amountFils: 300000, merchant: 'Sharaf Dg' });
+t('...nor an "interest payment plan" footer',
+  'AED 2,500.00 spent at IKEA with Credit Card 4110. Avl Cr AED 6,000.00. Interest payment plan available.',
+  { type: 'expense', amountFils: 250000, merchant: 'Ikea' });
+// A standalone offer restates the purchase in the PRESENT and has no settled
+// tense anywhere, so it is still skipped — the purchase it quotes is already
+// on the ledger from its own alert.
+t('a standalone EPP offer is still skipped',
+  'Convert your purchases to 0% Easy Payment Plan. Call now.', null);
+
+// ── The release of a hold IS the settlement notice ──
+// The parser's own comment says the real charge "arrives as its own SMS", and
+// this is that SMS: the hold-release sentence is the one sentence that proves
+// the money moved, and PREAUTH_RE fired on it.
+t('a released authorisation hold does not delete the settlement',
+  'AED 1,500.00 charged at ROVE HOTEL with Credit Card 4110. The authorisation hold has been released.',
+  { kind: 'transaction', type: 'expense', amountFils: 150000, merchant: 'Rove Hotel',
+    category: 'travel', card: { last4: '4110', kind: 'credit' } });
+t('..."Pre-authorisation released" too',
+  'AED 1,500.00 charged at ROVE HOTEL with Credit Card 4110. Pre-authorisation released.',
+  { type: 'expense', amountFils: 150000, merchant: 'Rove Hotel' });
+t('...and a released TEMPORARY hold quoted with its own figure',
+  'AED 250.00 spent at ENOC with Debit Card 1234. Your earlier temporary hold of AED 300.00 is released.',
+  { type: 'expense', amountFils: 25000, merchant: 'ENOC', category: 'transport',
+    card: { last4: '1234', kind: 'debit' } });
+// The hold itself is still dropped, quoted balance and all — an evidence gate
+// would have let every one of these through, which is why the RELEASE clause
+// is anchored instead.
+t('a hold that was PLACED is still a hold',
+  'An authorisation hold of AED 1,500.00 has been placed on your Credit Card 4110 at ROVE HOTEL.', null);
+t('a blocked amount is still a hold, even beside an available limit',
+  'AED 900.00 has been blocked on your Credit Card 4110 at ROVE HOTEL. Avl Cr AED 7,000.00', null);
+t('a pre-authorisation is still a hold, even beside an available limit',
+  'A pre-authorisation of AED 900.00 has been placed on your Credit Card 4110 at HERTZ. Avl Cr AED 7,000.00', null);
+
+// ── A refund is a posting, so a footer must not delete it ──
+// The evidence gate is a FLOOR, not a whitelist of sentence shapes: the bare
+// "AED N refunded to your card" — how most issuers word it — carried no listed
+// verb phrase, so a PIN footer deleted money coming back. A deleted refund is
+// money the ledger keeps counting as spent.
+t('a refund carrying a PIN footer is still a refund',
+  'AED 350.00 refunded to your Credit Card 4110 by NOON. Do not disclose your PIN.',
+  { kind: 'transaction', type: 'income', amountFils: 35000, merchant: 'Refund',
+    card: { last4: '4110', kind: 'credit' } });
+t('...and one carrying an OTP footer',
+  'AED 350.00 refunded to your Credit Card 4110 by NOON. Never share your OTP.',
+  { type: 'income', amountFils: 35000, merchant: 'Refund' });
+t('...and the perfect-tense wording that already worked',
+  'AED 350.00 has been refunded to your Credit Card 4110 by NOON. Do not disclose your PIN.',
+  { type: 'income', amountFils: 35000, merchant: 'Refund' });
+
+// ── A field-list alert carries no verb, and is still a posting ──
+// The gate must not apply a stricter standard than the code path it guards:
+// the parser reads an amount, a card, a merchant and a date as a purchase
+// everywhere else.
+t('a terse comma-delimited alert survives a security footer',
+  'Transaction alert: AED 89.50, CARREFOUR, Debit Card 1234, 31/07/2026. Do not share this with anyone.',
+  { kind: 'transaction', type: 'expense', amountFils: 8950, category: 'groceries',
+    card: { last4: '1234', kind: 'debit' } });
+t('...and reads the same way without one',
+  'Transaction alert: AED 89.50, CARREFOUR, Debit Card 1234, 31/07/2026.',
+  { type: 'expense', amountFils: 8950, card: { last4: '1234', kind: 'debit' } });
+
 // ══════════════════════ Arabic ══════════════════════
 //
 // UAE banks send the same alert in Arabic, in English, or with both halves in
@@ -1609,6 +1918,62 @@ t('English still wins when the Arabic half comes first',
   ok('opposite directions never collapse into one row', rows.length === 2, `got ${rows.length}`);
 }
 
+// ── Cross-script merchant identity ──
+//
+// categoryGuess was tried as a proxy for "is this the same shop" and is far
+// too coarse in BOTH directions, so it produced one blocker each way.
+//
+// It SPLIT restatements: the Latin brand table knows SHARAF DG is shopping and
+// has no entry for شرف دي جي, which guesses "other", so one AED 200 purchase
+// became AED 400 of spending. A guess of "other" means "I do not know" — it is
+// not a claim that this is a different shop. Nothing downstream rescues it:
+// auto-import's dedupe key is (date, amount, title) and the two titles differ.
+for (const [latin, arabic, amount] of [
+  ['SHARAF DG', 'شرف دي جي', 20000],
+  ['VIRGIN MEGASTORE', 'فيرجن ميجاستور', 20000],
+  ['HOME CENTRE', 'هوم سنتر', 20000],
+  ['ZARA HOME', 'زارا هوم', 25000],
+  ['ADNOC', 'ادنوك', 20000],
+  ['CARREFOUR', 'كارفور', 8950],
+  ['LULU', 'لولو', 6000],
+  ['STARBUCKS', 'ستاربكس', 6000],
+  ['TALABAT', 'طلبات', 4500],
+]) {
+  const money = (amount / 100).toFixed(2);
+  const rows = parseSmsBatch(
+    `AED ${money} spent at ${latin} with Debit Card 1234\n\nتم شراء بمبلغ ${money} درهم لدى ${arabic} من بطاقتك 1234`,
+  );
+  ok(`${latin} and ${arabic} are one purchase, not two`,
+    rows.length === 1 && rows[0].amountFils === amount,
+    `got ${rows.length} rows: ${JSON.stringify(rows.map((r) => [r.amountFils, r.merchant]))}`);
+  // ...in either message order, and the Latin row is the one kept.
+  const flipped = parseSmsBatch(
+    `تم شراء بمبلغ ${money} درهم لدى ${arabic} من بطاقتك 1234\n\nAED ${money} spent at ${latin} with Debit Card 1234`,
+  );
+  ok(`...and with the Arabic half first, the Latin row wins (${latin})`,
+    flipped.length === 1 && !/[؀-ۿ]/.test(flipped[0].merchant),
+    `got ${flipped.length} rows: ${JSON.stringify(flipped.map((r) => r.merchant))}`);
+}
+
+// ...and it MERGED distinct shops, because a category is not an identity:
+// Amazon and نون are both shopping, Carrefour and لولو are both groceries,
+// Talabat and ستاربكس are both dining. Each of those pairs lost a real
+// purchase — two AED 150 purchases became one.
+for (const [latin, arabic] of [
+  ['AMAZON', 'نون'],
+  ['CARREFOUR', 'لولو'],
+  ['TALABAT', 'ستاربكس'],
+  ['IKEA', 'ستاربكس'],
+  ['SPINNEYS', 'نون'],
+]) {
+  const rows = parseSmsBatch(
+    `AED 150.00 spent at ${latin} with Debit Card 1234\n\nتم شراء بمبلغ 150.00 درهم لدى ${arabic} بطاقتك 1234`,
+  );
+  ok(`${latin} and ${arabic} are two purchases, not one`,
+    rows.length === 2,
+    `got ${rows.length} rows: ${JSON.stringify(rows.map((r) => [r.amountFils, r.merchant]))}`);
+}
+
 // ── Money moved but was not spent ──
 // Settling a credit card. transferHint is the only thing keeping the whole
 // card balance out of the month's spending. Needs the card STEM (بطاقتك will
@@ -1690,6 +2055,61 @@ t('an alef-hamza spelling categorises like its plain twin, and keeps its spellin
   ok('the raw field is the bank\'s own text, not the normalised one',
     p && p.raw === msg, `raw was ${JSON.stringify(p && p.raw)}`);
 }
+
+// ── The connector before the card, in every word order ──
+// The stop list knew only the bare من, so the SAME shop came back under a
+// different name for every connector a bank chose: "كارفور باستخدام", "كارفور
+// على", "كارفور بواسطة". باستخدام ("using your card") is the commonest of them
+// in Emirates NBD and ADCB Arabic alerts — more common than the من case that
+// was fixed — so this was the larger half of the bug. One shop under four
+// identities fragments every merchant override, subscription grouping and
+// per-merchant total between them.
+for (const [connector, order] of [
+  ['', 'لدى كارفور بطاقتك'],
+  ['من', 'لدى كارفور من بطاقتك'],
+  ['باستخدام', 'لدى كارفور باستخدام بطاقتك'],
+  ['على', 'لدى كارفور على بطاقتك'],
+  ['بواسطة', 'لدى كارفور بواسطة بطاقتك'],
+]) {
+  t(`the Arabic payee stops before "${connector || '(no connector)'} بطاقتك"`,
+    `تم شراء بمبلغ 250.00 درهم ${order} 1234`,
+    { type: 'expense', amountFils: 25000, merchant: 'كارفور', category: 'groceries',
+      card: { last4: '1234', kind: 'debit' } });
+}
+t('...and the same holds for a dining payee',
+  'تم شراء بمبلغ 250.00 درهم لدى ستاربكس باستخدام بطاقتك 1234',
+  { amountFils: 25000, merchant: 'ستاربكس', category: 'dining' });
+// ...and none of the connectors may cut a trade name that BEGINS with one.
+// منازل الشام is a real Sharjah restaurant group and علي بابا is Alibaba.
+t('a merchant whose name starts with من survives every connector stop',
+  'تم شراء بمبلغ 250.00 درهم لدى منازل الشام بطاقتك 1234',
+  { amountFils: 25000, merchant: 'منازل الشام' });
+t('a merchant whose name starts with على survives too',
+  'تم شراء بمبلغ 250.00 درهم لدى علي بابا بطاقتك 1234',
+  { amountFils: 25000, merchant: 'علي بابا' });
+
+// ── The Arabic mirror of the OTP footer ──
+// رمز التحقق sat in the unconditional half while لا تشارك had been moved into
+// the gated one, so the IDENTICAL do-not-share footer deleted the purchase or
+// not depending on which noun the bank happened to choose. لا تفصح عن رمز
+// التحقق is the standard Arabic rendering of "do not disclose your
+// verification code".
+t('an Arabic purchase survives "لا تفصح عن رمز التحقق"',
+  'شراء بمبلغ AED 89.50 لدى كارفور من بطاقتك 1234. لا تفصح عن رمز التحقق لاحد.',
+  { kind: 'transaction', type: 'expense', amountFils: 8950, merchant: 'كارفور',
+    category: 'groceries', card: { last4: '1234', kind: 'debit' } });
+t('...and "لا تشارك رمز التحقق مع أحد"',
+  'تم شراء بمبلغ 89.50 درهم لدى كارفور بطاقتك 1234. لا تشارك رمز التحقق مع أحد',
+  { type: 'expense', amountFils: 8950, merchant: 'كارفور' });
+t('...and "لن يطلب البنك رمز التحقق الخاص بك"',
+  'تم شراء بمبلغ 89.50 درهم لدى كارفور بطاقتك 1234. لن يطلب البنك رمز التحقق الخاص بك',
+  { type: 'expense', amountFils: 8950, merchant: 'كارفور' });
+t('...and the الرمز السري footer that was already gated',
+  'تم خصم 250.00 درهم لدى نون من بطاقتك 4110. لا تشارك الرمز السري مع احد.',
+  { type: 'expense', amountFils: 25000, merchant: 'نون', category: 'shopping' });
+// The boundary: an Arabic OTP that QUOTES its code still dies.
+t('an Arabic OTP quoting its code is still an OTP',
+  'رمز التحقق الخاص بك هو 458213 لعملية شراء بمبلغ 260.00 درهم لدى نون', null);
 
 // ── Found while building the above, English-only, same class of bug ──
 // CATEGORY_KEYWORDS carried an unanchored 7-?11, and guessCategory is fed the
@@ -1910,6 +2330,20 @@ fmt('REAL', 'family F — a masked amount is dropped, never guessed',
   'Your Credit Card ending *** 6383 was used for AED ····0710.00 at MSPLUS DOCUMENTS CL.... Your available limit is AED 3019.69',
   null);
 
+// The marketing recap, in the vocabulary ADCB actually uses. Every dirham of
+// it is already on the ledger, one real transaction at a time — and the
+// "last 30 days" spelling is one word away from the "this month" one that was
+// pinned in round 1.
+fmt('RECON', 'family G — a "last 30 days" spend recap fabricates nothing',
+  'Dear Customer, you spent AED 4,320.00 in the last 30 days. Download the ADCB app.', null);
+
+// ...and the footer the same issuer staples to REAL alerts. It says the same
+// thing about a transaction that DID happen, and deleted it.
+fmt('RECON', 'family F — the fraud-reporting footer keeps its purchase',
+  'Your Credit Card ending *** 6383 was used for AED 231.95 at BUSINESS HUB GOVERNMEN. Your available limit is AED 1659.58. If this was not authorised by you, please call 600 54 0000.',
+  { kind: 'transaction', type: 'expense', amountFils: 23195, merchant: 'Business Hub Governmen',
+    card: { last4: '6383', kind: 'credit' }, snapshotFils: 165958, snapshotKind: 'limit' });
+
 // ────────────────────────── Mashreq ─────────────────────────
 bank('Mashreq', '"Mashreq", "MashreqNeo"',
   'Family B — 28 of the corpus messages, the most common credit-card family on that phone.');
@@ -1943,6 +2377,12 @@ fmt('RECON', 'card statement — "Payment due date DD/MM/YYYY" yields a due day'
   'Your Mashreq Credit Card ending 4110 statement is ready. Total Amount Due AED 3,240.00. Minimum Amount Due AED 162.00. Payment due date 05/08/2026.',
   { kind: 'cardStatement', amountFils: 324000, minDueFils: 16200, merchant: 'Card •4110',
     card: { last4: '4110', kind: 'credit' }, date: '2026-08-05', dueDay: 5 });
+
+// An offer quotes a THRESHOLD to qualify for. There is no card, no merchant
+// and no posting verb behind the figure, and it was imported as a AED 1,000
+// purchase.
+fmt('RECON', 'a 0% instalment offer is not a AED 1,000 purchase',
+  'Enjoy 0% instalment plans on purchases above AED 1,000.00 with your Mashreq card.', null);
 
 // ──────────────────────────── FAB ───────────────────────────
 bank('FAB', '"FAB"',
@@ -2053,6 +2493,14 @@ fmt('RECON', 'monthly spend summary — a restatement, never a posting',
   'You spent AED 4,320.00 this month with your ADCB Credit Card. See the breakdown in the app.',
   null);
 
+// The ADIB/DIB Arabic word order, with باستخدام rather than من between the
+// payee and the funding card. It is the commonest connector of the set, and
+// without a stop for it the shop arrived named "كارفور باستخدام".
+fmt('RECON', 'Arabic purchase — the payee stops before "باستخدام بطاقتك"',
+  'تم شراء بمبلغ 250.00 درهم لدى كارفور باستخدام بطاقتك 1234',
+  { kind: 'transaction', type: 'expense', amountFils: 25000, merchant: 'كارفور',
+    category: 'groceries', card: { last4: '1234', kind: 'debit' } });
+
 // ────────────────────────── RAKBANK ─────────────────────────
 bank('RAKBANK', '"RAKBANK", "RAKBANKUAE"',
   'RECONSTRUCTED throughout. "RAKMoneyTransfer" is a real product name; the\n   register ("has been used for", "Available Limit:") is standard mid-tier UAE.');
@@ -2113,6 +2561,14 @@ fmt('RECON', 'RAKMoneyTransfer to a person keeps the payee and stays spending',
 fmt('RECON', 'card settlement with no stated amount — the limit is not the amount',
   'Thank you for your payment towards your RAKBANK Credit Card ending 4711. Your available limit is now AED 50,000.00',
   null);
+
+// The EPP pitch RAKBANK appends to a large purchase alert. The offer only
+// exists because the purchase just posted, so suppressing on it deleted
+// exactly the transactions banks pitch EPP on.
+fmt('RECON', 'a "Convert now" EPP footer keeps the purchase it advertises against',
+  'AED 1,850.00 spent at SHARAF DG on Credit Card 4110. Convert now to 0% EPP. Avl Cr AED 10,000.00',
+  { kind: 'transaction', type: 'expense', amountFils: 185000, merchant: 'Sharaf Dg',
+    category: 'shopping', card: { last4: '4110', kind: 'credit' } });
 
 // ──────────────────────────── Wio ───────────────────────────
 bank('Wio', '"Wio", "ae.wio.personal" (notification package)',

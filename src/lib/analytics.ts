@@ -98,13 +98,22 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   });
 }
 
-/** Per-month expense totals for one category over the last `months` months (oldest first). */
+/**
+ * Per-month expense totals for one category, `months` months ending at
+ * `endKey` (oldest first).
+ *
+ * `endKey` defaults to the calendar month, but the caller normally passes the
+ * month being reported on. The window used to be hard-anchored to today, so on
+ * a screen reporting July the strip ran to August and the sentence under it
+ * named a month the rest of the screen was not talking about.
+ */
 export function categoryTrend(
   transactions: Transaction[],
   category: CategoryId,
   months = 6,
+  endKey?: string,
 ): { key: string; fils: number }[] {
-  const nowKey = monthKey(new Date());
+  const nowKey = endKey ?? monthKey(new Date());
   const keys: string[] = [];
   for (let i = months - 1; i >= 0; i--) keys.push(shiftMonthKey(nowKey, -i));
   return keys.map((key) => {
