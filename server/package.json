@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "dev": "wrangler dev",
+    "setup": "node scripts/d1.mjs setup",
+    "predeploy": "node scripts/d1.mjs check",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "migrate": "wrangler d1 execute wafra --remote --file=./schema.sql"

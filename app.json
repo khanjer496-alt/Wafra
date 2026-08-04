@@ -80,7 +80,8 @@
           "defaultChannel": "payment-reminders",
           "enableBackgroundRemoteNotifications": true
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

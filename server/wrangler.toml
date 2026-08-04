@@ -10,7 +10,11 @@ command = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "wafra"
-# Replace with the id printed by: npx wrangler d1 create wafra
+# A D1 binding is resolved at build time and there is no environment-variable
+# substitution for it, so the id has to live in this file. It is written by
+# `npm run setup` (scripts/d1.mjs), which creates or finds the database and
+# applies schema.sql. `npm run deploy` refuses to run while this is still the
+# placeholder, so the failure is a sentence rather than a Cloudflare API error.
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 # Nightly sweep of expired queue rows and long-dead devices.

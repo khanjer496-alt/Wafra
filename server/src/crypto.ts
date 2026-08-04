@@ -14,6 +14,38 @@
 
 const enc = new TextEncoder();
 
+/* ─────────────────── Typing WebCrypto in two dialects ───────────────────
+ *
+ * This file is compiled twice: once against @cloudflare/workers-types (the
+ * real deployment target) and once against the DOM lib (scripts/test/run.sh
+ * transpiles it so the round-trip can be asserted under Node). The two
+ * describe the SAME runtime API with different types, so the parameter types
+ * are read off `SubtleCrypto` itself rather than named. That is what lets the
+ * Worker join the typecheck gate at all — it is why `server/` was excluded
+ * from it before.
+ */
+type KeyData = Parameters<SubtleCrypto['importKey']>[1];
+type BinaryData = Parameters<SubtleCrypto['digest']>[1];
+type DeriveAlgorithm = Parameters<SubtleCrypto['deriveBits']>[0];
+
+/**
+ * ECDH against a peer's public key.
+ *
+ * workerd's type generator renames the `public` field to `$public` because
+ * `public` is a TypeScript modifier keyword. The property the RUNTIME reads is
+ * `public`, in Workers and in browsers alike — so the object below is correct
+ * as written and the cast exists to reconcile two type definitions, not to
+ * paper over a wrong shape.
+ */
+function ecdh(publicKey: CryptoKey): DeriveAlgorithm {
+  return { name: 'X25519', public: publicKey } as unknown as DeriveAlgorithm;
+}
+
+/** `exportKey('raw', …)` always yields bytes; only the JWK overload does not. */
+async function exportRaw(key: CryptoKey): Promise<ArrayBuffer> {
+  return (await crypto.subtle.exportKey('raw', key)) as ArrayBuffer;
+}
+
 export interface SealedBlob {
   /** Ephemeral X25519 public key, base64. */
   epk: string;
@@ -37,11 +69,16 @@ export function b64decode(s: string): Uint8Array {
   return out;
 }
 
+/** Base64url, unpadded — safe in a header, a URL, or a JSON string. */
+export function b64url(bytes: ArrayBuffer | Uint8Array): string {
+  return b64encode(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /** Seal a JSON payload to a device's X25519 public key. */
 export async function seal(recipientPublicKeyB64: string, payload: unknown): Promise<SealedBlob> {
   const recipient = await crypto.subtle.importKey(
     'raw',
-    b64decode(recipientPublicKeyB64) as BufferSource,
+    b64decode(recipientPublicKeyB64) as KeyData,
     { name: 'X25519' },
     false,
     [],
@@ -51,15 +88,11 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
   const ephemeral = (await crypto.subtle.generateKey({ name: 'X25519' }, true, [
     'deriveBits',
   ])) as CryptoKeyPair;
-  const shared = await crypto.subtle.deriveBits(
-    { name: 'X25519', public: recipient },
-    ephemeral.privateKey,
-    256,
-  );
+  const shared = await crypto.subtle.deriveBits(ecdh(recipient), ephemeral.privateKey, 256);
   // HKDF over the ECDH output — the raw shared secret is not uniformly random
   // and must never be used as a key directly.
-  const ikm = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-  const epkRaw = await crypto.subtle.exportKey('raw', ephemeral.publicKey);
+  const ikm = await crypto.subtle.importKey('raw', shared as KeyData, 'HKDF', false, ['deriveKey']);
+  const epkRaw = await exportRaw(ephemeral.publicKey);
   const aes = await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(epkRaw), info: enc.encode('wafra/v1/seal') },
     ikm,
@@ -71,7 +104,7 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
   const ct = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     aes,
-    enc.encode(JSON.stringify(payload)),
+    enc.encode(JSON.stringify(payload)) as BinaryData,
   );
   return { epk: b64encode(epkRaw), iv: b64encode(iv), ct: b64encode(ct) };
 }
@@ -85,10 +118,7 @@ export async function hashToken(token: string): Promise<string> {
 }
 
 export function randomToken(): string {
-  return b64encode(crypto.getRandomValues(new Uint8Array(32)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return b64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 /** Constant-time compare, so token lookup cannot be timed character by character. */

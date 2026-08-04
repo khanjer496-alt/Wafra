@@ -17,9 +17,10 @@
  * not reimplemented. Every fix from the Android side applies here the day it
  * lands, and its 190 tests cover this service too.
  */
+import { MARKETS, setActiveMarket } from '@/lib/markets';
 import { parseSms } from '@/lib/sms-parser';
 
-import { b64decode, hashToken, randomToken, seal, timingSafeEqual } from './crypto';
+import { b64decode, b64url, hashToken, randomToken, seal, timingSafeEqual } from './crypto';
 
 export interface Env {
   DB: D1Database;
@@ -31,6 +32,10 @@ const MAX_BODY_BYTES = 8_192;
 const QUEUE_TTL_HOURS = 72;
 /** Per-device ingest ceiling. UAE banks send tens of alerts a day, not hundreds. */
 const INGEST_PER_HOUR = 300;
+/** Sender IDs are short by definition ("ADIB", "Emirates NBD", "ae.wio.personal"). */
+const MAX_SENDER_CHARS = 64;
+/** Fallback market when a device paired before market selection existed. */
+const DEFAULT_MARKET = 'AE';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -42,6 +47,8 @@ function json(data: unknown, status = 200): Response {
 interface Device {
   id: string;
   public_key: string;
+  /** Market pack id this device parses under — 'AE', 'SA', … */
+  market: string;
 }
 
 /** Resolve the bearer token to a device, or null. */
@@ -51,25 +58,85 @@ async function authenticate(req: Request, env: Env): Promise<Device | null> {
   if (!token) return null;
   const digest = await hashToken(token);
   const row = await env.DB.prepare(
-    'SELECT id, public_key, token_hash FROM devices WHERE token_hash = ?1',
+    'SELECT id, public_key, token_hash, market FROM devices WHERE token_hash = ?1',
   )
     .bind(digest)
-    .first<{ id: string; public_key: string; token_hash: string }>();
+    .first<{ id: string; public_key: string; token_hash: string; market: string | null }>();
   if (!row || !timingSafeEqual(row.token_hash, digest)) return null;
   await env.DB.prepare('UPDATE devices SET last_seen = unixepoch() WHERE id = ?1')
     .bind(row.id)
     .run();
-  return { id: row.id, public_key: row.public_key };
+  return { id: row.id, public_key: row.public_key, market: row.market || DEFAULT_MARKET };
 }
 
 /** Sliding-window counter, so one device cannot fill the database. */
 async function overRateLimit(env: Env, deviceId: string): Promise<boolean> {
   const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM queue WHERE device_id = ?1 AND created_at > unixepoch() - 3600",
+    'SELECT COUNT(*) AS n FROM queue WHERE device_id = ?1 AND created_at > unixepoch() - 3600',
   )
     .bind(deviceId)
     .first<{ n: number }>();
   return (row?.n ?? 0) >= INGEST_PER_HOUR;
+}
+
+/** A market id the app actually ships a pack for, or null. */
+function validMarket(id: unknown): string | null {
+  if (typeof id !== 'string') return null;
+  const up = id.trim().toUpperCase();
+  return MARKETS.some((m) => m.id === up) ? up : null;
+}
+
+/**
+ * The SMS sender ID, which is the ONLY thing that says which bank sent a
+ * message — no UAE bank but HSBC names itself in the body. Without it an iOS
+ * card is grey and nameless where the same card on Android is branded, and
+ * three sender-gated parser rules (islamic / ownPot / brand) never fire.
+ *
+ * It is normalised here and nowhere else: trimmed, collapsed to one line, and
+ * capped. A sender is a short handle, so anything longer is either a mistake in
+ * the user's Shortcut or someone trying to smuggle a payload through a field
+ * that gets sealed and handed to the phone.
+ */
+function sanitizeSender(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const s = value.replace(/[\r\n\t]+/g, ' ').trim().slice(0, MAX_SENDER_CHARS);
+  return s || undefined;
+}
+
+/**
+ * When the message arrived, according to the Shortcut.
+ *
+ * This matters more than it looks: the app's strong duplicate guard is a
+ * fingerprint of the message TIMESTAMP and amount (`smsKey` in auto-import.ts).
+ * Defaulting to `new Date()` — as this route used to — gives a re-POST of the
+ * same message a different fingerprint, so a Shortcut that fires twice writes
+ * the charge twice.
+ *
+ * A timestamp is only honoured if it is sane. A clock-skewed or hand-edited
+ * value further out than a day ahead or a year behind would either park a row
+ * in the future or trip the 45-day stale-due cutoff, so those fall back to now.
+ */
+function resolveReceivedAt(value: unknown, nowMs: number): number {
+  if (typeof value !== 'string' && typeof value !== 'number') return nowMs;
+  const ms = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(ms)) return nowMs;
+  if (ms > nowMs + 86_400_000) return nowMs;
+  if (ms < nowMs - 365 * 86_400_000) return nowMs;
+  return ms;
+}
+
+/**
+ * A stable identity for a message, computed from its text and sealed with the
+ * row. It never touches the database in the clear and never leaves this
+ * function as anything but ciphertext, so it is not an index into the user's
+ * messages — it is a dedupe key the phone can compare against itself.
+ *
+ * It exists because `receivedAt` is whatever the Shortcut sent: a retry can
+ * carry a drifted clock, and the timestamp fingerprint then fails to collapse.
+ * The digest does not drift.
+ */
+async function messageId(text: string): Promise<string> {
+  return b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
 }
 
 export default {
@@ -82,7 +149,7 @@ export default {
     // and never sends again. Losing the phone loses the queue, which is the
     // correct outcome for a service that is meant to hold nothing.
     if (req.method === 'POST' && url.pathname === '/v1/pair') {
-      const body = await req.json<{ publicKey?: string }>().catch(() => null);
+      const body = await req.json<{ publicKey?: string; market?: string }>().catch(() => null);
       const pk = body?.publicKey;
       if (typeof pk !== 'string' || pk.length > 128) return json({ error: 'bad_public_key' }, 400);
       try {
@@ -90,25 +157,36 @@ export default {
       } catch {
         return json({ error: 'bad_public_key' }, 400);
       }
+      // The device tells the relay which market pack to parse under. It is the
+      // only thing the phone knows that the Worker cannot infer: an SA user's
+      // "SAR 45.00 at PANDA" is not a UAE message, and parsing it under the
+      // hardcoded AE pack found no currency at all and dropped the row.
+      const market = validMarket(body?.market) ?? DEFAULT_MARKET;
       const id = crypto.randomUUID();
       const token = randomToken();
       await env.DB.prepare(
-        'INSERT INTO devices (id, public_key, token_hash, created_at, last_seen) VALUES (?1, ?2, ?3, unixepoch(), unixepoch())',
+        'INSERT INTO devices (id, public_key, token_hash, market, created_at, last_seen) VALUES (?1, ?2, ?3, ?4, unixepoch(), unixepoch())',
       )
-        .bind(id, pk, await hashToken(token))
+        .bind(id, pk, await hashToken(token), market)
         .run();
-      return json({ deviceId: id, token, ingestUrl: `${url.origin}/v1/ingest` });
+      return json({ deviceId: id, token, market, ingestUrl: `${url.origin}/v1/ingest` });
     }
 
     // ── Ingest: one message from the user's Shortcut ──
     if (req.method === 'POST' && url.pathname === '/v1/ingest') {
+      // Checked before the body is read, so an oversized POST is refused
+      // without buffering it.
+      const declared = Number(req.headers.get('content-length') ?? '0');
+      if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+        return json({ error: 'too_large' }, 413);
+      }
       const device = await authenticate(req, env);
       if (!device) return json({ error: 'unauthorized' }, 401);
       if (await overRateLimit(env, device.id)) return json({ error: 'rate_limited' }, 429);
 
       const raw = await req.text();
       if (raw.length > MAX_BODY_BYTES) return json({ error: 'too_large' }, 413);
-      const body = ((): { text?: string; receivedAt?: string } | null => {
+      const body = ((): { text?: unknown; sender?: unknown; receivedAt?: unknown } | null => {
         try {
           return JSON.parse(raw);
         } catch {
@@ -119,12 +197,23 @@ export default {
       const text = body?.text;
       if (typeof text !== 'string' || !text.trim()) return json({ error: 'empty' }, 400);
 
-      const parsed = parseSms(text);
+      const sender = sanitizeSender(body?.sender);
+      const receivedAtMs = resolveReceivedAt(body?.receivedAt, Date.now());
+
+      // Selecting the pack and parsing is ONE synchronous block on purpose.
+      // `setActiveMarket` sets module-level state that every isolate shares, so
+      // an `await` between these two lines would let a concurrent request for a
+      // different market change the pack out from under this parse. There is no
+      // await here, and a Workers isolate runs JavaScript on one thread, so no
+      // interleaving is possible.
+      setActiveMarket(device.market);
+      const parsed = parseSms(text, undefined, { sender });
       // Not a transaction — an OTP, a promo, a delivery notice. Nothing is
       // stored and nothing is echoed back: the Shortcut fires on every message
-      // from the sender, and most of them are none of our business.
+      // matching the user's filter, and most of them are none of our business.
       if (!parsed) return new Response(null, { status: 204 });
 
+      const msgId = await messageId(text);
       // `raw` is deliberately dropped here. It is the one field the app's own
       // importer keeps for its "unrecognised format" report, and keeping it
       // server-side would turn this database into a readable archive of the
@@ -132,7 +221,12 @@ export default {
       const { raw: _discard, ...row } = parsed;
       const sealed = await seal(device.public_key, {
         ...row,
-        receivedAt: body?.receivedAt ?? new Date().toISOString(),
+        // Everything below is sealed with the row and exists nowhere else.
+        sender,
+        smsTs: receivedAtMs,
+        receivedAt: new Date(receivedAtMs).toISOString(),
+        msgId,
+        market: device.market,
       });
       await env.DB.prepare(
         'INSERT INTO queue (id, device_id, epk, iv, ct, created_at) VALUES (?1, ?2, ?3, ?4, ?5, unixepoch())',
@@ -175,6 +269,23 @@ export default {
         .bind(device.id, ...ids)
         .run();
       return new Response(null, { status: 204 });
+    }
+
+    // ── Market: the user changed country in Settings ──
+    //
+    // Separate from pairing because re-pairing would invalidate the token that
+    // is baked into the user's Shortcut, and the Shortcut is the one piece of
+    // this system the app cannot repair for them.
+    if (req.method === 'PATCH' && url.pathname === '/v1/device') {
+      const device = await authenticate(req, env);
+      if (!device) return json({ error: 'unauthorized' }, 401);
+      const body = await req.json<{ market?: string }>().catch(() => null);
+      const market = validMarket(body?.market);
+      if (!market) return json({ error: 'bad_market' }, 400);
+      await env.DB.prepare('UPDATE devices SET market = ?2 WHERE id = ?1')
+        .bind(device.id, market)
+        .run();
+      return json({ market });
     }
 
     // ── Unpair: the user's delete button ──
