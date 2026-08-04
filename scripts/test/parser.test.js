@@ -1181,6 +1181,55 @@ t('"rejected" is a decline', 'Your Card ending 1234 was used for AED 500.00 at N
 t('"voided" is a decline', 'Your Card ending 1234 was used for AED 500.00 at NOON. Transaction was voided.', null);
 t('a cancelled payment is a decline', 'Your payment of AED 500.00 at NOON has been cancelled.', null);
 t('bare "failed" is a decline, not only "has failed"', 'AED 500.00 spent at NOON. Payment failed.', null);
+
+// ══ Suppression must never beat evidence ══
+// Each of these was a REAL posting that a boilerplate footer deleted. They are
+// invisible failures: no row, no error, and the money simply is not there.
+//
+// The rule they encode: a footer phrase only gets to suppress a message that
+// shows no posted transaction at all, and a code word only counts when its
+// digits are in the SAME SENTENCE.
+t(
+  'an OTP footer cannot reach across a full stop to an unrelated reference number',
+  'AED 89.50 spent at CARREFOUR using Debit Card 1234. Do not share your OTP with anyone. Ref: 123456.',
+  { type: 'expense', amountFils: 8950, merchant: 'Carrefour' },
+);
+t(
+  'an authorisation code is an approval reference on a posting, not an OTP',
+  'AED 250.00 spent at NOON with Credit Card 4110. Authorisation code: 123456.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon' },
+);
+t(
+  '3D Secure plus a reference number is still a posting',
+  'Purchase of AED 250.00 at NOON with Credit Card 4110 authenticated via 3D Secure. Ref: 883421.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon' },
+);
+t(
+  'a cancelled SUBSCRIPTION refund is money returned, not a decline',
+  'Your NETFLIX subscription was cancelled. AED 56.00 has been refunded to your Credit Card 4110.',
+  { type: 'income', amountFils: 5600 },
+);
+t(
+  'a cancelled BOOKING refund is money returned, not a decline',
+  'Your booking at EMIRATES was cancelled and AED 1,200.00 has been credited to your Credit Card 4110.',
+  { type: 'income', amountFils: 120000 },
+);
+t(
+  'an insufficient-balance FEE is money that actually left the account',
+  'AED 25.00 has been debited from your account 1234 as an insufficient balance fee. Avl Bal AED 400.00',
+  { type: 'expense', amountFils: 2500 },
+);
+// Controls: the suppressions above must still fire where they belong.
+t(
+  'a genuine OTP quoting the transaction it protects is still suppressed',
+  'Your one-time password for a purchase of AED 250.00 at NOON on card 4110 is 123456.',
+  null,
+);
+t(
+  'insufficient FUNDS as a refusal reason is still a decline',
+  'Your purchase of AED 500.00 at NOON was declined due to insufficient funds.',
+  null,
+);
 t('a FAILED status line is a decline', 'AED 500 purchase at NOON. Status: FAILED.', null);
 t('"could not be authorised" is a decline', 'Your purchase of AED 500.00 at NOON could not be authorised.', null);
 t('"did not go through" is a decline', 'Your purchase of AED 500.00 at NOON did not go through.', null);

@@ -344,8 +344,16 @@ const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent
  * real OTP message does. Naming alone therefore cannot be the discriminator —
  * see OTP_RE and OTP_FOOTER_RE below for the two halves it splits into.
  */
+// "AUTHORISATION CODE" IS NOT OTP VOCABULARY. It is the acquirer's approval
+// reference, printed on a POSTED card alert beside the amount it approved —
+// "AED 250.00 spent at NOON with Credit Card 4110. Authorisation code: 123456."
+// No bank has ever worded an OTP challenge that way; they say OTP, one-time
+// password, or verification code. Listing it here deleted every posting that
+// quoted its own approval reference, while the synonym "Approval code: 123456"
+// on the identical message was imported. Two spellings of one field decided
+// whether the user's money existed.
 const OTP_CODE_WORD =
-  String.raw`(?:\botp\b|one[\s-]?time\s+(?:password|pin|code|passcode)|(?:verification|validation|authentication|security|secure|access|confirmation)\s+code|auth(?:oris|oriz)ation\s+code|3-?d\s*secure|\b3ds\b|رمز التحقق|رمز تحقق|كلمه المرور الموقته|كلمه السر لمره واحده)`;
+  String.raw`(?:\botp\b|one[\s-]?time\s+(?:password|pin|code|passcode)|(?:verification|validation|authentication|security|secure|access|confirmation)\s+code|3-?d\s*secure|\b3ds\b|رمز التحقق|رمز تحقق|كلمه المرور الموقته|كلمه السر لمره واحده)`;
 /**
  * A 4-8 digit code, and not a figure. The trailing guard is what keeps a
  * balance out: "AED 5376.00" must never read as a one-time code.
@@ -368,7 +376,14 @@ const OTP_RE = new RegExp(
   // "Your OTP is 458213", "Security code 458213", "3D Secure: 458213",
   // "رمز التحقق ... هو 482910" — the noun and its digits in one clause.
   `${OTP_CODE_WORD}(?:\\s+(?:code|otp|password|pin|number))?\\s*(?:is|:|-|=|هو)?\\s*${OTP_CODE_DIGITS}` +
-    `|${OTP_CODE_WORD}[^\\n]{0,48}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
+    // The noun and its digits must be in the SAME SENTENCE. This gap used to be
+    // `[^\n]`, which let a "never share your OTP" FOOTER reach across the full
+    // stop and bind to whatever number came next — "AED 89.50 spent at CARREFOUR
+    // using Debit Card 1234. Do not share your OTP with anyone. Ref: 123456."
+    // was read as a code challenge and deleted, while the same message with the
+    // reference written without a colon was imported. `\.\d` is still allowed
+    // through so the gap can cross a decimal point inside an amount.
+    `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
     `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`,
@@ -481,7 +496,7 @@ const FRAUD_FOOTER_RE =
 const DECLINED_VERB_RE =
   /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b/i;
 const DECLINED_RE =
-  /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|insufficient|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|(?:was|is|has been|been)\s+cancell?ed|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect pin|wrong pin|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|تم عكس|معكوسه/i;
+  /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect pin|wrong pin|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|تم عكس|معكوسه/i;
 /**
  * Money coming BACK. A reversal is a posting in the opposite direction, not a
  * refusal — but "reversed" sat in the decline list, so every reversal was
