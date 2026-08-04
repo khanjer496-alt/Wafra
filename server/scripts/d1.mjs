@@ -26,7 +26,18 @@ const SCHEMA = join(SERVER_DIR, 'schema.sql');
 const DB_NAME = 'wafra';
 /** The literal that means "nobody has run setup yet". */
 const PLACEHOLDER = 'REPLACE_WITH_D1_DATABASE_ID';
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * A D1 database id, validated down to the version and variant nibbles.
+ *
+ * The `[1-5]` and `[89ab]` groups are the strict part, folded in from the
+ * `check-deploy-config.mjs` this script replaced. They are what stops a
+ * plausible-looking hand-typed or truncated-and-repadded string from passing
+ * as configuration and turning into a Cloudflare API error at deploy time,
+ * which is the one moment nobody wants to be debugging a regex.
+ */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** The same shape unanchored, for scanning it out of chatty wrangler output. */
+const UUID_SCAN_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i;
 
 function readToml() {
   return readFileSync(TOML, 'utf8');
@@ -60,7 +71,7 @@ function idFrom(output) {
   } catch {
     // Fall through to the scan below.
   }
-  const scan = output.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  const scan = output.match(UUID_SCAN_RE);
   return scan?.[0] ?? null;
 }
 

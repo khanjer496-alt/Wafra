@@ -10,8 +10,8 @@ manage budget" (Play policy: Use of SMS or Call Log permission groups).
 - SMS-based expense tracking IS the core functionality, not a side feature.
 - The permission is **optional**: the app fully works with manual entry if the
   user taps "Not now" (this must stay true — never gate the app on the grant).
-- Nothing leaves the device. No servers, no account, no analytics on spending.
-  This exceeds FinArt's "private mode" (their opt-in is our only mode).
+- The **Android alert-capture path** is local: SMS and bank-app notification
+  content is not sent to Wafra's iPhone relay. Private Mode remains available.
 - Prominent disclosure before the runtime prompt (onboarding explainer step).
 
 ## Permissions Declaration Form — draft answer
@@ -20,22 +20,24 @@ manage budget" (Play policy: Use of SMS or Call Log permission groups).
 > automatic expense tracking from bank transaction alert SMS: UAE banks send an
 > SMS for every card transaction, transfer, statement and bill. Wafra reads
 > these messages on-device to log transactions, track credit-card due dates and
-> detect recurring subscriptions. Processing is 100% local: messages are never
-> transmitted off the device; the app has no server component and no user
-> accounts. Non-transactional messages are ignored and never stored. The
+> detect recurring subscriptions. In the Android build, alert processing is
+> local and message content is never sent to Wafra's iPhone relay.
+> Non-transactional messages are ignored and never stored. The
 > permission is optional — the app functions with manual entry when declined.
-> Requested permissions: READ_SMS (inbox scan of historical bank alerts).
+> Requested permissions: READ_SMS (inbox scan of historical bank alerts) and
+> RECEIVE_SMS (process new supported bank alerts when they arrive). Both paths
+> parse on-device; message text is not uploaded.
 
 Attach a short screen-recording of: onboarding disclosure → permission prompt →
 scan → transactions appearing.
 
 ## Data safety form
 
-- Data collected: none. Data shared: none. All data stored on-device only.
-- Financial info is processed ephemerally on-device; optional backup is an
-  encrypted file the user exports themselves.
-- Security practices: data not transmitted; user can request deletion by
-  clearing app data (Settings → Erase data).
+- Android bank-alert content is processed on-device and not sent to the relay.
+- RevenueCat's current purchase and anonymous-identifier disclosures must be
+  reflected in the final Play Data safety form; do not submit the old blanket
+  “No data collected” answer without verifying the configured SDK.
+- User financial records stay local unless the user exports them.
 
 ## Store listing (draft)
 
@@ -47,10 +49,11 @@ scan → transactions appearing.
 - Knows every card: limits, outstanding, statement due dates with reminders.
 - Subscriptions: detects recurring charges, price rises, stopped services.
 - Budgets, insights in plain language, net-worth trend, monthly report.
-- Made for the UAE: AED-first, DEWA/Etisalat/du understood, 16 UAE banks.
+- Made for the UAE: AED-first, DEWA/Etisalat/du understood, with tested
+  formats for 8 UAE banks.
 - **Data privacy & security controls** section (the compliance argument):
   - No registration — no email, no phone number, no account.
-  - Everything on your phone. No servers involved, ever.
+  - Android bank alerts are processed on your phone, not by the iPhone relay.
   - Optional app lock (fingerprint).
   - Backup is a file you own and control.
   - Does not connect to bank accounts; works from SMS alerts only.
@@ -68,8 +71,8 @@ RECEIVE_WAP_PUSH`.
 - File the **Permissions Declaration Form** in Play Console and select that
   permitted use. Apps that skip the form "may be removed from Google Play".
 - The binding condition is data handling: budgeting apps must not exfiltrate
-  or share non-financial or personal SMS. Wafra has no backend at all, so
-  nothing leaves the device — say this plainly in the listing and the form.
+  or share non-financial or personal SMS. Wafra's Android capture code does not
+  upload those messages — say this platform-specific fact plainly.
 - The receiver drops any message without a currency amount before storing it,
   so personal correspondence is never retained. That is the sentence the
   reviewer wants to read.
@@ -96,39 +99,43 @@ collected. Do not model Wafra's documents on theirs: ours can claim far less
 because the app does far less, and that advantage only survives if the claims
 stay literally true.
 
-## If iOS ever comes up
+## iOS capture is a separate disclosure
 
-Worth knowing before it is planned: **iOS cannot do what Wafra does.** Apple
-gives no app access to the SMS inbox, so automatic tracking from bank alerts
-is not portable. FinArt's iOS app works around this with Apple Shortcuts
-automations and user-forwarded bank emails, and its policy states those
-messages are "sent to our server for transaction detection", retained 30 days.
+iOS has no third-party SMS-inbox API. Wafra's iPhone flow therefore has the user
+create a personal Apple Message automation. Only alerts from bank senders the
+user selects are POSTed to Wafra's relay.
 
-So an iOS version means either a materially weaker product (manual forwarding)
-or building the server Wafra deliberately does not have. Neither is a small
-change of scope — treat iOS as a separate product decision, not a port.
+The relay parses the raw request body in memory and discards it immediately.
+It stores only the structured result, sealed to the iPhone, until acknowledgement
+or for at most 30 days. A silent wake may stage that structured row in a
+separate encrypted inbox after the first unlock; the main ledger folds it in on
+foreground. Delivery is best-effort and stops after a user force-quit until the
+next open, so do not promise an exact background update time.
+
+Private Mode disables the relay and keeps processing local, which also means
+automatic SMS capture is unavailable on iPhone in that mode.
 
 ## Data safety form answers
 
-The app makes no network requests of its own, so the honest answers are the
-simple ones. Keep them true: the moment anything is uploaded, these change.
+These answers must be completed for the Android artifact actually submitted and
+the configured RevenueCat SDK. The old blanket answers are retained below only
+as examples of what **not** to submit:
 
 | Question | Answer |
 | --- | --- |
-| Does your app collect or share any of the required user data types? | **No** |
-| Is all user data encrypted in transit? | N/A — no data is transmitted |
+| Does your app collect or share any of the required user data types? | **Verify RevenueCat's current disclosure; Android bank-alert content itself is not uploaded** |
+| Is all user data encrypted in transit? | Yes for configured purchase traffic |
 | Do you provide a way for users to request data deletion? | Yes — uninstall, or clear data in Settings |
 
-Play billing is Google's own processing and is not app-collected data. If a
-cloud sync or crash reporter is ever added, this section and the privacy
-policy both have to change before that build ships.
+Verify Play billing and RevenueCat handling against the current Data safety
+definitions before submission. If cloud sync or crash reporting is added, this
+section and the privacy policy must change before that build ships.
 
 For reference, FinArt — the closest comparable on Play — declares "No data
 shared with third parties", "Data is encrypted in transit", and collects
 "Personal info, Financial info and 4 others", because it offers multi-device
 sync and Drive backup. Wafra's position is stronger precisely because it has
-no server; that is worth saying plainly in the listing rather than leaving
-the reviewer to infer it.
+  different architecture; do not borrow its answers.
 
 ## Prominent disclosure (required before the SMS prompt)
 
@@ -165,7 +172,8 @@ these three facts.
         update a side-loaded install and cannot be uploaded to Play.
       - The build fails early, with a message naming the secret at fault, if
         the keystore does not open or lacks the alias.
-- [x] Play **AAB** built by CI as the wafra-aab artifact every push
+- [x] Play **AAB** built by CI as the `wafra-aab` artifact on `main`, or from
+      a manual run with **Also build the Play Store bundle** enabled
 - [x] Privacy policy written (landing page section; host on real domain)
 - [x] i18n: English + Arabic UI with RTL; auto-detected, Settings override
 - [ ] Final app icon + adaptive icon + splash pass
@@ -186,9 +194,10 @@ these three facts.
   the store purchase button reads "3 days free".
 - SKUs (create in Play Console → Monetize → Subscriptions):
   `wafra_pro_monthly` (AED 9.99/mo), `wafra_pro_yearly` (AED 74.99/yr).
-- Code: paywall at `src/app/pro.tsx`; entitlement `state.pro`; billing
-  abstraction `src/lib/purchases.ts` — swap its stubs for react-native-iap
-  at submission (requestSubscription/getAvailablePurchases). UI unchanged.
+- Code: paywall at `src/app/pro.tsx`; entitlement `state.pro`; RevenueCat store
+  integration in `src/lib/billing.ts`. Production builds still require the
+  public platform SDK keys plus the matching store products and `pro`
+  entitlement described in `docs/billing.md`.
 - Play policy: digital subscriptions MUST use Play Billing (15% fee under
   $1M/yr after joining the small-business program). Include manage/cancel
   link (Play handles it), and price in AED via Play Console pricing.
@@ -200,6 +209,9 @@ these three facts.
 
 - Bank-app **notification listener** as a second capture channel (banks moving
   off SMS to push notifications).
-- Email parsing channel (optional, Gmail API) — later.
+- Opt-in bank-email forwarding and text-PDF statement import ship through the
+  same privacy-minimizing relay. Raw MIME, HTML, attachments and PDF text are
+  discarded after parsing; keep the Data safety and privacy disclosures in
+  sync with that optional network path.
 - Salary-day month start (custom month boundary) — cheap, high-value in UAE.
 - Multi-currency auto-conversion to AED (fixes USD-only subscription SMS gap).

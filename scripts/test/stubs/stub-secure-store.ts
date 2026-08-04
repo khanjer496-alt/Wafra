@@ -13,9 +13,22 @@ export interface SecureStoreOptions {
   requireAuthentication?: boolean;
 }
 
-/** Same numeric value expo-secure-store exports; only identity matters here. */
+/**
+ * Same numeric values expo-secure-store exports; only identity matters here.
+ *
+ * All THREE classes the client can name must be declared, and they must stay
+ * distinct. The relay client deliberately writes its two keychain items under
+ * two different classes — the admin config under WHEN_UNLOCKED_THIS_DEVICE_ONLY
+ * so a lost, locked phone cannot be made to give up the token that revokes
+ * devices, and the background-sync subset under
+ * AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY so a wake can still read it from a
+ * pocket. Modelling only one of them here does not weaken an assertion, it
+ * breaks the build: `SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY` is a compile
+ * error against a stub that omits it, and the relay pass of run.sh fails.
+ */
 export const AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY = 2;
 export const WHEN_UNLOCKED = 0;
+export const WHEN_UNLOCKED_THIS_DEVICE_ONLY = 4;
 
 const items = new Map<string, string>();
 const writes: { key: string; options?: SecureStoreOptions }[] = [];

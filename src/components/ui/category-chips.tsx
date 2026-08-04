@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import type { CategoryMeta } from '@/lib/categories';
+import { tapped } from '@/lib/haptics';
+import { categoryLabel, type CategoryMeta } from '@/lib/categories';
 import type { CategoryId } from '@/lib/types';
 
 interface CategoryChipsProps {
@@ -32,16 +34,50 @@ export function CategoryChips({
   layout = 'scroll',
 }: CategoryChipsProps) {
   const theme = useTheme();
+  const language = useLanguage();
   const isOn = (id: CategoryId) =>
     selected instanceof Set ? selected.has(id) : selected === id;
 
+  /**
+   * Scroll the selected chip into view.
+   *
+   * Opening a Shopping entry showed Groceries, Dining, Transport, Utilities
+   * and nothing selected — the current category was off the right edge, so the
+   * editor looked like it had lost the value it was editing. Each chip reports
+   * its own offset as it lays out; the single-selection case scrolls to it.
+   */
+  const scroller = useRef<ScrollView>(null);
+  const offsets = useRef(new Map<CategoryId, number>());
+  const single = selected instanceof Set ? null : selected;
+
+  const remember = useCallback((id: CategoryId, x: number) => {
+    offsets.current.set(id, x);
+  }, []);
+
+  useEffect(() => {
+    if (layout !== 'scroll' || !single) return;
+    // After layout, or the offset is not there yet on first render.
+    const id = setTimeout(() => {
+      const x = offsets.current.get(single);
+      if (x === undefined) return;
+      scroller.current?.scrollTo({ x: Math.max(0, x - 16), animated: false });
+    }, 0);
+    return () => clearTimeout(id);
+  }, [single, layout]);
+
   const chips = categories.map((c) => {
     const on = isOn(c.id);
+    const label = categoryLabel(c, language);
     return (
       <Pressable
         key={c.id}
-        onPress={() => onToggle(c.id)}
+        onPress={() => {
+          tapped();
+          onToggle(c.id);
+        }}
+        onLayout={(e) => remember(c.id, e.nativeEvent.layout.x)}
         accessibilityRole="button"
+        accessibilityLabel={label}
         accessibilityState={{ selected: on }}
         style={[
           styles.chip,
@@ -52,7 +88,7 @@ export function CategoryChips({
         ]}>
         <Icon name={c.icon} size={13} color={on ? theme.background : theme.textSecondary} />
         <ThemedText type="meta" style={{ color: on ? theme.background : theme.text }}>
-          {c.label}
+          {label}
         </ThemedText>
       </Pressable>
     );
@@ -62,6 +98,7 @@ export function CategoryChips({
 
   return (
     <ScrollView
+      ref={scroller}
       horizontal
       showsHorizontalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
@@ -72,11 +109,12 @@ export function CategoryChips({
 }
 
 const styles = StyleSheet.create({
-  row: { gap: Spacing.two, paddingRight: Spacing.three },
+  row: { gap: Spacing.two, paddingEnd: Spacing.three },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 44,
     gap: 6,
     borderWidth: 1,
     borderRadius: Radius.full,

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { ThemedText, type ThemedTextProps } from '@/components/themed-text';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { formatAmount } from '@/lib/format';
 
 interface CountUpAmountProps extends Omit<ThemedTextProps, 'children'> {
@@ -14,10 +15,17 @@ export function CountUpAmount({ fils, prefix = 'AED ', durationMs = 700, ...rest
   const [display, setDisplay] = useState(fils);
   const fromRef = useRef(fils);
   const frame = useRef<number | null>(null);
+  const reduced = useReducedMotion();
 
   useEffect(() => {
     const from = fromRef.current;
     if (from === fils) return;
+    // Reduce Motion, or a screen reader that would announce all ~40 frames.
+    if (reduced) {
+      setDisplay(fils);
+      fromRef.current = fils;
+      return;
+    }
     const start = Date.now();
     const tick = () => {
       const t = Math.min(1, (Date.now() - start) / durationMs);
@@ -34,7 +42,7 @@ export function CountUpAmount({ fils, prefix = 'AED ', durationMs = 700, ...rest
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       fromRef.current = fils;
     };
-  }, [fils, durationMs]);
+  }, [fils, durationMs, reduced]);
 
   return (
     <ThemedText tabular {...rest}>

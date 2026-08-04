@@ -53,29 +53,27 @@ import {
   trendShape,
 } from '@/lib/analytics';
 import { getCategory } from '@/lib/categories';
-import { formatAED, monthKey, monthLabel } from '@/lib/format';
+import { formatAED, monthKey, monthLabel, weekdayName, weekdayShort } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
 import { summarizeMonth } from '@/lib/insights';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 
-/** Sunday-first, matching `dayOfWeekSpend`'s buckets and the UAE week. */
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const WEEKDAYS_FULL = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
 /** Enough to see a pattern, few enough to fit without scrolling sideways. */
 const TREND_MONTHS = 6;
 const MERCHANT_ROWS = 6;
 const TREND_CATEGORIES = 4;
+/**
+ * `categoryMovers` takes its row limit THIRD, before the two exclusion sets.
+ * Stated here rather than left to the default, because leaving it out and
+ * passing `liveAccounts` next puts a Set where a number goes — which is the
+ * error that caught it, and one position further along it would not have been
+ * an error at all, just a wrong answer.
+ */
+const MOVER_ROWS = 4;
 
 export default function StatsScreen() {
   const theme = useTheme();
@@ -92,22 +90,40 @@ export default function StatsScreen() {
   const [periodOpen, setPeriodOpen] = useState(false);
   const [trendCategory, setTrendCategory] = useState<CategoryId | null>(null);
 
+  /**
+   * The two exclusion sets every money figure in the app is filtered through.
+   *
+   * This screen was written before they existed and passed neither, so each of
+   * its five rollups quietly counted two kinds of row that are not spending: a
+   * move between the user's own accounts, and anything on an archived account.
+   * A single card payment would appear as the top merchant AND as the biggest
+   * category mover, and the weekday chart would call payday the heaviest day of
+   * the week. Nothing about the output looks wrong — the figures are just
+   * larger — which is why every other screen derives these the same way and
+   * contracts.test.js checks that they do.
+   */
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period),
-    [state.transactions, period],
+    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   const merchants = useMemo(
-    () => topMerchants(state.transactions, period, MERCHANT_ROWS),
-    [state.transactions, period],
+    () => topMerchants(state.transactions, period, MERCHANT_ROWS, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
   const movers = useMemo(
-    () => categoryMovers(state.transactions, period),
-    [state.transactions, period],
+    () => categoryMovers(state.transactions, period, MOVER_ROWS, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
   const weekdays = useMemo(
-    () => dayOfWeekSpend(state.transactions, period),
-    [state.transactions, period],
+    () => dayOfWeekSpend(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   /** The categories worth offering a trend for: this period's biggest. */
@@ -118,12 +134,19 @@ export default function StatsScreen() {
   const shownCategory =
     trendCategory && trendChoices.includes(trendCategory) ? trendCategory : trendChoices[0];
 
+  // The 4th argument is endKey; liveAccounts and internal are 5th and 6th. The
+  // two branches merged here disagreed about exactly this — one signature was
+  // (txs, cat, months, live, internal) and the other (txs, cat, months, endKey),
+  // same arity, incompatible 4th. Passing a Set where a "YYYY-MM" is expected
+  // makes every bucket read zero, so the strip draws an empty category instead
+  // of failing. analytics.ts now throws on that shape; this call is the ordering
+  // it throws to protect.
   const trend = useMemo(
     () =>
       shownCategory
-        ? categoryTrend(state.transactions, shownCategory, TREND_MONTHS, key)
+        ? categoryTrend(state.transactions, shownCategory, TREND_MONTHS, key, liveAccounts, internal)
         : [],
-    [state.transactions, shownCategory, key],
+    [state.transactions, shownCategory, key, liveAccounts, internal],
   );
 
   const merchantMax = merchants[0]?.totalFils ?? 0;
@@ -142,22 +165,22 @@ export default function StatsScreen() {
    * latest" printed one number twice and called it an observation.
    */
   const trendSentence = (() => {
-    const avg = formatAED(shape.averageFils, { decimals: false });
+    const amount = formatAED(shape.averageFils, { decimals: false });
     const latest = formatAED(shape.latestFils, { decimals: false });
-    const pct = Math.round(Math.abs(shape.latestVsAverage) * 100);
-    if (shape.flat) {
-      return `${avg} every month for ${TREND_MONTHS} months — it hasn't moved.`;
+    const percent = Math.round(Math.abs(shape.latestVsAverage) * 100);
+    if (shape.flat) return tf('statsTrendFlat', { amount, count: TREND_MONTHS });
+    if (percent < 5) return tf('statsTrendOnAverage', { amount, month: trendMonth });
+    // Four whole sentences, not a stem plus two glued-on fragments. The
+    // direction and the "highest of the six" clause were separate English
+    // strings concatenated in this expression, which is unwritable in Arabic:
+    // the clause has to agree with the noun and sits in a different place.
+    // Above-average can only ever be the highest and below-average the lowest,
+    // so these four are the whole space.
+    const vars = { amount, latest, percent, month: trendMonth, count: TREND_MONTHS };
+    if (shape.latestVsAverage > 0) {
+      return tf(shape.latestIsHighest ? 'statsTrendAboveHighest' : 'statsTrendAbove', vars);
     }
-    if (pct < 5) {
-      return `${avg} a month on average, and ${trendMonth} lands right on it.`;
-    }
-    const direction = shape.latestVsAverage > 0 ? 'above' : 'below';
-    const extreme = shape.latestIsHighest
-      ? ', the highest of the six'
-      : shape.latestIsLowest
-        ? ', the lowest of the six'
-        : '';
-    return `${avg} a month on average. ${trendMonth} came to ${latest} — ${pct}% ${direction}${extreme}.`;
+    return tf(shape.latestIsLowest ? 'statsTrendBelowLowest' : 'statsTrendBelow', vars);
   })();
 
   const empty = summary.expenseFils === 0 && summary.incomeFils === 0;
@@ -169,12 +192,12 @@ export default function StatsScreen() {
           <View style={styles.headerLeft}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Back"
+              accessibilityLabel={t('back')}
               hitSlop={10}
               onPress={() => router.back()}>
               <Icon name="chevron-left" size={20} color={theme.text} />
             </Pressable>
-            <ThemedText type="title">Stats</ThemedText>
+            <ThemedText type="title">{t('statsTitle')}</ThemedText>
           </View>
           <PeriodPill onPress={() => setPeriodOpen(true)} />
         </View>
@@ -182,10 +205,11 @@ export default function StatsScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {empty ? (
             <View style={[styles.emptyBlock, { borderColor: theme.cardBorderStrong }]}>
-              <ThemedText type="small">Nothing to measure in {periodLabel(period)}</ThemedText>
+              <ThemedText type="small">
+                {tf('statsEmptyTitle', { period: periodLabel(period) })}
+              </ThemedText>
               <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>
-                Stats reads the ledger you already have. Import a month of bank messages, or pick
-                another period, and every section below fills itself in.
+                {t('statsEmptyBody')}
               </ThemedText>
             </View>
           ) : null}
@@ -193,7 +217,7 @@ export default function StatsScreen() {
           {/* ── Merchants ─────────────────────────────────────────────── */}
           {merchants.length > 0 && (
             <Section index={0} style={styles.section}>
-              <SectionHeader title="Where it goes" />
+              <SectionHeader title={t('statsWhereItGoes')} />
               {merchants.map((m, i) => (
                 <Row
                   key={m.title + i}
@@ -229,9 +253,9 @@ export default function StatsScreen() {
           {/* ── Movers ────────────────────────────────────────────────── */}
           {movers.length > 0 && (
             <Section index={1} style={styles.section}>
-              <SectionHeader title="What changed" />
+              <SectionHeader title={t('statsWhatChanged')} />
               <ThemedText type="meta" themeColor="textSecondary" style={styles.caption}>
-                Against the period before this one.
+                {t('statsMoversCaption')}
               </ThemedText>
               {movers.map((m, i) => {
                 const up = m.deltaFils > 0;
@@ -240,7 +264,9 @@ export default function StatsScreen() {
                   <Row
                     key={m.category}
                     last={i === movers.length - 1}
-                    accessibilityLabel={`${getCategory(m.category).label}, ${up ? 'up' : 'down'}`}
+                    accessibilityLabel={tf(up ? 'statsMoverUp' : 'statsMoverDown', {
+                      category: getCategory(m.category).label,
+                    })}
                     onPress={() => router.push(`/transactions?category=${m.category}`)}>
                     <CategoryAvatar category={m.category} />
                     <View style={styles.rowText}>
@@ -272,7 +298,12 @@ export default function StatsScreen() {
           {/* ── One category over time ────────────────────────────────── */}
           {shownCategory && shape.maxFils > 0 && (
             <Section index={2} style={styles.section}>
-              <SectionHeader title={`${getCategory(shownCategory).label} · ${TREND_MONTHS} months`} />
+              <SectionHeader
+                title={tf('statsCategoryMonths', {
+                  category: getCategory(shownCategory).label,
+                  count: TREND_MONTHS,
+                })}
+              />
               <View style={styles.chips}>
                 {trendChoices.map((c) => (
                   <Chip
@@ -300,26 +331,30 @@ export default function StatsScreen() {
           {/* ── Weekday rhythm ────────────────────────────────────────── */}
           {weekdayTotal > 0 && (
             <Section index={3} style={styles.section}>
-              <SectionHeader title="When it goes" />
+              <SectionHeader title={t('statsWhenItGoes')} />
               {/* Said before the chart, not after it. `dayOfWeekSpend` drops
                   fixed commitments, and a reader who is not told that will
                   wonder where the rent went. */}
               <ThemedText type="meta" themeColor="textSecondary" style={styles.caption}>
-                Day-to-day spending only. Rent and other fixed commitments land on whichever
-                weekday the standing order falls on, which is a calendar, not a habit.
+                {t('statsWeekdayCaption')}
               </ThemedText>
               <View style={styles.strip}>
                 <HistoryStrip
                   height={64}
                   months={weekdays.map((fils, i) => ({
-                    label: WEEKDAYS[i],
+                    label: weekdayShort(i),
                     fils,
                     current: i === heaviestDay,
                   }))}
                 />
               </View>
               <RichSentence
-                text={`${WEEKDAYS_FULL[heaviestDay]} is your heaviest day — ${formatAED(weekdays[heaviestDay], { decimals: false })} of the ${formatAED(weekdayTotal, { decimals: false })} you chose to spend in ${periodLabel(period)}.`}
+                text={tf('statsHeaviestDay', {
+                  day: weekdayName(heaviestDay),
+                  amount: formatAED(weekdays[heaviestDay], { decimals: false }),
+                  total: formatAED(weekdayTotal, { decimals: false }),
+                  period: periodLabel(period),
+                })}
                 color={theme.textSecondary}
                 size={12}
               />
@@ -331,28 +366,28 @@ export default function StatsScreen() {
               drawn again at the top of this screen, identical to the originals
               down to the figure above them. */}
           <Section index={4} style={styles.section}>
-            <SectionHeader title="Also worth a look" />
+            <SectionHeader title={t('statsAlsoWorthALook')} />
             <Row
-              accessibilityLabel="Net worth over six months, on Wallet"
+              accessibilityLabel={tf('statsNetWorthLinkA11y', { count: TREND_MONTHS })}
               onPress={() => router.push('/wallet')}>
               <Icon name="wallet" size={19} color={theme.textSecondary} />
               <View style={styles.rowText}>
-                <ThemedText type="small">Net worth</ThemedText>
+                <ThemedText type="small">{t('netWorth')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary">
-                  {TREND_MONTHS} months of balance, on Wallet
+                  {tf('statsNetWorthLink', { count: TREND_MONTHS })}
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />
             </Row>
             <Row
               last
-              accessibilityLabel="In versus out over six months, on Flow"
+              accessibilityLabel={tf('statsInVsOutLinkA11y', { count: TREND_MONTHS })}
               onPress={() => router.push('/flow')}>
               <Icon name="chart" size={19} color={theme.textSecondary} />
               <View style={styles.rowText}>
-                <ThemedText type="small">In vs out</ThemedText>
+                <ThemedText type="small">{t('statsInVsOut')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary">
-                  {TREND_MONTHS} months of earning and spending, on Flow
+                  {tf('statsInVsOutLink', { count: TREND_MONTHS })}
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />

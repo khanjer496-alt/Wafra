@@ -1,382 +1,328 @@
 /**
- * The iOS relay client.
+ * The iOS half of capture.
  *
- * Android reads SMS on-device and never touches the network. iOS cannot: Apple
- * gives no app access to messages, so the only path is a Shortcuts personal
- * automation the user builds, which POSTs each bank message to the relay
- * (server/). The relay parses it, drops the text, and queues the parsed row
- * SEALED to this device's public key. This file is the other end of that: it
- * generates the keypair, pairs, collects the sealed rows, opens them, and
- * hands them to the app's existing importer.
+ * Android reads the inbox directly and never needs a network (src/lib/auto-import.ts).
+ * iOS cannot: Apple gives no app access to SMS, and any capture that is not
+ * user-initiated fails App Review. What iOS does allow is a Shortcuts personal
+ * automation the USER creates — "when I get a message from ENBD, send it to
+ * Wafra" — and a Shortcut can only make an HTTP request. So the message goes
+ * to the relay (server/src/index.ts), which parses it, drops the text, seals
+ * the parsed row to this device's public key, and holds it until the app
+ * collects it.
  *
- * Four things here are load-bearing and easy to get wrong:
+ * The device identity is a keypair this file generates and a bearer token the
+ * relay issues once. Both live in expo-secure-store — the Keychain on iOS —
+ * and the private half is never transmitted. There is no account, no email and
+ * no password. Keychain items can survive an iOS reinstall, so the explicit
+ * disconnect path deletes both the relay device and the local credential.
  *
- * 1. THE SECRET KEY IS REUSED ACROSS REINSTALLS, deliberately. On iOS a
- *    keychain item survives app deletion, and the bearer token also lives
- *    inside the user's Shortcut, which uninstalling does not touch. If a
- *    reinstall minted a fresh keypair and re-paired, the Shortcut would keep
- *    POSTing under the old token: capture would be dead while the app looked
- *    perfectly healthy. `pairRelay` therefore reuses whatever is in the
- *    keychain and only mints a key when there is none.
+ * Sync deliberately does not delete on read. Rows are acknowledged only after
+ * the app has actually written them to the ledger, so a request that dies
+ * mid-flight costs a retry rather than a transaction.
  *
- * 2. THE KEYCHAIN ITEM MUST BE READABLE WHILE THE PHONE IS LOCKED. The
- *    expo-secure-store default is WHEN_UNLOCKED, and a sync that fires while
- *    the phone is in a pocket is nearly every sync. Under the default it would
- *    fail silently — no crash, no log, just a ledger that is always stale.
- *    THIS_DEVICE_ONLY is the other half of that choice and it has a cost worth
- *    stating: the secret key is deliberately excluded from iCloud backups, so
- *    a user who migrates to a new phone arrives unpaired. That is the safe
- *    direction to fail — the app sees "not paired" and can ask them to set up
- *    again — whereas a key that travelled in a backup would be a copy of the
- *    thing this whole design says never leaves the device.
+ * THE KEY IS GENERATED FROM BYTES THIS FILE SUPPLIES. `relay-crypto.ts` takes
+ * its 32 bytes of entropy as an argument and never reaches for a global,
+ * because React Native defines no `crypto.getRandomValues` and noble's own key
+ * generation throws under Hermes. Pairing was the first thing to call it, so
+ * that throw meant iOS could never pair on a real device while every Node test
+ * passed. Anything here that stops passing entropy in explicitly brings it back.
  *
- * 3. BACKGROUND SYNC MUST NOT WRITE THE LEDGER. `importBatch` is a method on
- *    the React store, and persistence runs in a `useEffect` inside
- *    StoreProvider with an in-memory chunk cache. Anything that writes
- *    `wafra/state/v1` behind the provider's back is overwritten on the next
- *    foreground save. So `syncRelay` only STAGES rows; `runRelayImport` is the
- *    foreground half that imports and acknowledges.
- *
- * 4. ACK ONLY AFTER THE LEDGER COMMIT. The relay deletes on acknowledgement
- *    rather than on read precisely so a crash between the two costs nothing:
- *    the row is still in the queue for 72 hours and the next sync fetches it
- *    again. Acking early is the one way to actually lose a transaction.
- *
- * There is no second ingestion path. Rows go through the same
- * `buildImportPlan` → `importBatch` pipeline as an Android inbox scan, so
- * every dedupe, healing and account-auto-creation rule applies unchanged.
- *
- * THREE LAYERS COLLECT, ONE LAYER FILES. A content-available push from the
- * relay (seconds), the periodic background task (minutes to overnight, iOS
- * decides), and the foreground (launch, background→active, pull-to-refresh).
- * The first two call `backgroundSyncRelay` and only stage; the third calls
- * `runRelayImport`, which is the one that writes and acknowledges. Any layer
- * can fail entirely without losing a transaction — the relay holds a row until
- * it is acknowledged, so the honest floor is "open Wafra once every three days
- * and nothing is lost". Everything above that floor is latency, not
- * correctness.
+ * ONE STAGING INBOX, DELIBERATELY. An earlier relay client was a single-token
+ * design with its own AsyncStorage staging inbox, and four modules were built
+ * on it: `src/lib/relay-wake.ts`, `src/hooks/use-relay-capture.ts`,
+ * `src/components/relay-status.tsx` and `src/app/iphone-setup.tsx`. All four
+ * were deleted rather than ported. This file is the four-scope client, and the
+ * inbox it pairs with is the encrypted one in
+ * `background-relay-storage.native.ts`, read through `background-relay.ts` and
+ * `capture.ts`. Do not reconcile the old design by adding a second staging
+ * path here: two inboxes would stage and acknowledge the same queue row twice,
+ * so one bank alert would be filed as two transactions.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
-import { Platform } from 'react-native';
 
-import { buildImportPlan, type ImportPlan, type ScannedSms } from '@/lib/auto-import';
-import { toISODate } from '@/lib/format';
-import { deviceKeypair, encodeKey, decodeKey, openSealed, type SealedBlob } from '@/lib/relay-crypto';
-import { isProActive } from '@/lib/purchases';
+import type { ScannedSms } from '@/lib/auto-import';
+import { getActiveMarket, MARKETS } from '@/lib/markets';
+import {
+  decodeKey,
+  deviceKeypair,
+  encodeKey,
+  openSealed,
+  type SealedBlob,
+} from '@/lib/relay-crypto';
+import { isRelayTestPayload } from '@/lib/relay-protocol';
 import type { ParsedSms } from '@/lib/sms-parser';
-import type { ImportBatchInput } from '@/lib/store';
-import type { AppState } from '@/lib/types';
+import {
+  parseTrustedDevices,
+  validTrustedDeviceName,
+  type TrustedDevice,
+  type TrustedDeviceInvite,
+} from '@/lib/trusted-device-contract';
 
-/* ─────────────────────────── Storage keys ─────────────────────────── */
-
-/** One keychain item holds the whole pairing: ~200 bytes, one read per sync. */
-const SECURE_KEY = 'wafra.relay.v1';
-const KEYCHAIN_SERVICE = 'app.wafra.relay';
-/** Staging area between a background fetch and a foreground ledger write. */
-const INBOX_KEY = 'wafra/relay/inbox/v1';
 /**
- * A copy of the subscription state, small enough for a headless task to read.
- *
- * The ledger lives in chunked AsyncStorage behind the React store, and a
- * background task has neither the provider nor a cheap way to reassemble it.
- * Syncing for a lapsed subscriber is a bug rather than a courtesy — automatic
- * capture is the paid feature on both platforms — so the foreground mirrors the
- * two fields the gate needs into one tiny key, and the background reads that.
- * Stale by at most one app session, which is the right direction to be wrong:
- * the worst case is one extra sync after a subscription lapses, never a
- * transaction lost for someone who is paying.
+ * React Native and Expo define this global; the test harness compiles this
+ * module in isolation and does not. Declared locally, and as possibly
+ * undefined, so the `typeof` guard below stays meaningful in both worlds — a
+ * bare reference would fail the suite's build rather than one of its tests.
  */
-const ENTITLEMENT_KEY = 'wafra/relay/entitlement/v1';
+declare const __DEV__: boolean | undefined;
 
-const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
-  keychainService: KEYCHAIN_SERVICE,
-  // See note 2 above. Without this, background sync cannot read the key.
-  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
-  // `true` would demand Face ID from a headless task, which cannot present UI.
-  // The app-lock feature (expo-local-authentication) is entirely separate.
-  requireAuthentication: false,
-};
+/**
+ * Expo inlines this public build setting. It is intentionally not a fallback:
+ * a release with no deployed relay must fail setup visibly, not send financial
+ * messages to a domain that merely looks plausible.
+ */
+export const DEFAULT_RELAY_URL = normalizeRelayBaseUrl(
+  process.env.EXPO_PUBLIC_WAFRA_RELAY_URL,
+);
 
-/** How many message digests to remember for duplicate suppression. */
-const SEEN_MSG_LIMIT = 500;
-/** Network calls are bounded so a hung relay cannot wedge a background task. */
-const REQUEST_TIMEOUT_MS = 15_000;
-/** A relay row can only be acked in batches this size — matches the server. */
-const ACK_LIMIT = 200;
+/** The published, credential-free Shortcut skeleton. */
+export const DEFAULT_SHORTCUT_URL = normalizeShortcutInstallUrl(
+  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
+);
 
-/* ─────────────────────────── Shapes ─────────────────────────── */
+const KEY = 'wafra.relay.v1';
+const BACKGROUND_KEY = 'wafra.relay.background.v1';
+const AUTOMATION_PROOF_KEY = 'wafra.relay.automation-proof.v1';
+/** What a device paired before market selection existed was parsing under. */
+const DEFAULT_MARKET = 'AE';
+/** A phone on hotel wifi should fail fast and retry, not hang the sync. */
+const TIMEOUT_MS = 15_000;
+/** Matches the Worker's `LIMIT 200` page and its `/v1/ack` ceiling. */
+const PAGE = 200;
 
-/** What the keychain holds. Everything but `sk` is safe to show the user. */
-interface StoredIdentity {
-  v: 1;
-  /** X25519 secret key, base64. Never sent, never logged, never exported. */
-  sk: string;
-  token: string;
-  deviceId: string;
-  ingestUrl: string;
-  /** Base URL this device paired against; sync must use it, not current config. */
+export interface RelayConfig {
   baseUrl: string;
-  market: string;
-  pairedAt: number;
-  /**
-   * The Expo push token the relay currently knows about, if any. Kept so the
-   * app can tell "already registered" from "never registered" without a
-   * network round trip on every launch — and so a token that CHANGED (a
-   * restore, a reinstall) is noticed and re-sent.
-   */
-  pushToken?: string;
-}
-
-/** The public half of a pairing — what a setup screen may display. */
-export interface RelayPairing {
   deviceId: string;
-  /** Goes into the user's Shortcut. A live credential: do not log it. */
-  token: string;
+  /** Ingest-only bearer token. The Shortcut carries a copy of this. */
+  ingestToken: string;
+  /** Foreground-only bearer for device, import, push and vault management. */
+  adminToken: string;
+  /** Least-privilege bearer used only to read and acknowledge this queue. */
+  syncToken: string;
+  /** Email-ingest-only token. It is never reused as an app or Shortcut token. */
+  emailToken?: string;
+  /** Private forwarding destination, present only when the relay routes email. */
+  forwardingAddress?: string;
+  /** base64 X25519 private key. Never leaves the device. */
+  privateKey: string;
+  /**
+   * Market pack the relay parses this device's messages under ('AE', 'SA').
+   *
+   * The Worker cannot infer it. `parseSms` reads the ACTIVE pack at call time,
+   * and a relay that leaves it at the AE default reads a Saudi user's
+   * "SAR 45.00 at PANDA" as no currency it knows: the amount is misread and the
+   * row is dropped. The phone is the only side that knows which country the
+   * user picked, so the phone tells the relay — at pairing, and afterwards
+   * through setRelayMarket() rather than by re-pairing, because re-pairing
+   * mints a token the user's Shortcut does not have.
+   */
+  market: string;
+  /** The URL the user's Shortcut POSTs to. */
   ingestUrl: string;
-  baseUrl: string;
-  market: string;
   pairedAt: number;
-  pushToken?: string;
+  /** Paired alone cannot capture; configured means the automation was created. */
+  setupState: 'paired' | 'configured' | 'verified';
+  verifiedAt?: number;
 }
 
-/**
- * A parsed row as the relay seals it: the app's own `ParsedSms` minus `raw`
- * (the message text is dropped server-side and never sent back), plus the
- * attribution and dedupe fields the relay adds.
- */
-export interface SealedRow extends Omit<ParsedSms, 'raw'> {
-  /** SMS sender id — the only thing that says which bank sent the message. */
-  sender?: string;
-  /** Message timestamp in epoch ms, from the Shortcut. */
-  smsTs: number;
-  receivedAt: string;
-  /** SHA-256 of the message text, base64url. Stable across Shortcut retries. */
-  msgId: string;
-  market: string;
-}
+/** Least-privilege credentials available to a silent wake after first unlock. */
+export type BackgroundRelayConfig = Pick<
+  RelayConfig,
+  'baseUrl' | 'deviceId' | 'syncToken' | 'privateKey' | 'setupState'
+>;
 
-interface StagedRow {
-  /** Queue id, for the ack. */
-  id: string;
-  row: SealedRow;
-}
+type RelaySyncConfig = Pick<RelayConfig, 'baseUrl' | 'syncToken' | 'privateKey'>;
 
-interface Inbox {
-  v: 1;
-  rows: StagedRow[];
-  /** Digests already staged or imported, newest last. */
-  seen: string[];
-  /**
-   * Queue ids to acknowledge WITHOUT importing: rows this device can never
-   * open, and rows whose message it already has. Both must be acked or every
-   * sync re-downloads them for the next three days.
-   */
-  discard: string[];
-  lastSyncAt: number;
-  lastRowAt: number;
-  lastError: string | null;
-}
-
-const EMPTY_INBOX: Inbox = {
-  v: 1,
-  rows: [],
-  seen: [],
-  discard: [],
-  lastSyncAt: 0,
-  lastRowAt: 0,
-  lastError: null,
-};
-
-export interface RelaySyncResult {
-  /** Rows newly staged for the foreground to import. */
-  staged: number;
-  /** Rows the queue held that were already known (a Shortcut that fired twice). */
-  duplicates: number;
-  /** Rows that could not be opened — a key mismatch, and permanent. */
-  unopenable: number;
-  /** Total rows waiting for the foreground after this sync. */
-  pending: number;
-  error: string | null;
-}
-
-export interface RelayImportResult {
-  /** Why nothing happened, when nothing happened. */
-  skipped: 'unsupported' | 'not-paired' | 'not-pro' | null;
-  sync: RelaySyncResult | null;
-  plan: ImportPlan | null;
-  /** Transaction ids created, for the undo affordance. */
-  ids: string[];
-  acked: number;
-}
-
-export interface RelayStatus {
-  supported: boolean;
-  paired: boolean;
-  deviceId: string | null;
-  market: string | null;
-  pairedAt: number | null;
-  /**
-   * The relay has somewhere to knock. False means capture still works and
-   * still loses nothing — it just arrives when the app is next opened or when
-   * iOS decides to run the background task, rather than in seconds.
-   */
-  pushEnabled: boolean;
-  /** Rows sitting in staging, waiting for a foreground import. */
-  pending: number;
-  lastSyncAt: number;
-  /** When the newest captured message arrived, per its own timestamp. */
-  lastRowAt: number;
-  lastError: string | null;
-  /**
-   * The automation looks broken: paired long enough that a real user would
-   * have spent money, synced successfully, and still nothing has ever arrived.
-   * This is what a "your automation may still be asking before it runs" repair
-   * card hangs off — the silent failure mode of Shortcuts is a run mode left on
-   * "Run After Confirmation", and nothing else signals it.
-   */
-  looksUnconfigured: boolean;
-}
-
-/** After this long with a healthy sync and zero rows, the setup is suspect. */
-const UNCONFIGURED_AFTER_MS = 48 * 3_600_000;
-
-/* ─────────────────────────── Platform gate ─────────────────────────── */
-
-/**
- * The relay exists for iOS and only for iOS. Android reads SMS natively and
- * must keep its no-server promise; web has no expo-secure-store at all, and
- * this project builds web.
- */
-export function isRelaySupported(): boolean {
-  return Platform.OS === 'ios';
-}
-
-/**
- * The relay base URL from app config (`expo.extra.relayUrl`). Absent in a
- * checkout that has not been pointed at a deployment — pairing then has to be
- * given one explicitly rather than guessing a hostname.
- */
-export function configuredRelayUrl(): string | null {
-  const extra = Constants.expoConfig?.extra as { relayUrl?: unknown } | undefined;
-  const url = typeof extra?.relayUrl === 'string' ? extra.relayUrl.trim() : '';
-  return url ? url.replace(/\/+$/, '') : null;
-}
-
-/* ─────────────────────── Entitlement mirror ─────────────────────── */
-
-interface CachedEntitlement {
-  pro: boolean;
-  trialStartTs: number;
-}
-
-/**
- * Mirror the subscription state where a headless task can read it. Called from
- * the foreground whenever the app knows the answer; never called in the
- * background, which only reads.
- */
-export async function cacheEntitlement(state: CachedEntitlement): Promise<void> {
+export function normalizeRelayBaseUrl(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
   try {
-    await AsyncStorage.setItem(
-      ENTITLEMENT_KEY,
-      JSON.stringify({ pro: !!state.pro, trialStartTs: state.trialStartTs || 0 }),
-    );
+    const url = new URL(value.trim());
+    const isLocal =
+      typeof __DEV__ !== 'undefined' &&
+      __DEV__ &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1') &&
+      url.protocol === 'http:';
+    if (url.protocol !== 'https:' && !isLocal) return null;
+    if (url.username || url.password || url.search || url.hash) return null;
+    const path = url.pathname.replace(/\/+$/, '');
+    return `${url.origin}${path}`;
   } catch {
-    // A failed mirror only means the next background sync is skipped. The
-    // foreground path reads the real store and is unaffected.
-  }
-}
-
-async function cachedEntitlementActive(now: number): Promise<boolean> {
-  try {
-    const raw = await AsyncStorage.getItem(ENTITLEMENT_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw) as CachedEntitlement;
-    return isProActive({ pro: !!parsed?.pro, trialStartTs: parsed?.trialStartTs ?? 0 }, now);
-  } catch {
-    return false;
-  }
-}
-
-/* ────────────────────── The "rows landed" signal ────────────────────── */
-
-type StagedListener = (result: RelaySyncResult) => void;
-const stagedListeners = new Set<StagedListener>();
-
-/**
- * Fires when a sync stages rows — including one that ran in a headless task
- * while the app happened to be in the foreground, which is the case this
- * exists for. A silent push wakes the same JS context the UI is running in, so
- * without this the rows would sit in staging until the next launch even though
- * the user was looking at the screen when they arrived.
- */
-export function subscribeRelayStaged(listener: StagedListener): () => void {
-  stagedListeners.add(listener);
-  return () => {
-    stagedListeners.delete(listener);
-  };
-}
-
-function emitStaged(result: RelaySyncResult): void {
-  for (const listener of [...stagedListeners]) {
-    try {
-      listener(result);
-    } catch {
-      // A listener that throws must not fail the sync that fed it.
-    }
-  }
-}
-
-/* ─────────────────────────── Identity ─────────────────────────── */
-
-async function readIdentity(): Promise<StoredIdentity | null> {
-  if (!isRelaySupported()) return null;
-  try {
-    const raw = await SecureStore.getItemAsync(SECURE_KEY, SECURE_OPTIONS);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredIdentity;
-    if (parsed?.v !== 1 || !parsed.sk || !parsed.token || !parsed.baseUrl) return null;
-    return parsed;
-  } catch {
-    // A keychain read can fail legitimately — first launch after a restore,
-    // or a locked device under the wrong accessibility class. Treat it as
-    // "not paired" rather than throwing into a background task.
     return null;
   }
 }
 
-async function writeIdentity(identity: StoredIdentity): Promise<void> {
-  await SecureStore.setItemAsync(SECURE_KEY, JSON.stringify(identity), SECURE_OPTIONS);
-}
-
-/** The pairing without the secret key, for the UI. */
-export async function getRelayPairing(): Promise<RelayPairing | null> {
-  const id = await readIdentity();
-  if (!id) return null;
-  const { sk: _sk, v: _v, ...rest } = id;
-  return rest;
-}
-
-/* ─────────────────────────── HTTP ─────────────────────────── */
-
-async function relayFetch(
-  baseUrl: string,
-  path: string,
-  init: RequestInit & { token?: string } = {},
-): Promise<Response> {
-  const { token, headers, ...rest } = init;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+export function normalizeShortcutInstallUrl(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
   try {
-    return await fetch(`${baseUrl}${path}`, {
-      ...rest,
+    const url = new URL(value.trim());
+    if (
+      url.protocol !== 'https:' ||
+      (url.hostname !== 'www.icloud.com' && url.hostname !== 'icloud.com') ||
+      !/^\/shortcuts\/[A-Za-z0-9_-]+\/?$/.test(url.pathname) ||
+      url.search ||
+      url.hash
+    ) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** iOS is the only platform that needs the relay; Android reads the inbox. */
+export function isRelayPlatform(): boolean {
+  return Platform.OS === 'ios';
+}
+
+/** A market id the app actually ships a pack for, or null. */
+export function validRelayMarket(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const id = value.trim().toUpperCase();
+  return MARKETS.some((market) => market.id === id) ? id : null;
+}
+
+export async function getRelayConfig(): Promise<RelayConfig | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(KEY);
+    if (!raw) return null;
+    const cfg = JSON.parse(raw) as Partial<RelayConfig>;
+    const baseUrl = normalizeRelayBaseUrl(cfg.baseUrl);
+    const setupState =
+      cfg.setupState === 'configured' || cfg.setupState === 'verified'
+        ? cfg.setupState
+        : 'paired';
+    const emailToken =
+      typeof cfg.emailToken === 'string' && cfg.emailToken.length >= 40 && cfg.emailToken.length <= 128
+        ? cfg.emailToken
+        : undefined;
+    // A device paired before market selection existed has no `market` at all.
+    // Defaulting is deliberate: rejecting the config here would read as "not
+    // paired", and the app would offer to pair again — minting a token the
+    // user's Shortcut does not carry and killing capture on a working setup.
+    const market = validRelayMarket(cfg.market) ?? DEFAULT_MARKET;
+    const forwardingAddress =
+      typeof cfg.forwardingAddress === 'string' &&
+      cfg.forwardingAddress.length <= 320 &&
+      !/[\s\r\n]/.test(cfg.forwardingAddress) &&
+      cfg.forwardingAddress.includes('@')
+        ? cfg.forwardingAddress
+        : undefined;
+    if (
+      !baseUrl ||
+      typeof cfg.deviceId !== 'string' ||
+      !/^[0-9a-f-]{36}$/i.test(cfg.deviceId) ||
+      typeof cfg.ingestToken !== 'string' ||
+      cfg.ingestToken.length < 40 ||
+      cfg.ingestToken.length > 128 ||
+      typeof cfg.adminToken !== 'string' ||
+      cfg.adminToken.length < 40 ||
+      cfg.adminToken.length > 128 ||
+      typeof cfg.syncToken !== 'string' ||
+      cfg.syncToken.length < 40 ||
+      cfg.syncToken.length > 128 ||
+      typeof cfg.privateKey !== 'string' ||
+      decodeKey(cfg.privateKey).length !== 32 ||
+      cfg.ingestUrl !== `${baseUrl}/v1/ingest` ||
+      typeof cfg.pairedAt !== 'number' ||
+      !Number.isFinite(cfg.pairedAt)
+    ) {
+      return null;
+    }
+    return { ...cfg, baseUrl, market, setupState, emailToken, forwardingAddress } as RelayConfig;
+  } catch {
+    // A Keychain read can fail on a locked device. Treat it as "not paired
+    // yet" rather than throwing into whatever screen asked.
+    return null;
+  }
+}
+
+async function putRelayConfig(cfg: RelayConfig): Promise<void> {
+  await SecureStore.setItemAsync(KEY, JSON.stringify(cfg), {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+  const background: BackgroundRelayConfig = {
+    baseUrl: cfg.baseUrl,
+    deviceId: cfg.deviceId,
+    syncToken: cfg.syncToken,
+    privateKey: cfg.privateKey,
+    setupState: cfg.setupState,
+  };
+  await SecureStore.setItemAsync(BACKGROUND_KEY, JSON.stringify(background), {
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function getBackgroundRelayConfig(): Promise<BackgroundRelayConfig | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(BACKGROUND_KEY);
+    if (!raw) return null;
+    const cfg = JSON.parse(raw) as Partial<BackgroundRelayConfig>;
+    const baseUrl = normalizeRelayBaseUrl(cfg.baseUrl);
+    if (
+      !baseUrl ||
+      typeof cfg.deviceId !== 'string' ||
+      !/^[0-9a-f-]{36}$/i.test(cfg.deviceId) ||
+      typeof cfg.syncToken !== 'string' ||
+      cfg.syncToken.length < 40 ||
+      cfg.syncToken.length > 128 ||
+      typeof cfg.privateKey !== 'string' ||
+      decodeKey(cfg.privateKey).length !== 32 ||
+      (cfg.setupState !== 'paired' &&
+        cfg.setupState !== 'configured' &&
+        cfg.setupState !== 'verified')
+    ) {
+      return null;
+    }
+    return { ...cfg, baseUrl } as BackgroundRelayConfig;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteRelayCredentials(): Promise<void> {
+  await Promise.all([
+    SecureStore.deleteItemAsync(KEY),
+    SecureStore.deleteItemAsync(BACKGROUND_KEY),
+    SecureStore.deleteItemAsync(AUTOMATION_PROOF_KEY),
+  ]);
+}
+
+/**
+ * A synthetic setup probe proves only Shortcut → relay → encrypted sync. The
+ * stronger proof is written exclusively by the headless notification task
+ * after it stages a parsed bank transaction while the UI is not involved.
+ */
+export async function recordRelayAutomationProof(at = Date.now()): Promise<void> {
+  await SecureStore.setItemAsync(AUTOMATION_PROOF_KEY, String(at), {
+    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function getRelayAutomationProof(): Promise<number | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(AUTOMATION_PROOF_KEY);
+    const at = raw ? Number(raw) : NaN;
+    return Number.isFinite(at) && at > 0 ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+async function request(url: string, init: RequestInit & { token?: string }): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      ...init,
       signal: controller.signal,
       headers: {
-        ...(token ? { authorization: `Bearer ${token}` } : {}),
-        ...(rest.body ? { 'content-type': 'application/json' } : {}),
-        ...headers,
+        ...(init.headers ?? {}),
+        ...(init.token ? { authorization: `Bearer ${init.token}` } : {}),
+        accept: 'application/json',
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
       },
     });
   } finally {
@@ -384,430 +330,757 @@ async function relayFetch(
   }
 }
 
-/* ─────────────────────────── Pairing ─────────────────────────── */
-
-export interface PairOptions {
-  /** Relay base URL, e.g. https://wafra-relay.example.workers.dev */
-  baseUrl?: string;
-  /** Market pack the relay should parse this device's messages under. */
-  market: string;
+export class RelayError extends Error {
+  constructor(
+    message: string,
+    /** True when retrying later is the right move (offline, 5xx, timeout). */
+    readonly retryable: boolean,
+    /** Stable relay error name when the server returned one. */
+    readonly code?: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'RelayError';
+  }
 }
 
-/**
- * Pair this device, or return the existing pairing unchanged.
- *
- * Re-pairing is never automatic: it would orphan the token baked into the
- * user's Shortcut. `unpairRelay` is the only way to get a new one, and it is
- * the user's explicit choice with an explicit warning.
- */
-export async function pairRelay(options: PairOptions): Promise<RelayPairing> {
-  if (!isRelaySupported()) throw new Error('relay: iOS only');
-  const existing = await readIdentity();
-  if (existing) {
-    // Already paired. Keep the key, keep the token, just make sure the relay
-    // knows which market pack to parse under if that changed since.
-    if (existing.market !== options.market) {
-      await setRelayMarket(options.market);
-      return (await getRelayPairing())!;
-    }
-    const { sk: _sk, v: _v, ...rest } = existing;
-    return rest;
-  }
+async function responseError(res: Response, fallback: string): Promise<RelayError> {
+  const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+  const code = typeof body?.error === 'string' ? body.error : undefined;
+  return new RelayError(fallback, res.status >= 500, code, res.status);
+}
 
-  const baseUrl = (options.baseUrl ?? configuredRelayUrl() ?? '').replace(/\/+$/, '');
-  if (!baseUrl) throw new Error('relay: no relay URL configured (expo.extra.relayUrl)');
-
-  // The one place entropy is needed. React Native defines no
-  // `crypto.getRandomValues`, so noble's own key generation throws — this is
-  // why the whole crypto path takes its randomness as an argument instead of
-  // reaching for a global, and why this app needs no crypto polyfill.
-  const keypair = deviceKeypair(Crypto.getRandomValues(new Uint8Array(32)));
-
-  const res = await relayFetch(baseUrl, '/v1/pair', {
-    method: 'POST',
-    body: JSON.stringify({ publicKey: encodeKey(keypair.publicKey), market: options.market }),
-  });
-  if (!res.ok) throw new Error(`relay: pairing failed (${res.status})`);
-  const body = (await res.json()) as {
-    deviceId?: string;
-    token?: string;
-    ingestUrl?: string;
-    market?: string;
+function validCredentialResponse(
+  value: unknown,
+): value is { deviceId: string; ingestToken: string; syncToken: string; adminToken: string } {
+  if (typeof value !== 'object' || value === null) return false;
+  const body = value as {
+    deviceId?: unknown;
+    ingestToken?: unknown;
+    syncToken?: unknown;
+    adminToken?: unknown;
   };
-  if (!body?.deviceId || !body?.token || !body?.ingestUrl) {
-    throw new Error('relay: pairing response was incomplete');
-  }
-
-  const identity: StoredIdentity = {
-    v: 1,
-    sk: encodeKey(keypair.secretKey),
-    token: body.token,
-    deviceId: body.deviceId,
-    ingestUrl: body.ingestUrl,
-    baseUrl,
-    market: body.market ?? options.market,
-    pairedAt: Date.now(),
-  };
-  await writeIdentity(identity);
-  await writeInbox({ ...EMPTY_INBOX });
-  const { sk: _sk, v: _v, ...rest } = identity;
-  return rest;
-}
-
-/**
- * Tell the relay which market pack to parse under. Separate from pairing
- * because re-pairing would invalidate the token inside the user's Shortcut.
- */
-export async function setRelayMarket(market: string): Promise<boolean> {
-  const id = await readIdentity();
-  if (!id) return false;
-  const res = await relayFetch(id.baseUrl, '/v1/device', {
-    method: 'PATCH',
-    token: id.token,
-    body: JSON.stringify({ market }),
-  });
-  if (!res.ok) return false;
-  await writeIdentity({ ...id, market });
-  return true;
-}
-
-/**
- * Unpair: the relay erases the device and its queue, and the local key goes
- * with it. The caller MUST tell the user that their Shortcut has stopped
- * working — the token is baked into it and nothing in the app can reach in and
- * fix it.
- */
-export async function unpairRelay(): Promise<void> {
-  const id = await readIdentity();
-  if (id) {
-    try {
-      await relayFetch(id.baseUrl, '/v1/device', { method: 'DELETE', token: id.token });
-    } catch {
-      // The server may be unreachable. Local state still goes: leaving a key
-      // behind that the user asked to delete is the worse failure, and the
-      // device row expires server-side on its own.
-    }
-  }
-  await SecureStore.deleteItemAsync(SECURE_KEY, SECURE_OPTIONS).catch(() => {});
-  await AsyncStorage.removeItem(INBOX_KEY).catch(() => {});
-}
-
-/* ─────────────────────────── Staging ─────────────────────────── */
-
-async function readInbox(): Promise<Inbox> {
-  try {
-    const raw = await AsyncStorage.getItem(INBOX_KEY);
-    if (!raw) return { ...EMPTY_INBOX };
-    const parsed = JSON.parse(raw) as Inbox;
-    if (parsed?.v !== 1 || !Array.isArray(parsed.rows)) return { ...EMPTY_INBOX };
-    return {
-      ...EMPTY_INBOX,
-      ...parsed,
-      seen: Array.isArray(parsed.seen) ? parsed.seen : [],
-      discard: Array.isArray(parsed.discard) ? parsed.discard : [],
-    };
-  } catch {
-    return { ...EMPTY_INBOX };
-  }
-}
-
-async function writeInbox(inbox: Inbox): Promise<void> {
-  await AsyncStorage.setItem(INBOX_KEY, JSON.stringify(inbox));
-}
-
-/**
- * The blob is authenticated — GCM proves the relay sealed it to this device —
- * but "authentic" is not "well-formed". A future server version, or a row
- * sealed by an older one, must not be able to put a NaN amount or a missing
- * kind into the ledger, so the shape is checked before anything is staged.
- */
-function isSealedRow(value: unknown): value is SealedRow {
-  const r = value as SealedRow | null;
   return (
-    !!r &&
-    typeof r === 'object' &&
-    typeof r.merchant === 'string' &&
-    Number.isFinite(r.amountFils) &&
-    (r.kind === 'transaction' ||
-      r.kind === 'billDue' ||
-      r.kind === 'cardStatement' ||
-      r.kind === 'cardPayment') &&
-    (r.type === 'expense' || r.type === 'income') &&
-    typeof r.msgId === 'string' &&
-    Number.isFinite(r.smsTs)
+    typeof body.deviceId === 'string' &&
+    /^[0-9a-f-]{36}$/i.test(body.deviceId) &&
+    typeof body.ingestToken === 'string' &&
+    body.ingestToken.length >= 40 &&
+    body.ingestToken.length <= 128 &&
+    typeof body.syncToken === 'string' &&
+    body.syncToken.length >= 40 &&
+    body.syncToken.length <= 128 &&
+    typeof body.adminToken === 'string' &&
+    body.adminToken.length >= 40 &&
+    body.adminToken.length <= 128
   );
 }
 
 /**
- * Collect the queue, open every row, stage what is new. Safe to call from a
- * headless background task: it writes only its own staging key and never
- * touches the ledger (see note 3 at the top of this file).
- *
- * It does NOT check the subscription — it is the primitive, and the caller owns
- * that decision. `runRelayImport` does check; a background wake must too, or
- * the app quietly keeps working for a lapsed subscriber.
+ * Register this device and return the details the onboarding flow bakes into
+ * the user's Shortcut. Safe to call again: a second pair issues a second
+ * identity, so callers should check getRelayConfig() first.
  */
-export async function syncRelay(): Promise<RelaySyncResult> {
-  const empty: RelaySyncResult = {
-    staged: 0,
-    duplicates: 0,
-    unopenable: 0,
-    pending: 0,
-    error: null,
-  };
-  const id = await readIdentity();
-  if (!id) return { ...empty, error: 'not-paired' };
-
-  const inbox = await readInbox();
-  let items: { id: string; epk: string; iv: string; ct: string }[] = [];
+export async function pairDevice(
+  baseUrl: string | null = DEFAULT_RELAY_URL,
+  deviceName?: string,
+  market: string = getActiveMarket().id,
+): Promise<RelayConfig> {
+  const base = normalizeRelayBaseUrl(baseUrl);
+  if (!base) {
+    throw new RelayError('Automatic capture is not configured in this build.', false);
+  }
+  // The 32 bytes are supplied here, not taken from a global inside the crypto
+  // module — see the note at the top of this file.
+  const keys = deviceKeypair(Crypto.getRandomValues(new Uint8Array(32)));
+  const pack = validRelayMarket(market) ?? DEFAULT_MARKET;
+  let res: Response;
   try {
-    const res = await relayFetch(id.baseUrl, '/v1/sync', { method: 'GET', token: id.token });
-    if (res.status === 401) {
-      // The relay no longer knows this device — swept after a year silent, or
-      // unpaired from another install. Surfacing it is the only way the user
-      // learns their Shortcut is now posting into nothing.
-      const next = { ...inbox, lastSyncAt: Date.now(), lastError: 'unauthorized' };
-      await writeInbox(next);
-      return { ...empty, pending: inbox.rows.length, error: 'unauthorized' };
-    }
-    if (!res.ok) throw new Error(`sync failed (${res.status})`);
-    const body = (await res.json()) as { items?: typeof items };
-    items = Array.isArray(body?.items) ? body.items : [];
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'network';
-    await writeInbox({ ...inbox, lastError: message });
-    return { ...empty, pending: inbox.rows.length, error: message };
+    res = await request(`${base}/v1/pair`, {
+      method: 'POST',
+      body: JSON.stringify({
+        publicKey: encodeKey(keys.publicKey),
+        market: pack,
+        ...(deviceName?.trim() ? { deviceName: deviceName.trim() } : {}),
+      }),
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra. Check your connection.', true);
+  }
+  if (!res.ok) throw await responseError(res, `Pairing failed (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    deviceId?: unknown;
+    ingestToken?: unknown;
+    syncToken?: unknown;
+    adminToken?: unknown;
+    market?: unknown;
+  } | null;
+  if (
+    !validCredentialResponse(body)
+  ) {
+    throw new RelayError('Pairing returned an unexpected response.', false);
+  }
+  const cfg: RelayConfig = {
+    baseUrl: base,
+    deviceId: body.deviceId,
+    ingestToken: body.ingestToken,
+    syncToken: body.syncToken,
+    adminToken: body.adminToken,
+    privateKey: encodeKey(keys.secretKey),
+    // Echoed back by the relay, so what is stored is the pack the relay will
+    // actually parse under rather than the one this build asked for.
+    market: validRelayMarket((body as { market?: unknown }).market) ?? pack,
+    // Do not accept a server-supplied destination for a bearer token. The
+    // Shortcut always posts back to the origin the app deliberately paired.
+    ingestUrl: `${base}/v1/ingest`,
+    pairedAt: Date.now(),
+    setupState: 'paired',
+  };
+  await putRelayConfig(cfg);
+  return cfg;
+}
+
+/** Enroll this phone into an existing vault with a one-use, ten-minute token. */
+export async function joinTrustedVault(
+  baseUrl: string,
+  inviteToken: string,
+  deviceName: string,
+  market: string = getActiveMarket().id,
+): Promise<RelayConfig> {
+  const base = normalizeRelayBaseUrl(baseUrl);
+  const name = deviceName.trim();
+  if (!base) throw new RelayError('This invite has an invalid relay address.', false, 'bad_invite');
+  if (!DEFAULT_RELAY_URL || base !== DEFAULT_RELAY_URL) {
+    throw new RelayError('This invite belongs to a different Wafra relay.', false, 'bad_invite');
+  }
+  if (!/^[A-Za-z0-9_-]{40,128}$/.test(inviteToken)) {
+    throw new RelayError('This invite code is invalid or incomplete.', false, 'bad_invite');
+  }
+  if (!validTrustedDeviceName(name)) {
+    throw new RelayError('Enter a device name between 1 and 40 characters.', false, 'bad_device_name');
+  }
+  if (await getRelayConfig()) {
+    throw new RelayError('This phone is already connected to a vault.', false, 'already_paired');
   }
 
-  const secretKey = decodeKey(id.sk);
-  const seen = new Set(inbox.seen);
-  const stagedIds = new Set(inbox.rows.map((r) => r.id));
-  const fresh: StagedRow[] = [];
-  const discardIds: string[] = [];
-  let duplicates = 0;
-  let lastRowAt = inbox.lastRowAt;
+  const keys = deviceKeypair(Crypto.getRandomValues(new Uint8Array(32)));
+  const pack = validRelayMarket(market) ?? DEFAULT_MARKET;
+  let res: Response;
+  try {
+    res = await request(`${base}/v1/join`, {
+      method: 'POST',
+      body: JSON.stringify({
+        publicKey: encodeKey(keys.publicKey),
+        market: pack,
+        inviteToken,
+        deviceName: name,
+      }),
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra. Check your connection.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Enrollment failed (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as unknown;
+  if (!validCredentialResponse(body)) {
+    throw new RelayError('Enrollment returned an unexpected response.', false, 'bad_response');
+  }
+
+  const cfg: RelayConfig = {
+    baseUrl: base,
+    deviceId: body.deviceId,
+    ingestToken: body.ingestToken,
+    syncToken: body.syncToken,
+    adminToken: body.adminToken,
+    privateKey: encodeKey(keys.secretKey),
+    market: validRelayMarket((body as { market?: unknown }).market) ?? pack,
+    ingestUrl: `${base}/v1/ingest`,
+    pairedAt: Date.now(),
+    setupState: 'paired',
+  };
+  // The new phone's long-lived tokens and X25519 private key never touch
+  // AsyncStorage. SecureStore maps to Keychain / Android Keystore storage.
+  await putRelayConfig(cfg);
+  return cfg;
+}
+
+/**
+ * Change the pack the relay parses this device's messages under.
+ *
+ * Deliberately not part of pairing: re-pairing would mint a new ingest token,
+ * and the old one is baked into the user's Shortcut where no code in this app
+ * can reach it. Capture would die while the app looked healthy. Changing
+ * country in Settings must therefore be a PATCH, never a re-pair.
+ */
+export async function setRelayMarket(cfg: RelayConfig, market: string): Promise<RelayConfig> {
+  const pack = validRelayMarket(market);
+  if (!pack) throw new RelayError('That country is not supported yet.', false, 'bad_market');
+  if (pack === cfg.market) return cfg;
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/device`, {
+      method: 'PATCH',
+      token: cfg.adminToken,
+      body: JSON.stringify({ market: pack }),
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Country change failed (${res.status}).`);
+  // Written only after the relay confirms. Storing it first would leave the app
+  // showing a market the relay is not parsing under, which looks like a parser
+  // bug and is invisible from either side.
+  const next = { ...cfg, market: pack };
+  await putRelayConfig(next);
+  return next;
+}
+
+export async function listTrustedDevices(cfg: RelayConfig): Promise<TrustedDevice[]> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/devices`, {
+      method: 'GET',
+      token: cfg.adminToken,
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Device list failed (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as unknown;
+  const devices = parseTrustedDevices(body);
+  if (!devices || devices.filter((device) => device.isCurrent).length !== 1) {
+    throw new RelayError('Device list returned an unexpected response.', false, 'bad_response');
+  }
+  return devices;
+}
+
+export async function createTrustedDeviceInvite(
+  cfg: RelayConfig,
+): Promise<TrustedDeviceInvite> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/device-invites`, {
+      method: 'POST',
+      token: cfg.adminToken,
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Invite creation failed (${res.status}).`);
+  const body = (await res.json().catch(() => null)) as {
+    inviteToken?: unknown;
+    expiresIn?: unknown;
+  } | null;
+  if (
+    typeof body?.inviteToken !== 'string' ||
+    !/^[A-Za-z0-9_-]{40,128}$/.test(body.inviteToken) ||
+    typeof body.expiresIn !== 'number' ||
+    !Number.isFinite(body.expiresIn) ||
+    body.expiresIn <= 0 ||
+    body.expiresIn > 600
+  ) {
+    throw new RelayError('Invite creation returned an unexpected response.', false, 'bad_response');
+  }
+  return { inviteToken: body.inviteToken, expiresIn: body.expiresIn };
+}
+
+export async function renameTrustedDevice(
+  cfg: RelayConfig,
+  deviceId: string,
+  name: string,
+): Promise<void> {
+  const nextName = name.trim();
+  if (!validTrustedDeviceName(nextName)) {
+    throw new RelayError('Enter a device name between 1 and 40 characters.', false, 'bad_device_name');
+  }
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/devices/${encodeURIComponent(deviceId)}`, {
+      method: 'PATCH',
+      token: cfg.adminToken,
+      body: JSON.stringify({ name: nextName }),
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Rename failed (${res.status}).`);
+}
+
+export async function revokeTrustedDevice(
+  cfg: RelayConfig,
+  deviceId: string,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/devices/${encodeURIComponent(deviceId)}`, {
+      method: 'DELETE',
+      token: cfg.adminToken,
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Device removal failed (${res.status}).`);
+  if (deviceId === cfg.deviceId) await deleteRelayCredentials();
+}
+
+/** Owner-only, explicit destruction of every device and queued relay item. */
+export async function deleteTrustedVault(cfg: RelayConfig): Promise<void> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/vault`, {
+      method: 'DELETE',
+      token: cfg.adminToken,
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (!res.ok) throw await responseError(res, `Vault deletion failed (${res.status}).`);
+  await deleteRelayCredentials();
+}
+
+export async function markRelayConfigured(cfg: RelayConfig): Promise<RelayConfig> {
+  const next = { ...cfg, setupState: 'configured' as const };
+  await putRelayConfig(next);
+  return next;
+}
+
+export async function markRelayVerified(cfg: RelayConfig): Promise<RelayConfig> {
+  const next = {
+    ...cfg,
+    setupState: 'verified' as const,
+    verifiedAt: Date.now(),
+  };
+  await putRelayConfig(next);
+  return next;
+}
+
+/** Persist a separately-issued email-ingest credential in device-only storage. */
+export async function saveRelayEmailCredential(
+  cfg: RelayConfig,
+  emailToken: string,
+  forwardingAddress: string,
+): Promise<RelayConfig> {
+  const next = { ...cfg, emailToken, forwardingAddress };
+  await putRelayConfig(next);
+  return next;
+}
+
+/** Forget a revoked email address without disturbing Shortcut capture. */
+export async function clearRelayEmailCredential(cfg: RelayConfig): Promise<RelayConfig> {
+  const { emailToken: _token, forwardingAddress: _address, ...rest } = cfg;
+  const next = rest as RelayConfig;
+  await putRelayConfig(next);
+  return next;
+}
+
+/**
+ * Give the relay a wake-only Expo push address. The Worker never sends money,
+ * merchant names, or queue contents through push; it sends only
+ * `{ kind: 'wafra.sync', v: 1 }`, which lets the headless task collect the
+ * device-sealed rows over the authenticated relay channel.
+ */
+export async function registerRelayPush(
+  cfg: RelayConfig,
+  expoPushToken: string,
+  projectId: string,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/push`, {
+      method: 'PUT',
+      token: cfg.adminToken,
+      body: JSON.stringify({ expoPushToken, projectId }),
+    });
+  } catch {
+    throw new RelayError('Could not enable silent capture.', true);
+  }
+  if (!res.ok) {
+    throw new RelayError(`Silent capture setup failed (${res.status}).`, res.status >= 500);
+  }
+}
+
+export async function unregisterRelayPush(cfg: RelayConfig): Promise<void> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/push`, {
+      method: 'DELETE',
+      token: cfg.adminToken,
+    });
+  } catch {
+    throw new RelayError('Could not disable silent capture.', true);
+  }
+  if (!res.ok && res.status !== 401 && res.status !== 404) {
+    throw new RelayError(`Silent capture removal failed (${res.status}).`, res.status >= 500);
+  }
+}
+
+export interface RelaySyncResult {
+  /** Parsed rows, oldest first, shaped exactly like an Android inbox scan. */
+  parsed: ScannedSms[];
+  /** Queue ids to acknowledge once the rows are safely in the ledger. */
+  ids: string[];
+  /** Rows the client could not open — a key mismatch, not a transient fault. */
+  unreadable: number;
+  /** Non-financial probes sent by the manual “Run test” Shortcut action. */
+  testReceived: number;
+  /** Probe ids are reserved for the foreground setup verifier. */
+  testIds: string[];
+}
+
+/**
+ * Collect whatever the Shortcut has pushed since last time. Returns rows in
+ * the same shape scanInbox() produces, so buildImportPlan() — deduplication,
+ * card mapping, transfer detection, rescan healing — applies unchanged.
+ */
+export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/sync`, { method: 'GET', token: cfg.syncToken });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true);
+  }
+  if (res.status === 401) throw new RelayError('This device is no longer paired.', false);
+  if (!res.ok) throw new RelayError(`Sync failed (${res.status}).`, res.status >= 500);
+
+  const body = (await res.json().catch(() => null)) as { items?: unknown } | null;
+  if (!Array.isArray(body?.items) || body.items.length > PAGE) {
+    throw new RelayError('Sync returned an unexpected response.', false);
+  }
+  const items = body.items;
+  const parsed: ScannedSms[] = [];
+  const ids: string[] = [];
+  let unreadable = 0;
+  let testReceived = 0;
+  const testIds: string[] = [];
+  // Decoded once per sync rather than once per row: a page is up to 200 rows,
+  // and this is the one value in the file that must not be re-derived casually.
+  const secretKey = decodeKey(cfg.privateKey);
 
   for (const item of items) {
-    if (stagedIds.has(item.id)) continue;
+    if (
+      typeof item !== 'object' ||
+      item === null ||
+      !('id' in item) ||
+      typeof item.id !== 'string' ||
+      !/^[0-9a-f-]{36}$/i.test(item.id) ||
+      !('epk' in item) ||
+      typeof item.epk !== 'string' ||
+      !('iv' in item) ||
+      typeof item.iv !== 'string' ||
+      !('ct' in item) ||
+      typeof item.ct !== 'string'
+    ) {
+      unreadable += 1;
+      continue;
+    }
+    const sealed = item as SealedBlob & { id: string };
     let row: unknown;
     try {
-      row = openSealed<SealedRow>(secretKey, item as SealedBlob);
+      row = openSealed<unknown>(secretKey, sealed);
     } catch {
-      // A row sealed to a key this device does not have can never become
-      // readable. Counting and acking it is the only way it stops being
-      // re-downloaded on every sync for the next three days.
-      discardIds.push(item.id);
+      // A cleared Keychain or corrupt payload makes this row unrecoverable.
+      // Acknowledge it because the missing private key makes it unrecoverable.
+      unreadable += 1;
+      ids.push(sealed.id);
       continue;
     }
-    if (!isSealedRow(row)) {
-      discardIds.push(item.id);
+    if (isRelayTestPayload(row)) {
+      testReceived += 1;
+      ids.push(sealed.id);
+      testIds.push(sealed.id);
       continue;
     }
-    // The message digest survives a Shortcut retry with a drifted clock, which
-    // the timestamp fingerprint downstream does not.
-    if (seen.has(row.msgId)) {
-      duplicates += 1;
-      discardIds.push(item.id);
+    if (!isParsedRelayRow(row)) {
+      unreadable += 1;
+      ids.push(sealed.id);
       continue;
     }
-    seen.add(row.msgId);
-    fresh.push({ id: item.id, row });
-    if (row.smsTs > lastRowAt) lastRowAt = row.smsTs;
+    parsed.push(relayRowToScannedSms(row));
+    ids.push(sealed.id);
   }
 
-  const next: Inbox = {
-    ...inbox,
-    rows: [...inbox.rows, ...fresh],
-    seen: [...seen].slice(-SEEN_MSG_LIMIT),
-    discard: [...new Set([...inbox.discard, ...discardIds])].slice(-ACK_LIMIT),
-    lastSyncAt: Date.now(),
-    lastRowAt,
-    lastError: null,
-  };
-  await writeInbox(next);
-  const result: RelaySyncResult = {
-    staged: fresh.length,
-    duplicates,
-    unopenable: discardIds.length - duplicates,
-    pending: next.rows.length,
-    error: null,
-  };
-  if (fresh.length > 0) emitStaged(result);
-  return result;
+  // Oldest first, the order buildImportPlan() expects so that account
+  // auto-creation sees a card's earliest appearance first.
+  parsed.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
+  return { parsed, ids, unreadable, testReceived, testIds };
 }
 
-/* ─────────────────────── The background layers ─────────────────────── */
+export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
+  /** The Worker discards raw Message Content before sealing the row. */
+  raw?: never;
+  /**
+   * When the MESSAGE arrived, not when the relay received it.
+   *
+   * This is the app's strong duplicate guard: `smsKey` in import-plan.ts is a
+   * fingerprint of the timestamp and the amount. While the relay stamped its
+   * own receipt time here, a Shortcut that fired twice produced two different
+   * fingerprints for one purchase and the charge was filed twice. The Worker
+   * now honours the Shortcut's timestamp, bounded to a sane window, and this
+   * field is what carries it — see resolveReceivedAt in server/src/index.ts.
+   */
+  receivedAt?: string;
+  captureSource?: 'shortcut' | 'email' | 'pdf';
+  /** Structured sender label only; raw Message Content never reaches sync. */
+  sender?: string;
+  /** Market pack the relay parsed this row under ('AE', 'SA'). */
+  market?: string;
+};
 
-export interface RelayBackgroundResult {
-  /** Why nothing happened. `null` means a sync actually ran. */
-  skipped: 'unsupported' | 'not-paired' | 'not-pro' | null;
-  sync: RelaySyncResult | null;
+const MAX_RELAY_SENDER_LENGTH = 80;
+const RELAY_CATEGORIES = new Set([
+  'groceries',
+  'dining',
+  'transport',
+  'utilities',
+  'telecom',
+  'rent',
+  'shopping',
+  'health',
+  'personal-care',
+  'home-services',
+  'education',
+  'travel',
+  'entertainment',
+  'charity',
+  'government',
+  'loan',
+  'salary',
+  'business',
+  'other',
+]);
+
+function validIsoDate(value: unknown): value is string | null {
+  if (value === null) return true;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function validParsedCard(value: unknown): value is ParsedRelayRow['card'] {
+  if (value === null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const card = value as { last4?: unknown; kind?: unknown };
+  return (
+    typeof card.last4 === 'string' &&
+    /^\d{4}$/.test(card.last4) &&
+    (card.kind === 'credit' ||
+      card.kind === 'debit' ||
+      card.kind === 'account' ||
+      card.kind === 'unknown')
+  );
+}
+
+function validNullableSafeFils(value: unknown): value is number | null {
+  return value === null || (Number.isSafeInteger(value) && (value as number) >= 0);
 }
 
 /**
- * What a silent push or the periodic background task runs.
- *
- * It fetches, opens and STAGES — and stops there. It must never write the
- * ledger: `importBatch` is a method on the React store and persistence happens
- * inside StoreProvider with an in-memory chunk cache, so a headless write to
- * `wafra/state/v1` would be overwritten by the provider's next save. The
- * foreground drains staging through the normal import path and acknowledges
- * afterwards, which is also why nothing is lost if the app is killed between
- * the two: unacknowledged rows stay in the relay's queue for 72 hours.
- *
- * It never throws. A background entry point that rejects is a crash report on
- * a user's phone for a network blip.
+ * Sender is optional for manual tests and old Shortcut payloads. When present,
+ * accept one compact, displayable label only: no surrounding whitespace,
+ * control characters, multiline text or bidi overrides that could disguise
+ * which bank produced a row.
  */
-export async function backgroundSyncRelay(
-  now: number = Date.now(),
-): Promise<RelayBackgroundResult> {
+export function validRelaySender(value: unknown): value is string | undefined {
+  return (
+    value === undefined ||
+    (typeof value === 'string' &&
+      value === value.trim() &&
+      [...value].length >= 1 &&
+      [...value].length <= MAX_RELAY_SENDER_LENGTH &&
+      !/[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/u.test(value))
+  );
+}
+
+export function isParsedRelayRow(
+  value: unknown,
+): value is ParsedRelayRow {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if ('raw' in row) return false;
+  if (
+    row.kind !== 'transaction' &&
+    row.kind !== 'billDue' &&
+    row.kind !== 'cardStatement' &&
+    row.kind !== 'cardPayment'
+  ) return false;
+  if (row.type !== 'expense' && row.type !== 'income') return false;
+  if (!Number.isSafeInteger(row.amountFils) || (row.amountFils as number) <= 0) return false;
+  if (typeof row.currency !== 'string' || !/^[A-Z]{3}$/.test(row.currency)) return false;
+  if (
+    typeof row.merchant !== 'string' ||
+    row.merchant !== row.merchant.trim() ||
+    row.merchant.length < 1 ||
+    row.merchant.length > 160 ||
+    /[\u0000-\u001F\u007F-\u009F]/u.test(row.merchant)
+  ) return false;
+  if (!validIsoDate(row.date)) return false;
+  if (!validParsedCard(row.card)) return false;
+  if (
+    row.reference !== null &&
+    (typeof row.reference !== 'string' ||
+      row.reference !== row.reference.trim() ||
+      row.reference.length < 1 ||
+      row.reference.length > 128 ||
+      /[\u0000-\u001F\u007F-\u009F]/u.test(row.reference))
+  ) return false;
+  if (typeof row.transferHint !== 'boolean') return false;
+  if (!RELAY_CATEGORIES.has(row.categoryGuess as string)) return false;
+  if (row.categoryDeliberate !== undefined && typeof row.categoryDeliberate !== 'boolean') {
+    return false;
+  }
+
+  const dueKind = row.kind === 'billDue' || row.kind === 'cardStatement';
+  if (
+    row.dueDay !== null &&
+    (!Number.isInteger(row.dueDay) || (row.dueDay as number) < 1 || (row.dueDay as number) > 31)
+  ) return false;
+  if (!dueKind && row.dueDay !== null) return false;
+  if (dueKind && row.date !== null && row.dueDay !== Number(row.date.slice(8))) return false;
+  if (!validNullableSafeFils(row.minDueFils)) return false;
+  if (row.kind !== 'cardStatement' && row.minDueFils !== null) return false;
+
+  if (!validNullableSafeFils(row.snapshotFils)) return false;
+  if (
+    row.snapshotKind !== null &&
+    row.snapshotKind !== 'balance' &&
+    row.snapshotKind !== 'limit' &&
+    row.snapshotKind !== 'outstanding'
+  ) return false;
+  if ((row.snapshotFils === null) !== (row.snapshotKind === null)) return false;
+
+  const fxFields = [row.originalAmountMinor, row.originalCurrency, row.fxRate, row.fxSource];
+  const hasFx = fxFields.some((field) => field !== undefined);
+  if (
+    hasFx &&
+    (!Number.isSafeInteger(row.originalAmountMinor) ||
+      (row.originalAmountMinor as number) <= 0 ||
+      typeof row.originalCurrency !== 'string' ||
+      !/^[A-Z]{3}$/.test(row.originalCurrency) ||
+      typeof row.fxRate !== 'number' ||
+      !Number.isFinite(row.fxRate) ||
+      row.fxRate <= 0 ||
+      (row.fxSource !== 'bank' && row.fxSource !== 'fallback'))
+  ) return false;
+
+  if (
+    row.receivedAt !== undefined &&
+    (typeof row.receivedAt !== 'string' || !Number.isFinite(Date.parse(row.receivedAt)))
+  ) return false;
+  if (row.market !== undefined && validRelayMarket(row.market) !== row.market) return false;
+  if (
+    row.captureSource !== undefined &&
+    row.captureSource !== 'shortcut' &&
+    row.captureSource !== 'email' &&
+    row.captureSource !== 'pdf'
+  ) return false;
+  if (!validRelaySender(row.sender)) return false;
+
+  if (
+    row.cardPaymentSide !== undefined &&
+    row.cardPaymentSide !== 'debit' &&
+    row.cardPaymentSide !== 'receipt'
+  ) return false;
+  if (row.kind !== 'cardPayment' && row.cardPaymentSide !== undefined) return false;
+  if (row.kind === 'cardStatement') {
+    const card = row.card as { kind?: unknown } | null;
+    if (
+      row.type !== 'expense' ||
+      (card !== null && card.kind !== 'credit') ||
+      row.categoryGuess !== 'other' ||
+      row.transferHint
+    ) {
+      return false;
+    }
+  }
+  if (row.kind === 'cardPayment') {
+    const card = row.card as { kind?: unknown } | null;
+    if (
+      row.type !== 'expense' ||
+      card?.kind !== 'credit' ||
+      row.categoryGuess !== 'other' ||
+      !row.transferHint
+    ) {
+      return false;
+    }
+  }
+  if (row.kind === 'billDue' && (row.type !== 'expense' || row.transferHint)) return false;
+
+  return true;
+}
+
+/**
+ * Preserve the validated sender for bank/card identity in buildImportPlan, and
+ * the message timestamp for its duplicate fingerprint.
+ *
+ * `market` is dropped rather than carried: the phone parses nothing here, so it
+ * would be a field with no reader. There is deliberately no message digest on
+ * this row either — retries are collapsed server-side by the keyed replay
+ * receipt in server/src/index.ts, which cannot be searched against a guessed
+ * bank alert the way a bare SHA-256 of the text could.
+ */
+export function relayRowToScannedSms(
+  row: ParsedRelayRow,
+  fallbackTs = Date.now(),
+): ScannedSms {
+  const ts = row.receivedAt ? Date.parse(row.receivedAt) : NaN;
+  const { receivedAt: _receipt, market: _market, ...structured } = row;
+  return { ...structured, smsTs: Number.isFinite(ts) ? ts : fallbackTs };
+}
+
+/** Drop collected rows from the queue. Call only after they are persisted. */
+export async function ackRelay(
+  cfg: Pick<RelayConfig, 'baseUrl' | 'syncToken'>,
+  ids: string[],
+): Promise<void> {
+  for (let i = 0; i < ids.length; i += PAGE) {
+    const slice = ids.slice(i, i + PAGE);
+    if (slice.length === 0) continue;
+    let res: Response;
+    try {
+      res = await request(`${cfg.baseUrl}/v1/ack`, {
+        method: 'POST',
+        token: cfg.syncToken,
+        body: JSON.stringify({ ids: slice }),
+      });
+    } catch {
+      throw new RelayError('Could not acknowledge captured transactions.', true);
+    }
+    // An un-acked row is re-delivered and deduplicated on the next sync, but
+    // callers still need to know that setup has not completed cleanly.
+    if (!res.ok) {
+      throw new RelayError(`Acknowledge failed (${res.status}).`, res.status >= 500);
+    }
+  }
+}
+
+/**
+ * Forget this device, server-side and locally. The queue goes with it; so does
+ * the public key, so anything the Shortcut sends afterwards is rejected.
+ */
+export async function unpairDevice(cfg: RelayConfig): Promise<void> {
+  let res: Response;
   try {
-    if (!isRelaySupported()) return { skipped: 'unsupported', sync: null };
-    const id = await readIdentity();
-    if (!id) return { skipped: 'not-paired', sync: null };
-    // Checked before the network call, not after: a lapsed subscriber's phone
-    // should not be talking to the relay at all.
-    if (!(await cachedEntitlementActive(now))) return { skipped: 'not-pro', sync: null };
-    return { skipped: null, sync: await syncRelay() };
+    res = await request(`${cfg.baseUrl}/v1/device`, {
+      method: 'DELETE',
+      token: cfg.adminToken,
+    });
   } catch {
-    return { skipped: null, sync: null };
+    // Keep the credential so the user can retry. Clearing it here would make
+    // the remote device impossible to delete until its retention timers fire.
+    throw new RelayError('Could not reach the relay to erase this device.', true);
   }
+  if (!res.ok && res.status !== 401 && res.status !== 404) {
+    throw new RelayError(`Could not erase the relay device (${res.status}).`, res.status >= 500);
+  }
+  await deleteRelayCredentials();
 }
 
-/* ─────────────────────────── Push registration ─────────────────────────── */
-
-export type PushRegistration = 'registered' | 'unchanged' | 'not-paired' | 'failed';
-
-/**
- * Hand the relay somewhere to knock, so a queued row wakes the phone instead of
- * waiting for the user to open the app.
- *
- * The token is stored locally too, and a token that has not changed costs no
- * request — this runs on every launch. Passing an empty string is how the app
- * says "stop knocking"; it is what turning notifications off must call, and it
- * clears the one stable device identifier the relay holds.
- */
-export async function registerRelayPushToken(token: string): Promise<PushRegistration> {
-  const id = await readIdentity();
-  if (!id) return 'not-paired';
-  const next = token.trim();
-  if ((id.pushToken ?? '') === next) return 'unchanged';
+/** Liveness probe for the "send a test message" onboarding step. */
+export async function relayHealthy(baseUrl: string | null = DEFAULT_RELAY_URL): Promise<boolean> {
+  const base = normalizeRelayBaseUrl(baseUrl);
+  if (!base) return false;
   try {
-    const res = await relayFetch(id.baseUrl, '/v1/push', {
-      method: 'POST',
-      token: id.token,
-      body: JSON.stringify({ token: next, platform: 'expo' }),
-    });
-    if (!res.ok) return 'failed';
+    const res = await request(`${base}/v1/health`, { method: 'GET' });
+    return res.ok;
   } catch {
-    return 'failed';
+    return false;
   }
-  // Written only after the relay confirms, so a failed call is retried on the
-  // next launch rather than remembered as done.
-  await writeIdentity({ ...id, pushToken: next || undefined });
-  return 'registered';
-}
-
-/** Sealed rows become exactly the shape an Android inbox scan produces. */
-function toScanned(rows: StagedRow[]): ScannedSms[] {
-  return rows
-    .map(({ row }) => ({
-      ...row,
-      // The relay never sends message text — that is the whole point — so the
-      // "report an unrecognised format" affordance has nothing to attach. An
-      // empty string is honest; a placeholder would show up in the UI.
-      raw: '',
-      date: row.date ?? toISODate(new Date(row.smsTs)),
-      smsTs: row.smsTs,
-      sender: row.sender,
-    }))
-    .sort((a, b) => a.smsTs - b.smsTs);
-}
-
-async function ackRows(id: StoredIdentity, ids: string[]): Promise<number> {
-  let acked = 0;
-  for (let i = 0; i < ids.length; i += ACK_LIMIT) {
-    const chunk = ids.slice(i, i + ACK_LIMIT);
-    const res = await relayFetch(id.baseUrl, '/v1/ack', {
-      method: 'POST',
-      token: id.token,
-      body: JSON.stringify({ ids: chunk }),
-    });
-    if (!res.ok) break;
-    acked += chunk.length;
-  }
-  return acked;
-}
-
-/**
- * The foreground half: sync, import through the app's own pipeline, and only
- * then acknowledge. Call it on hydrate, on background→active, and on
- * pull-to-refresh — the same places the Android auto-import runs.
- */
-export async function runRelayImport(
-  state: AppState,
-  importBatch: (input: ImportBatchInput) => string[],
-  today: Date = new Date(),
-): Promise<RelayImportResult> {
-  const base: RelayImportResult = { skipped: null, sync: null, plan: null, ids: [], acked: 0 };
-  if (!isRelaySupported()) return { ...base, skipped: 'unsupported' };
-  const id = await readIdentity();
-  if (!id) return { ...base, skipped: 'not-paired' };
-  // Syncing for a lapsed subscriber is a bug, not a courtesy: automatic
-  // capture is the paid feature, and the same gate guards the Android scan.
-  // The answer is mirrored on the way past so the headless layers, which
-  // cannot reach the store, apply the same gate.
-  await cacheEntitlement(state);
-  if (!isProActive(state)) return { ...base, skipped: 'not-pro' };
-
-  const sync = await syncRelay();
-  const inbox = await readInbox();
-  if (inbox.rows.length === 0 && inbox.discard.length === 0) {
-    return { ...base, sync };
-  }
-
-  const parsed = toScanned(inbox.rows);
-  // `lastScanTs` is passed through unchanged on purpose. It is the ANDROID
-  // inbox cursor — where the next on-device scan resumes from — and the relay
-  // has its own queue. Advancing it here would make a later SMS scan skip
-  // everything between the old cursor and the newest relayed message.
-  const plan = buildImportPlan(parsed, state, state.lastScanTs, today);
-  const nothingToWrite =
-    plan.txCount === 0 &&
-    plan.newAccountCount === 0 &&
-    plan.dueCount === 0 &&
-    plan.healedCount === 0;
-  const ids = nothingToWrite ? [] : importBatch(plan.batch);
-
-  // Ledger is committed; only now is it safe to let the relay forget.
-  const acked = await ackRows(id, [...inbox.rows.map((r) => r.id), ...inbox.discard]);
-  await writeInbox({ ...inbox, rows: [], discard: [] });
-
-  return { skipped: null, sync, plan, ids, acked };
-}
-
-/** Everything the UI needs to say whether capture is working. */
-export async function relayStatus(now: number = Date.now()): Promise<RelayStatus> {
-  const supported = isRelaySupported();
-  const id = supported ? await readIdentity() : null;
-  const inbox = await readInbox();
-  const pairedFor = id ? now - id.pairedAt : 0;
-  return {
-    supported,
-    paired: !!id,
-    deviceId: id?.deviceId ?? null,
-    market: id?.market ?? null,
-    pairedAt: id?.pairedAt ?? null,
-    pushEnabled: !!id?.pushToken,
-    pending: inbox.rows.length,
-    lastSyncAt: inbox.lastSyncAt,
-    lastRowAt: inbox.lastRowAt,
-    lastError: inbox.lastError,
-    looksUnconfigured:
-      !!id &&
-      pairedFor > UNCONFIGURED_AFTER_MS &&
-      inbox.lastSyncAt > 0 &&
-      inbox.lastError === null &&
-      inbox.lastRowAt === 0,
-  };
 }

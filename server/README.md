@@ -11,11 +11,11 @@ the whole reason this service exists, and why the Android build still has no
 server and never will.
 
 The device half lives in `src/lib/relay.ts` (pairing, sync, ack, unpair,
-status) and `src/lib/relay-crypto.ts` (the counterpart to `src/crypto.ts`'s
-seal). The two halves are asserted against each other in
-`scripts/test/worker.test.js` — the real `seal()` runs and the real shipping
-`openSealed()` opens it, so a change to either that breaks the other fails in
-CI rather than on a user's phone.
+trusted devices) and `src/lib/relay-crypto.ts` (the counterpart to
+`src/crypto.ts`'s seal). The two halves are asserted against each other in
+`scripts/test/worker.test.js` and `scripts/test/relay.test.js` — the real
+`seal()` runs and the real shipping `openSealed()` opens it — so a change to
+either that breaks the other fails in CI rather than on a user's phone.
 
 ## What it does and does not keep
 
@@ -33,43 +33,67 @@ the service must not be able to read:
 | Field | Why it is there | Why it is inside the seal |
 | --- | --- | --- |
 | `sender` | The SMS sender ID is the **only** thing that says which bank sent a message — no UAE bank but HSBC names itself in the body. Without it, a card that is branded on Android is grey and nameless on iOS, and three sender-gated parser rules never fire. | A column of sender IDs is a record of which banks each device hears from. |
-| `smsTs` / `receivedAt` | The app's strong duplicate guard is a fingerprint of the message timestamp and amount. Defaulting to `new Date()` gave a Shortcut retry a *different* fingerprint, so the same charge landed twice. | A timestamp column is a record of when each device receives bank messages. |
-| `msgId` | SHA-256 of the message text. Stable across a retry with a drifted clock, which the timestamp fingerprint is not. | It is derived from the text, and short texts are guessable. It is a key the phone compares against itself, not an index into anything. |
+| `receivedAt` | The app's strong duplicate guard fingerprints the message timestamp together with the amount. While this was the relay's own receipt time, a Shortcut that fired twice produced two different fingerprints and the same charge landed twice. | A timestamp column is a record of when each device receives bank messages. |
+| `market` | Which pack the row was parsed under, so a mis-set country is diagnosable from the phone rather than only from the wire. | It is a fact about the user's country, and it costs nothing to keep it sealed. |
 
-None of the three is a column, an index, or a log line. The claim the service
-makes is unchanged: **it cannot read what it stored.**
+`sender` is validated by `src/ingest-row.ts` before it is used, and a malformed
+or over-long value is **refused, never truncated** — truncating would store the
+first eighty characters of a bank message in a field meant to hold a bank name.
+`receivedAt` is honoured only when it is plausible: further than a day ahead or
+a year behind falls back to now, because a hand-edited value would either park a
+row at the top of the ledger forever or trip the app's 45-day stale-due cutoff.
 
-### The one thing that is a column: the push token
+There is deliberately **no digest of the message text** anywhere, sealed or not.
+Shortcut retries are collapsed by `ingest_receipts`, which stores an HMAC keyed
+by the ingest token — and that token is never stored here, so a D1 dump cannot
+be searched against a guessed bank alert the way a bare SHA-256 could.
+
+None of it is a column, an index, or a log line. The claim the service makes is
+unchanged: **it cannot read what it stored.**
+
+### The one row that is not sealed: the push registration
 
 A queued row is useless until the phone comes for it, and a phone that only
 comes when the user opens the app is not "automatic". So a device may register
-an Expo push token (`POST /v1/push`), and `/v1/ingest` sends a **content
--available push with an empty payload** — `data: {}`, no title, no body — to
-wake it.
+an Expo push token (`PUT /v1/push`) and the Worker sends a **content-available
+push with no transaction data in it** — `{kind: "wafra.sync", v: 1}`, no title,
+no body, no amount, no merchant, no queue id — to wake it.
 
 This is the one place the privacy story changes, and it changes honestly:
 
 - Apple and Expo learn **that** a row was queued for a device, and when. They
   cannot learn what it says; the row is fetched sealed over `/v1/sync`
   afterwards. Putting the amount or merchant in the push would hand two third
-  parties a readable transaction feed, so the payload is empty by construction.
-- `push_token` is a stable identifier for a phone — the only one in this
-  schema. It is **optional**: a device that never registers one still syncs on
+  parties a readable transaction feed.
+- The token is stored as AES-GCM ciphertext under `PUSH_TOKEN_KEY`, with the
+  AAD `wafra/v1/push-token`. Be precise about what that buys: it protects a
+  **database dump**, not the service — the Worker holds the key and can decrypt
+  what it needs to send. It is still, in effect, a stable identifier for a
+  phone, and it is the only one here.
+- It is **optional**. A device that never registers one still syncs on
   foreground and on its background task, just later. Declining notifications
   keeps the strong version of the claim available to anyone who wants it.
+- Registrations expire after 180 days and are refreshed whenever the app opens.
+  A token Expo reports as `DeviceNotRegistered` is deleted immediately.
 - Wakes are coalesced to at most one per device per 10 minutes. Apple throttles
-  apps that exceed roughly two or three background pushes an hour, and the
-  failure mode of exceeding it is invisible: the OS simply stops delivering.
-- A token Expo reports as `DeviceNotRegistered` is deleted rather than kept.
+  apps past roughly two or three background pushes an hour, and the failure mode
+  of exceeding it is invisible: the OS simply stops delivering. The window is
+  claimed in the database *before* the send, so a hung send cannot let a second
+  one start, and it is what makes the half-hourly retry cron safe.
 
 Typical retention is the seconds between a text arriving and the phone syncing.
-The hard ceiling is 72 hours, after which unsynced rows are swept.
+The hard ceiling is **30 days**, after which unsynced rows are swept by the
+cron in `scheduled()` — not left to a client that may never come back. That one
+number has to agree in three places: `schema.sql`, the `DELETE FROM queue`
+in `src/index.ts`, and this paragraph. A device silent for a year with an empty
+queue is deleted outright.
 
-This is deliberately stricter than FinArt, which keeps full message bodies for
-30 days. Their approach buys something real — they can re-run a fixed parser
-over stored messages and repair history retroactively, which we cannot. The
-trade was made the other way here: a readable archive of UAE bank messages is a
-breach target, and "Data Not Collected" is the product's main claim.
+Note what those 30 days are *of*: rows nobody can read, including us. Services
+that keep full message bodies for a month can re-run a fixed parser over stored
+messages and repair a user's history retroactively, which we cannot — that is
+the real cost of this design, and it was paid deliberately. A readable archive
+of UAE bank messages is a breach target, and "we cannot read it" is the
+product's main claim.
 
 **One thing that must be said out loud in the app, not just here.** The
 Shortcut's filter is coarse (see below), so messages that are not from a bank
@@ -98,15 +122,24 @@ them. A Workers isolate runs JavaScript on one thread, so nothing can interleave
 there. If you ever add an `await` between those two lines, you have introduced a
 cross-user parsing bug that will not reproduce under load of one.
 
-## Deploy
+A phone joining an existing vault inherits the vault's pack rather than
+imposing its own: two phones on the same ledger parsing the same family card
+under different packs would file one purchase twice, with two amounts.
+
+## Configure and deploy
+
+Requirements: Node.js 22 or newer and an authenticated Wrangler session.
 
 ```bash
 cd server
-npm install
+npm ci
+npm run typecheck        # tsc against @cloudflare/workers-types; no wrangler needed
 npx wrangler login
 
-npm run setup     # creates or finds the "wafra" D1 database, writes its
-                  # database_id into wrangler.toml, and applies schema.sql
+npm run setup            # creates or finds the "wafra" D1 database, writes its
+                         # database_id into wrangler.toml, and applies schema.sql
+npx wrangler secret put PUSH_TOKEN_KEY
+npx wrangler secret put EXPO_ACCESS_TOKEN
 npm run deploy
 ```
 
@@ -114,9 +147,16 @@ npm run deploy
 database and it finds the existing one. A D1 binding is resolved at build time
 and there is no environment-variable substitution for it, which is why the id
 has to be written into `wrangler.toml` rather than injected. `npm run deploy`
-runs `node scripts/d1.mjs check` first and refuses while the id is still the
-placeholder, so a fresh clone fails with a sentence instead of an opaque
-Cloudflare API error.
+runs `node scripts/d1.mjs check` first (as `predeploy`) and refuses while the id
+is still the placeholder, so a fresh clone fails with a sentence instead of an
+opaque Cloudflare API error.
+
+`npm run typecheck` deliberately does **not** shell out to `wrangler types
+--check`. That is what made `npm run check:server` exit 127 on a clean
+checkout — it needs a wrangler binary and a login before it can tell you
+anything. `@cloudflare/workers-types` is a real dependency instead, so the
+Worker is typechecked by `npm test` at the repo root with nothing installed but
+npm packages.
 
 If you would rather do it by hand:
 
@@ -127,35 +167,43 @@ npx wrangler d1 execute wafra --remote --file=./schema.sql
 npx wrangler deploy
 ```
 
-**Upgrading a database created before the `market` and push columns existed:**
+**Upgrading a database created before the market and coalescing columns
+existed** — SQLite has no `ADD COLUMN IF NOT EXISTS`, so these are commented out
+in `schema.sql` and run once, by hand:
 
 ```bash
 npx wrangler d1 execute wafra --remote \
   --command "ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE'"
 npx wrangler d1 execute wafra --remote \
-  --command "ALTER TABLE devices ADD COLUMN push_token TEXT"
-npx wrangler d1 execute wafra --remote \
-  --command "ALTER TABLE devices ADD COLUMN push_platform TEXT"
-npx wrangler d1 execute wafra --remote \
-  --command "ALTER TABLE devices ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0"
+  --command "ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0"
 ```
 
-Existing devices keep parsing under AE, which is what they were doing anyway,
-and keep syncing on foreground until they register a push token.
+Existing devices keep parsing under AE, which is what they were doing anyway.
 
-**Optional secret.** Expo's push service accepts unauthenticated sends unless
-the Expo project has enhanced security enabled, in which case:
+**Secrets.** `PUSH_TOKEN_KEY` is standard base64 containing exactly 32 random
+bytes; without it the Worker registers no push tokens and sends no wakes, and
+capture still works on foreground sync. Set `EXPO_PROJECT_ID` to the same EAS
+project UUID the app passes to SDK 55's
+`Notifications.getExpoPushTokenAsync({ projectId })` — a mismatch is rejected at
+registration rather than discovered as silence. Expo's push service accepts
+unauthenticated sends unless the project has enhanced security enabled, in which
+case `EXPO_ACCESS_TOKEN` is required; enable it. Set `EMAIL_DOMAIN` to a domain
+routed to this Worker with Cloudflare Email Routing to turn on the email
+supplement.
+
+Configure the app at build time:
 
 ```bash
-npx wrangler secret put EXPO_ACCESS_TOKEN
+EXPO_PUBLIC_WAFRA_RELAY_URL=https://wafra-relay.<your-subdomain>.workers.dev
+EXPO_PUBLIC_WAFRA_SHORTCUT_URL=https://www.icloud.com/shortcuts/<published-id>
 ```
 
-Nothing else about the Worker changes; without a token registered by any device
-the push code never runs at all.
-
-Cloudflare's free tier covers early usage comfortably: 100k Worker requests a
-day, and D1's free allowance is far beyond what a queue that empties itself
-will ever hold.
+`src/lib/relay.ts` reads the first and refuses to pair without one rather than
+guessing a hostname. The second must point at the published, credential-free
+**Wafra Capture** Shortcut — never one with a device token or ingest URL baked
+in; the app supplies both as a one-paste setup code after pairing. The exact
+action graph and the physical-device release proof are in
+[`../docs/ios-shortcut-spec.md`](../docs/ios-shortcut-spec.md).
 
 Verify:
 
@@ -164,21 +212,41 @@ curl https://wafra-relay.<your-subdomain>.workers.dev/v1/health
 # {"ok":true}
 ```
 
-The app needs to be pointed at the deployment: set `expo.extra.relayUrl` in
-`app.json` to the Worker's origin. `src/lib/relay.ts` reads it and refuses to
-pair without one rather than guessing a hostname.
+Cloudflare's free tier covers early usage comfortably: 100k Worker requests a
+day, and D1's free allowance is far beyond what a queue that empties itself
+will ever hold. Add an edge rate-limit rule for the unauthenticated `/v1/pair`
+route before production; the Worker's own global backstop is a second line, not
+the first.
 
 ## API
 
+Every token below is scope-specific. The Shortcut receives **ingest authority
+only**: it cannot read the queue, acknowledge it, or delete anything. The
+background sync has its own least-privilege bearer because it must be usable
+while the phone is locked, and destructive management needs the admin bearer,
+which stays in the foreground app.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/v1/pair` | `{publicKey, market?}` (base64 X25519, 32 bytes) → `{deviceId, token, market, ingestUrl}` |
-| `POST` | `/v1/ingest` | Bearer token. `{text, sender?, receivedAt?}` → `202`, or `204` if the message was not a transaction |
-| `GET` | `/v1/sync` | Bearer token → `{items: [{id, epk, iv, ct}]}` |
-| `POST` | `/v1/ack` | Bearer token. `{ids: [...]}` → `204`, rows deleted |
-| `POST` | `/v1/push` | Bearer token. `{token, platform: 'expo'}` → `{push:'on'}`; empty token → `{push:'off'}` |
-| `PATCH` | `/v1/device` | Bearer token. `{market}` → `{market}` |
-| `DELETE` | `/v1/device` | Bearer token → `204`, device and queue erased |
+| `POST` | `/v1/pair` | `{publicKey, market?, deviceName?}` (base64 X25519, 32 bytes) → `{deviceId, ingestToken, syncToken, adminToken, market}` |
+| `POST` | `/v1/ingest` | Ingest bearer + `{text, sender?, receivedAt?, eventId?}` → `202`, or `204` when the message was not a transaction |
+| `GET` | `/v1/sync` | Sync bearer → `{items: [{id, epk, iv, ct}]}` |
+| `POST` | `/v1/ack` | Sync bearer + `{ids}` → `204`, rows deleted |
+| `PATCH` | `/v1/device` | Admin bearer + `{market}` → `{market}` |
+| `DELETE` | `/v1/device` | Admin bearer → `204`, device and queue erased |
+| `PUT` | `/v1/push` | Admin bearer + `{expoPushToken, projectId}` → register/refresh a wake-only token |
+| `DELETE` | `/v1/push` | Admin bearer → remove wake-only delivery |
+| `POST` | `/v1/device-invites` | Owner bearer → one-use ten-minute join token |
+| `POST` | `/v1/join` | `{publicKey, inviteToken, deviceName, market?}` → independent credentials in the same vault |
+| `GET` | `/v1/devices` | Admin bearer → safe device metadata, roles and current-device marker |
+| `PATCH` | `/v1/devices/:id` | Owner (or self) + `{name}` → rename a device |
+| `DELETE` | `/v1/devices/:id` | Owner (or member self) → revoke one device; the last owner returns `409` |
+| `DELETE` | `/v1/vault` | Owner bearer → explicitly erase the vault and every device queue |
+| `GET` | `/v1/import/capabilities` | Admin bearer → truthful email/PDF formats and limits |
+| `POST` | `/v1/email-token` | Admin bearer → create/rotate `{emailToken, forwardingAddress}` |
+| `DELETE` | `/v1/email-token` | Admin bearer → revoke email forwarding |
+| `POST` | `/v1/email/ingest` | Email bearer + `{text?, html?, eventId?}` → structured sealed rows |
+| `POST` | `/v1/import/pdf` | Admin bearer + `application/pdf` bytes → structured sealed rows |
 | `GET` | `/v1/health` | → `{ok: true}` |
 
 No email, no password, no account. Identity is a key the phone generated. Sync
@@ -190,48 +258,80 @@ every message matching the user's filter, and most of them are OTPs, promos and
 delivery notices that are none of our business.
 
 `PATCH /v1/device` exists so changing country does not mean re-pairing.
-Re-pairing mints a new token, and the old one is baked into the user's Shortcut
-where nothing in the app can reach it — capture would die silently while the app
-looked healthy. For the same reason `pairRelay()` on the device reuses whatever
-key is already in the keychain (which survives app deletion on iOS) instead of
-minting a fresh one on reinstall.
+Re-pairing mints a new ingest token, and the old one is baked into the user's
+Shortcut where nothing in the app can reach it — capture would die silently
+while the app looked healthy.
 
-`receivedAt` is honoured only when it is plausible: further than a day ahead or
-a year behind falls back to now, because a hand-edited value would either park a
-row in the future or trip the app's 45-day stale-due cutoff.
+The published Shortcut should send one random `eventId` per automation run and
+reuse it if its HTTP action retries; a legacy `{text}` call falls back to a
+normalized-body fingerprint. Either form is suppressed for 15 minutes by the
+keyed receipt described above.
+
+Forwarded email has a separate inject-only credential for a specific reason:
+SMTP headers expose the destination address outside the app/relay TLS
+connection, so it must not be the same secret as the Shortcut's.
+
+## Email and PDF supplement
+
+Cloudflare Email Routing calls the Worker's email handler for
+`<emailToken>@<EMAIL_DOMAIN>`. `postal-mime` parses RFC822/MIME in memory;
+plain text is preferred and HTML is reduced to inert text before it reaches the
+same bank-alert parser. PDF attachments take the same route as direct uploads.
+The raw email, HTML and attachments fall out of scope when the request ends;
+only individually device-sealed structured rows reach D1.
+
+`POST /v1/import/pdf` accepts at most 5 MiB and 100 pages and never echoes
+extracted text or rows. The row contract is deliberately conservative: a text
+row needs a valid date, a description, an amount and an explicit `DR`/`CR` or
+`debit`/`credit` marker. A scan, an encrypted file, or a table whose direction
+exists only as visual column position returns `422` — Wafra does not guess
+whether money came in or went out. This path is why the "no history" limit
+below is survivable on iOS.
 
 ## Tests
 
 `scripts/test/worker.test.js` runs the **real** `export default { fetch }`
 against a real SQLite database built from this directory's `schema.sql` — D1 is
-SQLite, so the adapter in that file renames methods and nothing else. Covered:
-auth rejection on every authenticated route, cross-device isolation on sync and
-ack, rate limiting and its sliding window, the `204` path, the sync/ack
-round-trip including "not deleted on read", the 72-hour sweep, unpair, the
-market pack changing how a message parses, sender attribution changing a debit
-card into a credit card, timestamp handling, and the assertion that the message
-text appears nowhere in the database.
+SQLite, so the adapter in that file renames methods and nothing else.
+`scripts/test/relay.test.js` drives the **real** `src/lib/relay.ts` with only
+the native surfaces stubbed, and ends by putting the two together: pair against
+the real Worker, POST a bank SMS as the Shortcut does, collect the sealed row,
+open it, file it, acknowledge it, and assert the message text is nowhere in the
+database.
 
-`npm test` at the repo root also typechecks this directory against
+`server/test/*.cjs` cover the PDF/email parser, the push-token encryption and
+this schema. They run from the repo root's `npm test` — they used to run only
+from `npm --prefix server test`, which nothing called.
+
+`npm test` at the root also typechecks this directory against
 `@cloudflare/workers-types`. It used to be excluded from typecheck and CI both.
 
 ## The Shortcut the user builds
 
-In **Shortcuts → Automation → New → When I get a message**:
+In **Shortcuts → Automation → New → When I get a message**, then either:
 
-1. **Leave Sender empty.** UAE bank alerts arrive from alphanumeric sender IDs,
-   and the trigger's Sender field only accepts contacts and phone numbers.
-   Instead set **Message Contains** to `AED` — three characters that every UAE
-   bank alert carries, covering every bank at once.
-2. **Run Immediately.** This is the make-or-break step: left on "Run After
+- select the existing bank conversations Wafra lists, which keeps the filter
+  narrow and is much better for privacy; or
+- leave Sender empty and set **Message Contains** to `AED`, if the trigger's
+  Sender field turns out to accept only contacts and phone numbers — UAE bank
+  alerts arrive from alphanumeric sender IDs, which are not contacts.
+
+**Which of those two is actually available has not been verified on a physical
+device, and nothing may be claimed in a store listing until it is.** They differ
+in exactly the way that matters: the first sends only bank messages to this
+Worker, the second sends every message containing "AED".
+
+Then, whichever trigger is used:
+
+1. **Run Immediately.** This is the make-or-break step: left on "Run After
    Confirmation" the product silently does nothing and the user blames Wafra.
    Since iOS 17 an automation set to Run Immediately always posts a
    notification when it fires — there is no way to turn that off, and the setup
    flow has to set that expectation rather than let it be a surprise.
-3. Action: **Get Contents of URL**
-   - URL: the `ingestUrl` returned by pairing
+2. Action: **Get Contents of URL**
+   - URL: the `ingestUrl` the app shows after pairing
    - Method: `POST`
-   - Headers: `Authorization: Bearer <token>`, `Content-Type: application/json`
+   - Headers: `Authorization: Bearer <ingest token>`, `Content-Type: application/json`
    - Request Body: JSON —
      `text` = Shortcut Input (message content),
      `sender` = Shortcut Input (sender),
@@ -246,12 +346,14 @@ guard.
 **No history.** Android scans the whole inbox — that is where a typical user's
 first few thousand transactions come from. Shortcuts fires only on *new*
 messages, so an iOS user starts empty and accumulates from install day. This is
-why statement-file import matters far more on iOS than on Android.
+why the statement-file and forwarded-email import above matters far more on iOS
+than on Android.
 
-**`Message Contains: AED` is a coarse filter.** Every message containing "AED"
-is POSTed here, bank or not. Nothing is stored for the ones that are not
-transactions, but the text still left the device. That belongs in the setup flow
-and in the App Store privacy label, stated plainly.
+**A `Message Contains` filter is coarse.** If that is the trigger that works,
+every message containing "AED" is POSTed here, bank or not. Nothing is stored
+for the ones that are not transactions, but the text still left the device.
+That belongs in the setup flow and in the App Store privacy label, stated
+plainly.
 
 **Setup friction.** Four taps in Wafra, then roughly ten in an app most people
 have never opened. A meaningful share will not finish it. The app must be
@@ -262,11 +364,18 @@ performed outside them.
 ### Detecting a setup that never finished
 
 If the user misses the "Run Immediately" tap, nothing works and there is no
-signal at all. `relayStatus()` on the device reports `looksUnconfigured` — paired
-long enough that a real user would have spent money, syncing successfully, and
-still zero rows ever received — which is what a "your automation may still be
-asking before it runs" repair card should hang off. Letting the ledger quietly
-stay empty is the worst available outcome.
+error anywhere — the absence of rows is the only signal, so the app has to read
+it. Pairing therefore has three states, not two: `paired` (credentials exist),
+`configured` (the user says the automation is built) and `verified` (a
+synthetic probe travelled Shortcut → relay → encrypted sync).
+
+`verified` still only proves the *pipe*. The stronger proof is a separate
+timestamp written exclusively by the headless task after it stages a parsed
+**bank** row with the UI uninvolved — that is the only evidence a Message
+automation is actually firing. A phone that is paired and verified but has never
+recorded that proof is the case a "your automation may still be asking before it
+runs" repair card should hang off. Letting the ledger quietly stay empty is the
+worst available outcome.
 
 ### How fast a row actually lands
 
@@ -275,37 +384,39 @@ transaction:
 
 | Layer | Latency | Dies when |
 | --- | --- | --- |
-| Content-available push from this Worker | seconds | notifications declined, no `extra.eas.projectId` in `app.json`, or the app was force-quit from the switcher |
-| `expo-background-task` (`minimumInterval: 15`) | minutes to overnight — iOS decides | Background App Refresh off, Low Power Mode, force-quit |
+| Content-available push from this Worker | seconds | notifications declined, no `EXPO_PROJECT_ID`/`PUSH_TOKEN_KEY` configured, or the app was force-quit from the switcher |
+| The app's periodic background task | minutes to overnight — iOS decides | Background App Refresh off, Low Power Mode, force-quit |
 | Foreground sync (launch, background→active, pull-to-refresh) | when the app is opened | never |
 
 The floor is the third layer, and it is the one that makes the design correct
-rather than merely fast: **as long as Wafra is opened once every three days,
-nothing is lost**, because rows are not deleted until the phone acknowledges
-them and the queue TTL is 72 hours. Everything above that line is latency.
+rather than merely fast: rows are not deleted until the phone acknowledges them
+and the queue holds them for 30 days, so **as long as Wafra is opened once a
+month, nothing is lost**. Everything above that line is latency, not
+correctness.
 
-Only the foreground layer writes the ledger. The background layers fetch, open
-and stage into `wafra/relay/inbox/v1`; the app drains that through its normal
-import path and acknowledges afterwards. A headless task that wrote the ledger
-directly would be silently overwritten by the store's own persister.
+Only the foreground layer writes the main ledger. A background wake stages the
+opened rows into a separate encrypted inbox and stops there; the app folds that
+into the ledger on its next render and acknowledges afterwards. A headless task
+that wrote the ledger directly would be silently overwritten by the store's own
+persister.
 
 ### Not verified from here
 
 These need a real device before anything is promised in a listing:
 
+- **Which Message-automation trigger actually works** for UAE alphanumeric
+  sender IDs (see above). This is the highest-value unknown, and the privacy
+  copy depends on the answer.
 - Whether Message automations fire at all for SMS routed into **Filter Unknown
   Senders**, where UAE bank alerts often land. If they do not, the iOS design
-  fails for a large share of users. This is the highest-value unknown.
-- Whether "Message Contains" matching is case-insensitive and substring
-  (assumed yes).
+  fails for a large share of users.
 - Whether silencing Shortcuts notifications suppresses the mandatory
   automation banner.
 - **The wake layers have never run on hardware.** Content-available push needs
-  APNs and a physical device; `expo-background-task` does not run on iOS
-  simulators at all (BGTaskScheduler is unavailable there). The crypto and the
-  routes are observed — `scripts/test/relay.test.js` drives the real client
-  through the real Worker end to end — but *delivery* is read from Apple's and
-  the SDK 55 docs, not seen.
+  APNs and a physical device, and iOS background tasks do not run on simulators
+  at all. The crypto and the routes are observed — `relay.test.js` drives the
+  real client through the real Worker end to end — but *delivery* is read from
+  Apple's and the SDK 55 docs, not seen.
 - Whether Apple's throttle tolerates one wake per device per 10 minutes on a
   heavy day. If it does not, the symptom is invisible: iOS simply stops
   delivering, and only the foreground layer would still be filling the ledger.

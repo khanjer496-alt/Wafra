@@ -11,18 +11,16 @@ import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 import {
   autoCaptureMethod,
-  billingStore,
-  isBillingAvailable,
   PRO_PRICES,
-  purchasePro,
-  restorePro,
   TRIAL_DAYS,
   trialDaysLeft,
+  yearlySavingMonths,
   type ProPlan,
 } from '@/lib/purchases';
+import { isBillingAvailable, purchasePro, restorePro } from '@/lib/billing';
 import { useStore } from '@/lib/store';
 
 type FeatureRow = {
@@ -69,17 +67,14 @@ export default function ProScreen() {
   const trial = trialDaysLeft(state);
   const rows = features();
 
-  const store = billingStore();
-  const storeName = store === 'appStore' ? 'App Store' : 'Play Store';
-
   const buy = async () => {
     if (!isBillingAvailable()) {
-      Alert.alert(
-        `Available with the ${storeName} release`,
-        `Purchases go through ${store === 'appStore' ? 'Apple' : 'Google Play'} billing, which ` +
-          `only works when Wafra is installed from the ${storeName}. This build has every Pro ` +
-          'feature unlockable from Settings.',
-      );
+      // Store-name copy stays in i18n rather than being assembled from
+      // billingStore(): contracts.test.js fails any English sentence written
+      // into a screen, and a template literal is still an English sentence.
+      // These keys read "Play Store", which is correct for this Android
+      // milestone; the App Store wording needs its own keys before iOS ships.
+      Alert.alert(t('playOnlyTitle'), t('playOnlyBody'));
       return;
     }
     if (await purchasePro(plan)) setPro(true);
@@ -87,47 +82,39 @@ export default function ProScreen() {
 
   const restore = async () => {
     if (!isBillingAvailable()) {
-      Alert.alert('Nothing to restore', `Purchases arrive with the ${storeName} release.`);
+      Alert.alert(t('nothingToRestore'), t('nothingToRestoreBody'));
       return;
     }
     if (await restorePro()) setPro(true);
-    else
-      Alert.alert(
-        'No purchase found',
-        `No previous Wafra Pro purchase on this ${store === 'appStore' ? 'Apple Account' : 'Google account'}.`,
-      );
+    else Alert.alert(t('noPurchaseFound'), t('noPurchaseFoundBody'));
   };
 
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
-          <ScreenHeader title="Wafra Pro" onBack={() => router.back()} />
+          <ScreenHeader title={t('wafraPro')} onBack={() => router.back()} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Section index={0} style={styles.hero}>
-            {/* Founder unlock: long-press the mark (side-load builds). */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Wafra Pro"
-              delayLongPress={700}
-              onLongPress={() => {
-                const next = !state.pro;
-                setPro(next);
-                Alert.alert(
-                  next ? 'Founder mode' : 'Founder mode off',
-                  next ? 'Wafra Pro unlocked on this device.' : 'Wafra Pro disabled on this device.',
-                );
-              }}>
-              <Icon name="diamond" size={30} color={theme.warning} />
-            </Pressable>
-            <ThemedText type="title">Wafra Pro</ThemedText>
+            {/* No founder unlock here. There was one — a single long-press on
+                this icon toggled Pro — which put a free unlock on the most
+                discoverable surface in the app, the screen that sells it.
+                Long-pressing something is an ordinary thing to try. The
+                deliberate unlock is seven taps on the version row in
+                Settings, which nobody reaches by accident. */}
+            <Icon name="diamond" size={30} color={theme.warning} />
+            <ThemedText type="title">{t('wafraPro')}</ThemedText>
             <ThemedText type="default" themeColor="textSecondary">
               {state.pro
                 ? t('proActiveThanks')
                 : trial > 0
-                  ? `Everything is free for your first ${TRIAL_DAYS} days — ${trial} day${trial === 1 ? '' : 's'} left. Keep it going:`
+                  ? tf('trialDaysLeftPaywall', {
+                      total: TRIAL_DAYS,
+                      left: trial,
+                      s: trial === 1 ? '' : 's',
+                    })
                   : t('trialEndedPaywall')}
             </ThemedText>
             {!state.pro && trial > 0 && (
@@ -176,7 +163,7 @@ export default function ProScreen() {
                   onPress={() => router.push('/import-sms')}
                   hitSlop={8}>
                   <ThemedText type="micro" style={{ color: theme.primary }}>
-                    Paste a message now
+                    {t('pasteBankMessage')}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -206,7 +193,9 @@ export default function ProScreen() {
                       </ThemedText>
                       <Money fils={PRO_PRICES[p].fils} type="subtitle" decimals />
                       <ThemedText type="meta" themeColor="textTertiary">
-                        {p === 'yearly' ? t('perYear') : t('perMonth')}
+                        {p === 'yearly'
+                          ? `${t('perYear')} ${tf('monthsFreeSuffix', { months: yearlySavingMonths() })}`
+                          : t('perMonth')}
                       </ThemedText>
                     </Pressable>
                   );

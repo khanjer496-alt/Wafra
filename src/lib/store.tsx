@@ -1,27 +1,43 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { I18nManager, Platform } from 'react-native';
+import { AppState as RNAppState, I18nManager, Platform } from 'react-native';
 import React, {
   createContext,
   useCallback,
   useContext,
   useEffect,
   useMemo,
-  useReducer,
   useRef,
+  useState,
 } from 'react';
 
-import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
+import {
+  markCardsDistinct,
+  mergeDuplicateAccounts,
+  mergeRenewedCard,
+  repairCardPaymentAccounts,
+} from '@/lib/accounts';
+import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
+import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import { detectMarketId, setActiveMarket } from '@/lib/markets';
 import {
+  generateSeedAccounts,
   generateSeedCardDues,
   generateSeedTransactions,
   SEED_ACCOUNTS,
   SEED_BILLS,
   SEED_BUDGETS,
 } from '@/lib/seed';
-import { guessCategory, normalizeServiceName, parseSms, STRUCTURAL_TITLES } from '@/lib/sms-parser';
+import { applyHealPatch, healPatch } from '@/lib/heal';
+import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
+import { internalTransferIds } from '@/lib/ledger';
+import { mergeImportedCardDues } from '@/lib/cards';
+import { reconcileCaptureDuplicates } from '@/lib/dedupe';
+import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
+import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
+import type { FxUpdate } from '@/lib/fx';
+
 import type {
+  ImportBatchInput,
   Account,
   AppState,
   Bill,
@@ -30,7 +46,10 @@ import type {
   CategoryId,
   Goal,
   Transaction,
+  TxHealUpdate,
 } from '@/lib/types';
+
+export type { ImportBatchInput } from '@/lib/types';
 
 const STORAGE_KEY = 'wafra/state/v1';
 
@@ -50,7 +69,9 @@ const EMPTY_STATE: AppState = {
   userName: 'there',
   appLock: false,
   monthStartDay: 1,
+  themePreference: 'system',
   pro: false,
+  privateMode: false,
   trialStartTs: 0,
   marketId: '',
   language: '',
@@ -66,6 +87,217 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
   return [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
+/**
+ * Automatic repairs may discard a poorer duplicate, but they must never
+ * rewrite or discard the row the user chose to correct. Restore those rows
+ * from the exact objects that entered the migration, including optional
+ * fields that a duplicate merge could otherwise add or remove.
+ */
+export function preserveUserEditedTransactions(
+  original: Transaction[],
+  migrated: Transaction[],
+): Transaction[] {
+  const pinned = new Map(original.filter((t) => t.userEdited).map((t) => [t.id, t]));
+  if (pinned.size === 0) return migrated;
+
+  const restoredIds = new Set<string>();
+  const restored = migrated.map((t) => {
+    const exact = pinned.get(t.id);
+    if (!exact) return t;
+    restoredIds.add(t.id);
+    return exact;
+  });
+  for (const [id, exact] of pinned) {
+    if (!restoredIds.has(id)) restored.push(exact);
+  }
+  return restored;
+}
+
+/** Conservative persisted-capture cleanup shared by every hydration path. */
+export function finalizeHydrationTransactions(
+  transactions: Transaction[],
+  authoritativeOriginal: Transaction[] = transactions,
+): Transaction[] {
+  return sortTxs(
+    preserveUserEditedTransactions(
+      authoritativeOriginal,
+      reconcileCaptureDuplicates(transactions),
+    ),
+  );
+}
+
+/** Payer evidence shared with the parser's anonymous-income policy. */
+const PERSISTED_INCOME_ORIGINATOR_RE =
+  /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b|inc\b)/i;
+
+/**
+ * Upgrade persisted data whose meaning became clearer in newer parsers.
+ *
+ * Every transaction transform explicitly treats `userEdited` as immutable.
+ * The final hydration reducer protects it again around account repair and
+ * conservative capture reconciliation, so this contract does not depend on
+ * every future migration author remembering every downstream transform.
+ */
+export function migratePersistedState(
+  parsed: Partial<Omit<AppState, 'hydrated'>>,
+): Partial<Omit<AppState, 'hydrated'>> {
+  if (parsed.transactions) {
+    parsed.transactions = parsed.transactions
+      .map((t) =>
+        t.userEdited
+          ? t
+          : t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
+            ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
+            : t,
+      )
+      // Income mis-filed into spending categories (a Talabat payout is
+      // revenue, not dining): re-file as business/salary.
+      .map((t) =>
+        t.userEdited
+          ? t
+          : t.source === 'sms' &&
+              t.type === 'income' &&
+              !['salary', 'business', 'other'].includes(t.category)
+            ? { ...t, category: 'business' as const }
+            : t,
+      )
+      // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
+      // clearly and group as one subscription.
+      .map((t) => {
+        if (t.userEdited || t.source !== 'sms') return t;
+        const canonical = normalizeServiceName(t.title);
+        return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
+      })
+      // Parser versions before T215 filed anonymous incoming money as
+      // Business (or even retained a spending category). Structural titles
+      // mean no payer was identified. Refile only those exact SMS rows, while
+      // retaining salary/Other and raw messages carrying explicit originator
+      // or company evidence.
+      .map((t) => {
+        if (
+          t.userEdited ||
+          t.source !== 'sms' ||
+          t.type !== 'income' ||
+          (t.title !== 'Incoming transfer' && t.title !== 'Inward remittance') ||
+          t.category === 'salary' ||
+          t.category === 'other' ||
+          (t.raw !== undefined && PERSISTED_INCOME_ORIGINATOR_RE.test(t.raw))
+        ) {
+          return t;
+        }
+        return { ...t, category: 'other' as const };
+      })
+      // Older imports marked every inward remittance as a transfer. An
+      // unpaired arrival is real income; only ledger pairing can prove it
+      // moved between the user's own accounts. Raw-bearing rows can reparse,
+      // so migrate only the exact stranded legacy shape.
+      .map((t) => {
+        if (
+          t.userEdited ||
+          t.source !== 'sms' ||
+          t.raw !== undefined ||
+          t.type !== 'income' ||
+          t.title !== 'Inward remittance' ||
+          t.isTransfer !== true
+        ) {
+          return t;
+        }
+        const { isTransfer: _stale, ...income } = t;
+        return income;
+      });
+
+    // Re-file rows stuck in Other: each parser release widens the merchant
+    // vocabulary, so imported-as-Other rows get another chance without
+    // needing a rescan. User overrides still win.
+    parsed.transactions = parsed.transactions.map((t) => {
+      if (
+        t.userEdited ||
+        t.source !== 'sms' ||
+        t.isTransfer ||
+        t.category !== 'other' ||
+        t.type !== 'expense'
+      ) {
+        return t;
+      }
+      const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+      return guessed !== 'other' ? { ...t, category: guessed } : t;
+    });
+
+    // Rows that kept their raw SMS re-parse under the CURRENT grammar on
+    // every launch. A hand-corrected row is the user's answer, not the
+    // parser's, so it remains the exact object supplied to this migration.
+    if (parsed.marketId) setActiveMarket(parsed.marketId);
+    parsed.transactions = parsed.transactions.flatMap((t) => {
+      if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
+      const p = parseSms(t.raw, parsed.merchantOverrides);
+      // Parser regressions and formats this release does not understand are
+      // not evidence that a persisted transaction never happened. Preserve
+      // the old row and its raw text for a future rescan instead of deleting
+      // the only local record.
+      if (!p) return [t];
+      if (p.kind === 'billDue' || p.kind === 'cardStatement') {
+        // This migration can heal transactions but cannot materialize the
+        // CardDue/Bill that now represents this message. Keep the legacy row
+        // until a rescan can atomically create that obligation; deleting it
+        // here loses the only record when lastScanTs prevents re-offering it.
+        return [t];
+      }
+      const patch = healPatch(t, p);
+      return [patch ? applyHealPatch(t, patch) : t];
+    });
+  }
+
+  if (parsed.cardDues?.length && parsed.accounts?.length) {
+    // A CardDue can only describe a credit-card statement. Older parsers
+    // sometimes left the referenced account untyped or labelled debit; the
+    // due is stronger evidence than that fallback. Preserve every statement
+    // (including long-overdue, unreplaced ones) and repair the account rather
+    // than deleting the only record of money still owed.
+    const dueAccountIds = new Set(parsed.cardDues.map((due) => due.accountId));
+    parsed.accounts = parsed.accounts.map((account) => {
+      if (!dueAccountIds.has(account.id)) return account;
+      if (
+        account.kind === 'card' &&
+        account.cardType === 'credit' &&
+        account.snapshotKind !== 'balance'
+      ) {
+        return account;
+      }
+      return {
+        ...account,
+        kind: 'card' as const,
+        cardType: 'credit' as const,
+        // Legacy credit-card "balance" alerts represented available
+        // headroom. Once the card type is authoritative, so is this meaning.
+        ...(account.snapshotKind === 'balance' ? { snapshotKind: 'limit' as const } : {}),
+      };
+    });
+  }
+
+  return parsed;
+}
+
+/** Validate and migrate an imported backup before it reaches the reducer. */
+export function parseBackupForRestore(
+  json: string,
+): Partial<Omit<AppState, 'hydrated'>> | null {
+  try {
+    const parsed = JSON.parse(json) as { app?: unknown; data?: unknown };
+    if (
+      parsed.app !== 'wafra' ||
+      typeof parsed.data !== 'object' ||
+      parsed.data === null ||
+      !('transactions' in parsed.data) ||
+      !Array.isArray(parsed.data.transactions)
+    ) {
+      return null;
+    }
+    return migratePersistedState(parsed.data as Partial<Omit<AppState, 'hydrated'>>);
+  } catch {
+    return null;
+  }
+}
+
 type Action =
   | { type: 'hydrate'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'addTransaction'; transaction: Transaction }
@@ -79,6 +311,7 @@ type Action =
       newDues: CardDue[];
       snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
       bankNames: Record<string, string>;
+      cardTypes: Record<string, 'credit' | 'debit'>;
       lastScanTs: number;
       updates: TxHealUpdate[];
     }
@@ -88,6 +321,8 @@ type Action =
   | { type: 'addAccount'; account: Account }
   | { type: 'editAccount'; id: string; patch: Partial<Omit<Account, 'id'>> }
   | { type: 'deleteAccount'; id: string }
+  | { type: 'mergeRenewedCard'; oldId: string; newId: string }
+  | { type: 'markCardsDistinct'; id: string }
   | { type: 'addBill'; bill: Bill }
   | { type: 'deleteBill'; id: string }
   | { type: 'markBillPaid'; id: string; month: string; transaction: Transaction }
@@ -100,10 +335,14 @@ type Action =
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
   | { type: 'setAppLock'; enabled: boolean }
+  | { type: 'setPrivateMode'; enabled: boolean }
+  | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
+  | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; language: string }
+  | { type: 'markParserVersion' }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -119,6 +358,7 @@ function reducer(state: AppState, action: Action): AppState {
       // Month grouping is computed all over the app; sync the global before
       // anything renders against the hydrated state.
       applyMonthStartDay(next.monthStartDay || 1);
+      applyThemePreference(next.themePreference);
       // The free Pro trial clock starts the first time the app ever opens.
       if (!next.trialStartTs) next.trialStartTs = Date.now();
       // Localize automatically: country pack from the device locale, once.
@@ -126,8 +366,23 @@ function reducer(state: AppState, action: Action): AppState {
       setActiveMarket(next.marketId);
       if (!next.language) next.language = detectLanguage();
       setLanguage(next.language === 'ar' ? 'ar' : 'en');
-      return next;
+      // Older states can carry two rows for one card. Collapse on the way in,
+      // once, rather than teaching every screen to tolerate it.
+      const accountsMerged = mergeDuplicateAccounts(next);
+      const paymentsRepaired = repairCardPaymentAccounts(accountsMerged);
+      return {
+        ...paymentsRepaired,
+        transactions: finalizeHydrationTransactions(paymentsRepaired.transactions, next.transactions),
+        cardDues: mergeImportedCardDues([], paymentsRepaired.cardDues, paymentsRepaired.accounts),
+      };
     }
+    case 'markParserVersion':
+      // A full re-read that changed nothing still proves the stored rows were
+      // read with this parser. Without recording it, the app would re-read the
+      // entire inbox on every single launch.
+      return state.parserVersion === PARSER_VERSION
+        ? state
+        : { ...state, parserVersion: PARSER_VERSION };
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'setMarket':
@@ -136,10 +391,30 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setUiLanguage':
       setLanguage(action.language === 'ar' ? 'ar' : 'en');
       return { ...state, language: action.language };
+    case 'setThemePreference': {
+      // Applied here as well as on hydrate, so the palette turns over on the
+      // same tick the setting is written rather than on the next launch.
+      applyThemePreference(action.preference);
+      return { ...state, themePreference: action.preference };
+    }
     case 'setMonthStartDay': {
       const day = Math.min(28, Math.max(1, Math.round(action.day) || 1));
+      if (day === state.monthStartDay) return state;
       applyMonthStartDay(day);
-      return { ...state, monthStartDay: day };
+      // A new array identity for the transactions, deliberately.
+      //
+      // This setting reshapes every month boundary in the app, but it lives in
+      // a module-global that `monthKey` reads at call time — nothing about
+      // `state.transactions` changes when it moves. Every figure memoised on
+      // `[state.transactions, period]` therefore kept its old value: Home's
+      // hero still showed the calendar month's saving while Leaving soon,
+      // memoised on `[state]`, had already switched to the salary month. Two
+      // panels of one screen, two definitions of "this month", until a
+      // transaction was added or the app restarted.
+      //
+      // Copying the array is what tells those memos the world moved. It is
+      // O(n) once, on a setting the user changes approximately never.
+      return { ...state, monthStartDay: day, transactions: [...state.transactions] };
     }
     case 'addTransaction':
       return { ...state, transactions: sortTxs([action.transaction, ...state.transactions]) };
@@ -155,22 +430,32 @@ function reducer(state: AppState, action: Action): AppState {
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
     case 'importBatch': {
-      const dues = [...state.cardDues];
-      for (const due of action.newDues) {
-        const i = dues.findIndex((d) => d.accountId === due.accountId && !d.settledAt);
-        if (i >= 0) dues[i] = { ...due, id: dues[i].id };
-        else dues.push(due);
-      }
       const accounts = [...state.accounts, ...action.newAccounts].map((a) => {
         const snap = action.snapshots[a.id];
         const bank = !a.bankName ? action.bankNames[a.id] : undefined;
+        const learnedType = action.cardTypes[a.id];
         let next = a;
         if (snap && snap.ts > (a.snapshotTs ?? 0)) {
           next = { ...next, snapshotFils: snap.fils, snapshotKind: snap.kind, snapshotTs: snap.ts };
         }
         if (bank) next = { ...next, bankName: bank };
+        if (
+          learnedType &&
+          (learnedType === 'credit' || next.cardType === undefined) &&
+          next.cardType !== learnedType
+        ) {
+          next = { ...next, kind: 'card', cardType: learnedType };
+        }
+        // A balance-shaped snapshot captured before the parser learned this
+        // is a credit card is available headroom, not cash in an account.
+        // Normalize persisted snapshots too, including batches where no newer
+        // snapshot arrived alongside the authoritative card type.
+        if (learnedType === 'credit' && next.snapshotKind === 'balance') {
+          next = { ...next, snapshotKind: 'limit' };
+        }
         return next;
       });
+      const dues = mergeImportedCardDues(state.cardDues, action.newDues, accounts);
       // Heal existing rows the parser now reads better.
       const patches = new Map(action.updates.map((u) => [u.id, u]));
       const existing =
@@ -179,23 +464,21 @@ function reducer(state: AppState, action: Action): AppState {
               .filter((t) => !patches.get(t.id)?.remove)
               .map((t) => {
                 const u = patches.get(t.id);
-                if (!u) return t;
-                return {
-                  ...t,
-                  ...(u.title !== undefined ? { title: u.title } : null),
-                  ...(u.category !== undefined ? { category: u.category } : null),
-                  ...(u.isTransfer !== undefined ? { isTransfer: u.isTransfer } : null),
-                  ...(u.raw !== undefined ? { raw: u.raw } : null),
-                };
+                return u ? applyHealPatch(t, u) : t;
               })
           : state.transactions;
-      return {
+      const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
         ...state,
-        transactions: sortTxs([...action.transactions, ...existing]),
+        transactions: [...action.transactions, ...existing],
         accounts,
         accountHints: { ...state.accountHints, ...action.newHints },
         cardDues: dues,
         lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
+        parserVersion: PARSER_VERSION,
+      }));
+      return {
+        ...merged,
+        transactions: sortTxs(reconcileCaptureDuplicates(merged.transactions)),
       };
     }
     case 'undoBatch': {
@@ -215,6 +498,11 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
       };
+    case 'mergeRenewedCard':
+      // The bank reissued the card; the user confirmed the two rows are one.
+      return mergeRenewedCard(state, action.oldId, action.newId);
+    case 'markCardsDistinct':
+      return markCardsDistinct(state, action.id);
     case 'deleteAccount':
       return {
         ...state,
@@ -238,13 +526,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, bills, transactions: sortTxs([action.transaction, ...state.transactions]) };
     }
     case 'upsertCardDue': {
-      const i = state.cardDues.findIndex(
-        (d) => d.accountId === action.due.accountId && !d.settledAt,
-      );
-      const cardDues = [...state.cardDues];
-      if (i >= 0) cardDues[i] = { ...action.due, id: cardDues[i].id };
-      else cardDues.push(action.due);
-      return { ...state, cardDues };
+      return {
+        ...state,
+        cardDues: mergeImportedCardDues(state.cardDues, [action.due], state.accounts),
+      };
     }
     case 'payCardDue': {
       const cardDues = state.cardDues.map((d) =>
@@ -302,6 +587,30 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
     case 'setAppLock':
       return { ...state, appLock: action.enabled };
+    case 'setPrivateMode':
+      return {
+        ...state,
+        privateMode: action.enabled,
+        // The change is immediate and retroactive: no low-confidence message
+        // body survives after the switch says local-only.
+        transactions: action.enabled
+          ? state.transactions.map(({ raw: _discard, ...tx }) => tx)
+          : state.transactions,
+      };
+    case 'applyFxUpdates': {
+      const updates = new Map(action.updates.map((update) => [update.id, update]));
+      if (updates.size === 0) return state;
+      let changed = false;
+      const transactions = state.transactions.map((tx) => {
+        const update = updates.get(tx.id);
+        // A bank-quoted AED equivalent is final. A late response from a
+        // reference request must never replace it.
+        if (!update || tx.fxSource !== 'fallback') return tx;
+        changed = true;
+        return { ...tx, ...update };
+      });
+      return changed ? { ...state, transactions } : state;
+    }
     case 'setOnboarded':
       return { ...state, onboarded: true };
     case 'clearAll':
@@ -321,43 +630,66 @@ function reducer(state: AppState, action: Action): AppState {
  * parses BETTER (named merchant, real category, transfer flag) upgrades that
  * row in place instead of requiring an erase + reimport.
  */
-export interface TxHealUpdate {
-  id: string;
-  title?: string;
-  category?: CategoryId;
-  isTransfer?: boolean;
-  raw?: string;
-  /** The message no longer parses as a transaction (e.g. it's a statement reminder) — drop the row. */
-  remove?: boolean;
-}
+export type { TxHealUpdate } from '@/lib/types';
 
-export interface ImportBatchInput {
-  transactions: Omit<Transaction, 'id'>[];
-  newAccounts: Omit<Account, 'id'>[];
-  /** last4 → index into newAccounts OR existing accountId. */
-  newHints: Record<string, string>;
-  newDues: Omit<CardDue, 'id'>[];
-  /** accountRef → newest bank-quoted balance/limit figure from the scan. */
-  snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
-  /** accountRef → bank name learned from the SMS sender (backfill only). */
-  bankNames: Record<string, string>;
-  lastScanTs: number;
-  updates?: TxHealUpdate[];
-}
 
 interface StoreValue {
   state: AppState;
+  /**
+   * Non-null when persistence has failed in this process.
+   *
+   * Deliberately NOT part of `AppState`: `persist` writes everything in
+   * AppState except `hydrated`, so a storage-failure flag living there would
+   * be serialised into the very record whose write just failed.
+   *
+   * When this is set because HYDRATION failed, the state above was not read
+   * from disk and saving is latched off — so `state.onboarded === false` here
+   * means "we could not read your ledger", not "you are a new user". A screen
+   * that shows onboarding needs to check this before it offers a fresh start.
+   */
+  storageFailure: StorageFailure | null;
+  /**
+   * True when HYDRATION failed and writes are latched off.
+   *
+   * Narrower than `storageFailure`, which is also set by a failed save. This
+   * is the one that means "what is on screen is not the user's data", and it
+   * is what the recovery screen keys on: while it is true, no surface may
+   * offer onboarding, a fresh start or sample data, because the first save
+   * afterwards would write that over a ledger that is still on the device.
+   */
+  hydrationFailed: boolean;
+  /** A retry is in flight. The recovery screen stays up either way. */
+  retryingHydration: boolean;
+  /**
+   * Read the ledger again. Resolves to whether the read SUCCEEDED — returned
+   * rather than left to `hydrationFailed`, because a caller awaiting this has
+   * a stale closure over that flag and would have to guess from whether it is
+   * still mounted.
+   */
+  retryHydration: () => Promise<boolean>;
   addTransaction: (t: Omit<Transaction, 'id'>) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   deleteTransaction: (id: string) => void;
-  /** Bulk import; returns the created transaction ids for undo. */
-  importBatch: (input: ImportBatchInput) => string[];
+  /**
+   * Bulk import. `durable` resolves only after SQLCipher has committed the
+   * rows; relay callers must await it before acknowledging the server queue.
+   */
+  importBatch: (input: ImportBatchInput) => ImportReceipt;
+  /**
+   * Flush the current authoritative snapshot to SQLCipher. Relay callers use
+   * this before acknowledging a row that deduped against in-memory state.
+   */
+  ensureDurable: () => Promise<void>;
   undoBatch: (ids: string[]) => void;
   upsertBudget: (b: Budget) => void;
   deleteBudget: (category: Budget['category']) => void;
   addAccount: (a: Omit<Account, 'id'>) => void;
   editAccount: (id: string, patch: Partial<Omit<Account, 'id'>>) => void;
   deleteAccount: (id: string) => void;
+  /** Fold a reissued card's predecessor into it (user-confirmed). */
+  mergeRenewedCard: (oldId: string, newId: string) => void;
+  /** Remember that a suggested reissue link was declined. */
+  markCardsDistinct: (id: string) => void;
   addBill: (b: Omit<Bill, 'id' | 'paidMonths'>) => void;
   deleteBill: (id: string) => void;
   markBillPaid: (id: string, month: string, transaction: Omit<Transaction, 'id'>) => void;
@@ -369,8 +701,12 @@ interface StoreValue {
   addGoal: (g: Omit<Goal, 'id'>) => void;
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
+  markParserVersion: () => void;
   setAppLock: (enabled: boolean) => void;
+  setPrivateMode: (enabled: boolean) => Promise<void>;
+  applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
+  setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
   setMarket: (id: string) => void;
   setUiLanguage: (language: string) => void;
@@ -378,22 +714,42 @@ interface StoreValue {
   exportBackup: () => string;
   restoreBackup: (json: string) => boolean;
   loadDemoData: () => void;
-  clearAll: () => void;
+  /** Cryptographically erase the SQLCipher file/key, then create a blank store. */
+  clearAll: () => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
 
+export interface ImportReceipt {
+  ids: string[];
+  durable: Promise<void>;
+}
+
+/**
+ * The demo ledger.
+ *
+ * Everything here is DERIVED from one generated transaction list, in seed.ts,
+ * rather than written down beside it. The hardcoded version of this function
+ * carried a single AED 1,209 card due against a demo card that had actually
+ * charged AED 18,060 and never repaid a fils of it — a figure with no relation
+ * to the rows on the very next screen. SEED_BILLS moved to seed.ts for the same
+ * reason: the bills' due days have to sit two days after the matching debits in
+ * the seed's RECURRING table or the demo opens on an overdue row, and that is a
+ * fact about the seed, not about the store.
+ */
 function demoState(): Partial<Omit<AppState, 'hydrated'>> {
   const now = new Date();
   const transactions = generateSeedTransactions(now);
   return {
-    accounts: SEED_ACCOUNTS,
+    // Balances quoted against this ledger, not fixed constants — see
+    // generateSeedAccounts.
+    accounts: generateSeedAccounts(now, transactions),
     transactions,
+    budgets: SEED_BUDGETS,
+    bills: SEED_BILLS,
     // Derived from the same statement windows the seed's card payments were
     // written against, so the open due matches what the card actually spent.
     cardDues: generateSeedCardDues(now, transactions),
-    budgets: SEED_BUDGETS,
-    bills: SEED_BILLS,
     // Six months of the demo's own outgoings, roughly 40% of the way there —
     // an AED 20,000 target next to a AED 93,000 bank balance read as a goal
     // already met and left on the screen by mistake.
@@ -404,42 +760,133 @@ function demoState(): Partial<Omit<AppState, 'hydrated'>> {
 }
 
 /**
- * Transactions are stored in chunks: Android's AsyncStorage keeps each key in
- * a single SQLite row capped at ~2MB, and a full SMS history in one blob blew
- * past it — the save "worked" but every read failed, so the app opened as if
- * brand new. Meta (small) lives at STORAGE_KEY; rows live at :tx:N keys.
+ * Transactions are stored in chunks. Older Android builds used AsyncStorage,
+ * where a single row could exceed the cursor limit; current native builds use
+ * the same chunk contract inside SQLCipher so migration is exact and writes
+ * stay bounded. Meta (small) lives at STORAGE_KEY; rows live at :tx:N keys.
  */
 const TX_CHUNK_SIZE = 400;
+/** Collapses a burst of dispatches — import, rename, undo — into one write. */
+const SAVE_DEBOUNCE_MS = 700;
 const txChunkKey = (i: number) => `${STORAGE_KEY}:tx:${i}`;
 
 type PersistedMeta = Partial<Omit<AppState, 'hydrated'>> & { txChunks?: number };
 
-async function loadPersisted(): Promise<Partial<Omit<AppState, 'hydrated'>> | null> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+interface LoadedState {
+  state: Partial<Omit<AppState, 'hydrated'>>;
+  /** The chunk bodies exactly as they were on disk, to seed the write cache. */
+  chunkBodies: string[];
+}
+
+async function loadPersisted(): Promise<LoadedState | null> {
+  let raw = await stateStorage.getItem(STORAGE_KEY);
+  if (!raw && (await migrateLegacyState(STORAGE_KEY))) {
+    raw = await stateStorage.getItem(STORAGE_KEY);
+  }
   if (!raw) return null;
   const parsed = JSON.parse(raw) as PersistedMeta;
+  const chunkBodies: string[] = [];
+  /** Any gap makes the index-aligned body cache unusable — see below. */
+  let corrupt = false;
   if (!Array.isArray(parsed.transactions)) {
     const count = Number(parsed.txChunks) || 0;
     const txs: Transaction[] = [];
     if (count > 0) {
-      const pairs = await AsyncStorage.multiGet(
+      const pairs = await stateStorage.multiGet(
         Array.from({ length: count }, (_, i) => txChunkKey(i)),
       );
       for (const [, v] of pairs) {
-        if (v) txs.push(...(JSON.parse(v) as Transaction[]));
+        if (!v) {
+          corrupt = true;
+          continue;
+        }
+        // Each chunk stands on its own. One throw here used to abort the
+        // whole load, and the caller turns a failed load into a blank
+        // onboarded=false state — so a single corrupt chunk presented as
+        // "your data is gone", accounts, settings and all, while the other
+        // chunks sat intact in storage. Losing 400 rows is bad; losing the
+        // app is worse, and it is the same one-line failure either way.
+        try {
+          const rows = JSON.parse(v) as Transaction[];
+          if (Array.isArray(rows)) {
+            txs.push(...rows);
+            // Seeds the save-time diff, so the first write after launch does
+            // not rewrite every chunk it just read.
+            chunkBodies.push(v);
+          } else {
+            corrupt = true;
+          }
+        } catch {
+          // Skip it. The next save rewrites every chunk from memory — and the
+          // body cache is dropped rather than left with a hole in it, because
+          // it is diffed BY INDEX. Keeping the surviving bodies would shift
+          // every chunk after the corrupt one against its stored twin and
+          // suppress writes that were genuinely needed.
+          corrupt = true;
+        }
       }
     }
     parsed.transactions = txs;
   }
   delete parsed.txChunks;
-  return parsed;
+  return { state: parsed, chunkBodies: corrupt ? [] : chunkBodies };
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, EMPTY_STATE);
+  const [state, setState] = useState(EMPTY_STATE);
+  /**
+   * React may batch renders, but capture can deliver two relay batches in the
+   * same turn. This ref is the ordered source of truth for every dispatch, so
+   * the second batch always reduces over the first even before React renders.
+   */
+  const authoritativeState = useRef(EMPTY_STATE);
+  const dispatch = useCallback((action: Action): AppState => {
+    const next = reducer(authoritativeState.current, action);
+    authoritativeState.current = next;
+    setState(next);
+    return next;
+  }, []);
   const prevChunkCount = useRef(0);
   /** Last successfully written body per chunk, so unchanged ones are skipped. */
   const prevChunks = useRef<string[]>([]);
+  /**
+   * The transactions array as of the last save. Reducers return a NEW array
+   * only when they actually touch transactions, so an identity check here is
+   * exact — and it is what lets a settings toggle skip re-serialising the
+   * whole ledger.
+   */
+  const prevTransactions = useRef<Transaction[] | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Serialises saves — see the comment where it is used. */
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Latched when hydration failed. While it is set, `persist` refuses to write
+   * anything: the in-memory state was not read from disk, so saving it would
+   * overwrite a ledger we could not load. See the hydration catch above.
+   */
+  const storageBlocked = useRef(false);
+  const [storageFailure, setStorageFailure] = useState<StorageFailure | null>(null);
+  /**
+   * The renderable half of `storageBlocked`.
+   *
+   * The ref is what `persist` reads, because that guard has to be exact on the
+   * same tick it is set; a ref does not re-render, and the recovery screen has
+   * to appear. They are set together and only together.
+   *
+   * This is deliberately narrower than `storageFailure`, which is also set when
+   * a SAVE fails. A failed save happens mid-session over data that was read
+   * correctly, and taking the whole app away from someone at that point would
+   * be worse than the failure — only an unreadable ledger justifies the
+   * takeover, because only then is what is on screen not the user's data.
+   */
+  const [hydrationFailed, setHydrationFailed] = useState(false);
+  const [retryingHydration, setRetryingHydration] = useState(false);
+  const retryInFlight = useRef(false);
+  /**
+   * Supersedes an in-flight hydration. A retry started while the previous read
+   * is still running, or an unmount, must not let the older attempt dispatch.
+   */
+  const hydrationRun = useRef(0);
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -452,169 +899,232 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.hydrated, state.language]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const loaded = await loadPersisted();
-        if (cancelled) return;
-        if (loaded) {
-          const parsed = loaded;
-          prevChunkCount.current = Math.ceil((parsed.transactions?.length ?? 0) / TX_CHUNK_SIZE);
-          // Pre-onboarding builds stored data without the flag; count them as onboarded.
-          if (parsed.onboarded === undefined) parsed.onboarded = true;
-          // Repair rows imported before the masked-PAN parser fix: titles like
-          // "4782********4833 Has Bee..." are card settlements, not spending.
-          if (parsed.transactions) {
-            parsed.transactions = parsed.transactions
-              .map((t) =>
-                t.source === 'sms' && /^\d{4,6}[Xx*•]{2,}\d{4}/.test(t.title)
-                  ? { ...t, title: 'Card payment', isTransfer: true, category: 'other' as const }
-                  : t,
-              )
-              // Amounts above AED 1M in a single SMS are misread balances/refs.
-              .filter((t) => t.source !== 'sms' || t.amountFils <= 100_000_000)
-              // Income mis-filed into spending categories (a Talabat payout is
-              // revenue, not dining): re-file as business/salary.
-              .map((t) =>
-                t.source === 'sms' &&
-                t.type === 'income' &&
-                !['salary', 'business', 'other'].includes(t.category)
-                  ? { ...t, category: 'business' as const }
-                  : t,
-              )
-              // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc.
-              // read clearly and group as one subscription.
-              .map((t) => {
-                if (t.source !== 'sms') return t;
-                const canonical = normalizeServiceName(t.title);
-                return canonical && canonical !== t.title ? { ...t, title: canonical } : t;
-              });
-            // Collapse exact SMS duplicates left by rescans across parser
-            // versions (same day/amount/type/title). Keep the newest import —
-            // it carries the best parsing and the right card account.
-            const importTs = (id: string) => Number(id.split('-')[1]) || 0;
-            const best = new Map<string, (typeof parsed.transactions)[number]>();
-            for (const t of parsed.transactions) {
-              if (t.source !== 'sms') continue;
-              const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
-              const cur = best.get(k);
-              if (!cur || importTs(t.id) > importTs(cur.id)) best.set(k, t);
-            }
-            parsed.transactions = parsed.transactions.filter((t) => {
-              if (t.source !== 'sms') return true;
-              const k = `${t.date}|${t.amountFils}|${t.type}|${t.title.trim().toLowerCase()}`;
-              return best.get(k)?.id === t.id;
-            });
-            // Re-file rows stuck in Other: each parser release widens the
-            // merchant vocabulary, so imported-as-Other rows get another
-            // chance without needing a rescan. User overrides still win.
-            parsed.transactions = parsed.transactions.map((t) => {
-              if (t.source !== 'sms' || t.isTransfer || t.category !== 'other' || t.type !== 'expense') {
-                return t;
-              }
-              const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
-              return guessed !== 'other' ? { ...t, category: guessed } : t;
-            });
-            // Rows that kept their raw SMS re-parse under the CURRENT grammar
-            // on every launch: junk that no longer parses (promos, BNPL
-            // previews, reminders) disappears, misread rows get their real
-            // title/category/transfer flag, and rows the grammar now fully
-            // understands drop their raw. No rescan needed.
-            if (parsed.marketId) setActiveMarket(parsed.marketId);
-            parsed.transactions = parsed.transactions.flatMap((t) => {
-              if (!t.raw || t.source !== 'sms') return [t];
-              // A hand-corrected row is the user's answer, not the parser's.
-              if (t.userEdited) return [t];
-              const p = parseSms(t.raw, parsed.merchantOverrides);
-              if (!p) return []; // no longer a transaction at all
-              if (p.kind === 'billDue' || p.kind === 'cardStatement') return []; // was a reminder
-              const next = { ...t };
-              if (
-                p.merchant !== 'Card purchase' &&
-                p.merchant !== t.title &&
-                (t.title === 'Card purchase' || t.category === 'other')
-              ) {
-                next.title = p.merchant;
-              }
-              if (t.category === 'other' && p.categoryGuess !== 'other' && !t.isTransfer) {
-                next.category = p.categoryGuess;
-              }
-              if ((p.transferHint || p.kind === 'cardPayment') && !t.isTransfer) {
-                next.isTransfer = true;
-              }
-              const stillLow =
-                !next.isTransfer &&
-                next.type === 'expense' &&
-                (next.title === 'Card purchase' ||
-                  (next.category === 'other' && !STRUCTURAL_TITLES.has(next.title)));
-              if (!stillLow) delete next.raw;
-              return [next];
-            });
-          }
-          // Drop stale unsettled card dues, and dues attached to anything that
-          // is not a credit card (statement dues only exist for credit cards).
-          if (parsed.cardDues) {
-            const cutoff = toISODate(new Date(Date.now() - 60 * 86400000));
-            const creditIds = new Set(
-              (parsed.accounts ?? []).filter((a) => a.cardType === 'credit').map((a) => a.id),
-            );
-            parsed.cardDues = parsed.cardDues.filter(
-              (d) => (d.settledAt || d.dueDate >= cutoff) && creditIds.has(d.accountId),
-            );
-          }
-          dispatch({ type: 'hydrate', state: parsed });
-        } else {
-          dispatch({ type: 'hydrate', state: { onboarded: false } });
-        }
-      } catch {
-        if (!cancelled) dispatch({ type: 'hydrate', state: { onboarded: false } });
+  /**
+   * Read the ledger and present it — on launch, and again on every retry.
+   *
+   * This used to be an anonymous IIFE inside the mount effect, which meant the
+   * only way to try a second time was to relaunch the app. A read can fail for
+   * reasons that go away on their own — the device was still locked, the file
+   * was momentarily unavailable — and "force-stop and reopen" is not a
+   * recovery instruction to give someone whose ledger is on the line.
+   *
+   * The contract for the recovery screen is at the bottom: the latch and the
+   * failure record are cleared ONLY after a read that actually succeeded, and
+   * a read that legitimately finds nothing counts as a success. Everything
+   * else leaves both exactly as it found them, so a retry cannot flicker
+   * onboarding into view on its way to failing again.
+   */
+  const hydrate = useCallback(async (): Promise<boolean> => {
+    const run = ++hydrationRun.current;
+    try {
+      const loaded = await loadPersisted();
+      if (hydrationRun.current !== run) return false;
+      let next: Partial<Omit<AppState, 'hydrated'>> = { onboarded: false };
+      if (loaded) {
+        const parsed = loaded.state;
+        prevChunkCount.current = Math.ceil((parsed.transactions?.length ?? 0) / TX_CHUNK_SIZE);
+        // Seed the write cache with what is already on disk. Without this the
+        // first save after every launch believes no chunk has ever been
+        // written and rewrites the entire history — about a megabyte on a
+        // heavy ledger, for no change at all.
+        prevChunks.current = loaded.chunkBodies;
+        prevTransactions.current = parsed.transactions ?? [];
+        // Pre-onboarding builds stored data without the flag; count them as onboarded.
+        if (parsed.onboarded === undefined) parsed.onboarded = true;
+        next = migratePersistedState(parsed);
       }
-    })();
+      // The read SUCCEEDED. This is the only place writes are reopened, and
+      // `loaded === null` — a database that is genuinely empty — reaches it
+      // exactly like a database full of rows, because "there is nothing here"
+      // is a real answer and only a THROW means we failed to get one.
+      storageBlocked.current = false;
+      setHydrationFailed(false);
+      setStorageFailure(null);
+      dispatch({ type: 'hydrate', state: next });
+      return true;
+    } catch (error) {
+      if (hydrationRun.current !== run) return false;
+      /**
+       * A storage failure is NOT a first run, and this is the line that used
+       * to say it was.
+       *
+       * `loadPersisted` returns null when there is genuinely nothing stored
+       * and throws when the database could not be read. Both landed here and
+       * both produced `onboarded: false` — so a phone whose ledger was
+       * unreadable was shown onboarding, and then the first debounced save
+       * 700ms later wrote a fresh empty state over the data we had just
+       * failed to read. A transient read error became permanent data loss.
+       *
+       * So writes are latched off. The state we are about to present is not
+       * derived from what is on disk, and it must never be allowed to replace
+       * it. `hydrationFailed` puts the recovery screen over the top of it, so
+       * the empty state dispatched here is never offered as onboarding.
+       */
+      storageBlocked.current = true;
+      setHydrationFailed(true);
+      setStorageFailure(recordStorageFailure('read', error));
+      dispatch({ type: 'hydrate', state: { onboarded: false } });
+      return false;
+    }
+  }, [dispatch]);
+
+  useEffect(() => {
+    void hydrate();
+    // Bumping the run counter supersedes the in-flight read rather than
+    // cancelling it: the same mechanism a retry uses.
     return () => {
-      cancelled = true;
+      hydrationRun.current += 1;
     };
+  }, [hydrate]);
+
+  /**
+   * Try the read again, without relaunching.
+   *
+   * Nothing is cleared on the way in. Writes stay latched and the recovery
+   * screen stays up for the whole attempt, so a retry that fails again changes
+   * nothing the user can see except the spinner, and a retry that succeeds
+   * moves straight from the recovery screen to the real ledger.
+   */
+  const retryHydration = useCallback(async (): Promise<boolean> => {
+    if (retryInFlight.current) return false;
+    retryInFlight.current = true;
+    setRetryingHydration(true);
+    try {
+      return await hydrate();
+    } finally {
+      retryInFlight.current = false;
+      setRetryingHydration(false);
+    }
+  }, [hydrate]);
+
+  /**
+   * Persist. Three guards, because this runs on EVERY dispatch.
+   *
+   * The first is that transactions are only re-serialised when the array
+   * identity changed. Chunk diffing already avoided rewriting unchanged
+   * chunks, but the JSON.stringify that produced the bodies to compare ran
+   * first — so flipping App Lock, editing a budget or dismissing a toast still
+   * built roughly a megabyte of string on the JS thread at 5,000 rows, and
+   * then threw it away. Those mutations now write the small meta key alone.
+   *
+   * The second is a debounce. An import batch, a rename and an undo arrive as
+   * separate dispatches within a few hundred milliseconds, and each used to be
+   * its own full write. They now collapse into one, flushed on the way to the
+   * background so nothing is lost when the app is swiped away.
+   *
+   * The third is the write queue below. Debouncing makes overlapping saves
+   * rarer but does not remove them — the background flush fires while a
+   * debounced write may still be in flight — and two overlapping saves is a
+   * data-loss bug, not a performance one.
+   */
+  const persist = useCallback((snapshot: AppState): Promise<boolean> => {
+    // Fail closed. Hydration could not read the ledger, so nothing derived
+    // from this session is allowed to replace it on disk.
+    if (storageBlocked.current) return Promise.resolve(false);
+
+    const { hydrated: _hydrated, transactions, ...meta } = snapshot;
+    const txChanged = prevTransactions.current !== transactions;
+
+    let chunks: [string, string][] | null = null;
+    if (txChanged) {
+      chunks = [];
+      for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
+        chunks.push([
+          txChunkKey(i),
+          JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
+        ]);
+      }
+    }
+    const chunkCount = chunks ? chunks.length : prevChunkCount.current;
+
+    // Saves run ONE AT A TIME, chained onto whatever is still in flight.
+    //
+    // Two state changes in quick succession — an import followed by the
+    // parser-version stamp, say — used to start two overlapping writes. Each
+    // writes the meta record, and meta carries txChunks, the number of chunk
+    // keys the loader will ask for. If the smaller save's meta landed last,
+    // the count said 3 while 4 chunks existed on disk, and the loader read
+    // three of them: 400 transactions gone, silently, with the data still
+    // sitting in storage. The bookkeeping refs below have the same problem —
+    // they are read and written across an await.
+    //
+    // Chaining makes the last save's meta the one that survives, which is the
+    // only correct answer, and lets the diff be computed against a cache that
+    // is actually current.
+    const operation = writeQueue.current.then(async () => {
+      try {
+        // Computed in here, not outside: out here `prevChunks` may still be
+        // the value from before the write that is currently in flight.
+        const changed = chunks
+          ? chunks.filter(([, body], i) => prevChunks.current[i] !== body)
+          : [];
+        await stateStorage.multiSet([
+          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunkCount })],
+          ...changed,
+        ]);
+        if (chunks && prevChunkCount.current > chunks.length) {
+          await stateStorage.multiRemove(
+            Array.from({ length: prevChunkCount.current - chunks.length }, (_, i) =>
+              txChunkKey(chunks!.length + i),
+            ),
+          );
+        }
+        if (chunks) {
+          prevChunkCount.current = chunks.length;
+          prevChunks.current = chunks.map(([, body]) => body);
+        }
+        prevTransactions.current = transactions;
+        return true;
+      } catch (error) {
+        // Persistence is best-effort; the in-memory state stays authoritative.
+        // The caches are cleared so the next save rewrites every chunk rather
+        // than assuming a failed write landed.
+        //
+        // "Best-effort" used to mean the error vanished here, which is how a
+        // write path that failed on EVERY save on Android went unnoticed
+        // through two signed releases. It is recorded now, and the reason is
+        // readable both in logcat and from the device.
+        prevChunks.current = [];
+        prevTransactions.current = null;
+        setStorageFailure(recordStorageFailure('write', error));
+        return false;
+      }
+    });
+    // Keep the shared queue non-rejecting so one failed device write cannot
+    // prevent every later save from running. Callers that require durability
+    // inspect `operation` separately.
+    writeQueue.current = operation.then(() => undefined);
+    return operation;
   }, []);
 
   useEffect(() => {
     if (!state.hydrated) return;
-    const { hydrated: _hydrated, transactions, ...meta } = state;
-    const chunks: [string, string][] = [];
-    for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
-      chunks.push([
-        txChunkKey(i),
-        JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
-      ]);
-    }
-    // Only chunks whose contents actually changed are rewritten. Every state
-    // change lands here — flipping a setting, editing a budget, dismissing a
-    // toast — and each one used to re-serialise and rewrite the entire
-    // transaction history.
-    const changed = chunks.filter(([, body], i) => prevChunks.current[i] !== body);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      persist(authoritativeState.current);
+    }, SAVE_DEBOUNCE_MS);
+  }, [state, persist]);
 
-    (async () => {
-      try {
-        await AsyncStorage.multiSet([
-          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunks.length })],
-          ...changed,
-        ]);
-        if (prevChunkCount.current > chunks.length) {
-          await AsyncStorage.multiRemove(
-            Array.from({ length: prevChunkCount.current - chunks.length }, (_, i) =>
-              txChunkKey(chunks.length + i),
-            ),
-          );
-        }
-        prevChunkCount.current = chunks.length;
-        prevChunks.current = chunks.map(([, body]) => body);
-      } catch {
-        // Persistence is best-effort; the in-memory state stays authoritative.
-        // The cache is cleared so the next save rewrites every chunk rather
-        // than assuming a failed write landed.
-        prevChunks.current = [];
+  // A debounce that loses the last write when the app is swiped away is a data
+  // loss bug, so leaving the foreground flushes immediately.
+  useEffect(() => {
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next !== 'background' && next !== 'inactive') return;
+      if (!saveTimer.current) return;
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      persist(authoritativeState.current);
+    });
+    return () => {
+      sub.remove();
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        persist(authoritativeState.current);
       }
-    })();
-  }, [state]);
+    };
+  }, [persist]);
 
   const addTransaction = useCallback((t: Omit<Transaction, 'id'>) => {
     dispatch({ type: 'addTransaction', transaction: { ...t, id: makeId('tx') } });
@@ -628,7 +1138,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteTransaction', id });
   }, []);
 
-  const importBatch = useCallback((input: ImportBatchInput) => {
+  const importBatch = useCallback((input: ImportBatchInput): ImportReceipt => {
     const newAccounts: Account[] = input.newAccounts.map((a) => ({ ...a, id: makeId('acc') }));
     // Hints pointing at a numeric index refer to a just-created account.
     const newHints: Record<string, string> = {};
@@ -638,8 +1148,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? newAccounts[idx].id
         : ref;
     }
+    const base = authoritativeState.current;
     const transactions: Transaction[] = input.transactions.map((t) => ({
       ...t,
+      // Private Mode keeps the structured row and drops source text at the
+      // ingestion boundary, before it can reach React state or persistence.
+      raw: base.privateMode ? undefined : t.raw,
       // Resolve index-refs in accountId the same way.
       accountId:
         /^\d+$/.test(t.accountId) && Number(t.accountId) < newAccounts.length
@@ -667,7 +1181,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
       bankNames[id] = bank;
     }
-    dispatch({
+    const cardTypes: NonNullable<ImportBatchInput['cardTypes']> = {};
+    for (const [ref, cardType] of Object.entries(input.cardTypes ?? {})) {
+      const id =
+        /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
+      cardTypes[id] = cardType;
+    }
+    const action: Action = {
       type: 'importBatch',
       transactions,
       newAccounts,
@@ -675,11 +1195,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       newDues,
       snapshots,
       bankNames,
+      cardTypes,
       lastScanTs: input.lastScanTs,
-      updates: input.updates ?? [],
+      updates: (input.updates ?? []).map((update) => ({
+        ...update,
+        accountId:
+          update.accountId && /^\d+$/.test(update.accountId) && Number(update.accountId) < newAccounts.length
+            ? newAccounts[Number(update.accountId)].id
+            : update.accountId,
+      })),
+    };
+    // React dispatch is intentionally not treated as persistence. Compute the
+    // exact next snapshot from the same action and enqueue its encrypted write
+    // now, bypassing the ordinary 700 ms UI debounce.
+    // A timer armed by an earlier UI action must not enqueue its older
+    // snapshot behind this durability write. All future timers read the
+    // authoritative ref, and this one is cancelled before the import lands.
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch(action);
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('Encrypted ledger write failed');
     });
-    return transactions.map((t) => t.id);
-  }, []);
+    return { ids: transactions.map((t) => t.id), durable };
+  }, [dispatch, persist]);
+
+  const ensureDurable = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const written = await persist(authoritativeState.current);
+    if (!written) throw new Error('Encrypted ledger write failed');
+  }, [persist]);
 
   const undoBatch = useCallback((ids: string[]) => {
     dispatch({ type: 'undoBatch', ids });
@@ -703,6 +1253,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const deleteAccount = useCallback((id: string) => {
     dispatch({ type: 'deleteAccount', id });
+  }, []);
+
+  const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
+    dispatch({ type: 'mergeRenewedCard', oldId, newId });
+  }, []);
+
+  const markCardsDistinctAction = useCallback((id: string) => {
+    dispatch({ type: 'markCardsDistinct', id });
   }, []);
 
   const addBill = useCallback((b: Omit<Bill, 'id' | 'paidMonths'>) => {
@@ -764,12 +1322,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteGoal', id });
   }, []);
 
+  const markParserVersion = useCallback(() => {
+    dispatch({ type: 'markParserVersion' });
+  }, []);
+
   const setAppLock = useCallback((enabled: boolean) => {
     dispatch({ type: 'setAppLock', enabled });
   }, []);
 
+  const setPrivateMode = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setPrivateMode', enabled });
+    const written = await persist(next);
+    if (!written) throw new Error('Private Mode could not be saved');
+  }, [dispatch, persist]);
+
+  const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
+    dispatch({ type: 'applyFxUpdates', updates });
+  }, []);
+
   const setOnboarded = useCallback(() => {
     dispatch({ type: 'setOnboarded' });
+  }, []);
+
+  const setThemePreference = useCallback((preference: string) => {
+    dispatch({ type: 'setThemePreference', preference });
   }, []);
 
   const setMonthStartDay = useCallback((day: number) => {
@@ -794,39 +1374,150 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   const restoreBackup = useCallback((json: string): boolean => {
-    try {
-      const parsed = JSON.parse(json);
-      if (parsed?.app !== 'wafra' || !parsed?.data || !Array.isArray(parsed.data.transactions)) {
-        return false;
-      }
-      dispatch({ type: 'restore', state: parsed.data });
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
+    const restored = parseBackupForRestore(json);
+    if (!restored) return false;
+    dispatch({ type: 'restore', state: restored });
+    return true;
+  }, [dispatch]);
 
   const loadDemoData = useCallback(() => {
     dispatch({ type: 'loadDemo', state: demoState() });
   }, []);
 
-  const clearAll = useCallback(() => {
+  const clearAll = useCallback(async () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+
+    /**
+     * Latch writes off BEFORE the blank state exists anywhere.
+     *
+     * Cancelling the debounce above is not enough, and neither is the write
+     * queue. The dispatch below moves `authoritativeState` to blank and
+     * re-renders, which schedules a FRESH 700 ms save of that blank state —
+     * and every save reads the ref at fire time, so it is the blank state it
+     * will write. That is intended when the erase succeeds. It is data loss
+     * when the erase fails:
+     *
+     *   dispatch(clearAll)          → authoritative ref is blank, timer armed
+     *   destroy() rejects           → the ledger is STILL ON DISK, readable
+     *   writeQueue recovery resolves → the queue is deliberately non-rejecting
+     *   timer fires at t+700ms      → persist(blank) chains onto that queue
+     *   multiSet(blank)             → the retained ledger is overwritten
+     *
+     * The queue orders those writes correctly; correct ordering is exactly
+     * what lands the blank write on the surviving database. `destroy` can
+     * fail with the file and the key both intact — `state-storage.native.ts`
+     * records a key error and a database error and still throws — and those
+     * two failures are coupled in practice: expo-sqlite refuses to delete an
+     * open database when `closeAsync` failed, and SecureStore cannot delete a
+     * key while the Keystore is unavailable. The old database then reopens
+     * with its retained key and the blank write commits, while Settings is
+     * telling the user the erase failed.
+     *
+     * So the latch closes here, before the dispatch, and stays closed for the
+     * whole operation. It is reopened below only on the success path.
+     */
+    storageBlocked.current = true;
+
+    // What the ledger actually held before this call touched anything. The
+    // dispatch below overwrites `authoritativeState.current` with blank, so
+    // this has to be taken first — it is what gets put back on screen if the
+    // erase fails.
+    const previousState = authoritativeState.current;
+
+    // Move the UI and authoritative ref to the blank state first. Any timer
+    // or mutation that arrives while the erase is in flight can therefore
+    // only write the blank/new state, never resurrect the old ledger.
     dispatch({ type: 'clearAll' });
-  }, []);
+
+    // All older encrypted writes finish before the cryptographic erase. The
+    // queue remains non-rejecting for future writes, while this caller keeps
+    // the real result so Settings cannot report success on failure.
+    const destroyOperation = writeQueue.current.then(() => stateStorage.destroy(STORAGE_KEY));
+    writeQueue.current = destroyOperation.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      // Throws if the erase failed. A ledger we failed to erase is still on
+      // disk and still readable, and until the catch below runs, the screen
+      // is showing blank — a lie about what is actually retained.
+      await destroyOperation;
+    } catch (error) {
+      // Put back what was on screen before this call, so a failed erase
+      // looks like a failed erase, not a successful one that also lost the
+      // ledger from view.
+      //
+      // The latch stays CLOSED here, not restored to whatever it was on
+      // entry: `destroy` can fail with the key or the database file only
+      // partially removed, and there is no way from here to tell which.
+      // Reopening writes onto a store in that state is the exact bug this
+      // latch exists to prevent. `hydrationFailed` goes up too, so the
+      // recovery screen blocks further unsaved edits until the app restarts
+      // or a backup is restored — the alternative is a user typing new
+      // transactions into a session that can never save them.
+      dispatch({ type: 'restore', state: previousState });
+      setStorageFailure(recordStorageFailure('destroy', error));
+      setHydrationFailed(true);
+      throw error;
+    }
+
+    prevChunkCount.current = 0;
+    prevChunks.current = [];
+    prevTransactions.current = null;
+
+    /**
+     * The erase SUCCEEDED, so the latch has nothing left to protect. This is
+     * the ONLY path that reopens writes during an erase — reached after the
+     * await, so a rejection can never arrive here.
+     *
+     * `storageBlocked` exists to stop this session's empty state from
+     * overwriting a ledger we failed to read. That ledger no longer exists:
+     * its file is deleted and its key is gone from the Keychain. Leaving the
+     * latch closed here was the bug — `destroy` really did erase everything,
+     * then `persist` returned false because the latch was still set, and
+     * `clearAll` threw "Blank encrypted store could not be created". Settings
+     * reported a failure for an erase that had completely succeeded, and the
+     * user was left with no ledger and a screen saying so.
+     *
+     * Cleared BEFORE the write, not after, because it is the write that the
+     * latch would otherwise refuse.
+     */
+    storageBlocked.current = false;
+    setHydrationFailed(false);
+    setStorageFailure(null);
+
+    // Recreate only the minimal blank state under a fresh random key. Waiting
+    // here makes "Erase" a completed operation, not a 700 ms intention. A
+    // failure here is a real one and is reported as such: `persist` records it
+    // and puts it back on `storageFailure`, so the screen shows what happened
+    // rather than a success it cannot back up.
+    const written = await persist(authoritativeState.current);
+    if (!written) throw new Error('Blank encrypted store could not be created');
+  }, [dispatch, persist]);
 
   const value = useMemo(
     () => ({
       state,
+      storageFailure,
+      hydrationFailed,
+      retryingHydration,
+      retryHydration,
       addTransaction,
       editTransaction,
       deleteTransaction,
       importBatch,
+      ensureDurable,
       undoBatch,
       upsertBudget,
       deleteBudget,
       addAccount,
       editAccount,
       deleteAccount,
+      mergeRenewedCard: mergeRenewedCardAction,
+      markCardsDistinct: markCardsDistinctAction,
       addBill,
       deleteBill,
       markBillPaid,
@@ -838,8 +1529,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
+      markParserVersion,
       setAppLock,
+      setPrivateMode,
+      applyFxUpdates,
       setMonthStartDay,
+      setThemePreference,
       setPro,
       setMarket,
       setUiLanguage,
@@ -851,16 +1546,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      storageFailure,
+      hydrationFailed,
+      retryingHydration,
+      retryHydration,
       addTransaction,
       editTransaction,
       deleteTransaction,
       importBatch,
+      ensureDurable,
       undoBatch,
       upsertBudget,
       deleteBudget,
       addAccount,
       editAccount,
       deleteAccount,
+      mergeRenewedCardAction,
+      markCardsDistinctAction,
       addBill,
       deleteBill,
       markBillPaid,
@@ -872,8 +1574,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
+      markParserVersion,
       setAppLock,
+      setPrivateMode,
+      applyFxUpdates,
       setMonthStartDay,
+      setThemePreference,
       setPro,
       setMarket,
       setUiLanguage,
@@ -900,8 +1606,15 @@ export { accountBalanceFils, netWorthFils, reliableBalanceFils } from './balance
 
 /** Net worth as of end-of-day on the given ISO date. */
 export function netWorthAtDate(state: AppState, dateISO: string): number {
-  let total = state.accounts.reduce((sum, a) => sum + a.openingFils, 0);
+  // Same two rules as netWorthSeries: hidden accounts are not part of net
+  // worth, and a transfer between your own accounts moves nothing — including
+  // the arriving side, which the bank words like ordinary income and which
+  // therefore carries no transfer flag of its own.
+  const live = new Set(state.accounts.filter((a) => !a.archived).map((a) => a.id));
+  const internal = internalTransferIds(state.transactions, live);
+  let total = state.accounts.reduce((sum, a) => (a.archived ? sum : sum + a.openingFils), 0);
   for (const t of state.transactions) {
+    if (t.isTransfer || internal.has(t.id) || !live.has(t.accountId)) continue;
     if (t.date > dateISO) continue;
     total += t.type === 'income' ? t.amountFils : -t.amountFils;
   }

@@ -17,9 +17,6 @@
         "UIBackgroundModes": [
           "remote-notification",
           "processing"
-        ],
-        "BGTaskSchedulerPermittedIdentifiers": [
-          "com.expo.modules.backgroundtask.processing"
         ]
       }
     },
@@ -31,6 +28,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "allowBackup": false,
       "permissions": [
         "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS"
@@ -71,9 +69,23 @@
       ],
       "@react-native-community/datetimepicker",
       [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true,
+          "enableFTS": true
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow Wafra to use Face ID to unlock your private ledger."
+        }
+      ],
+      [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Wafra uses Face ID to unlock your ledger on this device."
+          "faceIDPermission": "Allow Wafra to use Face ID to unlock your private ledger."
         }
       ],
       [
@@ -84,12 +96,15 @@
           "enableBackgroundRemoteNotifications": true
         }
       ],
-      "expo-secure-store",
-      "expo-background-task"
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "revenueCatAndroidKey": "",
+      "revenueCatIosKey": ""
     }
   }
 }

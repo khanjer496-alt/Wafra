@@ -8,7 +8,6 @@ on:
   push:
     branches:
       - main
-      - claude/uae-android-app-ui-muatsu
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,9 +18,56 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # The e2e scripts drive a browser, but typecheck/lint/test never launch
-      # one — skip the ~300MB download on every run.
+      # Chromium is pre-installed on the runner image used for the e2e job
+      # below; npm postinstall must not re-fetch it.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install relay dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Relay typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      - name: Relay tests
+        working-directory: server
+        run: npm test
+
+      - name: Relay Worker dry run
+        working-directory: server
+        run: npm run build:check
+
+  # The browser suites catch what unit tests structurally cannot: a route that
+  # resolves to nothing, a screen that renders blank, a total that disagrees
+  # with the rows under it. They existed for weeks and ran only when someone
+  # remembered to — which is the same "nothing checks it" problem the contracts
+  # suite is about, one level up.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -33,11 +79,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run typecheck
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Test
-        run: npm test
+      - name: End-to-end
+        run: npm run test:e2e

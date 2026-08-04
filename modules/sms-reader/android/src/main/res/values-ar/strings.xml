@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="wafra_alert_title">صُرف %1$s</string>
+  <string name="wafra_alert_title_named">%1$s · %2$s</string>
+  <string name="wafra_alert_title_credit">وصل %1$s</string>
+  <string name="wafra_alert_title_credit_named">وصل %1$s · %2$s</string>
+  <string name="wafra_alert_card">··%1$s</string>
+  <string name="wafra_alert_fallback">افتح وفرة</string>
+  <string name="wafra_alert_channel">تنبيهات المعاملات</string>
+  <string name="wafra_alert_channel_description">تنبيه صامت فور وصول رسالة البنك.</string>
+</resources>

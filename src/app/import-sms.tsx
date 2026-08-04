@@ -35,6 +35,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { SupplementImports } from '@/components/supplement-imports';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
@@ -42,6 +43,7 @@ import { Money } from '@/components/ui/money';
 import { PulseDot } from '@/components/ui/states';
 import { CategoryTile } from '@/components/ui/tile';
 import { EASE, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildImportPlan,
@@ -51,11 +53,12 @@ import {
   type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
-import { getCategory } from '@/lib/categories';
+import { categoryLabel } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
-import { autoCaptureMethod, isProActive, requiresPro } from '@/lib/purchases';
+import { isProActive, requiresPro } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
+import { t, tf } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -98,19 +101,29 @@ function ScanPanel() {
 export default function ImportSmsScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const keyboardHeight = useKeyboardHeight();
   const { auto } = useLocalSearchParams<{ auto?: string }>();
   const { state, importBatch, addBill } = useStore();
 
   const [text, setText] = useState('');
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [showManual, setShowManual] = useState(() => !isSmsScanningAvailable());
   const [progress, setProgress] = useState<{ scanned: number; found: number } | null>(null);
   const [trackedBills, setTrackedBills] = useState<Set<number>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
   const started = useRef(false);
 
   const runScan = async () => {
+    // The plan's duplicate checks read state.transactions, so scanning before
+    // the ledger has loaded imports the whole inbox a second time.
+    if (!state.hydrated) {
+      Alert.alert(t('importOneMoment'), t('dataStillLoading'));
+      return;
+    }
     // The scan is Wafra reading a whole inbox on its own — the paid half.
+    // Asked through requiresPro() rather than inline so the free/paid line
+    // lives in one place and stays the same on both platforms.
     if (requiresPro('inboxScan') && !isProActive(state)) {
       router.push('/pro');
       return;
@@ -121,8 +134,8 @@ export default function ImportSmsScreen() {
       const granted = await requestSmsPermission();
       if (!granted) {
         Alert.alert(
-          'Permission needed',
-          'Wafra needs SMS access to read bank alerts. You can also paste messages manually below.',
+          t('smsPermissionNeeded'),
+          t('smsPermissionNeededBody'),
         );
         return;
       }
@@ -136,7 +149,7 @@ export default function ImportSmsScreen() {
       setPlan(p);
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
-        Alert.alert('Up to date', 'Everything in your inbox is already filed.');
+        Alert.alert(t('upToDate'), t('inboxAlreadyFiled'));
       }
     } finally {
       setScanning(false);
@@ -148,6 +161,15 @@ export default function ImportSmsScreen() {
    * is read it better than they would type it.
    */
   const runParse = (input: string) => {
+    if (!state.hydrated) {
+      Alert.alert(t('importOneMoment'), t('dataStillLoading'));
+      return;
+    }
+    // Deliberately NO isProActive gate here. Pasting is the only ingestion
+    // path an iPhone has without a Shortcut, so paywalling it charged an
+    // iPhone user for the privilege of doing the work by hand that an Android
+    // user gets automatically. Pasting is `manual` capture, and
+    // requiresPro('manual') is false on every platform by design.
     const parsed: ScannedSms[] = parseSmsBatch(input, state.merchantOverrides);
     const p = buildImportPlan(parsed, state, state.lastScanTs);
     const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
@@ -188,7 +210,7 @@ export default function ImportSmsScreen() {
 
   // Preview account name: index refs point into the plan's new accounts.
   const accountName = (ref: string): string => {
-    if (/^\d+$/.test(ref)) return plan?.batch.newAccounts[Number(ref)]?.name ?? 'New card';
+    if (/^\d+$/.test(ref)) return plan?.batch.newAccounts[Number(ref)]?.name ?? t('newCard');
     return state.accounts.find((a) => a.id === ref)?.name ?? '';
   };
 
@@ -197,14 +219,17 @@ export default function ImportSmsScreen() {
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
           {/* The title has to describe what this screen can actually do on the
-              phone it is running on. There is no inbox to read on iPhone. */}
-          <ScreenHeader
-            title={isSmsScanningAvailable() ? 'Read my inbox' : 'Read a message'}
-            onBack={() => router.back()}
-          />
+              phone it is running on: iOS gives no app access to Messages, so
+              "Read my inbox" named something the screen cannot do there. This
+              key is deliberately platform-neutral rather than branched on
+              Platform.OS — it is true on both, and it has an Arabic value. */}
+          <ScreenHeader title={t('importBankActivity')} onBack={() => router.back()} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
           {scanning ? (
             <Section index={0} style={styles.scanning}>
               <ScanPanel />
@@ -212,80 +237,98 @@ export default function ImportSmsScreen() {
                 <View style={styles.progressLabel}>
                   <PulseDot color={theme.primary} />
                   <ThemedText type="micro" themeColor="textTertiary">
-                    Progress
+                    {t('importProgress')}
                   </ThemedText>
                 </View>
                 <ThemedText type="small" tabular>
-                  {progress?.scanned ?? 0} read · {progress?.found ?? 0} matched
+                  {tf('importProgressCounts', {
+                    read: progress?.scanned ?? 0,
+                    matched: progress?.found ?? 0,
+                  })}
                 </ThemedText>
               </View>
               <ThemedText type="meta" themeColor="textTertiary">
-                Reading backwards from today. Nothing leaves the phone.
+                {t('importProgressPrivacy')}
               </ThemedText>
             </Section>
           ) : (
             <Section index={0} style={styles.intro}>
               <ThemedText type="default" themeColor="textSecondary">
                 {isSmsScanningAvailable()
-                  ? 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.'
-                  : 'Paste one or more bank alerts below, separated by a blank line. Everything is read on this device, and this always works — no subscription, no setup.'}
+                  ? t('scanBankAlertsPrivacy')
+                  : t('pasteHint')}
               </ThemedText>
+              {/* THE PLATFORM-FAIR LINE. Pasting used to sit behind the
+                  paywall, which on a phone with no inbox scan meant an iPhone
+                  user paid to do by hand exactly what an Android user got for
+                  free and automatically. runParse() no longer gates, and the
+                  screen has to SAY so on the platform where pasting is the
+                  only path — otherwise the wall is gone and nobody knows.
+                  Same key as the paywall's own row, so the two can never
+                  disagree about what is free. */}
+              {!isSmsScanningAvailable() && (
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('featPasteFreeText')}
+                </ThemedText>
+              )}
               {isSmsScanningAvailable() && (
-                <Button label="Scan full inbox" icon="search" onPress={runScan} />
+                <>
+                  <Button label={t('findBankAlerts')} icon="search" onPress={runScan} />
+                  <Button
+                    label={showManual ? t('hideManualPaste') : t('pasteInstead')}
+                    variant="ghost"
+                    onPress={() => setShowManual((value) => !value)}
+                  />
+                </>
               )}
-              <TextInput
-                accessibilityLabel="Paste bank messages"
-                value={text}
-                onChangeText={setText}
-                multiline
-                placeholder="Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR…"
-                placeholderTextColor={theme.textTertiary}
-                style={[
-                  styles.textarea,
-                  {
-                    backgroundColor: theme.backgroundElement,
-                    borderColor: theme.cardBorder,
-                    color: theme.text,
-                  },
-                ]}
-              />
-              <View style={styles.parseRow}>
-                <Button
-                  inline
-                  variant="outline"
-                  label="Parse pasted text"
-                  onPress={() => runParse(text)}
-                  disabled={!text.trim()}
-                />
-                <Button
-                  inline
-                  variant="ghost"
-                  label="Try sample"
-                  onPress={() => {
-                    setText(SAMPLE);
-                    runParse(SAMPLE);
-                  }}
-                />
-              </View>
-
-              {/* On iPhone this screen is the manual fallback for a job that
-                  can be done automatically — but only after a Shortcut exists.
-                  Someone who found their way here by pasting is exactly the
-                  person who should be told that. */}
-              {autoCaptureMethod() === 'relayCapture' && (
-                <Block onPress={() => router.push('/iphone-setup')}>
-                  <View style={styles.unreadRow}>
-                    <Icon name="spark" size={17} color={theme.primary} />
-                    <View style={styles.rowText}>
-                      <ThemedText type="small">Stop pasting</ThemedText>
-                      <ThemedText type="meta" themeColor="textTertiary">
-                        Set your iPhone up once and bank messages file themselves
-                      </ThemedText>
-                    </View>
-                    <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+              {showManual && (
+                <>
+                  <TextInput
+                    accessibilityLabel={t('pasteBankMessagesA11y')}
+                    value={text}
+                    onChangeText={setText}
+                    multiline
+                    placeholder={t('bankMessageExample')}
+                    placeholderTextColor={theme.textTertiary}
+                    style={[
+                      styles.textarea,
+                      {
+                        backgroundColor: theme.backgroundElement,
+                        borderColor: theme.cardBorder,
+                        color: theme.text,
+                        textAlign: state.language === 'ar' ? 'right' : 'left',
+                      },
+                    ]}
+                  />
+                  <View style={styles.parseRow}>
+                    <Button
+                      inline
+                      variant="outline"
+                      label={t('parsePastedText')}
+                      onPress={() => runParse(text)}
+                      disabled={!text.trim()}
+                    />
+                    <Button
+                      inline
+                      variant="ghost"
+                      label={t('trySample')}
+                      onPress={() => {
+                        setText(SAMPLE);
+                        runParse(SAMPLE);
+                      }}
+                    />
                   </View>
-                </Block>
+                </>
               )}
+              {/* B's screen ended with a "Stop pasting" card linking to the
+                  iPhone setup wizard. Deliberately not carried across: the
+                  same job is done below by <SupplementImports />, which offers
+                  the relay, forwarded email and PDF paths through a translated
+                  copy layer, and the card's two sentences exist in no i18n key
+                  (contracts.test.js bans an English literal here). If it comes
+                  back it needs t() keys with ar: values, and its href is
+                  /ios-setup — iphone-setup.tsx was the losing filename and is
+                  gone. */}
             </Section>
           )}
 
@@ -295,16 +338,16 @@ export default function ImportSmsScreen() {
                 <View style={[styles.stats, { borderColor: theme.cardBorder }]}>
                   {(
                     [
-                      [plan.txCount, 'Matched', theme.text],
-                      [plan.newAccountCount, plan.newAccountCount === 1 ? 'Card' : 'Cards', theme.text],
-                      [unreadCount, 'Unread', unreadCount > 0 ? theme.warning : theme.textTertiary],
+                      [plan.txCount, t('matchedLabel'), theme.text],
+                      [plan.newAccountCount, t('cardsTitle'), theme.text],
+                      [unreadCount, t('unreadLabel'), unreadCount > 0 ? theme.warning : theme.textTertiary],
                     ] as const
                   ).map(([value, label, color], i) => (
                     <View
                       key={label}
                       style={[
                         styles.statCell,
-                        i > 0 && { borderLeftWidth: 1, borderLeftColor: theme.cardBorder },
+                        i > 0 && { borderStartWidth: 1, borderStartColor: theme.cardBorder },
                       ]}>
                       <ThemedText type="small" tabular style={[styles.statFigure, { color }]}>
                         {value}
@@ -317,20 +360,22 @@ export default function ImportSmsScreen() {
                 </View>
                 {skippedCount > 0 && (
                   <ThemedText type="meta" themeColor="textTertiary" style={styles.skipped}>
-                    {skippedCount} already filed · skipped
+                    {skippedCount} {t('alreadyFiledSkipped')}
                   </ThemedText>
                 )}
                 {plan.healedCount > 0 && (
                   <ThemedText type="meta" style={{ color: theme.income }}>
-                    {plan.healedCount} existing entr{plan.healedCount === 1 ? 'y' : 'ies'} re-read
-                    better — renamed or recategorised in place.
+                    {tf('improvedExistingEntries', {
+                      count: plan.healedCount,
+                      ending: plan.healedCount === 1 ? 'y' : 'ies',
+                    })}
                   </ThemedText>
                 )}
               </Section>
 
               {newBills.length > 0 && (
                 <Section index={2}>
-                  <SectionHeader title="Bill reminders detected" />
+                  <SectionHeader title={t('billRemindersDetected')} />
                   {newBills.map((p, i) => {
                     const tracked = trackedBills.has(i);
                     return (
@@ -341,13 +386,13 @@ export default function ImportSmsScreen() {
                             {p.merchant}
                           </ThemedText>
                           <ThemedText type="meta" themeColor="textTertiary">
-                            {getCategory(p.categoryGuess).label}
-                            {p.dueDay ? ` · due day ${p.dueDay}` : ''}
+                            {categoryLabel(p.categoryGuess)}
+                            {p.dueDay ? ` · ${tf('dueDay', { day: p.dueDay })}` : ''}
                           </ThemedText>
                         </View>
                         <Button
                           variant={tracked ? 'ghost' : 'outline'}
-                          label={tracked ? 'Tracked' : 'Track'}
+                          label={tracked ? t('tracked') : t('track')}
                           disabled={tracked}
                           onPress={() => {
                             addBill({
@@ -372,8 +417,8 @@ export default function ImportSmsScreen() {
                   <SectionHeader
                     title={
                       plan.txCount > PREVIEW_LIMIT
-                        ? `Just filed · first ${PREVIEW_LIMIT} of ${plan.txCount}`
-                        : 'Just filed'
+                        ? tf('justFiledFirst', { shown: PREVIEW_LIMIT, total: plan.txCount })
+                        : t('justFiled')
                     }
                   />
                   {previewRows.map((tx, i) => (
@@ -385,7 +430,7 @@ export default function ImportSmsScreen() {
                             {tx.title}
                           </ThemedText>
                           <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-                            {getCategory(tx.category).label} · {shortDate(tx.date)}
+                            {categoryLabel(tx.category)} · {shortDate(tx.date)}
                             {accountName(tx.accountId) ? ` · ${accountName(tx.accountId)}` : ''}
                           </ThemedText>
                         </View>
@@ -408,11 +453,13 @@ export default function ImportSmsScreen() {
                       <Icon name="alert" size={17} color={theme.warning} />
                       <View style={styles.rowText}>
                         <ThemedText type="small">
-                          {unreadCount} message{unreadCount === 1 ? '' : 's'} in a format we don&apos;t
-                          know
+                          {tf('unknownMessageFormats', {
+                            count: unreadCount,
+                            s: unreadCount === 1 ? '' : 's',
+                          })}
                         </ThemedText>
                         <ThemedText type="meta" themeColor="textTertiary">
-                          Send the shapes — digits masked — and they parse next release
+                          {t('shareMaskedFormatsHint')}
                         </ThemedText>
                       </View>
                       <Icon name="chevron-right" size={15} color={theme.textTertiary} />
@@ -422,12 +469,37 @@ export default function ImportSmsScreen() {
               )}
             </>
           )}
+
+          {!scanning && plan === null && (
+            <Section index={2}>
+              <SupplementImports />
+            </Section>
+          )}
         </ScrollView>
 
         {plan !== null && !scanning && (plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0) && (
           <View style={styles.footer}>
+            {/* The button appears for dues and healed rows too, so labelling
+                it from txCount alone offered to "File 0 entries" after a scan
+                that found only statement reminders. Name what is actually
+                about to be filed. */}
             <Button
-              label={`File ${plan.txCount} entr${plan.txCount === 1 ? 'y' : 'ies'}`}
+              label={
+                plan.txCount > 0
+                  ? tf('fileEntries', {
+                      count: plan.txCount,
+                      ending: plan.txCount === 1 ? 'y' : 'ies',
+                    })
+                  : plan.dueCount > 0
+                    ? tf('fileCardDues', {
+                        count: plan.dueCount,
+                        s: plan.dueCount === 1 ? '' : 's',
+                      })
+                    : tf('fixEntries', {
+                        count: plan.healedCount,
+                        ending: plan.healedCount === 1 ? 'y' : 'ies',
+                      })
+              }
               onPress={applyPlan}
             />
           </View>

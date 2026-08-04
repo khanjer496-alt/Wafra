@@ -7,6 +7,8 @@ import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
+import { formatAED } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
 
 /**
  * One hue at five lightnesses. Composition is a question of proportion, not
@@ -20,6 +22,14 @@ export function useRamp(): string[] {
   return scheme === 'dark' ? RAMP_DARK : RAMP_LIGHT;
 }
 
+// There is deliberately no `useOutBarColor` here any more. It returned a muted
+// brown for the out bar in every month except the selected one, which made one
+// colour mean two things at once — series AND recency — and left the legend's
+// clay "Out" swatch sitting above five brown bars and one clay one. PairedBars
+// marks "now" positionally instead, so the hook had no caller left (checked
+// across src/ before deleting). Do not bring it back to dim a bar: dimming a
+// bar changes what the bar says it measures.
+
 /* ── Progress ────────────────────────────────────────────────────────── */
 
 interface ProgressBarProps {
@@ -29,16 +39,37 @@ interface ProgressBarProps {
   height?: number;
   /** Overrides the track on surfaces that ignore the OS theme. */
   trackColor?: string;
+  accessibilityLabel?: string;
 }
 
-export function ProgressBar({ ratio, color, height = 6, trackColor }: ProgressBarProps) {
+export function ProgressBar({
+  ratio,
+  color,
+  height = 6,
+  trackColor,
+  accessibilityLabel,
+}: ProgressBarProps) {
   const theme = useTheme();
-  const clamped = Math.max(0.02, Math.min(ratio, 1));
+  // Clamped at 0, not at 0.02. The old floor drew a sliver of fill for a
+  // category that had not been spent on at all, so an untouched budget read as
+  // already started.
+  const clamped = Math.max(0, Math.min(ratio, 1));
   return (
     <View
-      style={[styles.track, { backgroundColor: trackColor ?? theme.track, height, borderRadius: height / 2 }]}>
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(clamped * 100) }}
+      style={[
+        styles.track,
+        { backgroundColor: trackColor ?? theme.track, height, borderRadius: height / 2 },
+      ]}>
       <View
-        style={{ width: `${clamped * 100}%`, height: '100%', backgroundColor: color, borderRadius: height / 2 }}
+        style={{
+          width: `${clamped * 100}%`,
+          height: '100%',
+          backgroundColor: color,
+          borderRadius: height / 2,
+        }}
       />
     </View>
   );
@@ -70,10 +101,26 @@ export function CompositionBar({
   const ramp = useRamp();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
-    return <View style={[styles.track, { backgroundColor: theme.track, height, borderRadius: height / 2 }]} />;
+    return (
+      <View
+        accessibilityRole="image"
+        accessibilityLabel={t('noSpendingComposition')}
+        style={[styles.track, { backgroundColor: theme.track, height, borderRadius: height / 2 }]}
+      />
+    );
   }
   return (
     <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={segments
+        .map((s) =>
+          tf('compositionPercent', {
+            label: s.label,
+            percent: Math.round((s.value / total) * 100),
+          }),
+        )
+        .join('. ')}
       style={[
         styles.track,
         styles.composition,
@@ -82,16 +129,18 @@ export function CompositionBar({
       {segments.map((s, i) => (
         <Animated.View
           key={s.key}
+          accessible={false}
           entering={FadeIn.delay(i * 60).duration(Motion.sectionEnter)}
-          accessibilityLabel={`${s.label} ${Math.round((s.value / total) * 100)} percent`}
           style={{
             flexGrow: s.value,
             flexBasis: 0,
             backgroundColor: s.neutral ? theme.cardBorderStrong : ramp[i % ramp.length],
             // Segments are separated by a background-coloured gap, not a
-            // border: a border would eat into the smallest slices.
-            borderRightWidth: i === segments.length - 1 ? 0 : 1,
-            borderRightColor: theme.background,
+            // border: a border would eat into the smallest slices. `End` and
+            // not `Right`, so under RTL the gap stays on the trailing edge
+            // instead of doubling up on the leading one.
+            borderEndWidth: i === segments.length - 1 ? 0 : 1,
+            borderEndColor: theme.background,
           }}
         />
       ))}
@@ -135,6 +184,11 @@ function LegendKey({ color, label }: { color: string; label: string }) {
  * now". "Now" is a position on a time axis, not a third quantity, so it is
  * marked positionally: the current column keeps its label in full ink and
  * carries a tick beneath it.
+ *
+ * The two colours are read into locals that both the bars AND the legend
+ * swatches use. That is what stops the legend from describing a bar it does
+ * not match again — the defect above was only possible because the swatch held
+ * a colour literal of its own.
  */
 export function PairedBars({
   months,
@@ -149,6 +203,11 @@ export function PairedBars({
   onPressMonth?: (index: number) => void;
 }) {
   const theme = useTheme();
+  // The graphic clay, not the text clay: theme.ts holds `expense` to WCAG AA
+  // because it carries meaning as TEXT, and keeps `expenseGraphic` for bars and
+  // dots, where 3:1 is the bar and the AA value goes muddy at this size.
+  const inColor = theme.primary;
+  const outColor = theme.expenseGraphic;
   const max = Math.max(1, ...months.flatMap((m) => [m.inFils, m.outFils]));
 
   return (
@@ -158,7 +217,11 @@ export function PairedBars({
           <Pressable
             key={m.label + i}
             accessibilityRole={onPressMonth ? 'button' : undefined}
-            accessibilityLabel={m.label}
+            accessibilityLabel={tf('monthCashflowA11y', {
+              month: m.label,
+              income: formatAED(m.inFils),
+              spending: formatAED(m.outFils),
+            })}
             disabled={!onPressMonth}
             onPress={() => onPressMonth?.(i)}
             style={styles.pairColumn}>
@@ -167,17 +230,14 @@ export function PairedBars({
                 entering={FadeIn.delay(i * 50).duration(Motion.sectionEnter)}
                 style={[
                   styles.pairBar,
-                  { height: Math.max(3, (m.inFils / max) * height), backgroundColor: theme.primary },
+                  { height: Math.max(3, (m.inFils / max) * height), backgroundColor: inColor },
                 ]}
               />
               <Animated.View
                 entering={FadeIn.delay(i * 50 + 30).duration(Motion.sectionEnter)}
                 style={[
                   styles.pairBar,
-                  {
-                    height: Math.max(3, (m.outFils / max) * height),
-                    backgroundColor: theme.expense,
-                  },
+                  { height: Math.max(3, (m.outFils / max) * height), backgroundColor: outColor },
                 ]}
               />
             </View>
@@ -187,10 +247,7 @@ export function PairedBars({
             {/* The "you are here" tick. Ink, not a hue: it marks a position on
                 the axis, and every hue in this chart is already spoken for. */}
             <View
-              style={[
-                styles.nowTick,
-                { backgroundColor: m.current ? theme.text : 'transparent' },
-              ]}
+              style={[styles.nowTick, { backgroundColor: m.current ? theme.text : 'transparent' }]}
             />
           </Pressable>
         ))}
@@ -198,8 +255,8 @@ export function PairedBars({
 
       {legend && (
         <View style={styles.legend}>
-          <LegendKey color={theme.primary} label="In" />
-          <LegendKey color={theme.expense} label="Out" />
+          <LegendKey color={inColor} label={t('inLabel')} />
+          <LegendKey color={outColor} label={t('outLabel')} />
         </View>
       )}
     </View>
@@ -259,7 +316,9 @@ export function TrendCurve({
   const area = `${line} L${width},${y(lo)} L0,${y(lo)} Z`;
   const last = points[points.length - 1];
   const rising = last.fils >= points[0].fils;
-  const stroke = rising ? theme.primary : theme.expense;
+  // Falling takes the graphic clay for the same reason the bars do: this is a
+  // 2px stroke and a wash, which theme.ts holds to 3:1 rather than to AA.
+  const stroke = rising ? theme.primary : theme.expenseGraphic;
 
   return (
     <Svg width={width} height={height}>
@@ -308,7 +367,15 @@ export function HistoryStrip({
   return (
     <View style={styles.pairRow}>
       {months.map((m, i) => (
-        <View key={m.label + i} style={styles.pairColumn}>
+        <View
+          key={m.label + i}
+          accessible
+          accessibilityRole="image"
+          // A month and an amount, with no English connective between them, so
+          // the label reads the same under Arabic — formatAED already localises
+          // the figure.
+          accessibilityLabel={`${m.label}, ${formatAED(m.fils)}`}
+          style={styles.pairColumn}>
           <View style={[styles.historyBarWrap, { height }]}>
             <View
               style={[

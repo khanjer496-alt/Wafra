@@ -10,7 +10,9 @@ import Animated, {
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { tapped } from '@/lib/haptics';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -31,10 +33,7 @@ interface ButtonProps {
   style?: StyleProp<ViewStyle>;
 }
 
-/**
- * The one button. Labels are caps mono, so every action reads as a label
- * rather than a sentence; the height clears Android's 48dp target.
- */
+/** The shared 48dp action. Sentence-case sans keeps controls human and calm. */
 export function Button({
   label,
   onPress,
@@ -66,7 +65,14 @@ export function Button({
       accessibilityLabel={label}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              tapped();
+              onPress();
+            }
+          : undefined
+      }
       style={({ pressed }) => [
         styles.button,
         inline ? styles.buttonInline : styles.buttonBlock,
@@ -75,7 +81,7 @@ export function Button({
         style,
       ]}>
       {icon && <Icon name={icon} size={15} color={labelColor} />}
-      <ThemedText type="nano" numberOfLines={1} style={{ color: labelColor }}>
+      <ThemedText type="smallBold" numberOfLines={1} style={{ color: labelColor }}>
         {label}
       </ThemedText>
     </Pressable>
@@ -95,11 +101,15 @@ export function Toggle({
   label?: string;
 }) {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
   const offset = useSharedValue(value ? 18 : 0);
 
   React.useEffect(() => {
-    offset.value = withTiming(value ? 18 : 0, { duration: Motion.rowPress, easing: EASING });
-  }, [value, offset]);
+    const next = value ? 18 : 0;
+    offset.value = reducedMotion
+      ? next
+      : withTiming(next, { duration: Motion.rowPress, easing: EASING });
+  }, [value, offset, reducedMotion]);
 
   const thumb = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
 
@@ -109,7 +119,10 @@ export function Toggle({
       accessibilityLabel={label}
       accessibilityState={{ checked: value }}
       hitSlop={10}
-      onPress={() => onChange(!value)}
+      onPress={() => {
+        tapped();
+        onChange(!value);
+      }}
       style={[
         styles.track,
         {
@@ -143,8 +156,16 @@ export function Chip({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityState={{ selected: !!active }}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              tapped();
+              onPress();
+            }
+          : undefined
+      }
       style={({ pressed }) => [
         styles.chip,
         {
@@ -196,8 +217,12 @@ export function Segmented<T extends string>({
           <Pressable
             key={s.value}
             accessibilityRole="tab"
+            accessibilityLabel={s.label}
             accessibilityState={{ selected: active }}
-            onPress={() => onChange(s.value)}
+            onPress={() => {
+              if (s.value !== value) tapped();
+              onChange(s.value);
+            }}
             style={[
               styles.segment,
               active && {
@@ -240,7 +265,14 @@ export function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={8}
-      onPress={onPress}
+      onPress={
+        onPress
+          ? () => {
+              tapped();
+              onPress();
+            }
+          : undefined
+      }
       style={({ pressed }) => [
         styles.iconButton,
         {
@@ -290,7 +322,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two - 2,
-    minHeight: 34,
+    minHeight: 44,
     paddingHorizontal: Spacing.three - 2,
     borderRadius: Radius.full,
     borderWidth: 1,
@@ -305,6 +337,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 44,
     paddingVertical: Spacing.two + 2,
     borderRadius: 9,
   },

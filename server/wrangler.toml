@@ -17,12 +17,18 @@ database_name = "wafra"
 # placeholder, so the failure is a sentence rather than a Cloudflare API error.
 database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
-# Nightly sweep of expired queue rows and long-dead devices.
+# Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]
-crons = ["17 3 * * *"]
+crons = ["*/30 * * * *"]
 
 [observability]
 enabled = true
 # Message text is never logged, but keeping sampling explicit means nobody
 # later assumes logs are a place to debug parsing from.
 head_sampling_rate = 0.1
+
+# Required production secrets/config (never commit values):
+#   npx wrangler secret put PUSH_TOKEN_KEY    # base64 of 32 random bytes
+#   npx wrangler secret put EXPO_ACCESS_TOKEN # EAS enhanced push security
+# Set EXPO_PROJECT_ID and EMAIL_DOMAIN as non-secret production variables.
+# Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.

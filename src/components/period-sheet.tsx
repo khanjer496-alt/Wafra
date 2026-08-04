@@ -5,12 +5,12 @@ import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button, Chip } from '@/components/ui/controls';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { monthKey, shiftMonthKey, toISODate } from '@/lib/format';
+import { monthKey, monthLabel, shiftMonthKey, toISODate } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import { usePeriod } from '@/lib/period-context';
 import type { Period } from '@/lib/period';
-
-const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 interface PeriodSheetProps {
   visible: boolean;
@@ -20,6 +20,7 @@ interface PeriodSheetProps {
 /** The reporting period every screen reads from: presets, month grid, range. */
 export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
   const theme = useTheme();
+  const language = useLanguage();
   const { period, setPeriod } = usePeriod();
 
   const now = useMemo(() => new Date(), []);
@@ -45,20 +46,20 @@ export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
   };
 
   const presets: { label: string; period: Period }[] = [
-    { label: 'This month', period: { mode: 'month', key: nowKey } },
-    { label: 'Last month', period: { mode: 'month', key: shiftMonthKey(nowKey, -1) } },
-    { label: 'Last 7 days', period: { mode: 'range', from: daysAgoISO(6), to: toISODate(now) } },
-    { label: 'Last 30 days', period: { mode: 'range', from: daysAgoISO(29), to: toISODate(now) } },
-    { label: 'Last 90 days', period: { mode: 'range', from: daysAgoISO(89), to: toISODate(now) } },
-    { label: 'This year', period: { mode: 'year', year: thisYear } },
+    { label: t('thisMonth'), period: { mode: 'month', key: nowKey } },
+    { label: t('lastMonth'), period: { mode: 'month', key: shiftMonthKey(nowKey, -1) } },
+    { label: t('lastSevenDays'), period: { mode: 'range', from: daysAgoISO(6), to: toISODate(now) } },
+    { label: t('lastThirtyDays'), period: { mode: 'range', from: daysAgoISO(29), to: toISODate(now) } },
+    { label: t('lastNinetyDays'), period: { mode: 'range', from: daysAgoISO(89), to: toISODate(now) } },
+    { label: t('thisYear'), period: { mode: 'year', year: thisYear } },
     { label: `${thisYear - 1}`, period: { mode: 'year', year: thisYear - 1 } },
-    { label: 'All time', period: { mode: 'all' } },
+    { label: t('allTimeTitle'), period: { mode: 'all' } },
   ];
 
   const isActive = (p: Period): boolean => JSON.stringify(p) === JSON.stringify(period);
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Reporting period">
+    <BottomSheet visible={visible} onClose={onClose} title={t('reportingPeriodTitle')}>
       <View style={styles.chipRow}>
         {presets.map((p) => (
           <Chip key={p.label} label={p.label} active={isActive(p.period)} onPress={() => apply(p.period)} />
@@ -85,7 +86,7 @@ export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
       </View>
 
       <View style={styles.monthGrid}>
-        {MONTH_ABBR.map((label, i) => {
+        {Array.from({ length: 12 }, (_, i) => monthLabel(`${gridYear}-${String(i + 1).padStart(2, '0')}`, true).replace(/\s+\d+$/, '')).map((label, i) => {
           const key = `${gridYear}-${String(i + 1).padStart(2, '0')}`;
           const future = key > nowKey;
           const active = period.mode === 'month' && period.key === key;
@@ -103,21 +104,21 @@ export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
 
       <View style={styles.range}>
         <ThemedText type="micro" themeColor="textTertiary">
-          Custom range
+          {t('customRange')}
         </ThemedText>
         <View style={styles.rangeRow}>
           {(
             [
-              ['From', fromText, setFromText],
-              ['To', toText, setToText],
+              [t('fromLabel'), t('fromDate'), t('fromDatePlaceholder'), fromText, setFromText],
+              [t('toLabel'), t('toDate'), t('toDatePlaceholder'), toText, setToText],
             ] as const
-          ).map(([label, value, set]) => (
+          ).map(([label, accessibilityLabel, placeholder, value, set]) => (
             <TextInput
               key={label}
-              accessibilityLabel={`${label} date`}
+              accessibilityLabel={accessibilityLabel}
               value={value}
               onChangeText={set}
-              placeholder={`${label} YYYY-MM-DD`}
+              placeholder={placeholder}
               placeholderTextColor={theme.textTertiary}
               selectionColor={theme.primary}
               style={[
@@ -126,13 +127,14 @@ export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
                   backgroundColor: theme.backgroundElement,
                   borderColor: theme.cardBorder,
                   color: value && !dateValid(value) ? theme.expense : theme.text,
+                  textAlign: language === 'ar' ? 'right' : 'left',
                 },
               ]}
             />
           ))}
         </View>
         <Button
-          label="Apply range"
+          label={t('applyRange')}
           disabled={!rangeValid}
           onPress={() => apply({ mode: 'range', from: fromText, to: toText })}
         />

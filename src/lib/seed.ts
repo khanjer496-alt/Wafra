@@ -1,4 +1,5 @@
-import { toISODate } from '@/lib/format';
+import { shiftISO, toISODate } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import type { Account, Bill, Budget, CardDue, CategoryId, Transaction } from '@/lib/types';
 
 /** Deterministic PRNG so demo data is stable across launches. */
@@ -31,9 +32,21 @@ function monthSeed(year: number, month: number): number {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
+/**
+ * The demo's accounts, WITHOUT balance snapshots.
+ *
+ * A snapshot is a figure the bank quoted at a particular moment, and there is
+ * no such moment until the ledger has been generated for a particular launch
+ * date — see `generateSeedAccounts`. A hardcoded one would be a number that
+ * disagrees with the rows underneath it on every day but one, which is the
+ * exact class of defect the balance rules exist to prevent.
+ *
+ * `creditLimitFils` is different: it is a standing fact about the card, not a
+ * moving figure, so it belongs here.
+ */
 export const SEED_ACCOUNTS: Account[] = [
   { id: 'acc-enbd', name: 'Emirates NBD', kind: 'bank', openingFils: 2_450_000, color: '#2DD4A8', last4: '9012', bankName: 'Emirates NBD' },
-  { id: 'acc-card', name: 'FAB Credit Card', kind: 'card', openingFils: 0, color: '#60A5FA', last4: '4821', cardType: 'credit', bankName: 'FAB' },
+  { id: 'acc-card', name: 'FAB Credit Card', kind: 'card', openingFils: 0, color: '#60A5FA', last4: '4821', cardType: 'credit', bankName: 'FAB', creditLimitFils: 5_000_000 },
   { id: 'acc-cash', name: 'Cash', kind: 'cash', openingFils: 120_000, color: '#E9B949' },
 ];
 
@@ -157,15 +170,42 @@ const RECURRING: RecurringDef[] = [
   { title: 'Salik Auto Recharge', category: 'transport', accountId: BANK, day: 12, aed: 100 },
 ];
 
+/**
+ * Foreign-currency charges, ONE PER DEMO MONTH, rotating.
+ *
+ * The currency surface is a real feature and an immaculate empty state hides
+ * it, so the demo has to contain some. But three of these landing every month
+ * at a fixed amount is a subscription by every test subscriptions.ts applies —
+ * that is exactly how the previous demo manufactured "Apple Store US, AED
+ * 183.58/mo, cancellable" and filed Booking.com and TfL as fixed commitments,
+ * three false positives on a screen whose whole job is spotting real ones.
+ *
+ * Rotating one per month puts ~60 days between repeats of the same merchant,
+ * outside every cadence window (weekly 6-8, monthly 26-35, yearly 350-380),
+ * and the day is drawn from the month's own stream rather than fixed. Each one
+ * also carries a different `fxSource`, which is the provenance the currency
+ * screen exists to show: what the bank itself converted, what a reference rate
+ * supplied, and what fell back to a stored rate.
+ */
+interface ForeignDef {
+  title: string;
+  category: CategoryId;
+  currency: string;
+  /** Minor units in the original currency, e.g. cents. */
+  originalMinor: number;
+  rate: number;
+  source: 'bank' | 'reference' | 'fallback';
+}
+
+const FOREIGN: ForeignDef[] = [
+  { title: 'Apple Store US', category: 'shopping', currency: 'USD', originalMinor: 4_999, rate: 3.6723, source: 'bank' },
+  { title: 'Booking.com', category: 'travel', currency: 'EUR', originalMinor: 21_650, rate: 3.997, source: 'reference' },
+  { title: 'TfL Travel Charge', category: 'transport', currency: 'GBP', originalMinor: 3_240, rate: 4.9, source: 'fallback' },
+];
+
 /** Fixed-per-month swing for the bills that genuinely move month to month. */
 function monthlyBump(year: number, month: number, spread: number): number {
   return ((monthSeed(year, month) >>> 8) % (spread * 2 + 1)) - spread;
-}
-
-function shiftISO(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return toISODate(d);
 }
 
 /**
@@ -216,11 +256,18 @@ function seedStatements(now: Date): StatementWindow[] {
   return out;
 }
 
-/** What was charged to the demo card inside one statement window. */
+/**
+ * What was charged to the demo card inside one statement window.
+ *
+ * Through `isSpending` rather than a hand-written `expense && !isTransfer`:
+ * that is the shared definition, and a statement total that disagreed with it
+ * would put the demo's card due at odds with every screen that adds the same
+ * rows up. It is also the shape `contracts.test.js` refuses.
+ */
 function statementTotalFils(transactions: Transaction[], w: StatementWindow): number {
   let total = 0;
   for (const t of transactions) {
-    if (t.accountId !== CARD || t.type !== 'expense' || t.isTransfer) continue;
+    if (t.accountId !== CARD || !isSpending(t)) continue;
     if (t.date < w.fromISO || t.date > w.toISO) continue;
     total += t.amountFils;
   }
@@ -263,6 +310,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
       accountId: BANK,
       title: 'Salary',
       date: dateOn(1),
+      source: 'sms',
     });
     push({
       type: 'expense',
@@ -271,6 +319,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
       accountId: BANK,
       title: 'Apartment Rent',
       date: dateOn(1),
+      source: 'sms',
     });
     // Cash has to come from somewhere. Without this the Wallet's cash line
     // drifts negative by the third month — a balance the demo invented for
@@ -284,6 +333,10 @@ export function generateSeedTransactions(now: Date): Transaction[] {
         title: 'ATM Withdrawal',
         date: dateOn(2),
         isTransfer: true,
+        // The bank side arrives by SMS; the cash side is the user counting
+        // notes into their own pocket. That difference is what lets
+        // reliableBalanceFils show a cash balance and refuse a bank one.
+        source: accountId === CASH ? 'manual' : 'sms',
       });
     }
 
@@ -295,6 +348,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
         accountId: BANK,
         title: 'Freelance Project',
         date: dateOn(8 + Math.floor(rand() * 13)),
+        source: 'sms',
       });
     }
 
@@ -310,6 +364,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
         accountId: r.accountId,
         title: r.title,
         date: dateOn(r.day),
+        source: r.accountId === CASH ? 'manual' : 'sms',
       });
     }
 
@@ -324,9 +379,30 @@ export function generateSeedTransactions(now: Date): Transaction[] {
           accountId: m.accountId,
           title: m.title,
           date: dateOn(1 + Math.floor(rand() * daysTotal)),
+          source: m.accountId === CASH ? 'manual' : 'sms',
         });
       }
     }
+
+    // One foreign charge this month. `back` rather than a random pick so the
+    // rotation is stable: a given calendar month always gets the same
+    // merchant, and the same merchant never lands in consecutive months.
+    const fx = FOREIGN[(back + FOREIGN.length) % FOREIGN.length];
+    const fxDate = dateOn(4 + Math.floor(rand() * 20));
+    push({
+      type: 'expense',
+      amountFils: Math.round(fx.originalMinor * fx.rate),
+      originalAmountMinor: fx.originalMinor,
+      originalCurrency: fx.currency,
+      fxRate: fx.rate,
+      ...(fx.source === 'reference' ? { fxRateDate: fxDate } : {}),
+      fxSource: fx.source,
+      category: fx.category,
+      accountId: CARD,
+      title: fx.title,
+      date: fxDate,
+      source: 'sms',
+    });
   }
 
   // Statements whose due date has passed were paid, three days early. The open
@@ -343,6 +419,7 @@ export function generateSeedTransactions(now: Date): Transaction[] {
       title: 'FAB Credit Card payment',
       date: w.paidISO,
       isTransfer: true,
+      source: 'sms',
     });
   }
 
@@ -366,6 +443,11 @@ export function generateSeedCardDues(now: Date, transactions: Transaction[]): Ca
       accountId: CARD,
       totalDueFils: total,
       minDueFils: minimumDueFils(total),
+      // The 5%-with-an-AED-100-floor figure above is Wafra's estimate, not
+      // FAB's stated minimum — no demo SMS quotes one. Without this flag
+      // cards.ts reports minimumKnown: true and the app presents an invented
+      // number as the bank's, including in a push notification.
+      minDueEstimated: true,
       dueDate: w.dueISO,
       // Left at zero even on settled statements: cards.ts pours the recorded
       // payments across the statements itself, and pre-filling paidFils makes
@@ -376,4 +458,60 @@ export function generateSeedCardDues(now: Date, transactions: Transaction[]): Ca
     });
   }
   return dues;
+}
+
+/**
+ * The demo's accounts with the balances a bank would have quoted, stamped
+ * against `now`.
+ *
+ * Wallet does not show a running balance for an SMS-fed account — SMS history
+ * is partial by nature, so a derived figure would be fiction (see
+ * `reliableBalanceFils`). The demo obeys the same rule as a real account, so
+ * without a quoted snapshot the bank and card rows show no balance at all and
+ * the screen the demo exists to sell is blank.
+ *
+ * The figures are DERIVED from the ledger that was just generated, not written
+ * down. A hardcoded snapshot is right on exactly one launch date: the previous
+ * demo carried an AED 1,209 card figure beside a card that had actually
+ * charged AED 18,060 and never paid it, and Wallet and Cards contradicted each
+ * other on the first screen a reviewer sees.
+ *
+ * The stamp is deliberately a few hours old rather than `now`: a balance
+ * quoted this second reads as live data, and the honest claim is "this is what
+ * the bank last told us".
+ */
+export function generateSeedAccounts(now: Date, transactions: Transaction[]): Account[] {
+  const quotedTs = now.getTime() - 5 * 60 * 60 * 1000;
+  const balanceOf = (accountId: string, openingFils: number) =>
+    transactions.reduce(
+      (sum, t) =>
+        t.accountId === accountId
+          ? sum + (t.type === 'income' ? t.amountFils : -t.amountFils)
+          : sum,
+      openingFils,
+    );
+  return SEED_ACCOUNTS.map((a) => {
+    if (a.id === BANK) {
+      return {
+        ...a,
+        snapshotFils: balanceOf(BANK, a.openingFils),
+        snapshotKind: 'balance' as const,
+        snapshotTs: quotedTs,
+      };
+    }
+    if (a.id === CARD) {
+      // A card snapshot is what is OWED, so it is the negative of the account
+      // balance: purchases push it down, the statement payments push it back
+      // up. `reliableBalanceFils` negates it again to place it on the ledger.
+      return {
+        ...a,
+        snapshotFils: Math.max(0, -balanceOf(CARD, a.openingFils)),
+        snapshotKind: 'outstanding' as const,
+        snapshotTs: quotedTs,
+      };
+    }
+    // Cash is fully manual: its rows are the user's own entries, so the
+    // running balance IS knowable and no snapshot is wanted.
+    return a;
+  });
 }

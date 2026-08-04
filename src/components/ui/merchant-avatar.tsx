@@ -36,6 +36,11 @@ export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarPro
 
   return (
     <View
+      // The mark is a decorative initial cut from the merchant name — "en" for
+      // ENOC. A screen reader announcing it before the row's own label turns
+      // every entry into "en, ENOC Fuel, …", so it is hidden rather than read.
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
       style={[
         styles.tile,
         {

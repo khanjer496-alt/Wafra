@@ -62,7 +62,27 @@ export function b64encode(bytes: ArrayBuffer | Uint8Array): string {
   return btoa(s);
 }
 
-export function b64decode(s: string): Uint8Array {
+/**
+ * Strict base64 in, bytes out.
+ *
+ * The shape is checked before `atob` rather than trusted after it, because
+ * `atob` is lenient: it accepts non-canonical input and returns bytes for it.
+ * The caller that matters is the pairing public key — "returns bytes" there
+ * means a device enrolled with a key nothing can ever seal to, and a sync that
+ * is silently empty forever afterwards.
+ *
+ * The `<ArrayBuffer>` is load-bearing, not decoration: a bare `Uint8Array` is
+ * `Uint8Array<ArrayBufferLike>`, which WebCrypto's `BufferSource` does not
+ * accept when this file is compiled against the DOM lib for the Node test run.
+ */
+export function b64decode(s: string): Uint8Array<ArrayBuffer> {
+  if (
+    s.length === 0 ||
+    s.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(s)
+  ) {
+    throw new Error('Invalid base64');
+  }
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
@@ -84,7 +104,7 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
     [],
   );
   // generateKey is typed as CryptoKey | CryptoKeyPair; X25519 always yields a
-  // pair, but the DOM lib cannot narrow it from the algorithm name.
+  // pair, but neither type dialect can narrow it from the algorithm name.
   const ephemeral = (await crypto.subtle.generateKey({ name: 'X25519' }, true, [
     'deriveBits',
   ])) as CryptoKeyPair;
@@ -114,7 +134,23 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
  * cannot be used to impersonate a device or push rows into someone's queue.
  */
 export async function hashToken(token: string): Promise<string> {
-  return b64encode(await crypto.subtle.digest('SHA-256', enc.encode(token)));
+  return b64encode(await crypto.subtle.digest('SHA-256', enc.encode(token) as BinaryData));
+}
+
+/**
+ * A keyed, one-way replay identifier. Unlike a plain message hash, a D1 dump
+ * cannot be searched against a guessed bank alert without the ingest token,
+ * and that token is never stored by the Worker.
+ */
+export async function keyedFingerprint(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret) as KeyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return b64encode(await crypto.subtle.sign('HMAC', key, enc.encode(value) as BinaryData));
 }
 
 export function randomToken(): string {

@@ -1,6 +1,7 @@
 import { StyleSheet, Text, type TextProps, type TextStyle } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 
 export type TextType =
@@ -40,13 +41,24 @@ export function ThemedText({
   ...rest
 }: ThemedTextProps) {
   const theme = useTheme();
+  const language = useLanguage();
   const color = themeColor ?? (type === 'linkPrimary' ? 'primary' : 'text');
+  const arabic = language === 'ar' && !tabular;
 
   return (
     <Text
+      allowFontScaling
+      maxFontSizeMultiplier={rest.maxFontSizeMultiplier ?? MAX_SCALE[type]}
       style={[
         { color: theme[color] },
         styles[type],
+        arabic && {
+          fontFamily: ARABIC_FOR_WEIGHT[WEIGHT_OF[type]],
+          // Tracking breaks cursive joins; uppercase has no meaning in Arabic.
+          letterSpacing: 0,
+          textTransform: 'none',
+          writingDirection: 'rtl',
+        },
         tabular && styles.tabular,
         tabular && { fontFamily: MONO_FOR_WEIGHT[WEIGHT_OF[type]] },
         style,
@@ -84,6 +96,36 @@ const MONO_FOR_WEIGHT = {
   medium: Fonts.monoMedium,
   semi: Fonts.monoSemi,
 } as const;
+
+const ARABIC_FOR_WEIGHT = {
+  regular: Fonts.arabic,
+  medium: Fonts.arabic,
+  semi: Fonts.arabicBold,
+} as const;
+
+/**
+ * Dynamic Type stays on everywhere. Large money figures and dense utility
+ * labels get a generous cap so they remain a single, legible unit rather than
+ * clipping the ledger; body and row copy can grow to the platform's full
+ * accessibility sizes.
+ */
+const MAX_SCALE: Record<TextType, number | undefined> = {
+  display: 1.5,
+  amount: 1.5,
+  sheetAmount: 1.5,
+  title: 2,
+  heading: 2,
+  subtitle: 2,
+  default: undefined,
+  small: undefined,
+  smallBold: undefined,
+  meta: 2,
+  micro: 1.7,
+  nano: 1.7,
+  link: undefined,
+  linkPrimary: undefined,
+  code: 2,
+};
 
 // Tracking is given in ems by the design; at these sizes that lands on the
 // pixel values below.
@@ -155,18 +197,18 @@ const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
   },
   /** Caps section label. */
   micro: {
-    fontFamily: Fonts.monoMedium,
-    fontSize: 11,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 11.5,
     lineHeight: 15,
-    letterSpacing: 1.32,
+    letterSpacing: 0.72,
     textTransform: 'uppercase',
   },
   /** The smallest caps label — chart axes, tab labels, urgency tags. */
   nano: {
-    fontFamily: Fonts.monoMedium,
+    fontFamily: Fonts.sansMedium,
     fontSize: 10.5,
     lineHeight: 14,
-    letterSpacing: 1.05,
+    letterSpacing: 0.55,
     textTransform: 'uppercase',
   },
   link: {

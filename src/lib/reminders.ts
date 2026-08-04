@@ -12,12 +12,20 @@
  *   salary-day reporting month, so with a month start of the 25th the reminder
  *   set and the Bills screen disagreed about which month a bill sat in.
  *
- * Both are gone: the date comes from `billDueISO`, the same function the Bills
- * screen and Home's "leaving soon" list read.
+ * Both are gone: the date comes from `billsForMonth`'s `dueISO`, produced by
+ * the same `dueDateInMonth` the Bills screen and Home's "leaving soon" list
+ * read.
+ *
+ * Every string goes through `t`/`tf`. This module writes text a user reads on
+ * their lock screen, so an English-only reminder set would be the one part of
+ * the product that never learned Arabic — and `contracts.test.js` requires an
+ * Arabic value for every key it uses.
  */
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { formatAED, shiftISO } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { daysUntilNext, detectSubscriptions } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
@@ -66,6 +74,8 @@ export function buildPaymentReminders(
     pending.push({ id, kind, dateISO, date, title, body });
   };
 
+  const todayWord = t('today').toLocaleLowerCase();
+
   // Bills: the day before, and the day itself.
   const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
   for (const { bill, status, dueISO } of billsForMonth(
@@ -77,36 +87,65 @@ export function buildPaymentReminders(
     // this is the only check needed — the old second `paidMonths` guard below
     // the loop body was unreachable.
     if (status === 'paid') continue;
-    for (const [offset, label] of [[-1, 'tomorrow'], [0, 'today']] as const) {
+    for (const [offset, label] of [[-1, t('tomorrow')], [0, todayWord]] as const) {
       add(
         `bill-${bill.id}-${offset}`,
         'bill',
         shiftISO(dueISO, offset),
-        `${bill.title} due ${label}`,
-        `${formatAED(bill.amountFils, { decimals: false })} · mark it paid in Wafra once done.`,
+        tf('notificationBillDue', { name: bill.title, when: label }),
+        tf('notificationBillBody', {
+          amount: formatAED(bill.amountFils, { decimals: false }),
+        }),
       );
     }
   }
 
   // Card dues: three days out, then the day itself. A statement needs the
   // lead time a bill does not — the money has to be moved.
-  for (const { due, remainingFils } of openDues(state, now)) {
+  for (const { due, remainingFils, minimumKnown } of openDues(state, now)) {
     const account = state.accounts.find((a) => a.id === due.accountId);
-    const name = account?.name ?? 'Credit card';
-    for (const [offset, label] of [[-3, 'in 3 days'], [0, 'today']] as const) {
+    const name = account?.name ?? t('creditCard');
+    for (const [offset, label] of [
+      [-3, tf('inDaysPhrase', { days: 3 })],
+      [0, todayWord],
+    ] as const) {
       add(
         `card-${due.id}-${offset}`,
         'card',
         shiftISO(due.dueDate, offset),
-        `${name} payment due ${label}`,
-        `${formatAED(remainingFils, { decimals: false })} outstanding · minimum ${formatAED(due.minDueFils, { decimals: false })}.`,
+        tf('notificationCardDue', { name, when: label }),
+        // Only quote a minimum the bank actually stated. When none was, the
+        // stored figure is a 5%-with-a-floor placeholder Wafra computed, and a
+        // push notification is the last place to hand someone a number the app
+        // made up — it arrives with no screen around it to qualify it.
+        minimumKnown
+          ? tf('notificationOutstandingMinimum', {
+              amount: formatAED(remainingFils, { decimals: false }),
+              minimum: formatAED(due.minDueFils, { decimals: false }),
+            })
+          : tf('notificationOutstanding', {
+              amount: formatAED(remainingFils, { decimals: false }),
+            }),
       );
     }
   }
 
   // Subscriptions: the day before the next expected charge. Merchants already
   // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(state.transactions, state.notSubscriptions, now)) {
+  //
+  // liveAccounts/internal are passed for the same reason every other caller
+  // passes them: without them a recurring own-account sweep that predates the
+  // transfer flag reads as a monthly commitment, and the user gets a push
+  // telling them their own money is about to be charged to them.
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internal = internalTransferIds(state.transactions, liveAccounts);
+  for (const sub of detectSubscriptions(
+    state.transactions,
+    state.notSubscriptions,
+    now,
+    liveAccounts,
+    internal,
+  )) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
     if (billTitles.has(sub.title.toLowerCase())) continue;
     const days = daysUntilNext(sub, now);
@@ -115,8 +154,10 @@ export function buildPaymentReminders(
       `sub-${sub.title.trim().toLowerCase()}`,
       'subscription',
       shiftISO(sub.nextExpectedISO, -1),
-      `${sub.title} renews tomorrow`,
-      `Around ${formatAED(sub.avgAmountFils, { decimals: false })} will be charged.`,
+      tf('notificationRenewsTomorrow', { name: sub.title }),
+      tf('notificationRenewalBody', {
+        amount: formatAED(sub.avgAmountFils, { decimals: false }),
+      }),
     );
   }
 

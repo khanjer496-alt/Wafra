@@ -59,6 +59,12 @@ export function InsightCard({ insight }: InsightCardProps) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={insight.title}
+      // No non-null assertion and no `?? '/flow'` fallback. The guard above
+      // already proved `href` is there, so a fallback is unreachable code that
+      // only hides the real risk: asserting is how a missing href became a push
+      // to the empty path, and the error screen said "wafra:///" instead of the
+      // route it failed to find. Passing the narrowed local makes the compiler
+      // check the destination against expo-router's generated routes.
       onPress={() => router.push(href)}
       style={({ pressed }) => [
         styles.wrap,

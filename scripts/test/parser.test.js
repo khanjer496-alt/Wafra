@@ -30,6 +30,26 @@ function t(name, msg, expect, options) {
       // the user simply misses the payment — worth asserting inline.
       if (expect.minDueFils !== undefined && p.minDueFils !== expect.minDueFils) errs.push(`minDueFils ${p.minDueFils} != ${expect.minDueFils}`);
       if (expect.dueDay !== undefined && p.dueDay !== expect.dueDay) errs.push(`dueDay ${p.dueDay} != ${expect.dueDay}`);
+      // WHICH LEG of a card settlement this is. One payment sends two SMS, and
+      // importing both as money arriving on the card settles the statement
+      // twice. On iOS the relay drops the body before the row is sealed, so
+      // `raw` is not there to re-read — the side has to be decided here or not
+      // at all, and dedupe.ts's pairing has 18 references to it.
+      if (expect.side !== undefined && p.cardPaymentSide !== expect.side) errs.push(`cardPaymentSide ${p.cardPaymentSide} != ${expect.side}`);
+      if (expect.reference !== undefined && p.reference !== expect.reference) errs.push(`reference ${p.reference} != ${expect.reference}`);
+      if (expect.currency !== undefined && p.currency !== expect.currency) errs.push(`currency ${p.currency} != ${expect.currency}`);
+      // FX PROVENANCE. The local amount is the same either way; what differs is
+      // whether the bank quoted it or this file's cross-rate table guessed it,
+      // and fx.ts's reference-rate backfill may only correct the guesses. Stored
+      // as one indistinguishable number it either rewrites real charges or
+      // leaves every estimate wrong forever.
+      if (expect.originalCurrency !== undefined && p.originalCurrency !== expect.originalCurrency) errs.push(`originalCurrency ${p.originalCurrency} != ${expect.originalCurrency}`);
+      if (expect.originalAmountMinor !== undefined && p.originalAmountMinor !== expect.originalAmountMinor) errs.push(`originalAmountMinor ${p.originalAmountMinor} != ${expect.originalAmountMinor}`);
+      if (expect.fxSource !== undefined && p.fxSource !== expect.fxSource) errs.push(`fxSource ${p.fxSource} != ${expect.fxSource}`);
+      // `other` means two opposite things — a settlement that HAS no category,
+      // and a row nothing could read. heal.ts and the accuracy report both
+      // branch on the difference.
+      if (expect.deliberate !== undefined && Boolean(p.categoryDeliberate) !== expect.deliberate) errs.push(`categoryDeliberate ${p.categoryDeliberate} != ${expect.deliberate}`);
     }
   }
   if (errs.length) { fail++; console.log(`✗ ${name}\n    ${errs.join('\n    ')}`); }
@@ -673,9 +693,18 @@ t('ride app classifies as transport',
   'Purchase of AED 18.00 at YANGO RIDES DUBAI with Debit Card ending 1234',
   { category: 'transport' });
 
-t('salon classifies as shopping (personal care)',
+// A haircut is a service, not retail. This asserted `shopping` because the
+// shopping rule listed `salon|barber|spa|beauty|laundry` and ran first — the
+// parenthesis in the old name was already admitting the answer was wrong. Those
+// words now live on the personal-care and home-services rules above shopping,
+// so a limit on Shopping no longer moves because someone had their hair cut.
+t('salon classifies as personal care, not retail',
   'Purchase of AED 120.00 at SUGAR LOUNGE SALON with Credit Card ending 1234',
-  { category: 'shopping' });
+  { category: 'personal-care' });
+
+t('a laundry pickup is a home service, not retail',
+  'Purchase of AED 65.00 at WASHMEN LAUNDRY with Debit Card ending 1234',
+  { category: 'home-services' });
 
 t('gym membership classifies as health',
   'Purchase of AED 350.00 at GYMNATION FITNESS with Credit Card ending 1234',
@@ -1156,7 +1185,7 @@ t('an invoice payment received from a client is business income',
 t('a refund paid BACK to your card is income, not a second purchase',
   'AED 300.00 refund from NOON has been paid back to your Card 1234.',
   { type: 'income', amountFils: 30000, merchant: 'Noon', category: 'other',
-    card: { last4: '1234', kind: 'debit' } });
+    card: { last4: '1234', kind: 'unknown' } });
 
 t('money received from a person is income',
   'You have received a payment of AED 250.00 from Ahmed via Ziina.',
@@ -1316,7 +1345,7 @@ t('a reversed purchase returns the money',
 t('a reversal onto a card with no payee is titled Refund',
   'AED 500.00 has been reversed to your Card ending 1234.',
   { type: 'income', amountFils: 50000, merchant: 'Refund', category: 'other',
-    card: { last4: '1234', kind: 'debit' } });
+    card: { last4: '1234', kind: 'unknown' } });
 
 // Verb and noun describe the identical event: one bank writing "reversal" and
 // another writing "reversed" must not produce an AED 500 difference.
@@ -1330,7 +1359,7 @@ t('the NOUN form of the same reversal reads identically',
 t('a chargeback is an offset, not business revenue',
   'A chargeback of AED 500.00 has been credited to your card 1234.',
   { type: 'income', amountFils: 50000, merchant: 'Refund', category: 'other',
-    card: { last4: '1234', kind: 'debit' } });
+    card: { last4: '1234', kind: 'unknown' } });
 
 t('"credited back" is the same offset',
   'AED 500.00 has been credited back to your Card ending 1234 by NOON.',
@@ -1383,7 +1412,7 @@ t('a provisional debit pending settlement is a hold', 'AED 500.00 debited provis
 t('a purchase on a Cashback Card is still a purchase',
   'Your Cashback Card 1234 purchase AED 89.50 at CARREFOUR.',
   { type: 'expense', amountFils: 8950, merchant: 'Carrefour', category: 'groceries',
-    card: { last4: '1234', kind: 'debit' } });
+    card: { last4: '1234', kind: 'unknown' } });
 
 t('a loyalty footer does not erase the purchase it is attached to',
   'AED 89.50 spent at CARREFOUR on Card 1234. Congratulations, you unlocked a reward.',
@@ -1513,7 +1542,7 @@ t('a salary credited to your account is still income',
 t('a utility bill paid BY card is spending, not a card settlement',
   'Your payment of AED 200.00 has been received for your electricity bill using card 1234',
   { kind: 'transaction', type: 'expense', amountFils: 20000, merchant: 'Electricity',
-    category: 'utilities', transfer: false, card: { last4: '1234', kind: 'debit' } });
+    category: 'utilities', transfer: false, card: { last4: '1234', kind: 'unknown' } });
 
 // The settlements the widened gap existed for still work — the product name
 // between "your" and "Card" really is two words on most UAE issuers.
@@ -1923,7 +1952,7 @@ t('an Arabic separator inside an English message is still a separator',
 t('a single bidi mark does not delete the transaction',
   'Purchase of AED ‏150.00 at CARREFOUR with card ending 1234.',
   { kind: 'transaction', amountFils: 15000, merchant: 'Carrefour', category: 'groceries',
-    card: { last4: '1234', kind: 'debit' } });
+    card: { last4: '1234', kind: 'unknown' } });
 
 // ── Polarity, in Arabic ──
 // إيداع and راتب have to reach the credit side, and راتب has to reach the
@@ -1971,7 +2000,7 @@ t('a bilingual alert is one row, and the English name wins',
 t('English still wins when the Arabic half comes first',
   'تم خصم 250.00 درهم لدى نون\nAED 250.00 was debited at NOON with card ending 4110',
   { kind: 'transaction', type: 'expense', amountFils: 25000, merchant: 'Noon',
-    category: 'shopping', card: { last4: '4110', kind: 'debit' } });
+    category: 'shopping', card: { last4: '4110', kind: 'unknown' } });
 
 // The batch path splits on blank lines, so a bilingual alert whose halves are
 // blank-line separated became TWO transactions for one purchase and doubled
@@ -2301,14 +2330,14 @@ bank('HSBC', '"HSBC"', 'The one bank that writes its name in the body.');
 fmt('REAL', 'purchase — merchant before the verb, "AED n-" sign suffix',
   'From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. Your available balance is AED 1,430.28',
   { kind: 'transaction', type: 'expense', amountFils: 1000, merchant: 'Dubai Integrated Economic Zones',
-    card: { last4: '6737', kind: 'debit' }, snapshotFils: 143028, snapshotKind: 'balance' });
+    card: { last4: '6737', kind: 'unknown' }, snapshotFils: 143028, snapshotKind: 'balance' });
 
 // REAL corpus #163 (seen 1x). The account fragment "041-340***-001" sits
 // immediately before the currency and must not be read as the amount.
 fmt('REAL', 'purchase with a PayPal acquirer descriptor',
   'From HSBC: 08SEP25 PAYPAL *CXIANGHUI01L Purchase from 041-340***-001 AED 259.40- by Card Ending with 6737. Your available balance is AED 7.03',
   { type: 'expense', amountFils: 25940, snapshotFils: 703, snapshotKind: 'balance',
-    card: { last4: '6737', kind: 'debit' } });
+    card: { last4: '6737', kind: 'unknown' } });
 
 // REAL corpus #288 (seen 1x). "GlobalE /HoneyLove" — the cross-border
 // processor prefixes the shop.
@@ -2527,7 +2556,7 @@ fmt('RECON', 'Covered Card purchase — an Islamic credit card is a credit card'
 fmt('RECON', 'debit card purchase — "Available Balance" means cash, not headroom',
   'AED 250.00 was spent on your ADIB Card ending 4417 at LULU HYPERMARKET, DUBAI on 12/07/26. Available Balance: AED 8,240.00',
   { type: 'expense', amountFils: 25000, merchant: 'Lulu Hypermarket', category: 'groceries',
-    card: { last4: '4417', kind: 'debit' }, snapshotFils: 824000, snapshotKind: 'balance' });
+    card: { last4: '4417', kind: 'unknown' }, snapshotFils: 824000, snapshotKind: 'balance' });
 
 // The ATM's street address is a shopping mall as often as not. One event must
 // not take three different categories depending on which machine was used.
@@ -2579,9 +2608,9 @@ fmt('RECON', 'Takaful contribution is insurance',
 // Sharia-compliant issuer, which never writes the word "credit", a card
 // quoting available HEADROOM is the Covered Card. Only the sender can tell
 // the two apart — and getting it wrong stores a credit limit as cash.
-fmt('RECON', 'kindless "Card" quoting a limit reads as debit with no sender',
+fmt('RECON', 'a kindless "Card" quoting a limit stays UNKNOWN with no sender',
   'Your ADIB Card ending 4417 has been used for AED 250.00 at CARREFOUR. Your available limit is AED 8,240.00',
-  { type: 'expense', amountFils: 25000, card: { last4: '4417', kind: 'debit' } });
+  { type: 'expense', amountFils: 25000, card: { last4: '4417', kind: 'unknown' } });
 fmt('RECON', '...and as the Covered Card once the sender says ADIB',
   'Your ADIB Card ending 4417 has been used for AED 250.00 at CARREFOUR. Your available limit is AED 8,240.00',
   { type: 'expense', amountFils: 25000, card: { last4: '4417', kind: 'credit' },
@@ -2684,7 +2713,7 @@ bank('Wio', '"Wio", "ae.wio.personal" (notification package)',
 fmt('RECON', 'card purchase with a bare "Balance:" tail',
   'AED 45.50 spent at CARREFOUR with your Wio Card ending 8801. Balance: AED 3,120.00',
   { type: 'expense', amountFils: 4550, merchant: 'Carrefour', category: 'groceries',
-    card: { last4: '8801', kind: 'debit' }, snapshotFils: 312000, snapshotKind: 'balance' });
+    card: { last4: '8801', kind: 'unknown' }, snapshotFils: 312000, snapshotKind: 'balance' });
 
 // "transferred" appeared in NEITHER word list — only the opposite-direction
 // phrase "transferred to your" — so an outgoing transfer returned null and the
@@ -2809,6 +2838,264 @@ ok('no sender at all attributes to nothing', bankProfileForSender() === null);
   }
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * EXTRACTION — ported from the other branch's parser suite as its fields
+ * landed here.
+ *
+ * The two suites were blind to each other's defect class: this one is the
+ * regression net for suppression (declines, OTPs, pre-auths, spend summaries),
+ * and stayed green through six real corpus messages that carried no date, six
+ * credit cards typed as debit, and a settlement whose two legs were
+ * indistinguishable. Everything below is the other half of that.
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+// ── compact dates ──
+//
+// Six real corpus messages carried no date at all and were filed on whatever
+// day they happened to be imported, which puts a June purchase in whichever
+// month the user first opened the app.
+t('HSBC runs the date together with no separators at all',
+  'From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. Your available balance is AED 1,430.28',
+  { type: 'expense', amountFils: 1000, date: '2025-06-24',
+    merchant: 'Dubai Integrated Economic Zones',
+    card: { last4: '6737', kind: 'unknown' }, snapshotFils: 143028, snapshotKind: 'balance' });
+
+t('Mashreq puts the day first and drops the separators',
+  'Please note the details of a recent transaction on your Mashreq Credit Card. Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at GOOGLE *Domains g.co/helppay# US on 22Jan18 09:35 AM. Available limit is AED 2207.33.',
+  { type: 'expense', amountFils: 8814, date: '2018-01-22',
+    // The shop, not the plastic: this arrives on a CO-BRANDED Etisalat card,
+    // and reading the issuer's name filed a domain renewal as a phone bill.
+    merchant: 'Google Domains', category: 'entertainment',
+    originalCurrency: 'USD', originalAmountMinor: 2400, fxSource: 'fallback',
+    snapshotFils: 220733, snapshotKind: 'limit' });
+
+t('the day-first form with dashes and a four-digit year',
+  'AED 55.00 debited from a/c 1234 on 21-SEP-2023 11:10 PM at NOON',
+  { type: 'expense', amountFils: 5500, date: '2023-09-21' });
+
+// The loosest date form runs LAST. Tried first it reads the leading digits of
+// an ordinary numeric date as a day, fails on the month, and stops the numeric
+// reader from ever being reached.
+t('a numeric date still wins over the compact reader',
+  'Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026',
+  { date: '2026-07-17' });
+
+// ── ADCB "Cr.Card": an abbreviation is still an explicit statement ──
+//
+// Six real messages. Read as debit cards, every ADCB purchase attached to a
+// phantom debit account, so the card's own statement and its payments landed
+// somewhere else and it could never show as settled.
+t('"Cr.Card" is an explicit credit abbreviation, not an untyped card',
+  'AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.Avl.Limit is AED 2508.31',
+  { type: 'expense', amountFils: 30000, merchant: 'Salik', category: 'transport',
+    card: { last4: '7720', kind: 'credit' }, date: '2025-02-11',
+    snapshotFils: 250831, snapshotKind: 'limit' });
+
+t('...and on the "was used for" alert shape as well',
+  'Your Cr.Card XXX7720 was used for AED12.00 on 20/04/2024 19:58:59 at ABO ALO,SHARJAH-AE. Avl. Cr.limit is AED3572.61',
+  { type: 'expense', amountFils: 1200, card: { last4: '7720', kind: 'credit' },
+    date: '2024-04-20', snapshotFils: 357261, snapshotKind: 'limit' });
+
+// The header states the kind and the footer advertises the opposite. Reading
+// the whole body let an advert for a card the customer does not own re-type
+// the card they actually used.
+t('a card-offer footer does not overrule the transaction\'s own words',
+  'Debit Card Purchase Card No 5492********4833 AED 45.00 STARBUCKS DUBAI. Apply for a Credit Card today.',
+  { type: 'expense', amountFils: 4500, card: { last4: '4833', kind: 'debit' } });
+
+// ── masked identities ──
+t('ADIB\'s compact alert omits the word "card" and keeps the LAST four',
+  'XXX456789 was used for AED 120.00 at CARREFOUR',
+  { type: 'expense', amountFils: 12000, merchant: 'Carrefour',
+    card: { last4: '6789', kind: 'unknown' } });
+
+t('a formatted masked account number attributes the row instead of losing it',
+  'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-0001 SEWA NO.-8765',
+  { type: 'expense', amountFils: 193841, merchant: 'SEWA', category: 'utilities',
+    card: { last4: '0001', kind: 'account' } });
+
+// The banking boilerplate that follows a great many alerts has the exact shape
+// of a biller reference. Matched blindly it retitled a real card purchase
+// "Account" and filed it as a utility bill.
+t('a trailing "ACCOUNT NO.-" footer is not a biller name',
+  'Purchase of AED 45.00 with Debit Card 1234 at STARBUCKS. ACCOUNT NO.-556677',
+  { type: 'expense', amountFils: 4500, merchant: 'Starbucks', category: 'dining' });
+
+t('...nor is a trailing "REF NO.-" footer',
+  'AED 250.00 spent at NOON with Credit Card 4110. REF NO.-123456',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon', category: 'shopping' });
+
+// ── snapshot vocabulary ──
+//
+// The bare form is the balance footer of the biggest message family in the
+// real corpus; the ADCB form appears on six more. Neither of the two branches
+// read both, so the corpus split into a balance-bearing half and a
+// balance-less half depending on how the bank happened to spell it.
+t('a bare "Balance AED n" line is a balance',
+  'Debit Card Purchase  \nCard XXXX5083\nAED 10.00\nDUBAI INTEGRATED ECONODUBAI           AE \n03/02/26 14:26 \nBalance AED 9774.87',
+  { type: 'expense', amountFils: 1000, snapshotFils: 977487, snapshotKind: 'balance' });
+
+t('ADCB writes "Avl. Cr.limit" with a full stop, not a space',
+  'Your Cr.Card XXX7720 was used for USD1.00 on 15/06/2024 17:49:15 at PAYPAL,····7733-LU. Avl. Cr.limit is AED4417.96',
+  { snapshotFils: 441796, snapshotKind: 'limit', originalCurrency: 'USD',
+    originalAmountMinor: 100, fxSource: 'fallback' });
+
+// The gap between the balance noun and its figure used to be "anything that is
+// not a digit", and what sits in that gap is routinely an ACCOUNT NUMBER. The
+// figure has to be introduced by a currency token, on either side of it.
+t('an account number between the noun and the figure is not the balance',
+  'AED 250.00 was debited from your card. Avl bal for a/c 9988 is AED 7,500.00',
+  { amountFils: 25000, snapshotFils: 750000, snapshotKind: 'balance' });
+
+t('...and the currency may follow the figure instead of leading it',
+  'Your a/c XX9012 is debited with 250.00 AED. Avl bal 9,262.00 AED',
+  { amountFils: 25000, snapshotFils: 926200, snapshotKind: 'balance' });
+
+// A redacted figure is a FRAGMENT, not a number: 9,235.93 out of a balance
+// that may really be 129,235.93. Unknown beats guessed.
+t('a masked balance stays unknown rather than reporting its tail',
+  'AED 250.00 spent at NOON with card 1234. Avl Bal AED ····9235.93',
+  { amountFils: 25000, snapshotFils: null, snapshotKind: null });
+
+// ── which LEG of a card settlement a message is ──
+//
+// One payment produces two SMS. Reading them both as money arriving on the
+// card pays the statement twice, and the only thing that separates them is the
+// verb. That used to be re-read from `raw` downstream, which iOS cannot do:
+// the relay drops the text before the row reaches the phone. dedupe.ts has 18
+// references to this field.
+for (const [name, message, side] of [
+  ['receipt leg: payment received towards the card',
+    'Payment of AED 3,240.00 received towards your Credit Card ending 4821. Thank you.', 'receipt'],
+  ['receipt leg: card has been paid',
+    'Your Credit Card 4782********4833 Has Been Paid AED 10,700.00. Thank you for banking with us.', 'receipt'],
+  ['receipt leg: payment received on a masked card',
+    'Payment of AED 7,663.00 has been received on your Credit Card 5492********4711.', 'receipt'],
+  ['debit leg: deducted from the account towards payment of the card',
+    'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.', 'debit'],
+  ['debit leg: payment instructions to a masked PAN',
+    'Your payment instructions of AED 7,663.94 to 5492********4711 has been processed', 'debit'],
+]) {
+  t(name, message, { kind: 'cardPayment', side });
+}
+
+// The debit leg used to fall through to the generic path entirely and be
+// imported as SPENDING, so a paid card showed the payment twice — once as an
+// expense on the account and once as the receipt on the card.
+t('the account-side leg is a settlement, not a purchase',
+  'AED 5,000.00 has been debited from your account 1234 towards the payment of your Credit Card 4110.',
+  { kind: 'cardPayment', amountFils: 500000, side: 'debit', transfer: true });
+
+// Silence, not a guess: consumers keep an "unknown" branch and it has to stay
+// reachable.
+t('wording that names no leg leaves the side unset',
+  'Payment of AED 500.00 against your Credit Card ending 4821.',
+  { kind: 'cardPayment', side: undefined });
+
+t('an ordinary purchase carries no card-payment side',
+  'Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026',
+  { side: undefined });
+
+{
+  // The field is structured, not a re-reading of the text: it has to still be
+  // there once `raw` is gone, which is exactly what the relay sends.
+  const receipt = parseSms('Payment of AED 4,061.69 received towards your Credit Card ending 8575.');
+  const { raw, ...sealed } = receipt;
+  ok('the side survives a row with its message text discarded',
+    sealed.raw === undefined && sealed.cardPaymentSide === 'receipt', JSON.stringify(sealed));
+}
+
+// ── FX provenance ──
+//
+// The local amount is identical either way. What differs is whether the BANK
+// quoted it or this file's cross-rate table did, and fx.ts's reference-rate
+// backfill may only correct the second kind.
+t('a bank-quoted local amount beside a foreign one is provenance "bank"',
+  'Purchase of USD 9.99 (AED 36.70) at NETFLIX with Credit Card ending 4821',
+  { amountFils: 3670, merchant: 'Netflix', category: 'entertainment',
+    originalCurrency: 'USD', originalAmountMinor: 999, fxSource: 'bank' });
+
+t('a foreign-only amount is converted, and says so',
+  'Purchase of USD 49.99 at STEAM GAMES with Credit Card ending 4821',
+  { amountFils: 18359, originalCurrency: 'USD', originalAmountMinor: 4999, fxSource: 'fallback' });
+
+t('a purely local amount carries no FX fields at all',
+  'Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026',
+  { originalCurrency: undefined, originalAmountMinor: undefined, fxSource: undefined });
+
+// ── currency and reference ──
+ok('every row states the ledger currency it is denominated in',
+  parseSms('Purchase of AED 50.00 to TABBY with Credit Card ending 1234').currency === 'AED');
+
+t('a transaction reference is lifted without its label',
+  'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-0001. Ref: TT12345678',
+  { reference: 'TT12345678' });
+
+t('a message with no reference says so rather than inventing one',
+  'Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR on 17/07/2026',
+  { reference: null });
+
+// ── "other" means two opposite things ──
+//
+// A settlement or a savings sweep is `other` on purpose; a row nothing could
+// read is `other` by default. heal.ts keeps the raw SMS for the second kind
+// only, and the accuracy report counts only the second kind as a miss.
+t('a card settlement is deliberately uncategorised',
+  'Payment of AED 3,240.00 received towards your Credit Card ending 4821. Thank you.',
+  { kind: 'cardPayment', category: 'other', deliberate: true });
+
+t('a row nothing could classify is NOT deliberate',
+  'Purchase of AED 55.00 at CXIANGHUI01L with Debit Card ending 1234',
+  { category: 'other', deliberate: false });
+
+t('a vocabulary hit is deliberate',
+  'Purchase of AED 43.00 at CARREFOUR with Debit Card ending 1234',
+  { category: 'groceries', deliberate: true });
+
+// ── the market vocabulary cannot silently die ──
+//
+// Every Arabic literal in a market pack is matched against text that has
+// already been folded (آ أ إ ٱ → ا, ى → ي, ة → ه). A rule written in natural
+// spelling throws nothing and warns about nothing — it simply never fires,
+// while the list still reads like coverage. Eleven of the UAE pack's
+// twenty-four rules were dead that way.
+{
+  const { MARKETS } = require('./build/markets');
+  const { foldOrthography } = require('./build/sms-parser');
+  const dead = [];
+  for (const m of MARKETS) {
+    for (const [re] of m.keywords) {
+      if (foldOrthography(re.source) !== re.source) dead.push(`${m.id}: ${re.source}`);
+    }
+  }
+  ok('every market keyword is written POST-FOLD, so none of them is a dead regex',
+    dead.length === 0, dead.join('\n    '));
+}
+
+// ...and the folded vocabulary really does match natural spelling on the way in.
+t('a naturally-spelled Arabic cafe still classifies as dining',
+  'شراء بمبلغ 45.00 درهم لدى مقهى الرواق من بطاقتك المنتهية 4833',
+  { type: 'expense', amountFils: 4500, category: 'dining', merchant: 'مقهى الرواق' });
+
+t('a naturally-spelled Arabic pharmacy still classifies as health',
+  'شراء بمبلغ 30.00 درهم لدى صيدلية النهدي من بطاقتك المنتهية 4833',
+  { type: 'expense', amountFils: 3000, category: 'health' });
+
+t('a co-op (جمعية) is groceries',
+  'شراء بمبلغ 90.00 درهم لدى جمعية الاتحاد من بطاقتك المنتهية 4833',
+  { type: 'expense', amountFils: 9000, category: 'groceries' });
+
+// ── the version that reaches already-imported rows ──
+//
+// Every fix above applies to NEW messages only. A message is imported once and
+// never offered again, so the stored rows are reached by a PARSER_VERSION bump
+// triggering a full re-read, and by nothing else.
+{
+  const { PARSER_VERSION } = require('./build/sms-parser');
+  ok('PARSER_VERSION is past 9, so an existing ledger is re-read',
+    typeof PARSER_VERSION === 'number' && PARSER_VERSION > 9, String(PARSER_VERSION));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

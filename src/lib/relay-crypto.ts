@@ -24,6 +24,15 @@
  * no `crypto.getRandomValues`, so noble's own key generation throws. The caller
  * (src/lib/relay.ts) supplies bytes from expo-crypto instead, which is why this
  * app needs no crypto polyfill at all.
+ *
+ * That last paragraph is why this module keeps its keys as BYTES rather than as
+ * the base64 strings the rest of the relay stores. The alternative that was
+ * merged away called `x25519.utils.randomSecretKey()` inside `generateKeypair()`,
+ * which throws `crypto.getRandomValues must be defined` under Hermes — and it
+ * was the first statement of pairing, so iOS could never pair on a real device
+ * while every Node test passed, because Node has `getRandomValues`. Anything
+ * that reintroduces an implicit source of randomness in this file reintroduces
+ * that bug, and no test on this machine can see it.
  */
 import { gcm } from '@noble/ciphers/aes.js';
 import { x25519 } from '@noble/curves/ed25519.js';

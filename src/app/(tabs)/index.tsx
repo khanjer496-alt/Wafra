@@ -14,15 +14,13 @@
  * dues, bills, and subscriptions. The user does not think of those as three
  * kinds of thing. They are all money that leaves on a date.
  */
-import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { AppState as RNAppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PeriodSheet } from '@/components/period-sheet';
-import { describeRelay, useRelayStatus } from '@/components/relay-status';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TransactionRow } from '@/components/transaction-row';
@@ -32,36 +30,253 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { CountUpAmount } from '@/components/ui/count-up';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useRelayCapture } from '@/hooks/use-relay-capture';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import {
-  buildImportPlan,
-  hasSmsPermission,
-  isSmsScanningAvailable,
-  requestSmsPermission,
-  scanInbox,
-} from '@/lib/auto-import';
-import { daysPhrase, leavingSoon, outgoingTotalFils, type Outgoing } from '@/lib/leaving-soon';
-import { formatAED, formatAmount, formatCompactAED, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
-import { buildInsights, summarizeMonth } from '@/lib/insights';
-import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
+import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { enableRelayBackgroundSync } from '@/lib/background-relay';
+import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
+import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
+import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
+import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
+import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
+import { committed, tapped } from '@/lib/haptics';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
+import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
+import { refreshEntitlement } from '@/lib/billing';
+import { getActiveMarket } from '@/lib/markets';
+import { getRelayAutomationProof, getRelayConfig } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
-// Once per app session: auto-import + notification sync.
-let autoImportRan = false;
+// The one-time setup that must not repeat: asking for notification
+// permission, and the first reminder sync.
+let sessionSetupRan = false;
+
+/**
+ * How long a scan stays fresh enough to skip on returning to the app.
+ *
+ * Coming back from the banking app to see the charge is the single most
+ * common way this screen is opened, so the bar for re-scanning is low. It is
+ * not zero only because flicking between two apps should not run a full inbox
+ * read on every flick.
+ */
+const RESCAN_AFTER_MS = 30_000;
+let lastScanAt = 0;
+
+/**
+ * What a scan attempt actually did, so a caller who only *joined* it — rather
+ * than starting it — can tell whether it still owes its own interactive
+ * feedback. `'imported'` is the one outcome that already shows a toast
+ * unconditionally; every other outcome only acts when `interactive` was true
+ * for THAT attempt, so a silent attempt that hit one of them delivered
+ * nothing a joining interactive caller would see.
+ */
+type AutoImportOutcome =
+  | 'not-hydrated'
+  | 'not-pro'
+  | 'unavailable'
+  | 'no-permission'
+  | 'needs-setup'
+  | 'up-to-date'
+  | 'imported';
 
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
+
+type CaptureSurfaceState =
+  | 'checking'
+  | 'active'
+  | 'pipe-ready'
+  | 'needs-test'
+  | 'off'
+  | 'paused'
+  | 'unsupported';
+
+/**
+ * The product promise, above the fold. This is deliberately a live status and
+ * an action rather than marketing copy: it says whether capture is actually
+ * connected on this platform, and tapping it either syncs now or finishes the
+ * platform-specific setup.
+ */
+function AutomaticCapture({
+  status,
+  lastCaptureDate,
+  onPress,
+}: {
+  status: CaptureSurfaceState;
+  lastCaptureDate?: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const enter = useScreenEntering();
+  const active = status === 'active';
+  const title =
+    status === 'paused'
+      ? t('trialEndedBanner')
+      : status === 'checking'
+      ? t('captureChecking')
+      : status === 'unsupported'
+        ? t('capturePhoneOnly')
+        : Platform.OS === 'ios'
+          ? active
+            ? t('captureIosOn')
+            : status === 'pipe-ready'
+              ? t('captureIosPipeReady')
+            : status === 'needs-test'
+              ? t('captureIosNeedsTest')
+              : t('captureIosOff')
+          : active
+            ? t('captureAndroidOn')
+            : t('turnOnTracking');
+  // `unsupported` is deliberately absent here. Its title is already
+  // t('capturePhoneOnly'), and this branch used to return the same key — so the
+  // card printed one identical sentence twice, one line under the other, on the
+  // first screen of the app. There is nothing more to say in that state, so the
+  // detail line is dropped rather than padded, and the render below skips it.
+  const detail: string | null = status === 'paused'
+    ? t('trialEndedBannerSub')
+    : status === 'unsupported'
+    ? null
+    : status === 'checking'
+    ? t('capturePhoneOnly')
+    : active
+    ? lastCaptureDate
+      ? tf('captureLatest', { date: shortDate(lastCaptureDate) })
+      : Platform.OS === 'ios'
+        ? t('captureSyncNow')
+        : t('captureAndroidPrivate')
+    : status === 'pipe-ready'
+      ? t('iosTestLimit')
+    : Platform.OS === 'android'
+      ? t('trackingPrivacy')
+      : t('captureIosSetupDetail');
+  const badge = status === 'paused'
+    ? t('pausedBadge')
+    : active
+    ? t('captureReady')
+    : status === 'pipe-ready'
+      ? t('captureVerify')
+    : status === 'needs-test'
+      ? t('captureFinish')
+      : status === 'checking' || status === 'unsupported'
+        ? null
+        : t('captureEnable');
+
+  return (
+    <Animated.View entering={enter(FadeInDown.duration(280))}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={[t('automaticCapture'), title, detail].filter(Boolean).join('. ')}
+        disabled={status === 'checking' || status === 'unsupported'}
+        onPress={() => {
+          tapped();
+          onPress();
+        }}
+        style={({ pressed }) => [
+          styles.capture,
+          {
+            backgroundColor: active ? theme.primarySoft : theme.backgroundElement,
+            borderColor: active ? theme.primaryBorder : theme.cardBorder,
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
+        ]}>
+        <View
+          style={[
+            styles.captureIcon,
+            { backgroundColor: active ? theme.primary : theme.backgroundSelected },
+          ]}>
+          <Icon name="spark" size={18} color={active ? theme.onPrimary : theme.textSecondary} />
+        </View>
+        <View style={styles.captureText}>
+          <View style={styles.captureTitleRow}>
+            {active && <View style={[styles.liveDot, { backgroundColor: theme.primary }]} />}
+            <ThemedText type="smallBold" numberOfLines={2} style={styles.captureTitle}>
+              {title}
+            </ThemedText>
+          </View>
+          {detail ? (
+            <ThemedText type="meta" themeColor="textTertiary">
+              {detail}
+            </ThemedText>
+          ) : null}
+        </View>
+        {badge ? (
+          <ThemedText type="nano" style={{ color: active ? theme.primary : theme.warning }}>
+            {badge}
+          </ThemedText>
+        ) : null}
+        {status !== 'checking' && status !== 'unsupported' ? (
+          <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+        ) : null}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }) {
+  const theme = useTheme();
+  const router = useRouter();
+  const language = useStore().state.language === 'ar' ? 'ar' : 'en';
+  if (summary.groups.length === 0) return null;
+  const top = summary.groups.slice(0, 2);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${t('foreignActivity')}, ${formatAED(summary.totalLocalFils)}`}
+      onPress={() => {
+        tapped();
+        router.push('/currency');
+      }}
+      style={({ pressed }) => [
+        styles.currencyPreview,
+        {
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.cardBorder,
+          transform: [{ scale: pressed ? 0.985 : 1 }],
+        },
+      ]}>
+      <View style={styles.currencyPreviewTop}>
+        <View style={styles.currencyPreviewHeading}>
+          <Icon name="plane" size={17} color={theme.primary} />
+          <ThemedText type="micro" themeColor="textTertiary">
+            {t('foreignActivity')}
+          </ThemedText>
+        </View>
+        <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+      </View>
+      <ThemedText type="heading" tabular>
+        {formatAED(summary.totalLocalFils, { decimals: false })}
+      </ThemedText>
+      <View style={styles.currencyRows}>
+        {top.map((group) => (
+          <View key={group.currency} style={styles.currencyRow}>
+            <ThemedText type="smallBold" tabular style={{ color: theme.primary }}>
+              {group.currency}
+            </ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1} style={styles.currencyOriginal}>
+              {formatOriginalCurrency(group.originalMinor, group.currency, language)}
+            </ThemedText>
+            <ThemedText type="small" tabular>
+              {formatAED(group.localFils, { decimals: false })}
+            </ThemedText>
+          </View>
+        ))}
+      </View>
+    </Pressable>
+  );
+}
 
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
@@ -81,6 +296,7 @@ function Hero({
 }) {
   const theme = useTheme();
   const router = useRouter();
+  const enter = useScreenEntering();
 
   const caption =
     (netFils >= 0 ? t('saved') : t('overspent')) +
@@ -89,12 +305,16 @@ function Hero({
       ? t('soFarThisMonth')
       : period.mode === 'all'
         ? t('allTime')
-        : `${t('inWord')} ${periodLabel(period)}`) +
-    ` · ${t('inMinusOut')}`;
+        : `${t('inWord')} ${periodLabel(period)}`);
 
   return (
-    <Animated.View entering={FadeInDown.duration(320)}>
-      <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
+    // No shell. This carried a bordered card filled with a three-stop
+    // LinearGradient, directly above a comment saying "no card, no background"
+    // and against theme.ts's own doctrine that grouping is done with 1px
+    // dividers rather than boxes. The gradient also hard-coded six hexes that
+    // exist in neither theme, so it did not move with the palette.
+    <Animated.View entering={enter(FadeInDown.duration(320))}>
+      <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
 
@@ -121,17 +341,22 @@ function Hero({
       <View style={styles.split}>
         {(
           [
-            ['In', incomeFils, theme.income, '/transactions?type=income'],
-            ['Out', expenseFils, theme.expense, '/transactions?type=expense'],
+            [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
+            [t('outLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
         ).map(([label, fils, color, href], i) => (
           <Pressable
             key={label}
-            onPress={() => router.push(href)}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
+            onPress={() => {
+              tapped();
+              router.push(href);
+            }}
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
-              i === 1 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.cardBorder },
+              i === 1 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
             ]}>
             <View style={styles.splitTop}>
               <View style={[styles.dot, { backgroundColor: color }]} />
@@ -169,16 +394,37 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
+  const enter = useScreenEntering();
+  const [expanded, setExpanded] = useState(false);
   const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
 
-  const shown = items.slice(0, 3);
+  // The heading used to say "Leaving in 9 days" over the total of everything
+  // in the list — including statements 28 days overdue, which have not been
+  // leaving in nine days for a month. And only three rows were ever drawn, so
+  // AED 70,976 sat above rows adding to 15,785 with nothing to say where the
+  // rest of it was.
+  //
+  // The total still covers the whole list, because "what is about to leave my
+  // account" is the useful number and truncating it to three rows would be a
+  // different lie. Two things make it legible instead: the heading admits the
+  // overdue items are in there, and the remainder is stated below the rows so
+  // the column reconciles.
+  const shown = expanded ? items : items.slice(0, 3);
+  const late = items.filter((x) => x.overdue).length;
+  const hidden = items.length - shown.length;
 
   return (
-    <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
+    <Animated.View
+      entering={enter(FadeInDown.delay(80).duration(320))}
+      style={styles.section}>
       <SectionHeader
-        title={`Leaving in ${HORIZON_DAYS} days`}
-        right={formatAED(outgoingTotalFils(items), { decimals: false })}
+        title={
+          late > 0
+            ? tf('overdueAndLeaving', { days: HORIZON_DAYS })
+            : tf('leavingInDays', { days: HORIZON_DAYS })
+        }
+        right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
       />
       {shown.map((x, i) => {
         const alarming = x.overdue || x.urgent;
@@ -210,6 +456,35 @@ function LeavingSoon({
           </Pressable>
         );
       })}
+      {hidden > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={tf('seeUpcomingPaymentsA11y', { count: items.length })}
+          // Expand in place. This used to push to Bills, which opens on its
+          // Cards segment — so tapping "3 more" under three card rows showed
+          // the SAME three cards, and the three items actually being counted
+          // (bills, not cards) were never reachable at all.
+          onPress={() => {
+            tapped();
+            setExpanded(true);
+          }}
+          style={[
+            styles.leaveRow,
+            { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          ]}>
+          <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+          <View style={styles.leaveText}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {tf('moreItems', { count: hidden })}
+            </ThemedText>
+          </View>
+          <ThemedText type="small" tabular themeColor="textSecondary">
+            {formatAmount(totalAsShown(items.slice(3).map((x) => x.amountFils)), {
+              decimals: false,
+            })}
+          </ThemedText>
+        </Pressable>
+      )}
     </Animated.View>
   );
 }
@@ -231,7 +506,7 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Report ${formats} unrecognised bank message formats`}
+      accessibilityLabel={tf('reportUnreadFormatsA11y', { count: formats })}
       onPress={() => router.push('/accuracy')}
       style={({ pressed }) => [
         styles.notice,
@@ -243,10 +518,10 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
       <Icon name="search" size={17} color={theme.warning} />
       <View style={styles.noticeText}>
         <ThemedText type="small">
-          {formats} message {formats === 1 ? 'format' : 'formats'} we couldn&apos;t read
+          {tf('unreadFormatCount', { count: formats, s: formats === 1 ? '' : 's' })}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary">
-          Send them over and they get recognised next release. Digits are masked.
+          {t('unreadMessageHint')}
         </ThemedText>
       </View>
       <Icon name="chevron-right" size={16} color={theme.textTertiary} />
@@ -258,24 +533,87 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
-  const { state, importBatch, undoBatch } = useStore();
+  const {
+    state,
+    importBatch,
+    ensureDurable,
+    undoBatch,
+    markParserVersion,
+    setPro,
+    applyFxUpdates,
+  } = useStore();
   const { period } = usePeriod();
 
   const now = useMemo(() => new Date(), []);
   const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
-  // Re-read after every capture, not only on focus: a sync that just landed
-  // rows should clear the "nothing has arrived" warning without a tab switch.
-  const relay = useRelayStatus(state.transactions.length);
+  const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
+  const lastFxAttempt = React.useRef('');
+  /**
+   * Foreground resume, pull-to-refresh and the capture card can all request a
+   * scan within the same second. Reading and parsing the same inbox twice is
+   * both expensive and a race against two import plans built from one stale
+   * ledger. Every caller joins the scan already in progress instead.
+   *
+   * Tracked with the interactivity it was started with: a silent background
+   * scan and a user-initiated one owe different feedback, and joining the
+   * wrong one used to mean the user's explicit pull-to-refresh silently rode
+   * along on a scan that could not redirect to paywall/setup, prompt for SMS
+   * permission, or show the up-to-date toast — all gated on `interactive`.
+   */
+  const importInFlight = React.useRef<{
+    promise: Promise<AutoImportOutcome>;
+    interactive: boolean;
+  } | null>(null);
+
+  // Read the real platform capability whenever Home regains focus. This makes
+  // the card turn on immediately after returning from Settings or iOS setup,
+  // without making the user relaunch to see that their choice worked.
+  useFocusEffect(
+    useCallback(() => {
+      let current = true;
+      void (async () => {
+        if (Platform.OS === 'ios') {
+          const [cfg, automationProof] = await Promise.all([
+            getRelayConfig(),
+            getRelayAutomationProof(),
+          ]);
+          if (!current) return;
+          setCaptureState(
+            cfg?.setupState === 'verified' && automationProof
+              ? 'active'
+              : cfg?.setupState === 'verified'
+                ? 'pipe-ready'
+              : cfg
+                ? 'needs-test'
+                : 'off',
+          );
+          return;
+        }
+        if (Platform.OS === 'android' && isSmsScanningAvailable()) {
+          const granted = await hasSmsPermission().catch(() => false);
+          if (!current) return;
+          setNeedsPermission(!granted);
+          setCaptureState(granted ? 'active' : 'off');
+          return;
+        }
+        if (current) setCaptureState('unsupported');
+      })();
+      return () => {
+        current = false;
+      };
+    }, []),
+  );
 
   /** A dated outgoing opens the sheet for whatever kind of thing it is. */
   const openOutgoing = useCallback(
@@ -291,12 +629,34 @@ export default function HomeScreen() {
     [state.cardDues, router],
   );
 
+  // Archiving an account used to remove its balance from Wallet and its
+  // history from net worth, while its spending went on counting here. Hiding
+  // a card now hides what it spent too.
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  // Both halves of a move between the user's own accounts. Without this the
+  // arriving half reads exactly like being paid.
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period),
-    [state.transactions, period],
+    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   // One insight, not five. The rest are on Flow.
+  /**
+   * The hero's three figures, reconciled. Rounding each of in and out to whole
+   * dirhams first and subtracting those is the only way the caption under them
+   * can be checked by eye — which is the entire point of showing all three.
+   */
+  const hero = useMemo(() => {
+    const expenseFils = composition(summary).totalFils;
+    const incomeFils = Math.round(summary.incomeFils / 100) * 100;
+    return { incomeFils, expenseFils, netFils: incomeFils - expenseFils };
+  }, [summary]);
+
   const insight = useMemo(() => {
     const all = buildInsights(
       state.transactions,
@@ -304,100 +664,234 @@ export default function HomeScreen() {
       period,
       now,
       state.notSubscriptions,
+      liveAccounts,
+      internal,
     );
     return all.find((i) => i.id !== dismissedInsight) ?? null;
-  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, dismissedInsight]);
+  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, dismissedInsight]);
 
   const today = useMemo(
-    () => state.transactions.filter((t) => !t.isTransfer && inPeriod(t.date, period)).slice(0, 6),
+    () =>
+      state.transactions
+        .filter(
+          (transaction) =>
+            !transaction.isTransfer &&
+            !internal.has(transaction.id) &&
+            liveAccounts.has(transaction.accountId) &&
+            inPeriod(transaction.date, period),
+        )
+        .slice(0, 6),
+    [state.transactions, period, internal, liveAccounts],
+  );
+
+  const foreignActivity = useMemo(
+    () => summarizeForeignActivity(state.transactions, (tx) => inPeriod(tx.date, period)),
     [state.transactions, period],
   );
 
-  const runAutoImport = useCallback(
-    async (interactive: boolean) => {
+  const lastAutomatic = useMemo(
+    () => state.transactions.find((tx) => tx.source === 'sms'),
+    [state.transactions],
+  );
+
+  // Foreign-only alerts arrive with an offline estimate so capture never
+  // blocks on a network. Once the ledger is visible, replace only those
+  // estimates with a dated public reference rate. A bank-quoted AED
+  // equivalent is authoritative and Private Mode makes no request at all.
+  useEffect(() => {
+    if (!state.hydrated || state.privateMode) return;
+    const pending = state.transactions
+      .filter((tx) => tx.fxSource === 'fallback')
+      .slice(0, 16);
+    if (pending.length === 0) return;
+    const signature = pending
+      .map((tx) => `${tx.id}:${tx.originalCurrency}:${tx.date}`)
+      .join('|');
+    if (signature === lastFxAttempt.current) return;
+    lastFxAttempt.current = signature;
+    void buildReferenceFxUpdates(
+      pending,
+      getActiveMarket().currency.code,
+    ).then((updates) => {
+      if (updates.length > 0) applyFxUpdates(updates);
+    });
+  }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
+
+  const performAutoImport = useCallback(
+    async (interactive: boolean): Promise<AutoImportOutcome> => {
+      // Never scan against a ledger that has not finished loading. Every
+      // duplicate check in the plan is a lookup against state.transactions,
+      // so an unhydrated store means nothing matches and the entire inbox
+      // imports as new — on top of the rows that arrive a moment later. The
+      // effect below already waits for this; pull-to-refresh did not.
+      if (!state.hydrated) {
+        if (interactive) toast.show(t('stillLoading'));
+        return 'not-hydrated';
+      }
       // Hard paywall: tracking pauses when the trial ends without Pro.
       if (!isProActive(state)) {
         if (interactive) router.push('/pro');
-        return;
+        return 'not-pro';
       }
-      if (!isSmsScanningAvailable()) return;
-      let granted = await hasSmsPermission();
-      if (!granted && interactive) granted = await requestSmsPermission();
-      if (!granted) {
-        setNeedsPermission(true);
-        return;
+      if (!isCaptureAvailable()) return 'unavailable';
+      // Android needs the SMS permission before it can read anything. iOS has
+      // no permission to ask for — its messages arrive over the relay — so the
+      // prompt is skipped there rather than shown and refused.
+      if (isSmsScanningAvailable()) {
+        let granted = await hasSmsPermission();
+        if (!granted && interactive) granted = await requestSmsPermission();
+        if (!granted) {
+          setNeedsPermission(true);
+          setCaptureState('off');
+          return 'no-permission';
+        }
+        setNeedsPermission(false);
+        setCaptureState('active');
       }
-      setNeedsPermission(false);
-      const sinceMs = state.lastScanTs > 0 ? state.lastScanTs + 1 : 0;
-      const { parsed, newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
-      const plan = buildImportPlan(parsed, state, newestTs);
-      if (plan.txCount === 0 && plan.dueCount === 0) {
-        if (interactive) toast.show('Up to date. No new bank messages.');
-        return;
+
+      const { plan, source, commit, needsSetup } = await planNewMessages(state);
+      if (needsSetup) {
+        // The relay is not paired yet, so silence here means "not connected",
+        // not "nothing new". Only say so when the user actually asked.
+        if (interactive) router.push('/ios-setup');
+        return 'needs-setup';
       }
-      const ids = importBatch(plan.batch);
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      // healedCount belongs in this test. A re-read that only CORRECTS rows —
+      // exactly what a parser fix produces — was being thrown away here, so the
+      // corrections never reached the store.
+      if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
+        markParserVersion();
+        // Nothing arrived, so nothing is owed — but acking is still correct:
+        // the relay may have queued rows that deduped against an earlier
+        // in-memory import whose first disk write failed. Flush the current
+        // authoritative ledger before dropping those server rows.
+        if (source === 'relay') await ensureDurable();
+        await commit();
+        if (interactive) toast.show(t('upToDateNoNew'));
+        return 'up-to-date';
       }
+      const receipt = importBatch(plan.batch);
+      // A React dispatch is not a disk commit. Wait for the encrypted SQLite
+      // transaction; only then is it safe to drop the relay's sealed copy.
+      await receipt.durable;
+      await commit();
+      committed();
       toast.show(
-        `Imported ${plan.txCount} transaction${plan.txCount === 1 ? '' : 's'}${plan.newAccountCount > 0 ? ` · ${plan.newAccountCount} new card${plan.newAccountCount === 1 ? '' : 's'}` : ''}`,
+        tf('importedTransactions', {
+          count: plan.txCount,
+          s: plan.txCount === 1 ? '' : 's',
+          cards:
+            plan.newAccountCount > 0
+              ? tf('importedNewCards', {
+                  count: plan.newAccountCount,
+                  s: plan.newAccountCount === 1 ? '' : 's',
+                })
+              : '',
+        }),
         [
-          { label: 'Undo', onPress: () => undoBatch(ids) },
-          { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
+          { label: t('undo'), onPress: () => undoBatch(receipt.ids) },
+          { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
         ],
       );
+      return 'imported';
     },
-    [state, importBatch, undoBatch, toast, router],
+    [state, importBatch, ensureDurable, undoBatch, markParserVersion, toast, router],
   );
 
-  /**
-   * The iPhone half of the same job.
-   *
-   * Android reads the inbox; iOS collects what the user's Shortcut already
-   * forwarded, sealed, from the relay. Both end in `buildImportPlan →
-   * importBatch`, so every dedupe and healing rule is shared — this is a second
-   * SOURCE, not a second ingestion path.
-   *
-   * The hook owns WHEN it runs — launch, back-to-foreground, and the moment a
-   * background sync stages something while the app is open — because those are
-   * the layers that let a transaction land without the user opening anything.
-   * This screen owns what the user is told about it.
-   */
-  const { capture: captureRelay } = useRelayCapture({
-    state,
-    importBatch,
-    onCaptured: (result, interactive) => {
-      if (result.skipped === 'not-pro') {
-        if (interactive) router.push('/pro');
-        return;
-      }
-      if (result.ids.length === 0) return;
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      }
-      const ids = result.ids;
-      toast.show(`Captured ${ids.length} transaction${ids.length === 1 ? '' : 's'}`, [
-        { label: 'Undo', onPress: () => undoBatch(ids) },
-        { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
-      ]);
+  // The single owner of `importInFlight`. Always starts a fresh scan — callers
+  // that should instead join one already running go through `runAutoImport`.
+  const startAutoImport = useCallback(
+    (interactive: boolean): Promise<AutoImportOutcome> => {
+      const operation = performAutoImport(interactive).finally(() => {
+        if (importInFlight.current?.promise === operation) importInFlight.current = null;
+      });
+      importInFlight.current = { promise: operation, interactive };
+      return operation;
     },
-  });
+    [performAutoImport],
+  );
 
-  // Silent auto-import + reminder sync, once per session. The relay's own
-  // launch sync lives in useRelayCapture, which also has to run on every
-  // foreground rather than once.
+  const runAutoImport = useCallback(
+    (interactive: boolean): Promise<void> => {
+      const existing = importInFlight.current;
+      if (!existing) return startAutoImport(interactive).then(() => undefined);
+      // Two silent callers, or an interactive caller joining another
+      // interactive one already in flight: the one running owns delivering
+      // whatever feedback applies, same as before.
+      if (!interactive || existing.interactive) return existing.promise.then(() => undefined);
+      // An explicit action (pull-to-refresh, tapping the capture card) joined
+      // a scan nobody was watching. That scan only ever ran its `interactive`
+      // branches as false, so a permission prompt, a paywall/setup redirect,
+      // or the up-to-date toast never fired — the user's tap would otherwise
+      // get no feedback at all. None of those outcomes did any actual
+      // reading or importing, so re-running interactively is a fresh first
+      // attempt for this request, not a second scan of the same data. The one
+      // exception is `'imported'`, whose toast already fires unconditionally.
+      return existing.promise.then((outcome) =>
+        outcome === 'imported' ? undefined : startAutoImport(true).then(() => undefined),
+      );
+    },
+    [startAutoImport],
+  );
+
+  // Silent auto-import on open, and again every time the app comes back to
+  // the foreground.
+  //
+  // This used to run once per JS session, behind a module-level flag that was
+  // never reset. Android keeps the JS context alive when the app is
+  // backgrounded, so "once per session" meant once per COLD START: leaving the
+  // app to pay for something and coming back — the exact moment a new bank SMS
+  // exists — imported nothing, and the charge only appeared after a manual
+  // pull-to-refresh. The app looked like it could not see messages it had
+  // already captured.
   useEffect(() => {
-    if (!state.hydrated || autoImportRan) return;
-    autoImportRan = true;
-    (async () => {
-      try {
-        await runAutoImport(false);
-        await requestNotificationPermission();
-        await syncPaymentReminders(state);
-      } catch {
+    if (!state.hydrated) return;
+
+    const scan = () => {
+      if (Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
+      lastScanAt = Date.now();
+      void runAutoImport(false).catch(() => {
         // Best-effort; manual import still available.
-      }
-    })();
+      });
+    };
+
+    scan();
+
+    if (!sessionSetupRan) {
+      sessionSetupRan = true;
+      (async () => {
+        try {
+          // Ask the store who this customer is, once per launch.
+          //
+          // Without this, `pro` was a local boolean that nothing ever
+          // re-checked: once true it stayed true through a lapsed
+          // subscription, a refund or a cancellation, and a reinstall left a
+          // paying customer to find the Restore button by themselves.
+          //
+          // A null answer means the store could not be reached, which is NOT
+          // the same as not having paid — the cached flag stands in that
+          // case, so a flight does not lock someone out of their own ledger.
+          const entitled = await refreshEntitlement();
+          if (entitled !== null && entitled !== state.pro) setPro(entitled);
+        } catch {
+          // Entitlement is best-effort; the cached flag stands.
+        }
+        try {
+          await enableRelayBackgroundSync();
+          // Never prompt on launch. Reminder/instant-alert surfaces ask only
+          // after the user explicitly enables them; this call is a no-op when
+          // notification authorization has not already been granted.
+          await syncPaymentReminders(state);
+        } catch {
+          // Reminders are best-effort; the ledger does not depend on them.
+        }
+      })();
+    }
+
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') scan();
+    });
+    return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.hydrated]);
 
@@ -405,12 +899,11 @@ export default function HomeScreen() {
     setRefreshing(true);
     try {
       await runAutoImport(true);
-      await captureRelay(true);
       await syncPaymentReminders(state);
     } finally {
       setRefreshing(false);
     }
-  }, [runAutoImport, captureRelay, state]);
+  }, [runAutoImport, state]);
 
   return (
     <ThemedView style={styles.root}>
@@ -429,79 +922,42 @@ export default function HomeScreen() {
                 label={t('seeAll')}
                 onPress={() => router.push('/transactions')}
               />
-              <IconButton name="sliders" label="Settings" onPress={() => router.push('/settings')} />
+              <IconButton name="sliders" label={t('settingsTitle')} onPress={() => router.push('/settings')} />
             </View>
           </View>
 
           <Hero
             period={period}
             live={live}
-            netFils={summary.incomeFils - summary.expenseFils}
-            incomeFils={summary.incomeFils}
-            expenseFils={summary.expenseFils}
+            // All three figures from one arithmetic, so the hero equals its
+            // own two cells. It read "63,039 in, 8,815 out, saved 54,223" —
+            // a subtraction that is off by one, in 40px type, at the top of
+            // the screen. Each cell was rounded on its own while the net was
+            // computed from the raw fils and rounded once more.
+            //
+            // Out is the composition total, which Flow prints above the
+            // category split; in is rounded the same way; and the net is the
+            // difference between those two, not a third measurement.
+            netFils={hero.netFils}
+            incomeFils={hero.incomeFils}
+            expenseFils={hero.expenseFils}
           />
 
-          {!isProActive(state) && (
-            <Pressable
-              onPress={() => router.push('/pro')}
-              style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-              <Icon name="diamond" size={17} color={theme.warning} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('trialEndedBanner')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('trialEndedBannerSub')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
-
-          {needsPermission && isProActive(state) && (
-            <Pressable
-              onPress={() => runAutoImport(true)}
-              style={[styles.notice, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-              <Icon name="spark" size={17} color={theme.primary} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('turnOnTracking')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('trackingPrivacy')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
-
-          {/* The iPhone equivalent of the permission banner above, and it only
-              ever appears when something is genuinely wrong: the automation
-              lives in Apple's app where Wafra cannot see it, so a run mode left
-              on "Ask Before Running" produces no error anywhere — just a ledger
-              that never fills. Wallet carries the full status row; this is the
-              one state that has earned a place on the screen people open. */}
-          {relay && relay.paired && describeRelay(relay).tone === 'warn' && (
-            <Pressable
-              onPress={() => router.push('/iphone-setup')}
-              style={[
-                styles.notice,
-                { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg },
-              ]}>
-              <Icon name="alert" size={17} color={theme.expense} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small" style={{ color: theme.expense }}>
-                  {describeRelay(relay).title}
-                </ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {describeRelay(relay).detail}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.expense} />
-            </Pressable>
-          )}
+          <AutomaticCapture
+            status={!isProActive(state) ? 'paused' : needsPermission ? 'off' : captureState}
+            lastCaptureDate={lastAutomatic?.date}
+            onPress={() => {
+              if (!isProActive(state)) router.push('/pro');
+              else if (Platform.OS === 'ios') router.push('/ios-setup');
+              else void runAutoImport(true);
+            }}
+          />
 
           {/* One sentence, with somewhere to go. A carousel of five of these
               was five things to skim and nothing to act on. */}
           {insight && (
             <Animated.View
-              entering={FadeInDown.delay(40).duration(320)}
+              entering={enter(FadeInDown.delay(40).duration(320))}
               style={[
                 styles.insight,
                 { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
@@ -515,17 +971,25 @@ export default function HomeScreen() {
               </ThemedText>
               <View style={styles.insightActions}>
                 <Pressable
-                  onPress={() => router.push(insight.href ?? '/flow')}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tapped();
+                    router.push(insight.href ?? '/flow');
+                  }}
                   style={[styles.btn, { backgroundColor: theme.primary }]}>
                   <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                    See the breakdown
+                    {t('seeBreakdown')}
                   </ThemedText>
                 </Pressable>
                 <Pressable
-                  onPress={() => setDismissedInsight(insight.id)}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tapped();
+                    setDismissedInsight(insight.id);
+                  }}
                   style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
                   <ThemedText type="nano" themeColor="textSecondary">
-                    Dismiss
+                    {t('dismiss')}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -534,12 +998,20 @@ export default function HomeScreen() {
 
           <LeavingSoon state={state} now={now} onOpen={openOutgoing} />
 
+          {/* Foreign-currency detail is useful but secondary on Home (and has
+              a full destination in Wallet). Keeping it below the month's one
+              insight and upcoming outgoings prevents four peer cards from
+              competing directly under the hero. */}
+          <ForeignActivityPreview summary={foreignActivity} />
+
           <UnreadFormatsPrompt state={state} />
 
-          <Animated.View entering={FadeInDown.delay(120).duration(320)} style={styles.section}>
+          <Animated.View
+            entering={enter(FadeInDown.delay(120).duration(320))}
+            style={styles.section}>
             <SectionHeader
               title={live ? t('recentActivity') : periodLabel(period)}
-              right="ALL ACTIVITY"
+              right={t('allActivity')}
               onPressRight={() => router.push('/transactions')}
             />
             {today.map((tx, i) => (
@@ -553,19 +1025,26 @@ export default function HomeScreen() {
                 <TransactionRow
                   transaction={tx}
                   account={state.accounts.find((a) => a.id === tx.accountId)}
-                  onPress={() => setEntry(tx)}
+                  onPress={setEntry}
+                  internal={internal.has(tx.id)}
                 />
               </View>
             ))}
-            {today.length === 0 && (
+            {/* Reading the ledger back off disk takes long enough to paint,
+                and an unhydrated store is indistinguishable from an empty one.
+                The screen was announcing t('noEntriesPeriod') over
+                AED 0 and then replacing it with a real month — telling the user
+                their data was gone, every cold start. Skeletons until the store
+                says it has looked. */}
+            {!state.hydrated && today.length === 0 && <SkeletonRows count={4} height={44} />}
+            {state.hydrated && today.length === 0 && (
               <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
                 <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
                   AED 0
                 </ThemedText>
-                <ThemedText type="small">No entries in this period yet</ThemedText>
+                <ThemedText type="small">{t('noEntriesPeriod')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>
-                  Pull down to read your inbox, or add the last thing you paid for — one entry is
-                  enough to start the month.
+                  {t('emptyPeriodBody')}
                 </ThemedText>
               </View>
             )}
@@ -589,9 +1068,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.three,
   },
   topActions: { flexDirection: 'row', gap: Spacing.two },
+
+  capture: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 11,
+    marginTop: Spacing.four,
+  },
+  captureIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captureText: { flex: 1, gap: 2 },
+  captureTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  captureTitle: { flexShrink: 1 },
+  liveDot: { width: 6, height: 6, borderRadius: 3 },
 
   heroLabel: { marginBottom: Spacing.two },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
@@ -602,13 +1103,30 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 11,
     paddingBottom: Spacing.two,
-    paddingRight: Spacing.three,
-    paddingLeft: 0,
+    paddingEnd: Spacing.three,
+    paddingStart: 0,
     gap: 5,
   },
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   splitFigure: { fontSize: 17, lineHeight: 22 },
   dot: { width: 5, height: 5, borderRadius: 3 },
+
+  currencyPreview: {
+    marginTop: Spacing.four,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  currencyPreviewTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  currencyPreviewHeading: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  currencyRows: { gap: 5, marginTop: Spacing.one },
+  currencyRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  currencyOriginal: { flex: 1 },
 
   section: { marginTop: Spacing.five },
 
@@ -624,6 +1142,7 @@ const styles = StyleSheet.create({
   insightActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
   btn: {
     borderRadius: Radius.tile,
+    minHeight: 44,
     paddingVertical: 9,
     paddingHorizontal: 14,
     alignItems: 'center',

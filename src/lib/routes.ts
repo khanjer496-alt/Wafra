@@ -39,7 +39,7 @@ export const APP_ROUTES = [
   '/settings',
   '/accuracy',
   '/import-sms',
-  '/iphone-setup',
+  '/ios-setup',
   '/add-transaction',
   '/pro',
 ] as const;
