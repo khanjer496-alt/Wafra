@@ -22,6 +22,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PeriodSheet } from '@/components/period-sheet';
+import { describeRelay, useRelayStatus } from '@/components/relay-status';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TransactionRow } from '@/components/transaction-row';
@@ -51,6 +52,7 @@ import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notif
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
+import { isRelaySupported, runRelayImport } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
@@ -266,6 +268,9 @@ export default function HomeScreen() {
   const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
+  // Re-read after every capture, not only on focus: a sync that just landed
+  // rows should clear the "nothing has arrived" warning without a tab switch.
+  const relay = useRelayStatus(state.transactions.length);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
@@ -345,6 +350,42 @@ export default function HomeScreen() {
     [state, importBatch, undoBatch, toast, router],
   );
 
+  /**
+   * The iPhone half of the same job.
+   *
+   * Android reads the inbox; iOS collects what the user's Shortcut already
+   * forwarded, sealed, from the relay. Both end in `buildImportPlan →
+   * importBatch`, so every dedupe and healing rule is shared — this is a second
+   * SOURCE, not a second ingestion path.
+   *
+   * It has to live here, on the screen that runs on every launch and on every
+   * pull-to-refresh, because the relay deletes a row only when the phone
+   * acknowledges it and drops it after 72 hours. Syncing only while a setup
+   * screen happened to be open would silently lose transactions.
+   */
+  const runRelayCapture = useCallback(
+    async (interactive: boolean) => {
+      if (!isRelaySupported()) return;
+      const result = await runRelayImport(state, importBatch);
+      if (result.skipped === 'not-pro') {
+        if (interactive) router.push('/pro');
+        return;
+      }
+      if (result.ids.length === 0) return;
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
+      toast.show(
+        `Captured ${result.ids.length} transaction${result.ids.length === 1 ? '' : 's'}`,
+        [
+          { label: 'Undo', onPress: () => undoBatch(result.ids) },
+          { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
+        ],
+      );
+    },
+    [state, importBatch, undoBatch, toast, router],
+  );
+
   // Silent auto-import + reminder sync, once per session.
   useEffect(() => {
     if (!state.hydrated || autoImportRan) return;
@@ -352,6 +393,7 @@ export default function HomeScreen() {
     (async () => {
       try {
         await runAutoImport(false);
+        await runRelayCapture(false);
         await requestNotificationPermission();
         await syncPaymentReminders(state);
       } catch {
@@ -365,11 +407,12 @@ export default function HomeScreen() {
     setRefreshing(true);
     try {
       await runAutoImport(true);
+      await runRelayCapture(true).catch(() => {});
       await syncPaymentReminders(state);
     } finally {
       setRefreshing(false);
     }
-  }, [runAutoImport, state]);
+  }, [runAutoImport, runRelayCapture, state]);
 
   return (
     <ThemedView style={styles.root}>
@@ -427,6 +470,32 @@ export default function HomeScreen() {
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Pressable>
+          )}
+
+          {/* The iPhone equivalent of the permission banner above, and it only
+              ever appears when something is genuinely wrong: the automation
+              lives in Apple's app where Wafra cannot see it, so a run mode left
+              on "Ask Before Running" produces no error anywhere — just a ledger
+              that never fills. Wallet carries the full status row; this is the
+              one state that has earned a place on the screen people open. */}
+          {relay && relay.paired && describeRelay(relay).tone === 'warn' && (
+            <Pressable
+              onPress={() => router.push('/iphone-setup')}
+              style={[
+                styles.notice,
+                { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg },
+              ]}>
+              <Icon name="alert" size={17} color={theme.expense} />
+              <View style={styles.noticeText}>
+                <ThemedText type="small" style={{ color: theme.expense }}>
+                  {describeRelay(relay).title}
+                </ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {describeRelay(relay).detail}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.expense} />
             </Pressable>
           )}
 

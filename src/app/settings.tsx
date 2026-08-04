@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useRelayStatus } from '@/components/relay-status';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Toggle } from '@/components/ui/controls';
@@ -37,6 +38,7 @@ import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '
 import { t } from '@/lib/i18n';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
+import { isRelaySupported } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
 
@@ -65,6 +67,7 @@ export default function SettingsScreen() {
   } = useStore();
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
+  const relay = useRelayStatus();
   const [smsGranted, setSmsGranted] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -371,6 +374,23 @@ export default function SettingsScreen() {
                 smsGranted ? 'Granted · nothing is uploaded' : 'Off · nothing can import',
                 smsGranted,
                 toggleSms,
+              )}
+            {/* iPhone capture is a privacy setting as much as a feature: it is
+                the one path in the whole app where a message leaves the phone,
+                so it belongs in this section, stated plainly, rather than
+                buried as a convenience toggle. The screen it opens is also
+                where it gets turned off again. */}
+            {isRelaySupported() &&
+              linkRow(
+                'iPhone capture',
+                relay === null
+                  ? 'Checking…'
+                  : relay.paired
+                    ? relay.lastRowAt > 0
+                      ? 'On · bank messages are read by the relay, then dropped'
+                      : 'On · nothing captured yet'
+                    : 'Off · bank messages are not being captured',
+                () => router.push('/iphone-setup'),
               )}
             <Row onPress={gated(onNotificationAccess)} last accessibilityLabel="Bank app notifications">
               <View style={styles.rowText}>

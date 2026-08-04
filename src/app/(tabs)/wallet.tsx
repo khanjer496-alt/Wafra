@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
+import { RelayStatusRow } from '@/components/relay-status';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { AccountTile } from '@/components/ui/tile';
@@ -629,6 +630,15 @@ export default function WalletScreen() {
               </Pressable>
             )}
           </View>
+
+          {/* On iPhone, whether capture is actually working is not something
+              the app can take for granted: the automation lives in Apple's
+              Shortcuts app, Wafra cannot read it, and the likeliest mistake
+              produces no error anywhere. So it gets a live row here, above the
+              manual route, and the row goes red on its own when the ledger has
+              been silent long enough to be suspicious. Renders nothing off
+              iOS. */}
+          <RelayStatusRow onPress={() => router.push('/iphone-setup')} />
 
           {/* Where the numbers above came from. The claim that nothing leaves
               the phone is worth stating on the screen that shows balances,

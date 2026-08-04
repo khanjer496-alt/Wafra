@@ -23,6 +23,12 @@
  *    expo-secure-store default is WHEN_UNLOCKED, and a sync that fires while
  *    the phone is in a pocket is nearly every sync. Under the default it would
  *    fail silently — no crash, no log, just a ledger that is always stale.
+ *    THIS_DEVICE_ONLY is the other half of that choice and it has a cost worth
+ *    stating: the secret key is deliberately excluded from iCloud backups, so
+ *    a user who migrates to a new phone arrives unpaired. That is the safe
+ *    direction to fail — the app sees "not paired" and can ask them to set up
+ *    again — whereas a key that travelled in a backup would be a copy of the
+ *    thing this whole design says never leaves the device.
  *
  * 3. BACKGROUND SYNC MUST NOT WRITE THE LEDGER. `importBatch` is a method on
  *    the React store, and persistence runs in a `useEffect` inside
@@ -132,8 +138,12 @@ interface Inbox {
   rows: StagedRow[];
   /** Digests already staged or imported, newest last. */
   seen: string[];
-  /** Queue ids that could never be opened; acked so they stop re-downloading. */
-  unopenable: string[];
+  /**
+   * Queue ids to acknowledge WITHOUT importing: rows this device can never
+   * open, and rows whose message it already has. Both must be acked or every
+   * sync re-downloads them for the next three days.
+   */
+  discard: string[];
   lastSyncAt: number;
   lastRowAt: number;
   lastError: string | null;
@@ -143,7 +153,7 @@ const EMPTY_INBOX: Inbox = {
   v: 1,
   rows: [],
   seen: [],
-  unopenable: [],
+  discard: [],
   lastSyncAt: 0,
   lastRowAt: 0,
   lastError: null,
@@ -393,7 +403,7 @@ async function readInbox(): Promise<Inbox> {
       ...EMPTY_INBOX,
       ...parsed,
       seen: Array.isArray(parsed.seen) ? parsed.seen : [],
-      unopenable: Array.isArray(parsed.unopenable) ? parsed.unopenable : [],
+      discard: Array.isArray(parsed.discard) ? parsed.discard : [],
     };
   } catch {
     return { ...EMPTY_INBOX };
@@ -431,6 +441,10 @@ function isSealedRow(value: unknown): value is SealedRow {
  * Collect the queue, open every row, stage what is new. Safe to call from a
  * headless background task: it writes only its own staging key and never
  * touches the ledger (see note 3 at the top of this file).
+ *
+ * It does NOT check the subscription — it is the primitive, and the caller owns
+ * that decision. `runRelayImport` does check; a background wake must too, or
+ * the app quietly keeps working for a lapsed subscriber.
  */
 export async function syncRelay(): Promise<RelaySyncResult> {
   const empty: RelaySyncResult = {
@@ -468,7 +482,7 @@ export async function syncRelay(): Promise<RelaySyncResult> {
   const seen = new Set(inbox.seen);
   const stagedIds = new Set(inbox.rows.map((r) => r.id));
   const fresh: StagedRow[] = [];
-  const badIds: string[] = [];
+  const discardIds: string[] = [];
   let duplicates = 0;
   let lastRowAt = inbox.lastRowAt;
 
@@ -481,18 +495,18 @@ export async function syncRelay(): Promise<RelaySyncResult> {
       // A row sealed to a key this device does not have can never become
       // readable. Counting and acking it is the only way it stops being
       // re-downloaded on every sync for the next three days.
-      badIds.push(item.id);
+      discardIds.push(item.id);
       continue;
     }
     if (!isSealedRow(row)) {
-      badIds.push(item.id);
+      discardIds.push(item.id);
       continue;
     }
     // The message digest survives a Shortcut retry with a drifted clock, which
     // the timestamp fingerprint downstream does not.
     if (seen.has(row.msgId)) {
       duplicates += 1;
-      badIds.push(item.id);
+      discardIds.push(item.id);
       continue;
     }
     seen.add(row.msgId);
@@ -504,7 +518,7 @@ export async function syncRelay(): Promise<RelaySyncResult> {
     ...inbox,
     rows: [...inbox.rows, ...fresh],
     seen: [...seen].slice(-SEEN_MSG_LIMIT),
-    unopenable: [...new Set([...inbox.unopenable, ...badIds])].slice(-ACK_LIMIT),
+    discard: [...new Set([...inbox.discard, ...discardIds])].slice(-ACK_LIMIT),
     lastSyncAt: Date.now(),
     lastRowAt,
     lastError: null,
@@ -513,7 +527,7 @@ export async function syncRelay(): Promise<RelaySyncResult> {
   return {
     staged: fresh.length,
     duplicates,
-    unopenable: badIds.length - duplicates,
+    unopenable: discardIds.length - duplicates,
     pending: next.rows.length,
     error: null,
   };
@@ -570,21 +584,26 @@ export async function runRelayImport(
 
   const sync = await syncRelay();
   const inbox = await readInbox();
-  if (inbox.rows.length === 0 && inbox.unopenable.length === 0) {
+  if (inbox.rows.length === 0 && inbox.discard.length === 0) {
     return { ...base, sync };
   }
 
   const parsed = toScanned(inbox.rows);
-  // `lastScanTs` belongs to the Android inbox cursor; the relay has its own
-  // queue and must not move it, or the next SMS scan would skip history.
+  // `lastScanTs` is passed through unchanged on purpose. It is the ANDROID
+  // inbox cursor — where the next on-device scan resumes from — and the relay
+  // has its own queue. Advancing it here would make a later SMS scan skip
+  // everything between the old cursor and the newest relayed message.
   const plan = buildImportPlan(parsed, state, state.lastScanTs, today);
-  const ids = plan.txCount || plan.newAccountCount || plan.dueCount || plan.healedCount
-    ? importBatch({ ...plan.batch, lastScanTs: state.lastScanTs })
-    : [];
+  const nothingToWrite =
+    plan.txCount === 0 &&
+    plan.newAccountCount === 0 &&
+    plan.dueCount === 0 &&
+    plan.healedCount === 0;
+  const ids = nothingToWrite ? [] : importBatch(plan.batch);
 
   // Ledger is committed; only now is it safe to let the relay forget.
-  const acked = await ackRows(id, [...inbox.rows.map((r) => r.id), ...inbox.unopenable]);
-  await writeInbox({ ...inbox, rows: [], unopenable: [] });
+  const acked = await ackRows(id, [...inbox.rows.map((r) => r.id), ...inbox.discard]);
+  await writeInbox({ ...inbox, rows: [], discard: [] });
 
   return { skipped: null, sync, plan, ids, acked };
 }

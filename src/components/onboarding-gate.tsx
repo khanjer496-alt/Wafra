@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
@@ -15,6 +16,7 @@ import {
   scanInbox,
 } from '@/lib/auto-import';
 import { requestNotificationPermission } from '@/lib/notifications';
+import { isRelaySupported } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 
 type Step = 'welcome' | 'scanning' | 'choose';
@@ -23,7 +25,27 @@ type Step = 'welcome' | 'scanning' | 'choose';
  *  the tone, and the mark is at its strongest on charcoal. */
 const night = Colors.dark;
 
-const POINTS: [IconName, string, string][] = [
+/**
+ * THE PRIVACY CLAIM IS DIFFERENT ON IPHONE, AND IT HAS TO STILL BE TRUE.
+ *
+ * On Android "There is no server" is literally true: modules/sms-reader parses
+ * the inbox on-device and the app opens no socket at all. On iPhone it is
+ * false. Apple lets no app read Messages, so the only route is a Shortcuts
+ * automation the user builds, which POSTs each bank alert to Wafra's relay.
+ * Telling an iPhone user "there is no server" is a lie told on the exact screen
+ * where trust is established, and it contradicts the product's own design.
+ *
+ * What replaces it is not a softer claim — it is a more specific one, and it is
+ * the argument server/README.md actually makes. The message text is parsed and
+ * DROPPED: there is no table for messages, no log line, nothing to dump. What
+ * is stored is the parsed row, sealed with X25519 + AES-GCM to a key only this
+ * iPhone holds, and deleted the moment the phone collects it. Typical retention
+ * is the seconds between the text arriving and the app syncing.
+ *
+ * "Nothing to breach, nothing to sell" survives that translation intact. Only
+ * "nothing to sync" does not, and that is precisely the part that is false.
+ */
+const ANDROID_POINTS: [IconName, string, string][] = [
   [
     'mail',
     'Reads SMS, files the spend',
@@ -31,6 +53,20 @@ const POINTS: [IconName, string, string][] = [
   ],
   ['calendar', 'Warns before the money leaves', 'Card dues, DEWA, rent, and quiet subscriptions'],
   ['lock', 'There is no server', 'Nothing to breach, nothing to sell, nothing to sync'],
+];
+
+const IOS_POINTS: [IconName, string, string][] = [
+  [
+    'mail',
+    'Your bank texts file themselves',
+    'A Shortcut you set up hands each alert straight to Wafra — you never type a transaction',
+  ],
+  ['calendar', 'Warns before the money leaves', 'Card dues, DEWA, rent, and quiet subscriptions'],
+  [
+    'lock',
+    'Read, dropped, then sealed',
+    'The message itself is never stored. The entry is locked to a key only this iPhone holds, and erased the second it lands.',
+  ],
 ];
 
 /**
@@ -41,6 +77,7 @@ const POINTS: [IconName, string, string][] = [
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const { state, importBatch, setOnboarded, loadDemoData } = useStore();
+  const router = useRouter();
   const [step, setStep] = useState<Step>('welcome');
   const [progress, setProgress] = useState({ scanned: 0, found: 0 });
   const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
@@ -67,6 +104,24 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
+  /**
+   * iPhone takes a different road out of this screen. The Android path is a
+   * permission dialog and a scan; the iPhone path is a Shortcut the user builds
+   * in Apple's app, which is a whole product surface of its own. Dropping an
+   * iPhone user into "Read my inbox" — a screen that on iOS cannot read an
+   * inbox — was the single most misleading step in the app.
+   *
+   * The overlay is dismissed BEFORE the push. The navigator underneath is
+   * already mounted (it renders hidden behind this screen), so the setup route
+   * is there waiting; leaving the overlay up would just cover it.
+   */
+  const startIosSetup = () => {
+    setOnboarded();
+    router.push('/iphone-setup');
+  };
+
+  const points = isRelaySupported() ? IOS_POINTS : ANDROID_POINTS;
+
   if (!showOverlay) return <>{children}</>;
 
   return (
@@ -82,13 +137,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   Your bank already texts you. Wafra reads it.
                 </ThemedText>
                 <ThemedText style={styles.sub}>
-                  Every ENBD, FAB, and du alert becomes a filed transaction. On device, in AED, with
-                  no account to create.
+                  {isRelaySupported()
+                    ? 'Every ENBD, FAB, and du alert becomes a filed transaction. In AED, with no account to create.'
+                    : 'Every ENBD, FAB, and du alert becomes a filed transaction. On device, in AED, with no account to create.'}
                 </ThemedText>
               </View>
 
               <View style={styles.points}>
-                {POINTS.map(([icon, title, detail], i) => (
+                {points.map(([icon, title, detail], i) => (
                   <View
                     key={title}
                     style={[styles.point, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth }]}>
@@ -105,8 +161,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
               <View style={styles.actions}>
                 <Button
-                  label={isSmsScanningAvailable() ? 'Read my inbox' : 'Continue'}
-                  onPress={() => (isSmsScanningAvailable() ? startScan() : setStep('choose'))}
+                  label={
+                    isSmsScanningAvailable()
+                      ? 'Read my inbox'
+                      : isRelaySupported()
+                        ? 'Set up automatic tracking'
+                        : 'Continue'
+                  }
+                  onPress={() => {
+                    if (isSmsScanningAvailable()) return startScan();
+                    if (isRelaySupported()) return startIosSetup();
+                    setStep('choose');
+                  }}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
@@ -156,7 +222,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 <ThemedText style={styles.sub}>
                   {Platform.OS === 'web'
                     ? 'Reading SMS works in the Android app. Pick a starting point:'
-                    : 'You can read your inbox later from Wallet.'}
+                    : isRelaySupported()
+                      ? 'You can set up automatic tracking later from Wallet.'
+                      : 'You can read your inbox later from Wallet.'}
                 </ThemedText>
               </View>
               <View style={styles.actions}>
