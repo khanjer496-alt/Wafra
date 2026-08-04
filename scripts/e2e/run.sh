@@ -15,7 +15,10 @@ echo "→ exporting web build to $OUT"
 npx expo export --platform web --output-dir "$OUT" >/dev/null
 
 echo "→ serving $OUT on :$PORT"
-npx serve -s "$OUT" -l "$PORT" >/dev/null 2>&1 &
+# serve.mjs, not `npx serve`: serve is in nobody's dependencies, so this line
+# fetched a package mid-job on every run, and it does not do the extensionless
+# rewrite the client router needs — a pushed route would 404.
+node scripts/e2e/serve.mjs "$OUT" "$PORT" >/dev/null 2>&1 &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null || true' EXIT
 

@@ -196,6 +196,18 @@ const money = (s) => {
  * the pair is only correct if it clears the 3:1 a graphical object needs —
  * a 26px tile is not text and does not get the 4.5:1 bar.
  */
+/**
+ * The composition rows on Flow.
+ *
+ * These used to be 26x26 tiles with a category glyph on a colour ramp, and this
+ * helper looked for exactly that. The row is an 8px swatch now — theme.ts says
+ * category identity comes from the WORD, not from a hue, so the tile restated
+ * what the label already said. Nothing was wrong with the app when this started
+ * failing; the selector was describing a design that no longer ships, and it
+ * failed by finding NOTHING, which reads as "the rows sum to 0" rather than as
+ * "I could not see the rows". Match the swatch, and keep the money invariant
+ * the assertion actually exists for.
+ */
 const compTiles = (page) => page.evaluate(() => {
   const parse = (c) => {
     const m = c.trim().startsWith('#')
@@ -208,20 +220,21 @@ const compTiles = (page) => page.evaluate(() => {
     return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
   };
   const out = [];
-  for (const svg of document.querySelectorAll('svg')) {
-    const tile = svg.parentElement;
-    if (!tile) continue;
-    const r = tile.getBoundingClientRect();
-    if (Math.round(r.width) !== 26 || Math.round(r.height) !== 26) continue;
+  const pageBg = parse(getComputedStyle(document.body).backgroundColor) || [20, 18, 15];
+  for (const el of document.querySelectorAll('div')) {
+    if (el.childElementCount) continue;
+    const r = el.getBoundingClientRect();
+    if (Math.round(r.width) !== 8 || Math.round(r.height) !== 8) continue;
     const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    if (!(top && (tile.contains(top) || top.contains(tile)))) continue;
-    const mark = svg.querySelector('path,circle,rect,line');
-    const bg = parse(getComputedStyle(tile).backgroundColor);
-    const ink = mark && parse(mark.getAttribute('stroke') || getComputedStyle(mark).stroke);
+    if (!(top && (el.contains(top) || top.contains(el)))) continue;
+    // A solid swatch has no ink of its own, so the pair that has to stay
+    // legible is the swatch against the page it sits on.
+    const bg = parse(getComputedStyle(el).backgroundColor);
+    const ink = pageBg;
     if (!bg || !ink) continue;
     const a = lum(bg), b = lum(ink);
     out.push({
-      label: (tile.parentElement?.textContent || '').trim().slice(0, 24),
+      label: (el.parentElement?.textContent || '').trim().slice(0, 24),
       contrast: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100,
     });
   }
@@ -388,11 +401,10 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
   // A row's figure is the right-most plain number on the tile's own line.
   const perTile = (await page.evaluate(() => {
     const ys = [];
-    for (const svg of document.querySelectorAll('svg')) {
-      const tile = svg.parentElement;
-      if (!tile) continue;
-      const r = tile.getBoundingClientRect();
-      if (Math.round(r.width) === 26 && Math.round(r.height) === 26) ys.push(Math.round(r.y));
+    for (const el of document.querySelectorAll('div')) {
+      if (el.childElementCount) continue;
+      const r = el.getBoundingClientRect();
+      if (Math.round(r.width) === 8 && Math.round(r.height) === 8) ys.push(Math.round(r.y));
     }
     return ys;
   })).map((y) => {
@@ -407,7 +419,7 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
   // `onRampColor` flips the ink by luminance, and the threshold has to land
   // where the two inks actually cross over, not where they look like they do.
   const worst = tiles.reduce((m, x) => (x.contrast < m.contrast ? x : m), tiles[0] ?? { contrast: 0, label: 'none' });
-  ok(`flow: every category glyph is legible on its ramp step (worst ${worst.contrast}:1 on "${worst.label}")`,
+  ok(`flow: every category swatch is visible against the page (worst ${worst.contrast}:1 on "${worst.label}")`,
     tiles.length > 0 && tiles.every((x) => x.contrast >= 3));
 }
 
@@ -549,7 +561,12 @@ await tapText(page, /Fixed \d/i, 1200);
   // A travel charge under a utilities heading reads as a bug even when the
   // recurrence is real: it must sit below the "other" heading, not the
   // utilities one.
-  const otherPayment = t.find((x) => /Booking\.com/i.test(x.t));
+  // Was Booking.com, which is not in this segment any more and should never have
+  // been: the old demo generated three FX rows a month on a fixed day, and the
+  // detector read them as a "183.58/mo, cancellable" commitment. The seed no
+  // longer manufactures that, so the assertion now uses a repeat that is really
+  // recurring — a Salik toll top-up, which is a genuine non-bill charge.
+  const otherPayment = t.find((x) => /Salik/i.test(x.t));
   ok('bills fixed: a non-bill repeat is filed under "other", not utilities',
     !!otherPayment && !!other && otherPayment.y > other.y);
   ok('bills fixed: no recurring row label is ellipsised',
