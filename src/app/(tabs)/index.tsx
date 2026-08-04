@@ -34,6 +34,7 @@ import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useRelayCapture } from '@/hooks/use-relay-capture';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
@@ -52,7 +53,6 @@ import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notif
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { isRelaySupported, runRelayImport } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
@@ -358,15 +358,15 @@ export default function HomeScreen() {
    * importBatch`, so every dedupe and healing rule is shared — this is a second
    * SOURCE, not a second ingestion path.
    *
-   * It has to live here, on the screen that runs on every launch and on every
-   * pull-to-refresh, because the relay deletes a row only when the phone
-   * acknowledges it and drops it after 72 hours. Syncing only while a setup
-   * screen happened to be open would silently lose transactions.
+   * The hook owns WHEN it runs — launch, back-to-foreground, and the moment a
+   * background sync stages something while the app is open — because those are
+   * the layers that let a transaction land without the user opening anything.
+   * This screen owns what the user is told about it.
    */
-  const runRelayCapture = useCallback(
-    async (interactive: boolean) => {
-      if (!isRelaySupported()) return;
-      const result = await runRelayImport(state, importBatch);
+  const { capture: captureRelay } = useRelayCapture({
+    state,
+    importBatch,
+    onCaptured: (result, interactive) => {
       if (result.skipped === 'not-pro') {
         if (interactive) router.push('/pro');
         return;
@@ -375,25 +375,23 @@ export default function HomeScreen() {
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
-      toast.show(
-        `Captured ${result.ids.length} transaction${result.ids.length === 1 ? '' : 's'}`,
-        [
-          { label: 'Undo', onPress: () => undoBatch(result.ids) },
-          { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
-        ],
-      );
+      const ids = result.ids;
+      toast.show(`Captured ${ids.length} transaction${ids.length === 1 ? '' : 's'}`, [
+        { label: 'Undo', onPress: () => undoBatch(ids) },
+        { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
+      ]);
     },
-    [state, importBatch, undoBatch, toast, router],
-  );
+  });
 
-  // Silent auto-import + reminder sync, once per session.
+  // Silent auto-import + reminder sync, once per session. The relay's own
+  // launch sync lives in useRelayCapture, which also has to run on every
+  // foreground rather than once.
   useEffect(() => {
     if (!state.hydrated || autoImportRan) return;
     autoImportRan = true;
     (async () => {
       try {
         await runAutoImport(false);
-        await runRelayCapture(false);
         await requestNotificationPermission();
         await syncPaymentReminders(state);
       } catch {
@@ -407,12 +405,12 @@ export default function HomeScreen() {
     setRefreshing(true);
     try {
       await runAutoImport(true);
-      await runRelayCapture(true).catch(() => {});
+      await captureRelay(true);
       await syncPaymentReminders(state);
     } finally {
       setRefreshing(false);
     }
-  }, [runAutoImport, runRelayCapture, state]);
+  }, [runAutoImport, captureRelay, state]);
 
   return (
     <ThemedView style={styles.root}>

@@ -28,7 +28,7 @@ const SCHEMA_PATH = require.resolve('../../server/schema.sql');
 
 const { seal, hashToken, randomToken, timingSafeEqual, b64decode, b64encode, b64url } =
   require('./build/crypto');
-const { deviceKeypair, openSealed, encodeKey, decodeKey } = require('./build/relay-crypto.mjs');
+const { deviceKeypair, openSealed, encodeKey, decodeKey } = require('./build/relay-crypto.cjs');
 const worker = require('./build/worker').default;
 
 let pass = 0, fail = 0;
@@ -508,6 +508,121 @@ const NOT_A_TRANSACTION = 'Your OTP is 483920. Do not share it with anyone.';
       env.DB.handle.prepare('SELECT COUNT(*) n FROM queue').get().n === 1);
     ok('unpair: another device is untouched',
       (await (await call(env, 'GET', '/v1/sync', { token: survivor.token })).json()).items.length === 1);
+  }
+
+  /* ═════════════════ Route: /v1/push, and the wake ═════════════════
+   *
+   * The wake is what turns "a row is queued" into "the ledger is current"
+   * without the user opening anything. Three properties are load-bearing and
+   * none of them is observable from a phone:
+   *
+   *   • the payload is EMPTY. A push carrying "AED 40 at Carrefour" would hand
+   *     a readable transaction feed to Apple and to Expo, which is the exact
+   *     thing this whole service is built to avoid;
+   *   • wakes are coalesced. Apple throttles apps past roughly two or three
+   *     background pushes an hour and then quietly stops delivering, so a busy
+   *     shopping day must not spend the budget;
+   *   • a failed push never costs a transaction. The row stays queued for 72
+   *     hours and the app's other two layers collect it regardless.
+   */
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const TOKEN = 'ExponentPushToken[abcdef123456]';
+
+    // Everything the Worker sends to Expo is captured rather than sent.
+    const sent = [];
+    let reply = () => new Response(JSON.stringify({ data: { status: 'ok' } }), { status: 200 });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      if (String(url).startsWith('https://exp.host/')) {
+        sent.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) });
+        return reply();
+      }
+      return realFetch(url, init);
+    };
+
+    ok('push: rejects a registration with no token',
+      (await call(env, 'POST', '/v1/push', { body: { token: TOKEN } })).status === 401);
+    ok('push: refuses a token that is not an Expo token — this field is an address we POST to',
+      (await call(env, 'POST', '/v1/push', { token: me.token, body: { token: 'https://evil.example/hook' } })).status === 400);
+    ok('push: refuses a platform it cannot actually send to',
+      (await call(env, 'POST', '/v1/push', { token: me.token, body: { token: TOKEN, platform: 'fcm' } })).status === 400);
+
+    await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_PURCHASE } });
+    ok('wake: a device that never registered is never knocked on', sent.length === 0);
+
+    const on = await call(env, 'POST', '/v1/push', { token: me.token, body: { token: TOKEN, platform: 'expo' } });
+    ok('push: registering answers push:on', on.status === 200 && (await on.json()).push === 'on');
+    ok('push: the token is stored against that device only',
+      env.DB.handle.prepare('SELECT push_token FROM devices WHERE id = ?').get(me.deviceId).push_token === TOKEN);
+
+    await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_PURCHASE } });
+    ok('wake: queuing a row wakes the phone', sent.length === 1);
+    ok('wake: addressed to the registered token', sent[0].body.to === TOKEN);
+    ok('wake: content-available, high priority', sent[0].body._contentAvailable === true && sent[0].body.priority === 'high');
+    ok('wake: the payload is EMPTY — no amount, no merchant, nothing to read',
+      JSON.stringify(sent[0].body.data) === '{}' &&
+      !('title' in sent[0].body) && !('body' in sent[0].body));
+    ok('wake: nothing from the message survives into the push',
+      !JSON.stringify(sent[0]).includes('CARREFOUR') && !JSON.stringify(sent[0]).includes('ARABICA'));
+    ok('wake: no access token header when none is configured',
+      !(sent[0].headers && sent[0].headers.authorization));
+
+    // Coalescing. A second charge a minute later must not spend another wake.
+    await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_LIMIT_CARD } });
+    ok('wake: a second row inside the window does not send a second push', sent.length === 1);
+    ok('wake: but it is still queued — coalescing delays the knock, never the row',
+      env.DB.handle.prepare('SELECT COUNT(*) n FROM queue').get().n === 3);
+
+    env.DB.handle.prepare('UPDATE devices SET push_sent_at = unixepoch() - 700').run();
+    await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_PURCHASE } });
+    ok('wake: once the window has passed the next row wakes it again', sent.length === 2);
+
+    // An access token, when the Expo project demands one.
+    env.DB.handle.prepare('UPDATE devices SET push_sent_at = 0').run();
+    await call(
+      { ...env, EXPO_ACCESS_TOKEN: 'secret-value' },
+      'POST',
+      '/v1/ingest',
+      { token: me.token, body: { text: AE_PURCHASE } },
+    );
+    ok('wake: the access token is sent as a bearer header when configured',
+      sent[2].headers.authorization === 'Bearer secret-value');
+
+    // A token that will never work again is not a device identifier worth keeping.
+    reply = () =>
+      new Response(
+        JSON.stringify({ data: { status: 'error', details: { error: 'DeviceNotRegistered' } } }),
+        { status: 200 },
+      );
+    env.DB.handle.prepare('UPDATE devices SET push_sent_at = 0').run();
+    await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_PURCHASE } });
+    ok('wake: a dead token is deleted rather than kept',
+      env.DB.handle.prepare('SELECT push_token FROM devices WHERE id = ?').get(me.deviceId).push_token === null);
+
+    // A relay that cannot reach Expo still has to accept the message.
+    await call(env, 'POST', '/v1/push', { token: me.token, body: { token: TOKEN, platform: 'expo' } });
+    reply = () => {
+      throw new Error('expo is down');
+    };
+    const stillOk = await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_PURCHASE } });
+    ok('wake: a push that throws does not fail the ingest', stillOk.status === 202);
+    ok('wake: and the row is queued anyway',
+      env.DB.handle.prepare('SELECT COUNT(*) n FROM queue').get().n === 7);
+
+    reply = () => new Response(JSON.stringify({ data: { status: 'ok' } }), { status: 200 });
+    const off = await call(env, 'POST', '/v1/push', { token: me.token, body: { token: '' } });
+    ok('push: an empty token turns knocking off', (await off.json()).push === 'off');
+    ok('push: and the identifier is erased with it',
+      env.DB.handle.prepare('SELECT push_token FROM devices WHERE id = ?').get(me.deviceId).push_token === null);
+    const before = sent.length;
+    env.DB.handle.prepare('UPDATE devices SET push_sent_at = 0').run();
+    await call(env, 'POST', '/v1/ingest', { token: me.token, body: { text: AE_PURCHASE } });
+    ok('wake: nothing is sent once it is off', sent.length === before);
+
+    globalThis.fetch = realFetch;
   }
 
   /* ═════════════════ Routing and the nightly cron ═════════════════ */

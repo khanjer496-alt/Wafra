@@ -13,6 +13,8 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 import {
+  autoCaptureMethod,
+  billingStore,
   isBillingAvailable,
   PRO_PRICES,
   purchasePro,
@@ -23,17 +25,41 @@ import {
 } from '@/lib/purchases';
 import { useStore } from '@/lib/store';
 
-const FEATURES: { icon: IconName; titleKey: Parameters<typeof t>[0]; textKey: Parameters<typeof t>[0] }[] = [
-  { icon: 'spark', titleKey: 'featAutoTracking', textKey: 'featAutoTrackingText' },
-  { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
-  { icon: 'calendar', titleKey: 'featSalaryMonths', textKey: 'featSalaryMonthsText' },
-  { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
-];
+type FeatureRow = {
+  icon: IconName;
+  titleKey: Parameters<typeof t>[0];
+  textKey: Parameters<typeof t>[0];
+};
 
 /**
- * Wafra Pro paywall. Purchases run through Google Play Billing on the Play
- * build; side-load builds explain that and stay functional via the founder
- * unlock in Settings.
+ * The list is built per platform, because the same feature is delivered two
+ * different ways and describing the iPhone one as "reads your bank SMS" would
+ * promise something Apple forbids. A paywall that oversells is the most
+ * expensive copy in an app: the refund happens on the App Store review page.
+ */
+function features(): FeatureRow[] {
+  return [
+    {
+      icon: 'spark',
+      titleKey: 'featAutoTracking',
+      textKey:
+        autoCaptureMethod() === 'relayCapture' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
+    },
+    { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
+    { icon: 'calendar', titleKey: 'featSalaryMonths', textKey: 'featSalaryMonthsText' },
+    { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
+  ];
+}
+
+/**
+ * Wafra Pro paywall. Purchases run through the platform's own billing on a
+ * store build — Play Billing on Android, StoreKit on iPhone; side-load builds
+ * explain that and stay functional via the founder unlock in Settings.
+ *
+ * The screen also states what is NOT behind this wall. Wafra sells the work it
+ * does on its own; handing it a message yourself stays free on both platforms,
+ * and saying so here is what keeps the wall from reading as a hostage note to
+ * an iPhone user who cannot use the automatic path yet.
  */
 export default function ProScreen() {
   const theme = useTheme();
@@ -41,13 +67,18 @@ export default function ProScreen() {
   const { state, setPro } = useStore();
   const [plan, setPlan] = useState<ProPlan>('yearly');
   const trial = trialDaysLeft(state);
+  const rows = features();
+
+  const store = billingStore();
+  const storeName = store === 'appStore' ? 'App Store' : 'Play Store';
 
   const buy = async () => {
     if (!isBillingAvailable()) {
       Alert.alert(
-        'Available with the Play Store release',
-        'Purchases go through Google Play billing, which only works when Wafra is installed ' +
-          'from the Play Store. This build has every Pro feature unlockable from Settings.',
+        `Available with the ${storeName} release`,
+        `Purchases go through ${store === 'appStore' ? 'Apple' : 'Google Play'} billing, which ` +
+          `only works when Wafra is installed from the ${storeName}. This build has every Pro ` +
+          'feature unlockable from Settings.',
       );
       return;
     }
@@ -56,11 +87,15 @@ export default function ProScreen() {
 
   const restore = async () => {
     if (!isBillingAvailable()) {
-      Alert.alert('Nothing to restore', 'Purchases arrive with the Play Store release.');
+      Alert.alert('Nothing to restore', `Purchases arrive with the ${storeName} release.`);
       return;
     }
     if (await restorePro()) setPro(true);
-    else Alert.alert('No purchase found', 'No previous Wafra Pro purchase on this Google account.');
+    else
+      Alert.alert(
+        'No purchase found',
+        `No previous Wafra Pro purchase on this ${store === 'appStore' ? 'Apple Account' : 'Google account'}.`,
+      );
   };
 
   return (
@@ -103,8 +138,8 @@ export default function ProScreen() {
           </Section>
 
           <Section index={1}>
-            {FEATURES.map((f, i) => (
-              <Row key={f.titleKey} last={i === FEATURES.length - 1}>
+            {rows.map((f, i) => (
+              <Row key={f.titleKey} last={i === rows.length - 1}>
                 <View style={styles.featureIcon}>
                   <Icon name={f.icon} size={19} color={theme.textSecondary} />
                 </View>
@@ -118,8 +153,38 @@ export default function ProScreen() {
             ))}
           </Section>
 
+          {/* What the wall does NOT hold back. It belongs on the paywall rather
+              than only in a help page: the trial ends on the day this screen
+              matters most, and a user who thinks Wafra has stopped working
+              deletes it instead of pasting one message. */}
+          <Section index={2}>
+            <View
+              style={[
+                styles.freeNote,
+                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+              ]}>
+              <View style={styles.featureIcon}>
+                <Icon name="check" size={19} color={theme.income} />
+              </View>
+              <View style={styles.featureText}>
+                <ThemedText type="small">{t('featPasteFree')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('featPasteFreeText')}
+                </ThemedText>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push('/import-sms')}
+                  hitSlop={8}>
+                  <ThemedText type="micro" style={{ color: theme.primary }}>
+                    Paste a message now
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+          </Section>
+
           {!state.pro && (
-            <Section index={2} style={styles.buy}>
+            <Section index={3} style={styles.buy}>
               <View style={styles.plans}>
                 {(['yearly', 'monthly'] as ProPlan[]).map((p) => {
                   const selected = plan === p;
@@ -190,6 +255,14 @@ const styles = StyleSheet.create({
   },
   buy: {
     gap: Spacing.two + 2,
+  },
+  freeNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
   },
   plans: {
     flexDirection: 'row',

@@ -62,7 +62,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { getCategory } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
 import { getActiveMarket } from '@/lib/markets';
-import { isProActive } from '@/lib/purchases';
+import { isProActive, requiresPro } from '@/lib/purchases';
 import {
   configuredRelayUrl,
   getRelayPairing,
@@ -72,6 +72,12 @@ import {
   unpairRelay,
   type RelayPairing,
 } from '@/lib/relay';
+import {
+  ensureRelayWake,
+  relayWakeStatus,
+  stopRelayWake,
+  type RelayWakeStatus,
+} from '@/lib/relay-wake';
 import { useStore } from '@/lib/store';
 import type { Transaction } from '@/lib/types';
 
@@ -366,6 +372,40 @@ export default function IphoneSetupScreen() {
       .catch(() => {});
   }, [supported]);
 
+  /* ── How fast a captured row will actually land ──────────────────────
+     Read, never assumed. A phone with notifications declined or Background
+     App Refresh off still captures everything — it collects on launch instead
+     of in seconds — and this screen must say which of those it is rather than
+     promising the good case to everyone. */
+  const [wake, setWake] = useState<RelayWakeStatus | null>(null);
+  useEffect(() => {
+    if (!supported || !pairing) return;
+    let alive = true;
+    // Registering here as well as on Home matters: a user who has just paired
+    // is exactly the user whose layers have never been turned on.
+    ensureRelayWake()
+      .then((s) => alive && setWake(s))
+      .catch(() => {
+        relayWakeStatus()
+          .then((s) => alive && setWake(s))
+          .catch(() => {});
+      });
+    return () => {
+      alive = false;
+    };
+  }, [supported, pairing, reload]);
+
+  /** One sentence about latency that is true on THIS phone. */
+  const deliveryLine = (): string => {
+    if (wake?.push === 'on') {
+      return 'Wafra is woken the moment a message is captured, so entries appear within seconds.';
+    }
+    if (wake?.background === 'on') {
+      return 'Wafra collects in the background on iOS’s own schedule, and whenever you open it. Nothing is lost as long as that happens once every three days.';
+    }
+    return 'Wafra collects whatever is waiting each time you open it. Nothing is lost as long as that happens once every three days.';
+  };
+
   const stepIndex = step ? WALKTHROUGH.indexOf(step) : -1;
 
   /* ── Pairing ─────────────────────────────────────────────────────── */
@@ -551,8 +591,12 @@ export default function IphoneSetupScreen() {
           onPress: async () => {
             setBusy(true);
             try {
+              // The wake layers go first: a background task that keeps firing
+              // for an unpaired device is a battery cost with nothing to fetch.
+              await stopRelayWake();
               await unpairRelay();
               setPairing(null);
+              setWake(null);
               setCaught(null);
               setChecks(0);
               setWaitingSince(0);
@@ -692,14 +736,22 @@ export default function IphoneSetupScreen() {
               <Button
                 label="Start setup"
                 onPress={() => {
-                  if (!isProActive(state)) {
+                  // Automatic capture is the paid feature on both platforms —
+                  // the Android inbox scan is gated the same way. Pasting a
+                  // message is not, which is why the wall below it is an
+                  // alternative rather than a dead end.
+                  if (requiresPro('relayCapture') && !isProActive(state)) {
                     router.push('/pro');
                     return;
                   }
                   setStep('pair');
                 }}
               />
-              <Button variant="ghost" label="Not now" onPress={() => router.back()} />
+              <Button
+                variant="ghost"
+                label="Paste a message instead"
+                onPress={() => router.push('/import-sms')}
+              />
             </View>
           </>
         );
@@ -912,12 +964,22 @@ export default function IphoneSetupScreen() {
       case 'proof': {
         if (caught) {
           const rows = caught.rows.slice(0, 4);
+          // A screen that exists to prove the thing works must not claim credit
+          // for a path that was not exercised. A test message proves pairing,
+          // the relay, the token and the seal — it does NOT prove the
+          // automation, and saying otherwise here would be the one lie this
+          // whole flow was built to remove.
+          const wasTest = caught.rows.some((r) => /wafra setup test/i.test(r.title));
           return (
             <Animated.View entering={FadeIn.duration(400)} style={styles.stepBody}>
               <StepHead
                 eyebrow="Step 5 of 5"
-                title="It works."
-                body="That came in through your automation, was parsed, sealed, and filed — and the message itself was thrown away on the way."
+                title={wasTest ? 'The line is open.' : 'It works.'}
+                body={
+                  wasTest
+                    ? 'Your test went out, came back sealed, and filed itself. That proves everything except the automation — the next real bank message is what proves that.'
+                    : 'That came in through your automation, was parsed, sealed, and filed — and the message itself was thrown away on the way.'
+                }
               />
               <View>
                 {rows.map((tx, i) => (
@@ -945,14 +1007,19 @@ export default function IphoneSetupScreen() {
                 ))}
               </View>
               <ThemedText type="meta" themeColor="textTertiary">
-                From here it runs on its own. Wafra collects whatever is waiting whenever you open
-                it, and nothing is lost as long as you open it once every three days.
+                From here it runs on its own. {deliveryLine()}
               </ThemedText>
               <View style={styles.actions}>
                 <Button label="Done" onPress={() => setStep('live')} />
                 <Button
                   variant="ghost"
-                  label="Undo this entry"
+                  label={
+                    wasTest
+                      ? 'Remove the test entry'
+                      : caught.ids.length === 1
+                        ? 'Undo this entry'
+                        : `Undo these ${caught.ids.length} entries`
+                  }
                   onPress={() => {
                     undoBatch(caught.ids);
                     toast.show('Removed. Capture is still on.');
@@ -970,7 +1037,7 @@ export default function IphoneSetupScreen() {
             <StepHead
               eyebrow="Step 5 of 5"
               title="Waiting for your first message."
-              body="Buy something small, or just wait for your bank's next alert. Wafra is checking every few seconds while this screen is open — and it will keep checking in the background after you leave."
+              body={`Buy something small, or just wait for your bank's next alert. Wafra checks every few seconds while this screen is open. ${deliveryLine()}`}
             />
 
             <Block>
@@ -1093,8 +1160,28 @@ export default function IphoneSetupScreen() {
                     </ThemedText>
                   ),
                 },
+                {
+                  // The layer that is actually live, not the one we hoped for.
+                  label: 'Arrives',
+                  value: (
+                    <ThemedText type="small">
+                      {wake?.push === 'on'
+                        ? 'In seconds'
+                        : wake?.background === 'on'
+                          ? 'In the background'
+                          : 'When you open Wafra'}
+                    </ThemedText>
+                  ),
+                },
               ]}
             />
+
+            <ThemedText type="meta" themeColor="textTertiary">
+              {deliveryLine()}
+              {wake && wake.push !== 'on'
+                ? ' Allowing notifications lets the relay wake Wafra the moment something is captured — the notification itself is empty and never says what you spent.'
+                : ''}
+            </ThemedText>
 
             <View style={styles.actions}>
               <Button

@@ -45,6 +45,16 @@
  * There is no second ingestion path. Rows go through the same
  * `buildImportPlan` → `importBatch` pipeline as an Android inbox scan, so
  * every dedupe, healing and account-auto-creation rule applies unchanged.
+ *
+ * THREE LAYERS COLLECT, ONE LAYER FILES. A content-available push from the
+ * relay (seconds), the periodic background task (minutes to overnight, iOS
+ * decides), and the foreground (launch, background→active, pull-to-refresh).
+ * The first two call `backgroundSyncRelay` and only stage; the third calls
+ * `runRelayImport`, which is the one that writes and acknowledges. Any layer
+ * can fail entirely without losing a transaction — the relay holds a row until
+ * it is acknowledged, so the honest floor is "open Wafra once every three days
+ * and nothing is lost". Everything above that floor is latency, not
+ * correctness.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -67,6 +77,19 @@ const SECURE_KEY = 'wafra.relay.v1';
 const KEYCHAIN_SERVICE = 'app.wafra.relay';
 /** Staging area between a background fetch and a foreground ledger write. */
 const INBOX_KEY = 'wafra/relay/inbox/v1';
+/**
+ * A copy of the subscription state, small enough for a headless task to read.
+ *
+ * The ledger lives in chunked AsyncStorage behind the React store, and a
+ * background task has neither the provider nor a cheap way to reassemble it.
+ * Syncing for a lapsed subscriber is a bug rather than a courtesy — automatic
+ * capture is the paid feature on both platforms — so the foreground mirrors the
+ * two fields the gate needs into one tiny key, and the background reads that.
+ * Stale by at most one app session, which is the right direction to be wrong:
+ * the worst case is one extra sync after a subscription lapses, never a
+ * transaction lost for someone who is paying.
+ */
+const ENTITLEMENT_KEY = 'wafra/relay/entitlement/v1';
 
 const SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainService: KEYCHAIN_SERVICE,
@@ -98,6 +121,13 @@ interface StoredIdentity {
   baseUrl: string;
   market: string;
   pairedAt: number;
+  /**
+   * The Expo push token the relay currently knows about, if any. Kept so the
+   * app can tell "already registered" from "never registered" without a
+   * network round trip on every launch — and so a token that CHANGED (a
+   * restore, a reinstall) is noticed and re-sent.
+   */
+  pushToken?: string;
 }
 
 /** The public half of a pairing — what a setup screen may display. */
@@ -109,6 +139,7 @@ export interface RelayPairing {
   baseUrl: string;
   market: string;
   pairedAt: number;
+  pushToken?: string;
 }
 
 /**
@@ -187,6 +218,12 @@ export interface RelayStatus {
   deviceId: string | null;
   market: string | null;
   pairedAt: number | null;
+  /**
+   * The relay has somewhere to knock. False means capture still works and
+   * still loses nothing — it just arrives when the app is next opened or when
+   * iOS decides to run the background task, rather than in seconds.
+   */
+  pushEnabled: boolean;
   /** Rows sitting in staging, waiting for a foreground import. */
   pending: number;
   lastSyncAt: number;
@@ -226,6 +263,70 @@ export function configuredRelayUrl(): string | null {
   const extra = Constants.expoConfig?.extra as { relayUrl?: unknown } | undefined;
   const url = typeof extra?.relayUrl === 'string' ? extra.relayUrl.trim() : '';
   return url ? url.replace(/\/+$/, '') : null;
+}
+
+/* ─────────────────────── Entitlement mirror ─────────────────────── */
+
+interface CachedEntitlement {
+  pro: boolean;
+  trialStartTs: number;
+}
+
+/**
+ * Mirror the subscription state where a headless task can read it. Called from
+ * the foreground whenever the app knows the answer; never called in the
+ * background, which only reads.
+ */
+export async function cacheEntitlement(state: CachedEntitlement): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      ENTITLEMENT_KEY,
+      JSON.stringify({ pro: !!state.pro, trialStartTs: state.trialStartTs || 0 }),
+    );
+  } catch {
+    // A failed mirror only means the next background sync is skipped. The
+    // foreground path reads the real store and is unaffected.
+  }
+}
+
+async function cachedEntitlementActive(now: number): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(ENTITLEMENT_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as CachedEntitlement;
+    return isProActive({ pro: !!parsed?.pro, trialStartTs: parsed?.trialStartTs ?? 0 }, now);
+  } catch {
+    return false;
+  }
+}
+
+/* ────────────────────── The "rows landed" signal ────────────────────── */
+
+type StagedListener = (result: RelaySyncResult) => void;
+const stagedListeners = new Set<StagedListener>();
+
+/**
+ * Fires when a sync stages rows — including one that ran in a headless task
+ * while the app happened to be in the foreground, which is the case this
+ * exists for. A silent push wakes the same JS context the UI is running in, so
+ * without this the rows would sit in staging until the next launch even though
+ * the user was looking at the screen when they arrived.
+ */
+export function subscribeRelayStaged(listener: StagedListener): () => void {
+  stagedListeners.add(listener);
+  return () => {
+    stagedListeners.delete(listener);
+  };
+}
+
+function emitStaged(result: RelaySyncResult): void {
+  for (const listener of [...stagedListeners]) {
+    try {
+      listener(result);
+    } catch {
+      // A listener that throws must not fail the sync that fed it.
+    }
+  }
 }
 
 /* ─────────────────────────── Identity ─────────────────────────── */
@@ -524,13 +625,87 @@ export async function syncRelay(): Promise<RelaySyncResult> {
     lastError: null,
   };
   await writeInbox(next);
-  return {
+  const result: RelaySyncResult = {
     staged: fresh.length,
     duplicates,
     unopenable: discardIds.length - duplicates,
     pending: next.rows.length,
     error: null,
   };
+  if (fresh.length > 0) emitStaged(result);
+  return result;
+}
+
+/* ─────────────────────── The background layers ─────────────────────── */
+
+export interface RelayBackgroundResult {
+  /** Why nothing happened. `null` means a sync actually ran. */
+  skipped: 'unsupported' | 'not-paired' | 'not-pro' | null;
+  sync: RelaySyncResult | null;
+}
+
+/**
+ * What a silent push or the periodic background task runs.
+ *
+ * It fetches, opens and STAGES — and stops there. It must never write the
+ * ledger: `importBatch` is a method on the React store and persistence happens
+ * inside StoreProvider with an in-memory chunk cache, so a headless write to
+ * `wafra/state/v1` would be overwritten by the provider's next save. The
+ * foreground drains staging through the normal import path and acknowledges
+ * afterwards, which is also why nothing is lost if the app is killed between
+ * the two: unacknowledged rows stay in the relay's queue for 72 hours.
+ *
+ * It never throws. A background entry point that rejects is a crash report on
+ * a user's phone for a network blip.
+ */
+export async function backgroundSyncRelay(
+  now: number = Date.now(),
+): Promise<RelayBackgroundResult> {
+  try {
+    if (!isRelaySupported()) return { skipped: 'unsupported', sync: null };
+    const id = await readIdentity();
+    if (!id) return { skipped: 'not-paired', sync: null };
+    // Checked before the network call, not after: a lapsed subscriber's phone
+    // should not be talking to the relay at all.
+    if (!(await cachedEntitlementActive(now))) return { skipped: 'not-pro', sync: null };
+    return { skipped: null, sync: await syncRelay() };
+  } catch {
+    return { skipped: null, sync: null };
+  }
+}
+
+/* ─────────────────────────── Push registration ─────────────────────────── */
+
+export type PushRegistration = 'registered' | 'unchanged' | 'not-paired' | 'failed';
+
+/**
+ * Hand the relay somewhere to knock, so a queued row wakes the phone instead of
+ * waiting for the user to open the app.
+ *
+ * The token is stored locally too, and a token that has not changed costs no
+ * request — this runs on every launch. Passing an empty string is how the app
+ * says "stop knocking"; it is what turning notifications off must call, and it
+ * clears the one stable device identifier the relay holds.
+ */
+export async function registerRelayPushToken(token: string): Promise<PushRegistration> {
+  const id = await readIdentity();
+  if (!id) return 'not-paired';
+  const next = token.trim();
+  if ((id.pushToken ?? '') === next) return 'unchanged';
+  try {
+    const res = await relayFetch(id.baseUrl, '/v1/push', {
+      method: 'POST',
+      token: id.token,
+      body: JSON.stringify({ token: next, platform: 'expo' }),
+    });
+    if (!res.ok) return 'failed';
+  } catch {
+    return 'failed';
+  }
+  // Written only after the relay confirms, so a failed call is retried on the
+  // next launch rather than remembered as done.
+  await writeIdentity({ ...id, pushToken: next || undefined });
+  return 'registered';
 }
 
 /** Sealed rows become exactly the shape an Android inbox scan produces. */
@@ -580,6 +755,9 @@ export async function runRelayImport(
   if (!id) return { ...base, skipped: 'not-paired' };
   // Syncing for a lapsed subscriber is a bug, not a courtesy: automatic
   // capture is the paid feature, and the same gate guards the Android scan.
+  // The answer is mirrored on the way past so the headless layers, which
+  // cannot reach the store, apply the same gate.
+  await cacheEntitlement(state);
   if (!isProActive(state)) return { ...base, skipped: 'not-pro' };
 
   const sync = await syncRelay();
@@ -620,6 +798,7 @@ export async function relayStatus(now: number = Date.now()): Promise<RelayStatus
     deviceId: id?.deviceId ?? null,
     market: id?.market ?? null,
     pairedAt: id?.pairedAt ?? null,
+    pushEnabled: !!id?.pushToken,
     pending: inbox.rows.length,
     lastSyncAt: inbox.lastSyncAt,
     lastRowAt: inbox.lastRowAt,

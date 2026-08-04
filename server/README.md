@@ -39,6 +39,29 @@ the service must not be able to read:
 None of the three is a column, an index, or a log line. The claim the service
 makes is unchanged: **it cannot read what it stored.**
 
+### The one thing that is a column: the push token
+
+A queued row is useless until the phone comes for it, and a phone that only
+comes when the user opens the app is not "automatic". So a device may register
+an Expo push token (`POST /v1/push`), and `/v1/ingest` sends a **content
+-available push with an empty payload** — `data: {}`, no title, no body — to
+wake it.
+
+This is the one place the privacy story changes, and it changes honestly:
+
+- Apple and Expo learn **that** a row was queued for a device, and when. They
+  cannot learn what it says; the row is fetched sealed over `/v1/sync`
+  afterwards. Putting the amount or merchant in the push would hand two third
+  parties a readable transaction feed, so the payload is empty by construction.
+- `push_token` is a stable identifier for a phone — the only one in this
+  schema. It is **optional**: a device that never registers one still syncs on
+  foreground and on its background task, just later. Declining notifications
+  keeps the strong version of the claim available to anyone who wants it.
+- Wakes are coalesced to at most one per device per 10 minutes. Apple throttles
+  apps that exceed roughly two or three background pushes an hour, and the
+  failure mode of exceeding it is invisible: the OS simply stops delivering.
+- A token Expo reports as `DeviceNotRegistered` is deleted rather than kept.
+
 Typical retention is the seconds between a text arriving and the phone syncing.
 The hard ceiling is 72 hours, after which unsynced rows are swept.
 
@@ -104,14 +127,31 @@ npx wrangler d1 execute wafra --remote --file=./schema.sql
 npx wrangler deploy
 ```
 
-**Upgrading a database created before the `market` column existed:**
+**Upgrading a database created before the `market` and push columns existed:**
 
 ```bash
 npx wrangler d1 execute wafra --remote \
   --command "ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE'"
+npx wrangler d1 execute wafra --remote \
+  --command "ALTER TABLE devices ADD COLUMN push_token TEXT"
+npx wrangler d1 execute wafra --remote \
+  --command "ALTER TABLE devices ADD COLUMN push_platform TEXT"
+npx wrangler d1 execute wafra --remote \
+  --command "ALTER TABLE devices ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0"
 ```
 
-Existing devices keep parsing under AE, which is what they were doing anyway.
+Existing devices keep parsing under AE, which is what they were doing anyway,
+and keep syncing on foreground until they register a push token.
+
+**Optional secret.** Expo's push service accepts unauthenticated sends unless
+the Expo project has enhanced security enabled, in which case:
+
+```bash
+npx wrangler secret put EXPO_ACCESS_TOKEN
+```
+
+Nothing else about the Worker changes; without a token registered by any device
+the push code never runs at all.
 
 Cloudflare's free tier covers early usage comfortably: 100k Worker requests a
 day, and D1's free allowance is far beyond what a queue that empties itself
@@ -136,6 +176,7 @@ pair without one rather than guessing a hostname.
 | `POST` | `/v1/ingest` | Bearer token. `{text, sender?, receivedAt?}` → `202`, or `204` if the message was not a transaction |
 | `GET` | `/v1/sync` | Bearer token → `{items: [{id, epk, iv, ct}]}` |
 | `POST` | `/v1/ack` | Bearer token. `{ids: [...]}` → `204`, rows deleted |
+| `POST` | `/v1/push` | Bearer token. `{token, platform: 'expo'}` → `{push:'on'}`; empty token → `{push:'off'}` |
 | `PATCH` | `/v1/device` | Bearer token. `{market}` → `{market}` |
 | `DELETE` | `/v1/device` | Bearer token → `204`, device and queue erased |
 | `GET` | `/v1/health` | → `{ok: true}` |
@@ -226,6 +267,27 @@ long enough that a real user would have spent money, syncing successfully, and
 still zero rows ever received — which is what a "your automation may still be
 asking before it runs" repair card should hang off. Letting the ledger quietly
 stay empty is the worst available outcome.
+
+### How fast a row actually lands
+
+Three layers, each of which degrades to the one below it without losing a
+transaction:
+
+| Layer | Latency | Dies when |
+| --- | --- | --- |
+| Content-available push from this Worker | seconds | notifications declined, no `extra.eas.projectId` in `app.json`, or the app was force-quit from the switcher |
+| `expo-background-task` (`minimumInterval: 15`) | minutes to overnight — iOS decides | Background App Refresh off, Low Power Mode, force-quit |
+| Foreground sync (launch, background→active, pull-to-refresh) | when the app is opened | never |
+
+The floor is the third layer, and it is the one that makes the design correct
+rather than merely fast: **as long as Wafra is opened once every three days,
+nothing is lost**, because rows are not deleted until the phone acknowledges
+them and the queue TTL is 72 hours. Everything above that line is latency.
+
+Only the foreground layer writes the ledger. The background layers fetch, open
+and stage into `wafra/relay/inbox/v1`; the app drains that through its normal
+import path and acknowledges afterwards. A headless task that wrote the ledger
+directly would be silently overwritten by the store's own persister.
 
 ### Not verified from here
 

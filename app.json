@@ -17,6 +17,9 @@
         "UIBackgroundModes": [
           "remote-notification",
           "processing"
+        ],
+        "BGTaskSchedulerPermittedIdentifiers": [
+          "com.expo.modules.backgroundtask.processing"
         ]
       }
     },
@@ -81,7 +84,8 @@
           "enableBackgroundRemoteNotifications": true
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true,

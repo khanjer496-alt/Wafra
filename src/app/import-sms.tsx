@@ -1,10 +1,24 @@
 /**
- * SMS import.
+ * Reading bank messages by hand.
  *
  * Runs the SAME pipeline as the automatic import on Home — scanInbox →
  * buildImportPlan → importBatch — and just makes the plan visible before it is
  * applied. Cards are attributed by their last four digits, duplicates are
  * skipped on the message fingerprint, and statements become card dues.
+ *
+ * TWO THINGS ON THIS SCREEN ARE PLATFORM-DEPENDENT, AND BOTH USED TO BE WRONG.
+ *
+ * It was called "Read my inbox" everywhere. iOS gives no app access to
+ * Messages, so on iPhone that title described something the screen could not
+ * do; what it actually offers there is a paste box.
+ *
+ * And pasting was behind the paywall. On Android that was survivable — the
+ * inbox scan is right there — but on iPhone, where pasting is the ONLY
+ * ingestion path that works without a Shortcut, it made the free tier of the
+ * iPhone app strictly worse than the Android one at the same price. Pasting is
+ * the user doing the work; Wafra charges for doing the work itself. See
+ * `requiresPro` in lib/purchases.ts. The full inbox scan is still Pro, on the
+ * platform that has one.
  */
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -39,7 +53,7 @@ import {
 } from '@/lib/auto-import';
 import { getCategory } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
-import { isProActive } from '@/lib/purchases';
+import { autoCaptureMethod, isProActive, requiresPro } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 
@@ -96,7 +110,8 @@ export default function ImportSmsScreen() {
   const started = useRef(false);
 
   const runScan = async () => {
-    if (!isProActive(state)) {
+    // The scan is Wafra reading a whole inbox on its own — the paid half.
+    if (requiresPro('inboxScan') && !isProActive(state)) {
       router.push('/pro');
       return;
     }
@@ -128,11 +143,11 @@ export default function ImportSmsScreen() {
     }
   };
 
+  /**
+   * Free, on every platform. The user is holding the message; all Wafra does
+   * is read it better than they would type it.
+   */
   const runParse = (input: string) => {
-    if (!isProActive(state)) {
-      router.push('/pro');
-      return;
-    }
     const parsed: ScannedSms[] = parseSmsBatch(input, state.merchantOverrides);
     const p = buildImportPlan(parsed, state, state.lastScanTs);
     const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
@@ -181,7 +196,12 @@ export default function ImportSmsScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
-          <ScreenHeader title="Read my inbox" onBack={() => router.back()} />
+          {/* The title has to describe what this screen can actually do on the
+              phone it is running on. There is no inbox to read on iPhone. */}
+          <ScreenHeader
+            title={isSmsScanningAvailable() ? 'Read my inbox' : 'Read a message'}
+            onBack={() => router.back()}
+          />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -208,7 +228,7 @@ export default function ImportSmsScreen() {
               <ThemedText type="default" themeColor="textSecondary">
                 {isSmsScanningAvailable()
                   ? 'Rescans your whole inbox and shows what would be filed. Cards are matched automatically and nothing imports twice. You can also paste messages below.'
-                  : 'Paste one or more bank alerts below, separated by a blank line. Everything is read on this device.'}
+                  : 'Paste one or more bank alerts below, separated by a blank line. Everything is read on this device, and this always works — no subscription, no setup.'}
               </ThemedText>
               {isSmsScanningAvailable() && (
                 <Button label="Scan full inbox" icon="search" onPress={runScan} />
@@ -247,6 +267,25 @@ export default function ImportSmsScreen() {
                   }}
                 />
               </View>
+
+              {/* On iPhone this screen is the manual fallback for a job that
+                  can be done automatically — but only after a Shortcut exists.
+                  Someone who found their way here by pasting is exactly the
+                  person who should be told that. */}
+              {autoCaptureMethod() === 'relayCapture' && (
+                <Block onPress={() => router.push('/iphone-setup')}>
+                  <View style={styles.unreadRow}>
+                    <Icon name="spark" size={17} color={theme.primary} />
+                    <View style={styles.rowText}>
+                      <ThemedText type="small">Stop pasting</ThemedText>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        Set your iPhone up once and bank messages file themselves
+                      </ThemedText>
+                    </View>
+                    <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                  </View>
+                </Block>
+              )}
             </Section>
           )}
 

@@ -30,6 +30,7 @@ const UNSUPPORTED: RelayStatus = {
   deviceId: null,
   market: null,
   pairedAt: null,
+  pushEnabled: false,
   pending: 0,
   lastSyncAt: 0,
   lastRowAt: 0,
@@ -117,7 +118,14 @@ export function describeRelay(status: RelayStatus, now: number = Date.now()): Re
     detail:
       status.pending > 0
         ? `${status.pending} waiting to file · opens on this iPhone only`
-        : 'Captured, sealed, and filed — the text was never kept',
+        : // Without a push token the relay has no way to knock, so rows are
+          // collected on launch and on iOS's own background schedule. Nothing
+          // is lost either way; the difference is seconds versus hours, and a
+          // status row that says "instant" when it is not is how a user learns
+          // to distrust every other line on the screen.
+          status.pushEnabled
+          ? 'Captured, sealed, and filed — the text was never kept'
+          : 'Collected each time you open Wafra — turn on notifications for instant',
     action: 'manage',
   };
 }

@@ -38,7 +38,8 @@ import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '
 import { t } from '@/lib/i18n';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
-import { isRelaySupported } from '@/lib/relay';
+import { isRelaySupported, unpairRelay } from '@/lib/relay';
+import { stopRelayWake } from '@/lib/relay-wake';
 import { useStore } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
 
@@ -224,13 +225,44 @@ export default function SettingsScreen() {
     }
   };
 
+  /**
+   * Erasing has to reach the relay too.
+   *
+   * The ledger is only half of what this phone has: if iPhone capture is on,
+   * there is also a device row and a sealed queue on the relay, a key in the
+   * keychain (which on iOS outlives app deletion), and a push token that tells
+   * the relay where to knock. "Erase everything" that left all of that behind
+   * would be false on the one screen where a privacy claim has to be exact.
+   *
+   * The one thing it cannot reach is the Shortcut, because the bearer token
+   * lives inside it and no API can edit it — so the user is told, rather than
+   * left with an automation that posts into nothing.
+   */
   const confirmErase = () => {
+    const paired = isRelaySupported() && !!relay?.paired;
     Alert.alert(
       'Erase everything on this phone?',
-      'All accounts, entries, bills, and goals will be permanently deleted.',
+      'All accounts, entries, bills, and goals will be permanently deleted.' +
+        (paired
+          ? ' iPhone capture is turned off too: the relay erases this phone, its queue and its key. ' +
+            'Delete the Wafra shortcut in the Shortcuts app as well, or it keeps posting into nothing.'
+          : ''),
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Erase', style: 'destructive', onPress: clearAll },
+        {
+          text: 'Erase',
+          style: 'destructive',
+          onPress: () => {
+            if (paired) {
+              // Best-effort and deliberately not awaited before the local wipe:
+              // an unreachable relay must not stop a user erasing their phone,
+              // and its device row expires on its own.
+              stopRelayWake().catch(() => {});
+              unpairRelay().catch(() => {});
+            }
+            clearAll();
+          },
+        },
       ],
     );
   };

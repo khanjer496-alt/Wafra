@@ -149,6 +149,12 @@ const S = {
   perYear: { en: 'per year · 2 months free', ar: 'سنوياً · شهران مجاناً' },
   featAutoTracking: { en: 'Automatic tracking', ar: 'تتبع تلقائي' },
   featAutoTrackingText: { en: 'Bank SMS and app notifications become transactions, cards and dues by themselves.', ar: 'رسائل البنك والإشعارات تتحول تلقائياً إلى عمليات وبطاقات ومستحقات.' },
+  // iPhone gets the same feature by a different road — Apple lets no app read
+  // Messages, so a Shortcut forwards them. Describing it as "reads your SMS"
+  // there would promise something the platform forbids.
+  featAutoTrackingIosText: { en: 'Each bank alert your iPhone forwards becomes a transaction, card or due on its own. Set up once.', ar: 'كل رسالة بنكية يحوّلها هاتفك تتحول تلقائياً إلى عملية أو بطاقة أو مستحق. إعداد مرة واحدة.' },
+  featPasteFree: { en: 'Pasting is always free', ar: 'لصق الرسائل مجاني دائماً' },
+  featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
   featInsights: { en: 'Insights & subscriptions', ar: 'تحليلات واشتراكات' },
   featInsightsText: { en: 'Auto-detected subscriptions, due-date countdowns, plain-language insights.', ar: 'اكتشاف تلقائي للاشتراكات وتذكير بالمستحقات وتحليلات واضحة.' },
   featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },

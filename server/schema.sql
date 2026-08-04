@@ -18,14 +18,34 @@ CREATE TABLE IF NOT EXISTS devices (
   -- default. This is a coarse country code the user already chose in Settings,
   -- not a new fact about them.
   market      TEXT NOT NULL DEFAULT 'AE',
+  -- Expo push token, or NULL. This is the ONE field in this schema that is a
+  -- stable identifier for a phone, and it is here for one reason: without a
+  -- wake, a queued row waits until the user next opens the app, which defeats
+  -- the promise the product is built on. It is optional — a device that never
+  -- registers one still syncs on foreground and on the background task, just
+  -- later. What it costs is stated plainly in README.md: Apple and Expo learn
+  -- THAT a row arrived and when, never what it says. The push itself carries
+  -- an empty payload.
+  push_token  TEXT,
+  -- 'expo' today. The column exists so a future direct-APNs sender can be told
+  -- apart from an Expo one rather than guessed at from the token's shape.
+  push_platform TEXT,
+  -- When the last wake was sent, for coalescing. Apple throttles apps that
+  -- exceed roughly two or three background pushes an hour, and a busy shopping
+  -- day on a family card would sail past that — after which the OS quietly
+  -- stops delivering them at all.
+  push_sent_at INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL,
   last_seen   INTEGER NOT NULL
 );
 
--- Migration for databases created before `market` existed. SQLite has no
+-- Migrations for databases created before these columns existed. SQLite has no
 -- ADD COLUMN IF NOT EXISTS, and re-running this file must stay safe, so the
 -- error from a second run is the expected outcome — see server/README.md.
 -- ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE';
+-- ALTER TABLE devices ADD COLUMN push_token TEXT;
+-- ALTER TABLE devices ADD COLUMN push_platform TEXT;
+-- ALTER TABLE devices ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS queue (
   id         TEXT PRIMARY KEY,

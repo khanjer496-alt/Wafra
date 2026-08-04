@@ -24,6 +24,12 @@ import { b64decode, b64url, hashToken, randomToken, seal, timingSafeEqual } from
 
 export interface Env {
   DB: D1Database;
+  /**
+   * Optional. Expo's push service accepts unauthenticated sends unless the
+   * project has "enhanced security" turned on, in which case this is required.
+   * Set it with `wrangler secret put EXPO_ACCESS_TOKEN` — never in wrangler.toml.
+   */
+  EXPO_ACCESS_TOKEN?: string;
 }
 
 /** Longer than any real bank SMS; anything bigger is abuse or a mistake. */
@@ -36,6 +42,17 @@ const INGEST_PER_HOUR = 300;
 const MAX_SENDER_CHARS = 64;
 /** Fallback market when a device paired before market selection existed. */
 const DEFAULT_MARKET = 'AE';
+/**
+ * Expo's push service. Chosen over speaking APNs directly because APNs requires
+ * HTTP/2 to api.push.apple.com and an ES256 JWT signed with a .p8 — and whether
+ * a Worker's `fetch` negotiates HTTP/2 there is not something this codebase can
+ * verify. This is a plain HTTPS JSON POST, and Expo owns the APNs credentials.
+ */
+const PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
+/** At most one wake per device per this long — see `push_sent_at` in schema.sql. */
+const PUSH_COALESCE_SECONDS = 600;
+/** `ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]` and nothing else. */
+const EXPO_TOKEN_RE = /^Expo(nent)?PushToken\[[A-Za-z0-9_-]{1,64}\]$/;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -139,9 +156,91 @@ async function messageId(text: string): Promise<string> {
   return b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
 }
 
+/**
+ * Nudge a device to come and collect.
+ *
+ * THE PAYLOAD IS EMPTY, DELIBERATELY. `data: {}` with `_contentAvailable: true`
+ * is a content-available push and nothing else: no title, no body, no amount,
+ * no merchant. Apple and Expo carry the fact that something arrived and when —
+ * they cannot carry what it was, because the row itself is fetched sealed over
+ * /v1/sync afterwards. Putting so much as "AED 40 at Carrefour" in here would
+ * hand a readable transaction feed to two third parties and break the only
+ * claim this service makes.
+ *
+ * Everything here is best-effort. A push that fails costs latency, never a
+ * transaction: the row is in the queue for 72 hours and the app's foreground
+ * and background-task layers collect it regardless.
+ */
+async function wakeDevice(env: Env, deviceId: string): Promise<void> {
+  // The coalescing window is enforced in the WHERE clause so a burst of
+  // messages cannot each read "no push sent yet" before any of them writes.
+  const row = await env.DB.prepare(
+    `SELECT push_token FROM devices
+      WHERE id = ?1 AND push_token IS NOT NULL AND push_token <> ''
+        AND push_sent_at < unixepoch() - ?2`,
+  )
+    .bind(deviceId, PUSH_COALESCE_SECONDS)
+    .first<{ push_token: string }>();
+  if (!row?.push_token) return;
+
+  // Claim the window BEFORE sending, not after: if the send hangs, the next
+  // message must not start a second one.
+  await env.DB.prepare('UPDATE devices SET push_sent_at = unixepoch() WHERE id = ?1')
+    .bind(deviceId)
+    .run();
+
+  const res = await fetch(PUSH_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+      ...(env.EXPO_ACCESS_TOKEN ? { authorization: `Bearer ${env.EXPO_ACCESS_TOKEN}` } : {}),
+    },
+    body: JSON.stringify({
+      to: row.push_token,
+      data: {},
+      _contentAvailable: true,
+      priority: 'high',
+      // No point waking a phone for a row that has already expired.
+      ttl: QUEUE_TTL_HOURS * 3600,
+    }),
+  });
+  if (!res.ok) return;
+
+  // A token dies when the app is deleted or the user reinstalls. Expo reports
+  // that as DeviceNotRegistered, and a token that will never work again should
+  // not be kept — it is a device identifier we have no further use for.
+  const body = (await res.json().catch(() => null)) as {
+    data?: { status?: string; details?: { error?: string } };
+  } | null;
+  if (body?.data?.details?.error === 'DeviceNotRegistered') {
+    await env.DB.prepare(
+      'UPDATE devices SET push_token = NULL, push_platform = NULL WHERE id = ?1',
+    )
+      .bind(deviceId)
+      .run();
+  }
+}
+
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  /**
+   * `ctx` is optional so the route tests can drive this handler directly. In
+   * production Workers always supplies one, and it is what lets the wake push
+   * happen AFTER the Shortcut's request has been answered — the automation is
+   * holding the phone's radio open while it waits, so /v1/ingest must not sit
+   * on a round trip to Expo before returning 202.
+   */
+  async fetch(req: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
+    // Without a ctx the work is awaited instead of dropped, so a caller that
+    // has one loses nothing and a caller that has none (the tests) stays
+    // deterministic. Failures are swallowed either way: nothing after the
+    // response can change what the client was told.
+    const after = async (work: Promise<unknown>): Promise<void> => {
+      const guarded = work.catch(() => {});
+      if (ctx?.waitUntil) ctx.waitUntil(guarded);
+      else await guarded;
+    };
 
     // ── Pairing: the app posts its X25519 public key, gets a bearer token ──
     //
@@ -233,7 +332,47 @@ export default {
       )
         .bind(crypto.randomUUID(), device.id, sealed.epk, sealed.iv, sealed.ct)
         .run();
+      // The row is safely queued; the wake is what makes it arrive in seconds
+      // rather than whenever the app is next opened. It runs after the response
+      // and can fail freely.
+      await after(wakeDevice(env, device.id));
       return new Response(null, { status: 202 });
+    }
+
+    // ── Push: the device offers somewhere to knock ──
+    //
+    // Separate from pairing because it is genuinely optional and revocable: a
+    // user who declines notifications, or turns them off later, keeps a working
+    // product with a slower one. POSTing an empty token is how the app says
+    // "stop knocking", and it is what Settings → notifications off must call.
+    if (req.method === 'POST' && url.pathname === '/v1/push') {
+      const device = await authenticate(req, env);
+      if (!device) return json({ error: 'unauthorized' }, 401);
+      const body = await req
+        .json<{ token?: unknown; platform?: unknown }>()
+        .catch(() => null);
+      const token = typeof body?.token === 'string' ? body.token.trim() : '';
+      if (!token) {
+        await env.DB.prepare(
+          'UPDATE devices SET push_token = NULL, push_platform = NULL WHERE id = ?1',
+        )
+          .bind(device.id)
+          .run();
+        return json({ push: 'off' });
+      }
+      // Only Expo tokens, and only ones shaped like Expo tokens. This field is
+      // an address the Worker will POST to; accepting anything else would make
+      // it a request forwarder for whoever holds a bearer token.
+      if (body?.platform !== undefined && body.platform !== 'expo') {
+        return json({ error: 'unsupported_platform' }, 400);
+      }
+      if (!EXPO_TOKEN_RE.test(token)) return json({ error: 'bad_token' }, 400);
+      await env.DB.prepare(
+        "UPDATE devices SET push_token = ?2, push_platform = 'expo', push_sent_at = 0 WHERE id = ?1",
+      )
+        .bind(device.id, token)
+        .run();
+      return json({ push: 'on' });
     }
 
     // ── Sync: the app collects and acknowledges ──
