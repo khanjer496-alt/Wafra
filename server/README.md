@@ -300,3 +300,12 @@ These need a real device before anything is promised in a listing:
   (assumed yes).
 - Whether silencing Shortcuts notifications suppresses the mandatory
   automation banner.
+- **The wake layers have never run on hardware.** Content-available push needs
+  APNs and a physical device; `expo-background-task` does not run on iOS
+  simulators at all (BGTaskScheduler is unavailable there). The crypto and the
+  routes are observed — `scripts/test/relay.test.js` drives the real client
+  through the real Worker end to end — but *delivery* is read from Apple's and
+  the SDK 55 docs, not seen.
+- Whether Apple's throttle tolerates one wake per device per 10 minutes on a
+  heavy day. If it does not, the symptom is invisible: iOS simply stops
+  delivering, and only the foreground layer would still be filling the ledger.
