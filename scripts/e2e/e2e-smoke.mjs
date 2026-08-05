@@ -227,9 +227,13 @@ const compTiles = (page) => page.evaluate(() => {
     if (Math.round(r.width) !== 8 || Math.round(r.height) !== 8) continue;
     const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     if (!(top && (el.contains(top) || top.contains(el)))) continue;
-    // A solid swatch has no ink of its own, so the pair that has to stay
-    // legible is the swatch against the page it sits on.
-    const bg = parse(getComputedStyle(el).backgroundColor);
+    // A solid swatch has no ink of its own, so what has to stay legible is its
+    // EDGE against the page. The fill deliberately matches this row's segment in
+    // the bar, and the ramp's tail steps sit at 2.0-2.8:1 — they cannot be
+    // lifted without collapsing the ramp — so the border is what makes the
+    // swatch visible, and the border is what this measures.
+    const cs = getComputedStyle(el);
+    const bg = parse(cs.borderTopColor) ?? parse(cs.backgroundColor);
     const ink = pageBg;
     if (!bg || !ink) continue;
     const a = lum(bg), b = lum(ink);

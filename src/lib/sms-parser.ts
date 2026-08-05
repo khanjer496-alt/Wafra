@@ -645,8 +645,25 @@ const CODE_CHALLENGE_QUOTED_RE = new RegExp(
     `|${CHALLENGE_CODE_WORD}\\s*(?:is|:|-|=)?${CODE_MASK}${OTP_CODE_DIGITS}`,
   'i',
 );
-const CODE_VALIDITY_WINDOW_RE =
-  /\b(?:use|enter|submit)\b(?:[^.\n]{0,24}?)\bwithin\s+\d{1,3}\s*(?:sec|min|hour|hr)|\b(?:use|enter|submit)\s+(?:it\s+|this\s+(?:\w+\s+){0,2})?in\s+\d{1,3}\s*(?:sec|min|hour|hr)|\bexpires?\s+(?:in|after|within)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)|\bvalid\s+(?:for|till|until|upto|up\s+to)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)/i;
+// THE COUNTDOWN HAS TO BE ABOUT THE CODE.
+//
+// The first two alternatives are IMPERATIVES ("use it in 5 mins", "enter within
+// 2 minutes") — those have no subject to get wrong. The last two do, and
+// leaving them subjectless meant any short-lived thing in the body armed the
+// suppression: a real RTA Parking posting reading "Ticket valid for 60 minutes.
+// Authorisation code: 123456." was DELETED, because a parking ticket expires and
+// the message quotes its own approval reference. That is suppression beating
+// evidence, which this file exists not to do. So "expires in" and "valid for"
+// now require a CODE noun as their subject — a ticket, an offer and a card can
+// all expire, and none of them is a challenge.
+const CODE_SUBJECT = String.raw`(?:otp|code|password|passcode|pin)\b[^.\n]{0,12}?`;
+const CODE_VALIDITY_WINDOW_RE = new RegExp(
+  String.raw`\b(?:use|enter|submit)\b(?:[^.\n]{0,24}?)\bwithin\s+\d{1,3}\s*(?:sec|min|hour|hr)` +
+    String.raw`|\b(?:use|enter|submit)\s+(?:it\s+|this\s+(?:\w+\s+){0,2})?in\s+\d{1,3}\s*(?:sec|min|hour|hr)` +
+    String.raw`|${CODE_SUBJECT}\bexpires?\s+(?:in|after|within)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)` +
+    String.raw`|${CODE_SUBJECT}\b(?:is\s+)?valid\s+(?:for|till|until|upto|up\s+to)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)`,
+  'i',
+);
 
 /**
  * Pre-auth holds are not postings; the real charge arrives as its own SMS, so
@@ -1775,7 +1792,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // `jamal` (جمال, beauty) is deliberately absent: it is also one of the
   // commonest men's names in the Gulf, so "JAMAL TRADING LLC" — a shop selling
   // anything at all — would have become a salon.
-  [/\bhall?aq\w*|\bhilaqa\b|\bmashghal\b|\bmashgal\b|\btajmeel\b|\btajmil\b/i, 'personal-care'],
+  [/\bhall?aq\w*|\bhilaqa\b|\bmashghal\b|\bmashgal\b|\btajmeel\b(?![^.\n]{0,24}\b(?:hospital|clinic|medical|polyclinic)\b)|\btajmil\b(?![^.\n]{0,24}\b(?:hospital|clinic|medical|polyclinic)\b)/i, 'personal-care'],
   // Three edits worth naming, because each one is a class rather than a shop:
   //
   // 1. `sun ?& ?sand` was written with the AMPERSAND only, and the acquirer
@@ -1967,7 +1984,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // `airport companion` and now `airport lounge` are all claimed there first.
   // Hotel and shisha lounges, which is what is left by the time control
   // reaches this line, are meals.
-  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\blebanan\b|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b|\bfoo\b|\blounge\b/i, 'dining'],
+  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\blebanan\b|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b|\bfoo\b(?![^.\n]{0,20}\b(?:trading|tr\b|construction|contracting))|(?<!\b(?:tile|tiles|furniture|showroom|interior|interiors|carpet|kitchen|bath|sofa)\s)\blounge\b(?![^.\n]{0,20}\b(?:furniture|tile|tiles|showroom|trading|interiors?))/i, 'dining'],
   // "Centre" sits here, in the structural fallbacks, rather than with the
   // brands: a medical centre is health and a car centre is transport, and both
   // of those rules run earlier. By the time anything reaches this line, the

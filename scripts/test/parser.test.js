@@ -3445,6 +3445,228 @@ t('a peel that would leave a fragment is discarded',
   'Purchase of AED 30.00 with Debit Card ending 1354 at SP OIL, Dubai. Avl Balance is AED 100.00.',
   { merchant: 'Sp Oil' });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CATEGORY COVERAGE — the merchant was already right, the category was Other
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 119 of 126 message families in the accuracy export parsed with the CORRECT
+// merchant and landed in `other`. That is not a parsing failure, it is worse:
+// the ledger is right and useless, because nothing groups, nothing can be
+// budgeted, and every row reads to the user as "the app did not understand
+// this".
+//
+// The descriptors below are the real ones from that export. The carrier
+// sentence is the shape the same export documents for this bank; card digits
+// are synthetic (1234 / 5678) because nothing here turns on their value.
+//
+// Every block is paired: the fixture, then the CONTROL that proves the rule
+// did not over-reach. A category rule that fires on a common word mis-files
+// thousands of rows silently, and the user cannot see that it is wrong.
+const g = (name, place) =>
+  `Purchase of AED 42.00 with Debit Card ending 1234 at ${name}, ${place}. Avl Balance is AED 846.57.`;
+
+// ── DINING ──
+// `lebanan` is لبنان, beside the `lebanese`/`libnan` the vocabulary already had.
+t('a transliterated cuisine nationality is dining', g('JABAL LEBANAN AL JADEE', 'SHARJAH'),
+  { merchant: 'Jabal Lebanan Al Jadee', category: 'dining' });
+// `foo` is the acquirer's 22-character truncation of FOOD, the same class as
+// the CATERIN and GOVERNMEN stubs already in this vocabulary.
+t('a truncated FOOD descriptor is dining', g('AL WHAH INTERNATIONAL FOO', 'SHARJAH'),
+  { merchant: 'Al Whah International Foo', category: 'dining' });
+t('a lounge is a meal', g('Z LOUNGE FZC', 'SHARJAH'),
+  { merchant: 'Z Lounge Fzc', category: 'dining' });
+// CONTROL: an AIRPORT lounge is travel, and the travel rule runs first. This
+// descriptor is a synthetic probe — no airport lounge is in the corpus — and it
+// exists because `lounge` is the one word in this batch that spans categories.
+t('an airport lounge is travel, not dining', g('MARHABA AIRPORT LOUNGE', 'DUBAI'),
+  { category: 'travel' });
+// CONTROL: personal-care runs above the dining fallback, so a salon that
+// happens to be called a lounge is still a salon. This is a REAL existing
+// fixture's message, re-asserted here for the new rule.
+t('a salon called a lounge is still personal care',
+  'Purchase of AED 120.00 at SUGAR LOUNGE SALON with Credit Card ending 1234',
+  { category: 'personal-care' });
+t('the roadhouse stub and the full name are one restaurant', g('D586-TEXAS RHOUSE Al S', 'SHARJAH'),
+  { merchant: 'Texas Roadhouse', category: 'dining' });
+// CONTROL: bare `texas` is NOT a dining signal — it is a US state, so it is the
+// CITY field on any card used there, and guessCategory reads the whole message.
+t('a shop in Texas is not a restaurant', g('BEST BUY 0421', 'TEXAS'),
+  { category: 'other', deliberate: false });
+t('Gazebo is the restaurant chain', g('GAZEBO', 'DUBAI'), { category: 'dining' });
+t('Fujiyama is a restaurant', g('FUJIYAMA SAHARA CENTREBR', 'SHARJAH'), { category: 'dining' });
+
+// ── GROCERIES / SHOPPING ──
+t('Falcon Pack is groceries', g('FALCON PACK', 'SHARJAH'), { category: 'groceries' });
+// The brand was in the vocabulary the whole time, spelled with an ampersand,
+// while the acquirer spells the word out.
+t('Sun and Sand Sports spelled with AND is still the retailer',
+  g('SUN AND SAND SPORTS LLC', 'DUBAI'), { category: 'shopping' });
+t('...and the plural branch spelling too', g('SUN AND SANDS SPORTS SHJ', 'SHARJAH'),
+  { category: 'shopping' });
+// CONTROL: the ampersand spelling, which is what the rule used to say.
+t('the ampersand spelling still works', g('SUN & SAND SPORTS', 'DUBAI'), { category: 'shopping' });
+t('a ...cart storefront is retail', g('COCOCART', 'DUBAI'),
+  { merchant: 'Cococart', category: 'shopping' });
+// The MASK is part of the shape here, not decoration: the export writes the
+// acquirer's phone tail as "+····NNNN", and that is what the tail strip keys
+// on. Digits synthetic, mask real.
+t('Todd Snyder is a clothing brand',
+  'Purchase of AED 42.00 with Debit Card ending 1234 at SP TODD SNYDER +····5678 USA. Avl Balance is AED 846.57.',
+  { merchant: 'Todd Snyder', category: 'shopping' });
+// A typo'd descriptor must land where its correctly-spelled twin lands, or one
+// chain is filed under two categories. NOTE: the accuracy export labels this
+// one GROCERIES; it reads as retail here because a household-goods trader is
+// retail everywhere else in this vocabulary, and consistency beats one row.
+t('a transposed HOUSEHOLD still reads as household goods', g('AL BORJ HOUES HOLD TR', 'SHARJAH'),
+  { merchant: 'Al Borj Houes Hold Tr', category: 'shopping' });
+
+// ── HEALTH / PERSONAL CARE ──
+// `PHY` is the acquirer's abbreviation for a pharmacy, and also the stub of
+// "physiotherapy". Both are health, which is what makes one short token safe.
+t('a PHY descriptor is a pharmacy', g('CITY LIFE PHY BR5-1303', 'SHARJAH'),
+  { merchant: 'City Life Pharmacy', category: 'health' });
+t('a truncated HAIRDRE is a barber', g('HASSAN AL AZZEH HAIRDRE', 'SHARJAH'),
+  { merchant: 'Hassan Al Azzeh Hairdre', category: 'personal-care' });
+// CONTROL: the spelled-out forms the truncation rule replaced must all survive.
+t('hairdressing spelled out is still personal care', g('AL NOOR HAIRDRESSING SALON', 'DUBAI'),
+  { category: 'personal-care' });
+// TRANSLITERATED trade words — the generalising half of this change. None of
+// this user's four Arabic-named salons carries one, which is exactly why the
+// vocabulary rather than their names is what got extended.
+t('mashghal is a ladies salon', g('MASHGHAL AL ANAQA', 'SHARJAH'), { category: 'personal-care' });
+t('hallaq is a barber', g('HALLAQ AL MADINA', 'SHARJAH'), { category: 'personal-care' });
+t('tajmeel is beauty', g('MARKAZ TAJMEEL', 'DUBAI'), { category: 'personal-care' });
+// CONTROL: `jamal` (beauty) is deliberately NOT vocabulary — it is one of the
+// commonest men's names in the Gulf, so a general trader would become a salon.
+t('a trader named Jamal is not a salon', g('JAMAL GENERAL TRADING', 'SHARJAH'),
+  { category: 'shopping' });
+
+// ── TRANSPORT ──
+// `car par` was written to match only the acquirer's TRUNCATION, so the phrase
+// spelled out in full fell through every rule.
+t('a car park spelled out in full is transport', g('ISLAND PALACE CAR PARK', 'DUBAI'),
+  { merchant: 'Island Palace Car Park', category: 'transport' });
+t('Cars24 is automotive, which this app files under transport',
+  'Purchase of AED 299.00 with Debit Card ending 1234 at HTTP WWW CARS24 COM, RAS AL KHAIM. Avl Balance is AED 4,469.89.',
+  { merchant: 'Cars24', category: 'transport' });
+// A road toll belongs beside Salik. The VAT on it is the same journey.
+t('VAT on a road toll is transport, not an uncategorised fee',
+  'AED 15.70 has been deducted from your account ····1711 for VAT on toll transaction(s) during June 2026. Your current account balance is AED 146.80.',
+  { merchant: 'VAT fee', category: 'transport' });
+// CONTROL, and the reason `toll` carries a negative lookahead: "toll free" is a
+// footer on ordinary purchase alerts from several UAE banks. Without the guard
+// every one of them would have been filed as transport.
+t('a toll-free phone number in a footer is not a road toll',
+  'Purchase of AED 42.00 with Debit Card ending 1234 at AL RAWABI GROCERY, DUBAI. Avl Balance is AED 846.57. For queries call our toll free number 600 54 0000.',
+  { category: 'groceries' });
+
+// ── ENTERTAINMENT ──
+t('a truncated PLAYGROU is still a playground', g('ARD AL MALAIEB PLAYGROU', 'SHARJAH'),
+  { merchant: 'Ard Al Malaieb Playgrou', category: 'entertainment' });
+t('TOD.TV is a streaming service', g('TOD.TV', 'DUBAI'), { category: 'entertainment' });
+t('Abu Dhabi Media is a broadcaster', g('ABU DHABI MEDIA PJSC', 'ABU DHABI'),
+  { category: 'entertainment' });
+// CONTROL, and the reason the broadcaster is spelled out in full: "DUBAI MEDIA
+// C" is Dubai Media CITY, the free zone, and it is the CITY field on a real
+// software purchase in this corpus. A bare `media` would have filed a SaaS
+// charge as a broadcaster.
+t('Dubai Media City is a place, not a broadcaster',
+  'Purchase of AED 74.00 with Debit Card ending 1234 at VEDA INC INVESTMENT L., DUBAI MEDIA C. Avl Balance is AED 16,430.80.',
+  { category: 'other', deliberate: false });
+
+// ── SOFTWARE, a new category ──
+//
+// This family was already being collected — the vocabulary had a developer and
+// AI tooling rule pointing at `entertainment` with a comment saying so. It now
+// points at the category it always meant. `software` is in
+// SUBSCRIPTION_CATEGORIES, or moving it would have demoted every AI
+// subscription from "subscription" to "commitment".
+t('PandaDoc is software', g('PANDADOC INC', 'USA'), { category: 'software' });
+t('CopyAI is software', g('COPYAI', 'USA'), { category: 'software' });
+t('Hopper HQ is software', g('HOPPER HQ LIMITED', 'GBR'), { category: 'software' });
+// CONTROL: bare `hopper` is the flight-booking app, which is why the SaaS is
+// spelled with its suffix.
+t('Hopper without HQ is not claimed as software', g('HOPPER INC', 'MONTREAL'),
+  { category: 'other', deliberate: false });
+// The report lists "YAMM.COM" and "YET ANOTHER MAIL MERGE" under two different
+// categories. They are the same Gmail add-on under two descriptors.
+t('YAMM and Yet Another Mail Merge are one product',
+  'Credit Card Purchase \nCard No XXXX5678 \nUSD 50.00 \nYAMM.COM BRUSSELS BEL \n07/07/26 14:53 \nAvl Bal AED 7806.31',
+  { merchant: 'Yamm.com Brussels', category: 'software' });
+t('...and its spelled-out descriptor lands in the same place',
+  g('YET ANOTHER MAIL MERGE', 'FRA'), { category: 'software' });
+
+// ── INVESTING, a new category ──
+//
+// This rule used to point at `other`, with the comment "moving money, not
+// spending it". That reading is still right; `other` was the wrong way to say
+// it, because `other` is ALSO what the parser returns when it understood
+// nothing, and the user cannot tell those apart on screen.
+t('a brokerage purchase is investing',
+  'Purchase of AED 1,513.34 with Debit Card ending 1234 at CAPITAL.COM, s@capital.com. Avl Bal is AED 4,490.57. Pls refer stmt for exact amt',
+  { merchant: 'Capital.com', category: 'investing', deliberate: true });
+t('a crypto on-ramp is investing',
+  'Purchase of AED 2,062.26 with Debit Card ending 1234 at CRYPTO.COM, SAN GILJAN. Avl Balance is AED 37,091.01.  Pls refer stmt for exact amt.',
+  { merchant: 'Crypto.com', category: 'investing' });
+t('a savings certificate is investing', g('NATIONAL BONDS', 'DUBAI'), { category: 'investing' });
+t('IQOption is investing', g('IQOPTION.COM', 'CYP'), { category: 'investing' });
+// CONTROL: bare `cro` — crypto.com's token, and how one descriptor arrives —
+// is deliberately NOT vocabulary. Three letters with no context would fire
+// inside far too much, and `crypto.com` already claims that merchant by name.
+t('a three-letter token is not enough to claim a category', g('CRO', 'SAN GILJAN'),
+  { category: 'other', deliberate: false });
+
+// ── GOVERNMENT ──
+// `economic depart` only ever matched one word order; the descriptor carries
+// the other one.
+t('Department of Economic is a government body', g('DEPARTMENT OF ECONOMIC', 'SHARJAH'),
+  { category: 'government' });
+// CONTROL: requiring the "of" is what keeps this off a department STORE.
+t('a department store is retail', g('SALAM DEPARTMENT STORE', 'DUBAI'),
+  { category: 'shopping' });
+
+// ── A BANK'S OWN FEE ──
+// The app has no `fees` category and inventing one for a single product would
+// be a bigger claim than the evidence supports. What this rule buys is that the
+// row stops being reported as an unread FORMAT: the parser understood it
+// perfectly, there is just nothing else truthful to call it.
+t('the bank\'s own subscription fee is a deliberate other',
+  'Your Credit Card 1234 has been charged AED 24.90 for Liv. Prime.',
+  { merchant: 'Liv Prime', category: 'other', deliberate: true });
+
+// ── The categories the ground truth names and this change deliberately did
+// NOT claim, each because the message carries no evidence for it ──
+//
+// A city is not a cuisine: PHUKET is the city field on a ferry, a supermarket,
+// a mall and a sportswear shop in this same corpus, and BANGKOK is the city on
+// a Bolt ride. So the Thai restaurants stay uncategorised, and so does "Little
+// Bangkok". These assertions exist so that a future rule keyed on a place name
+// fails here rather than in someone's ledger.
+t('a Thai restaurant name carries no category evidence', g('PHUKET DELIGHT', 'PHUKET'),
+  { category: 'other', deliberate: false });
+t('a city in the descriptor does not make a category', g('LITTLE BANGKOK', 'DUBAI'),
+  { category: 'other', deliberate: false });
+t('a ferry operator named only MARINE stays uncategorised', g('NIKORN MARINE', 'PHUKET'),
+  { category: 'other', deliberate: false });
+// `studio` is a salon in this inbox and a gym, a photographer and a yoga hall
+// in the next one. `the box` is a restaurant here and a storage company in
+// Dubai. Both stay in Other on purpose.
+t('a studio is not necessarily a salon',
+  'Credit Card Purchase \nCard No XXXX5678 \nAED 25.00 \nAL MAZOON STUDIO BR 1 SHARJAH ARE \n13/05/25 20:28 \nAvailable Balance AED 524.10',
+  { merchant: 'Al Mazoon Studio', category: 'other', deliberate: false });
+t('THE BOX is a restaurant here and a storage company elsewhere',
+  'Purchase of AED 98.00 with Credit Card ending 5678 at THE BOX, SHARJAH. Avl Cr. Limit is AED 18,354.23',
+  { merchant: 'The Box', category: 'other', deliberate: false });
+// A trade-licence suffix is not a trade. "Technologies" and "Investment LLC"
+// are what a UAE company registration looks like, not what the business does.
+t('TECHNOLOGIES in a company name claims nothing', g('ON TECHNOLOGIES FZ LLC', 'DUBAI'),
+  { merchant: 'On Technologies Fz Llc', category: 'other', deliberate: false });
+// A real-estate agency is the one guess with a downstream cost: `rent` unlocks
+// the relaxed bill path in subscriptions.ts, so a wrong guess there does not
+// merely mislabel a row, it can mint a permanent monthly bill.
+t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBAI'),
+  { category: 'other', deliberate: false });
+
 // ── the version that reaches already-imported rows ──
 //
 // Every fix above applies to NEW messages only. A message is imported once and

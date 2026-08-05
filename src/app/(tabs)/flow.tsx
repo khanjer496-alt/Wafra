@@ -289,7 +289,12 @@ export default function FlowScreen() {
                         to key into — and category identity is supposed to come
                         from the word, per theme.ts. The swatch's only job is
                         "this row is that segment". */}
-                    <View style={[styles.swatch, { backgroundColor: s.color }]} />
+                    <View
+                      style={[
+                        styles.swatch,
+                        { backgroundColor: s.color, borderColor: theme.textTertiary },
+                      ]}
+                    />
                     <ThemedText type="small" style={styles.compLabel} numberOfLines={1}>
                       {s.label}
                     </ThemedText>
@@ -556,7 +561,14 @@ const styles = StyleSheet.create({
     gap: Spacing.two + 2,
     paddingVertical: 11,
   },
-  swatch: { width: 8, height: 8, borderRadius: 2 },
+  // The FILL matches this row's segment in the bar above — that link is the
+  // swatch's whole job — but the ramp descends into lightnesses that sit at
+  // 2.0-2.8:1 against the page, so the faint tail steps were invisible on their
+  // own. The ramp cannot be lifted to fix it: forcing five descending steps all
+  // above 3:1 collapses the last three into the same colour, and five
+  // categories then look like three. So the EDGE carries visibility and the
+  // fill carries identity.
+  swatch: { width: 8, height: 8, borderRadius: 2, borderWidth: StyleSheet.hairlineWidth },
   compLabel: { flex: 1 },
   compShare: { width: 38 },
   compFigure: { width: 72 },

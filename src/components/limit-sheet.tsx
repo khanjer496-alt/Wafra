@@ -9,7 +9,7 @@ import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
+import { formatAED, parseAmountToFils, shiftMonthKey, toWholeDirhamFils } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
@@ -115,8 +115,8 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    * the other 215 went. Home's "leaving soon" list had the identical bug and
    * takes the identical cure — keep the total honest and state the rest.
    */
-  const { merchants, restFils, restCount } = useMemo(() => {
-    if (!picked) return { merchants: [], restFils: 0, restCount: 0 };
+  const { merchants, restFils, restCount, shownTotalFils } = useMemo(() => {
+    if (!picked) return { merchants: [], restFils: 0, restCount: 0, shownTotalFils: 0 };
     const map = new Map<string, { title: string; totalFils: number; count: number }>();
     for (const t of state.transactions) {
       // Same filter as `spent` above, or the rows listed here do not add up to
@@ -133,13 +133,24 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
         map.set(k, { title: t.title, totalFils: t.amountFils, count: 1 });
       }
     }
-    const all = [...map.values()].sort((a, b) => b.totalFils - a.totalFils);
+    // Snap each merchant to whole dirhams BEFORE summing, because that is how
+    // every figure in this sheet is shown (decimals: false). Rounding once over
+    // rows that each round themselves is how a header of AED 226 came to sit
+    // above two rows reading 227 — the same defect the Wallet headline had, and
+    // a finance app disagreeing with its own arithmetic on one screen costs
+    // more credibility than the dirham is worth.
+    const all = [...map.values()]
+      .map((m) => ({ ...m, totalFils: toWholeDirhamFils(m.totalFils) }))
+      .sort((a, b) => b.totalFils - a.totalFils);
     const shown = all.slice(0, MERCHANT_ROWS);
     const rest = all.slice(MERCHANT_ROWS);
     return {
       merchants: shown,
       restFils: rest.reduce((s, m) => s + m.totalFils, 0),
       restCount: rest.length,
+      // The header is derived FROM the rows rather than computed alongside
+      // them, so the two cannot drift apart however the rounding falls.
+      shownTotalFils: all.reduce((s, m) => s + m.totalFils, 0),
     };
   }, [state.transactions, key, picked, liveAccounts, internal]);
 
@@ -261,7 +272,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     type="smallBold"
                     tabular
                     style={{ color: over ? theme.expense : theme.text }}>
-                    {formatAED(spent, { decimals: false })}
+                    {formatAED(shownTotalFils, { decimals: false })}
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {'  / '}
                       {formatAED(limitFils, { decimals: false })}
