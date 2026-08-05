@@ -205,7 +205,7 @@ export default function FlowScreen() {
               styles.summaryRail,
               { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
             ]}>
-            <View style={styles.summaryCell}>
+            <View style={[styles.summaryCell, styles.summaryPrimary]}>
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('totalOut')}
               </ThemedText>
@@ -214,7 +214,7 @@ export default function FlowScreen() {
               </ThemedText>
             </View>
             {totalLimit > 0 && (
-              <View style={[styles.summaryCell, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+              <View style={[styles.summaryCell, styles.summaryPaired, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('limitedSpend')}
                 </ThemedText>
@@ -227,7 +227,7 @@ export default function FlowScreen() {
               </View>
             )}
             {live && (
-              <View style={[styles.summaryCell, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+              <View style={[styles.summaryCell, styles.summaryTerse, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('periodProgress')}
                 </ThemedText>
@@ -548,7 +548,28 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sheet,
     paddingHorizontal: Spacing.three,
   },
-  summaryCell: { flex: 1, minWidth: 0, gap: 3, paddingVertical: Spacing.two + 2 },
+  /**
+    * Three equal thirds cut the only figure the rail exists for.
+    *
+    * "Total out" carries a currency prefix and up to six digits — AED
+    * 17,148 — and a third of a phone's width does not hold it, so the number
+    * the section is named after rendered as "AED 17,1…". The pair beside it
+    * loses the same way: "1,177 / 1,800" became "1,177 / …".
+    *
+    * So the cells are weighted by what they have to say. Period progress is
+    * always three characters ("19%") and needs the least; the two money cells
+    * split what it gives back. Weights rather than fixed widths, so this
+    * holds at any font scale and in Arabic.
+    */
+  summaryCell: { minWidth: 0, gap: 3, paddingVertical: Spacing.two + 2 },
+  // Weights derived from measured need, not guessed. At a 390pt viewport the
+  // three cells have 312pt of rail between them, and what each has to hold is:
+  // "AED 17,148" 87pt, "1,177 / 1,800" 113pt, and — for the last one — not its
+  // value but the word "progress" in its label, 48pt. These leave every cell
+  // 8-15pt of headroom, which is one more digit on the total.
+  summaryPrimary: { flex: 1.2 },
+  summaryPaired: { flex: 1.35 },
+  summaryTerse: { flex: 0.65 },
   summaryDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
   section: { marginTop: Spacing.five },
 

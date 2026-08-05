@@ -238,8 +238,43 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && ids.has(a.id)).map((a) => a.id),
   );
-  const value = state.transactions
-    .filter((t) => isCardPayment(t, ids, creditIds))
+  const matched = state.transactions.filter((t) => isCardPayment(t, ids, creditIds));
+
+  /**
+   * One settlement, two rows, counted as two payments.
+   *
+   * A reported ledger had AED 5,645.07 paid onto card •3749 and BOTH of these
+   * against it on the same day:
+   *
+   *   +5,645.07  Card •3749 payment   [transfer] [debit]
+   *   -5,645.07  Card payment         [transfer]
+   *
+   * The first is a settlement the parser recognised. The second is the
+   * compatibility shape this function deliberately still reads — a payment
+   * whose wording the parser could not place, imported as an expense carrying
+   * a transfer hint. Both pass `isCardPayment`, so allocation saw AED
+   * 11,290.14 of payments against a AED 5,645.07 statement.
+   *
+   * It settled the right statement, because `allocatePayments` never takes
+   * more than a statement owes. The surplus is the problem: it spills onto the
+   * NEXT statement and marks a bill paid that nobody paid.
+   *
+   * A sided row is the parser's considered answer about a settlement. An
+   * unsided compat row on the same card, same day, same amount is that same
+   * money read a second time, less well — so the sided row wins and the compat
+   * row is dropped.
+   *
+   * Same DATE, not a window. Both rows here describe one movement and carry
+   * its date; widening to ±1 day would start collapsing genuine repeat
+   * payments, and this direction of error is the cheap one — dropping a real
+   * second payment leaves a balance showing that the user can clear with Mark
+   * paid, while counting one twice quietly settles a bill they still owe.
+   */
+  const sided = new Set(
+    matched.filter((t) => t.cardPaymentSide !== undefined).map((t) => `${t.date}|${t.amountFils}`),
+  );
+  const value = matched
+    .filter((t) => t.cardPaymentSide !== undefined || !sided.has(`${t.date}|${t.amountFils}`))
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
   paymentsCache.byKey.set(key, value);

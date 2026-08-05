@@ -38,10 +38,19 @@
  * it before this hook existed; routing every tab-screen entrance through one
  * place fixed that as a side effect.
  *
- * Scope is deliberate: this is for screens whose native views get detached and
- * re-attached under them. Sheets, modals and pushed stack screens are mounted
- * and unmounted for real, so their entrances mean what they say — they keep
- * using {@link useReducedMotion} directly.
+ * Scope started at tab screens and has since widened to `Section`, which most
+ * pushed screens are built out of. The original line was that a pushed screen
+ * mounts for real, so its entrance means what it says — true, and beside the
+ * point once a user reports bouncing in and out of Stats as lag. The cost
+ * measured above is what a Reanimated layout animation does to the Android
+ * draw path; it is not specific to the detach/re-attach that made tab screens
+ * replay theirs. A screen that is genuinely entering still costs 440ms of
+ * stagger before its last section settles, and on Android that is time before
+ * anything can be read.
+ *
+ * Sheets and modals still use {@link useReducedMotion} directly. Their motion
+ * is the affordance — a sheet that appears without rising has no direction to
+ * have come from — and they are opened deliberately, not passed through.
  */
 import { useCallback } from 'react';
 import { Platform } from 'react-native';

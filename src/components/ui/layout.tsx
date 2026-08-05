@@ -6,7 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
@@ -24,20 +24,36 @@ import { t } from '@/lib/i18n';
  * same plain form as the rest. A slightly longer rise is not worth a screen
  * that cannot be read.
  */
+/**
+ * ...and NOT on Android, where the stagger is the thing being felt.
+ *
+ * Every screen built out of Sections pays `index * 40 + 320` before its last
+ * one has settled — four sections on Stats is 440ms, Settings more. On a tab
+ * screen that same Reanimated entrance was measured holding the first
+ * traversal/draw back by 548ms on a Release build (see use-screen-entering),
+ * and nothing about that cost is specific to tab screens: it is what a layout
+ * animation does to the Android draw path. What WAS specific was the reason —
+ * a tab screen replays its entrance without remounting, which is a bug, while
+ * a pushed screen plays it once per real mount, which is a choice.
+ *
+ * A user bouncing in and out of Stats reported it as lag, and they are paying
+ * that choice on every push. So the choice goes the same way it went for the
+ * four tab screens: kept on iOS, where these views are not detached from the
+ * window and the motion is free, dropped on Android, where it is a stall
+ * before the screen can be read.
+ */
 export function Section({
   index = 0,
   style,
   children,
   ...rest
 }: ViewProps & { index?: number }) {
-  const reducedMotion = useReducedMotion();
+  const enter = useScreenEntering();
   return (
     <Animated.View
-      entering={
-        reducedMotion
-          ? undefined
-          : FadeInDown.delay(index * Motion.sectionStagger).duration(Motion.sectionEnter)
-      }
+      entering={enter(
+        FadeInDown.delay(index * Motion.sectionStagger).duration(Motion.sectionEnter),
+      )}
       style={style}
       {...rest}>
       {children}

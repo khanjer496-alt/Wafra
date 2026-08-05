@@ -338,6 +338,62 @@ ok('openDues: recent overdue credit due still shows',
       second.find((d) => d.due.id === 'g1').daysLeft - 1);
 }
 
+// ── one settlement, two rows, must not be two payments ──
+//
+// A reported ledger had AED 5,645.07 paid onto card •3749 with both a sided
+// settlement row and the older unsided compat shape against it on the same
+// day. Allocation saw AED 11,290.14. It settled the right statement — nothing
+// takes more than a statement owes — but the surplus spills onto the NEXT one
+// and marks a bill paid that nobody paid.
+{
+  const dupState = {
+    accounts: [
+      { id: 'c', name: 'FAB Credit Card', kind: 'card', cardType: 'credit', last4: '3749', openingFils: 0, color: '#fff' },
+    ],
+    transactions: [
+      { id: 'sided', type: 'income', amountFils: 564507, category: 'other', accountId: 'c',
+        title: 'Card •3749 payment', date: '2026-08-05', source: 'sms', isTransfer: true,
+        cardPaymentSide: 'debit' },
+      { id: 'compat', type: 'expense', amountFils: 564507, category: 'other', accountId: 'c',
+        title: 'Card payment', date: '2026-08-05', source: 'sms', isTransfer: true },
+    ],
+    cardDues: [
+      { id: 'aug', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-08-26', paidFils: 0 },
+      { id: 'sep', accountId: 'c', totalDueFils: 400000, minDueFils: 20000, dueDate: '2026-09-26', paidFils: 0 },
+    ],
+  };
+  ok('pairing: the settlement the payment was for is paid',
+    cardsGuardLib.duePaidFils(dupState, dupState.cardDues[0]) === 564507);
+  ok('pairing: the surplus does NOT spill onto next month',
+    cardsGuardLib.duePaidFils(dupState, dupState.cardDues[1]) === 0,
+    String(cardsGuardLib.duePaidFils(dupState, dupState.cardDues[1])));
+
+  // ...and the compat shape ALONE still settles. It is the only record of a
+  // payment on ledgers imported before the parser could read that wording, and
+  // dropping it unconditionally would reopen every one of those statements.
+  const compatOnly = { ...dupState, transactions: [dupState.transactions[1]] };
+  ok('pairing: an unsided compat payment on its own still settles the statement',
+    cardsGuardLib.duePaidFils(compatOnly, compatOnly.cardDues[0]) === 564507);
+
+  // Two REAL payments of the same amount on different days stay two payments.
+  // Both statements are dated so that both payments fall inside their windows —
+  // otherwise this would pass for the wrong reason, with the second payment
+  // dropped as too early rather than counted.
+  const twoDays = {
+    ...dupState,
+    transactions: [
+      dupState.transactions[0],
+      { ...dupState.transactions[1], id: 'later', date: '2026-08-06' },
+    ],
+    cardDues: [
+      { id: 'aug', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-08-26', paidFils: 0 },
+      { id: 'sep', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-09-10', paidFils: 0 },
+    ],
+  };
+  ok('pairing: same amount on different days is two payments, not one',
+    cardsGuardLib.duePaidFils(twoDays, twoDays.cardDues[1]) === 564507);
+}
+
 // The same statement stored twice — a reminder SMS read as a fresh statement —
 // listed the card twice on Home and counted it twice in the total.
 const twinState = {
