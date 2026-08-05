@@ -622,6 +622,33 @@ t('SEWA bill notice is a due reminder, not an expense',
   'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22. Click here to view bill  https://sewapayment.tiny.us/359aezc3',
   { kind: 'billDue' });
 
+// The reported shape, verbatim apart from the account identifiers. Twelve of
+// these landed in one user's ledger as AED 775.81 expenses each — AED 9,309 of
+// spending that never happened — because "if you have already paid" made
+// hasDebit true and isBillDue requires !hasDebit.
+t('e& due-date notice is a reminder, not a charge',
+  'Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due for FISH BASKET REST. with the Party-ID 3014835 on 15-08-2026 . To pay your bill, please visit businessonline.etisalat.ae/quickpay. Kindly disregard this message if you have already paid. Thank you.',
+  { kind: 'billDue', merchant: 'E&', amountFils: 77581, date: '2026-08-15', dueDay: 15, category: 'telecom' });
+
+// The article at the front of that sentence used to win the merchant: the
+// capture ran from "the" all the way to "e&" and titled the row
+// "Due Date For Your E&".
+t('a bill reminder is titled by the biller, not by the sentence it opens',
+  'Dear Customer, The due date for your DEWA bill is nearing. AED 450.00 is due on 25/08/2026.',
+  { kind: 'billDue', merchant: 'DEWA' });
+
+// POSTPAID contains PAID. Unanchored, that noun alone turned the commonest
+// telecom reminder in the UAE into a posted expense.
+t('a postpaid bill reminder is not a payment',
+  'Your Etisalat postpaid bill of AED 210.00 is due on 03/09/2026.',
+  { kind: 'billDue', amountFils: 21000, date: '2026-09-03' });
+
+// The other half of the guard: the same biller actually debiting the account
+// still has to post. Suppression must never beat evidence.
+t('an e& bill actually debited still posts',
+  'AED 775.81 has been debited from your account XXXX0002 for your e& bill payment on 15/08/2026.',
+  { kind: 'transaction', type: 'expense', merchant: 'E&', amountFils: 77581 });
+
 t('supermarket truncation SUPE categorizes as groceries',
   'Purchase of AED 120.24 with Credit Card ending 4722 at ABDULLA AND NASIR SUPE, SHARJAH. Avl Cr. Limit is AED 14,808.82',
   { category: 'groceries' });

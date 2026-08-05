@@ -135,8 +135,15 @@ export interface ParsedCard {
  * subscription still says Entertainment, every brokerage transfer still says
  * Other. Those rows are the point of the change and a re-read is the only thing
  * that reaches them.
+ *
+ * 13: bill reminders that were booked as charges. A due-date notice whose only
+ * debit word was "if you have already paid" — or the "paid" inside POSTPAID —
+ * imported as a real expense; one user carried twelve AED 775.81 e& charges for
+ * a bill that was only ever due. Those rows are already in the ledger and
+ * healPatch cannot delete a row, so the re-read is what reaches them: the
+ * billDue branch of buildImportPlan now drops the expense the old parser made.
  */
-export const PARSER_VERSION = 12;
+export const PARSER_VERSION = 13;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -420,7 +427,43 @@ const AR_DEBIT_WORDS =
 // as a AED 154.32 purchase at a shop called "Last Stmt 2022-05-11" — spending
 // the user never did, and no payment reminder for the money they do owe.
 const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\b(?:payment|pymt)\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
-const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
+/**
+ * The two clauses a bill REMINDER ends with, neither of which says money moved.
+ *
+ * "Kindly disregard this message if you have already paid" is boilerplate on
+ * every e&/du/DEWA due-date notice, and its "paid" is a HYPOTHETICAL about a
+ * payment the user may or may not have made — the sentence exists precisely
+ * because the biller does not know. But `hasDebit` is a word test, so that one
+ * word made isBillDue false (it requires !hasDebit) and dropped the reminder
+ * into the transaction path. The user's ledger carried twelve AED 775.81
+ * "Due Date For Your E&" expenses for bills that were reminders, not charges —
+ * AED 9,309 of spending that never happened.
+ *
+ * Blanked BEFORE the direction words read the body and nowhere else: the
+ * clause tests, hasPostedEvidence and merchant extraction all still see the
+ * whole message, so a genuine posting that happens to carry the same footer
+ * loses nothing. What is removed here is only ever a conditional ("if ...
+ * already paid") or an instruction ("to pay your bill, visit ...") — a real
+ * debit is never stated inside either.
+ */
+const HYPOTHETICAL_PAYMENT_RE =
+  /\b(?:if|in\s+case)\b[^.\n]{0,48}?\balready\b[^.\n]{0,32}?\b(?:paid|settled|cleared|made|processed|deducted|debited)\b/gi;
+/** "To pay your bill, please visit ..." / "to settle the amount, call ..." */
+const PAYMENT_INSTRUCTION_RE =
+  /\bto\s+(?:pay|settle|clear)\b[^.\n]{0,64}?(?:,\s*(?:please|kindly)\b|\bplease\b|\bkindly\b|\bvisit\b|\bcall\b|\blog\s*in\b|\bsms\b)[^.\n]{0,64}/gi;
+/**
+ * Words that are never part of a biller's name, so the capture below may not
+ * cross one. "The due date for your e& bill is nearing" matches at the FIRST
+ * "the", and a capture that allowed any run of word characters titled the
+ * reminder "Due Date For Your E&" — the biller's actual name, two words later,
+ * lost to the article at the front of the sentence.
+ */
+const BILL_NAME_STOP = String.raw`(?:your|the|a|an|due|date|dates|for|of|to|by|on|next|last|latest|current|new|upcoming|total|amount|outstanding|monthly|unpaid|pay|paid|payment|this|that|it|is|was|has|have)\b`;
+const BILL_NAME_WORD = String.raw`(?!${BILL_NAME_STOP})[A-Za-z0-9][A-Za-z0-9&.'\-]{0,20}`;
+const BILL_MERCHANT_RE = new RegExp(
+  String.raw`(?:your|the)\s+((?:${BILL_NAME_WORD}\s+){0,2}${BILL_NAME_WORD})\s+bill\b`,
+  'i',
+);
 /** "فاتورة هيئة كهرباء ومياه دبي بمبلغ ..." — the biller follows the noun. */
 const AR_BILL_MERCHANT_RE = new RegExp(
   `فاتوره\\s+([${AR_LETTER}][${AR_LETTER}0-9 &.'\\-]{2,40}?)(?=\\s*(?:بمبلغ|بقيمه|مستحق|[,.;\\n]|$))`,
@@ -1140,8 +1183,14 @@ function ensureCurrencyPatterns(): void {
   // credit nor debit, it matched nothing at all and the purchase VANISHED.
   // The trailing card clause covers alerts with no verb whatsoever
   // ("AED 250.00 to ETISALAT via Credit Card 1234").
+  // `\bpaid\b` and not bare `paid`: POSTPAID and PREPAID both contain it, and
+  // "your Etisalat postpaid bill is due on 03/09" is the single commonest
+  // telecom reminder in the UAE. Unanchored, that noun made hasDebit true, and
+  // isBillDue requires !hasDebit — so the reminder became a posted expense for
+  // money the user had not yet sent. Same failure the `payment(?!\s+due)`
+  // guard beside it exists to prevent, one word later.
   DEBIT_WORDS = new RegExp(
-    `purchase|debit(?:ed)?|deducted|spent|paid|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
+    `purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
       // "AED 500 has been TRANSFERRED from your account to MOHAMMED ALI" named
       // no verb either list knew — only the opposite-direction phrase
       // "transferred to your" was listed — so an outgoing transfer returned
@@ -3344,8 +3393,12 @@ export function parseSms(
 
   // URLs carry misleading words ("sewapayment.tiny.us" is not a payment).
   const prose = raw.replace(/https?:\/\/\S+/gi, ' ');
-  const hasDebit = DEBIT_WORDS.test(prose);
-  const hasCredit = CREDIT_WORDS.test(prose);
+  // ...and so do the two clauses a reminder signs off with. See
+  // HYPOTHETICAL_PAYMENT_RE: the direction WORDS read the body without them,
+  // while every clause test below still reads `prose` in full.
+  const stated = blank(blank(prose, HYPOTHETICAL_PAYMENT_RE), PAYMENT_INSTRUCTION_RE);
+  const hasDebit = DEBIT_WORDS.test(stated);
+  const hasCredit = CREDIT_WORDS.test(stated);
   // Carrier-billed store purchases ("App Store & Google Play bill") are
   // receipts, never utility bills — treating them as dues produced garbage
   // reminders with balance-sized amounts.

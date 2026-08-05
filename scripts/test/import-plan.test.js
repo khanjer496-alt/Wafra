@@ -393,6 +393,62 @@ const afterFirst = apply(BASE, first);
     plan.batch.updates);
 }
 
+/* A reminder the OLD parser booked as an expense is dropped on rescan.
+ *
+ * One user carried twelve AED 775.81 "Due Date For Your E&" charges for bills
+ * that were only ever due. The parser now reads the message as a billDue, but
+ * that alone leaves the twelve rows sitting in the ledger: healPatch rewrites
+ * rows, it cannot delete one. */
+{
+  const smsTs = T0 + 4_400_000;
+  const reminder = {
+    kind: 'billDue', type: 'expense', amountFils: 77581, currency: 'AED',
+    merchant: 'E&', date: '2026-08-15', dueDay: 15, minDueFils: null,
+    card: null, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'telecom', raw: '',
+    smsTs, sender: 'e&', channel: 'inbox',
+  };
+  const withPhantom = {
+    ...BASE,
+    transactions: [{
+      id: 'phantom-e&', type: 'expense', amountFils: 77581, category: 'telecom',
+      accountId: 'acc-main', title: 'Due Date For Your E&',
+      date: '2026-08-15', source: 'sms', smsKey: `s${smsTs}-77581`,
+    }],
+  };
+  const plan = buildImportPlan([reminder], withPhantom, smsTs, new Date(2026, 7, 2));
+  ok('a rescan removes the expense an unrecognised reminder had created',
+    plan.batch.updates.some((u) => u.id === 'phantom-e&' && u.remove),
+    plan.batch.updates);
+  ok('and the reminder itself lands as a bill due',
+    plan.billDues.length === 1 && plan.billDues[0].merchant === 'E&', plan.billDues);
+  ok('...and never as a transaction', plan.txCount === 0, plan.batch.transactions);
+}
+
+/* ...but never one the user corrected by hand. */
+{
+  const smsTs = T0 + 4_600_000;
+  const reminder = {
+    kind: 'billDue', type: 'expense', amountFils: 32050, currency: 'AED',
+    merchant: 'Du', date: '2026-08-21', dueDay: 21, minDueFils: null,
+    card: null, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'telecom', raw: '',
+    smsTs, sender: 'du', channel: 'inbox',
+  };
+  const corrected = {
+    ...BASE,
+    transactions: [{
+      id: 'edited-reminder', type: 'expense', amountFils: 32050, category: 'telecom',
+      accountId: 'acc-main', title: 'I paid this one myself',
+      date: '2026-08-21', source: 'sms', smsKey: `s${smsTs}-32050`, userEdited: true,
+    }],
+  };
+  const plan = buildImportPlan([reminder], corrected, smsTs, new Date(2026, 7, 2));
+  ok('a reminder rescan never removes a user-edited matching row',
+    !plan.batch.updates.some((u) => u.id === 'edited-reminder' && u.remove),
+    plan.batch.updates);
+}
+
 /* ── what must STILL import ──────────────────────────────────────────── */
 
 /* Ambiguous identity is never auto-merged from issuer + last4 alone. */

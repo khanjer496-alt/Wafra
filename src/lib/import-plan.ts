@@ -382,6 +382,18 @@ export function buildImportPlan(
   for (const p of ordered) {
     const date = p.date ?? toISODate(new Date());
     if (p.kind === 'billDue') {
+      // Same stale-misread sweep the cardStatement branch does below, and it
+      // was missing here — so a reminder the old parser had booked as a real
+      // expense stayed in the ledger forever after the parser learned to read
+      // it. healPatch cannot help: it rewrites a row, it cannot delete one,
+      // and there is no patch that turns an expense into "this never
+      // happened". The user who reported it carried twelve AED 775.81 e&
+      // charges for bills that were only ever due.
+      const staleKey = smsKeyOf(p);
+      const misread = staleKey ? priorBySmsKey.get(staleKey) : undefined;
+      if (misread && !misread.isTransfer && !misread.userEdited) {
+        updates.push({ id: misread.id, remove: true });
+      }
       if (p.merchant !== 'Bill payment') billDues.push(p);
       continue;
     }
