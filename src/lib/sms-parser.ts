@@ -128,8 +128,15 @@ export interface ParsedCard {
  * only thing that reaches those rows. `healPatch`'s `directionChanged` branch
  * is what writes the corrected `type` back — a version bump without it produces
  * a full re-read that reads everything correctly and then stores nothing.
+ *
+ * 12: category coverage. Two new categories (`software`, `investing`) and a
+ * large vocabulary extension, which means the stored CATEGORY on rows already
+ * imported is now wrong on exactly the rows this was meant to fix — every AI
+ * subscription still says Entertainment, every brokerage transfer still says
+ * Other. Those rows are the point of the change and a re-read is the only thing
+ * that reaches them.
  */
-export const PARSER_VERSION = 10;
+export const PARSER_VERSION = 12;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -406,7 +413,13 @@ const AR_DEBIT_WORDS =
 // fall through to the transaction path — where it became a AED 425 purchase at
 // a merchant named "July Is Available", harvested out of "statement for July
 // is available".
-const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
+// "Pymt due" and the ISO date are the abbreviated card-summary block, which
+// writes every label short and every date the other way round: "Last Stmt
+// 2022-05-11 / Min Amt AED 154.32 / Pymt due 2022-06-06". Neither spelling was
+// recognised, so a STATEMENT fell through to the transaction path and imported
+// as a AED 154.32 purchase at a shop called "Last Stmt 2022-05-11" — spending
+// the user never did, and no payment reminder for the money they do owe.
+const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bdue\s+(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\b(?:payment|pymt)\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b|مستحقه الدفع|مستحق الدفع|تاريخ الاستحقاق|الحد الادني للدفع|يرجي السداد/i;
 const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
 /** "فاتورة هيئة كهرباء ومياه دبي بمبلغ ..." — the biller follows the noun. */
 const AR_BILL_MERCHANT_RE = new RegExp(
@@ -415,9 +428,40 @@ const AR_BILL_MERCHANT_RE = new RegExp(
 
 /** Credit-card statement: has "statement"/"total due" language plus a card reference. */
 const STATEMENT_RE =
-  /statement|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
+  // "Last Stmt" and "Min Amt" are the same two facts abbreviated. Both are
+  // anchored to their qualifier and not left as bare "stmt": a purchase alert
+  // ends "Pls refer stmt for exact amt", and a bare stem there would turn
+  // every one of those purchases into a statement.
+  /statement|\blast\s+stmt\b|\bstmt\s+(?:date|bal(?:ance)?)\b|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|\bmin\s+amt\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
 /** Purchase-style verbs that disqualify the statement branch (NOT "paid"). */
 const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
+
+/**
+ * A BILLER'S OWN PAYMENT RECEIPT, in either language.
+ *
+ * Three labelled facts in one order: the account paid, the amount DUE, and the
+ * amount PAID. The two figures are equal only while the bill is settled in
+ * full — the moment they are not, the first figure in the body is the wrong
+ * one, so the amount is read off the PAID label and nowhere else.
+ *
+ * Written post-fold, like every Arabic literal in this file: المبلغ المدفوع
+ * carries no ة and no أ, so it is spelled exactly as the normaliser leaves it.
+ * The currency is optional on BOTH sides because Arabic puts it after the
+ * figure ("20 درهم") and English before it ("AED 408.45").
+ */
+const PORTAL_RECEIPT_RE =
+  /(?:payment\s+to\s+(?:the\s+)?account\s+(?:number|no\.?)|لحساب رقم)\s*:?\s*[·•X*]*(\d{4,})[\s\S]*?(?:amount\s+paid|المبلغ المدفوع)\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+/** The line that says how the receipt was paid — and, very often, to whom. */
+const PORTAL_CHANNEL_RE = /(?:payment\s+channel|تم الدفع عن طريق)\s*:?\s*([^\n]{2,60})/i;
+/**
+ * Billers that name themselves in a receipt's own channel line.
+ *
+ * Deliberately tiny, and read ONLY against that line — never against the whole
+ * body. "اتصالات" is also the ordinary Arabic word for "communications", and a
+ * table this size loose in the body is how a fish shop became a utility.
+ * Nothing goes in here without a real message showing the biller naming itself.
+ */
+const RECEIPT_BILLERS: [RegExp, string][] = [[/etisalat|اتصالات/i, 'Etisalat']];
 /** Payment INTO a card: settles dues rather than spending. */
 // CARD_PAYMENT_RE is market-compiled below.
 
@@ -532,6 +576,78 @@ const OTP_FOOTER_RE = new RegExp(
     `|رمز سري|الرمز السري|لا تشارك|لا تفصح|لا تشاركه|لن يطلب البنك`,
   'i',
 );
+
+/**
+ * A CODE CHALLENGE WITH A CLOCK ON IT — the worst phantom in the corpus.
+ *
+ * "DO NOT SHARE! The Auth code is 4606 for AED 272.00 at Next for card ending
+ * 1354. Use in 5 mins." booked AED 272 at Next. So did five more, up to AED
+ * 7,379.54. And these are not lone strays: the challenge is followed minutes
+ * later by the POSTING for the very same purchase, so every online card
+ * payment the user made was counted TWICE. The real inbox shows the pair —
+ * "The Auth code is 2004 for AED 290.00 at THE VIOLE for card ending 1354"
+ * and then "Purchase of AED 290.00 with Debit Card ending 1354 at FAT*THE
+ * VIOLE, Dubai."
+ *
+ * WHY THE BARE PHRASE IS NOT THE ANSWER. "Authorisation code" was deliberately
+ * removed from OTP_CODE_WORD (see the comment there) and must stay out: it is
+ * also the ACQUIRER'S APPROVAL REFERENCE printed on a posted alert — "AED
+ * 250.00 spent at NOON with Credit Card 4110. Authorisation code: 123456." —
+ * and listing it deleted every posting that quoted its own approval reference.
+ * The noun is genuinely ambiguous; a longer keyword list cannot fix that.
+ *
+ * THE DISCRIMINATOR IS THE CLOCK. A challenge is a code that EXPIRES: "Use in
+ * 5 mins", "This code expires in 5 minutes", "OTP valid for 10 minutes". An
+ * approval reference never expires — it is the receipt for money that has
+ * already moved, and no issuer has ever put a countdown on one. So the rule is
+ * a conjunction, and BOTH halves are needed:
+ *   1. the message QUOTES a code — a code noun bound to its digits in the same
+ *      sentence, exactly the OTP_RE standard, so a bare "do not share your
+ *      OTP" footer on a real purchase cannot satisfy it; and
+ *   2. that code has a VALIDITY WINDOW measured in seconds, minutes or hours.
+ *
+ * Candidates that were probed and REJECTED as the discriminator:
+ *   - "if not requested, call ..." — a real posting carries the same clause.
+ *     The corpus has "If this is not you; contact us immediately via Call or
+ *     WhatsApp" on a genuine AED 750 transfer. A not-you imperative is a fraud
+ *     footer, not a challenge marker, and FRAUD_FOOTER_RE already exists
+ *     precisely because it appears on postings.
+ *   - "the code is the subject of the sentence" — separates family 1 ("The
+ *     Auth code is 4606 ...") but not the labelled-field posting reliably, and
+ *     the corpus has no challenge WITHOUT a window to justify relaxing to it.
+ * The window unit is deliberately restricted to sec/min/hour: "valid till 30
+ * Nov" and "valid for 30 days" are offer and card-expiry wording that sits on
+ * real messages.
+ *
+ * This one suppresses UNCONDITIONALLY, ahead of hasPostedEvidence, and that is
+ * the whole point: a challenge carries an amount, a merchant AND a card, so it
+ * looks exactly like posted evidence. The countdown is what proves the code
+ * has not been used yet and therefore that nothing has posted.
+ */
+// The noun list adds the auth-code spellings that OTP_CODE_WORD must not
+// carry. It is only ever read behind the window conjunct below — never by
+// OTP_RE or OTP_FOOTER_RE, which still suppress on their own.
+const CHALLENGE_CODE_WORD = String.raw`(?:auth(?:oris|oriz)?(?:ation)?\.?\s+code|${OTP_CODE_WORD})`;
+// Banks redact the leading digits of the code itself ("is ····5969"), so the
+// gap between "is" and the digits has to tolerate the mask characters. This is
+// not "recovering" a masked figure — the code is not money, and only its
+// PRESENCE is being read, never its value.
+const CODE_MASK = String.raw`[\s·•*xX]{0,10}`;
+const CODE_CHALLENGE_QUOTED_RE = new RegExp(
+  // The gap runs to 120 characters — longer than OTP_RE's 80 — because the
+  // challenge states the whole transaction between the noun and the code:
+  // "OTP for transaction at www landmarkgroup com for AED 208.00 on your ADCB
+  // Credit Card XXX7720 is 6786" is 92 characters of it, and at 80 that
+  // message fabricated AED 208. `\.\d` keeps the gap inside one sentence while
+  // still crossing the decimal point in "AED 1.00".
+  `${CHALLENGE_CODE_WORD}(?:[^.\\n]|\\.\\d){0,120}?(?:\\bis\\b|[:=])${CODE_MASK}${OTP_CODE_DIGITS}` +
+    // "The Auth code is 4606 for AED 272.00 ..." — noun, copula, digits.
+    `|${CHALLENGE_CODE_WORD}\\s*(?:is|:|-|=)?${CODE_MASK}${OTP_CODE_DIGITS}`,
+  'i',
+);
+const CODE_VALIDITY_WINDOW_RE =
+  /\b(?:use|enter|submit)\b(?:[^.\n]{0,24}?)\bwithin\s+\d{1,3}\s*(?:sec|min|hour|hr)|\b(?:use|enter|submit)\s+(?:it\s+|this\s+(?:\w+\s+){0,2})?in\s+\d{1,3}\s*(?:sec|min|hour|hr)|\bexpires?\s+(?:in|after|within)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)|\bvalid\s+(?:for|till|until|upto|up\s+to)\s+(?:the\s+next\s+)?\d{1,3}\s*(?:sec|min|hour|hr)/i;
+
 /**
  * Pre-auth holds are not postings; the real charge arrives as its own SMS, so
  * a missed hold double-counts — and holds live at hotels, car rentals and fuel
@@ -599,6 +715,21 @@ const HOLD_RELEASE_RE =
  * authorised." So the footer is blanked out before the decline patterns are
  * tested, and the indicative form still suppresses.
  */
+/**
+ * The bank's CALL-CENTRE footer, which is not a party to the transaction.
+ *
+ * "For more information please call 600 51 5500 (+9715551511 if calling from
+ * overseas)." — the merchant grammar reads "from overseas)" as a payee, and
+ * nine real funds transfers in this corpus arrived titled "Overseas)". The
+ * footer is taken out of the payee grammar's way rather than blocked with a
+ * stop-list of words, because the same "from" introduces a real merchant
+ * everywhere else in the message.
+ *
+ * Blanked, never deleted: every other offset into the body has to stay valid.
+ */
+const CONTACT_FOOTER_RE =
+  /\(?\s*(?:\+?[\d·•X][\d·•X\s-]{4,})?\s*if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
+
 const FRAUD_FOOTER_RE =
   /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b/gi;
 /**
@@ -733,8 +864,27 @@ const SPEND_SUMMARY_RE = new RegExp(
 // A DISCOUNT CEILING is not a purchase. "Get AED 100.00 off your next purchase
 // at NOON with your ADCB card" booked a AED 100 expense at Noon — the figure is
 // the most the user might SAVE, and the purchase is explicitly a future one.
+//
+// A LOYALTY RATE AND A QUALIFYING THRESHOLD are not purchases either, and the
+// real inbox is full of them: "Savour exquisite Indian delicacies at Gazebo and
+// earn 2 bonus TPs for every AED 1 spent" booked AED 1.00 at "Gazebo And Earn 2
+// Bonus Tps", and "Get up to 10X Shukrans on AED150 spent" booked AED 150.00 at
+// "10x Shukrans". Neither dirham exists.
+//
+// THE WORD "SPENT" CANNOT BE THE DISCRIMINATOR — it is the commonest posting
+// verb in the UAE ("AED 89.50 spent at CARREFOUR"). What separates them is the
+// GRAMMAR AROUND the figure:
+//   - "for/on/per EVERY AED 1" is a RATE — a conversion factor, not a sum. A
+//     posting never quantifies "every" dirham.
+//   - "on AED150 spent" puts the amount behind a preposition as the CONDITION
+//     to qualify; a posting makes the amount the subject ("AED 150.00 spent
+//     at ..."), which is why the preposition is required here and why "spent
+//     at" is untouched.
+//   - "up to 10X" is a MULTIPLIER on a reward, not money.
+// All of it stays behind the hasPostedEvidence gate below, so a bank that
+// staples a rewards line to a real card alert keeps the transaction.
 const OFFER_RE =
-  /^\s*(?:offer|promo(?:tion)?|deal)\s*[:!-]|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b|\boff\s+your\s+(?:next|first)\b|\b(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+off\b|\bup\s+to\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+(?:off|cashback|back)\b/i;
+  /^\s*(?:offer|promo(?:tion)?|deal)\s*[:!-]|\bpurchases?\s+(?:above|over|worth|starting\s+(?:at|from))\s+(?:aed|dhs|sar)\b|\bat\s+any\s+(?:store|shop|merchant|outlet|retailer|branch)\b|\bon\s+purchases\s+(?:above|over)\b|\boff\s+your\s+(?:next|first)\b|\b(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+off\b|\bup\s+to\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+(?:off|cashback|back)\b|\b(?:for|on|per)\s+(?:every|each)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\b|\b(?:on|for)\s+(?:aed|dhs|sar)\s*[\d,]+(?:\.\d{1,2})?\s+spent\b|\bup\s+to\s+\d{1,3}\s*x\b|\beach\s+of\s+[\d,]+(?:\.\d{1,2})?\s*(?:aed|dhs|sar)\b/i;
 
 /**
  * A FUTURE OR SCHEDULED EVENT HAS NOT MOVED ANY MONEY — and the bank sends the
@@ -840,8 +990,11 @@ function ensureCurrencyPatterns(): void {
   // first two letters as the currency symbol and invent an amount.
   AED_SUFFIX_RE = new RegExp(
     `([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
+  // "Min Amt AED 154.32" is the abbreviated card-summary spelling of the same
+  // figure. Without it that block had no minimum, and a statement with no
+  // minimum raises no reminder for the payment the user actually has to make.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+of)?)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+of)?|amt)\\s*(?:of|:|is)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -1122,9 +1275,16 @@ const USED_CARD_TAIL_RE = /[Xx*•]{2,}(\d{4,6})\s+was\s+used\s+for\b/i;
  * "الايتمانيه") is the Islamic-and-conventional word for credit; "الخصم" is
  * debit.
  */
-const AR_CARD_KIND = 'الايتمان';
+// The stem is written WITHOUT the definite article, and the article is
+// optional in the pattern instead. With "ال" baked into the constant, the
+// indefinite form — "بطاقة ائتمان", which folds to "بطاقه ايتمان" and is how
+// Etisalat's Arabic receipt names the card it was paid with — matched
+// nothing and every one of those credit cards was typed DEBIT. That mints a
+// second, phantom account for a card the user already has, and the statement
+// and the payment then land on different ones so the card never shows settled.
+const AR_CARD_KIND = 'ايتمان';
 const AR_CARD_RE = new RegExp(
-  `بطاق[${AR_LETTER}]{0,4}\\s*(${AR_CARD_KIND}[${AR_LETTER}]{0,3}|الخصم)?[^\\d\\n]{0,28}?(\\d{4})(?!\\d)`,
+  `بطاق[${AR_LETTER}]{0,4}\\s*((?:ال)?${AR_CARD_KIND}[${AR_LETTER}]{0,3}|الخصم)?[^\\d\\n]{0,28}?(\\d{4})(?!\\d)`,
 );
 const AR_ACCOUNT_RE = new RegExp(
   `حساب[${AR_LETTER}]{0,3}\\s*(?:رقم)?[^\\d\\n]{0,20}?(\\d{4})(?!\\d)`,
@@ -1181,10 +1341,30 @@ const MERCHANT_RE = new RegExp(
   // The optional domain tail keeps "CAPITAL.COM" and "Name.com, Inc" whole —
   // MERCHANT_STOP treats "." as a sentence end, so both used to arrive as
   // "Capital" and "Name".
-  String.raw`(?:\bat|\bto|\bfrom|@)\s+([A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
+  // "+" and "_" are inside a descriptor, never a sentence boundary. Without
+  // them the match did not merely end early, it FAILED — neither character is
+  // a MERCHANT_STOP either — so "at SP TODD SNYDER +····0068 USA" and "at
+  // Simplex_Elastum, s@simplex.com" named no merchant at all and arrived as
+  // "Card purchase". cleanDescriptor strips the phone tail afterwards.
+  String.raw`(?:\bat|\bto|\bfrom|@)\s+([A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()+_]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
     MERCHANT_STOP,
   'gi',
 );
+/**
+ * A payment gateway's own DOMAIN, its field separator, then the real shop:
+ * "at WWW.2C2P.COM*2C2P BOLT (M, BANGKOK".
+ *
+ * MERCHANT_RE cannot read this and must not be taught to: "." is one of its
+ * stop tokens, deliberately, because a full stop ends a sentence far more
+ * often than it continues a host name. So the whole descriptor was thrown
+ * away — the candidate was the bare "WWW", which extractMerchant rejects —
+ * and a real Bolt ride imported as "Card purchase".
+ *
+ * Anchored on a MULTI-LABEL host followed by a star, which is a shape no
+ * prose sentence has.
+ */
+const GATEWAY_URL_MERCHANT_RE =
+  /\b(?:at|to)\s+(?:https?:\/\/)?(?:www\.)?[A-Za-z0-9-]{2,}(?:\.[A-Za-z0-9-]{2,})+\s*\*\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s*$)/i;
 /**
  * The Arabic merchant clause: "لدى كارفور", "في مطعم الطازج".
  *
@@ -1246,8 +1426,17 @@ const AR_MERCHANT_RE = new RegExp(
  * something any bank sends. On the device the text is plain digits, so the
  * rule never fired where it mattered and "Bloomfield Treat-245814" stayed
  * split from "Bloomfield Treat".
+ *
+ * A space-separated YEAR is not a terminal id, and that is the only exception:
+ * "SP LUETTI 1980" (real, 2x in the corpus) came back as "Sp Luetti" with the
+ * half of the name that distinguishes it from every other Luetti cut off.
+ * Shops name themselves after the year they opened; acquirer site numbers are
+ * arbitrary, so "EMARAT 1049" must still lose its number — one petrol station
+ * per forecourt is not a merchant. 19xx/20xx is the whole difference between
+ * the two, and getting it wrong costs a name in one direction and splits a
+ * chain into one merchant per site in the other.
  */
-const TERMINAL_ID_RE = /[-\s]+(?:[·•X]{2,}\d*|\d{4,})$/i;
+const TERMINAL_ID_RE = /(?:[-\s]+[·•X]{2,}\d*|-\d{4,}|\s(?!(?:19|20)\d{2}$)\d{4,})$/i;
 
 // The date needs a lead-in word, and a NOUN is as valid a lead-in as a
 // preposition: RAKBANK writes "Due date 18/08/2026" and Mashreq "Payment due
@@ -1260,6 +1449,18 @@ const DATE_RE =
 // "03/07/26 05:53" — a bare date WITH a time is the transaction timestamp and
 // beats any "statement due on <date>" footer later in the message.
 const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
+/**
+ * ISO order, which the region's own billers use and no other rule here could
+ * read: "Transaction Date: 2022-03-11", "تاريخ المعاملة: 2020-04-15", "Pymt
+ * due 2022-06-06". Every one of those messages was filed on the day it
+ * happened to be imported instead of the day it happened — and on a statement,
+ * on the day the payment was due.
+ *
+ * It keeps its LABEL. The four-digit-first shape is unambiguous on its own,
+ * but requiring the label is what stops it reading a hyphenated reference or
+ * an account fragment as a date.
+ */
+const ISO_DATE_RE = /(?:\bdate\b|\bdue\b|تاريخ)[^\d\n]{0,24}(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/i;
 // HSBC opens every alert with the transaction date run together, no
 // separators: "From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from...".
 // Nothing else in the grammar could read it, so a quarter of the messages in
@@ -1273,6 +1474,16 @@ const ATM_RE = /\batm\b|cash\s+withdrawal|\bwithdrawn\b|سحب نقدي|الصر
 const FEE_RE =
   /\bfees?\b|\bcharges?\s+(?:of|:)|service charge|\bvat\b|annual membership|رسوم|رسم خدمه|ضريبه القيمه المضافه/i;
 const DEPOSIT_RE = /cash\s+deposit|\bcdm\b|deposit(?:ed)?\s+(?:in|into|to)\b|ايداع نقدي|جهاز الايداع/i;
+/**
+ * A prepaid AIRTIME top-up, which names no shop and never will.
+ *
+ * "recharge" ALONE is not the marker and must not become one: a Salik tag and
+ * a nol card are recharged too, and both of those are transport. The airtime
+ * noun beside it is what identifies the product — "Out of Credit Call Service"
+ * is Etisalat's own name for the overdraft it settles out of the next top-up.
+ */
+const MOBILE_RECHARGE_RE =
+  /\b(?:mobile|airtime|talktime|prepaid)\s+recharge\b|\brecharge\b[^\n]{0,80}?\b(?:call\s+service|airtime|talktime)\b|\bout\s+of\s+credit\s+call\s+service\b/i;
 
 /**
  * Multi-line bank formats put the merchant on its own line with no
@@ -1303,6 +1514,27 @@ const PLACE_TAIL_RE =
   /(?:[-\s]+[A-Za-z]?)?(?:DXB|DUBAI|ABU ?DHABI|SHARJAH|AJMAN|FUJAIRAH|UMM AL QUWAIN|AL AIN|RAK)$/i;
 
 /**
+ * Peels a LEADING token off a descriptor, but only when a real name is left.
+ *
+ * Peeling a first token has exactly one failure mode and it is silent: it eats
+ * the first word of a shop whose name legitimately begins with a short one.
+ * "ON TECHNOLOGIES FZ LLC", "AT TWENTY TWO HOUSE", "Z LOUNGE FZC", "AL BORJ
+ * HOUES HOLD TR" and "DU" are all real merchants from this corpus, and none of
+ * them may lose a word.
+ *
+ * Two things keep that safe. Every pattern passed in here is either separated
+ * by a STAR — which no shop name contains, it is the acquirer's own field
+ * separator — or is a literal acquirer code; and the peel is DISCARDED unless
+ * at least four letters survive it, so a short name can never be peeled down
+ * to a fragment.
+ */
+function peelPrefix(name: string, re: RegExp): string {
+  const peeled = name.replace(re, '').trim();
+  if (peeled === name) return name;
+  return (peeled.match(/[A-Za-z]/g) ?? []).length >= 4 ? peeled : name;
+}
+
+/**
  * Strips the noise an acquirer wraps around a merchant name.
  *
  * The descriptor is a fixed-width field, so the city is regularly glued
@@ -1321,10 +1553,34 @@ function cleanDescriptor(name: string): string {
     // Google bills through a help URL, not a location: "GOOGLE*FINART AI EXPE
     // G.CO/HELPPAY#CA US".
     .replace(/\s+G\.CO\/\S+(?:\s+[A-Za-z]{2,3})?$/i, '')
+    // A branch code is the acquirer's, not the shop's: "CITY LIFE PHY BR5-1303"
+    // is one pharmacy chain, and with the code left on, every branch of it was
+    // a separate merchant that no override could ever cover.
+    .replace(/[-\s]+BR\s?\d{1,4}(?:[-\s]\d{1,6})?$/i, '')
     .replace(TERMINAL_ID_RE, '') // "BLOOMFIELD TREAT-····5814"
-    .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '') // "MUZZ LTD +····1111"
+    // Country BEFORE phone, because the acquirer prints them in that order and
+    // a single pass the other way round left both: "SP TODD SNYDER +····0068
+    // USA" kept its phone number, and a phone number in a merchant name splits
+    // one shop into one merchant per branch that answered.
     .replace(/[-\s]*\b(?:AE|ARE|UAE|BH|BHR|SA|KSA|US|USA|GB|IN)$/i, '')
+    .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '') // "MUZZ LTD +····1111"
     .trim();
+  // The gateway's own name, then its field separator, then the shop's:
+  // "FAT*THE VIOLE" is The Viole — and the SAME purchase arrives again as the
+  // plain descriptor "THE VIOLE", so leaving the prefix on files one shop
+  // under two names. Deliberately generic: the star is the separator every
+  // acquirer uses, and listing gateways one at a time never caught up.
+  out = peelPrefix(out, /^[A-Za-z0-9][A-Za-z0-9.\-& ]{0,14}\*\s*/);
+  // "SP ALL-CHARMS", "SP LUETTI 1980", "SP TODD SNYDER" — one acquirer's
+  // literal prefix, UPPER-CASE only so a mixed-case name starting with "Sp"
+  // is left alone. "2C2P" is the Thai gateway behind WWW.2C2P.COM*2C2P BOLT.
+  out = peelPrefix(out, /^SP\s+/);
+  out = peelPrefix(out, /^2C2P\s+/i);
+  // Terminal id in FRONT of the name: "D586-TEXAS RHOUSE", "PZD131 CENTRAL
+  // PHUKET", "DB267 FO SHARJAH CORNI". Three letters at most and three digits
+  // at least, which is the shape of a terminal id and not of a shop ("H2O",
+  // "A2Z", "7-11" and "SHOP24" all fail it).
+  out = peelPrefix(out, /^[A-Za-z]{1,3}\d{3,6}[-\s]\s*/);
   // Peel repeatedly: "TGI FRIDAYS DUBADUBAI" carries two. Never peel a name
   // down to nothing — a shop really can be called Dubai something.
   let prev = '';
@@ -1433,27 +1689,49 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // truncate the descriptor to 20-22 characters, so several of these
   // deliberately match the stub the bank sends ("CATERIN", "GOVERNMEN",
   // "NATIONAL PAR") rather than the merchant's full legal name.
-  [/caribou|caffe\s*nero|\bpeets?\b|tgi\s*fridays?|\btgif\b|cinnabon|cravia|bakemart|manazil al sham|al bait al shami|qalat trablus|alfatayir|aldumashqi|raydan|sultan saray|koshari|cookie dealer|malfoof|flurya|little neighborhood|friends\s?avenue|friendsavenue|caterin|chocolala|rabbash|arwa cake|cake n more|roti bhai|al tarbouch|buffalo\s+(?:jumeira|mirdif|wings)|cheese\s?cake|widerange fish|25 hours f and b|bloomfield treat|point seven|\bhutong\b|al baar wa al bahr|casa pons|al bahar al mutawasit|thai corner|golden city/i, 'dining'],
-  [/hyper\s?ramez|lavender al madina|mark and save|fresh good day|almed retail|\btops-patong\b|dubai refreshment/i, 'groceries'],
+  //
+  // `texas r(oad)?house` matches BOTH renderings the acquirer sends — the full
+  // name and the "TEXAS RHOUSE" stub. Bare `texas` is NOT here: it is a US
+  // state, so it is the CITY field on any card used in Texas, and guessCategory
+  // reads the whole message.
+  [/caribou|caffe\s*nero|\bpeets?\b|tgi\s*fridays?|\btgif\b|cinnabon|cravia|bakemart|manazil al sham|al bait al shami|qalat trablus|alfatayir|aldumashqi|raydan|sultan saray|koshari|cookie dealer|malfoof|flurya|little neighborhood|friends\s?avenue|friendsavenue|caterin|chocolala|rabbash|arwa cake|cake n more|roti bhai|al tarbouch|buffalo\s+(?:jumeira|mirdif|wings)|cheese\s?cake|widerange fish|25 hours f and b|bloomfield treat|point seven|\bhutong\b|al baar wa al bahr|casa pons|al bahar al mutawasit|thai corner|golden city|\bgazebo\b|fujiyama|texas ?r(?:oad)?house|texas ?chicken/i, 'dining'],
+  [/hyper\s?ramez|lavender al madina|mark and save|fresh good day|almed retail|\btops-patong\b|dubai refreshment|falcon ?pack/i, 'groceries'],
   [/max fashion|\bmax\b(?!imum|\s*(?:limit|amount))|new yorker|lefties|la senza|victoria\s?s secret|\bkoton\b|ardene|lovisa|\blevis\b|\bcider\b|mumuso|whsmith|rivoli|malabar gold|l'?oreal|stradivarius|genzy trendz|nice style|honeylove|globale/i, 'shopping'],
   [/alphamed|wellfit|pilates|\bwatsons?\b|oriana|al khabeer al awal/i, 'health'],
-  [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b|valtrans|\bcar\s*par\b|golden bay car|yellow line car|smart green line car/i, 'transport'],
+  // `car par` was the acquirer's TRUNCATION of "car park", and written with a
+  // closing \b it matched only the truncation: "ISLAND PALACE CAR PARK", spelled
+  // out in full, fell through every rule into Other. The optional tail covers
+  // park/parks/parking as well as the stub.
+  [/\blime\s*\*|\blime\s*(?:ride|auth|temp)\b|valtrans|\bcar\s*par(?:k\w*)?\b|golden bay car|yellow line car|smart green line car/i, 'transport'],
   // `fresha` came out of this list: it is a salon-booking platform, and it is
   // named in the personal-care rule below. Left here it would have kept every
   // haircut in Entertainment, since this rule runs first.
-  // `craft docs`, `google *domains` and `domains g.co` sit HERE, above the
-  // telecom rule, and the position is the point. Both real messages arrive on a
-  // CO-BRANDED card — "your Etisalat Card ending with 0000" — and guessCategory
-  // reads the whole body, so the card ISSUER's name decided the category and a
-  // domain renewal was filed as a phone bill. The shop is what was bought from;
-  // the plastic it was bought with is not.
-  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'entertainment'],
+  //
+  // This WAS one rule mixing leisure venues with software, all pointing at
+  // `entertainment`. It is now two rules at the same position, because the
+  // position is load-bearing and the categories are not the same thing: both
+  // the Craft Docs and the Google Domains messages arrive on a CO-BRANDED card
+  // — "your Etisalat Card ending with 0000" — and guessCategory reads the whole
+  // body, so the card ISSUER's name decided the category and a domain renewal
+  // was filed as a phone bill. The shop is what was bought from; the plastic it
+  // was bought with is not. Both halves must therefore stay ABOVE telecom.
+  [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village/i, 'entertainment'],
+  [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'software'],
   [/\bunigaz\b/i, 'utilities'],
   [/carrefour|lulu|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
   [/talabat|deliveroo|zomato|noon food|careem food|eateasy|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
-  [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bcar\s+rentals?\b|\brent-?\s?a-?\s?car\b|\bprkn\b|\bmetro\b|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility/i, 'transport'],
+  // `toll` carries a NEGATIVE LOOKAHEAD and it is not decoration: "call our
+  // toll free number 600 54 0000" is a footer on ordinary purchase alerts from
+  // several UAE banks, and a bare \btoll\b would have filed every one of them
+  // as transport. What the rule is actually for is the road toll itself —
+  // "deducted ... for VAT on toll transaction(s)", which is a Salik charge and
+  // belongs beside Salik.
+  [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bcar\s+rentals?\b|\brent-?\s?a-?\s?car\b|\bprkn\b|\bmetro\b|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility|cars\s?24|\bferr(?:y|ies)\b|\btolls?\b(?!\s*-?\s*free)/i, 'transport'],
   [/dewa|sewa|fewa|addc|aadc|empower|lootah|tabreed|btu\b|chilled water|electricity|water|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder|\bwater\b(?!\s*park)/i, 'utilities'],
-  [/etisalat|\be&(?![a-z])|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
+  // "out of credit call service" is Etisalat's own product name for the
+  // airtime overdraft a top-up settles; a bare "recharge" is deliberately NOT
+  // here, because Salik and nol are recharged too and those are transport.
+  [/etisalat|\be&(?![a-z])|eand\b|\bdu\b|virgin mobile|swyp|telecom|mobile recharge|out of credit call service|internet|five telecom|wifi|\btelephone\b|\blandline\b/i, 'telecom'],
   // Word-bounded, for the same reason `\b7-?11\b` is: guessCategory reads the
   // WHOLE message, and a bare "rent" is a substring of current, currently,
   // different, parent and rental agency. "AED 250.00 purchase at NOON ... is
@@ -1475,16 +1753,82 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/urbanclap|urban ?clap|justlife|just ?life|helpling|matic services|home ?maids?|maids? ?in ?minutes|cleantizer|clentizer|\bfixat\b|servicemarket|service ?market|hitches ?(?:&|and) ?glitches|\bserrurier\b|lock ?smith/i, 'home-services'],
   [/\bcleanin|\bcleaner|\blaundr|dry ?clean|\bironing\b|housekeep|house ?maid|maid ?service|pest ?control|handyman|\bplumb|\belectrician|\bac (?:service|repair|clean)|\bcarpent|\bmovers?\b|packers?(?: ?(?:&|and)? ?movers)?\b|deep ?clean|car ?wash|washmen/i, 'home-services'],
   [/fresha|\bglamb\b|\bnstyle\b|tips ?(?:&|and) ?toes|sisters? beauty|laura ?beauty|\bbeautyland\b|pastels? ?salon|\bzenora\b|the ?nail ?spa|qasr al zain/i, 'personal-care'],
-  [/\bsalo{1,2}n\b|\bbarber|\bspa\b|\bnails?\b|\bhair(?:cut|dress|\s?studio)|\bbeauty\b|\bgrooming\b|\bmassage\b|\bmani ?cure|\bpedi ?cure|\bwaxing\b|\bthreading\b|\btattoo\b|cosmetic ?(?:centre|center|clinic)/i, 'personal-care'],
-  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun ?& ?sand|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|house ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
-  [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic|insura\w*/i, 'health'],
+  // `hair(?:cut|dress|...)` spelled the word out, so the acquirer's 22-character
+  // truncation missed it: "HASSAN AL AZZEH HAIRDRE" is a barber and it read as
+  // Other. `\bhaird\w*` covers hairdress/hairdresser/hairdressing/HAIRDRE at
+  // once; the leading \b keeps it off "chair" and "mohair".
+  //
+  // `studio` is NOT here, and that is a decision rather than an omission. The
+  // corpus's "AL MAZOON STUDIO" is a ladies' salon, but a studio is a gym, a
+  // photographer, a yoga hall and a recording room just as often, and a wrong
+  // category is worse than none because the user cannot see that it is wrong.
+  // The compound `hair studio` below is safe and stays.
+  [/\bsalo{1,2}n\b|\bbarber|\bspa\b|\bnails?\b|\bhaird\w*|\bhair(?:cut|\s?studio)|\bbeauty\b|\bgrooming\b|\bmassage\b|\bmani ?cure|\bpedi ?cure|\bwaxing\b|\bthreading\b|\btattoo\b|cosmetic ?(?:centre|center|clinic)/i, 'personal-care'],
+  // TRANSLITERATED personal-care trade words — the twin of the `mataam` /
+  // `makhbaz` / `saydaliya` block further down, for the category that had none.
+  // These are TRANSLATIONS, not guesses about particular shops: hallaq is a
+  // barber (حلاق), mashghal is a ladies' salon-workshop (مشغل), tajmeel is
+  // beauty/cosmetics (تجميل). All three are already in the Arabic-script table
+  // in markets.ts; this is the same vocabulary spelled the way an acquirer
+  // prints it in Latin letters.
+  //
+  // `jamal` (جمال, beauty) is deliberately absent: it is also one of the
+  // commonest men's names in the Gulf, so "JAMAL TRADING LLC" — a shop selling
+  // anything at all — would have become a salon.
+  [/\bhall?aq\w*|\bhilaqa\b|\bmashghal\b|\bmashgal\b|\btajmeel\b|\btajmil\b/i, 'personal-care'],
+  // Three edits worth naming, because each one is a class rather than a shop:
+  //
+  // 1. `sun ?& ?sand` was written with the AMPERSAND only, and the acquirer
+  //    spells it out: "SUN AND SAND SPORTS LLC" and "SUN AND SANDS SPORTS SHJ"
+  //    both read as Other while the brand sat in this list the whole time.
+  // 2. `house ?hold` now tolerates the transposition the descriptor actually
+  //    carries — "AL BORJ HOUES HOLD TR". A typo'd descriptor must land where
+  //    its correctly-spelled twin lands, or one chain becomes two categories.
+  // 3. `[a-z]+cart` is the e-commerce naming convention (Cococart, Instacart),
+  //    and the required prefix is what makes it safe: a BARE "cart" is a word
+  //    in ordinary prose, "…cart" as one token is a storefront.
+  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun\s*(?:&|and)\s*sands?\b|todd ?snyder|\b[a-z]+cart\b|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|hou[es]{2} ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
+  // `\bphy\b` is the acquirer's abbreviation for a pharmacy — "CITY LIFE PHY
+  // BR5-1303" — and it doubles as the stub of "physiotherapy". Both are health,
+  // which is why one short token is safe here and would not be anywhere else.
+  [/pharmacy|phcy|life pharm|bin sina|boots\b|supercare|clinic|hospital|aster|medcare|\bnmc\b|mediclinic|saudi german|burjeel|zulekha|prime medical|dental|medical|medic\b|polyclinic|physio|optic|vision|lab\b|diagnostic|x-?ray|derma|vet\b|veterinar|sukoon|\bdaman\b|\baxa\b|insuran|\bins\b|wathba|gym\b|fitness|classpass|padel|phar\b|\bphy\b|pharma|sports? club|fit body|be ?fit\b|bodybuilding|\bseha\b|patient portal|bioniq|supplement|dietary supp|nutrition|ole for sports|sports? ?(?:playgr|ground|centre|center|complex|academy|arena|hall)|football|futsal|tennis|basketball|swimming|athletic|insura\w*/i, 'health'],
   [/school|university|college|tuition|academy|nursery|kindergarten|\bgems\b|taaleem|kumon|udemy|coursera|coursra|skillshare|training (?:center|centre)|institute/i, 'education'],
-  [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport companion|dayuse|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight|daypass/i, 'travel'],
-  [/playstation|\bpsn\b|xbox|steam|nintendo|app store|google play|itunes|apple\.com|you\s*tube|national park|cinema|vox\b|reel\b|novo\b|roxy\b|imax|netflix|spotify|anghami|shahid|osn\b|starz|game\b|gaming|arcade|bowling|magic planet|kidzania|global village|ferrari world|yas island|img world|wild wadi|aquaventure|dubai parks|adventure|entertainment|theme park|water ?park|playground|palyground|ball talent|openai|chat\s*gpt|anthropic|\bclaude\b|alldebrid|real-?debrid|getresponse|domain\.com|godaddy|namecheap|hostinger|\bhosting\b|museum|prison island|x ?strike|billiard|\bgolf\b|shooting|leisure|theentertainer|little fox|g2a\b|cdkeys|oculus|stadia|al futtaim cin|\bcin\b|bounce\b/i, 'entertainment'],
+  [/emirates(?!\s*(?:nbd|islamic|coop))|flydubai|etihad|air arabia|airline|airways|\bhotel\b|rotana|marriott|hilton|hyatt|radisson|movenpick|sheraton|ibis\b|novotel|booking|airbnb|agoda|expedia|almosafer|musafir|wego\b|cleartrip|wizz|visa fee|travel|resort|oberoi|chedi|meridien|fairmont|loungekey|dragonpass|airport ?(?:companion|lounge)|dayuse|trip\.?\s?(?:dot ?)?com|viator|makemytrip|airasia|hoteltonight|daypass/i, 'travel'],
+  // Moved OUT of this rule and into the `software` one below: openai, chatgpt,
+  // anthropic, claude, getresponse, domain.com, godaddy, namecheap, hostinger
+  // and `hosting`. A domain renewal and a cinema ticket are not one habit.
+  // `alldebrid` / `real-debrid` stay, because those are download and streaming
+  // services, not tools.
+  //
+  // `playgrou\w*` replaces the spelled-out `playground`: "ARD AL MALAIEB
+  // PLAYGROU" is the acquirer's truncation, and `malaeb`/`malaieb` is ملاعب,
+  // "pitches" — the transliterated word for the same thing.
+  //
+  // `abu dhabi media` is written out in full ON PURPOSE. A bare `media` would
+  // have caught "DUBAI MEDIA C" — Dubai Media CITY, the free zone, which is the
+  // CITY field on a real software purchase in this corpus, so the rule would
+  // have filed a SaaS charge as a broadcaster.
+  [/playstation|\bpsn\b|xbox|steam|nintendo|app store|google play|itunes|apple\.com|you\s*tube|national park|cinema|vox\b|reel\b|novo\b|roxy\b|imax|netflix|spotify|anghami|shahid|osn\b|starz|game\b|gaming|arcade|bowling|magic planet|kidzania|global village|ferrari world|yas island|img world|wild wadi|aquaventure|dubai parks|adventure|entertainment|theme park|water ?park|pla[yi]?grou\w*|palygrou\w*|\bmalaeb\b|\bmalaieb\b|ball talent|alldebrid|real-?debrid|\bmuzz\b|pm connect|tod\.?\s?tv|abu ?dhabi ?media|museum|prison island|x ?strike|billiard|\bgolf\b|shooting|leisure|theentertainer|little fox|g2a\b|cdkeys|oculus|stadia|al futtaim cin|\bcin\b|bounce\b/i, 'entertainment'],
   [/donat|charity|zakat|sadaqah|dubai cares|red crescent|beit al khair|dar al ber|gofundme/i, 'charity'],
-  // Developer and AI tooling billed per seat — a whole spending family the
-  // vocabulary had no entry for, so every one of them landed in "other".
-  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|\bmuzz\b|pm connect/i, 'entertainment'],
+  // Developer and AI tooling billed per seat. This rule already existed and
+  // already carried a comment saying it was "a whole spending family the
+  // vocabulary had no entry for" — it pointed at `entertainment` because that
+  // was the closest thing available, not because anyone thought Vercel was
+  // entertainment. It now points at the category it always meant.
+  //
+  // Two came OUT while relabelling, because they are content and not tools:
+  // `muzz` (a dating app) and `pm connect` (a mobile-content biller) are on the
+  // entertainment rule above.
+  //
+  // BRAND entries added from the accuracy corpus: pandadoc, copy.ai, hopper hq
+  // and YAMM. The last one is worth naming — the report lists "YAMM.COM" under
+  // entertainment and "YET ANOTHER MAIL MERGE" under software, and they are the
+  // same Gmail add-on under two descriptors, which is precisely the kind of
+  // split one canonical rule exists to close.
+  //
+  // `hopper hq` is spelled with its suffix ON PURPOSE: bare `hopper` is the
+  // flight-booking app, which is travel.
+  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|openai|chat\s*gpt|anthropic|\bclaude\b|getresponse|domain\.com|godaddy|hostinger|\bhosting\b|pandadoc|copy\.?ai|hopper ?hq|yamm\.com|yet another mail merge|\bmail ?merge\b/i, 'software'],
   // Leisure venues and cinema distributors. Deliberately no district names
   // here — "City Walk" appears in the descriptor of every shop and cafe in
   // it, and matching it sent a coffee roastery to entertainment.
@@ -1513,11 +1857,28 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/\bsaydal\w*|\bsaidal\w*|\bsydal\w*/i, 'health'],
   // AliPay / WeChat descriptors are marketplace purchases.
   [/\balp\*|weixin\*|taobao|otherretail|guangdong|personalservices/i, 'shopping'],
-  // Brokerages and crypto on-ramps are moving money, not spending it.
-  [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds/i, 'other'],
+  // Brokerages, crypto on-ramps and savings certificates. This rule used to
+  // point at `other`, with the comment "moving money, not spending it", and
+  // that reading is still correct — what changed is that `other` was the wrong
+  // way to say it. `other` is ALSO what the parser returns when it understood
+  // nothing, and on screen the two are one word: a real export showed thirty-odd
+  // eToro and Capital.com rows that the user could only read as "the app does
+  // not know what this is". A named category says the same thing out loud, and
+  // it groups, which "other" can never do.
+  //
+  // `iqoption` and `vibed.inc` are new from the accuracy corpus. Bare `cro`
+  // (crypto.com's token, and how one descriptor arrives) is deliberately NOT
+  // here — three letters with no context would fire inside far too much, and
+  // `crypto.com` already claims that merchant by name.
+  [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds|iqoption|vibed\.inc/i, 'investing'],
   // Government sits AFTER transport/utilities so traffic fines, RTA and SEWA
   // keep their more specific buckets.
-  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bded\b|governmen|muncipal|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco/i, 'government'],
+  //
+  // `economic depart` only ever matched one word order, and the descriptor in
+  // the corpus is the other one — "DEPARTMENT OF ECONOMIC". `department(s) of`
+  // generalises it: in a UAE card descriptor that phrase is a government body,
+  // and requiring the "of" is what keeps it off a DEPARTMENT STORE.
+  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bdep(?:t|artment)s?\s+of\b|\bded\b|governmen|muncipal|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco/i, 'government'],
   [/salary|payroll|wages/i, 'salary'],
   // ── acquirer prefixes ──
   //
@@ -1530,6 +1891,14 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // would otherwise call this AED 4.00 an in-app purchase. `other` here is an
   // ANSWER — the row is understood — so it must not read as an unread format.
   [/\bwallet\s*temp\b/i, 'other'],
+  // The BANK'S OWN subscription fee, charged to the user's own card ("has been
+  // charged AED 24.90 for Liv. Prime"). Like `wallet temp`, `other` here is an
+  // ANSWER and not a shrug: the app has no `fees` category, and inventing one
+  // for a single product would be a bigger claim than this evidence supports.
+  // What the rule buys is that the row stops being reported as an unread
+  // format — the parser understood it perfectly, there is just nothing else
+  // truthful to call it.
+  [/\bliv\.? ?prime\b/i, 'other'],
   // Google bills the Play Store and in-app purchases through this prefix.
   [/google\s*\*/i, 'entertainment'],
   // A PayPal star is followed by the payee, and a payee means a purchase.
@@ -1557,7 +1926,13 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // صيدليه. A rule written the natural way can never fire.
   [/مطعم|مطاعم|مقهي|قهوه|كافيه|مخبز|مخابز|حلويات|شاورما|بيتزا|برجر|مشاوي|فطاير|عصير|عصاير|كافتيريا|ماكولات|وجبات|مطبخ|بوفيه|كنافه|فلافل|بروست|ايس كريم|ايسكريم|شوكولاته|طلبات|ديليفرو|ستاربكس|ماكدونالدز|كريم فود/i, 'dining'],
   [/بقاله|بقالات|سوبرماركت|هايبرماركت|هايبر|تموين|خضار|خضروات|فواكه|ثمار|لحوم|اسماك|دواجن|تمور|جمعيه تعاونيه|التعاونيه|كارفور|لولو|سبينيز/i, 'groceries'],
-  [/صيدليه|صيدليات|مستشفي|مستوصف|عياده|عيادات|طبي|مختبر|تحاليل|اسنان|بصريات|نظارات|مركز صحي|نادي رياضي|لياقه/i, 'health'],
+  // "طبي" (medical) is BOUNDED, and that boundary is load-bearing: Arabic
+  // letters are not `\w`, so an unanchored طبي matches inside تطبيق —
+  // "application". Etisalat's own Arabic payment receipt says it paid through
+  // "تطبيق إتصالات" (the Etisalat app), and 29 real telecom bills in this
+  // corpus were filed as HEALTH by that one substring. The article and the
+  // feminine/plural endings are spelled out so الطبية and طبيب still match.
+  [/صيدليه|صيدليات|مستشفي|مستوصف|عياده|عيادات|(?:^|[^ء-ي])(?:ال)?طبي(?:ه|ات|ب|به|بات|ين)?(?![ء-ي])|مختبر|تحاليل|اسنان|بصريات|نظارات|مركز صحي|نادي رياضي|لياقه/i, 'health'],
   // "كريم" is both Careem and the word for cream, exactly like the English
   // careem/ice-cream collision the rule above already guards — hence the
   // explicit letter boundaries, since \b is meaningless here.
@@ -1580,7 +1955,19 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // ("Debit Card ending 4711") filed the row as groceries. `\b7-?11\b` cannot
   // match inside 4711 — the 4|7 junction is not a word boundary.
   [/hypermarket|supermarket|superm\w*|hyperm\w*|mini ?mart?\b|\bmart\b|grocer|baqala|coop\b|co-?op|vegetables|\bfruits?\b|butcher|fish market|meat\b|roastery|adnoc oasis|zoom\b|\b7-?11\b|\b7-?eleven\b|circle k|last chance|day to day|gala\b|west zone|foodstuff|tawfeer|tawpeek|vending|\bmarket\b|\bsupe\w*\b|sprmkt|spmkt|\bsprm\b|\bsmkt\b|now ?now|\bviva\b|smart seven|mazraat|janata|aswaaq|plus point|\bspices?\b|\bdates? (?:llc|tr|trading)\b|\bgro\b|\bgroc\b|\bhymkt\b|hypermkt|\bfoodstuff|nuts? (?:tr|llc)\b|\bbakala|dairy|\bmeats?\b/i, 'groceries'],
-  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b/i, 'dining'],
+  // Three additions here rather than on a brand rule, because each is what the
+  // place IS and the position is what makes them safe — every brand rule above
+  // has already had its turn.
+  //
+  // `\bfoo\b` is the acquirer's truncation of FOOD ("AL WHAH INTERNATIONAL
+  // FOO"), the same class as CATERIN and GOVERNMEN elsewhere in this table.
+  // `\blebanan\b` is لبنان beside the `lebanese`/`libnan` already here.
+  // `\blounge\b` is the one to watch: an AIRPORT lounge is travel, not dining,
+  // and the travel rule above is what keeps it — `loungekey`, `dragonpass`,
+  // `airport companion` and now `airport lounge` are all claimed there first.
+  // Hotel and shisha lounges, which is what is left by the time control
+  // reaches this line, are meals.
+  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\blebanan\b|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b|\bfoo\b|\blounge\b/i, 'dining'],
   // "Centre" sits here, in the structural fallbacks, rather than with the
   // brands: a medical centre is health and a car centre is transport, and both
   // of those rules run earlier. By the time anything reaches this line, the
@@ -1704,6 +2091,11 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/apple\.com|apple\s*services|itunes/i, 'Apple'],
   [/icloud/i, 'iCloud'],
   [/amazon\s*prime|prime\s*video/i, 'Amazon Prime'],
+  // AFTER Amazon Prime, so the subscription keeps its own name. "AMZ*" is
+  // Amazon Pay acting as the acquirer for someone else's checkout
+  // ("AMZ*Centraldereservasc") — the money still went to Amazon, and the
+  // gibberish sub-merchant reference is not a name anyone can recognise.
+  [/\bamz\s*\*|\bamzn\b|\bamazon\b/i, 'Amazon'],
   [/disney/i, 'Disney+'],
   [/anghami/i, 'Anghami'],
   [/shahid/i, 'Shahid'],
@@ -1770,6 +2162,19 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/pixocial/i, 'Pixocial'],
   [/honeylove/i, 'HoneyLove'],
   [/playstation\s*plus|psn\s*plus/i, 'PlayStation Plus'],
+  // The acquirer truncates to a fixed width and abbreviates, so one shop
+  // arrives under several spellings. Canonicalising is what lets a merchant
+  // override, a category and a subscription cover all of them at once.
+  [/texas\s*r(?:oad)?house/i, 'Texas Roadhouse'],
+  // "PHY" is the pharmacy, abbreviated: without the canonical name the row
+  // read "City Life Phy Br5" and no health rule could see a pharmacy in it.
+  [/city\s*life\s*ph(?:y|cy|arm)/i, 'City Life Pharmacy'],
+  // "Simplex_Elastum, s@simplex.com" — the processor names itself twice, once
+  // before the underscore and once in the support address.
+  // Not `\b`: the underscore in "Simplex_Elastum" IS a word character, so a
+  // word boundary never happens there and the rule could not fire on the one
+  // descriptor it exists for.
+  [/(?:^|[^A-Za-z])simplex(?![A-Za-z])/i, 'Simplex'],
 ];
 
 /**
@@ -1792,6 +2197,7 @@ export const STRUCTURAL_TITLES = new Set([
   'Account debit',
   'Telegraphic transfer',
   'Outward remittance',
+  'Mobile recharge',
 ]);
 
 /** Clean descriptor noise and map to a canonical service name when known. */
@@ -1899,6 +2305,12 @@ function extractMerchant(raw: string, re: RegExp): string {
     if (/^(?:the|this|that|your|our|an?|and|for|to|date)$/i.test(candidate)) continue;
     if (/^\d+\s+(?:month|day|week|year|hr|hour|min)/i.test(candidate)) continue; // "up to 12 months"
     if (/^acc[\s/]|^a\/?c\b|^cr\.?\s*card/i.test(candidate)) continue; // "from Acc/Cr.Card ..."
+    // "your funds transfer request of AED 4,070.80 to IBAN/Account/Card
+    // XXXX8575" — the destination LABEL, not a payee. Thirty-six real
+    // transfers in this corpus were filed against a merchant called "Iban/".
+    // A transfer to an IBAN names nobody, and the structural title is the
+    // honest answer (see the "Outgoing transfer" branch in parseSms).
+    if (/^iban\b/i.test(candidate)) continue;
     if (/^(?:aed|dhs|sar|usd|eur|gbp)\b/i.test(candidate)) continue;
     if (/^www\.?$/i.test(candidate)) continue; // "at WWW.GRAB.COM" stops at the dot
     // Marketing sentences hide behind the same "to"/"for" the merchant uses:
@@ -1906,7 +2318,11 @@ function extractMerchant(raw: string, re: RegExp): string {
     // titled "View Your Statement" and "Avoid Charges" were the result.
     // A descriptor never opens with an imperative or names the reader.
     if (
-      /^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt)\b/i.test(
+      // "settle" earns its place from a real telecom receipt: "AED 1.57 of you
+      // last recharge have been used to settle the Out of Credit Call Service
+      // Balance" was filed against a merchant named "Settle The Out Of Credit
+      // Call Service". An infinitive of purpose after "to" is never a payee.
+      /^(?:avoid|view|check|see|click|visit|call|contact|update|verify|confirm|download|enjoy|get|earn|save|know|learn|read|use|pay|settle|activate|renew|register|apply|explore|discover|manage|track|start|join|book|order|shop|win|claim|reply|dial|send|scan|switch|upgrade|unlock|redeem|collect|refer|share|follow|subscribe|opt)\b/i.test(
         candidate,
       )
     ) {
@@ -2204,7 +2620,7 @@ function extractCard(raw: string, bank?: BankProfile | null): ParsedCard | null 
     if (arCard) {
       const kindWord = arCard[1] ?? '';
       const kind =
-        kindWord.startsWith(AR_CARD_KIND) || (!kindWord && raw.includes(AR_CARD_KIND))
+        kindWord.includes(AR_CARD_KIND) || (!kindWord && raw.includes(AR_CARD_KIND))
           ? 'credit'
           : 'debit';
       return { last4: arCard[2], kind };
@@ -2322,6 +2738,13 @@ function extractDueDate(raw: string): string | null {
     const iso = namedDate(byNamed[1], byNamed[2], byNamed[3]);
     if (iso) return iso;
   }
+  // "Pymt due 2022-06-06" — the abbreviated block's deadline. Last, because
+  // the phrases above are more specific claims about which date is the due one.
+  const isoDue = raw.match(/\bdue\b[^\d\n]{0,24}(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/i);
+  if (isoDue) {
+    const iso = isoDate(Number(isoDue[1]), Number(isoDue[2]), Number(isoDue[3]));
+    if (iso) return iso;
+  }
   return null;
 }
 
@@ -2360,6 +2783,11 @@ function extractDate(raw: string): string | null {
   const hsbc = raw.match(HSBC_DATE_RE);
   if (hsbc) {
     const iso = namedDate(hsbc[2], hsbc[1], String(2000 + Number(hsbc[3])));
+    if (iso) return iso;
+  }
+  const isoOrder = raw.match(ISO_DATE_RE);
+  if (isoOrder) {
+    const iso = isoDate(Number(isoOrder[1]), Number(isoOrder[2]), Number(isoOrder[3]));
     if (iso) return iso;
   }
   const numeric = raw.match(DATE_RE);
@@ -2421,6 +2849,14 @@ export function parseSms(
   const card = extractCard(raw, bank);
 
   if (OTP_RE.test(raw)) return null;
+  // A CODE CHALLENGE WITH A COUNTDOWN IS NOT A PURCHASE — and the purchase it
+  // is challenging arrives afterwards as its own SMS, so importing it
+  // DOUBLE-COUNTS every online card payment. Tested here, ahead of
+  // hasPostedEvidence, because the challenge quotes the amount, the merchant
+  // AND the card: there is no evidence gate it would not pass. The countdown
+  // is the proof that the code is still unused. See CODE_CHALLENGE_QUOTED_RE
+  // for why "authorisation code" alone must never suppress on its own.
+  if (CODE_CHALLENGE_QUOTED_RE.test(raw) && CODE_VALIDITY_WINDOW_RE.test(raw)) return null;
   // Read once: this is what every boilerplate-shaped suppression rule below
   // has to beat before it may delete a message.
   const posted = hasPostedEvidence(raw, card);
@@ -2692,20 +3128,38 @@ export function parseSms(
   // "Amount Paid" is the figure that moved; "Amount Due" only happens to equal
   // it when the bill was settled in full. Naming the account beats the generic
   // fallback, and the labelled lines are not a merchant descriptor.
-  const portalPay = raw.match(
-    /payment\s+to\s+(?:the\s+)?account\s+(?:number|no\.?)\s*[·•X*]*(\d{4,})[\s\S]*?amount\s+paid\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i,
-  );
+  //
+  // ONE rule for both languages, because it is one biller sending one receipt
+  // in whichever language the customer chose. The Arabic half — 56 messages
+  // across five families in this corpus, the largest unread group in it —
+  // states the same three things in the same order: لحساب رقم (to account
+  // number), المبلغ المستحق (amount due), المبلغ المدفوع (amount PAID). It
+  // fell through to the generic card path and arrived as "Card purchase",
+  // with its amount taken from whichever figure came first rather than from
+  // the label — which is right only for as long as the bill happens to be
+  // settled in full. A PARTIAL payment would have recorded the amount DUE.
+  const portalPay = raw.match(PORTAL_RECEIPT_RE);
   if (portalPay) {
     // Last four, not first four: an unmasked account number would otherwise
     // label the row with its leading digits.
     const last4 = portalPay[1].slice(-4);
     const amountFils = Math.round(Number(portalPay[2].replace(/,/g, '')) * 100);
+    // The biller names ITSELF in the channel line — "Payment Channel: Etisalat
+    // Mobile App", "تم الدفع عن طريق: تطبيق إتصالات للهواتف الذكية" — and that
+    // name is worth more than an account fragment: it is what groups this
+    // month's bill with last month's, and what a merchant override or a
+    // subscription can key on. A channel naming no biller ("Bank Website",
+    // "Mode of Payment: Credit/Debit") keeps the account title, because
+    // inventing a payee is the failure this whole file is built to avoid.
+    const channel = raw.match(PORTAL_CHANNEL_RE)?.[1] ?? '';
+    const biller = channel ? (RECEIPT_BILLERS.find(([re]) => re.test(channel))?.[1] ?? null) : null;
+    const merchant = biller ?? `Payment to •${last4}`;
     if (amountFils > 0) {
       return {
         kind: 'transaction',
         type: 'expense',
         amountFils,
-        merchant: `Payment to •${last4}`,
+        merchant,
         date,
         dueDay: null,
         minDueFils: null,
@@ -2713,7 +3167,7 @@ export function parseSms(
         transferHint: false,
         snapshotFils,
         snapshotKind,
-        categoryGuess: guessCategory(raw, 'expense', overrides, `Payment to \u2022${last4}`),
+        categoryGuess: guessCategory(raw, 'expense', overrides, merchant),
         currency,
         reference,
         raw: source,
@@ -2935,6 +3389,12 @@ export function parseSms(
   /** The descriptor before cleanup — ".com" survives here, so Capital.com and
    *  Name.com can still be recognised as the services they are. */
   let descriptor = '';
+  /**
+   * The body the PAYEE grammar reads: the same text with the bank's own
+   * call-centre footer blanked out. Length-preserving, so the Arabic path can
+   * still slice a name out of `clean` at these offsets.
+   */
+  const payeeText = blank(raw, CONTACT_FOOTER_RE);
   // English first in BOTH branches, always. On a bilingual body the two halves
   // name the same shop, and the Latin spelling is the one SERVICE_NAMES,
   // cleanDescriptor's acquirer heuristics, the merchant-override keys and
@@ -2942,14 +3402,18 @@ export function parseSms(
   // "CARREFOUR" is right there would fragment every one of them.
   if (isBillDue) {
     const billMatch = raw.match(BILL_MERCHANT_RE);
-    merchant = billMatch ? billMatch[1].trim() : extractMerchant(raw, MERCHANT_RE);
+    merchant = billMatch ? billMatch[1].trim() : extractMerchant(payeeText, MERCHANT_RE);
     if (!merchant) {
       const arBill = raw.match(AR_BILL_MERCHANT_RE);
-      merchant = arBill ? sliceUnfolded(clean, arBill) : extractArabicMerchant(raw, clean);
+      merchant = arBill ? sliceUnfolded(clean, arBill) : extractArabicMerchant(payeeText, clean);
     }
   } else {
-    merchant = extractMerchant(raw, MERCHANT_RE);
-    if (!merchant) merchant = extractArabicMerchant(raw, clean);
+    merchant = extractMerchant(payeeText, MERCHANT_RE);
+    if (!merchant) merchant = extractArabicMerchant(payeeText, clean);
+    if (!merchant) {
+      const gateway = raw.match(GATEWAY_URL_MERCHANT_RE);
+      if (gateway) merchant = gateway[1].trim();
+    }
     if (!merchant) {
       const paymentFor = raw.match(PAYMENT_FOR_RE);
       if (paymentFor) merchant = paymentFor[1].trim();
@@ -3040,7 +3504,15 @@ export function parseSms(
     } else if (/\btransfer\s+to\s+[A-Z]{2}[\dX·•]/i.test(raw)) {
       merchant = 'Bank transfer';
       structuralMerchant = true;
-    } else if (!merchant && /\bfund\s+transfer\b|\bfunds?\s+transferred\b/i.test(raw)) {
+    } else if (
+      !merchant &&
+      // "your funds transfer request of AED 4,070.80 to IBAN/Account/Card
+      // XXXX8575 has been processed" — this bank never writes "fund transfer"
+      // in the singular, and the request wording puts a word between the noun
+      // and the destination, so neither existing spelling matched. Thirty-six
+      // real transfers were counted as spending at a shop called "Iban/".
+      /\bfunds?\s+transfer\b|\bfunds?\s+transferred\b/i.test(raw)
+    ) {
       merchant = 'Outgoing transfer';
       structuralMerchant = true;
     }
@@ -3053,6 +3525,11 @@ export function parseSms(
       /\b(?:for|sent\s+to)\s+([A-Za-z][A-Za-z &.'\-]{2,40}?)\s*(?:[.,;]|\bon\b|\bas\s+per\b|\bthrough\b|$)/gi;
     for (const m of raw.matchAll(payeeRe)) {
       const candidate = m[1].trim();
+      // "…deducted from your account 1711 for VAT on toll transaction(s)
+      // during June 2026" — a tax is what the money WAS, not who received it,
+      // and the row arrived titled "Vat". The structural "VAT fee" title
+      // below says the same thing without inventing a payee.
+      if (/^vat\b|^value\s+added\s+tax\b/i.test(candidate)) continue;
       if (/^(?:aed|dhs|sar|usd|eur|gbp|your|the|payment|consumer|exact|pay\b|using|below)/i.test(candidate)) continue;
       if ((candidate.match(/[A-Za-z]/g) ?? []).length < 3) continue;
       merchant = candidate.replace(/\s+(?:PJSC|LLC|PSC|FZE)$/i, '').trim();
@@ -3080,9 +3557,15 @@ export function parseSms(
           ? 'Card payment'
           : ATM_RE.test(raw)
             ? 'ATM withdrawal'
+            : MOBILE_RECHARGE_RE.test(raw)
+            ? 'Mobile recharge'
             : /cheque|\bchq\b/i.test(raw)
               ? 'Cheque'
-              : /value\s+added\s+tax|\bvat\b\s*(?:@|¡)?\s*\d/i.test(raw)
+              // "for VAT on toll transaction(s) during June 2026" states the
+              // tax with no figure of its own beside it, so the "@5%" form
+              // could not see it and the row was titled "Vat" — a payee the
+              // government does not have.
+              : /value\s+added\s+tax|\bvat\b\s*(?:@|¡)?\s*\d|\bvat\s+on\b|\bfor\s+vat\b/i.test(raw)
                 ? 'VAT fee'
                 : FEE_RE.test(raw)
                   ? 'Bank fee'

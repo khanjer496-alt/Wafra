@@ -66,7 +66,15 @@ const ARABIC_KEYWORDS: [RegExp, CategoryId][] = [
   // shop kinds — the noun does the work
   [/مطعم|مطاعم|كافيه|مقهي|قهوه/, 'dining'],
   [/سوبرماركت|بقاله|تموين|هايبر|جمعيه/, 'groceries'],
-  [/صيدليه|مستشفي|مستوصف|عياده|طبي|طبيه|مختبر/, 'health'],
+  // "طبي" is BOUNDED, and the boundary is load-bearing: Arabic letters are not
+  // `\w`, so `\b` cannot express it and an unanchored طبي matches inside
+  // تطبيق — "application". Etisalat's Arabic payment receipt says it was paid
+  // through "تطبيق إتصالات" (the Etisalat app), and 29 real telecom bills in
+  // the accuracy corpus were filed as HEALTH by that one substring. This table
+  // is consulted BEFORE the parser's own, so fixing only that copy changed
+  // nothing. The article and the endings are spelled out so الطبية and طبيب
+  // still match.
+  [/صيدليه|مستشفي|مستوصف|عياده|(?:^|[^ء-ي])(?:ال)?طبي(?:ه|ات|ب|به|بات|ين)?(?![ء-ي])|مختبر/, 'health'],
   [/محطه|وقود|بنزين|مواقف|موقف/, 'transport'],
   [/كهرباء|مياه|ماء|غاز/, 'utilities'],
   [/اتصالات|جوال|هاتف|انترنت/, 'telecom'],

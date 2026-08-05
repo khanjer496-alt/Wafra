@@ -506,9 +506,15 @@ t('biller AutoPay receipt is skipped (bank side already counted)',
   'Dear Valued Customer, Payment of AED 351.35 on 15/04/2019 has been received and posted to your account no 5552906 Thank you for using AutoPay service.',
   null);
 
-t('ChatGPT via Google descriptor categorizes as entertainment',
+// CHANGED from `category: 'entertainment'`. What this test is FOR is unchanged
+// and still asserted: a Google-billed descriptor must resolve to the shop that
+// was bought from, not to the acquirer. The category moved because ChatGPT now
+// has a category of its own — the vocabulary rule it used to hit carried a
+// comment admitting `entertainment` was a placeholder for the whole developer
+// and AI tooling family.
+t('ChatGPT via Google descriptor categorizes as software',
   'Purchase of AED 76.99 with Debit Card ending 4733 at Google ChatGPT, 650-5550000. Avl Balance is AED 11,102.89.  Pls refer stmt for exact amt.',
-  { merchant: 'ChatGPT', category: 'entertainment' });
+  { merchant: 'ChatGPT', category: 'software' });
 
 t('grab.com purchase names Grab and categorizes transport',
   'Purchase of AED 16.92 with Debit Card ending 4744 at WWW.GRAB.COM, BANGKOK. Avl Balance is AED 26,306.05.  Pls refer stmt for exact amt.',
@@ -753,9 +759,12 @@ t('restaurant-tech processors are dining, not "other"',
   'Purchase of AED 313.95 with Debit Card ending 4733 at WWW GRUBTECH COM, DUBAI. Avl Balance is AED 36,326.96.',
   { merchant: 'Grubtech', category: 'dining' });
 
+// CHANGED from `category: 'entertainment'`. The name of this test was always
+// the claim — developer tooling has A HOME rather than falling to "other" —
+// and the home is now the right one instead of the nearest one.
 t('developer tooling has a home instead of falling to "other"',
   'Purchase of USD 20.00 with Debit Card ending 4733 at CURSOR, AI POWERED IDE, +9715504. Avl Balance is AED 13,933.26.',
-  { merchant: 'Cursor', category: 'entertainment' });
+  { merchant: 'Cursor', category: 'software' });
 
 // Direct-debit instalments to a bank are debt servicing, not "other".
 t('HSBC DDR instalment reads as a loan payment',
@@ -955,9 +964,19 @@ t('a Coursera hash is one merchant',
 t('a call-cost notice has not charged anything yet',
   'Last call cost is AED 1.57 (VAT included) for Out of Credit Call Service. Amount will be deducted from next recharge.',
   null);
-t('a biller portal receipt takes its category from the channel',
+// CHANGED, deliberately, from `merchant: 'Payment to •2543'`. The original
+// claim — that the CATEGORY comes from the channel line — is unchanged and
+// still asserted here. What is new is that the same line also names the
+// PAYEE, and an account fragment was never a name: "Payment to •2543" cannot
+// group with last month's Etisalat bill, cannot key a merchant override and
+// cannot become a subscription. A channel naming no biller still keeps the
+// account title — the control immediately below is that case.
+t('a biller portal receipt takes its merchant and category from the channel',
   'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App',
-  { merchant: 'Payment to \u20222543'.replace('\u2022', '\u2022'), category: 'telecom' });
+  { merchant: 'Etisalat', category: 'telecom' });
+t('a channel that names no biller keeps the account title',
+  'Dear Customer, Your payment to the account number \u00b7\u00b7\u00b7\u00b72543 has been processed.\nAmount Due: AED 408.45\nAmount Paid: AED 408.45\nRemaining Balance: AED 0\nTransaction Date: 2022-03-11\nPayment Channel: Bank Website\nCard Number: NA\nMode of Payment : Credit/Debit',
+  { merchant: 'Payment to \u20222543', amountFils: 40845, date: '2022-03-11' });
 
 // Third corpus, from the shipped build.
 t('Trip.com is travel, dot and all',
@@ -1010,7 +1029,9 @@ t('a sportswear retailer is still shopping', shop('SUN & SAND SPORTS', 'DUBAI'),
 t('majid al futtaim is retail', shop('MAJID AL FUTTAIM', 'DUBAI'), { category: 'shopping' });
 t('bioniq is supplements', shop('SP BIONIQ-GLOBAL', '+9715474'), { category: 'health' });
 t('a finance house instalment is a loan', shop('AAFAQ ISLAMIC FINANCE', 'DUBAI'), { category: 'loan' });
-t('fiverr matches even with a region suffix', shop('FiverrEU', 'Nicosia'), { category: 'entertainment' });
+// CHANGED from 'entertainment' with the rest of the tooling rule. The claim
+// under test is the SUFFIX tolerance, which is untouched.
+t('fiverr matches even with a region suffix', shop('FiverrEU', 'Nicosia'), { category: 'software' });
 
 // A district name in the descriptor must not decide the category: every shop
 // and cafe in City Walk carries it.
@@ -1090,9 +1111,12 @@ t('one merchant, three spellings, one name',
   'Purchase of AED 96.00 with Debit Card ending 4502 at URBANCLAP TECHNOLOGIES, DUBAI. Avl Balance is AED 258.91.',
   { merchant: 'UrbanClap', amountFils: 9600 });
 
+// CHANGED from 'entertainment': FinArt is an AI app and moved with the tooling
+// rule. The claim under test — that the help URL is not read as the location —
+// is asserted by the merchant and is untouched.
 t('Google bills through a help URL, not a location',
   'Debit Card Purchase\nCard XXXX5083\nAED 49.99\nGOOGLE*FINART AI EXPE G.CO/HELPPAY#CA US \n13/12/25 11:59 \nBalance AED 6576.11',
-  { merchant: 'Finart Ai Expe', amountFils: 4999, category: 'entertainment' });
+  { merchant: 'Finart Ai Expe', amountFils: 4999, category: 'software' });
 
 // A savings pot has a name, and the name is rarely the word "savings".
 t('a named savings pot is a transfer, not AED 7,000 of spending',
@@ -1785,6 +1809,116 @@ t('"NNNNNN is your verification code" is still an OTP',
   '458213 is your verification code for a purchase of AED 260.00 at NOON with Credit Card 4110.', null);
 t('"Use NNNNNN to complete" is still an OTP',
   'Use 458213 to complete your purchase of AED 260.00 at NOON.', null);
+
+// ── A CODE CHALLENGE WITH A COUNTDOWN IS NOT A PURCHASE ──
+//
+// The worst phantom in the real accuracy report: six confirmed messages, up to
+// AED 7,379.54 each, every one of them booked as spending. And they are not
+// isolated — the challenge is followed by the POSTING for the same purchase
+// (the report shows the pair: the AED 290.00 challenge at THE VIOLE, then
+// "Purchase of AED 290.00 ... at FAT*THE VIOLE"), so EVERY online card payment
+// this user made was counted twice.
+//
+// The discriminator is NOT the phrase "auth code" — that is also the acquirer's
+// approval reference on a posted alert, and listing it once deleted every
+// posting that quoted one (see the control block below, which is the older
+// regression this must not undo). The discriminator is that a challenge code
+// EXPIRES: it is quoted AND carries a validity window in minutes. An approval
+// reference is a receipt and never has a countdown on one.
+//
+// Digits are masked here the way the app's own export masks them; the shape,
+// which is what the parser matches on, is the real one.
+t('an auth-code challenge with a 5-minute window is not a purchase',
+  'DO NOT SHARE! The Auth code is 4606 for AED 272.00 at Next for card ending 1354. Use in 5 mins. If not requested call +971 600 50 0000',
+  null);
+t('...and the masked rendering the export produces is the same message',
+  'DO NOT SHARE! The Auth code is ····4606 for AED 272.00 at Next for card ending 1354. Use in 5 mins. If not requested call +971 600 50 0000',
+  null);
+t('...at AED 7,379.54, which is what a missed one costs',
+  'DO NOT SHARE! The Auth code is ····2427 for AED 7379.54 at AL AIN AHLIA for card ending 9190. Use in 5 mins. If not requested call +971 600 50 0000',
+  null);
+t('...and the AED 1.00 card-verification challenge',
+  'DO NOT SHARE! The Auth code is ····6159 for AED 1.00 at CPAY-CARD-AED-ADYEN for card ending 1354. Use in 5 mins. If not requested call +971 600 50 0000',
+  null);
+// The second issuer wording: the code is at the END, after the whole
+// transaction, and the window is its own sentence.
+t('a DoubleSecure auth code that expires in 5 minutes is not a purchase',
+  'Your DoubleSecure Auth Code for card ending 8783 at CPAY-CARD-AED of AED 1.00 is 5969. This code expires in 5 minutes. Do not share this code with anyone. If not requested, please contact +971 600 54 00 00',
+  null);
+t('...with a masked code and a real merchant behind it',
+  'Your DoubleSecure Auth Code for card ending 8783 at AL ANSARI EXCHANGE LLC of AED 258.00 is ····3957. This code expires in 5 minutes. Do not share this code with anyone. If not requested, please contact +971 600 54 00 00',
+  null);
+t('...and the XPOWERPLUS one',
+  'Your DoubleSecure Auth Code for card ending 8783 at XPOWERPLUS of AED 1.00 is ····6097. This code expires in 5 minutes. Do not share this code with anyone. If not requested, please contact +971 600 54 00 00',
+  null);
+// This one names itself an OTP and STILL fabricated AED 208: 92 characters of
+// transaction sit between the noun and its digits, which overran the
+// same-sentence gap OTP_RE allows.
+t('an OTP whose code is 90+ characters after the noun is still an OTP',
+  'Do not share your OTP with anyone. If not initiated by you, please call +971 600 50 2030. OTP for transaction at www landmarkgroup com for AED 208.00 on your ADCB Credit Card XXX7720 is ····6786. OTP valid for 10 minutes',
+  null);
+
+// CONTROLS — the approval reference on a POSTING keeps its money. Deleting
+// these is the exact regression that removing "authorisation code" from the
+// OTP vocabulary was meant to fix, so the suppression above is required to
+// need the countdown as well as the noun.
+t('an approval reference with no countdown is still a posting',
+  'AED 250.00 spent at NOON with Credit Card 4110. Auth code 123456.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon',
+    card: { last4: '4110', kind: 'credit' } });
+t('...spelled "Authorisation code", unlabelled and mid-message',
+  'Your card ending 1234 was used for AED 231.95 at BUSINESS HUB GOVERNMEN. Authorisation code 998877. Available limit AED 1659.58.',
+  { type: 'expense', amountFils: 23195, merchant: 'Business Hub Governmen' });
+t('...and a 30-DAY window is an offer footer, not a code countdown',
+  'AED 250.00 spent at NOON with Credit Card 4110. Authorisation code: 123456. Offer valid for 30 days.',
+  { type: 'expense', amountFils: 25000, merchant: 'Noon' });
+// A merchant whose NAME carries the vocabulary. The challenge rule reads a
+// quoted code and a countdown, neither of which a descriptor can supply.
+t('a purchase at a merchant named AUTH CODE CAFE is a purchase',
+  'Purchase of AED 75.00 with Debit Card ending 1234 at AUTH CODE CAFE, Dubai. Avl Balance is AED 883.43.',
+  { type: 'expense', amountFils: 7500, merchant: 'Auth Code Cafe' });
+t('...and one at AUTHENTIC KEBAB HOUSE',
+  'Purchase of AED 45.00 with Debit Card ending 1234 at AUTHENTIC KEBAB HOUSE, Dubai. Avl Balance is AED 883.43.',
+  { type: 'expense', amountFils: 4500, merchant: 'Authentic Kebab House' });
+// A validity window that belongs to the PURCHASE, under an OTP footer that
+// names no digits. Both halves of the conjunction have to be present.
+t('a footer naming the OTP beside an unrelated minutes window keeps the purchase',
+  'AED 20.00 spent at RTA PARKING with Debit Card 1234. Your parking ticket is valid for 60 minutes. Do not share your OTP with anyone.',
+  { type: 'expense', amountFils: 2000, merchant: 'RTA Parking' });
+t('...and one where the footer, a reference number and a window are all present',
+  'AED 89.50 spent at CARREFOUR using Debit Card 1234. Do not share your OTP with anyone. Ref: 123456. Offer valid for 30 minutes.',
+  { type: 'expense', amountFils: 8950, merchant: 'Carrefour' });
+// And the posting that arrives AFTER the challenge — the leg that must survive,
+// because suppressing the challenge is only correct if this one is kept.
+t('the posting the challenge was protecting is still imported',
+  'Purchase of AED 290.00 with Debit Card ending 1354 at FAT*THE VIOLE, Dubai. Avl Balance is AED 45,506.98.',
+  { kind: 'transaction', type: 'expense', amountFils: 29000,
+    card: { last4: '1354', kind: 'debit' } });
+
+// ── A LOYALTY RATE AND A QUALIFYING THRESHOLD ARE NOT AMOUNTS ──
+//
+// Real marketing from the same inbox, all booked as spending. The figure is a
+// conversion rate ("2 bonus TPs for every AED 1 spent") or the threshold you
+// must reach to qualify ("10X Shukrans on AED150 spent"). Note that "spent"
+// appears in the real postings above too, so the word cannot be the
+// discriminator — the grammar around the figure is.
+t('"for every AED 1 spent" is a rate, not a AED 1 purchase',
+  'Savour exquisite Indian delicacies at Gazebo and earn 2 bonus TPs for every AED 1 spent. Learn more at adcb.com/tpapp',
+  null);
+t('"on every AED 1 spent" is the same rate, on a card that is only named',
+  'In celebration of your birthday month, earn up to 50,000 extra FAB Rewards! Use your FAB credit card and get extra 2 FAB rewards on every AED 1 spent. To start earning, SMS BDAY to 2121. Conditions apply.',
+  null);
+t('"up to 10X Shukrans on AED150 spent" is a threshold, not AED 150 spent',
+  "Get up to 10X Shukrans on AED150 spent and 500 Bonus on 3 spends each of 150 AED till 19 Nov'23 in our 13th Anniversary.",
+  null);
+// CONTROLS — the same rewards wording stapled to a real card alert, and the
+// ordinary posting whose amount IS the subject of "spent".
+t('a rewards line on a real card charge does not delete the charge',
+  'Your Credit Card 4110 has been charged AED 24.90 for LIV PRIME. Earn 2 rewards for every AED 1 spent.',
+  { type: 'expense', amountFils: 2490, card: { last4: '4110', kind: 'credit' } });
+t('"AED 150.00 spent at ..." is a posting, not a threshold',
+  'AED 150.00 spent at CARREFOUR with Credit Card 4110. Avl Cr AED 5,000.00.',
+  { type: 'expense', amountFils: 15000, merchant: 'Carrefour', category: 'groceries' });
 
 // ── The fraud-reporting footer is not a decline ──
 // "If this was not authorised by you, please call ..." is stapled to POSTED
@@ -2888,7 +3022,10 @@ t('Mashreq puts the day first and drops the separators',
   { type: 'expense', amountFils: 8814, date: '2018-01-22',
     // The shop, not the plastic: this arrives on a CO-BRANDED Etisalat card,
     // and reading the issuer's name filed a domain renewal as a phone bill.
-    merchant: 'Google Domains', category: 'entertainment',
+    // CHANGED from 'entertainment' to 'software'. The claim is unchanged and is
+    // in fact sharper now — the co-branded issuer must not win, and the rule
+    // that beats it still sits above telecom, it just says `software`.
+    merchant: 'Google Domains', category: 'software',
     originalCurrency: 'USD', originalAmountMinor: 2400, fxSource: 'fallback',
     snapshotFils: 220733, snapshotKind: 'limit' });
 
@@ -3107,6 +3244,206 @@ t('a naturally-spelled Arabic pharmacy still classifies as health',
 t('a co-op (جمعية) is groceries',
   'شراء بمبلغ 90.00 درهم لدى جمعية الاتحاد من بطاقتك المنتهية 4833',
   { type: 'expense', amountFils: 9000, category: 'groceries' });
+
+// ══ A FOOTER, A LABEL AND A FORM FIELD ARE NOT THE PAYEE ══
+//
+// Every message in this block is a real family from a second user's inbox,
+// with the account fragments replaced by obviously-synthetic digits and the
+// masking left exactly as that phone's own export produced it. The shape is
+// what the parser matches on, so the shape is preserved verbatim.
+
+// 36 occurrences across six families. "IBAN/Account/Card XXXX8575" is the
+// DESTINATION LABEL — the bank's own words for "we are not telling you who" —
+// and it was being filed as a shop called "Iban/". A transfer to an IBAN names
+// nobody, so it takes the structural title and the transfer hint: money moving
+// between accounts is not this month's spending.
+t('a transfer to an IBAN has no merchant, only a destination label',
+  'Dear Customer, your funds transfer request of  AED 4,070.80 to IBAN/Account/Card XXXX5678  has been processed successfully from your account/card XXXX1234 on 16/04/2026 01:18',
+  { merchant: 'Outgoing transfer', amountFils: 407080, date: '2026-04-16', transfer: true });
+// 11 occurrences. The merchant grammar was reaching into the CALL-CENTRE
+// FOOTER: "from overseas)" is not a payee, it is the second half of "if
+// calling from overseas".
+t('the call-centre footer is not the payee',
+  'Dear Customer, your funds transfer request of AED 20,000.00 from account XXXX1234 to account XXXX5678 has been processed on 27/07/2026 19:01. For more information please call ····5500 (+····1511 if calling from overseas).',
+  { merchant: 'Outgoing transfer', amountFils: 2000000, date: '2026-07-27', transfer: true });
+// CONTROL: the same "from" still introduces a real merchant. The footer is
+// blanked, not the preposition.
+t('blanking the footer does not blank a real merchant clause',
+  'From HSBC: 24JUN25 DUBAI INTEGRATED ECO Purchase from 041-340***-001 AED 10.00- by Card Ending with 6737. For more information please call ····5500 (+····1511 if calling from overseas).',
+  { merchant: 'Dubai Integrated Economic Zones' });
+// CONTROL: a merchant whose name really does contain the word.
+t('an overseas-named shop is still a shop',
+  'Purchase of AED 65.00 with Debit Card ending 1234 at OVERSEAS EXPRESS CARGO, Dubai. Avl Balance is AED 500.00.',
+  { merchant: 'Overseas Express Cargo' });
+
+// A tax is what the money WAS, not who received it.
+t('VAT on toll charges is a VAT fee, not a shop called Vat',
+  'AED 15.70 has been deducted from your account ····1711 for VAT on toll transaction(s) during June 2026. Your current account balance is AED 146.80.',
+  { merchant: 'VAT fee', amountFils: 1570 });
+// CONTROL: the "for <payee>" grammar this narrows is otherwise untouched.
+t('a named payee after "for" is still read',
+  'AED 25.00 has been debited from your account 1234 for SALIK on 12/06/2026.',
+  { merchant: 'Salik', category: 'transport' });
+
+// The abbreviated card-summary block. Every label is short and the dates are
+// ISO, so neither the statement vocabulary nor the date grammar could read it:
+// a STATEMENT imported as a AED 154.32 purchase at a shop called "Last Stmt
+// 2022-05-11", and the payment that is actually due raised no reminder.
+{
+  const p = parseSms('Card XXXX8722\nAvailable Balance AED 440.10\nLast Stmt 2022-05-11\nMin Amt AED 154.32\nPymt due 2022-06-06\nLast Pymt AED 50.00\nLast Pymt date 2022-05-07');
+  ok('the abbreviated card summary is a statement, not a purchase',
+    p && p.kind === 'cardStatement' && p.merchant === 'Card •8722' && p.minDueFils === 15432 &&
+      p.date === '2022-06-06' && p.dueDay === 6 && p.card.kind === 'credit',
+    JSON.stringify(p && { k: p.kind, m: p.merchant, min: p.minDueFils, d: p.date, c: p.card }));
+}
+// CONTROL: "Pls refer stmt for exact amt" is the commonest footer in this
+// corpus and sits on ordinary purchases. A bare "stmt" stem would have turned
+// every one of them into a statement.
+t('a "refer stmt" footer does not make a purchase a statement',
+  'Purchase of AED 2,062.26 with Debit Card ending 8783 at CRYPTO.COM, SAN GILJAN. Avl Balance is AED 37,091.01.  Pls refer stmt for exact amt.',
+  { kind: 'transaction', merchant: 'Crypto.com', amountFils: 206226 });
+
+// A telecom recharge confirmation. "to settle the Out of Credit Call Service
+// Balance" is a purpose clause, and it was being read as the payee.
+t('a purpose clause after "to" is not the payee',
+  'Your recharge transaction for AED 5.00 was successfully processed, AED 1.57 of you last recharge have been used to settle the Out of Credit Call Service Balance.',
+  { merchant: 'Mobile recharge', amountFils: 500, category: 'telecom' });
+// CONTROL: the notice that no money has moved yet still suppresses.
+t('a call-cost notice is still not a transaction',
+  'Last call cost is AED 1.57 (VAT included) for Out of Credit Call Service. Amount will be deducted from next recharge.',
+  null);
+// CONTROL: a Salik/nol recharge is transport, and must not be swept up by the
+// airtime rule — "recharge" alone is not a telecom marker.
+t('a Salik recharge is not a mobile recharge',
+  'AED 100.00 has been debited from your account 1234 for SALIK account recharge on 12/06/2026.',
+  { category: 'transport' });
+
+// ══ THE BILLER'S OWN RECEIPT, IN BOTH LANGUAGES ══
+//
+// 56 occurrences across five families — the largest unread group in this
+// corpus. Etisalat sends a labelled Arabic block: the account, the amount DUE,
+// the amount PAID, then the channel. It arrived as "Card purchase", and its
+// amount was taken from whichever figure came first rather than from the PAID
+// label, which is right only while the bill is settled in full.
+const AR_RECEIPT_HEAD =
+  'عزيزي العميل،\n لقد تمت عملية الدفع بنجاح لحساب رقم ····1993\n';
+t('the Arabic biller receipt names its biller and takes the amount PAID',
+  AR_RECEIPT_HEAD +
+    'المبلغ المستحق 00.00 درهم\nالمبلغ المدفوع: 20 درهم\nالمبلغ المتبقي: 00.00 درهم\n' +
+    'تاريخ المعاملة: 2020-04-15\nوقت المعاملة : 22:10:17\n' +
+    'تم الدفع عن طريق: تطبيق إتصالات للهواتف الذكية\nرقم البطاقة : XXXXXXXXXXXX5678\nطريقة الدفع: بطاقة',
+  { merchant: 'Etisalat', amountFils: 2000, category: 'telecom', date: '2020-04-15' });
+// The same family paid with a CREDIT card. "بطاقة ائتمان" is the indefinite
+// spelling, and with the definite article baked into the card-kind stem it
+// matched nothing: a real credit card was typed DEBIT, which mints a second
+// phantom account for a card the user already has.
+t('an Arabic credit card without the article is still a credit card',
+  AR_RECEIPT_HEAD +
+    'المبلغ المستحق 00.00 درهم\nالمبلغ المدفوع: 25.0 درهم\nالمبلغ المتبقي: 00.00 درهم\n' +
+    'تاريخ المعاملة: 2020-04-15\n' +
+    'تم الدفع عن طريق: تطبيق إتصالات للهواتف الذكية\nرقم البطاقة : XXXXXXXXXXXX5678\nطريقة الدفع: بطاقة ائتمان',
+  { merchant: 'Etisalat', amountFils: 2500, category: 'telecom', card: { last4: '5678', kind: 'credit' } });
+// The web-channel variant, where the due and the paid figures agree.
+t('the Arabic receipt paid through the website is the same biller',
+  AR_RECEIPT_HEAD +
+    'المبلغ المستحق: 849.45 درهم\nالمبلغ المدفوع: 849.45 درهم\nالمبلغ المتبقي: 00.00 درهم\n' +
+    'تاريخ المعاملة: 2020-04-15\nتم الدفع عن طريق: الموقع الإلكتروني لإتصالات\nرقم المعاملة: B2C126',
+  { merchant: 'Etisalat', amountFils: 84945, category: 'telecom' });
+// THE POINT OF READING THE LABEL: a PARTIAL payment. The due figure comes
+// first and is larger, so first-figure extraction would record money that
+// never moved. No such message is in the corpus — every sample is settled in
+// full — so this is the same family with one figure changed, which is why it
+// is asserted on the amount alone.
+t('a partly-paid biller receipt records what was PAID, not what was due',
+  AR_RECEIPT_HEAD +
+    'المبلغ المستحق: 849.45 درهم\nالمبلغ المدفوع: 100.00 درهم\nالمبلغ المتبقي: 749.45 درهم\n' +
+    'تم الدفع عن طريق: الموقع الإلكتروني لإتصالات',
+  { amountFils: 10000 });
+// "تطبيق" (application) CONTAINS "طبي" (medical), and Arabic letters are not
+// word characters, so the health rule matched inside the word: four of the
+// five Arabic receipt families were filed as HEALTH by that one substring.
+t('an Arabic app is not a medical app',
+  'شراء بمبلغ 45.00 درهم لدى تطبيق كريم من بطاقتك المنتهية 4833',
+  { category: 'transport' });
+// CONTROL: the health words the boundary must not have cost.
+t('an Arabic medical centre is still health',
+  'شراء بمبلغ 45.00 درهم لدى المركز الطبي الدولي من بطاقتك المنتهية 4833',
+  { category: 'health' });
+t('an Arabic doctor is still health',
+  'شراء بمبلغ 45.00 درهم لدى عيادة طبيب الاسنان من بطاقتك المنتهية 4833',
+  { category: 'health' });
+
+// ══ GATEWAY AND ACQUIRER PREFIXES ══
+//
+// The star is the acquirer's own field separator and no shop name contains
+// one, so what follows it is the merchant. Leaving the prefix on filed the
+// SAME shop under two names — the gateway's alert and the bank's posting for
+// one purchase.
+t('a gateway prefix before the star is not the merchant',
+  'Purchase of AED 290.00 with Debit Card ending 1354 at FAT*THE VIOLE, Dubai. Avl Balance is AED 45,506.98.',
+  { merchant: 'The Viole', amountFils: 29000 });
+t('Amazon Pay acting as the acquirer is still Amazon',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at AMZ*Centraldereservasc, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'Amazon' });
+t('a gateway DOMAIN before the star is not the merchant either',
+  'Purchase of AED 0.10 with Debit Card ending 8783 at WWW.2C2P.COM*2C2P BOLT (M, BANGKOK. Avl Balance is AED 35,848.02.  Pls refer stmt for exact amt.',
+  { merchant: 'Bolt', amountFils: 10, category: 'transport' });
+t('an underscore descriptor with an email tail resolves to the processor',
+  'Purchase of AED 186.29 with Debit Card ending 8783 at Simplex_Elastum, s@simplex.com. Avl Balance is AED 883.43.',
+  { merchant: 'Simplex', amountFils: 18629 });
+t('the SP acquirer prefix comes off',
+  'Purchase of AED 189.12 with Debit Card ending 8783 at SP ALL-CHARMS, ····7501. Avl Balance is AED 36,826.25.  Pls refer stmt for exact amt.',
+  { merchant: 'All-charms' });
+// The year in "LUETTI 1980" is part of the NAME. A space and four digits is
+// not a terminal id — that shape is glued on with a hyphen, or runs longer.
+t('a year in a shop name survives the terminal-id strip',
+  'Purchase of AED 389.00 with Debit Card ending 8783 at SP LUETTI 1980, +····0586. Avl Balance is AED 35,786.45.  Pls refer stmt for exact amt.',
+  { merchant: 'Luetti 1980', amountFils: 38900 });
+// CONTROL: a forecourt number is still not part of the name, or one petrol
+// chain becomes one merchant per pump.
+t('a site number is still not part of the name',
+  'Purchase of AED 120.00 at EMARAT 1049 with Debit Card ending 1234',
+  { merchant: 'Emarat', category: 'transport' });
+t('a country and a phone tail both come off, in either order',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at SP TODD SNYDER +····0068 USA. Avl Balance is AED 100.00.',
+  { merchant: 'Todd Snyder' });
+t('a terminal id in FRONT of the name comes off',
+  'Purchase of AED 68.38 with Debit Card ending 8783 at PZD131 CENTRAL PHUKET, PHUKET. Avl Balance is AED 37,488.79.  Pls refer stmt for exact amt.',
+  { merchant: 'Central Phuket' });
+t('a truncated chain name is canonicalised',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at D586-TEXAS RHOUSE Al S, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'Texas Roadhouse' });
+t('a branch suffix is the acquirer’s, not the shop’s',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at CITY LIFE PHY BR5-1303, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'City Life Pharmacy' });
+
+// ── CONTROLS for the prefix peels: names that legitimately START with a short
+// token, and one that legitimately ENDS in digits. A rule that peels a first
+// token has exactly one failure mode and it is silent.
+t('a merchant beginning with a two-letter word keeps it',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at ON TECHNOLOGIES FZ LLC, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'On Technologies Fz Llc' });
+t('a merchant beginning with AT keeps it',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at AT TWENTY TWO HOUSE, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'At Twenty Two House' });
+t('a merchant beginning with a single letter keeps it',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at Z LOUNGE FZC, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'Z Lounge Fzc' });
+t('a merchant beginning with AL keeps it',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at AL BORJ HOUES HOLD TR, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'Al Borj Houes Hold Tr' });
+// A four-letter head with two digits is NOT the terminal-id shape.
+t('a name with digits in its first word keeps the word',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at SHOP24 GROCERY, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'Shop24 Grocery' });
+// The floor, stated: the peel is DISCARDED unless four letters survive it, so
+// a short name can never be peeled down to a fragment. The name here is a
+// synthetic probe of that boundary — no such descriptor is in the corpus — and
+// four is not an arbitrary number: "WWW.2C2P.COM*2C2P BOLT" peels down to
+// exactly four, so raising it would lose a real merchant.
+t('a peel that would leave a fragment is discarded',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at SP OIL, Dubai. Avl Balance is AED 100.00.',
+  { merchant: 'Sp Oil' });
 
 // ── the version that reaches already-imported rows ──
 //

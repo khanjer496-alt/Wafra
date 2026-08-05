@@ -16,6 +16,25 @@ export type CategoryId =
   | 'education'
   | 'travel'
   | 'entertainment'
+  /**
+   * Software and online tooling billed per seat or per month — AI assistants,
+   * design and document tools, domains, hosting, mailbox add-ons.
+   *
+   * These had no home, so the vocabulary parked them in `entertainment`, and
+   * the file said so in a comment. A domain renewal is not a night out: a user
+   * capping "fun money" was capping their work tools, and the two habits move
+   * for completely unrelated reasons.
+   */
+  | 'software'
+  /**
+   * Money moved into a brokerage, a crypto on-ramp or a savings certificate.
+   *
+   * NOT consumption — this is wealth changing shape, not leaving. It used to be
+   * mapped to `other` for exactly that reason, but `other` is also what the
+   * parser says when it failed, and the user cannot tell those apart on screen:
+   * thirty-odd eToro rows read as "the app could not understand this".
+   */
+  | 'investing'
   | 'charity'
   | 'government'
   /** Loan and finance instalments, usually paid by direct debit to a bank. */

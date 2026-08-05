@@ -839,6 +839,8 @@ const RELAY_CATEGORIES = new Set([
   'education',
   'travel',
   'entertainment',
+  'software',
+  'investing',
   'charity',
   'government',
   'loan',

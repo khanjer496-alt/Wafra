@@ -37,6 +37,18 @@ export const CATEGORIES: CategoryMeta[] = [
   { id: 'education', label: 'Education', labelAr: 'التعليم', icon: 'cap', type: 'expense' },
   { id: 'travel', label: 'Travel', labelAr: 'السفر', icon: 'plane', type: 'expense' },
   { id: 'entertainment', label: 'Entertainment', labelAr: 'الترفيه', icon: 'play', type: 'expense' },
+  // Two more the app had no home for, both read off the same accuracy corpus
+  // that produced personal-care and home-services. 119 of 126 message families
+  // parsed with the RIGHT merchant and landed in "other" — the ledger was
+  // correct and useless, because nothing grouped.
+  //
+  // Software was already being collected, just under the wrong name: the
+  // vocabulary had a whole developer/AI-tooling rule pointing at
+  // `entertainment` with a comment admitting it. Investing is the opposite
+  // case — it was mapped to `other` ON PURPOSE, to say "this is not spending",
+  // but `other` is also the shrug, and on screen the two are the same word.
+  { id: 'software', label: 'Software', labelAr: 'البرمجيات', icon: 'code', type: 'expense' },
+  { id: 'investing', label: 'Investing', labelAr: 'الاستثمار', icon: 'trend', type: 'expense' },
   { id: 'charity', label: 'Charity', labelAr: 'الصدقة', icon: 'gift', type: 'expense' },
   { id: 'government', label: 'Government', labelAr: 'الخدمات الحكومية', icon: 'bank', type: 'expense' },
   { id: 'loan', label: 'Loan', labelAr: 'القروض', icon: 'bank', type: 'expense' },

@@ -48,6 +48,8 @@ export type IconName =
   | 'leaf'
   | 'scissors'
   | 'tools'
+  | 'code'
+  | 'trend'
   | 'download'
   | 'upload'
   | 'fingerprint';
@@ -371,6 +373,25 @@ function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconP
             {...p}
             d="M15.2 3.6 a5 5 0 0 0 -5.6 7.4 L3.6 17 a2 2 0 0 0 2.8 2.8 l6-6 a5 5 0 0 0 7.4 -5.6 l-3.1 3.1 -2.9 -0.6 -0.6 -2.9 Z"
           />
+        </>
+      )}
+      {/* Software: a pair of angle brackets. Not a monitor or a floppy — the
+          category is what is BILLED (a seat, a licence, a domain), not the
+          machine it runs on. */}
+      {name === 'code' && (
+        <>
+          <Path {...p} d="M8.5 8 L4 12 8.5 16" />
+          <Path {...p} d="M15.5 8 L20 12 15.5 16" />
+        </>
+      )}
+      {/* Investing: a rising line. Deliberately NOT the bar chart 'chart' uses
+          for Business income — one is money arriving, the other is money the
+          user chose to move, and a list where both are bars reads as one
+          thing. */}
+      {name === 'trend' && (
+        <>
+          <Path {...p} d="M4 16.5 L9.5 11 13 14.5 20 7.5" />
+          <Path {...p} d="M15 7.5 H20 V12.5" />
         </>
       )}
       {name === 'download' && (

@@ -73,8 +73,24 @@ function median(values: number[]): number {
 /**
  * Categories where a recurring charge can plausibly BE a subscription service.
  * A recurring supplier invoice or school fee is a commitment, not a Netflix.
+ *
+ * `software` is here because it had to be: every AI assistant, domain renewal
+ * and design tool used to be categorised `entertainment`, and moving them to
+ * their own category would otherwise have quietly demoted the app's most
+ * canonical subscriptions — ChatGPT, Claude, Vercel, Google One — from
+ * "subscription" to "commitment", emptying the tab the user manages them from.
+ * A per-seat licence is the definition of a subscription.
+ *
+ * `investing` is deliberately NOT here. A monthly transfer into a brokerage is
+ * recurring, but it is not a service anyone would want prompted to cancel, and
+ * listing it beside Netflix invites exactly that.
  */
-const SUBSCRIPTION_CATEGORIES = new Set<CategoryId>(['entertainment', 'shopping', 'health']);
+const SUBSCRIPTION_CATEGORIES = new Set<CategoryId>([
+  'entertainment',
+  'software',
+  'shopping',
+  'health',
+]);
 
 /**
  * Real subscription detection: per-merchant charge cadence with amount
