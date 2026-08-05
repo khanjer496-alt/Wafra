@@ -33,7 +33,6 @@ import {
   buildOnboardingPlan,
   DEFAULT_ONBOARDING_ANSWERS,
   GOAL_PRESETS,
-  MONEY_MONTH_DAYS,
   type OnboardingAnswers,
   type OnboardingBudgetId,
   type OnboardingGoalId,
@@ -52,7 +51,10 @@ type Step =
   | 'scanning'
   | 'complete';
 
-const QUESTION_STEPS: readonly Step[] = ['market', 'goals', 'budget', 'month', 'capture'];
+// 'month' is deliberately absent. Asking a salary day up front is a question
+// the app can answer for itself later, and it sat between the user and the
+// thing they came for. The setting still exists in state with its default.
+const QUESTION_STEPS: readonly Step[] = ['market', 'goals', 'budget', 'capture'];
 
 /** Onboarding is night mode regardless of the OS theme: the first screen sets
  * the tone, and the mark is at its strongest on charcoal. */
@@ -581,39 +583,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             />
                           );
                         })}
-                      </View>
-                      <Button
-                        label={t('continueWord')}
-                        onPress={() => setStep('month')}
-                        labelColor={night.onPrimary}
-                        style={styles.primaryButton}
-                      />
-                    </>
-                  )}
-
-                  {activeStep === 'month' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardMoneyMonthTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>{t('onboardMoneyMonthBody')}</ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {MONEY_MONTH_DAYS.map((day) => (
-                          <SelectionRow
-                            key={day}
-                            title={day === 1 ? t('onboardCalendarMonth') : t('onboardSalaryDay')}
-                            detail={
-                              day === 1
-                                ? t('onboardCalendarMonthDetail')
-                                : tf('onboardDayNumber', { day })
-                            }
-                            icon="calendar"
-                            selected={answers.monthStartDay === day}
-                            onPress={() => updateAnswer('monthStartDay', day)}
-                          />
-                        ))}
                       </View>
                       <Button
                         label={t('continueWord')}

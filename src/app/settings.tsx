@@ -11,6 +11,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+
+import { shareText } from '@/lib/share-text';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -19,7 +21,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -36,7 +37,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { unreadFormatCount } from '@/lib/accuracy';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
-import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
+import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
@@ -56,13 +57,6 @@ import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
 
 /** The reporting month can start on any day that exists in February. */
-const MAX_START_DAY = 28;
-
-function ordinal(day: number): string {
-  const rem100 = day % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${day}th`;
-  return `${day}${['th', 'st', 'nd', 'rd'][day % 10] ?? 'th'}`;
-}
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -71,7 +65,6 @@ export default function SettingsScreen() {
     state,
     setAppLock,
     setPrivateMode,
-    setMonthStartDay,
     setPro,
     setMarket,
     setUiLanguage,
@@ -297,11 +290,16 @@ export default function SettingsScreen() {
       const title = `"${tx.title.replace(/"/g, '""')}"`;
       return `${tx.date},${tx.type},${(tx.amountFils / 100).toFixed(2)},${tx.category},${title},"${account}",${tx.isTransfer ? 1 : 0}`;
     });
-    Share.share({ title: 'wafra-export.csv', message: [header, ...lines].join('\n') }).catch(() => {});
+    // A whole ledger is far past the intent-payload ceiling; share the file.
+    shareText('wafra-export.csv', [header, ...lines].join('\n'), {
+      mimeType: 'text/csv',
+    }).catch(() => {});
   };
 
   const backupJson = () => {
-    Share.share({ title: 'wafra-backup.json', message: exportBackup() }).catch(() => {});
+    shareText('wafra-backup.json', exportBackup(), {
+      mimeType: 'application/json',
+    }).catch(() => {});
   };
 
   const createExpenseReport = async (scope: 'month' | 'all') => {
@@ -489,8 +487,6 @@ export default function SettingsScreen() {
       <Toggle value={value} onChange={onChange} label={title} />
     </Row>
   );
-
-  const monthKeyNow = monthKey(new Date());
   const trial = trialDaysLeft(state);
 
   return (
@@ -530,72 +526,6 @@ export default function SettingsScreen() {
           </Section>
 
           <Section index={1}>
-            <SectionHeader title={t('moneyMonthHeader')} />
-            <Block>
-              <View style={styles.monthHead}>
-                <ThemedText type="small">
-                  {tf('moneyMonthStarts', {
-                    day:
-                      state.language === 'ar'
-                        ? state.monthStartDay
-                        : ordinal(state.monthStartDay),
-                  })}
-                </ThemedText>
-                <ThemedText type="small" tabular style={{ color: theme.primary }}>
-                  {state.monthStartDay}
-                </ThemedText>
-              </View>
-              {/* A picture of the month rather than a ± stepper: this is the
-                  setting that reshapes every other screen, so it should look
-                  like a month, not like a counter. */}
-              <View style={styles.dayGrid}>
-                {Array.from({ length: MAX_START_DAY }, (_, i) => i + 1).map((day) => {
-                  const chosen = day === state.monthStartDay;
-                  return (
-                    <Pressable
-                      key={day}
-                      accessibilityRole="button"
-                      accessibilityLabel={tf('moneyMonthDayA11y', { day })}
-                      accessibilityState={{ selected: chosen }}
-                      onPress={() => setMonthStartDay(day)}
-                      style={styles.dayCell}>
-                      <View
-                        style={[
-                          styles.dayChoice,
-                          {
-                            backgroundColor: chosen ? theme.primary : 'transparent',
-                            borderColor: chosen ? theme.primary : theme.cardBorder,
-                          },
-                        ]}>
-                        <ThemedText
-                          type="meta"
-                          tabular
-                          style={{ color: chosen ? theme.onPrimary : theme.textSecondary }}>
-                          {day}
-                        </ThemedText>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {tf('moneyMonthRange', {
-                  month: shortDate(monthStartISO(monthKeyNow)).split(' ')[1],
-                  from: shortDate(monthStartISO(monthKeyNow)),
-                  to: shortDate(monthEndISO(monthKeyNow)),
-                })}
-              </ThemedText>
-              {state.monthStartDay === 1 && (
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {tf('calendarMonthHint', {
-                    date: shortDate(monthStartISO(shiftMonthKey(monthKeyNow, 1))),
-                  })}
-                </ThemedText>
-              )}
-            </Block>
-          </Section>
-
-          <Section index={2}>
             <SectionHeader title={t('appearanceHeader')} />
             <Block>
               {/* The handoff said to follow the OS and offer no picker. That is
@@ -623,7 +553,7 @@ export default function SettingsScreen() {
             </Block>
           </Section>
 
-          <Section index={3}>
+          <Section index={2}>
             <SectionHeader title={t('privacyHeader')} />
             <Block style={styles.privacyCopy}>
               <Icon name="lock" size={16} color={theme.textTertiary} />
@@ -711,7 +641,7 @@ export default function SettingsScreen() {
             )}
           </Section>
 
-          <Section index={4}>
+          <Section index={3}>
             <SectionHeader title={t('regionHeader')} />
             {linkRow(
               t('countryPack'),
@@ -729,7 +659,7 @@ export default function SettingsScreen() {
             )}
           </Section>
 
-          <Section index={5}>
+          <Section index={4}>
             <SectionHeader title={t('dataHeader')} />
             {linkRow(t('backupJson'), null, gated(backupJson))}
             {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
@@ -748,7 +678,7 @@ export default function SettingsScreen() {
             {linkRow(t('eraseAll'), null, confirmErase, true, true)}
           </Section>
 
-          <Section index={6} style={styles.about}>
+          <Section index={5} style={styles.about}>
             <Pressable accessibilityRole="button" accessibilityLabel="Wafra" onPress={onLogoTap}>
               <WafraMark size={34} />
             </Pressable>

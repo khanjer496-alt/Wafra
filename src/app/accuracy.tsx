@@ -12,6 +12,7 @@ import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { cardDiagnostics, unreadFormats } from '@/lib/accuracy';
+import { shareText } from '@/lib/share-text';
 import { categoryLabel } from '@/lib/categories';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
@@ -68,7 +69,10 @@ export default function AccuracyScreen() {
   };
 
   const shareCards = () => {
-    Share.share({ message: cardDiagnostics(state) }).catch(() => {});
+    // As a FILE. This one prints every card row with its raw bank message, and
+    // pushing that through the share sheet as an intent payload crossed
+    // Android's Binder limit and killed the app outright — see share-text.ts.
+    shareText('wafra-card-diagnostic.txt', cardDiagnostics(state)).catch(() => {});
   };
 
   return (

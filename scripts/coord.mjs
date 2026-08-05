@@ -257,7 +257,6 @@ function whoami(flags) {
 }
 
 /** `claude:s7f2` → `claude`. Used only for display grouping, never for ownership. */
-const baseOf = (identity) => identity.split(':')[0]
 
 // --- commands --------------------------------------------------------------
 
