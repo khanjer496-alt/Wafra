@@ -178,4 +178,63 @@ ok('the counted totals are stated, which is where a double count shows',
 ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
 
 
+// ── the diagnostic has to answer "how was net worth calculated?" ──
+//
+// It could not, and neither could the app. Net worth is a sum over accounts,
+// and the two ways it goes wrong are both invisible in a total: one physical
+// card held as several account rows, each with its own balance snapshot; and
+// an account dormant for months, hidden from Wallet's list but still counted.
+{
+  const A = (o) => ({ kind: 'card', openingFils: 0, color: '#000', ...o });
+  const nwAccounts = [
+    // Liv is Emirates NBD's digital bank: one card, two account rows.
+    A({ id: '1', name: 'Liv Debit Card', last4: '8783', cardType: 'debit', bankName: 'Liv',
+        snapshotKind: 'balance', snapshotFils: 3584802 }),
+    A({ id: '2', name: 'Emirates NBD Card', last4: '8783', bankName: 'Emirates NBD',
+        snapshotKind: 'balance', snapshotFils: 3584802 }),
+    // An available limit is not money you have.
+    A({ id: '3', name: 'FAB Credit Card', last4: '5793', cardType: 'credit', bankName: 'FAB',
+        snapshotKind: 'limit', snapshotFils: 1480882 }),
+    // A credit card can only ever subtract.
+    A({ id: '4', name: 'ADCB Credit Card', last4: '7720', cardType: 'credit', bankName: 'ADCB',
+        snapshotKind: 'outstanding', snapshotFils: 71474 }),
+    // Silent since 2022: gone from Wallet's list, still in the total.
+    A({ id: '5', name: 'Old FAB Card', last4: '8722', bankName: 'FAB',
+        snapshotKind: 'balance', snapshotFils: 44010 }),
+    A({ id: '6', name: 'Hidden card', last4: '9999', cardType: 'debit', archived: true,
+        snapshotKind: 'balance', snapshotFils: 999900 }),
+  ];
+  const nwTx = [
+    { id: 'x', accountId: '1', date: '2026-08-04', title: 'Shop', amountFils: 100, type: 'expense', category: 'other', source: 'sms' },
+    { id: 'y', accountId: '5', date: '2022-05-11', title: 'Shop', amountFils: 100, type: 'expense', category: 'other', source: 'sms' },
+  ];
+  const nw = cardDiagnostics({ accounts: nwAccounts, transactions: nwTx, cardDues: [] });
+  const flat = nw.replace(/\s+/g, ' ');
+
+  ok('net worth: the headline figure is stated', /NET WORTH\s+AED/.test(nw));
+  ok('net worth: the total equals the counted parts',
+    /NET WORTH AED 71,421\.00/.test(flat), flat.slice(0, 200));
+  ok('net worth: a quoted balance is counted, and says who quoted it',
+    /\+35,848\.02 Liv Debit Card ·8783 \(balance quoted by the bank\)/.test(flat));
+  ok('net worth: a credit card subtracts its outstanding',
+    /-714\.74 ADCB Credit Card ·7720 \(outstanding quoted by the bank\)/.test(flat));
+  ok('net worth: an available limit is excluded, with the reason',
+    /FAB Credit Card ·5793 — the bank quoted a limit, not an outstanding balance/.test(flat));
+  ok('net worth: a hidden account is excluded, with the reason',
+    /Hidden card ·9999 — you hid this account/.test(flat));
+  // The two findings the user actually needs out of this file.
+  ok('net worth: a dormant account still counting is flagged where it counts',
+    /Old FAB Card[^[]*\[SILENT SINCE 2022-05-11 — hidden from Wallet's list, still counted here\]/.test(flat));
+  ok('net worth: two counted accounts sharing a last four are flagged as a possible double count',
+    /·8783 <-- MORE THAN ONE OF THESE IS COUNTED/.test(flat));
+  // ...and NOT flagged when only one of them contributes, or the warning is
+  // noise on every card the app has ever seen twice.
+  const oneCounts = cardDiagnostics({
+    accounts: [nwAccounts[0], { ...nwAccounts[1], snapshotKind: undefined, snapshotFils: undefined }],
+    transactions: nwTx, cardDues: [],
+  }).replace(/\s+/g, ' ');
+  ok('net worth: a shared last four where only one side counts is not flagged',
+    /·8783/.test(oneCounts) && !/MORE THAN ONE OF THESE IS COUNTED/.test(oneCounts));
+}
+
 if (!process.exitCode) console.log(`${passed} report tests passed`);

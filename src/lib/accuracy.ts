@@ -1,3 +1,6 @@
+import { netWorthFils, reliableBalanceFils } from '@/lib/balances';
+import { DORMANT_AFTER_DAYS } from '@/lib/cards';
+import { toISODate } from '@/lib/format';
 import type { AppState, Transaction } from '@/lib/types';
 
 /**
@@ -122,6 +125,115 @@ export function cardDiagnostics(state: {
     out.push(
       `  ${c.name} ·${c.last4 ?? '????'}  ${c.cardType ?? 'unknown type'}  bank ${c.bankName ?? '—'}`,
     );
+  }
+  out.push('');
+
+  /* ── What the headline figure is made of ────────────────────────────
+   *
+   * "How was net worth calculated?" could not be answered from this report,
+   * or from the app. The number is a sum over accounts, and the two ways it
+   * goes wrong are both invisible in a total:
+   *
+   *  - one physical card held as several account rows, each carrying its own
+   *    balance snapshot, so one balance is added more than once. Liv is
+   *    Emirates NBD's digital bank, and a card shows up under both names;
+   *    the app will not merge them on similar metadata alone, because two
+   *    real cards can share a bank and a last four.
+   *  - an account dormant for months is hidden from Wallet's list but still
+   *    counted here, so the total is built from accounts the user cannot see.
+   *
+   * Both are visible the moment the sum is shown as its parts, which is what
+   * this block is. Excluded accounts are listed WITH THE REASON: an account
+   * silently contributing nothing is the third way the number goes wrong.
+   */
+  // Last activity for every account in one pass — this is a one-shot export,
+  // but the per-account scan it replaces is the same quadratic shape that made
+  // the Wallet tab slow, and there is no reason to write it twice.
+  const lastActivity = new Map<string, string>();
+  for (const t of state.transactions) {
+    const seen = lastActivity.get(t.accountId);
+    if (!seen || t.date > seen) lastActivity.set(t.accountId, t.date);
+  }
+  const today = toISODate(new Date());
+  const daysSince = (iso: string): number =>
+    Math.round(
+      (new Date(`${today}T12:00:00`).getTime() - new Date(`${iso}T12:00:00`).getTime()) / 86400000,
+    );
+
+  const netWorth = netWorthFils(state);
+  out.push(`NET WORTH  AED ${fmt(netWorth)}`);
+  out.push(
+    '  Only figures the BANK quoted count. A credit card can only subtract its',
+    '  outstanding or count nothing — an available limit is not money you have.',
+    '  An account with SMS history but no quoted figure contributes nothing',
+    '  rather than a balance derived from a partial message history.',
+    '',
+  );
+  const contribution = (a: AppState['accounts'][number]) => reliableBalanceFils(state, a);
+  const countedAccounts = state.accounts.filter((a) => !a.archived && contribution(a) !== null);
+  const excluded = state.accounts.filter((a) => a.archived || contribution(a) === null);
+
+  out.push(`  COUNTED (${countedAccounts.length})`);
+  if (!countedAccounts.length) out.push('    none — every account is excluded, so net worth is 0');
+  for (const a of countedAccounts) {
+    const fils = contribution(a) ?? 0;
+    const quoted =
+      a.snapshotKind && a.snapshotFils !== undefined
+        ? `${a.snapshotKind} quoted by the bank`
+        : 'manual account — opening balance plus your own entries';
+    const last = lastActivity.get(a.id) ?? null;
+    const dormant = last !== null && daysSince(last) > DORMANT_AFTER_DAYS;
+    out.push(
+      `    ${fils < 0 ? '-' : '+'}${fmt(Math.abs(fils))}  ${accountLabel(a.id)}  (${quoted})` +
+        `${dormant ? `  [SILENT SINCE ${last} — hidden from Wallet's list, still counted here]` : ''}`,
+    );
+  }
+  out.push('');
+  out.push(`  NOT COUNTED (${excluded.length})`);
+  for (const a of excluded) {
+    const why = a.archived
+      ? 'you hid this account'
+      : a.cardType === 'credit'
+        ? a.snapshotKind
+          ? `the bank quoted a ${a.snapshotKind}, not an outstanding balance`
+          : 'no outstanding figure from the bank'
+        : a.snapshotKind
+          ? `the bank quoted a ${a.snapshotKind}, not a balance`
+          : 'no balance from the bank, and SMS history alone cannot be trusted';
+    out.push(`    ${accountLabel(a.id)}  — ${why}`);
+  }
+  out.push('');
+
+  // The double-count check. Same last four on more than one account that
+  // CONTRIBUTES is the shape of the bug; same last four where only one
+  // contributes is harmless and is shown anyway so nothing looks hidden.
+  const byLast4 = new Map<string, AppState['accounts']>();
+  for (const a of state.accounts) {
+    if (!a.last4) continue;
+    byLast4.set(a.last4, [...(byLast4.get(a.last4) ?? []), a]);
+  }
+  const shared = [...byLast4.entries()].filter(([, list]) => list.length > 1);
+  out.push(`  SAME LAST FOUR ON MORE THAN ONE ACCOUNT (${shared.length})`);
+  if (!shared.length) out.push('    none — every account has a distinct last four');
+  for (const [last4, list] of shared) {
+    // A contributor is one adding a NON-ZERO figure. A manual account with no
+    // history is legitimately zero, and zero cannot be double-counted — letting
+    // it qualify fired this warning on pairs where nothing was at stake, which
+    // is how a warning stops being read.
+    const contributors = list.filter((a) => !a.archived && (contribution(a) ?? 0) !== 0);
+    const flag =
+      contributors.length > 1
+        ? '   <-- MORE THAN ONE OF THESE IS COUNTED. If they are one physical card, its balance is in the total more than once.'
+        : '';
+    out.push(`    ·${last4}${flag}`);
+    for (const a of list) {
+      const fils = contribution(a);
+      const counts = !a.archived && fils !== null;
+      out.push(
+        `      ${counts ? `${fils < 0 ? '-' : '+'}${fmt(Math.abs(fils))}` : 'not counted'}` +
+          `  ${a.name}  ${a.cardType ?? 'unknown type'}  bank ${a.bankName ?? '—'}`,
+      );
+    }
   }
   out.push('');
 
