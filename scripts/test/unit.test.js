@@ -2007,6 +2007,51 @@ ok('stale: a stale statement that gets paid leaves openDues',
     noop === null || noop.raw !== null);
 }
 
+// ── a confidently wrong category is healed, a merely-guessed one is not ──
+//
+// Grubtech sells a POS system to restaurants, matched a food rule, and 55
+// charges of AED 1,295.63 sat in Dining — money against a dining budget, and a
+// software subscription the Subscriptions tab could never list because
+// `dining` is not a subscription category. Healing only out of `other` reached
+// none of them.
+{
+  const heal = require('./build/heal.js');
+  const base = {
+    id: 'g1', type: 'expense', amountFils: 129563, category: 'dining',
+    accountId: 'a', title: 'Grubtech', date: '2026-08-01', source: 'sms',
+  };
+  const parsed = {
+    kind: 'transaction', type: 'expense', amountFils: 129563, merchant: 'Grubtech',
+    categoryGuess: 'software', categoryDeliberate: true, transferHint: false,
+    date: '2026-08-01', card: null, currency: 'AED',
+  };
+  const p1 = heal.healPatch(base, parsed);
+  ok('heal: a deliberate category correction reaches a row that was not "other"',
+    !!p1 && p1.category === 'software', p1);
+
+  // The fallback must not sweep. A rule that merely failed to match anything
+  // is not evidence the stored category is wrong.
+  const guessed = heal.healPatch(base, { ...parsed, categoryGuess: 'shopping', categoryDeliberate: false });
+  ok('heal: a non-deliberate guess never overwrites a real category',
+    guessed === null || guessed.category === undefined, guessed);
+
+  // `other` is where transfers and card settlements deliberately live. A row
+  // that already knows what it is must never be demoted into it.
+  const demote = heal.healPatch(base, { ...parsed, categoryGuess: 'other' });
+  ok('heal: a deliberate "other" never demotes a categorised row',
+    demote === null || demote.category === undefined, demote);
+
+  // The user's own correction outranks every rule in the file.
+  const edited = heal.healPatch({ ...base, userEdited: true }, parsed);
+  ok('heal: a hand-corrected row is still untouchable', edited === null, edited);
+
+  // And a transfer keeps its category: both sides of an own-account move are
+  // deliberately uncategorised, and re-filing one as spending double-counts.
+  const transfer = heal.healPatch({ ...base, isTransfer: true }, parsed);
+  ok('heal: a transfer is not re-categorised as spending',
+    transfer === null || transfer.category === undefined, transfer);
+}
+
 // ── one transaction, three channels, one row ──
 //
 // A user's Home screen showed the same AED 28,538 salary twice and the same

@@ -142,8 +142,14 @@ export interface ParsedCard {
  * a bill that was only ever due. Those rows are already in the ledger and
  * healPatch cannot delete a row, so the re-read is what reaches them: the
  * billDue branch of buildImportPlan now drops the expense the old parser made.
+ *
+ * 14: Grubtech out of Dining. It sells a POS system TO restaurants; the word
+ * looks like food and is not. One user carried 55 charges of AED 1,295.63
+ * against a dining budget for a software subscription. Correcting the rule
+ * reaches those rows only through healPatch's new deliberate-category branch,
+ * which needs this re-read to run.
  */
-export const PARSER_VERSION = 13;
+export const PARSER_VERSION = 14;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -1901,7 +1907,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   //
   // `hopper hq` is spelled with its suffix ON PURPOSE: bare `hopper` is the
   // flight-booking app, which is travel.
-  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|openai|chat\s*gpt|anthropic|\bclaude\b|getresponse|domain\.com|godaddy|hostinger|\bhosting\b|pandadoc|copy\.?ai|hopper ?hq|yamm\.com|yet another mail merge|\bmail ?merge\b/i, 'software'],
+  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|openai|chat\s*gpt|anthropic|\bclaude\b|getresponse|domain\.com|godaddy|hostinger|\bhosting\b|pandadoc|copy\.?ai|hopper ?hq|yamm\.com|yet another mail merge|\bmail ?merge\b|grubtech|\bfoodics\b|\bdeliverect\b/i, 'software'],
   // Leisure venues and cinema distributors. Deliberately no district names
   // here — "City Walk" appears in the descriptor of every shop and cafe in
   // it, and matching it sent a coffee roastery to entertainment.
@@ -1916,7 +1922,13 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // in the card descriptor ("Kokoro qlub, sharjah", "LaBoheme-Muntazahqlub",
   // "BreakbyMara-AlJqlub"). Every descriptor carrying it is a restaurant bill,
   // whatever the venue is called — nine of them sat in Other.
-  [/qlub|grubtech|\botter\b|carriage|deliveryhero|delivery hero|talabat|maxzigoodfood|alsafadi|wardt alsham|al tahadi|la barra|brass monkey|si italiano|tareeq al khalidiah|aseer time|nightjar|alpha flight|kitopi|new star families(?! sprm)/i, 'dining'],
+  // `grubtech` is deliberately NOT here, and it used to be. Grubtech sells a
+  // POS/order-management system TO restaurants — it is a monthly software bill
+  // for the operator, never a meal for a diner, and nobody has ever eaten at
+  // one. The word looks like food and is not: 55 charges of AED 1,295.63 on
+  // one user's card were filed as Dining, which is a four-figure hole in a
+  // dining budget every month for a line item that belongs in Software.
+  [/qlub|\botter\b|carriage|deliveryhero|delivery hero|talabat|maxzigoodfood|alsafadi|wardt alsham|al tahadi|la barra|brass monkey|si italiano|tareeq al khalidiah|aseer time|nightjar|alpha flight|kitopi|new star families(?! sprm)/i, 'dining'],
   // Transliterated Arabic trade words. Half the descriptors on a UAE card
   // statement are Arabic shop names in Latin letters, and an English-only
   // vocabulary can never read them — which is why so much landed in Other.

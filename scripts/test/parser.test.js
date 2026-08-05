@@ -649,6 +649,24 @@ t('an e& bill actually debited still posts',
   'AED 775.81 has been debited from your account XXXX0002 for your e& bill payment on 15/08/2026.',
   { kind: 'transaction', type: 'expense', merchant: 'E&', amountFils: 77581 });
 
+// Grubtech sells a POS/order-management system TO restaurants. Nobody has
+// ever eaten at one — it is a monthly software bill for the operator, and 55
+// charges of AED 1,295.63 sat in a user's dining budget.
+t('Grubtech is the POS vendor, not a restaurant',
+  'Purchase of AED 1,295.63 with Debit Card ending 1354 at GRUBTECH, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Grubtech', category: 'software' });
+
+// ...and the food-adjacent B2B names beside it read the same way.
+t('Foodics is restaurant software',
+  'Purchase of AED 420.00 with Credit Card ending 3749 at FOODICS, DUBAI.',
+  { category: 'software' });
+
+// The consumer-facing rail it used to sit next to must still be Dining: qlub
+// appends itself to the VENUE name on a real restaurant bill.
+t('qlub is still a restaurant bill',
+  'Purchase of AED 210.00 with Credit Card ending 3749 at Kokoro qlub, sharjah.',
+  { category: 'dining' });
+
 t('supermarket truncation SUPE categorizes as groceries',
   'Purchase of AED 120.24 with Credit Card ending 4722 at ABDULLA AND NASIR SUPE, SHARJAH. Avl Cr. Limit is AED 14,808.82',
   { category: 'groceries' });
@@ -782,9 +800,15 @@ t('acquirer prefixes are stripped from the merchant',
   'Purchase of CNY 62.2 with Credit Card ending 4844 at ALP*Taobao, Shanghai. Avl Cr. Limit is AED 11,186.46.',
   { merchant: 'Taobao', category: 'shopping' });
 
-t('restaurant-tech processors are dining, not "other"',
+// CHANGED from `category: 'dining'`. The claim in the name held — this is a
+// named merchant, not "other" — but the category was wrong, and wrong in the
+// expensive direction. Grubtech's customer is the RESTAURANT, not the diner:
+// it is a POS/order-management subscription the operator pays monthly. The
+// user who found it was carrying 55 charges of AED 1,295.63 against a dining
+// budget for software.
+t('restaurant-tech processors are software, not "other"',
   'Purchase of AED 313.95 with Debit Card ending 4733 at WWW GRUBTECH COM, DUBAI. Avl Balance is AED 36,326.96.',
-  { merchant: 'Grubtech', category: 'dining' });
+  { merchant: 'Grubtech', category: 'software' });
 
 // CHANGED from `category: 'entertainment'`. The name of this test was always
 // the claim — developer tooling has A HOME rather than falling to "other" —

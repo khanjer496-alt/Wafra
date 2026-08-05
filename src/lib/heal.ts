@@ -49,6 +49,30 @@ export function healPatch(
   if (prior.category === 'other' && p.categoryGuess !== 'other' && !prior.isTransfer) {
     patch.category = p.categoryGuess;
   }
+  // A category the parser is now DELIBERATE about, disagreeing with what is
+  // stored. Healing only out of `other` was not enough: the expensive mistakes
+  // are the confidently wrong ones. Grubtech sells a POS system to restaurants
+  // and matched a food rule, so 55 charges of AED 1,295.63 sat in Dining —
+  // AED 1,295 a month against a dining budget, and a software subscription the
+  // Subscriptions tab could never show because `dining` is not a subscription
+  // category. Correcting the rule reached none of them: those rows say
+  // `dining`, not `other`, so nothing above touches them.
+  //
+  // Three guards make this safe to run over an entire ledger. `userEdited`
+  // returned at the top, so a hand-corrected row is untouchable. `deliberate`
+  // means a NAMED rule matched, never the fallback — a vocabulary tweak cannot
+  // sweep rows it was not written for. And `other` is excluded as a
+  // destination: transfers and card settlements are deliberately `other`, and
+  // a row that already knows what it is must never be demoted to that.
+  if (
+    p.categoryDeliberate &&
+    p.categoryGuess !== 'other' &&
+    p.categoryGuess !== prior.category &&
+    !prior.isTransfer &&
+    !p.transferHint
+  ) {
+    patch.category = p.categoryGuess;
+  }
   if (p.transferHint && !prior.isTransfer) patch.isTransfer = true;
   // Older parser versions marked every inbound remittance as a transfer and
   // therefore removed genuine external money from Income. Inbound account
