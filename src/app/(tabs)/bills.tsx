@@ -3,6 +3,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -18,6 +19,7 @@ import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
@@ -56,6 +58,16 @@ export default function BillsScreen() {
   const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue } = useStore();
+  /**
+   * The screen that answers "is this card settled?" can now go and find out.
+   *
+   * Paying a credit card and coming straight here to check is the single most
+   * likely reason this tab is open, and until now nothing on it could ask the
+   * inbox for the payment SMS — the scan lived on Home. A user who paid
+   * AED 5,645 off a FAB card saw the card still listing AED 5,645 owing, with
+   * no gesture on this screen able to change that.
+   */
+  const { refreshing, onRefresh } = usePullToRefresh();
 
   const now = useMemo(() => new Date(), []);
   const key = monthKey(now);
@@ -437,6 +449,9 @@ export default function BillsScreen() {
 
         <ScrollView
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+          }
           showsVerticalScrollIndicator={false}>
           {/* Credit-card statement dues live in their own tab. */}
           {segment === 'cards' && (

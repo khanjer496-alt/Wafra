@@ -14,9 +14,9 @@
  * dues, bills, and subscriptions. The user does not think of those as three
  * kinds of thing. They are all money that leaves on a date.
  */
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState as RNAppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -31,77 +31,31 @@ import { CountUpAmount } from '@/components/ui/count-up';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { SkeletonRows } from '@/components/ui/states';
-import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
-import { enableRelayBackgroundSync } from '@/lib/background-relay';
-import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
-import { committed, tapped } from '@/lib/haptics';
+import { tapped } from '@/lib/haptics';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { refreshEntitlement } from '@/lib/billing';
 import { getActiveMarket } from '@/lib/markets';
-import { getRelayAutomationProof, getRelayConfig } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
-// The one-time setup that must not repeat: asking for notification
-// permission, and the first reminder sync.
-let sessionSetupRan = false;
-
-/**
- * How long a scan stays fresh enough to skip on returning to the app.
- *
- * Coming back from the banking app to see the charge is the single most
- * common way this screen is opened, so the bar for re-scanning is low. It is
- * not zero only because flicking between two apps should not run a full inbox
- * read on every flick.
- */
-const RESCAN_AFTER_MS = 30_000;
-let lastScanAt = 0;
-
-/**
- * What a scan attempt actually did, so a caller who only *joined* it — rather
- * than starting it — can tell whether it still owes its own interactive
- * feedback. `'imported'` is the one outcome that already shows a toast
- * unconditionally; every other outcome only acts when `interactive` was true
- * for THAT attempt, so a silent attempt that hit one of them delivered
- * nothing a joining interactive caller would see.
- */
-type AutoImportOutcome =
-  | 'not-hydrated'
-  | 'not-pro'
-  | 'unavailable'
-  | 'no-permission'
-  | 'needs-setup'
-  | 'up-to-date'
-  | 'imported';
-
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
-
-type CaptureSurfaceState =
-  | 'checking'
-  | 'active'
-  | 'pipe-ready'
-  | 'needs-test'
-  | 'off'
-  | 'paused'
-  | 'unsupported';
 
 /**
  * The product promise, above the fold. This is deliberately a live status and
@@ -536,85 +490,22 @@ export default function HomeScreen() {
   const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const router = useRouter();
-  const toast = useToast();
-  const {
-    state,
-    importBatch,
-    ensureDurable,
-    undoBatch,
-    markParserVersion,
-    setPro,
-    applyFxUpdates,
-  } = useStore();
+  const { state, applyFxUpdates } = useStore();
   const { period } = usePeriod();
+  // `true`: Home is the screen that scans on mount and on foreground resume.
+  // The other tabs take the same hook without that flag — they get the shared
+  // scan for pull-to-refresh and leave the watching to Home.
+  const { runAutoImport, needsPermission, captureState } = useAutoImport(true);
 
   const now = useMemo(() => new Date(), []);
   const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
-  const [needsPermission, setNeedsPermission] = useState(false);
-  const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const lastFxAttempt = React.useRef('');
-  /**
-   * Foreground resume, pull-to-refresh and the capture card can all request a
-   * scan within the same second. Reading and parsing the same inbox twice is
-   * both expensive and a race against two import plans built from one stale
-   * ledger. Every caller joins the scan already in progress instead.
-   *
-   * Tracked with the interactivity it was started with: a silent background
-   * scan and a user-initiated one owe different feedback, and joining the
-   * wrong one used to mean the user's explicit pull-to-refresh silently rode
-   * along on a scan that could not redirect to paywall/setup, prompt for SMS
-   * permission, or show the up-to-date toast — all gated on `interactive`.
-   */
-  const importInFlight = React.useRef<{
-    promise: Promise<AutoImportOutcome>;
-    interactive: boolean;
-  } | null>(null);
-
-  // Read the real platform capability whenever Home regains focus. This makes
-  // the card turn on immediately after returning from Settings or iOS setup,
-  // without making the user relaunch to see that their choice worked.
-  useFocusEffect(
-    useCallback(() => {
-      let current = true;
-      void (async () => {
-        if (Platform.OS === 'ios') {
-          const [cfg, automationProof] = await Promise.all([
-            getRelayConfig(),
-            getRelayAutomationProof(),
-          ]);
-          if (!current) return;
-          setCaptureState(
-            cfg?.setupState === 'verified' && automationProof
-              ? 'active'
-              : cfg?.setupState === 'verified'
-                ? 'pipe-ready'
-              : cfg
-                ? 'needs-test'
-                : 'off',
-          );
-          return;
-        }
-        if (Platform.OS === 'android' && isSmsScanningAvailable()) {
-          const granted = await hasSmsPermission().catch(() => false);
-          if (!current) return;
-          setNeedsPermission(!granted);
-          setCaptureState(granted ? 'active' : 'off');
-          return;
-        }
-        if (current) setCaptureState('unsupported');
-      })();
-      return () => {
-        current = false;
-      };
-    }, []),
-  );
-
   /** A dated outgoing opens the sheet for whatever kind of thing it is. */
   const openOutgoing = useCallback(
     (item: Outgoing) => {
@@ -716,184 +607,6 @@ export default function HomeScreen() {
       if (updates.length > 0) applyFxUpdates(updates);
     });
   }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
-
-  const performAutoImport = useCallback(
-    async (interactive: boolean): Promise<AutoImportOutcome> => {
-      // Never scan against a ledger that has not finished loading. Every
-      // duplicate check in the plan is a lookup against state.transactions,
-      // so an unhydrated store means nothing matches and the entire inbox
-      // imports as new — on top of the rows that arrive a moment later. The
-      // effect below already waits for this; pull-to-refresh did not.
-      if (!state.hydrated) {
-        if (interactive) toast.show(t('stillLoading'));
-        return 'not-hydrated';
-      }
-      // Hard paywall: tracking pauses when the trial ends without Pro.
-      if (!isProActive(state)) {
-        if (interactive) router.push('/pro');
-        return 'not-pro';
-      }
-      if (!isCaptureAvailable()) return 'unavailable';
-      // Android needs the SMS permission before it can read anything. iOS has
-      // no permission to ask for — its messages arrive over the relay — so the
-      // prompt is skipped there rather than shown and refused.
-      if (isSmsScanningAvailable()) {
-        let granted = await hasSmsPermission();
-        if (!granted && interactive) granted = await requestSmsPermission();
-        if (!granted) {
-          setNeedsPermission(true);
-          setCaptureState('off');
-          return 'no-permission';
-        }
-        setNeedsPermission(false);
-        setCaptureState('active');
-      }
-
-      const { plan, source, commit, needsSetup } = await planNewMessages(state);
-      if (needsSetup) {
-        // The relay is not paired yet, so silence here means "not connected",
-        // not "nothing new". Only say so when the user actually asked.
-        if (interactive) router.push('/ios-setup');
-        return 'needs-setup';
-      }
-      // healedCount belongs in this test. A re-read that only CORRECTS rows —
-      // exactly what a parser fix produces — was being thrown away here, so the
-      // corrections never reached the store.
-      if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
-        markParserVersion();
-        // Nothing arrived, so nothing is owed — but acking is still correct:
-        // the relay may have queued rows that deduped against an earlier
-        // in-memory import whose first disk write failed. Flush the current
-        // authoritative ledger before dropping those server rows.
-        if (source === 'relay') await ensureDurable();
-        await commit();
-        if (interactive) toast.show(t('upToDateNoNew'));
-        return 'up-to-date';
-      }
-      const receipt = importBatch(plan.batch);
-      // A React dispatch is not a disk commit. Wait for the encrypted SQLite
-      // transaction; only then is it safe to drop the relay's sealed copy.
-      await receipt.durable;
-      await commit();
-      committed();
-      toast.show(
-        tf('importedTransactions', {
-          count: plan.txCount,
-          s: plan.txCount === 1 ? '' : 's',
-          cards:
-            plan.newAccountCount > 0
-              ? tf('importedNewCards', {
-                  count: plan.newAccountCount,
-                  s: plan.newAccountCount === 1 ? '' : 's',
-                })
-              : '',
-        }),
-        [
-          { label: t('undo'), onPress: () => undoBatch(receipt.ids) },
-          { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
-        ],
-      );
-      return 'imported';
-    },
-    [state, importBatch, ensureDurable, undoBatch, markParserVersion, toast, router],
-  );
-
-  // The single owner of `importInFlight`. Always starts a fresh scan — callers
-  // that should instead join one already running go through `runAutoImport`.
-  const startAutoImport = useCallback(
-    (interactive: boolean): Promise<AutoImportOutcome> => {
-      const operation = performAutoImport(interactive).finally(() => {
-        if (importInFlight.current?.promise === operation) importInFlight.current = null;
-      });
-      importInFlight.current = { promise: operation, interactive };
-      return operation;
-    },
-    [performAutoImport],
-  );
-
-  const runAutoImport = useCallback(
-    (interactive: boolean): Promise<void> => {
-      const existing = importInFlight.current;
-      if (!existing) return startAutoImport(interactive).then(() => undefined);
-      // Two silent callers, or an interactive caller joining another
-      // interactive one already in flight: the one running owns delivering
-      // whatever feedback applies, same as before.
-      if (!interactive || existing.interactive) return existing.promise.then(() => undefined);
-      // An explicit action (pull-to-refresh, tapping the capture card) joined
-      // a scan nobody was watching. That scan only ever ran its `interactive`
-      // branches as false, so a permission prompt, a paywall/setup redirect,
-      // or the up-to-date toast never fired — the user's tap would otherwise
-      // get no feedback at all. None of those outcomes did any actual
-      // reading or importing, so re-running interactively is a fresh first
-      // attempt for this request, not a second scan of the same data. The one
-      // exception is `'imported'`, whose toast already fires unconditionally.
-      return existing.promise.then((outcome) =>
-        outcome === 'imported' ? undefined : startAutoImport(true).then(() => undefined),
-      );
-    },
-    [startAutoImport],
-  );
-
-  // Silent auto-import on open, and again every time the app comes back to
-  // the foreground.
-  //
-  // This used to run once per JS session, behind a module-level flag that was
-  // never reset. Android keeps the JS context alive when the app is
-  // backgrounded, so "once per session" meant once per COLD START: leaving the
-  // app to pay for something and coming back — the exact moment a new bank SMS
-  // exists — imported nothing, and the charge only appeared after a manual
-  // pull-to-refresh. The app looked like it could not see messages it had
-  // already captured.
-  useEffect(() => {
-    if (!state.hydrated) return;
-
-    const scan = () => {
-      if (Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
-      lastScanAt = Date.now();
-      void runAutoImport(false).catch(() => {
-        // Best-effort; manual import still available.
-      });
-    };
-
-    scan();
-
-    if (!sessionSetupRan) {
-      sessionSetupRan = true;
-      (async () => {
-        try {
-          // Ask the store who this customer is, once per launch.
-          //
-          // Without this, `pro` was a local boolean that nothing ever
-          // re-checked: once true it stayed true through a lapsed
-          // subscription, a refund or a cancellation, and a reinstall left a
-          // paying customer to find the Restore button by themselves.
-          //
-          // A null answer means the store could not be reached, which is NOT
-          // the same as not having paid — the cached flag stands in that
-          // case, so a flight does not lock someone out of their own ledger.
-          const entitled = await refreshEntitlement();
-          if (entitled !== null && entitled !== state.pro) setPro(entitled);
-        } catch {
-          // Entitlement is best-effort; the cached flag stands.
-        }
-        try {
-          await enableRelayBackgroundSync();
-          // Never prompt on launch. Reminder/instant-alert surfaces ask only
-          // after the user explicitly enables them; this call is a no-op when
-          // notification authorization has not already been granted.
-          await syncPaymentReminders(state);
-        } catch {
-          // Reminders are best-effort; the ledger does not depend on them.
-        }
-      })();
-    }
-
-    const sub = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') scan();
-    });
-    return () => sub.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.hydrated]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

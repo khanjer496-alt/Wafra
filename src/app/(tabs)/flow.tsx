@@ -11,7 +11,7 @@
  */
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -25,6 +25,7 @@ import { LinkPill, PeriodPill, SectionHeader } from '@/components/ui/period-pill
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
+import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
@@ -56,6 +57,8 @@ export default function FlowScreen() {
   const dark = useColorScheme() === 'dark';
   const clearance = useTabBarClearance();
   const { state } = useStore();
+  // Every tab that shows money the inbox produces can now go and refresh it.
+  const { refreshing, onRefresh } = usePullToRefresh();
   const { period } = usePeriod();
   const now = useMemo(() => new Date(), []);
 
@@ -178,6 +181,9 @@ export default function FlowScreen() {
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+          }
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <ThemedText type="title">{t('tabFlow')}</ThemedText>

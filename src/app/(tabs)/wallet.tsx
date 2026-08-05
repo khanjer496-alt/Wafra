@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -27,6 +28,7 @@ import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/the
 import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
+import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
@@ -89,6 +91,8 @@ export default function WalletScreen() {
     mergeRenewedCard,
     markCardsDistinct,
   } = useStore();
+  // Every tab that shows money the inbox produces can now go and refresh it.
+  const { refreshing, onRefresh } = usePullToRefresh();
 
   const now = useMemo(() => new Date(), []);
 
@@ -279,7 +283,12 @@ export default function WalletScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+          }
+          showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow}>
             <ThemedText type="title">{t('walletTitle')}</ThemedText>
             <View style={styles.headerActions}>

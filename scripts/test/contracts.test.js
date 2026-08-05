@@ -328,7 +328,7 @@ function ktSources(dir) {
 {
   const src = read('src/lib/purchases.ts');
   const sdk = read('src/lib/billing.ts');
-  const home = read('src/app/(tabs)/index.tsx');
+  const home = read('src/hooks/use-auto-import.ts');
 
   // The entitlement id is a string shared with a dashboard nobody can grep.
   ok('the entitlement id is named once and exported',
@@ -429,7 +429,7 @@ function ktSources(dir) {
 /* ── relay acknowledgement follows encrypted durability ─────────────── */
 {
   const store = read('src/lib/store.tsx');
-  const home = read('src/app/(tabs)/index.tsx');
+  const home = read('src/hooks/use-auto-import.ts');
   const setup = read('src/app/ios-setup.tsx');
   const homeDurableAt = home.indexOf('await receipt.durable');
   const setupDurableAt = setup.indexOf('await durable');
@@ -453,7 +453,7 @@ function ktSources(dir) {
   );
   const background = read('src/lib/background-relay.ts');
   const relay = read('src/lib/relay.ts');
-  const home = read('src/app/(tabs)/index.tsx');
+  const home = read('src/hooks/use-auto-import.ts');
   const onboarding = read('src/components/onboarding-gate.tsx');
   const layout = read('src/app/_layout.tsx');
   const worker = read('server/src/push.ts');
@@ -530,15 +530,21 @@ function ktSources(dir) {
 /* ── Android inbox scans stay off the interaction critical path ─────── */
 {
   const scan = read('src/lib/auto-import.ts');
-  const home = read('src/app/(tabs)/index.tsx');
+  const home = read('src/hooks/use-auto-import.ts');
   const slice = Number(scan.match(/const PARSE_SLICE_SIZE = (\d+)/)?.[1]);
 
   ok('SMS parsing yields frequently enough for responsive input',
     slice > 0 && slice <= 32 && /await yieldToUi\(\)/.test(scan),
     `slice=${slice}`);
-  ok('concurrent Home capture requests join one scan',
-    /const existing = importInFlight\.current;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
-      /importInFlight\.current = \{ promise: operation, interactive \}/.test(home));
+  ok('concurrent capture requests join one scan',
+    /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
+      /importInFlight = \{ promise: operation, interactive \}/.test(home));
+  // ...and the thing they join is MODULE-level, not a component ref. Four tabs
+  // now mount this hook; a per-component ref would have given each screen its
+  // own "one" scan, which is four inbox reads racing four import plans built
+  // from the same stale ledger — the duplicate-charge bug the join prevents.
+  ok('the in-flight scan is shared across screens, not per component',
+    /^let importInFlight: \{/m.test(home) && !/importInFlight = React\.useRef/.test(home));
   // A silent scan cannot deliver a permission prompt, a paywall/setup
   // redirect, or the up-to-date toast — every one of those is gated on
   // `interactive`, which that scan ran with false. An explicit action that
@@ -548,6 +554,30 @@ function ktSources(dir) {
   ok('an interactive request joining a silent scan still gets its own follow-up',
     /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
       /outcome === 'imported' \? undefined : startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home));
+}
+
+/* ── every tab that shows captured money can go and refresh it ──────── */
+//
+// A user paid AED 5,645 off a FAB card, opened Bills — the screen whose entire
+// job is "is this card settled?" — and it still said AED 5,645 owing. The scan
+// lived inside Home, so nothing on Bills, Wallet or Flow could ask the inbox
+// for the payment SMS. The screen that raises the question has to be able to
+// answer it.
+{
+  const hook = read('src/hooks/use-auto-import.ts');
+  ok('the pull-to-refresh helper exists and scans interactively',
+    /export function usePullToRefresh/.test(hook) && /runAutoImport\(true\)/.test(hook));
+  for (const tab of ['bills', 'wallet', 'flow']) {
+    const src = read(`src/app/(tabs)/${tab}.tsx`);
+    ok(`${tab} can pull to refresh`,
+      /usePullToRefresh\(\)/.test(src) &&
+        /<RefreshControl refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(src));
+  }
+  // Home keeps the mount + foreground watch; the others deliberately do not,
+  // so a tab switch does not fire a native permission query for a card that
+  // tab never renders.
+  const home = read('src/app/(tabs)/index.tsx');
+  ok('Home is the screen that watches the foreground', /useAutoImport\(true\)/.test(home));
 }
 
 /* ── the budget editor answers the same question as the budget bar ──── */
