@@ -1490,6 +1490,13 @@ const HSBC_DATE_RE = /\bfrom\s+hsbc:\s*(\d{1,2})([A-Za-z]{3})(\d{2})\b/i;
 const ATM_RE = /\batm\b|cash\s+withdrawal|\bwithdrawn\b|سحب نقدي|الصراف الالي|صراف الي|جهاز الصراف/i;
 const FEE_RE =
   /\bfees?\b|\bcharges?\s+(?:of|:)|service charge|\bvat\b|annual membership|رسوم|رسم خدمه|ضريبه القيمه المضافه/i;
+/**
+ * A salary credit, for TITLING only — the category is decided separately.
+ * "payroll" and "wages" are here because UAE employers on WPS use all three,
+ * and "end of service" is not: a gratuity is income but it is not the monthly
+ * salary the user is looking for.
+ */
+const SALARY_RE = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwages?\b|\bwps\b|راتب|الراتب/i;
 const DEPOSIT_RE = /cash\s+deposit|\bcdm\b|deposit(?:ed)?\s+(?:in|into|to)\b|ايداع نقدي|جهاز الايداع/i;
 /**
  * A prepaid AIRTIME top-up, which names no shop and never will.
@@ -3569,7 +3576,14 @@ export function parseSms(
           ? 'Cash deposit'
           : /inward\s+remittance/i.test(raw)
             ? 'Inward remittance'
-            : 'Incoming transfer'
+            // A salary credit is the single most recognisable row in the whole
+            // ledger and it was titled "Incoming transfer" — the generic
+            // fallback — while the category beside it already said Salary. The
+            // month's largest row should say what it is, and this is the one
+            // structural title the user reads every month.
+            : SALARY_RE.test(raw)
+              ? 'Salary'
+              : 'Incoming transfer'
         : transferHint
           ? 'Card payment'
           : ATM_RE.test(raw)

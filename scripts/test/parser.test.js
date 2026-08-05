@@ -86,7 +86,7 @@ t('balance amount skipped when it comes after',
 // ── Regression coverage ──
 t('salary credit, no fake merchant',
   'Salary of AED 18,500.00 has been credited to your account ending 5678',
-  { merchant: 'Incoming transfer', type: 'income', amountFils: 1850000, category: 'salary' });
+  { merchant: 'Salary', type: 'income', amountFils: 1850000, category: 'salary' });
 
 t('salik payment', 'AED 55.00 was debited from your account for payment to SALIK RECHARGE on 16/07/2026',
   { merchant: 'Salik Recharge', category: 'transport', date: '2026-07-16' });
@@ -1192,7 +1192,7 @@ t('a bill paid via a credit card, with no verb, is still spending',
 // clause that says WHERE the money went now settles it first.
 t('a salary paid INTO your account is income, not a AED 10,000 expense',
   'Your salary of AED 10,000.00 has been paid into your account 1234.',
-  { type: 'income', amountFils: 1000000, merchant: 'Incoming transfer', category: 'salary',
+  { type: 'income', amountFils: 1000000, merchant: 'Salary', category: 'salary',
     card: { last4: '1234', kind: 'account' } });
 
 t('salary paid to an a/c reads the same way',
@@ -1578,7 +1578,7 @@ t('a payment CREDITED TO a biller account is a bill, not income',
 // money arriving is still income.
 t('a salary credited to your account is still income',
   'Your salary of AED 18,500.00 has been credited to your account ending 5678',
-  { type: 'income', amountFils: 1850000, merchant: 'Incoming transfer', category: 'salary' });
+  { type: 'income', amountFils: 1850000, merchant: 'Salary', category: 'salary' });
 
 // ── A card settlement is a card settlement, not any payment near a card ──
 // CARD_PAYMENT_RE's word gap was widened to three bare words, so the phrase
@@ -1675,7 +1675,7 @@ t('a dividend payment credited to your account is income',
 // A bank is never the payee of money arriving in your own account.
 t('a salary payment credited to a BANK-named account is still income',
   'Your salary payment of AED 12,000.00 has been credited to your RAKBANK account 1234.',
-  { type: 'income', amountFils: 1200000, merchant: 'Incoming transfer', category: 'salary' });
+  { type: 'income', amountFils: 1200000, merchant: 'Salary', category: 'salary' });
 t('profit credited to an Islamic savings account is income',
   'Profit of AED 34.22 has been credited to your ADIB Savings Account 1234.',
   { type: 'income', amountFils: 3422, merchant: 'Incoming transfer' });
@@ -2117,7 +2117,7 @@ t('a single bidi mark does not delete the transaction',
 // payee invents one.
 t('an Arabic salary credit is income, with no invented payee',
   'تم إيداع راتب بمبلغ 18,500.00 درهم في حسابك المنتهي 5678',
-  { kind: 'transaction', type: 'income', amountFils: 1850000, merchant: 'Incoming transfer',
+  { kind: 'transaction', type: 'income', amountFils: 1850000, merchant: 'Salary',
     category: 'salary', card: { last4: '5678', kind: 'account' } });
 
 // Four hooks at once: the Arabic ATM words pin the title, بتاريخ carries the
@@ -2723,7 +2723,7 @@ fmt('RECON', 'ATM withdrawal at a mall is cash out, not shopping',
 
 fmt('RECON', 'salary credited to the account',
   'Your ADIB Account XXXX1234 has been credited with AED 18,500.00 being Salary for Jul 2026. Available Balance AED 21,400.00',
-  { type: 'income', amountFils: 1850000, merchant: 'Incoming transfer', category: 'salary',
+  { type: 'income', amountFils: 1850000, merchant: 'Salary', category: 'salary',
     card: { last4: '1234', kind: 'account' }, snapshotFils: 2140000 });
 
 // Islamic banks credit PROFIT, never interest — and bank profit is an offset,
@@ -2818,7 +2818,7 @@ fmt('RECON', 'ATM withdrawal on a debit card',
 
 fmt('RECON', 'salary credit',
   'Your salary of AED 18,500.00 has been credited to your RAKBANK Account XXXX1234. Available Balance: AED 21,400.00',
-  { type: 'income', amountFils: 1850000, category: 'salary', merchant: 'Incoming transfer',
+  { type: 'income', amountFils: 1850000, category: 'salary', merchant: 'Salary',
     card: { last4: '1234', kind: 'account' } });
 
 // "Due date DD/MM/YYYY" — a noun lead-in where ENBD writes "due on".
