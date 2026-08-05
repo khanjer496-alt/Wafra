@@ -295,6 +295,49 @@ ok('openDues: dues stale past 30d overdue decay away',
 ok('openDues: recent overdue credit due still shows',
   guardOpen.some(d => d.due.id === 'g1' && d.status === 'overdue'));
 
+// ── the card derivations are memoised on input IDENTITY ──
+//
+// `cardFigure` calls `openDues` and picks one row out of it, and Wallet calls
+// `cardFigure` once per card: 17 full payment allocations over the whole
+// ledger to answer 17 questions with one answer. Memoising it is only safe
+// while three things hold, so all three are asserted rather than assumed.
+{
+  const memoDay = new Date(2026, 6, 24);
+  // 1. A repeat call with the same state gives the same answer.
+  const first = cardsGuardLib.openDues(guardState, memoDay);
+  const second = cardsGuardLib.openDues(guardState, memoDay);
+  ok('openDues: a cached answer equals the computed one',
+    JSON.stringify(first) === JSON.stringify(second));
+  // 2. ...but never the same ARRAY. A caller that sorts its list in place must
+  //    not corrupt what every later reader in the frame sees.
+  ok('openDues: each caller gets its own array',
+    first !== second);
+  first.length = 0;
+  ok('openDues: emptying one caller\'s list leaves the next intact',
+    cardsGuardLib.openDues(guardState, memoDay).length === second.length);
+  // 3. A new state object must invalidate. The store is a reducer, so changed
+  //    data always means a changed reference — if identity did not invalidate,
+  //    the app would show last frame's numbers forever.
+  const paidState = {
+    ...guardState,
+    transactions: [{
+      id: 'pay', type: 'income', amountFils: 406100, category: 'other', accountId: 'cc',
+      title: 'Card payment', date: '2026-07-08', source: 'sms', isTransfer: true,
+    }],
+  };
+  ok('openDues: a new transactions array invalidates the cache',
+    !cardsGuardLib.openDues(paidState, memoDay).some((d) => d.due.id === 'g1'));
+  ok('openDues: and the old state still reads the same as before',
+    cardsGuardLib.openDues(guardState, memoDay).some((d) => d.due.id === 'g1'));
+  // 4. The day is part of the key: the same ledger read tomorrow is a
+  //    different answer, and an app left open overnight must not keep
+  //    yesterday's "days left".
+  const laterDay = cardsGuardLib.openDues(guardState, new Date(2026, 6, 25));
+  ok('openDues: a day later is a day fewer',
+    laterDay.find((d) => d.due.id === 'g1').daysLeft ===
+      second.find((d) => d.due.id === 'g1').daysLeft - 1);
+}
+
 // The same statement stored twice — a reminder SMS read as a fresh statement —
 // listed the card twice on Home and counted it twice in the total.
 const twinState = {

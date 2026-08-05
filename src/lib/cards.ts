@@ -44,6 +44,58 @@ export interface DueWithStatus {
  */
 export const ESTIMATED_MINIMUM_RATE = 0.05;
 
+/* ── Memoisation ─────────────────────────────────────────────────────────
+ *
+ * WHY THIS FILE, AND WHY IDENTITY.
+ *
+ * Everything below is a pure read of `state.accounts`, `state.transactions`
+ * and `state.cardDues`. That made it easy to call from anywhere, and it was
+ * called from everywhere — the cost is quadratic in a way none of the call
+ * sites can see:
+ *
+ *  - `cardFigure` calls `openDues` and then `.find()`s one row out of it. The
+ *    Wallet screen calls `cardFigure` once per card. On a real ledger — 49
+ *    accounts, 14 statements, 14,500 rows — that is 17 full payment
+ *    allocations, each walking the whole ledger once per statement, to answer
+ *    17 questions that share one answer. Measured at 45ms on desktop V8, which
+ *    on Hermes is most of a second of blocked JS on every render of the tab.
+ *  - `accountLastActivityISO` walks all 14,500 rows for ONE account id, and
+ *    `isInactiveAccount` calls it per account while Wallet filters the list.
+ *  - `leavingSoon` calls `openDues` again in the same render pass Home already
+ *    called it, and Bills calls it a third time.
+ *
+ * The store is a reducer: every mutation produces new arrays, and nothing
+ * writes through an existing one. So array IDENTITY is an exact, free change
+ * detector — `===` on three references decides whether last frame's answer is
+ * still the right answer. Not a heuristic; if any of the three inputs changed,
+ * the reference changed with it.
+ *
+ * One entry each, deliberately. These are render-path caches: the question
+ * asked 17 times in a row is the same question, and the frame after a
+ * dispatch asks a different one. A larger cache would hold ledgers nobody is
+ * looking at anymore.
+ */
+
+/** Identity of everything a card derivation can read. */
+interface CardInputs {
+  accounts: Account[];
+  transactions: Transaction[];
+  cardDues: CardDue[];
+}
+
+function sameInputs(a: CardInputs, b: CardInputs): boolean {
+  return (
+    a.accounts === b.accounts &&
+    a.transactions === b.transactions &&
+    a.cardDues === b.cardDues
+  );
+}
+
+let openDuesCache: (CardInputs & { day: string; value: DueWithStatus[] }) | null = null;
+let paymentsCache: { transactions: Transaction[]; accounts: Account[]; byKey: Map<string, Transaction[]> } | null =
+  null;
+let activityCache: { transactions: Transaction[]; byAccount: Map<string, string> } | null = null;
+
 export function estimatedMinimumFils(totalFils: number): number {
   return Math.round(totalFils * ESTIMATED_MINIMUM_RATE);
 }
@@ -164,13 +216,34 @@ function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>)
 }
 
 function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
+  // The full-ledger filter + sort, memoised per card. `allocatePayments` runs
+  // once per statement and `openDues` runs it for all of them, so on a ledger
+  // with several statements per card this is the same walk repeated. The key
+  // is the id set, sorted so it does not depend on insertion order.
+  const key = [...ids].sort().join(',');
+  if (
+    !paymentsCache ||
+    paymentsCache.transactions !== state.transactions ||
+    paymentsCache.accounts !== state.accounts
+  ) {
+    paymentsCache = {
+      transactions: state.transactions,
+      accounts: state.accounts,
+      byKey: new Map(),
+    };
+  }
+  const hit = paymentsCache.byKey.get(key);
+  if (hit) return hit;
+
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && ids.has(a.id)).map((a) => a.id),
   );
-  return state.transactions
+  const value = state.transactions
     .filter((t) => isCardPayment(t, ids, creditIds))
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date));
+  paymentsCache.byKey.set(key, value);
+  return value;
 }
 
 /** A card's statements: one per due date, however many rows describe each. */
@@ -353,6 +426,26 @@ const STALE_OVERDUE_DAYS = 30;
  * charging the user twice for the same money.
  */
 export function openDues(state: AppState, today: Date): DueWithStatus[] {
+  const day = toISODate(today);
+  if (openDuesCache && openDuesCache.day === day && sameInputs(openDuesCache, state)) {
+    // A copy, not the cached array. Callers sort and splice their own lists,
+    // and one caller mutating this in place would corrupt every later reader
+    // for the rest of the frame. Copying ≤ a few dozen references is free
+    // beside the allocation walk it replaces.
+    return openDuesCache.value.slice();
+  }
+  const value = computeOpenDues(state, today);
+  openDuesCache = {
+    accounts: state.accounts,
+    transactions: state.transactions,
+    cardDues: state.cardDues,
+    day,
+    value,
+  };
+  return value.slice();
+}
+
+function computeOpenDues(state: AppState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
@@ -503,11 +596,20 @@ export function cardStatementView(state: AppState, accountId: string): CardState
  * the bank's latest snapshot SMS, whichever is later. Null = no history.
  */
 export function accountLastActivityISO(state: AppState, accountId: string): string | null {
-  let latest: string | null = null;
-  for (const t of state.transactions) {
-    if (t.accountId !== accountId) continue;
-    if (!latest || t.date > latest) latest = t.date;
+  // One pass over the ledger builds the answer for EVERY account, because the
+  // caller that matters asks for all of them: Wallet filters its card list
+  // through `isInactiveAccount`, which lands here once per card. Per-account
+  // scanning made that 49 walks of 14,500 rows to compute 49 maxima that a
+  // single walk produces.
+  if (!activityCache || activityCache.transactions !== state.transactions) {
+    const byAccount = new Map<string, string>();
+    for (const t of state.transactions) {
+      const seen = byAccount.get(t.accountId);
+      if (!seen || t.date > seen) byAccount.set(t.accountId, t.date);
+    }
+    activityCache = { transactions: state.transactions, byAccount };
   }
+  let latest: string | null = activityCache.byAccount.get(accountId) ?? null;
   const acc = state.accounts.find((a) => a.id === accountId);
   if (acc?.snapshotTs) {
     const snapISO = toISODate(new Date(acc.snapshotTs));
