@@ -38,13 +38,20 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.platform != 'android') ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'device-shots'))
-    # macos-15 ships Xcode 16.4, and Expo SDK 55 requires 26.2 or newer. On
-    # 16.4 the build reached expo-modules-core and died with 24 Swift errors
+    # macos-15 DEFAULTS to Xcode 16.4, and Expo SDK 55 requires 26.2 or newer.
+    # On 16.4 the build reached expo-modules-core and died with 24 Swift errors
     # inside Expo's OWN sources — "unknown attribute 'MainActor'" on
     # `extension UIView: @MainActor AnyArgument`, which is an isolated
-    # conformance the older Swift compiler cannot parse. Nothing in this repo
-    # was wrong; the toolchain was.
-    runs-on: macos-26
+    # conformance (SE-0470, Swift 6.2) the older compiler cannot parse. Nothing
+    # in this repo was wrong; the toolchain was.
+    #
+    # The image is kept and the Xcode is SELECTED instead. macos-15 already
+    # carries a 26.x alongside the default — the simulator step boots an iOS
+    # 26.2 runtime, which ships only with Xcode 26 — so the newer toolchain is
+    # right there, just not the one `xcodebuild` picks. A `macos-26` label was
+    # tried first and sat unassigned, so this stays on the label that is known
+    # to allocate.
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
