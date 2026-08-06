@@ -378,9 +378,13 @@ jobs:
         id: preflight
         run: |
           set -o pipefail
+          # curl's %{http_code} is 000 when it never connected, and it writes
+          # that itself — so `|| true` here, not `|| echo 000`, which would
+          # concatenate two codes into one nonsense number.
           code=$(curl -sS -o cf.json -w '%{http_code}' \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" || echo 000)
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" || true)
+          code=${code:-000}
 
           subdomain=$(node -e '
             const fs = require("node:fs");
@@ -538,67 +542,9 @@ jobs:
           url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.out | head -1 || true)
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      # ---- Worker secrets, after the deploy rather than before.
-      #
-      #      `wrangler secret put` reads the value from stdin whenever stdin is
-      #      not a TTY (verified in wrangler 4.116.0: it branches on
-      #      process.stdin.isTTY and otherwise calls readFromStdin, then trims
-      #      trailing whitespace), so a pipe is the non-interactive form.
-      #
-      #      After, not before, because on a first run `secret put` against a
-      #      Worker that does not exist yet creates an empty draft Worker — in
-      #      CI it takes the default answer "yes" without asking. If the deploy
-      #      then failed, the URL would answer with a stub. Deploying first
-      #      means the worst case is a live, working relay that simply has no
-      #      push key yet, which server/DEPLOY.md documents as a supported
-      #      configuration rather than a broken one.
-      - name: Set PUSH_TOKEN_KEY
-        id: push_key
-        working-directory: server
-        env:
-          PUSH_TOKEN_KEY: ${{ secrets.PUSH_TOKEN_KEY }}
-        run: |
-          value=$(printf '%s' "${PUSH_TOKEN_KEY:-}" | tr -d '[:space:]')
-          if [ -z "$value" ]; then
-            echo "set=absent" >> "$GITHUB_OUTPUT"
-            echo "No PUSH_TOKEN_KEY secret — skipping. The relay will refuse push registration and send no wakes."
-            exit 0
-          fi
-          # server/src/push.ts requires standard base64 decoding to exactly 32
-          # bytes, which is 44 characters ending in '='. A wrong key is not a
-          # deploy failure — it is silent: registration throws at runtime and
-          # wakes simply never arrive. Catch it here.
-          if ! printf '%s' "$value" | grep -qE '^[A-Za-z0-9+/]{43}=$'; then
-            {
-              echo "## PUSH_TOKEN_KEY was rejected before it was uploaded"
-              echo
-              echo "It must be standard base64 of exactly 32 random bytes — 44 characters ending in \`=\`,"
-              echo "as produced by \`openssl rand -base64 32\`. The value in the repository secret is"
-              echo "${#value} characters after whitespace was stripped."
-              echo
-              echo "The Worker was already deployed. Fix the secret and re-run; nothing else needs redoing."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          printf '%s' "$value" | npx --no-install wrangler secret put PUSH_TOKEN_KEY
-          echo "set=set" >> "$GITHUB_OUTPUT"
-
-      - name: Set EXPO_ACCESS_TOKEN
-        id: expo_token
-        working-directory: server
-        env:
-          EXPO_ACCESS_TOKEN: ${{ secrets.EXPO_ACCESS_TOKEN }}
-        run: |
-          value=$(printf '%s' "${EXPO_ACCESS_TOKEN:-}" | tr -d '[:space:]')
-          if [ -z "$value" ]; then
-            echo "set=absent" >> "$GITHUB_OUTPUT"
-            echo "No EXPO_ACCESS_TOKEN secret — skipping. Only needed if EAS enhanced push security is on."
-            exit 0
-          fi
-          printf '%s' "$value" | npx --no-install wrangler secret put EXPO_ACCESS_TOKEN
-          echo "set=set" >> "$GITHUB_OUTPUT"
-
-      # ---- Work out the URL from the three things that might know it.
+      # ---- Work out the URL from the three things that might know it. This
+      #      runs before the secret steps so that a rejected secret still
+      #      leaves the URL on screen — it is the one value the owner came for.
       - name: Work out the deployed URL
         id: url
         env:
@@ -625,6 +571,74 @@ jobs:
           echo "source=$source" >> "$GITHUB_OUTPUT"
           echo "Deployed URL ($source): $url"
 
+      # ---- Worker secrets, after the deploy rather than before.
+      #
+      #      `wrangler secret put` reads the value from stdin whenever stdin is
+      #      not a TTY (verified in wrangler 4.116.0: it branches on
+      #      process.stdin.isTTY and otherwise calls readFromStdin, then trims
+      #      trailing whitespace), so a pipe is the non-interactive form.
+      #
+      #      After, not before, because on a first run `secret put` against a
+      #      Worker that does not exist yet creates an empty draft Worker — in
+      #      CI it takes the default answer "yes" without asking. If the deploy
+      #      then failed, the URL would answer with a stub. Deploying first
+      #      means the worst case is a live, working relay that simply has no
+      #      push key yet, which server/DEPLOY.md documents as a supported
+      #      configuration rather than a broken one.
+      - name: Set PUSH_TOKEN_KEY
+        id: push_key
+        working-directory: server
+        env:
+          PUSH_TOKEN_KEY: ${{ secrets.PUSH_TOKEN_KEY }}
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          value=$(printf '%s' "${PUSH_TOKEN_KEY:-}" | tr -d '[:space:]')
+          if [ -z "$value" ]; then
+            echo "set=absent" >> "$GITHUB_OUTPUT"
+            echo "No PUSH_TOKEN_KEY secret — skipping. The relay will refuse push registration and send no wakes."
+            exit 0
+          fi
+          # server/src/push.ts requires standard base64 decoding to exactly 32
+          # bytes, which is 44 characters ending in '='. A wrong key is not a
+          # deploy failure — it is silent: registration throws at runtime and
+          # wakes simply never arrive. Catch it here.
+          if ! printf '%s' "$value" | grep -qE '^[A-Za-z0-9+/]{43}=$'; then
+            {
+              echo "## PUSH_TOKEN_KEY was rejected before it was uploaded"
+              echo
+              echo "It must be standard base64 of exactly 32 random bytes — 44 characters ending in \`=\`,"
+              echo "as produced by \`openssl rand -base64 32\`. The value in the repository secret is"
+              echo "${#value} characters after whitespace was stripped."
+              echo
+              echo
+              echo "**The Worker was already deployed** and is live at:"
+              echo
+              echo '```'
+              echo "${URL:-(could not determine the URL — see the log)}"
+              echo '```'
+              echo
+              echo "Fix the secret and re-run; nothing else needs redoing."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          printf '%s' "$value" | npx --no-install wrangler secret put PUSH_TOKEN_KEY
+          echo "set=set" >> "$GITHUB_OUTPUT"
+
+      - name: Set EXPO_ACCESS_TOKEN
+        id: expo_token
+        working-directory: server
+        env:
+          EXPO_ACCESS_TOKEN: ${{ secrets.EXPO_ACCESS_TOKEN }}
+        run: |
+          value=$(printf '%s' "${EXPO_ACCESS_TOKEN:-}" | tr -d '[:space:]')
+          if [ -z "$value" ]; then
+            echo "set=absent" >> "$GITHUB_OUTPUT"
+            echo "No EXPO_ACCESS_TOKEN secret — skipping. Only needed if EAS enhanced push security is on."
+            exit 0
+          fi
+          printf '%s' "$value" | npx --no-install wrangler secret put EXPO_ACCESS_TOKEN
+          echo "set=set" >> "$GITHUB_OUTPUT"
+
       # ---- Verification. A deploy that is not checked is a rumour.
       - name: Health check
         id: health
@@ -650,7 +664,8 @@ jobs:
           body=""
           code=""
           for attempt in 1 2 3 4 5 6; do
-            code=$(curl -sS -m 20 -o body.txt -w '%{http_code}' "$URL/v1/health" || echo 000)
+            code=$(curl -sS -m 20 -o body.txt -w '%{http_code}' "$URL/v1/health" || true)
+            code=${code:-000}
             body=$(cat body.txt 2>/dev/null || true)
             echo "attempt $attempt: HTTP $code $body"
             if [ "$code" = "200" ] && printf '%s' "$body" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then

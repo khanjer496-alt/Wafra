@@ -319,7 +319,9 @@ async function captureRun(browser, { scheme, lang, device = 'review', store = fa
 
 const store = flag('store');
 const device = store ? arg('device', 'iphone-6.9') : 'review';
-if (!DEVICES[device] || device === 'review') {
+// Only meaningful in store mode; the review sweep always uses `review`, and
+// validating unconditionally rejected the default run outright.
+if (store && (!DEVICES[device] || device === 'review')) {
   console.error(
     `capture: unknown --device ${device}; expected one of ` +
       Object.keys(DEVICES).filter((d) => d !== 'review').join(', '),

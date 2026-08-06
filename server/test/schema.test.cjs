@@ -1,3 +1,49 @@
+// WHAT THIS FILE IS, AND WHAT IT IS NOT.
+//
+// Most of what follows reads server/src/index.ts as a STRING and regex-matches
+// it. That is a weak instrument and it must not be mistaken for a strong one.
+// It passes on a runtime-broken Worker and fails on a rename — wrong in both
+// directions. "device-sealed queue retention is implemented at 30 days" passes
+// because the SQL literal appears somewhere in the file; a scheduled() that
+// threw on its first line would satisfy it just as well.
+//
+// For a long time these 32 assertions were the LARGER HALF of `npm run
+// check:server` (59 assertions total), and the only other three suites in it
+// are unit tests of push, imports and the deploy script. No route executed, no
+// D1 stub existed, no fetch() or scheduled() was ever called. Reviewing a
+// change to the Worker with check:server meant reading grep results.
+//
+// That is fixed at the gate rather than here: `npm run check:server` now also
+// runs scripts/test/worker-gate.sh, which builds the real Worker and drives
+// scripts/test/worker.test.js — worker.fetch and worker.scheduled against a D1
+// stub over the real schema.sql, ~216 behavioural assertions. Retention,
+// scope separation, the sealed queue, the replay receipts and the statement
+// import paths are all EXERCISED there. Where an assertion below has a
+// behavioural counterpart it is now a belt-and-braces check on the shape of
+// the source, not the proof of the behaviour.
+//
+// The assertions that genuinely cannot be expressed behaviourally, and are the
+// reason this file still exists, are the NEGATIVE ones — the properties whose
+// violation is the absence of an observable event:
+//
+//   * no raw-message / body / email-body column exists in the schema, and no
+//     `sender` column either. A behavioural test can only prove that the text
+//     it happened to send is absent from the database; it cannot prove that no
+//     column capable of holding message text exists at all.
+//   * imports.ts and ingest-row.ts contain no console.*, no D1, no writeFile,
+//     no INSERT — i.e. the parsing modules have no persistence or logging
+//     SURFACE. There is no request that makes a console.log observable.
+//   * a refused sender is never echoed back in any 4xx body. The behavioural
+//     suite checks the responses it provokes; this checks every response shape
+//     the file can produce.
+//   * `raw` leaves the parsed row by SPREAD rather than by allow-list, so a
+//     field the parser gains later still reaches the phone. The failure mode
+//     is a field that does not exist yet, so nothing can drive it.
+//   * schema.sql applies cleanly to a real sqlite3, which is a property of the
+//     file and not of any code path.
+//
+// Nothing here is removed for being redundant: a grep that also holds is free,
+// and the pairs are load-bearing in opposite directions.
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');

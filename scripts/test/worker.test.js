@@ -1371,6 +1371,26 @@ const CARD_PAYMENT_DEBIT =
     ok('statement: re-uploading the same PDF queues nothing new',
       again.status === 202 && (await drainOpened(env, me)).length === 0);
 
+    // The other half of that, and a second silent-loss defect on this route:
+    // the replay key is `pdf:${sha256(bytes)}`, and the digest used to be taken
+    // AFTER extractPdfStatementRows — which hands the array to pdf.js, which
+    // detaches the buffer. Every upload therefore digested an empty array and
+    // got the SAME key, so the first statement's 72-hour receipts suppressed
+    // every DIFFERENT statement sent in the next three days. The route still
+    // answered 202 with a row count, and nothing arrived.
+    const different = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        '2026-04-02 SPINNEYS MARINA 55.25 DR',
+        '2026-04-05 SALARY CREDIT 900.00 CR',
+      ]),
+    });
+    const differentRows = await drainOpened(env, me);
+    ok('statement: a DIFFERENT statement is not suppressed by the first one\'s receipts',
+      different.status === 202 && differentRows.length === 2,
+      JSON.stringify(differentRows.map((row) => row.merchant)));
+    ok('statement: and the phone imports both of those as well',
+      importOnPhone(differentRows).batch.transactions.length === 2);
+
     // Same helper, a different route: a forwarded statement EMAIL takes the
     // queueEmailRows path, which had the identical one-stamp-per-batch defect.
     const email = await (await call(env, 'POST', '/v1/email-token', { token: me.adminToken })).json();

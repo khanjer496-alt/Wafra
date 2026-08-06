@@ -1076,6 +1076,17 @@ export default {
         String.fromCharCode(...incoming.bytes.subarray(0, 5)) !== '%PDF-'
       ) return json({ error: 'invalid_pdf' }, 400);
 
+      // BEFORE the extract, not after. extractPdfStatementRows hands the array
+      // to pdf.js, which takes OWNERSHIP of the underlying buffer and detaches
+      // it — `incoming.bytes` comes back with length 0. Digesting it afterwards
+      // therefore hashed the empty string, identically for every upload, so
+      // `pdf:${digest}` was one constant per device instead of one value per
+      // statement. The first PDF a user sent wrote 72-hour replay receipts
+      // under that constant and every DIFFERENT statement uploaded in the next
+      // three days was suppressed by them: the route answered
+      // `{ acceptedRows: 47 }` and queued nothing at all.
+      const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
+
       let extracted: Awaited<ReturnType<typeof extractPdfStatementRows>>;
       try {
         extracted = await extractPdfStatementRows(incoming.bytes);
@@ -1090,7 +1101,6 @@ export default {
         }, 422);
       }
       if (extracted.rows.length > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
-      const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
@@ -1330,6 +1340,16 @@ export default {
     for (let attachmentIndex = 0; attachmentIndex < parsedEmail.pdfAttachments.length; attachmentIndex++) {
       const bytes = parsedEmail.pdfAttachments[attachmentIndex];
       if (bytes.byteLength > MAX_PDF_BYTES) continue;
+      // BEFORE the extract. pdf.js detaches the buffer it is handed, so a
+      // digest taken afterwards is the digest of nothing — see the identical
+      // note on /v1/import/pdf. Here it would have made every forwarded
+      // statement attachment share one replay key.
+      //
+      // The cast is for the DOM-lib compile in scripts/test/run.sh, where
+      // BufferSource refuses `Uint8Array<ArrayBufferLike>`. Same bytes.
+      const digest = b64encode(
+        await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>),
+      );
       let extracted: Awaited<ReturnType<typeof extractPdfStatementRows>>;
       try {
         extracted = await extractPdfStatementRows(bytes);
@@ -1341,11 +1361,6 @@ export default {
         extracted.rows.length === 0 ||
         extracted.rows.length > MAX_IMPORT_ROWS
       ) continue;
-      // The cast is for the DOM-lib compile in scripts/test/run.sh, where
-      // BufferSource refuses `Uint8Array<ArrayBufferLike>`. Same bytes.
-      const digest = b64encode(
-        await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>),
-      );
       const baseKey = await keyedFingerprint(
         device.requestSecret,
         `mime-pdf:${messageId}:${attachmentIndex}:${digest}`,
