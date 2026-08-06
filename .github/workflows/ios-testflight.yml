@@ -308,7 +308,7 @@ jobs:
           set -o pipefail
           present=0
           for v in "${ASC_KEY_P8:-}" "${ASC_KEY_ID:-}" "${ASC_ISSUER_ID:-}"; do
-            [ -n "$v" ] && present=$((present + 1))
+            if [ -n "$v" ]; then present=$((present + 1)); fi
           done
 
           if [ "$present" = "0" ]; then
@@ -410,8 +410,11 @@ jobs:
             echo "EXPO_ASC_KEY_ID=$ASC_KEY_ID"
             echo "EXPO_ASC_ISSUER_ID=$ASC_ISSUER_ID"
           } >> "$GITHUB_ENV"
-          [ -n "${APPLE_TEAM_ID:-}" ] && echo "EXPO_APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
-          [ -n "${APPLE_TEAM_TYPE:-}" ] && echo "EXPO_APPLE_TEAM_TYPE=$APPLE_TEAM_TYPE" >> "$GITHUB_ENV"
+          # Written as `if` and not `[ … ] && echo`: an AND-list whose test is
+          # false is the last thing that ran in more than one earlier version
+          # of this file, and under `set -e` that ends the step.
+          if [ -n "${APPLE_TEAM_ID:-}" ]; then echo "EXPO_APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"; fi
+          if [ -n "${APPLE_TEAM_TYPE:-}" ]; then echo "EXPO_APPLE_TEAM_TYPE=$APPLE_TEAM_TYPE" >> "$GITHUB_ENV"; fi
 
           echo "state=present" >> "$GITHUB_OUTPUT"
           echo "ASC API key written to \$RUNNER_TEMP as $form; key id and issuer id exported."
@@ -478,6 +481,8 @@ jobs:
           WANT_SUBMIT: ${{ inputs.submit }}
           WAIT: ${{ inputs.wait }}
           WHAT_TO_TEST: ${{ inputs.what_to_test }}
+          ACCOUNT: ${{ steps.whoami.outputs.account }}
+          SLUG: ${{ steps.config.outputs.slug }}
         run: |
           set -o pipefail
           args=(build --platform ios --profile "$PROFILE" --non-interactive --json)
@@ -535,11 +540,21 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n");
           '
 
+          # If EAS did not print the URL, reconstruct it from the documented
+          # shape. Flagged as reconstructed in the summary, because the account
+          # segment is the *token owner* and a project owned by an organisation
+          # lives under the organisation's name instead — in which case the
+          # link 404s and the summary says where to look by hand.
+          page_guessed=false
           if [ -z "$page" ]; then
             id=$(sed -n 's/^build_id=//p' "$GITHUB_OUTPUT" | tail -1)
-            if [ -n "$id" ]; then page="https://expo.dev/builds/$id"; fi
+            if [ -n "$id" ] && [ -n "${ACCOUNT:-}" ] && [ -n "${SLUG:-}" ]; then
+              page="https://expo.dev/accounts/${ACCOUNT}/projects/${SLUG}/builds/${id}"
+              page_guessed=true
+            fi
           fi
           echo "build_page=$page" >> "$GITHUB_OUTPUT"
+          echo "page_guessed=$page_guessed" >> "$GITHUB_OUTPUT"
 
           # The one failure that is not a bug in the setup but a documented
           # limitation of non-interactive EAS. Name it precisely; the generic
@@ -563,7 +578,9 @@ jobs:
           WANT_SUBMIT: ${{ inputs.submit }}
           WAIT: ${{ inputs.wait }}
           BUILD_PAGE: ${{ steps.build.outputs.build_page }}
+          PAGE_GUESSED: ${{ steps.build.outputs.page_guessed }}
           BUILD_ID: ${{ steps.build.outputs.build_id }}
+          SLUG: ${{ steps.config.outputs.slug }}
           BUILD_STATUS: ${{ steps.build.outputs.build_status }}
           ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
           NEEDS_INTERACTIVE: ${{ steps.build.outputs.needs_interactive }}
@@ -635,6 +652,12 @@ jobs:
               echo "That page updates live, shows the log, and — when the build finishes — carries the **Install**"
               echo "button. Open it on the iPhone."
               echo
+              if [ "$PAGE_GUESSED" = "true" ]; then
+                echo "_EAS did not print that link, so it was reconstructed from your account name and the app slug._"
+                echo "_If it 404s, the project belongs to an organisation rather than to you personally — open_"
+                echo "_<https://expo.dev> → **Projects** → \`$SLUG\` → **Builds** and take the top entry instead._"
+                echo
+              fi
             fi
 
             if [ -n "$ARTIFACT_URL" ]; then
@@ -655,9 +678,9 @@ jobs:
             echo "| Profile | \`$PROFILE\` |"
             echo "| Bundle id | \`$BUNDLE_ID\` |"
             echo "| Version | \`$VERSION\` |"
-            [ -n "$BUILD_ID" ] && echo "| EAS build id | \`$BUILD_ID\` |"
-            [ -n "$BUILD_STATUS" ] && echo "| Build status at exit | \`$BUILD_STATUS\` |"
-            [ -n "$ACCOUNT" ] && echo "| EAS account | \`$ACCOUNT\` |"
+            if [ -n "$BUILD_ID" ]; then echo "| EAS build id | \`$BUILD_ID\` |"; fi
+            if [ -n "$BUILD_STATUS" ]; then echo "| Build status at exit | \`$BUILD_STATUS\` |"; fi
+            if [ -n "$ACCOUNT" ]; then echo "| EAS account | \`$ACCOUNT\` |"; fi
             if [ "$ASC_STATE" = "present" ]; then
               echo "| App Store Connect key | from repository secrets |"
             else
