@@ -916,6 +916,141 @@ const afterFirst = apply(BASE, first);
   ok('a genuinely new message still imports', plan.txCount === 1, plan.txCount);
 }
 
+/* ── the user's category rules reach the rows iOS did not parse ─────────
+ *
+ * "Just future" in the entry sheet was a permanent no-op on iOS. Android
+ * honours merchantOverrides inside parseSms (scanInbox passes them through);
+ * iOS parses in the Cloudflare Worker, which calls parseSms with no overrides
+ * and must keep doing so — the user's category vocabulary is exactly the kind
+ * of thing the relay's retention design promises never to hold. So the rule
+ * has to be re-applied on arrival, and it was not: recategorise Talabat to
+ * Groceries and every later Talabat charge still landed in Dining, forever. */
+{
+  const TALABAT_TS = T0 + 5_000_000;
+  const overrideState = {
+    ...BASE,
+    accounts: [{
+      id: 'cash', name: 'Current account', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    merchantOverrides: { talabat: 'groceries' },
+  };
+  /** What the Worker hands back: structured row, Message Content discarded. */
+  const relayRow = {
+    kind: 'transaction', type: 'expense', amountFils: 4200, currency: 'AED',
+    merchant: 'Talabat', date: '2026-07-20', dueDay: null, minDueFils: null,
+    card: null, reference: null, transferHint: false, snapshotFils: null,
+    snapshotKind: null, categoryGuess: 'dining', categoryDeliberate: true,
+    raw: undefined, smsTs: TALABAT_TS, sender: 'FAB', channel: 'inbox',
+    captureSource: 'shortcut',
+  };
+
+  const plan = buildImportPlan([relayRow], overrideState, TALABAT_TS);
+  ok('a merchant override reaches a relay row the Worker parsed without it',
+    plan.txCount === 1 && plan.batch.transactions[0]?.category === 'groceries',
+    plan.batch.transactions[0]);
+
+  // No rule for this merchant: the Worker's own answer stands untouched.
+  const unruled = { ...relayRow, merchant: 'Costa Coffee', smsTs: TALABAT_TS + 1000 };
+  const unruledPlan = buildImportPlan([unruled], overrideState, unruled.smsTs);
+  ok('a relay row with no matching rule keeps the category the Worker gave it',
+    unruledPlan.batch.transactions[0]?.category === 'dining',
+    unruledPlan.batch.transactions[0]);
+
+  // The rule is keyed the way the store keys it — trimmed and lowercased —
+  // so the merchant name as it arrives does not have to match character for
+  // character.
+  const cased = { ...relayRow, merchant: '  TALABAT  ', smsTs: TALABAT_TS + 2000 };
+  const casedPlan = buildImportPlan([cased], overrideState, cased.smsTs);
+  ok('the lookup is trimmed and case-folded like setMerchantOverride',
+    casedPlan.batch.transactions[0]?.category === 'groceries',
+    casedPlan.batch.transactions[0]);
+}
+
+/* Android is untouched: it already had the override applied during parsing,
+ * and a second pass here would be either redundant or — for any row whose
+ * stored title is not the key the parser matched on — actively wrong. `raw`
+ * is the discriminator: parseSms always fills it, the relay never can. */
+{
+  const androidState = {
+    ...BASE,
+    accounts: [{
+      id: 'cash', name: 'Current account', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    merchantOverrides: { spinneys: 'shopping' },
+  };
+  const body =
+    'Purchase of AED 76.50 with Debit Card ending 1234 at SPINNEYS, DUBAI. Avl Balance is AED 4,923.50.';
+  const ts = T0 + 5_500_000;
+
+  // Parsed the way scanInbox parses on Android: overrides handed to the
+  // parser, raw text retained.
+  const withOverride = parseSms(body, androidState.merchantOverrides);
+  ok('the Android parser itself is where the override lands',
+    withOverride.categoryGuess === 'shopping', withOverride.categoryGuess);
+  const androidRow = { ...withOverride, date: '2026-07-20', smsTs: ts, sender: 'ENBD', channel: 'inbox' };
+  const plan = buildImportPlan([androidRow], androidState, ts);
+  ok('an Android row arrives with its category already decided and is not re-touched',
+    plan.batch.transactions[0]?.category === 'shopping',
+    plan.batch.transactions[0]);
+
+  // The proof that import time is NOT doing the work on Android: the same
+  // message parsed WITHOUT overrides keeps the parser's own answer, because
+  // it carries raw. If the override were being applied here regardless of
+  // platform, this would come back 'shopping'.
+  const plain = parseSms(body);
+  const plainRow = { ...plain, date: '2026-07-20', smsTs: ts + 1000, sender: 'ENBD', channel: 'inbox' };
+  const plainPlan = buildImportPlan([plainRow], androidState, ts + 1000);
+  ok('a row that carries raw is left exactly as the local parser read it',
+    plainPlan.batch.transactions[0]?.category === plain.categoryGuess &&
+      plain.categoryGuess !== 'shopping',
+    { got: plainPlan.batch.transactions[0]?.category, parser: plain.categoryGuess });
+}
+
+/* And the rule stops at the user's own hand. "Just future" means future:
+ * a row they already corrected is never rewritten by a later import, however
+ * confident the override makes the incoming row. */
+{
+  const ts = T0 + 6_000_000;
+  const editedState = {
+    ...BASE,
+    accounts: [{
+      id: 'cash', name: 'Current account', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    merchantOverrides: { talabat: 'groceries' },
+    transactions: [{
+      id: 'tx-user-said-dining', type: 'expense', amountFils: 4200,
+      category: 'dining', accountId: 'cash', title: 'Talabat', date: '2026-07-20',
+      source: 'sms', smsKey: `s${ts}-4200`, userEdited: true,
+    }],
+  };
+  const relayRow = {
+    kind: 'transaction', type: 'expense', amountFils: 4200, currency: 'AED',
+    merchant: 'Talabat', date: '2026-07-20', dueDay: null, minDueFils: null,
+    card: null, reference: null, transferHint: false, snapshotFils: null,
+    snapshotKind: null, categoryGuess: 'dining', categoryDeliberate: true,
+    raw: undefined, smsTs: ts, sender: 'FAB', channel: 'inbox',
+    captureSource: 'shortcut',
+  };
+  const plan = buildImportPlan([relayRow], editedState, ts);
+  ok('a hand-corrected row is not recategorised by an override on a later import',
+    plan.txCount === 0 && plan.batch.updates.length === 0,
+    { txCount: plan.txCount, updates: plan.batch.updates });
+
+  // Same message, same override, but the stored row was the parser's guess
+  // rather than the user's. That one may be corrected — it is the identical
+  // heal Android gets from a rescan, and refusing it here would leave the two
+  // platforms disagreeing about what the user asked for.
+  const parserOwned = {
+    ...editedState,
+    transactions: [{ ...editedState.transactions[0], userEdited: undefined }],
+  };
+  const healPlan = buildImportPlan([relayRow], parserOwned, ts);
+  ok('...while a parser-owned duplicate of the same row is healed to the rule',
+    healPlan.txCount === 0 &&
+      healPlan.batch.updates.some((u) => u.category === 'groceries'),
+    healPlan.batch.updates);
+}
+
 /* ── the watermark ───────────────────────────────────────────────────── */
 
 {

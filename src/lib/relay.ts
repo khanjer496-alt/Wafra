@@ -1055,7 +1055,16 @@ export async function ackRelay(
 
 /**
  * Forget this device, server-side and locally. The queue goes with it; so does
- * the public key, so anything the Shortcut sends afterwards is rejected.
+ * the row carrying `ingest_token_hash`, so the token baked into the user's
+ * Shortcut authenticates against nothing and every later POST is answered 401
+ * before the Worker reads the body. The Shortcut itself survives — Apple
+ * exposes no way to delete it — see `src/lib/shortcut-cleanup.ts`.
+ *
+ * The relay refuses with 409 `last_owner` when this device owns a vault other
+ * trusted devices still depend on. That failure is NOT retryable and must not
+ * be reported as one, so the server's error name is carried through rather
+ * than flattened into a status string: callers decide between "try again" and
+ * "go remove the other devices first" on `error.code`.
  */
 export async function unpairDevice(cfg: RelayConfig): Promise<void> {
   let res: Response;
@@ -1067,10 +1076,10 @@ export async function unpairDevice(cfg: RelayConfig): Promise<void> {
   } catch {
     // Keep the credential so the user can retry. Clearing it here would make
     // the remote device impossible to delete until its retention timers fire.
-    throw new RelayError('Could not reach the relay to erase this device.', true);
+    throw new RelayError('Could not reach the relay to erase this device.', true, 'unavailable');
   }
   if (!res.ok && res.status !== 401 && res.status !== 404) {
-    throw new RelayError(`Could not erase the relay device (${res.status}).`, res.status >= 500);
+    throw await responseError(res, `Could not erase the relay device (${res.status}).`);
   }
   await deleteRelayCredentials();
 }

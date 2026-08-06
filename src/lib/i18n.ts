@@ -663,16 +663,63 @@ const S = {
     ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً.',
   },
   eraseEverythingIosBody: {
-    en: 'All accounts, entries, bills, goals, and this iPhone’s relay queue will be permanently deleted.',
-    ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف وصف انتظار الترحيل لهذا الآيفون نهائياً.',
+    en: 'All accounts, entries, bills, goals, and this iPhone’s relay queue will be permanently deleted. Wafra cannot delete your Capture Shortcut — Apple gives no app that power — so it will show you how to remove it yourself straight afterwards.',
+    ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف وصف انتظار الترحيل لهذا الآيفون نهائياً. لا تستطيع وفرة حذف اختصار الالتقاط — لا تمنح آبل أي تطبيق هذه الصلاحية — لذا ستوضّح لك بعد ذلك مباشرةً كيف تحذفه بنفسك.',
   },
   eraseRelayFailedTitle: {
     en: 'Could not erase everything',
     ar: 'تعذّر مسح كل شيء',
   },
   eraseRelayFailedBody: {
-    en: 'Connect to the internet and try again. Wafra kept this iPhone’s relay key so it can still delete the encrypted queue.',
-    ar: 'اتصل بالإنترنت وحاول مجدداً. احتفظت وفرة بمفتاح ترحيل هذا الآيفون كي تتمكن من حذف صف الانتظار المشفّر.',
+    en: 'The relay could not be reached, so nothing was erased. Connect to the internet and try again. Wafra kept this iPhone’s relay key so it can still delete the encrypted queue and revoke the token your Shortcut carries.',
+    ar: 'تعذّر الوصول إلى المرحّل، لذا لم يُمسح أي شيء. اتصل بالإنترنت وحاول مجدداً. احتفظت وفرة بمفتاح ترحيل هذا الآيفون كي تتمكن من حذف صف الانتظار المشفّر وإلغاء الرمز الذي يحمله اختصارك.',
+  },
+  /**
+   * The relay refuses to unpair an owner while other trusted devices still
+   * depend on that vault, and it is right to: unpairing would strand them.
+   * That is a 409, not a network fault, and retrying forever cannot fix it —
+   * so it must not be reported as "try again".
+   */
+  eraseVaultOwnerTitle: {
+    en: 'Other trusted devices depend on this iPhone',
+    ar: 'أجهزة موثوقة أخرى تعتمد على هذا الآيفون',
+  },
+  eraseVaultOwnerBody: {
+    en: 'This iPhone owns a trusted vault that other devices still use, so the relay will not release it and nothing has been erased. Remove the other devices, or delete the whole vault, then erase again.',
+    ar: 'يملك هذا الآيفون خزنة موثوقة ما زالت أجهزة أخرى تستخدمها، لذا لن يحرّرها المرحّل ولم يُمسح أي شيء. أزل الأجهزة الأخرى أو احذف الخزنة بالكامل، ثم أعد المسح.',
+  },
+  /**
+   * The relay half succeeded and the local half did not. Saying "try again"
+   * here would be a second lie: the device row is already gone.
+   */
+  eraseLocalFailedTitle: {
+    en: 'Your data is still on this phone',
+    ar: 'بياناتك ما زالت على هذا الهاتف',
+  },
+  eraseLocalFailedBody: {
+    en: 'Wafra disconnected the relay and revoked this iPhone’s tokens, but the encrypted ledger on this phone could not be deleted. Restart Wafra and erase again.',
+    ar: 'فصلت وفرة المرحّل وألغت رموز هذا الآيفون، لكن تعذّر حذف السجل المشفّر الموجود على هذا الهاتف. أعد تشغيل وفرة ثم امسح مرة أخرى.',
+  },
+  shortcutStillInstalledTitle: {
+    en: 'One thing left: your Shortcut',
+    ar: 'بقي شيء واحد: اختصارك',
+  },
+  shortcutCleanupErased: {
+    en: 'Everything on this phone is gone and the relay rejects this iPhone’s token from now on. The Wafra Capture Shortcut is still installed, and it still sends each bank alert you pointed it at over the network, where it is now refused. Only you can delete it: Shortcuts → Automation → delete the Wafra automation, then My Shortcuts → delete Wafra Capture.',
+    ar: 'حُذف كل شيء على هذا الهاتف وأصبح المرحّل يرفض رمز هذا الآيفون من الآن. لكن اختصار «Wafra Capture» ما زال مثبّتاً، وما زال يرسل كل تنبيه بنكي وجّهته إليه عبر الشبكة حيث يُرفض الآن. أنت وحدك من يستطيع حذفه: الاختصارات ← الأتمتة ← احذف أتمتة وفرة، ثم اختصاراتي ← احذف Wafra Capture.',
+  },
+  shortcutCleanupLeft: {
+    en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. The Wafra Capture Shortcut is still installed and still forwards each bank alert you pointed it at over the network, where it is now refused. Only you can delete it: Shortcuts → Automation → delete the Wafra automation, then My Shortcuts → delete Wafra Capture.',
+    ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. لكن اختصار «Wafra Capture» ما زال مثبّتاً وما زال يمرّر كل تنبيه بنكي وجّهته إليه عبر الشبكة حيث يُرفض الآن. أنت وحدك من يستطيع حذفه: الاختصارات ← الأتمتة ← احذف أتمتة وفرة، ثم اختصاراتي ← احذف Wafra Capture.',
+  },
+  /**
+   * Removing SOMEBODY ELSE'S iPhone. Their Shortcut is on their phone, which
+   * this app cannot reach at all — so this is guidance to pass on, not a
+   * button anyone here can press.
+   */
+  trustedRemoveShortcutNote: {
+    en: 'If that device is an iPhone, its Wafra Capture Shortcut keeps sending bank alerts to the relay — refused from now on, but still leaving that phone. Only its owner can delete it, in the Shortcuts app.',
+    ar: 'إذا كان ذلك الجهاز آيفون، فسيظل اختصار «Wafra Capture» فيه يرسل التنبيهات البنكية إلى المرحّل — مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. مالك الجهاز وحده يستطيع حذفه من تطبيق الاختصارات.',
   },
   activeOnThisDevice: { en: 'Active on this device', ar: 'مفعّل على هذا الجهاز' },
   followingPhone: { en: 'Following your phone. Wafra turns over when it does.', ar: 'يتبع هاتفك. يتغيّر وفرة بتغيّره.' },
@@ -1338,6 +1385,33 @@ const S = {
   iosDisconnectFailed: {
     en: 'Could not disconnect. Stay online and try again so the relay copy can be erased.',
     ar: 'تعذّر الفصل. ابقَ متصلاً وحاول مجدداً حتى يمكن مسح نسخة الترحيل.',
+  },
+
+  // Recovery and back-navigation copy. Each of these exists because the setup
+  // flow had a reachable state where the screen said nothing about what to do
+  // next: a failure with no undo, a step with no way back to the one that
+  // caused it, or a finished setup that still asked to be proved.
+  iosAlreadyWorkingTitle: { en: 'Automatic capture is on', ar: 'الالتقاط التلقائي مُفعّل' },
+  iosAlreadyWorkingBody: {
+    en: 'This iPhone is connected and the private pipe has already answered. New bank alerts file themselves from here.',
+    ar: 'هذا الآيفون مرتبط، وقد استجاب المسار الخاص فعلاً. تُسجّل تنبيهات البنوك الجديدة نفسها من الآن.',
+  },
+  iosRunTestAgain: { en: 'Run the test again', ar: 'أعد تشغيل الاختبار' },
+  iosBackToShortcut: { en: 'Back to the setup code', ar: 'العودة إلى رمز الإعداد' },
+  iosBackToAutomation: { en: 'Back to the automation steps', ar: 'العودة إلى خطوات الأتمتة' },
+  iosReinstallShortcut: { en: 'Reinstall the Shortcut', ar: 'أعد تثبيت الاختصار' },
+  iosAutomationReadyTest: { en: 'I built it — test it now', ar: 'أنشأتها — اختبرها الآن' },
+  iosShortcutInstallFailed: {
+    en: 'Could not open the install page. Check your connection and try again.',
+    ar: 'تعذّر فتح صفحة التثبيت. تحقق من اتصالك ثم حاول مجدداً.',
+  },
+  iosShortcutsOpenFailed: {
+    en: 'Could not open Shortcuts. If it was removed from this iPhone, reinstall it from the App Store, then try again.',
+    ar: 'تعذّر فتح تطبيق الاختصارات. إن كان محذوفاً من هذا الآيفون فأعد تثبيته من App Store ثم حاول مجدداً.',
+  },
+  iosShortcutRunFailed: {
+    en: 'Could not run Wafra Capture. Check that the Shortcut is installed and still named “Wafra Capture”, then try again.',
+    ar: 'تعذّر تشغيل Wafra Capture. تأكد من تثبيت الاختصار ومن بقاء اسمه «Wafra Capture» ثم حاول مجدداً.',
   },
 
   // Remaining cross-screen UI. Keeping complete sentences here is

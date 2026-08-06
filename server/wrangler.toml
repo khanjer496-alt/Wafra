@@ -27,8 +27,23 @@ enabled = true
 # later assumes logs are a place to debug parsing from.
 head_sampling_rate = 0.1
 
-# Required production secrets/config (never commit values):
+# Required production secrets (never commit values). server/DEPLOY.md is the
+# ordered sequence; this is the reminder of what has to exist:
 #   npx wrangler secret put PUSH_TOKEN_KEY    # base64 of 32 random bytes
 #   npx wrangler secret put EXPO_ACCESS_TOKEN # EAS enhanced push security
-# Set EXPO_PROJECT_ID and EMAIL_DOMAIN as non-secret production variables.
-# Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.
+#
+# EXPO_PROJECT_ID and EMAIL_DOMAIN are not secret — they belong in a [vars]
+# block here, which is where the Worker reads them from. They are commented out
+# rather than left empty because both are per-owner values with no sensible
+# default, and an empty string would deploy a Worker that looks configured and
+# silently registers no push tokens. Uncomment and fill in:
+#
+# [vars]
+# EXPO_PROJECT_ID = "00000000-0000-0000-0000-000000000000"  # the EAS project UUID the app uses
+# EMAIL_DOMAIN = "mail.example.com"                          # only if Email Routing is set up
+#
+# Without EXPO_PROJECT_ID (or PUSH_TOKEN_KEY) the Worker refuses push
+# registration and sends no wakes; capture still works on foreground and
+# background sync. Without EMAIL_DOMAIN the email supplement reports itself as
+# disabled and /v1/email-token returns 503. Both are deliberate degradations,
+# not failures. Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.

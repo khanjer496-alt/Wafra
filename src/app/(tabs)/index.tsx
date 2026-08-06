@@ -496,6 +496,17 @@ export default function HomeScreen() {
   // The other tabs take the same hook without that flag — they get the shared
   // scan for pull-to-refresh and leave the watching to Home.
   const { runAutoImport, needsPermission, captureState } = useAutoImport(true);
+  // One value for what the card SAYS and what tapping it DOES. They used to be
+  // written out separately and drifted: the tap handler branched on the
+  // platform alone, so a fully verified iOS user — card reading "Shortcut
+  // connected", live dot, ON badge — tapped it and was dropped back into the
+  // four-step setup they had finished weeks earlier, with no way to sync from
+  // the surface whose whole job is syncing.
+  const captureStatus: CaptureSurfaceState = !isProActive(state)
+    ? 'paused'
+    : needsPermission
+      ? 'off'
+      : captureState;
 
   const now = useMemo(() => new Date(), []);
   const live = isCurrentMonth(period, now);
@@ -657,12 +668,19 @@ export default function HomeScreen() {
           />
 
           <AutomaticCapture
-            status={!isProActive(state) ? 'paused' : needsPermission ? 'off' : captureState}
+            status={captureStatus}
             lastCaptureDate={lastAutomatic?.date}
             onPress={() => {
-              if (!isProActive(state)) router.push('/pro');
-              else if (Platform.OS === 'ios') router.push('/ios-setup');
-              else void runAutoImport(true);
+              if (captureStatus === 'paused') router.push('/pro');
+              // Only iOS states that still owe the user setup go to the
+              // wizard: 'off' (no relay config), 'needs-test' (paired but
+              // unverified) and 'pipe-ready' (verified pipe, automation not
+              // yet proven) each have something left to finish there. 'active'
+              // does not — its own detail line is "tap to sync now" — so it
+              // gets the sync, exactly as Android does.
+              else if (Platform.OS === 'ios' && captureStatus !== 'active') {
+                router.push('/ios-setup');
+              } else void runAutoImport(true);
             }}
           />
 

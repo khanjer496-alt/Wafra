@@ -1,6 +1,6 @@
 import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
-import { tf } from '@/lib/i18n';
+import { tf, type Lang } from '@/lib/i18n';
 import { isSpending } from '@/lib/ledger';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
@@ -673,15 +673,23 @@ export function isInactiveAccount(state: AppState, account: Account, today: Date
   return silentDays > DORMANT_AFTER_DAYS;
 }
 
-/** Display name for an auto-created card account. */
+/**
+ * Display name for an auto-created card account.
+ *
+ * `language` exists for one caller: the iOS headless relay wake, which builds
+ * a notification before StoreProvider has hydrated and therefore before the
+ * module-level language in i18n.ts has been set. Everything on a screen leaves
+ * it alone and gets the current language, as before.
+ */
 export function cardAccountName(
   last4: string,
   kind: 'credit' | 'debit' | 'account' | 'unknown',
+  language?: Lang,
 ): string {
-  if (kind === 'credit') return tf('creditCardWithDigits', { last4 });
-  if (kind === 'debit') return tf('debitCardWithDigits', { last4 });
-  if (kind === 'unknown') return tf('cardWithDigits', { last4 });
-  return tf('accountWithDigits', { last4 });
+  if (kind === 'credit') return tf('creditCardWithDigits', { last4 }, language);
+  if (kind === 'debit') return tf('debitCardWithDigits', { last4 }, language);
+  if (kind === 'unknown') return tf('cardWithDigits', { last4 }, language);
+  return tf('accountWithDigits', { last4 }, language);
 }
 
 const HINT_COLORS = ['#60A5FA', '#F472B6', '#A78BFA', '#FB923C', '#22D3EE', '#4ADE80'];

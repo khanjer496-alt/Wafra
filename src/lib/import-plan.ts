@@ -371,13 +371,51 @@ export function buildImportPlan(
     return undefined;
   };
 
+  // The user's own category rules, re-applied to rows this device did not
+  // parse.
+  //
+  // On Android the rule is honoured inside the parser: scanInbox passes
+  // `state.merchantOverrides` to parseSms, and guessCategory returns the
+  // user's answer with `deliberate: true`. On iOS the parse happens in the
+  // Cloudflare Worker, which calls parseSms with no overrides at all — and it
+  // must stay that way. Shipping the user's category vocabulary to the relay
+  // would put "talabat → groceries" on a server whose entire design is that it
+  // holds nothing about the user and keeps nothing after acknowledgement.
+  //
+  // So the rule is applied here instead, on arrival. Without it, the entry
+  // sheet's "just future" was a permanent no-op on iOS: recategorise Talabat
+  // to Groceries and every later Talabat charge still landed in Dining, with
+  // the user redoing the same correction forever.
+  //
+  // The discriminator is `raw`. A locally-parsed row always carries the source
+  // text (`ParsedSms.raw` is required, and parseSms always fills it); a relay
+  // row cannot, because the Worker discards Message Content before sealing —
+  // `ParsedRelayRow` is typed `raw?: never` for exactly that reason. Skipping
+  // rows that have it is what keeps Android from being run through a second,
+  // redundant lookup on a merchant name the parser has already resolved.
+  //
+  // Rows already in the ledger are not this function's business: an override
+  // reaches an existing row only through the two paths below that both refuse
+  // to touch `userEdited`, which is what the sheet's "just future" means.
+  const overrides = state.merchantOverrides ?? {};
+  const applyMerchantOverride = (p: ScannedSms): ScannedSms => {
+    if (p.raw !== undefined) return p;
+    const hit = overrides[p.merchant.trim().toLowerCase()];
+    if (!hit || hit === p.categoryGuess) return p;
+    // `categoryDeliberate` is what the parser sets on an override hit, and it
+    // is load-bearing in both directions: it keeps the row out of the
+    // low-confidence accuracy report, and it is the flag heal.ts requires
+    // before a rescan may correct a stored category that is not `other`.
+    return { ...p, categoryGuess: hit, categoryDeliberate: true };
+  };
+
   // Prefer the fuller SMS when a notification and SMS for one event are in
   // the same scan. Processing a slightly-earlier push first used to leave the
   // guard with no persisted id to supersede, so both rows were appended.
   const ordered = [
     ...parsed.filter((p) => p.channel !== 'push'),
     ...parsed.filter((p) => p.channel === 'push'),
-  ];
+  ].map(applyMerchantOverride);
 
   for (const p of ordered) {
     const date = p.date ?? toISODate(new Date());

@@ -49,7 +49,14 @@ import { isProActive, trialDaysLeft } from '@/lib/purchases';
 // unpairRelay/stopRelayWake trio: the two relay clients speak incompatible wire
 // contracts (four scoped tokens here vs one there), and mixing their entry
 // points compiles on a good day and 401s on the device.
-import { getRelayConfig, isRelayPlatform, unpairDevice, type RelayConfig } from '@/lib/relay';
+import {
+  getRelayConfig,
+  isRelayPlatform,
+  RelayError,
+  unpairDevice,
+  type RelayConfig,
+} from '@/lib/relay';
+import { promptDeleteShortcut, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import {
   buildExpenseReportHtml,
   reportExpenses,
@@ -421,18 +428,61 @@ export default function SettingsScreen() {
   };
 
   const eraseAllData = async () => {
+    // Re-read rather than using the `relay` state: this is the destructive
+    // path, and a pairing created since this screen mounted must still be
+    // torn down.
+    let cfg: RelayConfig | null = null;
     try {
-      // Re-read rather than using the `relay` state: this is the destructive
-      // path, and a pairing created since this screen mounted must still be
-      // torn down.
-      const cfg = await getRelayConfig();
-      if (cfg) await unpairDevice(cfg);
+      cfg = await getRelayConfig();
+    } catch {
+      // A locked Keychain reads as "not paired". Erasing locally anyway would
+      // leave a live device row and a live ingest token behind while telling
+      // the user everything is gone, so stop instead.
+      Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
+      return;
+    }
+
+    if (cfg) {
+      try {
+        await unpairDevice(cfg);
+      } catch (error) {
+        // Three failures, three different truths. The old single catch told
+        // every one of them "connect to the internet and try again", which for
+        // an owner whose vault still has other devices is advice that can
+        // never work: the relay answers 409 `last_owner` forever, and the
+        // ledger was silently left intact behind a message about the network.
+        if (error instanceof RelayError && error.code === 'last_owner') {
+          Alert.alert(t('eraseVaultOwnerTitle'), t('eraseVaultOwnerBody'), [
+            { text: t('cancel'), style: 'cancel' },
+            {
+              text: t('trustedSettingsRow'),
+              onPress: () => router.push('/trusted-devices'),
+            },
+          ]);
+          return;
+        }
+        Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
+        return;
+      }
+    }
+
+    try {
       await clearAll();
     } catch {
-      Alert.alert(
-        t('eraseRelayFailedTitle'),
-        t('eraseRelayFailedBody'),
-      );
+      // The relay half really did succeed — the device row, its queue and its
+      // tokens are gone — and only the local ledger survived. Repeating the
+      // relay message here would claim the opposite.
+      Alert.alert(t('eraseLocalFailedTitle'), t('eraseLocalFailedBody'));
+      return;
+    }
+
+    // Both halves are gone, and this is the moment the user believes nothing
+    // is left. On iOS that is not yet true: the Shortcut they built is still
+    // installed and still puts bank-message text on the network on every
+    // matching alert. The relay refuses it now, but refusing is not the same
+    // as not sending, and no API in existence lets this app delete it.
+    if (shortcutCleanupApplies(cfg !== null)) {
+      promptDeleteShortcut(t('shortcutCleanupErased'));
     }
   };
 
@@ -449,18 +499,29 @@ export default function SettingsScreen() {
    * relay BEFORE wiping locally, because unpairing needs the admin token that
    * the wipe is about to destroy. It surfaces a failure instead of swallowing
    * it, so a user offline at that moment is not told their relay copy is gone
-   * when it is not.
+   * when it is not — and it now distinguishes WHICH half failed, because
+   * "connect to the internet and try again" was being shown for a 409 that no
+   * amount of connectivity will change.
    *
    * What it still cannot reach is the Shortcut itself: the bearer token lives
    * inside it and no API can edit it, so the automation keeps POSTing into a
-   * device row that no longer exists. The relay rejects those, but the user
-   * should be told to delete the Shortcut — see `concerns`, that sentence has
-   * no i18n key yet and an English literal here fails contracts.test.js.
+   * device row that no longer exists. The relay rejects those at the auth
+   * check, before it reads the body — but the message still leaves the phone,
+   * which is the part a privacy claim has to own. So the confirmation says up
+   * front that Wafra cannot delete the Shortcut, and a successful erase ends
+   * with `promptDeleteShortcut`, which names the exact steps and opens the
+   * Shortcuts app. See `src/lib/shortcut-cleanup.ts`.
    */
   const confirmErase = () => {
+    // The Shortcut sentence is true only where a Shortcut can exist. An iPhone
+    // that never paired has no automation to hunt for, and a warning that
+    // cries wolf on that phone is a warning ignored on the one where it counts.
+    // `undefined` is "not read yet", and on iOS the cautious reading is that a
+    // pairing exists.
+    const mentionsShortcut = Platform.OS === 'ios' && relay !== null;
     Alert.alert(
       t('eraseEverythingQ'),
-      Platform.OS === 'ios'
+      mentionsShortcut
         ? t('eraseEverythingIosBody')
         : t('eraseEverythingBody'),
       [

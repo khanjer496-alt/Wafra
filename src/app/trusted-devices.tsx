@@ -38,6 +38,7 @@ import {
   revokeTrustedDevice,
   type RelayConfig,
 } from '@/lib/relay';
+import { promptDeleteShortcut, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import {
   MAX_TRUSTED_DEVICES,
@@ -291,12 +292,23 @@ export default function TrustedDevicesScreen() {
     }
   };
 
+  /**
+   * Revoking is real: DELETE /v1/devices/:id drops the row that holds every
+   * one of that device's token hashes, so its ingest, sync and admin bearers
+   * all authenticate against nothing afterwards. What it cannot drop is the
+   * iOS Shortcut those tokens were pasted into, on either side of the
+   * operation — so both confirmations say whose problem that is, and leaving
+   * ends with the instructions for closing it here.
+   */
   const removeSelected = () => {
     if (!config || !selected) return;
     const isSelf = selected.isCurrent;
+    const removedName = selected.name ?? t('trustedUnnamed', language);
     Alert.alert(
       isSelf ? t('trustedLeaveTitle', language) : t('trustedRemoveTitle', language),
-      isSelf ? t('trustedLeaveBody', language) : tf('trustedRemoveBody', { name: selected.name ?? t('trustedUnnamed', language) }, language),
+      isSelf
+        ? t('trustedLeaveBody', language)
+        : `${tf('trustedRemoveBody', { name: removedName }, language)}\n\n${t('trustedRemoveShortcutNote', language)}`,
       [
         { text: t('cancel', language), style: 'cancel' },
         {
@@ -314,6 +326,12 @@ export default function TrustedDevicesScreen() {
                 setDevices((list) => list.filter((device) => device.id !== selected.id));
               }
               committed();
+              // Only for this phone. Another device's Shortcut lives on that
+              // phone, and telling this user to go delete it here would send
+              // them looking for something that is not on their device.
+              if (isSelf && shortcutCleanupApplies(true)) {
+                promptDeleteShortcut(t('shortcutCleanupLeft', language), language);
+              }
             } catch (error) {
               showError(error);
             } finally {
@@ -340,6 +358,11 @@ export default function TrustedDevicesScreen() {
             setDevices([]);
             setInvite(null);
             committed();
+            // Every device in the vault is revoked, including this one. This
+            // is the only one whose Shortcut this screen can speak to.
+            if (shortcutCleanupApplies(true)) {
+              promptDeleteShortcut(t('shortcutCleanupLeft', language), language);
+            }
           } catch (error) {
             showError(error);
           } finally {
