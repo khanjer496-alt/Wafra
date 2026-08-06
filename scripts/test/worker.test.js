@@ -83,6 +83,13 @@ const { parseSms } = require('./build/sms-parser');
 const { setActiveMarket } = require('./build/markets');
 const { RELAY_TEST_MESSAGE } = require('./build/relay-protocol');
 const worker = require('./build/worker').default;
+// The phone's half of a multi-row import. A row this Worker queues is only
+// really delivered if buildImportPlan keeps it, and the "one receipt timestamp
+// per batch" defect was invisible to every server-side assertion: the queue
+// held both rows, the seal round-tripped, and the app still filed one. See the
+// statement-import section near the end of this file.
+const { relayRowToScannedSms } = require('./build/relay.cjs');
+const { buildImportPlan } = require('./build/import-plan');
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail = '') {
@@ -172,6 +179,66 @@ function collector() {
   };
 }
 
+/**
+ * A one-page text PDF holding the given lines, built by hand.
+ *
+ * Same construction server/test/imports.test.cjs uses for a single line, widened
+ * to several because the defect this file's statement-import section exists to
+ * catch needs TWO rows in ONE upload to appear at all. Real bytes through the
+ * real /v1/import/pdf route: unpdf extracts them and parseStatementText reads
+ * them, so nothing about the import path is stubbed.
+ */
+function tinyPdf(lines) {
+  const escape = (line) => line.replace(/([()\\])/g, '\\$1');
+  const stream = `BT /F1 12 Tf 50 750 Td ${
+    lines.map((line, i) => `${i ? '0 -20 Td ' : ''}(${escape(line)}) Tj `).join('')
+  }ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(pdf, 'binary'));
+}
+
+/** A hydrated ledger with one account, so resolveAccount has somewhere to file. */
+const LEDGER = {
+  hydrated: true,
+  accounts: [{ id: 'acc-main', name: 'Current account', kind: 'bank', color: '#000', balanceFils: 0 }],
+  transactions: [],
+  budgets: [],
+  bills: [],
+  goals: [],
+  cardDues: [],
+  accountHints: {},
+  merchantOverrides: {},
+  lastScanTs: 0,
+  parserVersion: 0,
+};
+
+/**
+ * Everything between "the relay queued it" and "the ledger has it", run for
+ * real: open the sealed rows with the shipping client crypto, convert them the
+ * way syncRelay does, and hand them to the planner that decides what is new.
+ */
+function importOnPhone(rows, state = LEDGER) {
+  const scanned = rows.map((row) => relayRowToScannedSms(row));
+  scanned.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0)); // syncRelay's own ordering
+  return buildImportPlan(scanned, state, Date.now());
+}
+
 async function pairDevice(env, options = {}) {
   const keypair = deviceKeypair(webcrypto.getRandomValues(new Uint8Array(32)));
   const res = await call(env, 'POST', '/v1/pair', {
@@ -185,6 +252,21 @@ async function syncOpened(env, device) {
   const res = await call(env, 'GET', '/v1/sync', { token: device.syncToken });
   const { items } = await res.json();
   return { items, rows: items.map((i) => openSealed(device.keypair.secretKey, i)) };
+}
+
+/**
+ * Collect AND acknowledge, the way the app does once a batch is persisted.
+ * Without the ack the queue accumulates across a section and every later
+ * "what did this import deliver?" reads the sum of everything before it.
+ */
+async function drainOpened(env, device) {
+  const collected = await syncOpened(env, device);
+  if (collected.items.length > 0) {
+    await call(env, 'POST', '/v1/ack', {
+      token: device.syncToken, body: { ids: collected.items.map((i) => i.id) },
+    });
+  }
+  return collected.rows;
 }
 
 /* A Shortcut may retry, and the relay is idempotent for 15 minutes on the body
@@ -1192,6 +1274,148 @@ const CARD_PAYMENT_DEBIT =
     const solo = await pairDevice(noDomain);
     ok('email: an unconfigured relay refuses to mint an address',
       (await call(noDomain, 'POST', '/v1/email-token', { token: solo.adminToken })).status === 503);
+  }
+
+  /* ══════ A multi-row statement must arrive as many rows, not as one ══════
+   *
+   * THE DEFECT THIS SECTION EXISTS FOR. Every multi-row import path computed
+   * ONE `const receivedAt = new Date().toISOString()` for the whole batch and
+   * stamped every row with it. Nothing server-side could see the consequence:
+   * this Worker's own suppression is keyed on the row's date, so it queued both
+   * rows, sealed both, and handed both to the phone. But src/lib/relay.ts turns
+   * `receivedAt` into `smsTs`, src/lib/import-plan.ts fingerprints a row as
+   * `s{smsTs}-{amountFils}`, and src/lib/dedupe.ts drops a repeated fingerprint
+   * inside one batch. Two rows of one statement that happened to share an
+   * amount therefore shared a fingerprint, and the second was discarded on the
+   * phone — a different day, a different merchant, silently gone. The client
+   * then acknowledged EVERY id it was sent and this Worker wrote a 72-hour
+   * replay receipt, so re-uploading the same PDF recovered nothing.
+   *
+   * WHY IT IS TESTED FROM HERE. The assertion has to span both halves. A
+   * server-only test sees two rows in the queue and passes; a client-only test
+   * has to invent the batch and would have invented distinct timestamps. So
+   * these drive the real /v1/import/pdf and /v1/email/ingest routes, open the
+   * queue with the shipping client crypto, and finish in the real
+   * buildImportPlan — the function whose answer the user actually sees.
+   */
+
+  {
+    const env = { DB: makeDb(), EMAIL_DOMAIN: 'in.wafra.test' };
+    const me = await pairDevice(env);
+
+    // The reported reproduction, verbatim: two different days, two different
+    // merchants, the same four dirhams.
+    const statement = tinyPdf([
+      'ADCB Credit Card Statement',
+      '2026-01-03 SALIK TOLL GATE 4.00 DR',
+      '2026-01-17 PARKING RTA 4.00 DR',
+    ]);
+    const upload = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: statement,
+    });
+    const accepted = await upload.json();
+    ok('statement: both rows of a two-row PDF are accepted',
+      upload.status === 202 && accepted.acceptedRows === 2, JSON.stringify(accepted));
+
+    const delivered = { rows: await drainOpened(env, me) };
+    ok('statement: and both are delivered to the device', delivered.rows.length === 2);
+    ok('statement: each row carries its OWN receipt time, not one per batch',
+      new Set(delivered.rows.map((row) => row.receivedAt)).size === 2,
+      JSON.stringify(delivered.rows.map((row) => row.receivedAt)));
+    // Derived from the row's own statement date rather than from an index
+    // offset, so the event clock lands on the day the money moved and the sort
+    // in syncRelay puts a statement back into statement order.
+    ok('statement: the receipt time comes from the row\'s own date',
+      delivered.rows.every((row) => row.receivedAt.slice(0, 10) === row.date),
+      JSON.stringify(delivered.rows.map((row) => [row.date, row.receivedAt])));
+
+    const plan = importOnPhone(delivered.rows);
+    ok('statement: the phone imports BOTH rows — the row-loss regression',
+      plan.batch.transactions.length === 2,
+      JSON.stringify(plan.batch.transactions.map((t) => [t.date, t.title, t.amountFils])));
+    ok('statement: with the right days and the right merchants',
+      plan.batch.transactions.map((t) => `${t.date} ${t.title}`).join('|') ===
+        '2026-01-03 SALIK TOLL GATE|2026-01-17 PARKING RTA',
+      JSON.stringify(plan.batch.transactions.map((t) => `${t.date} ${t.title}`)));
+    ok('statement: the two rows keep distinct import fingerprints',
+      new Set(plan.batch.transactions.map((t) => t.smsKey)).size === 2,
+      JSON.stringify(plan.batch.transactions.map((t) => t.smsKey)));
+
+    // The date alone is not enough, and this is the same bug one level down: a
+    // statement legitimately lists two merchants for the same amount on the
+    // same day, and stamping both with midday on that date would collapse them
+    // exactly as one batch timestamp did.
+    const sameDay = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        '2026-02-09 SALIK TOLL GATE 4.00 DR',
+        '2026-02-09 PARKING RTA 4.00 DR',
+        '2026-02-09 NOL TOP UP 4.00 DR',
+      ]),
+    });
+    ok('statement: three same-day, same-amount rows are all accepted',
+      sameDay.status === 202 && (await sameDay.json()).acceptedRows === 3);
+    const sameDayRows = await drainOpened(env, me);
+    ok('statement: same-day rows still get distinct receipt times',
+      new Set(sameDayRows.map((row) => row.receivedAt)).size === sameDayRows.length,
+      JSON.stringify(sameDayRows.map((row) => row.receivedAt)));
+    ok('statement: and the phone keeps every one of them',
+      importOnPhone(sameDayRows).batch.transactions.length === 3,
+      JSON.stringify(importOnPhone(sameDayRows).batch.transactions.map((t) => t.title)));
+
+    // Per-row stamping must not become "stamp everything freshly, always". The
+    // 72-hour replay receipt is what makes a re-upload of the same statement a
+    // no-op rather than a second copy of the ledger.
+    const again = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: statement,
+    });
+    ok('statement: re-uploading the same PDF queues nothing new',
+      again.status === 202 && (await drainOpened(env, me)).length === 0);
+
+    // Same helper, a different route: a forwarded statement EMAIL takes the
+    // queueEmailRows path, which had the identical one-stamp-per-batch defect.
+    const email = await (await call(env, 'POST', '/v1/email-token', { token: me.adminToken })).json();
+    const forwarded = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken,
+      body: { text: '2026-03-04 SALIK TOLL GATE 4.00 DR\n2026-03-21 PARKING RTA 4.00 DR' },
+    });
+    ok('statement: a forwarded statement email is accepted', forwarded.status === 202);
+    const mailed = await drainOpened(env, me);
+    ok('statement: the email path also stamps per row',
+      mailed.length === 2 && new Set(mailed.map((row) => row.receivedAt)).size === 2,
+      JSON.stringify(mailed.map((row) => row.receivedAt)));
+    ok('statement: and the phone keeps both of those too',
+      importOnPhone(mailed).batch.transactions.length === 2);
+
+    // A forwarded bank ALERT parses as one row and carries no statement date.
+    // That row still needs a receipt time, and it must be the relay's own —
+    // this is the fallback path, and it is what a Shortcut-shaped row uses.
+    const alert = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken, body: { text: AE_PURCHASE },
+    });
+    const alertRow = (await drainOpened(env, me)).at(-1);
+    ok('statement: a dateless forwarded alert still gets a receipt time near now',
+      alert.status === 202 && Math.abs(Date.parse(alertRow.receivedAt) - Date.now()) < 120_000,
+      alertRow.receivedAt);
+
+    // The whole point of a statement import is history, so a row dated last
+    // year must keep last year's clock. A row dated in the FUTURE must not:
+    // smsTs becomes the caller's newestTs, which becomes lastScanTs, which is
+    // where the next local SMS scan starts — one row dated 2099 would park that
+    // watermark ahead of every message the phone will ever receive.
+    const edges = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        '2019-05-06 OLD GROCER 12.00 DR',
+        '2099-05-06 IMPOSSIBLE MERCHANT 13.00 DR',
+      ]),
+    });
+    ok('statement: both edge-dated rows are accepted', edges.status === 202);
+    const edgeRows = await drainOpened(env, me);
+    const old = edgeRows.find((row) => row.merchant === 'OLD GROCER');
+    const future = edgeRows.find((row) => row.merchant === 'IMPOSSIBLE MERCHANT');
+    ok('statement: a years-old row keeps its own date as its clock',
+      old.receivedAt.slice(0, 10) === '2019-05-06', old.receivedAt);
+    ok('statement: a future-dated row falls back to now rather than poisoning lastScanTs',
+      Date.parse(future.receivedAt) <= Date.now() + 86_400_000, future.receivedAt);
   }
 
   /* ═════════════════ Routing, and the scheduled sweep ═════════════════ */

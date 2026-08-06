@@ -32,7 +32,7 @@ import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
-import { getRelayAutomationProof, getRelayConfig } from '@/lib/relay';
+import { getRelayAutomationProof, getRelayConfig, getRelayRevokedAt } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 
 /** The one-time setup that must not repeat: entitlement, reminders, relay. */
@@ -71,6 +71,14 @@ export type CaptureSurfaceState =
   | 'active'
   | 'pipe-ready'
   | 'needs-test'
+  /**
+   * The relay has cut this device off — the vault owner removed it from
+   * another phone. Distinct from 'off' on purpose: 'off' is a user who has not
+   * set capture up, this is a user who did, whose card said ON for weeks
+   * afterwards, and who has to be told why it stopped before "set it up again"
+   * means anything.
+   */
+  | 'revoked'
   | 'off'
   | 'paused'
   | 'unsupported';
@@ -127,19 +135,28 @@ export function useAutoImport(watchForeground = false): AutoImport {
       let current = true;
       void (async () => {
         if (Platform.OS === 'ios') {
-          const [cfg, automationProof] = await Promise.all([
+          const [cfg, automationProof, revokedAt] = await Promise.all([
             getRelayConfig(),
             getRelayAutomationProof(),
+            getRelayRevokedAt(),
           ]);
           if (!current) return;
+          // The revocation check comes first and is not derived from `cfg`,
+          // because a revoked credential reads as no config at all. It also
+          // outranks the automation proof: that marker is written once and
+          // never expires, so a device the relay has cut off still carries
+          // proof that its Shortcut worked — which is exactly how this card
+          // went on saying "syncing silently" over a dead pipe.
           setCaptureState(
-            cfg?.setupState === 'verified' && automationProof
-              ? 'active'
-              : cfg?.setupState === 'verified'
-                ? 'pipe-ready'
-                : cfg
-                  ? 'needs-test'
-                  : 'off',
+            revokedAt
+              ? 'revoked'
+              : cfg?.setupState === 'verified' && automationProof
+                ? 'active'
+                : cfg?.setupState === 'verified'
+                  ? 'pipe-ready'
+                  : cfg
+                    ? 'needs-test'
+                    : 'off',
           );
           return;
         }
@@ -193,6 +210,15 @@ export function useAutoImport(watchForeground = false): AutoImport {
       if (needsSetup) {
         // The relay is not paired yet, so silence here means "not connected",
         // not "nothing new". Only say so when the user actually asked.
+        //
+        // The card is corrected here as well as on focus. A scan is what
+        // DISCOVERS a revocation, and the screen it happens on is already
+        // mounted and focused — waiting for the next focus event would leave
+        // "syncing silently" on screen for the rest of the session.
+        if (Platform.OS === 'ios') {
+          const revokedAt = await getRelayRevokedAt().catch(() => null);
+          setCaptureState(revokedAt ? 'revoked' : 'off');
+        }
         if (interactive) router.push('/ios-setup');
         return 'needs-setup';
       }
@@ -370,6 +396,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
  */
 export function usePullToRefresh(): { refreshing: boolean; onRefresh: () => void } {
   const { runAutoImport } = useAutoImport();
+  const toast = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const alive = React.useRef(true);
   useEffect(
@@ -380,9 +407,19 @@ export function usePullToRefresh(): { refreshing: boolean; onRefresh: () => void
   );
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    void runAutoImport(true).finally(() => {
-      if (alive.current) setRefreshing(false);
-    });
-  }, [runAutoImport]);
+    // `.finally` alone is not error handling. A scan that threw — a dead
+    // network, a relay 5xx, a page that did not parse — rejected here with no
+    // `.catch` at all: an unhandled promise rejection whose only visible
+    // effect was the spinner disappearing, on the one gesture in the app that
+    // exists to ask a question out loud. Every failure now says so, and
+    // nothing reaches the global handler.
+    void runAutoImport(true)
+      .catch(() => {
+        if (alive.current) toast.show(t('captureRefreshFailed'));
+      })
+      .finally(() => {
+        if (alive.current) setRefreshing(false);
+      });
+  }, [runAutoImport, toast]);
   return { refreshing, onRefresh };
 }

@@ -497,6 +497,50 @@ function ktSources(dir) {
       read('src/lib/capture.ts')));
 }
 
+/* ── a revoked device is told, not shown a status that is false ──────── */
+//
+// The vault owner removes this phone from another device. Nothing tells this
+// phone: the relay deletes the row that authenticates it and the only symptom
+// is a 401 on the next /v1/sync. relay.ts threw a non-retryable error for it
+// and NOTHING consumed that error, so the Keychain kept a 'verified' config
+// and its automation-proof marker, Home went on printing "Shortcut connected ·
+// syncing silently" over a pipe that answered 401 to everything, and there was
+// no route back to pairing from inside the app. Each assertion below is one
+// link in that chain.
+{
+  const relay = read('src/lib/relay.ts');
+  const hook = read('src/hooks/use-auto-import.ts');
+  const capture = read('src/lib/capture.ts');
+  const home = read('src/app/(tabs)/index.tsx');
+
+  ok('a 401 from sync records the refusal rather than only throwing',
+    /res\.status === 401/.test(relay) && /markRelayRevoked\(cfg\.syncToken\)/.test(relay));
+  // Stamped, not erased. A 401 is also what a captive portal or an
+  // authenticating proxy answers, and the X25519 private key is the only thing
+  // that can open a row still sealed in the queue while the admin token is the
+  // only thing that can delete this device server-side. Neither survives being
+  // destroyed on a guess.
+  ok('the refusal is a marker, never a deletion of the keys it would need back',
+    !/res\.status === 401[\s\S]{0,600}deleteRelayCredentials\(\)/.test(relay) &&
+      /revokedAt: at/.test(relay));
+  // Both keychain items, or the headless wake goes on re-authenticating
+  // against a device the relay has already deleted, on every push, forever.
+  ok('a stamped credential reads as "no pairing" on both keychain surfaces',
+    (relay.match(/if \(revokedAt\(cfg\) !== null\) return null;/g) || []).length === 2);
+  ok('the capture surface has a state for it, ahead of the automation proof',
+    /\| 'revoked'/.test(hook) &&
+      /revokedAt\s*\?\s*'revoked'/.test(hook) &&
+      hook.indexOf("? 'revoked'") < hook.indexOf("? 'active'"));
+  ok('and Home renders that state instead of falling through to "off"',
+    /status === 'revoked'/.test(home) && /captureIosRevoked/.test(home));
+  // A revocation discovered by the scan itself is the same outcome one tick
+  // later, and it must not surface as an exception on an interactive refresh.
+  // Every other sync failure still has to propagate: swallowing an offline
+  // sync into "you are not set up" walks a working user into the wizard.
+  ok('a revocation found mid-scan degrades to needs-setup rather than throwing',
+    /isRelayRevokedError\(error\)/.test(capture) && /throw error;/.test(capture));
+}
+
 /* ── only the setup screen may acknowledge a setup probe ─────────────── */
 //
 // syncRelay() reports a probe's queue id in BOTH `ids` and `testIds`. It does
@@ -642,6 +686,17 @@ function ktSources(dir) {
   const hook = read('src/hooks/use-auto-import.ts');
   ok('the pull-to-refresh helper exists and scans interactively',
     /export function usePullToRefresh/.test(hook) && /runAutoImport\(true\)/.test(hook));
+  // `.finally` is not error handling. This helper had a finally and no catch,
+  // so any scan that threw — a dead network, a relay 5xx, a revoked device —
+  // was an unhandled promise rejection whose only visible effect was the
+  // spinner disappearing. The one gesture in the app that asks a question out
+  // loud answered it with silence. The catch has to come first, too: a
+  // rejection is not handled by the finally that runs after it.
+  const refresh = hook.slice(hook.indexOf('export function usePullToRefresh'));
+  ok('a failed pull-to-refresh tells the user instead of rejecting into nothing',
+    /runAutoImport\(true\)\s*\.catch\(/.test(refresh) &&
+      refresh.indexOf('.catch(') < refresh.indexOf('.finally(') &&
+      /toast\.show\(t\('captureRefreshFailed'\)\)/.test(refresh));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,

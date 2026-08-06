@@ -16,6 +16,12 @@
  * no password. Keychain items can survive an iOS reinstall, so the explicit
  * disconnect path deletes both the relay device and the local credential.
  *
+ * The other way a pairing ends is from the outside: the vault owner revokes
+ * this phone from another device and this phone is never told. Its only
+ * symptom is a 401 on /v1/sync, so that is where the local credential is
+ * stamped revoked — see markRelayRevoked() for why it is stamped rather than
+ * destroyed, and for what would be lost if a proxy's 401 were believed.
+ *
  * Sync deliberately does not delete on read. Rows are acknowledged only after
  * the app has actually written them to the ledger, so a request that dies
  * mid-flight costs a retry rather than a transaction.
@@ -125,12 +131,20 @@ export interface RelayConfig {
   /** Paired alone cannot capture; configured means the automation was created. */
   setupState: 'paired' | 'configured' | 'verified';
   verifiedAt?: number;
+  /**
+   * When the relay last refused this credential outright — see
+   * markRelayRevoked(). A stamped credential is no longer a pairing:
+   * getRelayConfig() and getBackgroundRelayConfig() both answer null for it,
+   * so every screen and every collector reads this phone as unpaired and the
+   * user is offered setup again instead of a status line that is not true.
+   */
+  revokedAt?: number;
 }
 
 /** Least-privilege credentials available to a silent wake after first unlock. */
 export type BackgroundRelayConfig = Pick<
   RelayConfig,
-  'baseUrl' | 'deviceId' | 'syncToken' | 'privateKey' | 'setupState'
+  'baseUrl' | 'deviceId' | 'syncToken' | 'privateKey' | 'setupState' | 'revokedAt'
 >;
 
 type RelaySyncConfig = Pick<RelayConfig, 'baseUrl' | 'syncToken' | 'privateKey'>;
@@ -184,11 +198,25 @@ export function validRelayMarket(value: unknown): string | null {
   return MARKETS.some((market) => market.id === id) ? id : null;
 }
 
+/** A stored blob the relay has cut off, whatever else it still contains. */
+function revokedAt(cfg: { revokedAt?: unknown }): number | null {
+  return typeof cfg.revokedAt === 'number' && Number.isFinite(cfg.revokedAt) && cfg.revokedAt > 0
+    ? cfg.revokedAt
+    : null;
+}
+
 export async function getRelayConfig(): Promise<RelayConfig | null> {
   try {
     const raw = await SecureStore.getItemAsync(KEY);
     if (!raw) return null;
     const cfg = JSON.parse(raw) as Partial<RelayConfig>;
+    // Refused by the relay: still on disk, deliberately, but not a pairing.
+    // Answering with it would let Home keep claiming capture is live and would
+    // send /ios-setup to its "finish the test" step, where the poll can only
+    // 401 forever. Null is what puts the pair-again path back in front of the
+    // user; getRelayRevokedAt() is how a caller tells this apart from a phone
+    // that was never set up.
+    if (revokedAt(cfg) !== null) return null;
     const baseUrl = normalizeRelayBaseUrl(cfg.baseUrl);
     const setupState =
       cfg.setupState === 'configured' || cfg.setupState === 'verified'
@@ -249,6 +277,9 @@ async function putRelayConfig(cfg: RelayConfig): Promise<void> {
     syncToken: cfg.syncToken,
     privateKey: cfg.privateKey,
     setupState: cfg.setupState,
+    // Spread rather than assigned: an absent marker must stay absent in the
+    // stored JSON, because the locked-phone item is asserted key-for-key.
+    ...(cfg.revokedAt ? { revokedAt: cfg.revokedAt } : {}),
   };
   await SecureStore.setItemAsync(BACKGROUND_KEY, JSON.stringify(background), {
     keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
@@ -260,6 +291,10 @@ export async function getBackgroundRelayConfig(): Promise<BackgroundRelayConfig 
     const raw = await SecureStore.getItemAsync(BACKGROUND_KEY);
     if (!raw) return null;
     const cfg = JSON.parse(raw) as Partial<BackgroundRelayConfig>;
+    // Same rule as the foreground item: a refused credential is not a pairing,
+    // so the headless wake stops re-authenticating against a device the relay
+    // has already deleted instead of failing the task on every push.
+    if (revokedAt(cfg) !== null) return null;
     const baseUrl = normalizeRelayBaseUrl(cfg.baseUrl);
     if (
       !baseUrl ||
@@ -288,6 +323,86 @@ async function deleteRelayCredentials(): Promise<void> {
     SecureStore.deleteItemAsync(BACKGROUND_KEY),
     SecureStore.deleteItemAsync(AUTOMATION_PROOF_KEY),
   ]);
+}
+
+/** The relay refused this credential; the pairing is over, not merely stalled. */
+export const RELAY_REVOKED = 'device_revoked';
+
+/** True for the one error that means "re-pair", not "try again later". */
+export function isRelayRevokedError(error: unknown): boolean {
+  return error instanceof RelayError && error.code === RELAY_REVOKED;
+}
+
+/**
+ * Stamp a stored credential the relay has cut off, rather than destroying it.
+ *
+ * WHY A MARKER AND NOT deleteRelayCredentials().
+ *
+ * The vault owner revoking this phone from another device deletes its queue
+ * rows along with it (server/src/index.ts, DELETE /v1/devices/:id), so in the
+ * true case there is nothing left for the X25519 private key to open and
+ * erasing it would cost nothing. The problem is that a 401 is not proof of
+ * that case. It is the answer this client gets from anything that can sit in
+ * front of the relay — a captive portal or an authenticating corporate proxy —
+ * and from any relay-side fault that loses a token row. Under a destructive
+ * policy one such answer, on one hostile network, permanently destroys the
+ * only copy of the key that can open rows still sealed in the queue AND the
+ * admin token that is the only way to delete this device server-side; both are
+ * unrecoverable, and the user's Shortcut would then have to be rebuilt for a
+ * device that was never actually revoked. So the credential stays exactly
+ * where it is and gains one field. The app stops claiming to be paired either
+ * way — that is what getRelayConfig() returning null does — and everything
+ * needed to open a queued row or to unpair properly is still on disk.
+ *
+ * A compare-and-swap on the refused sync token, because a 401 can land after
+ * the credential it was sent with has already been replaced: a sync started
+ * before the user re-paired must never stamp the pairing that replaced it.
+ */
+export async function markRelayRevoked(syncToken: string, at = Date.now()): Promise<void> {
+  await Promise.all([
+    stampRevoked(KEY, syncToken, at, SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY),
+    stampRevoked(BACKGROUND_KEY, syncToken, at, SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY),
+  ]);
+}
+
+async function stampRevoked(
+  key: string,
+  syncToken: string,
+  at: number,
+  keychainAccessible: SecureStore.KeychainAccessibilityConstant,
+): Promise<void> {
+  try {
+    const raw = await SecureStore.getItemAsync(key);
+    if (!raw) return;
+    const cfg = JSON.parse(raw) as { syncToken?: unknown; revokedAt?: unknown };
+    if (cfg.syncToken !== syncToken || revokedAt(cfg) !== null) return;
+    // Merged into whatever is stored rather than rebuilt from a validated
+    // config: a blob this build cannot fully parse is still a blob the user
+    // may need, and losing a field here would be the destruction this exists
+    // to avoid. The accessibility class is restated per item for the same
+    // reason putRelayConfig states it — a write that omits it silently
+    // relaxes the class the pairing chose.
+    await SecureStore.setItemAsync(key, JSON.stringify({ ...cfg, revokedAt: at }), {
+      keychainAccessible,
+    });
+  } catch {
+    // A Keychain that will not answer leaves the app in the state it was
+    // already in. The next sync gets the same 401 and tries again.
+  }
+}
+
+/**
+ * When this device was cut off, or null. The one way to tell a revoked phone
+ * from one that has never been set up, both of which read as "not paired".
+ */
+export async function getRelayRevokedAt(): Promise<number | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(KEY);
+    if (!raw) return null;
+    return revokedAt(JSON.parse(raw) as { revokedAt?: unknown });
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -737,7 +852,15 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   } catch {
     throw new RelayError('Could not reach Wafra.', true);
   }
-  if (res.status === 401) throw new RelayError('This device is no longer paired.', false);
+  if (res.status === 401) {
+    // Nothing used to consume this. The throw was correct and completely
+    // inert: the Keychain kept a 'verified' config with its automation proof,
+    // so Home went on reporting live capture for a phone the relay had cut
+    // off, and every sync after it failed into a `.catch` that said nothing.
+    // Recording the refusal is what makes the rest of the app tell the truth.
+    await markRelayRevoked(cfg.syncToken);
+    throw new RelayError('This device is no longer paired.', false, RELAY_REVOKED, 401);
+  }
   if (!res.ok) throw new RelayError(`Sync failed (${res.status}).`, res.status >= 500);
 
   const body = (await res.json().catch(() => null)) as { items?: unknown } | null;

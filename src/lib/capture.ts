@@ -25,7 +25,13 @@ import {
 } from '@/lib/auto-import';
 import { readBackgroundRelayRows } from '@/lib/background-relay';
 import { backgroundRelayStorage } from '@/lib/background-relay-storage';
-import { ackRelay, getRelayConfig, isRelayPlatform, syncRelay } from '@/lib/relay';
+import {
+  ackRelay,
+  getRelayConfig,
+  isRelayPlatform,
+  isRelayRevokedError,
+  syncRelay,
+} from '@/lib/relay';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type { AppState } from '@/lib/types';
 
@@ -133,8 +139,10 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     // the UI process was not running. They live in SQLCipher until the normal
     // import boundary durably folds them into the ledger.
     const staged = await readStagedRows();
-    const cfg = await getRelayConfig();
-    if (!cfg || cfg.setupState === 'paired') {
+    // What this pipe can still deliver when the network half of it is not
+    // usable: whatever a wake already wrote to disk, retired the same
+    // conditional way, and otherwise an honest "not connected".
+    const stagedOnly = (): CaptureResult => {
       if (staged.rows.length > 0) {
         const newestTs = staged.rows.reduce(
           (max, p) => Math.max(max, p.smsTs ?? 0),
@@ -151,8 +159,25 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
         };
       }
       return { ...EMPTY, source: 'relay', needsSetup: true };
-    }
-    const { parsed, ids, testIds } = await syncRelay(cfg);
+    };
+    const cfg = await getRelayConfig();
+    // getRelayConfig() already answers null for a credential the relay has
+    // refused, so a device revoked before this scan started never reaches the
+    // network at all.
+    if (!cfg || cfg.setupState === 'paired') return stagedOnly();
+    // Revoked DURING this scan is the same outcome one tick later. syncRelay()
+    // has stamped the stored credential by the time it throws, so degrade to
+    // the branch above rather than propagating: this call has an interactive
+    // caller behind it, and an exception there is a spinner that clears with
+    // nothing said. Anything else — offline, 5xx, a malformed page — still
+    // throws, because those are conditions a retry can fix and must not be
+    // reported as "you are no longer set up".
+    const queued = await syncRelay(cfg).catch((error: unknown) => {
+      if (isRelayRevokedError(error)) return null;
+      throw error;
+    });
+    if (!queued) return stagedOnly();
+    const { parsed, ids, testIds } = queued;
     const collected = [...staged.rows, ...parsed];
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
     return {

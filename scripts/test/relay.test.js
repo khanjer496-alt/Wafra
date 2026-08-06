@@ -421,8 +421,20 @@ async function queueItem(id, row, publicKey) {
       result.testIds, ['55555555-5555-4555-8555-555555555555']);
   }
 
+  /* ═════════════════ Revoked from another device ═════════════════
+   *
+   * The owner removes this phone from a second device. Nothing tells this
+   * phone: the relay deletes the row that authenticates it and the only
+   * symptom is a 401 on the next /v1/sync. That throw existed and nothing
+   * consumed it — the Keychain kept a 'verified' config and its automation
+   * proof, so Home reported live capture forever over a pipe that answered
+   * 401 to every request, and the user had no way back to pairing from inside
+   * the app. These assertions are what stops that returning.
+   */
+
   {
     const { net, cfg } = await paired();
+    const before = storedConfig();
     net.on('GET /v1/sync', () => json(401, { error: 'unauthorized' }));
     let thrown = null;
     try {
@@ -432,6 +444,37 @@ async function queueItem(id, row, publicKey) {
     }
     ok('lost pairing: 401 is permanent and says so, so the UI can offer setup again',
       thrown?.name === 'RelayError' && thrown.retryable === false);
+    eq('lost pairing: and names the one condition a retry cannot fix',
+      [thrown?.code, thrown?.status], ['device_revoked', 401]);
+
+    // The app must stop claiming to be paired, on both surfaces: the
+    // foreground one every screen reads, and the locked-phone one the headless
+    // wake reads — otherwise every push re-authenticates against a device the
+    // relay has already deleted.
+    eq('lost pairing: the app stops reporting a pairing at all',
+      await relay.getRelayConfig(), null);
+    eq('lost pairing: and the headless wake stops trying too',
+      await relay.getBackgroundRelayConfig(), null);
+    ok('lost pairing: a cut-off device is still distinguishable from one never set up',
+      (await relay.getRelayRevokedAt()) > 0);
+
+    // MARKED, NOT DESTROYED. A 401 is also what a captive portal or an
+    // authenticating proxy answers. The X25519 private key is the only thing
+    // that can ever open a row still sealed in the queue, and the admin token
+    // is the only thing that can delete this device server-side; neither is
+    // recoverable once erased, so a single 401 on one hostile network must not
+    // be allowed to erase them.
+    const kept = storedConfig();
+    ok('lost pairing: the X25519 private key survives the refusal',
+      kept?.privateKey === before.privateKey && decodeKey(kept.privateKey).length === 32);
+    ok('lost pairing: so does the credential that can still erase this device',
+      kept?.adminToken === before.adminToken);
+    const backgroundWrite = [...secure.__keychain.writes].reverse()
+      .find((w) => w.key === BACKGROUND_KEY);
+    ok('lost pairing: the locked-phone item is stamped at its own accessibility class',
+      storedConfig(BACKGROUND_KEY)?.revokedAt === kept.revokedAt &&
+        backgroundWrite.options.keychainAccessible ===
+          secure.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
 
     net.on('GET /v1/sync', () => {
       throw new Error('radio off');
@@ -444,6 +487,47 @@ async function queueItem(id, row, publicKey) {
     }
     ok('offline: a dead network is retryable, not a reason to unpair',
       offline?.name === 'RelayError' && offline.retryable === true);
+  }
+
+  {
+    // The transient failures, against a phone that is genuinely fine. Getting
+    // this wrong unpairs a working device from a hotel wifi.
+    const { net, cfg } = await paired();
+    net.on('GET /v1/sync', () => json(503, { error: 'unavailable' }));
+    await relay.syncRelay(cfg).catch(() => {});
+    net.on('GET /v1/sync', () => {
+      throw new Error('radio off');
+    });
+    await relay.syncRelay(cfg).catch(() => {});
+    ok('offline: neither a 5xx nor a dead radio marks a working phone revoked',
+      (await relay.getRelayConfig())?.syncToken === cfg.syncToken &&
+        (await relay.getRelayRevokedAt()) === null);
+  }
+
+  {
+    // A 401 can land after the credential it was sent with has been replaced —
+    // a sync in flight while the user re-pairs. Stamping on the STORED token
+    // rather than the refused one would kill the pairing that replaced it.
+    const { net, cfg } = await paired();
+    net.on('GET /v1/sync', () => json(401, { error: 'unauthorized' }));
+    await relay.syncRelay({ ...cfg, syncToken: `sync-${'z'.repeat(40)}` }).catch(() => {});
+    ok('lost pairing: a 401 for a credential that has since been replaced stamps nothing',
+      (await relay.getRelayConfig())?.syncToken === cfg.syncToken &&
+        (await relay.getRelayRevokedAt()) === null);
+  }
+
+  {
+    // The route back. /ios-setup reads getRelayConfig() to decide which step
+    // to open on: null is what puts the user at step 1 instead of at the test
+    // step, where the poll could only 401 forever.
+    const { net, cfg } = await paired();
+    net.on('GET /v1/sync', () => json(401, { error: 'unauthorized' }));
+    await relay.syncRelay(cfg).catch(() => {});
+    const fresh = await relay.pairDevice(BASE);
+    ok('lost pairing: pairing again clears the mark and the phone works once more',
+      (await relay.getRelayRevokedAt()) === null &&
+        (await relay.getRelayConfig())?.deviceId === fresh.deviceId &&
+        (await relay.getBackgroundRelayConfig())?.deviceId === fresh.deviceId);
   }
 
   {
@@ -874,6 +958,7 @@ async function queueItem(id, row, publicKey) {
           getRelayConfig: async () => ({ setupState: 'verified' }),
           syncRelay: async () => synced,
           ackRelay: async (_cfg, ids) => void acked.push(...ids),
+          isRelayRevokedError: () => false,
         };
       }
       if (id === '@/lib/auto-import') {
@@ -987,6 +1072,91 @@ async function queueItem(id, row, publicKey) {
       await result.commit();
       eq('staging: and its commit is conditional too',
         staged(), ['ADNOC', 'NOON']);
+    }
+
+    /* Defect C — a device the relay has cut off must not read as connected.
+     *
+     * Two shapes, because the revocation can be discovered either before this
+     * scan starts (getRelayConfig() already answers null for a stamped
+     * credential) or by the sync this scan makes. Both have to end at "you are
+     * not connected", and neither may lose a row a wake had already staged. */
+    {
+      disk.clear();
+      acked = [];
+      const revoked = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/relay') {
+          return {
+            ...captureDep('@/lib/relay'),
+            // What the real getRelayConfig() answers once the credential has
+            // been stamped: a revoked config is not a pairing.
+            getRelayConfig: async () => null,
+            syncRelay: async () => {
+              throw new Error('a revoked device must not reach the network');
+            },
+          };
+        }
+        return captureDep(id);
+      });
+      const result = await revoked.collectNewMessages(state);
+      ok('revoked: a cut-off device asks for setup rather than reporting "up to date"',
+        result.needsSetup === true && result.parsed.length === 0 && result.source === 'relay');
+    }
+
+    {
+      disk.clear();
+      acked = [];
+      stage([row(1, 'ADNOC')]);
+      const cut = Object.assign(new Error('This device is no longer paired.'), {
+        name: 'RelayError', code: 'device_revoked', retryable: false, status: 401,
+      });
+      const midScan = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/relay') {
+          return {
+            ...captureDep('@/lib/relay'),
+            syncRelay: async () => { throw cut; },
+            ackRelay: async () => { throw new Error('a revoked device cannot acknowledge'); },
+            isRelayRevokedError: (e) => e === cut,
+          };
+        }
+        return captureDep(id);
+      });
+      const result = await midScan.collectNewMessages(state);
+      eq('revoked: a revocation found mid-scan still delivers what a wake staged',
+        result.parsed.map((r) => r.merchant), ['ADNOC']);
+      await result.commit();
+      eq('revoked: retiring them acknowledges nothing to a relay that refused us',
+        [staged(), acked], [[], []]);
+      const next = await midScan.collectNewMessages(state);
+      ok('revoked: and with the queue drained it is an honest "not connected"',
+        next.needsSetup === true && next.parsed.length === 0);
+    }
+
+    {
+      // The failure that is NOT a revocation still has to propagate. Swallowing
+      // an offline sync into needsSetup would send a user with a working
+      // pairing back into the setup wizard every time a tunnel dropped.
+      disk.clear();
+      acked = [];
+      const offline = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/relay') {
+          return {
+            ...captureDep('@/lib/relay'),
+            syncRelay: async () => {
+              throw Object.assign(new Error('Could not reach Wafra.'), {
+                name: 'RelayError', retryable: true,
+              });
+            },
+          };
+        }
+        return captureDep(id);
+      });
+      let threw = false;
+      try {
+        await offline.collectNewMessages(state);
+      } catch {
+        threw = true;
+      }
+      ok('revoked: an ordinary sync failure still throws instead of reading as unpaired', threw);
     }
 
     /* A snapshot of nothing owns nothing. */

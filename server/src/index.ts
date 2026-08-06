@@ -325,6 +325,73 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
   return structured;
 }
 
+/**
+ * One receipt timestamp per ROW. Never one per batch.
+ *
+ * A multi-row import — a forwarded statement email, an uploaded PDF, a PDF
+ * attached to a forwarded email — used to compute a single
+ * `new Date().toISOString()` and stamp every row in the batch with it. Every
+ * row then had the SAME `receivedAt`, and that is not a cosmetic detail:
+ * src/lib/relay.ts turns `receivedAt` into `smsTs`, src/lib/import-plan.ts
+ * fingerprints a row as `s{smsTs}-{amountFils}`, and src/lib/dedupe.ts treats a
+ * repeated fingerprint inside one batch as a duplicate. So a statement carrying
+ *
+ *     03 Jan  SALIK    4.00
+ *     17 Jan  PARKING  4.00
+ *
+ * queued two rows here — this Worker's own suppression is keyed on the row's
+ * date, so it kept both — sealed both, and delivered both, and the phone
+ * dropped the second as a duplicate of the first. Different day, different
+ * merchant, one transaction silently gone. The client then acknowledged EVERY
+ * id it was sent and this Worker wrote a 72-hour replay receipt, so uploading
+ * the same PDF again recovered nothing. What the user saw was
+ * "accepted 47 / imported 31", with no explanation available on either side.
+ *
+ * A statement row carries its own date, and that is a better clock than this
+ * relay's receipt time in any case: it puts the row's event time on the day the
+ * money actually moved, which is also the order src/lib/relay.ts sorts a synced
+ * page into before handing it to buildImportPlan. Rows with no date — a bank
+ * ALERT forwarded by email parses as a single row and has no statement date —
+ * fall back to a monotonic offset from now, which is enough to keep them
+ * distinct from each other.
+ *
+ * Three details that are load-bearing:
+ *
+ * 1. Uniqueness is enforced, not assumed. A statement legitimately lists two
+ *    different merchants for the same amount on the same day, and those collide
+ *    on the date alone — which is the very bug this function exists to fix, one
+ *    level down. Colliding rows are bumped a millisecond apart, which keeps
+ *    them distinct AND in statement order, and stays far inside the 120s window
+ *    dedupe.ts uses to recognise two captures of one event.
+ *
+ * 2. Midday UTC, not midnight. Only `smsTs` comes from this value — the ledger
+ *    date is taken from the row's own `date` field in import-plan.ts — but
+ *    midnight UTC lands on the previous calendar day for any device west of
+ *    Greenwich, and there is no reason to leave that edge lying around.
+ *
+ * 3. A date in the FUTURE is refused and falls back to now, for the same reason
+ *    resolveReceivedAt bounds the Shortcut's clock: `smsTs` feeds the callers'
+ *    `newestTs`, which becomes `lastScanTs`, which is the watermark the next
+ *    SMS inbox scan starts from. One row dated 2099 would park that watermark
+ *    in the future and stop local capture for good. Old dates need no such
+ *    bound — every caller takes `Math.max(..., state.lastScanTs)`, and a
+ *    statement import is historical by definition.
+ *
+ * The wire format is unchanged: still one ISO-8601 string per row, in the
+ * `receivedAt` field src/lib/relay.ts already reads and validates.
+ */
+function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
+  const used = new Set<number>();
+  return rows.map((row, index) => {
+    const dated = typeof row.date === 'string' ? Date.parse(`${row.date}T12:00:00.000Z`) : NaN;
+    let ms =
+      Number.isFinite(dated) && dated <= nowMs + 86_400_000 ? dated : nowMs + index;
+    while (used.has(ms)) ms += 1;
+    used.add(ms);
+    return new Date(ms).toISOString();
+  });
+}
+
 async function queueStructuredRow(
   env: Env,
   device: Device,
@@ -391,13 +458,16 @@ async function queueEmailRows(
   if (parsedRows.length === 0) return { acceptedRows: 0, wake: new Set() };
   if (parsedRows.length > MAX_IMPORT_ROWS) throw new Error('too_many_rows');
   const baseKey = await keyedFingerprint(device.requestSecret, eventMaterial);
-  const receivedAt = new Date().toISOString();
+  // Per ROW, not per batch — see rowReceiptTimes. One shared stamp here gave
+  // every row of a forwarded statement the same import-plan fingerprint and the
+  // phone kept exactly one of them.
+  const receivedAt = rowReceiptTimes(parsedRows, Date.now());
   const wake = new Set<string>();
   for (let index = 0; index < parsedRows.length; index++) {
     const inserted = await queueStructuredRow(
       env,
       device,
-      { ...withoutRaw(parsedRows[index]), captureSource: 'email', receivedAt },
+      { ...withoutRaw(parsedRows[index]), captureSource: 'email', receivedAt: receivedAt[index] },
       `${baseKey}:${index}`,
       REPLAY_WINDOW_SECONDS,
     );
@@ -1022,7 +1092,8 @@ export default {
       if (extracted.rows.length > MAX_IMPORT_ROWS) return json({ error: 'too_many_rows' }, 413);
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
-      const receivedAt = new Date().toISOString();
+      // Per ROW, not per batch — see rowReceiptTimes.
+      const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
       const wake = new Set<string>();
       for (let index = 0; index < extracted.rows.length; index++) {
         const inserted = await queueStructuredRow(
@@ -1032,7 +1103,7 @@ export default {
             ...withoutRaw(extracted.rows[index]),
             categoryDeliberate: true,
             captureSource: 'pdf',
-            receivedAt,
+            receivedAt: receivedAt[index],
           },
           `${baseKey}:${index}`,
           72 * 60 * 60,
@@ -1279,7 +1350,8 @@ export default {
         device.requestSecret,
         `mime-pdf:${messageId}:${attachmentIndex}:${digest}`,
       );
-      const receivedAt = new Date().toISOString();
+      // Per ROW, not per batch — see rowReceiptTimes.
+      const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
       for (let rowIndex = 0; rowIndex < extracted.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,
@@ -1288,7 +1360,7 @@ export default {
             ...withoutRaw(extracted.rows[rowIndex]),
             categoryDeliberate: true,
             captureSource: 'pdf',
-            receivedAt,
+            receivedAt: receivedAt[rowIndex],
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,

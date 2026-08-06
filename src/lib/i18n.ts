@@ -85,6 +85,18 @@ const S = {
     en: 'Connect your Shortcut once',
     ar: 'اربط الاختصار مرة واحدة',
   },
+  captureIosRevoked: {
+    en: 'This iPhone was removed · capture stopped',
+    ar: 'أُزيل هذا الآيفون · توقّف الالتقاط',
+  },
+  captureIosRevokedDetail: {
+    en: 'Another device removed it from your vault. Set it up again to resume.',
+    ar: 'أزاله جهاز آخر من خزنتك. أعد الإعداد لاستئناف الالتقاط.',
+  },
+  captureRefreshFailed: {
+    en: 'Could not refresh. Pull down to try again.',
+    ar: 'تعذّر التحديث. اسحب للأسفل للمحاولة مرة أخرى.',
+  },
   capturePhoneOnly: {
     en: 'Automatic capture runs in the phone app',
     ar: 'يعمل الالتقاط التلقائي في تطبيق الهاتف',
@@ -283,6 +295,24 @@ const S = {
   noUnrecognizedText: {
     en: 'No unrecognized bank formats in your data. Rows appear here after a scan when the parser has to guess.',
     ar: 'لا توجد صيغ غير معروفة في بياناتك. تظهر الرسائل هنا بعد الفحص عندما يضطر التطبيق للتخمين.',
+  },
+  // Zero unread formats means two opposite things, and the app used to report
+  // the good one either way. On iPhone the relay drops the message text before
+  // the row reaches the phone, so the check can never find anything and
+  // "Everything reads clean" was a verdict on a test that never ran. Private
+  // mode does the same on Android, by the user's own choice. See
+  // noFormatsReason() in lib/accuracy.ts.
+  formatsNotKeptRow: {
+    en: 'Card diagnostic · message text is not kept on this phone',
+    ar: 'تشخيص البطاقات · لا يُحتفظ بنص الرسائل على هذا الهاتف',
+  },
+  formatsNotKeptRelay: {
+    en: 'This iPhone never receives the text of a bank message. The relay reads each one, sends only the figures it parsed, and discards the rest — so the app cannot tell you which formats it is misreading, and an empty list here is not a clean bill of health. The card diagnostic below still works: it reports what the ledger did with every card row.',
+    ar: 'لا يستقبل هذا الآيفون نص الرسالة البنكية إطلاقاً. يقرأ الوسيط كل رسالة ويرسل الأرقام التي استخرجها فقط ثم يتخلص من الباقي، لذا لا يستطيع التطبيق إخبارك بالصيغ التي يخطئ في قراءتها، وخلوّ هذه القائمة ليس دليلاً على سلامة القراءة. أما تشخيص البطاقات بالأسفل فيعمل: يعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+  },
+  formatsNotKeptPrivate: {
+    en: 'Private mode removed the retained message text and keeps new imports from storing any, so the app cannot tell you which formats it is misreading. An empty list here is not a clean bill of health. The card diagnostic below still works: it reports what the ledger did with every card row.',
+    ar: 'أزال الوضع الخاص نصوص الرسائل المحفوظة ويمنع عمليات الاستيراد الجديدة من حفظ أي منها، لذا لا يستطيع التطبيق إخبارك بالصيغ التي يخطئ في قراءتها، وخلوّ هذه القائمة ليس دليلاً على سلامة القراءة. أما تشخيص البطاقات بالأسفل فيعمل: يعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
   },
   spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
   cardSpentThisMonth: {

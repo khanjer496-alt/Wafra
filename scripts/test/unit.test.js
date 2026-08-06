@@ -2215,6 +2215,26 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const noop = heal.healPatch(stillBad, { ...parsed, merchant: 'Card purchase', categoryGuess: 'other' });
   ok('accuracy: a still-unreadable row keeps its source text',
     noop === null || noop.raw !== null);
+
+  // ── a count of zero is not always a verdict ──
+  //
+  // unreadFormatCount keys off tx.raw, and an iPhone never has any: the relay
+  // Worker discards Message Content before sealing, which is why
+  // ParsedRelayRow is typed `raw?: never`. So the count was structurally 0 on
+  // every iPhone and Settings answered "Everything reads clean" — a clean bill
+  // of health for a check that never ran, on the one platform whose parser
+  // feedback nobody ever receives. Private mode does the same on Android by
+  // stripping raw on write.
+  ok('accuracy: with retention on, an empty list is a real finding',
+    accuracy.noFormatsReason({ relayPlatform: false, privateMode: false }) === 'none-found');
+  ok('accuracy: the relay platform cannot know, and says so',
+    accuracy.noFormatsReason({ relayPlatform: true, privateMode: false }) === 'relay');
+  ok('accuracy: private mode cannot know either',
+    accuracy.noFormatsReason({ relayPlatform: false, privateMode: true }) === 'private');
+  // Turning private mode off on an iPhone does not bring the text back, so
+  // blaming private mode there points the user at a switch that cannot fix it.
+  ok('accuracy: on iOS the platform is named, not the private-mode switch',
+    accuracy.noFormatsReason({ relayPlatform: true, privateMode: true }) === 'relay');
 }
 
 // ── a confidently wrong category is healed, a merely-guessed one is not ──

@@ -85,6 +85,12 @@ function AutomaticCapture({
         : Platform.OS === 'ios'
           ? active
             ? t('captureIosOn')
+            // Ahead of every other iOS branch: a device the relay cut off has
+            // a config that still looks finished, and reading it as merely
+            // "off" would send the user back through setup with no idea that
+            // the phone they are holding was removed on purpose.
+            : status === 'revoked'
+              ? t('captureIosRevoked')
             : status === 'pipe-ready'
               ? t('captureIosPipeReady')
             : status === 'needs-test'
@@ -110,6 +116,8 @@ function AutomaticCapture({
       : Platform.OS === 'ios'
         ? t('captureSyncNow')
         : t('captureAndroidPrivate')
+    : status === 'revoked'
+      ? t('captureIosRevokedDetail')
     : status === 'pipe-ready'
       ? t('iosTestLimit')
     : Platform.OS === 'android'
@@ -674,8 +682,10 @@ export default function HomeScreen() {
               if (captureStatus === 'paused') router.push('/pro');
               // Only iOS states that still owe the user setup go to the
               // wizard: 'off' (no relay config), 'needs-test' (paired but
-              // unverified) and 'pipe-ready' (verified pipe, automation not
-              // yet proven) each have something left to finish there. 'active'
+              // unverified), 'pipe-ready' (verified pipe, automation not yet
+              // proven) and 'revoked' (the relay cut this device off, so the
+              // way back is a new pairing) each have something left to finish
+              // there — and 'revoked' is why this stayed a !== test. 'active'
               // does not — its own detail line is "tap to sync now" — so it
               // gets the sync, exactly as Android does.
               else if (Platform.OS === 'ios' && captureStatus !== 'active') {

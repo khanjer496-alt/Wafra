@@ -30,6 +30,17 @@ export const AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY = 2;
 export const WHEN_UNLOCKED = 0;
 export const WHEN_UNLOCKED_THIS_DEVICE_ONLY = 4;
 
+/**
+ * The TYPE, not just the values. expo-secure-store exports both, and a client
+ * function that takes an accessibility class as a PARAMETER — relay.ts's
+ * stampRevoked does — names the type rather than a constant. Omitting it here
+ * fails the nodenext relay pass with TS2694, which under `set -e` aborts the
+ * whole run before a single suite executes: `npm test` then reports nothing at
+ * all about the app. Kept as `number` deliberately, matching the three values
+ * above; narrowing it to a union would reject a caller passing one through.
+ */
+export type KeychainAccessibilityConstant = number;
+
 const items = new Map<string, string>();
 const writes: { key: string; options?: SecureStoreOptions }[] = [];
 

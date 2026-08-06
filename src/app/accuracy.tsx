@@ -11,9 +11,10 @@ import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { cardDiagnostics, unreadFormats } from '@/lib/accuracy';
+import { cardDiagnostics, noFormatsReason, unreadFormats } from '@/lib/accuracy';
 import { shareText } from '@/lib/share-text';
 import { categoryLabel } from '@/lib/categories';
+import { isRelayPlatform } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
 
@@ -39,6 +40,14 @@ export default function AccuracyScreen() {
 
   const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
   const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
+
+  // An empty list is a finding on Android with retention on, and no finding at
+  // all on a phone that never keeps the message text. This screen used to show
+  // the same green check for both — see noFormatsReason() in lib/accuracy.ts.
+  const noFormats = noFormatsReason({
+    relayPlatform: isRelayPlatform(),
+    privateMode: state.privateMode,
+  });
 
   // Two headings, not one. The old export called every row "could not read",
   // which was wrong about most of them — the merchant was read fine, it just
@@ -85,7 +94,13 @@ export default function AccuracyScreen() {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Section index={0} style={styles.intro}>
             <ThemedText type="default" themeColor="textSecondary">
-              {t('improveAccuracyHint')}
+              {t(
+                noFormats === 'relay'
+                  ? 'formatsNotKeptRelay'
+                  : noFormats === 'private'
+                    ? 'formatsNotKeptPrivate'
+                    : 'improveAccuracyHint',
+              )}
             </ThemedText>
             {rows.length > 0 && (
               <Button
@@ -140,7 +155,11 @@ export default function AccuracyScreen() {
             ),
           )}
 
-          {rows.length === 0 && (
+          {/* The green tick is a VERDICT — "the parser read everything you
+              have" — and it can only be earned where the source text was kept
+              to check against. Where it was not, the explanation above is the
+              whole answer and this block would only contradict it. */}
+          {rows.length === 0 && noFormats === 'none-found' && (
             <Section index={1} style={styles.empty}>
               <Icon name="check" size={26} color={theme.income} strokeWidth={2.1} />
               <ThemedText type="small">{t('noUnrecognized')}</ThemedText>

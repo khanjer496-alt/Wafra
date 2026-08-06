@@ -34,7 +34,7 @@ import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/u
 import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { unreadFormatCount } from '@/lib/accuracy';
+import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { getChargeAlertPreference, setChargeAlertsEnabled } from '@/lib/background-relay';
 import {
   cancelDailySummary,
@@ -101,6 +101,11 @@ export default function SettingsScreen() {
   );
   const [smsGranted, setSmsGranted] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
+  // A count of 0 is not a verdict on every device — see noFormatsReason().
+  const noFormats = noFormatsReason({
+    relayPlatform: isRelayPlatform(),
+    privateMode: state.privateMode,
+  });
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
   const [instantAlerts, setInstantAlerts] = useState(false);
@@ -768,21 +773,30 @@ export default function SettingsScreen() {
                       : t('captureIosNeedsTest'),
                 () => router.push('/ios-setup'),
               )}
-            <Row
-              onPress={gated(onNotificationAccess)}
-              accessibilityLabel={t('bankAppNotifsTitle')}>
-              <View style={styles.rowText}>
-                <ThemedText type="small">{t('bankAppNotifsTitle')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t(notifEnabled ? 'bankPushOn' : 'bankPushOff')}
-                </ThemedText>
-              </View>
-              <Icon
-                name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
-                size={15}
-                color={theme.textTertiary}
-              />
-            </Row>
+            {/* Gated like every other capture row above it. Rendering this
+                unconditionally made it the one dead end in the section on
+                iOS: it read "Off · for banks that push instead of SMS", sent a
+                non-Pro user to the paywall first because of gated(), and only
+                then said notification access "works on the phone app only" —
+                to someone holding a phone. There is no iOS equivalent to
+                offer, so the row is not shown rather than shown broken. */}
+            {notifAvailable && (
+              <Row
+                onPress={gated(onNotificationAccess)}
+                accessibilityLabel={t('bankAppNotifsTitle')}>
+                <View style={styles.rowText}>
+                  <ThemedText type="small">{t('bankAppNotifsTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {t(notifEnabled ? 'bankPushOn' : 'bankPushOff')}
+                  </ThemedText>
+                </View>
+                <Icon
+                  name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+                  size={15}
+                  color={theme.textTertiary}
+                />
+              </Row>
+            )}
             {linkRow(
               t('trustedSettingsRow'),
               t('trustedSettingsDetail'),
@@ -815,6 +829,12 @@ export default function SettingsScreen() {
             {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
             {linkRow(t('exportCsv'), null, exportCsv)}
             {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod)}
+            {/* "No unrecognized formats" is a claim about message text this
+                phone may never have had. On iOS the relay discards it before
+                the row arrives and private mode deletes it on purpose, so the
+                count is 0 either way — see noFormatsReason(). The row still
+                leads somewhere on those devices: the card diagnostic is built
+                from the ledger, not from raw, and works everywhere. */}
             {linkRow(
               t('improveAccuracy'),
               formats > 0
@@ -822,7 +842,9 @@ export default function SettingsScreen() {
                     count: formats,
                     s: formats === 1 ? '' : 's',
                   })
-                : t('noUnrecognized'),
+                : noFormats === 'none-found'
+                  ? t('noUnrecognized')
+                  : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
             )}
             {linkRow(t('eraseAll'), null, confirmErase, true, true)}

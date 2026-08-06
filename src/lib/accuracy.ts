@@ -301,3 +301,43 @@ export function unreadFormatCount(state: AppState): number {
  * people to ignore the prompt that matters.
  */
 export const REPORT_PROMPT_THRESHOLD = 3;
+
+/**
+ * Why the list came back empty — which is not always good news.
+ *
+ * Both functions above start from `tx.raw`, and there are two whole classes of
+ * device where raw is absent for reasons that have nothing to do with how well
+ * the parser did:
+ *
+ *  - **The iOS relay never delivers it.** The Worker drops Message Content
+ *    before sealing the row, which is why `ParsedRelayRow` in relay.ts is
+ *    typed `raw?: never`. Every row on an iPhone therefore carries no source
+ *    text, `unreadFormatCount` is structurally 0, and Settings answered
+ *    "Everything reads clean" — a clean bill of health for a check that never
+ *    ran, on the one platform whose parser feedback never reaches anyone.
+ *  - **Private mode strips it.** store.tsx keeps `raw: base.privateMode ?
+ *    undefined : t.raw`, so an Android user who chose local-only retention is
+ *    told the same thing for the same wrong reason.
+ *
+ * Zero-because-clean and zero-because-blind are opposite facts and the screens
+ * have to be able to tell them apart, so this returns the reason rather than a
+ * boolean.
+ *
+ * The platform flag is passed IN rather than read here: this module is
+ * compiled and exercised in the Node test build, which has no react-native,
+ * and `isRelayPlatform()` in relay.ts is already the single definition of it.
+ *
+ * iOS is checked FIRST on purpose. Turning private mode off on an iPhone does
+ * not bring the text back — nothing does — so naming private mode there would
+ * point the user at a switch that cannot fix it.
+ */
+export type NoFormatsReason = 'none-found' | 'relay' | 'private';
+
+export function noFormatsReason(opts: {
+  relayPlatform: boolean;
+  privateMode: boolean;
+}): NoFormatsReason {
+  if (opts.relayPlatform) return 'relay';
+  if (opts.privateMode) return 'private';
+  return 'none-found';
+}
