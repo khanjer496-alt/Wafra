@@ -113,7 +113,10 @@ esac
 
 # The prompt goes in on stdin, never as a trailing argument: `--tools` is
 # variadic and would otherwise swallow it as a tool name.
-OUT="$(mktemp -t claude-reply)"
+# The template needs its own X's: GNU coreutils' mktemp rejects a -t
+# argument with none ("too few X's in template"), while BSD/macOS mktemp
+# appends them itself. Spelling them out works on both.
+OUT="$(mktemp -t claude-reply.XXXXXX)"
 trap 'rm -f "$OUT"' EXIT
 
 if ! printf '%s\n\n--- TASK ---\n%s\n' "$PREAMBLE" "$PROMPT" |

@@ -30,6 +30,15 @@
  * arrive as data rather than as a guess. Every refusal below is therefore a
  * property of the parsed row, not a pattern over prose.
  *
+ * NO MODULE STATE, WITH ONE NAMED EXCEPTION. Everything the app normally reads
+ * from a global — the UI language, the active market's currency — is taken
+ * from an argument or from the row instead. Those globals are set during
+ * hydrate, and this code runs in a headless wake that can execute before
+ * StoreProvider has ever mounted. A banner is the one surface where reading a
+ * not-yet-set global is invisible: there is no screen around it to look wrong.
+ * The exception is `money`'s last-resort fallback for a row carrying no
+ * currency code at all, which has nothing better to fall back TO; see there.
+ *
  * NOTHING LEAVES THE DEVICE. A local notification is composed here and handed
  * to the OS on this phone. No text derived from a bank message is sent
  * anywhere, and the wake that triggered all this carried no amount, merchant
@@ -37,7 +46,7 @@
  */
 import { cardAccountName } from '@/lib/cards';
 import { categoryLabel } from '@/lib/categories';
-import { formatAED } from '@/lib/format';
+import { formatAED, formatAmount } from '@/lib/format';
 import { tf, type Lang } from '@/lib/i18n';
 import type { ScannedSms } from '@/lib/import-plan';
 
@@ -75,6 +84,29 @@ export interface ChargeAlert {
 }
 
 /**
+ * The figure, in the currency the ROW states rather than the app's.
+ *
+ * `formatAED` prefixes whatever market pack is currently active, and "active"
+ * is module state set during hydrate — which a headless background wake can
+ * run before. A Saudi user's SAR 42.50 purchase would have been announced as
+ * "AED 42.50": the right number under the wrong name, which is a false claim
+ * about how much money left. Every parsed row carries its own ISO code, so
+ * this needs no global state to be right. formatAED remains the fallback for a
+ * row that somehow carries none.
+ */
+function money(row: ScannedSms, opts?: { decimals?: boolean }): string {
+  const code = typeof row.currency === 'string' ? row.currency.trim().toUpperCase() : '';
+  if (!/^[A-Z]{3}$/.test(code)) return formatAED(row.amountFils, opts);
+  return `${code} ${formatAmount(row.amountFils, opts)}`;
+}
+
+/** The ISO code a row's figure is denominated in, or null when it names none. */
+function currencyOf(row: ScannedSms): string | null {
+  const code = typeof row.currency === 'string' ? row.currency.trim().toUpperCase() : '';
+  return /^[A-Z]{3}$/.test(code) ? code : null;
+}
+
+/**
  * Is this parsed row a completed transaction the user should be told about?
  *
  * `nowMs` is passed in rather than read from the clock so a test can ask about
@@ -105,9 +137,10 @@ export function isAnnounceable(row: ScannedSms, nowMs: number): boolean {
   // arrived on this phone, which is the only one that happened NOW. `email`
   // and `pdf` are statement imports: dozens of rows at once, most of them
   // weeks old, and announcing them would tell the user they had just spent
-  // their way through a quarter. A setup probe never carries a capture source
-  // at all, so this also guarantees the capture test cannot post a banner for
-  // a transaction that was never real.
+  // their way through a quarter. A setup probe carries no capture source
+  // either — belt and braces, since syncRelay already drops probes before they
+  // ever become rows, but the capture test must not be one line's refactor
+  // away from announcing a transaction that was never real.
   if (row.captureSource !== 'shortcut') return false;
 
   const ts = row.smsTs;
@@ -158,30 +191,34 @@ export function buildChargeAlert(
 
   const out = charges.filter((row) => row.type === 'expense');
   const received = charges.filter((row) => row.type !== 'expense');
-  const sum = (list: ScannedSms[]) => list.reduce((total, row) => total + row.amountFils, 0);
 
   // The headline counts and totals ONE direction. A total that netted a refund
   // against two purchases would be a number that matches nothing the user can
   // check — not the day's spend, not any single charge. Spending leads when
   // there is any; money arriving still gets its own line below.
+  //
+  // And one CURRENCY, for the same reason. Rows only ever disagree here if the
+  // user changed market with a backlog still in flight, but adding SAR to AED
+  // would produce a figure that is not an amount of anything, so the headline
+  // speaks for the leading row's currency and the rest keep their own lines.
   const lead = out.length > 0 ? out : received;
+  const code = currencyOf(lead[0]);
+  const totalled = lead.filter((row) => currencyOf(row) === code);
   const title = tf(
     out.length > 0 ? 'chargeAlertGroupTitle' : 'chargeAlertGroupCreditTitle',
     {
-      amount: formatAED(sum(lead), { decimals: false }),
-      count: lead.length,
-      s: lead.length === 1 ? '' : 's',
+      amount: money(
+        { ...totalled[0], amountFils: totalled.reduce((sum, row) => sum + row.amountFils, 0) },
+        { decimals: false },
+      ),
+      count: totalled.length,
+      s: totalled.length === 1 ? '' : 's',
     },
     lang,
   );
 
   const named = charges.slice(0, ALERT_ROWS);
-  const lines = named.map((row) =>
-    tf(row.type === 'expense' ? 'dailySummaryLine' : 'chargeAlertLineCredit', {
-      amount: formatAED(row.amountFils),
-      merchant: merchantOf(row, lang),
-    }, lang),
-  );
+  const lines = named.map((row) => line(row, lang));
   const rest = charges.length - named.length;
   if (rest > 0) {
     lines.push(tf('dailySummaryMore', { count: rest, s: rest === 1 ? '' : 's' }, lang));
@@ -192,7 +229,7 @@ export function buildChargeAlert(
 
 /** The one-charge banner: what Android posts, with the parser's certainty. */
 function single(row: ScannedSms, lang: Lang): ChargeAlert {
-  const amount = formatAED(row.amountFils);
+  const amount = money(row);
   const credit = row.type !== 'expense';
   const merchant = namedMerchant(row);
   const key = merchant
@@ -226,7 +263,24 @@ function namedMerchant(row: ScannedSms): string | null {
   return name.length > 0 ? name : null;
 }
 
-/** Same, but for a body line, where there is always a column to fill. */
-function merchantOf(row: ScannedSms, lang: Lang): string {
-  return namedMerchant(row) ?? categoryLabel(row.categoryGuess, lang);
+/**
+ * One charge as a line of the grouped body.
+ *
+ * The naming discipline is `single`'s, not a looser one. An earlier version
+ * fell back to the category unconditionally, which printed "AED 42.50 — Other"
+ * for a row whose category was never decided — the exact shrug-as-finding the
+ * single banner refuses two functions up. A row that names nothing at all is
+ * printed as the amount alone, which is what the Kotlin does with the same
+ * problem and is still useful.
+ */
+function line(row: ScannedSms, lang: Lang): string {
+  const amount = money(row);
+  const credit = row.type !== 'expense';
+  const merchant = namedMerchant(row) ?? (row.categoryDeliberate
+    ? categoryLabel(row.categoryGuess, lang)
+    : null);
+  if (merchant) {
+    return tf(credit ? 'chargeAlertLineCredit' : 'dailySummaryLine', { amount, merchant }, lang);
+  }
+  return tf(credit ? 'chargeAlertTitleCreditPlain' : 'chargeAlertTitlePlain', { amount }, lang);
 }

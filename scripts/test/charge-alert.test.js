@@ -183,6 +183,32 @@ eq(
 }
 
 {
+  // A grouped line holds itself to the same naming rule as a single banner:
+  // `other` from an untouched fall-through is a shrug, and "AED 42.50 — Other"
+  // dresses it up as a finding. Not reachable through the relay validator
+  // today, which is exactly when a rule quietly stops being enforced.
+  const vague = alert.buildChargeAlert(
+    [
+      row({ amountFils: 30000, merchant: 'NOON' }),
+      row({ amountFils: 4250, merchant: '', categoryGuess: 'other', categoryDeliberate: false }),
+    ],
+    NOW,
+    'en',
+  );
+  ok('a nameless grouped row is the amount alone', vague.body.endsWith('AED 42.50 spent'), vague.body);
+  const byCategory = alert.buildChargeAlert(
+    [
+      row({ amountFils: 30000, merchant: 'NOON' }),
+      row({ amountFils: 4250, merchant: '', categoryGuess: 'dining', categoryDeliberate: true }),
+    ],
+    NOW,
+    'en',
+  );
+  ok('a decided category may stand in for a missing merchant',
+    byCategory.body.endsWith('AED 42.50 — Dining'), byCategory.body);
+}
+
+{
   const capped = alert.buildChargeAlert(
     Array.from({ length: 8 }, (_, i) =>
       row({ amountFils: (8 - i) * 1000, merchant: `SHOP${i}`, smsTs: NOW - i * 1000 }),
@@ -221,6 +247,39 @@ eq(
     'en',
   );
   eq('a wake of only credits leads with what arrived', onlyIn.title, 'AED 9,050 received · 2 payments');
+}
+
+/* ── The currency is the row's, not the app's ────────────────────────── */
+//
+// formatAED prefixes whatever market pack is active, and "active" is module
+// state set during hydrate — which a headless wake can run before. A Saudi
+// user's SAR 42.50 purchase announced as "AED 42.50" is the right number under
+// the wrong name, which is a false claim about how much money left.
+
+{
+  const sar = alert.buildChargeAlert([row({ currency: 'SAR' })], NOW, 'en');
+  eq('a single charge is priced in its own currency', sar.title, 'SAR 42.50 · CARREFOUR');
+  const sarGroup = alert.buildChargeAlert(
+    [row({ currency: 'SAR', amountFils: 10000 }), row({ currency: 'SAR', amountFils: 30000 })],
+    NOW,
+    'en',
+  );
+  eq('a grouped total is priced in its own currency', sarGroup.title, 'SAR 400 spent · 2 charges');
+}
+
+{
+  // Only reachable by changing market with a backlog in flight, but adding SAR
+  // to AED produces a figure that is not an amount of anything.
+  const mixed = alert.buildChargeAlert(
+    [
+      row({ currency: 'AED', amountFils: 30000, merchant: 'NOON' }),
+      row({ currency: 'SAR', amountFils: 20000, merchant: 'JARIR' }),
+    ],
+    NOW,
+    'en',
+  );
+  eq('currencies are never added together', mixed.title, 'AED 300 spent · 1 charge');
+  ok('the other currency keeps its own line', mixed.body.includes('SAR 200 — JARIR'), mixed.body);
 }
 
 /* ── Arabic ──────────────────────────────────────────────────────────── */

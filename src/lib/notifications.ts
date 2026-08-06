@@ -74,13 +74,25 @@ export function notificationsAllowed(status: Notifications.NotificationPermissio
   );
 }
 
+/**
+ * Ask for full notification permission, unless delivery already works.
+ *
+ * The early return is `notificationsAllowed`, not `granted`, and the
+ * difference is not cosmetic. On a provisionally-authorized iPhone `granted`
+ * is false, so every "Remind me" and the daily-summary switch would put the
+ * standard iOS permission sheet in front of a user whose reminders were
+ * already going to arrive. Tapping "Don't Allow" there sets the status to
+ * DENIED — which REVOKES the provisional grant and takes down the reminders,
+ * the nightly summary and the charge banner in one go. The user would be
+ * strictly worse off for having asked to be reminded.
+ */
 export async function requestNotificationPermission(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   configureHandler();
   const current = await Notifications.getPermissionsAsync();
-  if (current.granted) return true;
+  if (notificationsAllowed(current)) return true;
   const asked = await Notifications.requestPermissionsAsync();
-  return asked.granted;
+  return notificationsAllowed(asked);
 }
 
 /**

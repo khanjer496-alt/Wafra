@@ -116,15 +116,24 @@ export interface ChargeAlertPreference {
 }
 
 async function readAlertPreference(): Promise<ChargeAlertPreference> {
-  // Off unless the user turns it on, exactly as InstantAlert.isEnabled defaults
-  // on Android: this is an interruption, not a default.
-  const fallback: ChargeAlertPreference = { enabled: false, lang: detectLanguage() };
+  // ON until the user turns it off, which is the opposite of Android's
+  // InstantAlert.isEnabled, and the reason is the delivery and not a change of
+  // mind. Android's banner is a heads-up over whatever is on screen, so it
+  // defaults off because it is an interruption. This one is posted `passive`
+  // on a device that iOS setup only ever asked for PROVISIONAL authorization —
+  // it lands quietly in Notification Center with no banner and no sound. An
+  // interruption is worth an opt-in; a quiet line in a list the user chose to
+  // open is not, and defaulting it off would leave the iOS half of the product
+  // with no per-charge alert at all for everyone who never found the switch.
+  const fallback: ChargeAlertPreference = { enabled: true, lang: detectLanguage() };
   try {
     const raw = await backgroundRelayStorage.getItem(ALERT_KEY);
     if (!raw) return fallback;
     const value = JSON.parse(raw) as { on?: unknown; lang?: unknown };
     return {
-      enabled: value.on === true,
+      // Only an explicit `false` turns it off, so a blob written by an older
+      // build that carried no switch keeps working rather than going silent.
+      enabled: value.on !== false,
       lang: value.lang === 'ar' ? 'ar' : value.lang === 'en' ? 'en' : fallback.lang,
     };
   } catch {

@@ -47,7 +47,10 @@ PROMPT="${*:-}"
 [[ -n "$PROMPT" ]] || PROMPT="$(cat)"
 [[ -n "$PROMPT" ]] || { echo "ask-codex: empty prompt" >&2; exit 1; }
 
-OUT="$(mktemp -t codex-reply)"
+# The template needs its own X's: GNU coreutils' mktemp rejects a -t
+# argument with none ("too few X's in template"), while BSD/macOS mktemp
+# appends them itself. Spelling them out works on both.
+OUT="$(mktemp -t codex-reply.XXXXXX)"
 # Start empty: on an API error codex leaves the file untouched, and a stale
 # reply from a previous run would otherwise look like a successful answer.
 : > "$OUT"

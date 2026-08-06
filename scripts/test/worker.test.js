@@ -535,6 +535,40 @@ const CARD_PAYMENT_DEBIT =
     ok('ingest: the setup probe is accepted even though it is not a transaction',
       probe.status === 202 && count(env.DB, 'queue') === 2);
 
+    // A PROBE IS NEVER A REPLAY. Its body is a constant, so every "Try again"
+    // on the setup screen sends bytes identical to the last attempt. While the
+    // probe took the ordinary replay receipt, the second attempt was
+    // suppressed — and because the receipt UPSERT refreshes expires_at, each
+    // retry pushed the block further out. A user whose first probe went astray
+    // could retry forever on a correctly configured phone and be told, every
+    // time, that nothing arrived.
+    //
+    // Sent with NO eventId, because that is the case that bites: with one, the
+    // replay material is the event id and each retry differs anyway. Without
+    // one the body IS the identity.
+    const probeRetryA = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken, body: { text: RELAY_TEST_MESSAGE },
+    });
+    const probeRetryB = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken, body: { text: RELAY_TEST_MESSAGE },
+    });
+    ok('ingest: a repeated setup probe is queued again, not suppressed as a replay',
+      probeRetryA.status === 202 && probeRetryB.status === 202 &&
+        count(env.DB, 'queue') === 4,
+      `queue=${count(env.DB, 'queue')}`);
+
+    // ...and the guard it is exempt from still works for a real charge, which
+    // is the half that must not regress: an HTTP retry of one purchase is one
+    // purchase.
+    const dupBody = { text: 'Purchase of AED 12.00 with Debit Card ending 1234 at ARABICA, DUBAI.' };
+    const chargeA = await call(env, 'POST', '/v1/ingest', { token: me.ingestToken, body: dupBody });
+    const beforeReplay = count(env.DB, 'queue');
+    const chargeB = await call(env, 'POST', '/v1/ingest', { token: me.ingestToken, body: dupBody });
+    ok('ingest: a repeated real charge is still suppressed as a replay',
+      chargeA.status === 202 && chargeB.status === 202 &&
+        count(env.DB, 'queue') === beforeReplay,
+      `before=${beforeReplay} after=${count(env.DB, 'queue')}`);
+
     // ── The database holds nothing readable ──
     ok('ingest: the message text is nowhere in the database',
       !dumpDb(env.DB).includes('ARABICA') && !dumpDb(env.DB).includes('Avl Balance'));

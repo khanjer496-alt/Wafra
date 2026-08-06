@@ -856,12 +856,31 @@ export default {
             // transaction. Absent sender leaves the old material untouched.
             `body:${sender ? `${sender}:` : ''}${text.trim().replace(/\s+/g, ' ')}`;
       const replayKey = await keyedFingerprint(device.requestSecret, replayMaterial);
+      // A SETUP PROBE IS NEVER A REPLAY, and treating it as one locked users
+      // out of onboarding entirely.
+      //
+      // The probe body is a constant, so every "Try again" on the test step is
+      // byte-identical to the last one. The receipt below suppressed it — and
+      // the UPSERT refreshes `expires_at`, so each retry pushed the block
+      // further out. A user whose first probe went astray could retry forever
+      // and be silently refused, on a correctly configured phone, with the
+      // setup screen reporting nothing arrived.
+      //
+      // A zero TTL rather than a skipped receipt: `expires_at = unixepoch()`
+      // fails the suppression test's `expires_at > unixepoch()` immediately,
+      // so one row is written, it never suppresses anything, and the ordinary
+      // retention sweep collects it. Nothing else about the ingest path has to
+      // learn what a probe is.
+      //
+      // `isTest` already gates the wake below for the same underlying reason:
+      // the foreground setup screen is the only thing allowed to consume a
+      // probe.
       const insertedTargets = await queueStructuredRow(
         env,
         device,
         rowWithReceipt,
         replayKey,
-        REPLAY_WINDOW_SECONDS,
+        isTest ? 0 : REPLAY_WINDOW_SECONDS,
       );
       if (insertedTargets.length === 0 && (await queueIsFull(env, device.id))) {
         return json({ error: 'queue_full' }, 429);

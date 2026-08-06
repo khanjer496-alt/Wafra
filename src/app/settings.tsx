@@ -35,6 +35,7 @@ import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormatCount } from '@/lib/accuracy';
+import { getChargeAlertPreference, setChargeAlertsEnabled } from '@/lib/background-relay';
 import {
   cancelDailySummary,
   requestNotificationPermission,
@@ -271,6 +272,40 @@ export default function SettingsScreen() {
     // closure: the dispatch above has not re-rendered yet, and syncDailySummary
     // returns early on a false flag.
     await syncDailySummary({ ...state, dailySummary: true });
+  };
+
+  /**
+   * Defaults ON, unlike Android's per-charge banner, and the asymmetry is
+   * deliberate: Android's is a heads-up over whatever is on screen, while this
+   * one is posted passively on a device that iOS setup only asked provisional
+   * authorization for — it lands quietly in Notification Center. Only an
+   * explicit stored `false` turns it off, so a user who never opens this screen
+   * still gets the alerts the relay was set up to deliver.
+   */
+  const [chargeAlerts, setChargeAlerts] = useState(true);
+  useEffect(() => {
+    let current = true;
+    void getChargeAlertPreference()
+      .then((p) => {
+        if (current) setChargeAlerts(p.enabled);
+      })
+      .catch(() => {
+        // The stored preference is unreadable; the switch stays at its default
+        // rather than claiming the feature is off.
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+  const toggleChargeAlerts = async (enabled: boolean) => {
+    setChargeAlerts(enabled);
+    try {
+      await setChargeAlertsEnabled(enabled);
+    } catch {
+      // Put the switch back where it was rather than showing a state the
+      // device did not actually store.
+      setChargeAlerts(!enabled);
+    }
   };
 
   const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
@@ -703,6 +738,18 @@ export default function SettingsScreen() {
               state.dailySummary,
               (next) => void toggleDailySummary(next),
             )}
+            {/* iOS's answer to Android's "Alert every charge". Separate row
+                rather than a shared one because the two are not the same
+                promise: Android's fires from the SMS broadcast the instant the
+                message lands, while this one fires when the relay wake
+                delivers, which can be a moment later or a batch at once. */}
+            {isRelayPlatform() &&
+              switchRow(
+                t('chargeAlertsSetting'),
+                chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
+                chargeAlerts,
+                (next) => void toggleChargeAlerts(next),
+              )}
             {/* iPhone capture is a privacy setting as much as a feature: the
                 relay is the ONE path in the whole app where anything derived
                 from a message leaves the phone. It belongs in this section,
