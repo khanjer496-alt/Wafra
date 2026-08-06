@@ -58,6 +58,20 @@ jobs:
       - name: Prebuild iOS project
         run: npx expo prebuild --platform ios --no-install
 
+      # `--no-install` above skips npm AND CocoaPods, and the xcodebuild step
+      # below opens a WORKSPACE — which is a thing CocoaPods creates. Prebuild
+      # on its own leaves only ios/Wafra.xcodeproj, so the build died with
+      # "'ios/Wafra.xcworkspace' does not exist" and this job had never once
+      # produced a screenshot.
+      #
+      # The flag stays: npm ci has already run, and letting prebuild redo it
+      # would install from package.json rather than the lockfile. Pods are
+      # asked for separately instead. This is also the step that would surface
+      # a native dependency that cannot resolve for iOS at all, which is worth
+      # having as its own line in the log rather than buried in a build.
+      - name: Install CocoaPods dependencies
+        run: npx pod-install
+
       - name: Boot the simulator
         id: sim
         run: |
