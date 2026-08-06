@@ -225,9 +225,11 @@ The green run is the answer. Specifically, before it goes green the job has:
 - **checked the health endpoint** — `GET <url>/v1/health` answered `200` with
   `{"ok":true}`. It retries for 75 seconds, because a workers.dev DNS record
   registered minutes ago may still be propagating;
-- **checked the database** — read the remote table list and confirmed all eight
-  tables (`device_invites`, `devices`, `ingest_limits`, `ingest_receipts`,
-  `pair_limits`, `push_registrations`, `queue`, `vaults`) are there.
+- **checked the database** — read the remote table list and confirmed that every
+  table declared in `server/schema.sql` is there. Today that is eight:
+  `device_invites`, `devices`, `ingest_limits`, `ingest_receipts`,
+  `pair_limits`, `push_registrations`, `queue`, `vaults`. The list is read out
+  of the schema file at run time, so a table added later is checked too.
 
 What that still does **not** prove: that the Worker's *binding* to D1 resolves.
 `/v1/health` returns a constant and never touches the database, and the table

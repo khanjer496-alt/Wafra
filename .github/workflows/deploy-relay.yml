@@ -417,7 +417,12 @@ jobs:
               echo
               echo "Register one once, then re-run this workflow:"
               echo
-              echo "<https://dash.cloudflare.com/${CLOUDFLARE_ACCOUNT_ID}/workers/onboarding>"
+              echo "1. Open <https://dash.cloudflare.com> and pick your account."
+              echo "2. Tap **Compute (Workers)** in the left menu and choose a subdomain when asked."
+              echo
+              echo "(The direct page is \`/<your account id>/workers/onboarding\` under that host. The id is"
+              echo "not spelled out here because it is stored as a repository secret and would be masked."
+              echo "docs/deploy-from-github.md, step 1, has the same instructions.)"
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -726,10 +731,20 @@ jobs:
             }
             if (!parsed) { console.log("could not parse the table list"); process.exit(1); }
             const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap((r) => (r && r.results) || []);
+            // D1 keeps internal tables (_cf_KV and friends) in the same
+            // catalogue, so anything underscore-prefixed is expected noise.
             const names = rows.map((r) => r.name).filter((n) => !String(n).startsWith("_"));
-            const want = ["device_invites","devices","ingest_limits","ingest_receipts","pair_limits","push_registrations","queue","vaults"];
+            // Expected tables are read out of schema.sql rather than listed
+            // here, so adding a table to the schema does not quietly stop
+            // being checked.
+            const want = [
+              ...fs.readFileSync("schema.sql", "utf8")
+                .matchAll(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+"?([A-Za-z0-9_]+)"?/gi),
+            ].map((m) => m[1]);
             const missing = want.filter((t) => !names.includes(t));
-            console.log("tables: " + names.join(", "));
+            console.log("expected " + want.length + " tables from schema.sql");
+            console.log("found: " + names.join(", "));
+            if (!want.length) { console.log("could not read any table names out of schema.sql"); process.exit(1); }
             if (missing.length) { console.log("MISSING: " + missing.join(", ")); process.exit(1); }
           '
 
@@ -775,7 +790,7 @@ jobs:
               echo "| Schema | not touched this run |"
             fi
             case "$TABLES" in
-              success) echo "| Tables in D1 | all 8 present |" ;;
+              success) echo "| Tables in D1 | every table in \`schema.sql\` is present |" ;;
               failure) echo "| Tables in D1 | ⚠️ check the \"Check the schema really landed\" step |" ;;
               *)       echo "| Tables in D1 | not checked |" ;;
             esac
