@@ -1281,8 +1281,9 @@ const CARD_PAYMENT_DEBIT =
    * THE DEFECT THIS SECTION EXISTS FOR. Every multi-row import path computed
    * ONE `const receivedAt = new Date().toISOString()` for the whole batch and
    * stamped every row with it. Nothing server-side could see the consequence:
-   * this Worker's own suppression is keyed on the row's date, so it queued both
-   * rows, sealed both, and handed both to the phone. But src/lib/relay.ts turns
+   * this Worker's replay suppression is keyed on the row's INDEX within the
+   * upload, so it queued both rows, sealed both, and handed both to the phone
+   * exactly as it should have. But src/lib/relay.ts turns
    * `receivedAt` into `smsTs`, src/lib/import-plan.ts fingerprints a row as
    * `s{smsTs}-{amountFils}`, and src/lib/dedupe.ts drops a repeated fingerprint
    * inside one batch. Two rows of one statement that happened to share an
@@ -1406,16 +1407,79 @@ const CARD_PAYMENT_DEBIT =
     ok('statement: and the phone keeps both of those too',
       importOnPhone(mailed).batch.transactions.length === 2);
 
-    // A forwarded bank ALERT parses as one row and carries no statement date.
-    // That row still needs a receipt time, and it must be the relay's own —
-    // this is the fallback path, and it is what a Shortcut-shaped row uses.
+    // A forwarded bank ALERT parses as ONE row, and must keep the receipt clock
+    // rather than the transaction's date — including when it quotes one, which
+    // Gulf alerts routinely do. The same purchase commonly arrives twice, once
+    // by forwarded email and once through the Shortcut, and dedupe.ts collapses
+    // those only when the two stamps are within SAME_EVENT_MS of each other.
+    // Stamping this row midday-on-its-own-date would put the copies hours apart
+    // and file the charge twice.
     const alert = await call(env, 'POST', '/v1/email/ingest', {
       token: email.emailToken, body: { text: AE_PURCHASE },
     });
     const alertRow = (await drainOpened(env, me)).at(-1);
-    ok('statement: a dateless forwarded alert still gets a receipt time near now',
+    ok('statement: a dateless forwarded alert gets a receipt time near now',
       alert.status === 202 && Math.abs(Date.parse(alertRow.receivedAt) - Date.now()) < 120_000,
       alertRow.receivedAt);
+    const datedAlert = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken,
+      body: { text: 'Purchase of AED 40.00 with Debit Card ending 4733 at ARABICA, DUBAI ' +
+        'on 03/07/26 05:53. Avl Balance is AED 7,476.59.' },
+    });
+    const datedAlertRow = (await drainOpened(env, me)).at(-1);
+    ok('statement: an alert that quotes its own date STILL gets the receipt clock',
+      datedAlert.status === 202 && datedAlertRow.date === '2026-07-03' &&
+        Math.abs(Date.parse(datedAlertRow.receivedAt) - Date.now()) < 120_000,
+      JSON.stringify([datedAlertRow.date, datedAlertRow.receivedAt]));
+
+    // A charge and its refund: same day, same amount, same merchant, opposite
+    // direction. The server keeps both — parseStatementText's own key includes
+    // the direction — but dedupe.ts's `date|amount|title` key does NOT, so the
+    // second is dropped on the phone unless the two stamps are more than
+    // SAME_EVENT_MS apart. That is why colliding rows are separated by more
+    // than two minutes rather than by a millisecond.
+    const refund = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        '2026-05-11 AMAZON AE 100.00 DR',
+        '2026-05-11 AMAZON AE 100.00 CR',
+      ]),
+    });
+    const refundRows = await drainOpened(env, me);
+    ok('statement: a charge and its same-day refund both reach the device',
+      refund.status === 202 && refundRows.length === 2,
+      JSON.stringify(refundRows.map((row) => [row.type, row.merchant])));
+    const refundPlan = importOnPhone(refundRows);
+    ok('statement: and the phone files both, not just the charge',
+      refundPlan.batch.transactions.length === 2,
+      JSON.stringify(refundPlan.batch.transactions.map((t) => [t.type, t.title])));
+
+    // A row dated TODAY is ordinary, and its midday-UTC stamp is up to fifteen
+    // hours ahead of a phone importing at 00:30 in UTC+4. smsTs becomes
+    // newestTs becomes lastScanTs, and capture.ts starts the next inbox scan at
+    // lastScanTs + 1 — so an unclamped stamp skips every SMS that arrives
+    // before it, permanently, because a message is only ever offered once.
+    //
+    // Today AND tomorrow, deliberately: midday-today is ahead of now only
+    // before noon UTC and midday-tomorrow is within a day of now only after it,
+    // so one row alone would make this assertion hold for the wrong reason for
+    // half of every day. The two rows also collide once clamped, which is what
+    // proves the separation moves EARLIER — an upward bump would land the
+    // second one two minutes into the future and reopen the same hole.
+    const dayMs = 86_400_000;
+    const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
+    const soon = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        `${isoDay(Date.now())} LULU HYPERMARKET 31.50 DR`,
+        `${isoDay(Date.now() + dayMs)} LULU HYPERMARKET 31.50 DR`,
+      ]),
+    });
+    const soonRows = await drainOpened(env, me);
+    ok('statement: no row is ever stamped ahead of the relay\'s own clock',
+      soon.status === 202 && soonRows.length === 2 &&
+        soonRows.every((row) => Date.parse(row.receivedAt) <= Date.now()),
+      JSON.stringify(soonRows.map((row) => [row.date, row.receivedAt])));
+    ok('statement: and those two are still distinct rows on the phone',
+      importOnPhone(soonRows).batch.transactions.length === 2);
 
     // The whole point of a statement import is history, so a row dated last
     // year must keep last year's clock. A row dated in the FUTURE must not:
@@ -1434,8 +1498,8 @@ const CARD_PAYMENT_DEBIT =
     const future = edgeRows.find((row) => row.merchant === 'IMPOSSIBLE MERCHANT');
     ok('statement: a years-old row keeps its own date as its clock',
       old.receivedAt.slice(0, 10) === '2019-05-06', old.receivedAt);
-    ok('statement: a future-dated row falls back to now rather than poisoning lastScanTs',
-      Date.parse(future.receivedAt) <= Date.now() + 86_400_000, future.receivedAt);
+    ok('statement: a future-dated row is clamped to now rather than poisoning lastScanTs',
+      Date.parse(future.receivedAt) <= Date.now(), future.receivedAt);
   }
 
   /* ═════════════════ Routing, and the scheduled sweep ═════════════════ */

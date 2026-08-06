@@ -108,13 +108,50 @@ jobs:
       - name: Boot the simulator
         id: sim
         run: |
-          DEVICE="iPhone 16 Pro"
-          UDID=$(xcrun simctl create wafra-shots "$DEVICE" || true)
+          # 16 Pro MAX, not 16 Pro, and the difference is an App Store rejection.
+          #
+          # Apple's screenshot specification (App Store Connect help →
+          # "Screenshot specifications", re-verified 2026-08-06) makes the 6.9"
+          # display the one a submission needs: it accepts 1320x2868, 1290x2796
+          # or 1260x2736 there, and 6.5" is only required if no 6.9" set is
+          # provided. Everything smaller is optional and gets scaled down
+          # automatically. The 16 Pro is a 6.3" panel, so this job could not
+          # natively produce a submittable image no matter how well the tour ran
+          # — while the 16 Pro Max is 1320x2868, the exact accepted size.
+          #
+          # That matters more than it sounds: the only store assets in this repo
+          # today are react-native-web approximations from scripts/e2e/capture.mjs,
+          # made on a box with no Mac. This job is the path to real ones.
+          #
+          # CHANGING THIS NAME CHANGES THE PIXEL SIZE OF EVERY ARTIFACT. If a
+          # future runner image drops this device and the fallback below picks
+          # something else, the capture step prints the device it actually used
+          # so a wrong size is visible in the log instead of at review time.
+          set -uo pipefail
+          DEVICE="iPhone 16 Pro Max"
+          UDID=$(xcrun simctl create wafra-shots "$DEVICE" 2>/dev/null || true)
           if [ -z "$UDID" ]; then
             UDID=$(xcrun simctl list devices available -j \
               | jq -r --arg d "$DEVICE" '.devices[][] | select(.name==$d) | .udid' | head -1)
           fi
+          # Last resort: any available iPhone, so the job still produces images
+          # rather than dying on `simctl boot ""`. It says so in as many words,
+          # because those images will NOT be a submittable size.
+          if [ -z "$UDID" ]; then
+            UDID=$(xcrun simctl list devices available -j \
+              | jq -r '.devices[][] | select(.name|startswith("iPhone")) | .udid' | head -1)
+            echo "::warning::'$DEVICE' is not on this runner. Falling back to another iPhone — the screenshots will not be the 6.9\" App Store size (1320x2868)."
+          fi
+          if [ -z "$UDID" ]; then
+            echo "::error::no iOS simulator available on this runner"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          NAME=$(xcrun simctl list devices -j \
+            | jq -r --arg u "$UDID" '.devices[][] | select(.udid==$u) | .name' | head -1)
+          echo "booting $NAME ($UDID)"
           echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "device=$NAME" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
 
@@ -152,19 +189,116 @@ jobs:
           curl -Ls https://get.maestro.mobile.dev | bash
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
 
+      # THE STEP THAT MAKES THE TOUR PASS AT ALL.
+      #
+      # This is a Debug build: it holds no JS, it fetches it from Metro at
+      # launch. `/status` answering above only means the server is up — it has
+      # not transformed a single module at that point. The first launch is what
+      # triggers a cold bundle of expo-router + reanimated + svg + sqlite, and
+      # on a macOS runner that is minutes, not seconds.
+      #
+      # The first run that ever reached Maestro died exactly here without
+      # knowing it: `tour (37s) … Assertion is false`, where 7s of the 37 is
+      # Maestro's default assertion timeout and the rest is `launchApp
+      # clearState`. The app was on the splash screen with the bundle still
+      # compiling. Doing the bundle here instead moves that wait out of the
+      # test, where it is a legible timed step rather than a failed assertion,
+      # and it happens exactly once for both the dark and the light pass.
+      #
+      # `.expo/.virtual-metro-entry` is the bundle root Expo SDK 55 asks for
+      # (node_modules/expo/.../rewriteRequestUrl.js). Best-effort: if the path
+      # ever changes upstream this warns and the tour's own 240s first wait
+      # still covers it, rather than failing a job that would otherwise work.
+      - name: Warm the Metro bundle
+        run: |
+          set -uo pipefail
+          URL='http://127.0.0.1:8081/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true&minify=false&runModule=true'
+          START=$(date +%s)
+          if curl -sSf --max-time 900 -o /tmp/warm.bundle "$URL"; then
+            echo "bundled in $(( $(date +%s) - START ))s, $(wc -c < /tmp/warm.bundle) bytes"
+          else
+            echo "::warning::Metro warm-up failed after $(( $(date +%s) - START ))s; the tour's own 240s first wait now has to cover the cold bundle."
+            tail -60 /tmp/metro.log || true
+          fi
+
+      # NO `set -e` IN THIS STEP, AND THAT IS THE POINT.
+      #
+      # GitHub runs `run:` blocks under `bash -e`, so when the dark pass failed
+      # the shell aborted mid-loop and the light pass never ran — one missed
+      # assertion cost both captures. A light-mode set is worth having when
+      # dark went wrong, and vice versa, so each pass is allowed to fail on its
+      # own and the gate is applied afterwards, once, over the images that
+      # actually landed.
       - name: Capture dark and light
         run: |
+          set -uo pipefail
+          UDID='${{ steps.sim.outputs.udid }}'
           mkdir -p shots
+          echo "device: ${{ steps.sim.outputs.device }}"
+
+          FAILED=""
           for scheme in dark light; do
-            xcrun simctl ui "${{ steps.sim.outputs.udid }}" appearance "$scheme"
+            echo "::group::$scheme"
+            xcrun simctl ui "$UDID" appearance "$scheme" || true
             maestro test \
               -e APP_ID=app.wafra.ios \
               -e SHOT_PREFIX="ios-$scheme" \
               --format junit --output "shots/ios-$scheme.xml" \
-              .maestro/tour.yaml
+              --test-output-dir "shots/maestro-ios-$scheme" \
+              .maestro/tour.yaml || FAILED="$FAILED $scheme"
+            # Whatever the app was showing when the pass ended, straight from
+            # the simulator. Costs nothing and it is the one image that exists
+            # even if Maestro never managed to drive anything.
+            xcrun simctl io "$UDID" screenshot "shots/ios-$scheme-99-final-screen.png" || true
+            echo "::endgroup::"
           done
-          # Maestro writes screenshots to the working directory.
-          mv ./*.png shots/ 2>/dev/null || true
+
+          # Maestro does NOT write takeScreenshot output to the working
+          # directory. It lands in <test-output-dir>/<session>/<flow>/takeScreenshot/,
+          # so the `mv ./*.png shots/` that used to be here was moving nothing
+          # and this job would have uploaded zero images even on a fully
+          # passing tour. Copy them flat alongside the JUnit XML; the nested
+          # tree is uploaded too, because it carries commands.json, the device
+          # log, and the screen-hierarchy JSON that says why a selector missed.
+          #
+          # All three locations are searched rather than betting on one.
+          # `--test-output-dir` is the documented home and is what the flag
+          # above asks for, but Maestro is installed from an unpinned
+          # `get.maestro.mobile.dev` script, so the version this job runs is
+          # whatever shipped that morning: an older build ignores the flag and
+          # writes under ~/.maestro/tests, and an older one still wrote to the
+          # working directory. Looking everywhere costs nothing and means a
+          # Maestro upgrade cannot quietly turn this job into an empty artifact.
+          #
+          # -type f rather than -name '*.png': Maestro appends the extension
+          # itself when takeScreenshot is given a bare name, and this must not
+          # start silently counting zero if that ever changes.
+          find shots -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; || true
+          find "$HOME/.maestro/tests" -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; 2>/dev/null || true
+          find . -maxdepth 1 -type f -name 'ios-*' -exec cp -f {} shots/ \; 2>/dev/null || true
+
+          EXPECTED=14   # 7 surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
+          COUNT=$(find shots -maxdepth 1 -type f -name 'ios-*-0*' | wc -l | tr -d ' ')
+          echo "collected $COUNT/$EXPECTED tour screenshots (failed passes:${FAILED:- none})"
+          find shots -maxdepth 1 -type f ! -name '*.xml' -exec basename {} \; | sort
+
+          # The tour's assertions are all `optional: true` so that one missed
+          # step can never destroy a whole capture. This is where that trade is
+          # paid back: the gate on "did the tour work" is the images, counted
+          # here, not any individual assertion. Failing at this point still
+          # uploads — the artifact step below is `if: always()` — so a red job
+          # hands over everything it managed to get plus the logs saying why.
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::the tour produced no screenshots at all. Start with shots/ios-*-99-final-screen.png and shots/maestro-ios-*/**/screen-hierarchy/."
+            exit 1
+          fi
+          if [ "$COUNT" -lt "$EXPECTED" ]; then
+            echo "::error::only $COUNT of $EXPECTED screenshots were captured. The missing surfaces failed a step; see shots/maestro-ios-*/**/commands.json for which one and why."
+            exit 1
+          fi
+          if [ -n "$FAILED" ]; then
+            echo "::warning::every screenshot landed, but Maestro reported a failure on:$FAILED"
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -237,6 +371,24 @@ jobs:
           done
           curl -sf http://127.0.0.1:8081/status || { cat /tmp/metro.log; exit 1; }
 
+      # Same reasoning as the iOS job's warm-up step — the debug APK holds no
+      # JS and pulls it from Metro on first launch, and a cold bundle of this
+      # dependency graph takes far longer than Maestro's 7-second default
+      # assertion timeout. Doing it here means the emulator's first launch hits
+      # a warm server. Best-effort; the tour's own 240s first wait is the
+      # backstop.
+      - name: Warm the Metro bundle
+        run: |
+          set -uo pipefail
+          URL='http://127.0.0.1:8081/.expo/.virtual-metro-entry.bundle?platform=android&dev=true&minify=false&runModule=true'
+          START=$(date +%s)
+          if curl -sSf --max-time 900 -o /tmp/warm.bundle "$URL"; then
+            echo "bundled in $(( $(date +%s) - START ))s, $(wc -c < /tmp/warm.bundle) bytes"
+          else
+            echo "::warning::Metro warm-up failed; the tour's own 240s first wait now has to cover the cold bundle."
+            tail -60 /tmp/metro.log || true
+          fi
+
       - name: Boot the emulator and capture
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -245,19 +397,54 @@ jobs:
           arch: x86_64
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          # Deliberately no `set -e`: one failed appearance must not cost the
+          # other one, and the gate is the screenshot count at the end. See the
+          # long note on the iOS capture step.
           script: |
+            set -uo pipefail
             adb install -r android/app/build/outputs/apk/debug/app-debug.apk
             adb reverse tcp:8081 tcp:8081
             mkdir -p shots
+            FAILED=""
             for scheme in dark light; do
-              [ "$scheme" = dark ] && adb shell "cmd uimode night yes" || adb shell "cmd uimode night no"
+              echo "::group::$scheme"
+              if [ "$scheme" = dark ]; then adb shell "cmd uimode night yes"; else adb shell "cmd uimode night no"; fi
               maestro test \
                 -e APP_ID=app.wafra.android \
                 -e SHOT_PREFIX="android-$scheme" \
                 --format junit --output "shots/android-$scheme.xml" \
-                .maestro/tour.yaml
+                --test-output-dir "shots/maestro-android-$scheme" \
+                .maestro/tour.yaml || FAILED="$FAILED $scheme"
+              adb exec-out screencap -p > "shots/android-$scheme-99-final-screen.png" || true
+              echo "::endgroup::"
             done
-            mv ./*.png shots/ 2>/dev/null || true
+
+            # `mv ./*.png shots/` used to live here and moved nothing: Maestro
+            # writes takeScreenshot output into
+            # <test-output-dir>/<session>/<flow>/takeScreenshot/, never the
+            # working directory. This job would have uploaded no images even on
+            # a fully passing tour. All three locations are searched because
+            # Maestro is installed unpinned — see the iOS job for the full note.
+            find shots -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; || true
+            find "$HOME/.maestro/tests" -path '*takeScreenshot*' -type f -exec cp -f {} shots/ \; 2>/dev/null || true
+            find . -maxdepth 1 -type f -name 'android-*' -exec cp -f {} shots/ \; 2>/dev/null || true
+
+            EXPECTED=14   # 7 surfaces x 2 appearances; keep in sync with .maestro/tour.yaml
+            COUNT=$(find shots -maxdepth 1 -type f -name 'android-*-0*' | wc -l | tr -d ' ')
+            echo "collected $COUNT/$EXPECTED tour screenshots (failed passes:${FAILED:- none})"
+            find shots -maxdepth 1 -type f ! -name '*.xml' -exec basename {} \; | sort
+
+            if [ "$COUNT" -eq 0 ]; then
+              echo "::error::the tour produced no screenshots at all. Start with shots/android-*-99-final-screen.png and shots/maestro-android-*/**/screen-hierarchy/."
+              exit 1
+            fi
+            if [ "$COUNT" -lt "$EXPECTED" ]; then
+              echo "::error::only $COUNT of $EXPECTED screenshots were captured. See shots/maestro-android-*/**/commands.json for which step failed and why."
+              exit 1
+            fi
+            if [ -n "$FAILED" ]; then
+              echo "::warning::every screenshot landed, but Maestro reported a failure on:$FAILED"
+            fi
 
       - uses: actions/upload-artifact@v4
         if: always()

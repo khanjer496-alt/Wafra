@@ -339,54 +339,88 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
  *     03 Jan  SALIK    4.00
  *     17 Jan  PARKING  4.00
  *
- * queued two rows here — this Worker's own suppression is keyed on the row's
- * date, so it kept both — sealed both, and delivered both, and the phone
- * dropped the second as a duplicate of the first. Different day, different
- * merchant, one transaction silently gone. The client then acknowledged EVERY
- * id it was sent and this Worker wrote a 72-hour replay receipt, so uploading
- * the same PDF again recovered nothing. What the user saw was
- * "accepted 47 / imported 31", with no explanation available on either side.
+ * queued two rows here — this Worker's own replay suppression is keyed on the
+ * row's INDEX within the upload (`${baseKey}:${index}`), so it kept both —
+ * sealed both, and delivered both, and the phone dropped the second as a
+ * duplicate of the first. Different day, different merchant, one transaction
+ * silently gone. The client then acknowledged EVERY id it was sent and this
+ * Worker wrote a 72-hour replay receipt, so uploading the same PDF again
+ * recovered nothing. What the user saw was "accepted 47 / imported 31", with no
+ * explanation available on either side.
  *
  * A statement row carries its own date, and that is a better clock than this
  * relay's receipt time in any case: it puts the row's event time on the day the
  * money actually moved, which is also the order src/lib/relay.ts sorts a synced
- * page into before handing it to buildImportPlan. Rows with no date — a bank
- * ALERT forwarded by email parses as a single row and has no statement date —
- * fall back to a monotonic offset from now, which is enough to keep them
- * distinct from each other.
+ * page into before handing it to buildImportPlan. It is also DETERMINISTIC,
+ * which the old `now()` stamps were not — re-importing the same statement now
+ * reproduces the same `smsKey` and is idempotent on the phone.
+ *
+ * THIS IS FOR STATEMENT ROWS ONLY. A forwarded bank ALERT also reaches
+ * queueEmailRows, parses to a single row, and usually DOES carry a date
+ * (extractDate reads "03/07/26 05:53" out of a Gulf alert) — but it must keep
+ * the receipt clock, not the transaction date. The same purchase commonly
+ * arrives twice, once by forwarded email and once through the Shortcut, and
+ * dedupe.ts collapses those two copies only when their timestamps are within
+ * SAME_EVENT_MS. Midday-of-the-transaction-date would put them hours apart and
+ * file the purchase twice. A single row cannot collide with anything anyway, so
+ * it gains nothing here — see the call site in queueEmailRows.
  *
  * Three details that are load-bearing:
  *
- * 1. Uniqueness is enforced, not assumed. A statement legitimately lists two
- *    different merchants for the same amount on the same day, and those collide
- *    on the date alone — which is the very bug this function exists to fix, one
- *    level down. Colliding rows are bumped a millisecond apart, which keeps
- *    them distinct AND in statement order, and stays far inside the 120s window
- *    dedupe.ts uses to recognise two captures of one event.
+ * 1. Uniqueness is enforced, not assumed, and the SIZE of the separation
+ *    matters. A statement legitimately lists two merchants for the same amount
+ *    on the same day, and those collide on the date alone — the same bug one
+ *    level down. What a bump has to defeat is not one test but two: the exact
+ *    `smsKey` equality in import-plan.ts (any separation at all does that), and
+ *    dedupe.ts's `date|amount|title` test, which drops the later row unless the
+ *    two timestamps are more than SAME_EVENT_MS = 120s apart. Rows differing
+ *    only in direction — `03 Jan AMAZON 100.00 DR` and the matching `CR`
+ *    refund — share a `date|amount|title` key, because dedupe.ts's key has no
+ *    direction in it. So the bump clears 120s rather than a millisecond, which
+ *    keeps a refund and its charge as two rows. It moves EARLIER rather than
+ *    later so that note 3's ceiling can never be crossed by the separation
+ *    itself; the only thing that costs is the relative order of rows already
+ *    identical in date and amount, which nothing reads. A 200-row worst case
+ *    drifts under seven hours, still inside the same UTC day.
  *
  * 2. Midday UTC, not midnight. Only `smsTs` comes from this value — the ledger
  *    date is taken from the row's own `date` field in import-plan.ts — but
  *    midnight UTC lands on the previous calendar day for any device west of
  *    Greenwich, and there is no reason to leave that edge lying around.
  *
- * 3. A date in the FUTURE is refused and falls back to now, for the same reason
+ * 3. A date at or after NOW is clamped to now, for the same reason
  *    resolveReceivedAt bounds the Shortcut's clock: `smsTs` feeds the callers'
- *    `newestTs`, which becomes `lastScanTs`, which is the watermark the next
- *    SMS inbox scan starts from. One row dated 2099 would park that watermark
- *    in the future and stop local capture for good. Old dates need no such
- *    bound — every caller takes `Math.max(..., state.lastScanTs)`, and a
- *    statement import is historical by definition.
+ *    `newestTs`, which becomes `lastScanTs`, and capture.ts starts the next SMS
+ *    inbox scan at `lastScanTs + 1`. A message is only ever offered once, so
+ *    every SMS arriving before that watermark is skipped for good. This is not
+ *    an exotic case: at UTC+4, any statement row dated TODAY is stamped midday
+ *    UTC, which is up to fifteen hours ahead of a phone importing at 00:30
+ *    local. Old dates need no such bound — every caller takes
+ *    `Math.max(..., state.lastScanTs)`, and a statement import is historical by
+ *    definition. Taken together with note 1's direction, the invariant this
+ *    function guarantees is simply: no row is ever stamped ahead of the relay's
+ *    own clock.
+ *
+ * A row with no usable date falls back to a monotonic offset from now. Nothing
+ * reaches that branch today — parseStatementText refuses a row whose date it
+ * cannot read, and the one dateless case, a forwarded alert, does not come
+ * through here — so it is a floor rather than a path: enough to keep such rows
+ * distinct from each other, and never ahead of this relay's own clock.
  *
  * The wire format is unchanged: still one ISO-8601 string per row, in the
  * `receivedAt` field src/lib/relay.ts already reads and validates.
  */
+/** Must exceed SAME_EVENT_MS in src/lib/dedupe.ts; see note 1 above. */
+const ROW_RECEIPT_SEPARATION_MS = 121_000;
+
 function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
   const used = new Set<number>();
   return rows.map((row, index) => {
     const dated = typeof row.date === 'string' ? Date.parse(`${row.date}T12:00:00.000Z`) : NaN;
-    let ms =
-      Number.isFinite(dated) && dated <= nowMs + 86_400_000 ? dated : nowMs + index;
-    while (used.has(ms)) ms += 1;
+    // Clamped, not refused: a row dated today is ordinary and must keep its
+    // place in the batch, it just may not carry a clock ahead of this relay's.
+    let ms = Number.isFinite(dated) ? Math.min(dated, nowMs) : nowMs - index;
+    while (used.has(ms)) ms -= ROW_RECEIPT_SEPARATION_MS;
     used.add(ms);
     return new Date(ms).toISOString();
   });
@@ -461,7 +495,15 @@ async function queueEmailRows(
   // Per ROW, not per batch — see rowReceiptTimes. One shared stamp here gave
   // every row of a forwarded statement the same import-plan fingerprint and the
   // phone kept exactly one of them.
-  const receivedAt = rowReceiptTimes(parsedRows, Date.now());
+  //
+  // A forwarded ALERT is the exception and keeps the receipt clock. It is one
+  // row, so it has nothing to collide with, and it usually carries the
+  // transaction's own date — which would move it hours away from the copy of
+  // the SAME purchase that arrived through the Shortcut, past the window
+  // dedupe.ts uses to recognise them as one event, and file the charge twice.
+  const receivedAt = alert
+    ? [new Date().toISOString()]
+    : rowReceiptTimes(parsedRows, Date.now());
   const wake = new Set<string>();
   for (let index = 0; index < parsedRows.length; index++) {
     const inserted = await queueStructuredRow(
@@ -1341,9 +1383,15 @@ export default {
       const bytes = parsedEmail.pdfAttachments[attachmentIndex];
       if (bytes.byteLength > MAX_PDF_BYTES) continue;
       // BEFORE the extract. pdf.js detaches the buffer it is handed, so a
-      // digest taken afterwards is the digest of nothing — see the identical
-      // note on /v1/import/pdf. Here it would have made every forwarded
-      // statement attachment share one replay key.
+      // digest taken afterwards is the digest of nothing — see the note on
+      // /v1/import/pdf, where that was an outage.
+      //
+      // It was NOT one here, and the reason is worth keeping: this key is
+      // `mime-pdf:${messageId}:${attachmentIndex}:${digest}`, and the message
+      // id — a fresh UUID when the header is missing — already separated one
+      // forward from the next whatever the digest said. What the fix buys is
+      // the digest actually carrying information when a mail server redelivers
+      // the same Message-ID with different bytes.
       //
       // The cast is for the DOM-lib compile in scripts/test/run.sh, where
       // BufferSource refuses `Uint8Array<ArrayBufferLike>`. Same bytes.

@@ -11,58 +11,173 @@
 #   maestro test -e APP_ID=app.wafra.android  .maestro/tour.yaml
 #
 # Screenshots are prefixed with SHOT_PREFIX so a light and a dark pass can write
-# into the same directory without overwriting each other.
+# into the same directory without overwriting each other, and numbered so the
+# artifact listing reads in tour order.
+#
+#
+# THE POINT OF THIS FLOW IS THE PNGs, NOT THE ASSERTIONS.
+#
+# The first CI run that ever got as far as Maestro produced ZERO images: the
+# very first `assertVisible` missed and Maestro's fail-fast default threw the
+# whole flow away before `takeScreenshot` ran even once. A tour that captures
+# nine surfaces and warns about one is worth vastly more than a tour that
+# captures nothing and fails cleanly, so every step below that can miss is
+# marked `optional: true`. A missed step shows as ⚠️ in the Maestro output and
+# in commands.json; the run continues and the images still land.
+#
+# That trade only works because the CI step counts the PNGs afterwards. The
+# gate on "did the tour work" lives there — in .github/workflows/device-shots.yml
+# — deliberately, because "did we get the screenshots" is the actual question.
+#
+#
+# THREE THINGS ABOUT MAESTRO SELECTORS THAT THIS FILE GOT WRONG ONCE EACH.
+#
+#  1. A text selector is a FULL-match regex, not a substring search. `tapOn: Flow`
+#     matches the string "Flow" and nothing else; partial matching needs `.*`
+#     at both ends.
+#  2. It is case SENSITIVE, and half this app's section labels are
+#     `<ThemedText type="micro">`, which carries `textTransform: 'uppercase'`
+#     (src/components/themed-text.tsx). React Native applies textTransform
+#     before the string reaches the native view, so "Recent activity" is
+#     "RECENT ACTIVITY" to the accessibility tree — and to Maestro. Every
+#     selector for a caps label below is written `(?i)…` for that reason. Do
+#     not "tidy" those away.
+#  3. The default wait on an assertion is SEVEN SECONDS. That is the whole
+#     reason this flow starts with an `extendedWaitUntil` — see below.
 appId: ${APP_ID}
 ---
 - launchApp:
     clearState: true
 
-# First run: the onboarding gate. Shoot it — it is the first thing anyone sees.
-- assertVisible: 'Your bank already texts you.*'
-- takeScreenshot: ${SHOT_PREFIX}-onboarding
+# Nothing in the app asks for a permission at launch, but an OS alert sitting
+# over the window would make every selector below miss for a reason no
+# screenshot explains. Full-match regex, so this can only ever hit a button
+# named exactly "Allow" or "OK" — the welcome screen's own buttons are
+# "Personalise Wafra" and "Start with sample data" and cannot collide.
+- tapOn:
+    text: '(?i)(allow|ok)'
+    optional: true
+    label: 'Dismiss a system alert if one is covering the app'
 
-# 'Read my inbox' only appears where SMS scanning exists; on iOS the primary is
-# 'Continue', which leads to the same choose step. Take whichever is present.
-- runFlow:
-    when:
-      visible: 'Continue'
-    commands:
-      - tapOn: 'Continue'
-
-- tapOn: 'Start with sample data'
+# THIS IS THE STEP THE FIRST GREEN-BUILD RUN DIED ON, AND WHY.
+#
+# The run reached ** BUILD SUCCEEDED **, installed, started Metro, installed
+# Maestro — and then reported `tour (37s) … Assertion is false`. Seven of those
+# thirty-seven seconds are Maestro's default assertion timeout; the rest is
+# `launchApp clearState`. So the app got about seven seconds to paint.
+#
+# This is a DEBUG build served by Metro. At the moment of launch Metro has
+# never bundled anything: the app requests
+# `/.expo/.virtual-metro-entry.bundle?platform=ios&dev=true` and a cold
+# transform of this dependency graph — expo-router, reanimated, svg, sqlite —
+# takes considerably longer than seven seconds on a macOS runner. The app was
+# still on the splash screen. Nothing was wrong with the app or with the string.
+#
+# The workflow now warms that bundle before Maestro starts, which should make
+# this wait return almost immediately. The long timeout stays anyway: it costs
+# nothing when the bundle is warm, and it is the difference between a slow
+# first launch and a lost run.
 - extendedWaitUntil:
-    visible: 'Recent activity'
-    timeout: 20000
+    visible: 'Start with sample data'
+    timeout: 240000
+    optional: true
+    label: 'Wait for first paint — a cold Metro bundle can take minutes'
 
-- takeScreenshot: ${SHOT_PREFIX}-home
+# Unconditional, and first. Whatever is on the screen at this moment is the
+# single most useful artifact this job can produce: if the tour is going to
+# fail, this image is what says whether it failed on a splash screen, a red
+# box, a permission sheet, or a surface nobody expected.
+- takeScreenshot: ${SHOT_PREFIX}-01-onboarding
+
+# The headline is platform-split in src/components/onboarding-gate.tsx:428 —
+# iOS renders `iosOnboardHeadline` ("…Wafra keeps up."), Android renders
+# `onboardHeadline` ("…Wafra reads it."). This regex full-matches both. It is
+# an assertion rather than a wait because by now the screen is already up; it
+# exists to put the reason in commands.json if the app ever opens somewhere
+# else instead.
+- assertVisible:
+    text: 'Your bank already texts you.*'
+    optional: true
+    label: 'Onboarding welcome headline'
+
+# `loadDemoData` dispatches a state with `onboarded: true` (src/lib/store.tsx),
+# so this one tap both seeds the ledger and dismisses the gate. The alternative
+# — "Personalise Wafra" — is a four-question path that ends at the iOS Shortcut
+# wizard, which is a different tour.
+- tapOn:
+    text: 'Start with sample data'
+    optional: true
+    retryTapIfNoChange: true
+
+# "RECENT ACTIVITY" on screen; see note 2 at the top of this file. Home also
+# only says it while the selected period is the current month
+# (src/app/(tabs)/index.tsx:754), which it is on a fresh launch.
+- extendedWaitUntil:
+    visible: '(?i)recent activity'
+    timeout: 60000
+    optional: true
+    label: 'Home has painted the seeded ledger'
+- takeScreenshot: ${SHOT_PREFIX}-02-home
 
 # Tabs are matched by their label rather than a testID: the tab bar sets
-# accessibilityRole="tab" but carries no testID, and the caps styling is a
-# textTransform, so the accessible text stays title case.
-- tapOn: 'Flow'
-- waitForAnimationToEnd
-- takeScreenshot: ${SHOT_PREFIX}-flow
+# accessibilityRole="tab" but carries no testID. The Pressable's
+# accessibilityLabel is t('tabFlow') etc. — title case, untransformed — so
+# these four are the one place casing is NOT in doubt.
+- tapOn:
+    text: 'Flow'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${SHOT_PREFIX}-03-flow
 
-- tapOn: 'Bills'
-- waitForAnimationToEnd
-- takeScreenshot: ${SHOT_PREFIX}-bills
+- tapOn:
+    text: 'Bills'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${SHOT_PREFIX}-04-bills
 
-- tapOn: 'Wallet'
-- waitForAnimationToEnd
-- takeScreenshot: ${SHOT_PREFIX}-wallet
+- tapOn:
+    text: 'Wallet'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${SHOT_PREFIX}-05-wallet
 
-# Pushed screens, reached the way a user reaches them.
-- tapOn: 'Home'
-- waitForAnimationToEnd
-- tapOn: 'All activity'
-- waitForAnimationToEnd
-- takeScreenshot: ${SHOT_PREFIX}-transactions
-- back
+- tapOn:
+    text: 'Home'
+    optional: true
+- waitForAnimationToEnd:
+    timeout: 5000
 
-# The add-entry sheet is the app's most-used modal; capture it open. The raised
-# button has no visible label, so it is reached by its accessibilityLabel —
-# t('tabAdd'), which is 'Add an entry' in English.
-- tapOn: 'Add an entry'
-- waitForAnimationToEnd
-- takeScreenshot: ${SHOT_PREFIX}-add-transaction
-- back
+# Pushed screens, reached the way a user reaches them. "ALL ACTIVITY" is the
+# SectionHeader action on Home (src/components/ui/period-pill.tsx) — caps again.
+- tapOn:
+    text: '(?i)all activity'
+    optional: true
+- extendedWaitUntil:
+    visible: '(?i)transactions'
+    timeout: 20000
+    optional: true
+- takeScreenshot: ${SHOT_PREFIX}-06-transactions
+
+# The add-entry sheet is the app's most-used modal; capture it open.
+#
+# It is NOT reached from the tab bar. The raised centre button that used to
+# open it was removed when the bar went to four durable destinations — see the
+# comment in src/components/tab-bar.tsx — so t('tabAdd') / "Add an entry" is no
+# longer rendered anywhere in the app and the old step here could never pass.
+# The only route left is the plus button in the Transactions header, whose
+# accessibilityLabel is t('addCashEntry').
+#
+# This is deliberately the LAST step: it opens a modal presented from the
+# bottom, and Maestro's `back` on iOS is a left-edge swipe, which does not
+# dismiss one. Ending here means the flow never has to.
+- tapOn:
+    text: 'Add cash entry'
+    optional: true
+- extendedWaitUntil:
+    visible: '(?i)new transaction'
+    timeout: 20000
+    optional: true
+- takeScreenshot: ${SHOT_PREFIX}-07-add-transaction
