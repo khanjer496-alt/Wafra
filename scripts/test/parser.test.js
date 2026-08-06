@@ -667,6 +667,33 @@ t('qlub is still a restaurant bill',
   'Purchase of AED 210.00 with Credit Card ending 3749 at Kokoro qlub, sharjah.',
   { category: 'dining' });
 
+// The bank's own channel code in front of the payee. Reported from an ADCB
+// card that sent NO SMS for either charge — the only record was an app
+// notification, and the descriptor there is verbatim what the transaction
+// detail screen shows. MERCHANT_RE has no colon in its class and must not gain
+// one ("Authorisation code:", "Amount:" are all in this corpus), so the match
+// failed outright and both charges arrived titled "Card purchase" — a title no
+// bill reminder can ever reconcile against.
+t('a bank channel code in front of the payee is not the payee',
+  'Your ADCB Credit Card XXX2518 has been used for AED 450.45 at MB BILL DR:ETISALAT TELEP DUBAI on 04/08/2026.',
+  { merchant: 'Etisalat Telep', amountFils: 45045, category: 'telecom', type: 'expense' });
+
+t('...and the same shape on the other Etisalat line',
+  'Your ADCB Credit Card XXX2518 has been used for AED 313.95 at MB BILL DR:ETISALAT GSM DUBAI on 04/08/2026.',
+  { merchant: 'Etisalat Gsm', amountFils: 31395, category: 'telecom' });
+
+// The emirate is peeled by cleanDescriptor like any other descriptor tail, so
+// a one-word payee survives the whole path.
+t('a channel-code bill keeps a short payee whole',
+  'Your ADCB Credit Card XXX2518 has been used for AED 620.00 at MB BILL DR:DEWA DUBAI on 04/08/2026.',
+  { merchant: 'DEWA', amountFils: 62000, category: 'utilities' });
+
+// A colon that ends a LABEL is still not a merchant. This is the reason the
+// rule is anchored on the channel shape rather than on the colon.
+t('a labelled figure is not read as a channel bill',
+  'Purchase of AED 88.00 with Debit Card ending 1354 at SPINNEYS, DUBAI. Authorisation code: 123456',
+  { merchant: 'Spinneys', amountFils: 8800 });
+
 t('supermarket truncation SUPE categorizes as groceries',
   'Purchase of AED 120.24 with Credit Card ending 4722 at ABDULLA AND NASIR SUPE, SHARJAH. Avl Cr. Limit is AED 14,808.82',
   { category: 'groceries' });

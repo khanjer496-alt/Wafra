@@ -55,13 +55,49 @@ function normalize(s: string): string {
 }
 
 /**
- * A bill counts as paid this month if an imported expense matches it:
- * same month, similar title (either contains the other), amount within ±15%.
- * Keeps reminders honest when the actual debit was auto-imported from SMS.
+ * Words that identify a KIND of bill rather than who it is owed to.
+ *
+ * A shared token is only evidence if it names the payee. Two bills called
+ * "Internet" and "Home internet" share a word and may be owed to entirely
+ * different companies; "Etisalat internet" and an "Etisalat Telep" charge
+ * share the one that matters.
  */
-function paidByTransaction(bill: Bill, transactions: Transaction[], key: string): boolean {
+const GENERIC_BILL_WORDS = new Set([
+  'bill', 'bills', 'payment', 'monthly', 'subscription', 'internet', 'mobile',
+  'phone', 'home', 'card', 'account', 'service', 'fee', 'fees', 'charge',
+  'charges', 'plan', 'postpaid', 'prepaid', 'renewal', 'auto', 'my', 'the',
+]);
+
+/** Tokens that could name a payee: 4+ characters and not a kind-word. */
+function payeeTokens(title: string): Set<string> {
+  return new Set(
+    normalize(title)
+      .split(' ')
+      .filter((w) => w.length >= 4 && !GENERIC_BILL_WORDS.has(w)),
+  );
+}
+
+/**
+ * Transactions that could be this bill's payment: same month, amount within
+ * ±15%, and a title that either CONTAINS the bill's (or is contained by it) or
+ * shares a token that names the payee.
+ *
+ * Containment alone was the whole rule, and it is exact where it applies —
+ * but it needs the two names to nest. A bill the user called "Etisalat
+ * internet" never reconciled against a charge the bank described as "MB BILL
+ * DR:ETISALAT TELEP DUBAI", because neither string contains the other. The
+ * bill sat overdue with the money already gone.
+ *
+ * The token rule is looser, so it does not decide anything on its own — see
+ * `billsForMonth`, which drops a token match the moment more than one bill
+ * claims the same transaction. Marking a bill paid that was not is the
+ * expensive direction of this error: the user stops looking at it.
+ */
+function candidatePayments(bill: Bill, transactions: Transaction[], key: string): Transaction[] {
   const billTitle = normalize(bill.title);
-  if (!billTitle) return false;
+  if (!billTitle) return [];
+  const billTokens = payeeTokens(bill.title);
+  const out: Transaction[] = [];
   for (const t of transactions) {
     if (!isSpending(t) || monthKey(t.date) !== key) continue;
     if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
@@ -69,9 +105,25 @@ function paidByTransaction(bill: Bill, transactions: Transaction[], key: string)
     // Every string contains "", so a title that normalizes to nothing (a row
     // titled "—" or "***") would otherwise mark any similar-sized bill paid.
     if (!txTitle) continue;
-    if (txTitle.includes(billTitle) || billTitle.includes(txTitle)) return true;
+    if (txTitle.includes(billTitle) || billTitle.includes(txTitle)) {
+      out.push(t);
+      continue;
+    }
+    for (const token of payeeTokens(t.title)) {
+      if (billTokens.has(token)) {
+        out.push(t);
+        break;
+      }
+    }
   }
-  return false;
+  return out;
+}
+
+/** True when the two titles nest, which needs no corroboration. */
+function nests(bill: Bill, t: Transaction): boolean {
+  const b = normalize(bill.title);
+  const x = normalize(t.title);
+  return Boolean(b) && Boolean(x) && (x.includes(b) || b.includes(x));
 }
 
 /** Status of each bill for the month containing `today`, sorted most urgent first. */
@@ -82,6 +134,25 @@ export function billsForMonth(
 ): BillWithStatus[] {
   const key = monthKey(today);
   const todayISO = toISODate(today);
+
+  /**
+   * How many bills a given transaction could be the payment for.
+   *
+   * A token match is circumstantial, and the case it goes wrong on is a
+   * household with two bills from the same company — an Etisalat internet
+   * line and an Etisalat mobile line both share "etisalat", and if their
+   * amounts are close enough to both clear the ±15% band, one charge would
+   * mark both paid. So a claim on a transaction that more than one bill wants
+   * is not evidence for either of them, and only the exact nesting rule
+   * survives that. Better an unreconciled bill the user marks by hand than a
+   * bill that says paid while the money is still owed.
+   */
+  const claims = new Map<string, number>();
+  for (const bill of bills) {
+    for (const t of candidatePayments(bill, transactions, key)) {
+      claims.set(t.id, (claims.get(t.id) ?? 0) + 1);
+    }
+  }
 
   const rows = bills.map((bill) => {
     // The paid flag is keyed to the MONEY month, so the date has to be found
@@ -97,7 +168,11 @@ export function billsForMonth(
         86400000,
     );
     const manuallyPaid = bill.paidMonths.includes(key);
-    const autoReconciled = !manuallyPaid && paidByTransaction(bill, transactions, key);
+    const autoReconciled =
+      !manuallyPaid &&
+      candidatePayments(bill, transactions, key).some(
+        (t) => nests(bill, t) || (claims.get(t.id) ?? 0) === 1,
+      );
     let status: BillStatus;
     if (manuallyPaid || autoReconciled) status = 'paid';
     else if (daysLeft < 0) status = 'overdue';

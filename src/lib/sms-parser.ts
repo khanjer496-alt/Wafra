@@ -1438,6 +1438,28 @@ const MERCHANT_RE = new RegExp(
 const GATEWAY_URL_MERCHANT_RE =
   /\b(?:at|to)\s+(?:https?:\/\/)?(?:www\.)?[A-Za-z0-9-]{2,}(?:\.[A-Za-z0-9-]{2,})+\s*\*\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s*$)/i;
 /**
+ * The bank's OWN CHANNEL CODE in front of the payee: "MB BILL DR:ETISALAT
+ * TELEP DUBAI" is a bill paid to Etisalat through Mobile Banking.
+ *
+ * MERCHANT_RE cannot read it, for the same reason it cannot read a gateway
+ * URL: its character class has no colon, and it must not gain one. A colon
+ * ends a label far more often than it continues a descriptor — "Authorisation
+ * code:", "Amount:", "Available balance:" are all in this corpus — and
+ * widening the class would let every one of those become a merchant name.
+ *
+ * So this reads the shape instead, and the shape is unmistakable: an all-caps
+ * channel word, then DR or CR for the direction, then a colon. No English
+ * sentence looks like that. Without it the match failed outright rather than
+ * ending early, and two real Etisalat bills — AED 450.45 and AED 313.95 —
+ * arrived titled "Card purchase", which is a title no bill reminder can ever
+ * reconcile against.
+ *
+ * This is also the ONLY record of those charges: the bank sent no SMS for
+ * either, only an app notification.
+ */
+const CHANNEL_BILL_MERCHANT_RE =
+  /\b(?:at|to)\s+(?:[A-Z]{2,4}\s+)?(?:BILL|TRF|TFR|PMT|PYMT|POS|ATM|PUR|PAY|UTIL)\s+(?:DR|CR)\s*:\s*([A-Za-z0-9][A-Za-z0-9 &'.\-]{1,40}?)(?=\s*[,;(]|\s+on\s|\s*$)/;
+/**
  * The Arabic merchant clause: "لدى كارفور", "في مطعم الطازج".
  *
  * Three things here are load-bearing.
@@ -3502,6 +3524,13 @@ export function parseSms(
     if (!merchant) {
       const gateway = raw.match(GATEWAY_URL_MERCHANT_RE);
       if (gateway) merchant = gateway[1].trim();
+    }
+    // The bank's own channel code in front of the payee: "MB BILL DR:ETISALAT
+    // TELEP DUBAI". Runs through cleanDescriptor like any other descriptor, so
+    // the trailing emirate is peeled the same way it is everywhere else.
+    if (!merchant) {
+      const channelBill = raw.match(CHANNEL_BILL_MERCHANT_RE);
+      if (channelBill) merchant = cleanDescriptor(channelBill[1].trim());
     }
     if (!merchant) {
       const paymentFor = raw.match(PAYMENT_FOR_RE);

@@ -60,6 +60,50 @@ eq('bill due-soon (5d)', bills.billsForMonth([mkBill(23)], [], today)[0].status,
 eq('bill upcoming', bills.billsForMonth([mkBill(30)], [], today)[0].status, 'upcoming');
 eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Date(2026, 5, 15))[0].daysLeft, 15);
 
+// ── a fixed bill reconciles against the charge that paid it ──
+//
+// The two Etisalat charges that started this: no SMS at all, only an ADCB app
+// notification, described as "MB BILL DR:ETISALAT TELEP DUBAI". Containment
+// was the whole matching rule, so a bill the user called "Etisalat internet"
+// never nested with that title and sat overdue with the money already gone.
+{
+  const day = new Date(2026, 7, 15);
+  const charge = (id, title, fils) => ({ id, type: 'expense', amountFils: fils,
+    category: 'telecom', accountId: 'a', title, date: '2026-08-04', source: 'sms' });
+  const bill = (id, title, fils) => ({ id, title, category: 'telecom',
+    amountFils: fils, dueDay: 10, paidMonths: [] });
+  const telep = charge('t1', 'Etisalat Telep', 45045);
+  const gsm = charge('t2', 'Etisalat Gsm', 31395);
+  const statusOf = (bs, txs, id) =>
+    bills.billsForMonth(bs, txs, day).find((r) => r.bill.id === id).status;
+
+  eq('bill: a payee token reconciles a bill whose name does not nest',
+    statusOf([bill('b1', 'Etisalat internet', 45000)], [telep, gsm], 'b1'), 'paid');
+  // Two bills from one company, each with its own charge, both settle.
+  const twoBills = [bill('b1', 'Etisalat internet', 45000), bill('b2', 'Etisalat mobile', 31000)];
+  eq('bill: two bills from one payee each take their own charge (a)',
+    statusOf(twoBills, [telep, gsm], 'b1'), 'paid');
+  eq('bill: two bills from one payee each take their own charge (b)',
+    statusOf(twoBills, [telep, gsm], 'b2'), 'paid');
+  // ...but when one charge could be either bill, it settles NEITHER. Marking a
+  // bill paid that was not is the expensive direction: the user stops looking.
+  const ambiguous = [bill('b1', 'Etisalat internet', 45000), bill('b2', 'Etisalat mobile', 44000)];
+  eq('bill: one charge two bills could both claim settles neither (a)',
+    statusOf(ambiguous, [telep], 'b1'), 'overdue');
+  eq('bill: one charge two bills could both claim settles neither (b)',
+    statusOf(ambiguous, [telep], 'b2'), 'overdue');
+  // A word naming the KIND of bill is not evidence of the payee.
+  eq('bill: a generic word is not a payee match',
+    statusOf([bill('b1', 'Internet', 45000)], [telep], 'b1'), 'overdue');
+  eq('bill: another telecom at a similar amount is not a match',
+    statusOf([bill('b1', 'du home internet', 45000)], [telep], 'b1'), 'overdue');
+  // The exact rule that already worked still works, and still needs no
+  // corroboration — a nesting title settles even when another bill also claims
+  // the charge.
+  eq('bill: an exactly nesting title still settles',
+    statusOf([bill('b1', 'Etisalat', 45000)], [telep], 'b1'), 'paid');
+}
+
 // A money month starting on a salary day spans two calendar months, so the
 // paid flag (keyed to the money month) and the countdown (calendar
 // arithmetic) were describing different months.
