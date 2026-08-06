@@ -1671,6 +1671,25 @@ const S = {
   inDaysPhrase: { en: 'in {days} days', ar: 'خلال {days} أيام' },
   daysLatePhrase: { en: '{days} day{s} late', ar: 'متأخر {days} يوم' },
   notificationChannelPayments: { en: 'Payment reminders', ar: 'تذكيرات الدفعات' },
+  notificationChannelSummary: { en: 'Daily summary', ar: 'الملخص اليومي' },
+  // "{amount} spent today · {count} transaction{s}" — the whole day in the
+  // title, because a lock screen may never show the body.
+  dailySummaryTitle: {
+    en: '{amount} spent today · {count} transaction{s}',
+    ar: 'صرفت {amount} اليوم · {count} عملية',
+  },
+  dailySummaryLine: { en: '{amount} — {merchant}', ar: '{amount} — {merchant}' },
+  dailySummaryMore: { en: '+{count} more', ar: '+{count} اخري' },
+  dailySummaryBudget: {
+    en: '{spent} of {limit} monthly limits ({percent}%)',
+    ar: '{spent} من {limit} من حدودك الشهرية ({percent}%)',
+  },
+  dailySummarySetting: { en: 'Daily spend summary', ar: 'ملخص الصرف اليومي' },
+  dailySummaryOn: {
+    en: 'Every evening at 9pm, if you spent anything',
+    ar: 'كل مساء الساعه ٩، اذا صرفت شيئا',
+  },
+  dailySummaryOff: { en: 'Off', ar: 'متوقف' },
   notificationBillDue: { en: '{name} due {when}', ar: '{name} مستحق {when}' },
   notificationBillBody: { en: '{amount} · mark it paid in Wafra once done.', ar: '{amount} · علّمه كمدفوع في وفرة بعد السداد.' },
   creditCard: { en: 'Credit card', ar: 'بطاقة ائتمانية' },

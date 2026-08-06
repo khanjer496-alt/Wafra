@@ -12,11 +12,17 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
+import { buildDailySummary } from '@/lib/daily-summary';
+import { toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import { buildPaymentReminders, MAX_REMINDERS } from '@/lib/reminders';
 import type { AppState } from '@/lib/types';
 
 const CHANNEL_ID = 'payment-reminders';
+/** A separate channel so muting the nightly digest never mutes a bill due. */
+const SUMMARY_CHANNEL_ID = 'daily-summary';
+/** One id, so re-scheduling replaces tonight's rather than stacking another. */
+const SUMMARY_ID = 'wafra-daily-summary';
 
 let handlerConfigured = false;
 
@@ -76,7 +82,7 @@ export async function requestSilentCapturePermission(): Promise<boolean> {
  * The plan — dates, titles, bodies, ordering and the cap — comes from
  * `buildPaymentReminders`. This loop only speaks to the OS.
  */
-export async function syncPaymentReminders(state: AppState): Promise<void> {
+export async function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
   if (Platform.OS === 'web') return;
   configureHandler();
   const perms = await Notifications.getPermissionsAsync();
@@ -94,7 +100,7 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
 
   await Notifications.cancelAllScheduledNotificationsAsync();
 
-  for (const n of buildPaymentReminders(state, new Date(), MAX_REMINDERS)) {
+  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS)) {
     await Notifications.scheduleNotificationAsync({
       content: { title: n.title, body: n.body },
       trigger: {
@@ -104,4 +110,67 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
       },
     });
   }
+
+  await syncDailySummary(state, now);
+}
+
+/** The hour the day's summary is posted. Late enough to be the whole day. */
+export const SUMMARY_HOUR = 21;
+
+/**
+ * Re-schedule tonight's spend summary from the ledger as it stands now.
+ *
+ * A repeating daily trigger cannot carry today's figures — a local
+ * notification's content is fixed when it is scheduled, and no OS recomputes
+ * it at fire time. So this schedules ONE dated notification for tonight and
+ * replaces it every time the ledger changes, which on Android is every scan.
+ * The consequence is worth stating plainly: the summary is accurate as of the
+ * last time the app ran an import, so a charge that arrives after the last
+ * scan of the day is in tomorrow's summary, not tonight's.
+ *
+ * Cancelled and rebuilt rather than updated, for the same reason
+ * `syncPaymentReminders` does it: there is no way to ask expo-notifications
+ * whether a given notification is still pending and still says the right
+ * thing, and two summaries for one evening is a worse failure than one that is
+ * a few minutes stale.
+ */
+export async function syncDailySummary(state: AppState, now: Date = new Date()): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (!state.dailySummary) return;
+  configureHandler();
+  const perms = await Notifications.getPermissionsAsync();
+  if (!perms.granted) return;
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(SUMMARY_CHANNEL_ID, {
+      name: t('notificationChannelSummary'),
+      importance: Notifications.AndroidImportance.LOW,
+    });
+  }
+
+  const at = new Date(now);
+  at.setHours(SUMMARY_HOUR, 0, 0, 0);
+  // Past nine already: there is nothing left to schedule for today, and
+  // scheduling tomorrow with today's figures would post yesterday's numbers
+  // under the word "today".
+  if (at.getTime() <= now.getTime()) return;
+
+  const summary = buildDailySummary(state, toISODate(now));
+  if (!summary) return;
+
+  await Notifications.scheduleNotificationAsync({
+    identifier: SUMMARY_ID,
+    content: { title: summary.title, body: summary.body },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: at,
+      channelId: Platform.OS === 'android' ? SUMMARY_CHANNEL_ID : undefined,
+    },
+  });
+}
+
+/** Drop tonight's summary — the toggle going off has to take effect now. */
+export async function cancelDailySummary(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await Notifications.cancelScheduledNotificationAsync(SUMMARY_ID).catch(() => {});
 }

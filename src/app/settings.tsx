@@ -35,7 +35,11 @@ import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormatCount } from '@/lib/accuracy';
-import { requestNotificationPermission } from '@/lib/notifications';
+import {
+  cancelDailySummary,
+  requestNotificationPermission,
+  syncDailySummary,
+} from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
@@ -64,6 +68,7 @@ export default function SettingsScreen() {
   const {
     state,
     setAppLock,
+    setDailySummary,
     setPrivateMode,
     setPro,
     setMarket,
@@ -236,6 +241,29 @@ export default function SettingsScreen() {
     } catch {
       // Nothing to recover: the toggle stays where it was.
     }
+  };
+
+  /**
+   * Turning it on needs notification permission — and asking for it here, at
+   * the moment the user says yes to a notification, is the only place the ask
+   * makes sense. Launch never prompts.
+   */
+  const toggleDailySummary = async (enabled: boolean) => {
+    if (!enabled) {
+      setDailySummary(false);
+      await cancelDailySummary();
+      return;
+    }
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      Alert.alert(t('notificationsOff'), t('notificationsOffBody'));
+      return;
+    }
+    setDailySummary(true);
+    // Schedule from the state we are about to have, not the one in this
+    // closure: the dispatch above has not re-rendered yet, and syncDailySummary
+    // returns early on a false flag.
+    await syncDailySummary({ ...state, dailySummary: true });
   };
 
   const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
@@ -600,6 +628,16 @@ export default function SettingsScreen() {
                   void toggleInstantAlerts(next);
                 },
               )}
+            {/* The nightly digest. Separate from the per-charge banner on
+                purpose: one is an interruption at the moment money moves, the
+                other is a summary you read when the day is over, and a user
+                who wants the second rarely wants the first. */}
+            {switchRow(
+              t('dailySummarySetting'),
+              state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
+              state.dailySummary,
+              (next) => void toggleDailySummary(next),
+            )}
             {/* iPhone capture is a privacy setting as much as a feature: the
                 relay is the ONE path in the whole app where anything derived
                 from a message leaves the phone. It belongs in this section,

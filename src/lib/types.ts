@@ -263,6 +263,12 @@ export interface AppState {
    * the Shortcuts relay, because an HTTP Shortcut cannot be called "local-only".
    */
   privateMode: boolean;
+  /**
+   * The nightly spend digest. Off until asked for: it is an interruption, the
+   * same standing as the per-charge banner, and a finance app that pushes
+   * uninvited is a finance app that gets muted along with its bill reminders.
+   */
+  dailySummary: boolean;
   /** Epoch ms when the free Pro trial started (first launch). */
   trialStartTs: number;
   /** Market pack id (country). Auto-detected on first launch; user-changeable. */

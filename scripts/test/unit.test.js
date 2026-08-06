@@ -60,6 +60,73 @@ eq('bill due-soon (5d)', bills.billsForMonth([mkBill(23)], [], today)[0].status,
 eq('bill upcoming', bills.billsForMonth([mkBill(30)], [], today)[0].status, 'upcoming');
 eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Date(2026, 5, 15))[0].daysLeft, 15);
 
+// ── the nightly spend summary ──
+//
+// A digest that disagrees with the screen it summarises is worse than none:
+// the whole point is that the user can trust it without opening the app.
+{
+  const ds = require('./build/daily-summary.js');
+  const acct = (id, over = {}) => ({ id, name: id, kind: 'bank', openingFils: 0, color: '#fff', ...over });
+  const row = (id, title, fils, over = {}) => ({ id, type: 'expense', amountFils: fils,
+    category: 'shopping', accountId: 'a1', title, date: '2026-08-06', source: 'sms', ...over });
+  const base = {
+    accounts: [acct('a1'), acct('a2')], budgets: [], bills: [], goals: [], cardDues: [],
+    transactions: [], accountHints: {}, merchantOverrides: {},
+  };
+
+  ok('summary: a day with no spending says nothing at all',
+    ds.buildDailySummary(base, '2026-08-06') === null);
+
+  const day = { ...base, transactions: [
+    row('t1', 'Noon Minutes', 3557),
+    row('t2', 'Adnoc', 24001),
+    row('t3', 'Dufry Sharjah', 22232),
+    row('t4', 'Ginnys Plus Trading', 2700),
+    row('t5', 'Noon', 5897),
+    row('t6', 'Yesterday', 999900, { date: '2026-08-05' }),
+    row('t7', 'Income', 500000, { type: 'income' }),
+  ] };
+  const s1 = ds.buildDailySummary(day, '2026-08-06');
+  eq('summary: the total is the day\'s spending only', s1.totalFils, 3557 + 24001 + 22232 + 2700 + 5897);
+  eq('summary: and the count matches it', s1.count, 5);
+  ok('summary: another day is not in it', !s1.body.includes('Yesterday'));
+  ok('summary: income is not spending', !s1.body.includes('Income'));
+  // Largest first: a lock screen gets four seconds and the big row is the one
+  // worth them.
+  ok('summary: the largest row is named first',
+    s1.body.indexOf('Adnoc') < s1.body.indexOf('Noon Minutes'), s1.body);
+
+  // A move between the user's own accounts is not spending. Announcing one as
+  // a day's expenses is the loudest possible way to get an app muted.
+  const swept = { ...base, transactions: [
+    row('o', 'Outgoing transfer', 2000000, { isTransfer: true }),
+    row('i', 'Incoming transfer', 2000000, { type: 'income', accountId: 'a2', isTransfer: true }),
+    row('real', 'Spinneys', 12000),
+  ] };
+  const s2 = ds.buildDailySummary(swept, '2026-08-06');
+  eq('summary: an internal sweep is not spending', s2.totalFils, 12000);
+  eq('summary: ...and does not pad the count', s2.count, 1);
+
+  // Six rows: five named, the rest collapsed rather than a wall of text.
+  const many = { ...base, transactions: Array.from({ length: 8 }, (_, i) =>
+    row(`m${i}`, `Shop ${i}`, 1000 + i)) };
+  const s3 = ds.buildDailySummary(many, '2026-08-06');
+  eq('summary: only the top rows are named', s3.body.split('\n').filter((l) => l.startsWith('AED')).length, ds.SUMMARY_ROWS);
+  ok('summary: the rest are counted, not dropped', /\+3 more/.test(s3.body), s3.body);
+
+  // The budget line compares like with like: spending in the categories that
+  // HAVE a limit, against the sum of those limits.
+  const budgeted = { ...base,
+    budgets: [{ category: 'shopping', limitFils: 100000 }],
+    transactions: [row('t1', 'Noon', 25000), row('r', 'Rent', 500000, { category: 'rent' })],
+  };
+  const s4 = ds.buildDailySummary(budgeted, '2026-08-06');
+  ok('summary: unbudgeted categories do not blow past the limit',
+    /25%/.test(s4.body) && !/525%/.test(s4.body), s4.body);
+  ok('summary: no limits set means no budget line',
+    !/%/.test(ds.buildDailySummary(day, '2026-08-06').body));
+}
+
 // ── a fixed bill reconciles against the charge that paid it ──
 //
 // The two Etisalat charges that started this: no SMS at all, only an ADCB app

@@ -72,6 +72,7 @@ const EMPTY_STATE: AppState = {
   themePreference: 'system',
   pro: false,
   privateMode: false,
+  dailySummary: false,
   trialStartTs: 0,
   marketId: '',
   language: '',
@@ -336,6 +337,7 @@ type Action =
   | { type: 'deleteGoal'; id: string }
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
+  | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
   | { type: 'setThemePreference'; preference: string }
@@ -587,6 +589,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
     case 'setAppLock':
       return { ...state, appLock: action.enabled };
+    case 'setDailySummary':
+      return { ...state, dailySummary: action.enabled };
     case 'setPrivateMode':
       return {
         ...state,
@@ -704,6 +708,7 @@ interface StoreValue {
   markParserVersion: () => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
+  setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
@@ -1330,6 +1335,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setAppLock', enabled });
   }, []);
 
+  const setDailySummary = useCallback((enabled: boolean) => {
+    dispatch({ type: 'setDailySummary', enabled });
+  }, []);
+
   const setPrivateMode = useCallback(async (enabled: boolean) => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
@@ -1531,6 +1540,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       markParserVersion,
       setAppLock,
+      setDailySummary,
       setPrivateMode,
       applyFxUpdates,
       setMonthStartDay,
@@ -1576,6 +1586,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteGoal,
       markParserVersion,
       setAppLock,
+      setDailySummary,
       setPrivateMode,
       applyFxUpdates,
       setMonthStartDay,

@@ -30,7 +30,7 @@ import { refreshEntitlement } from '@/lib/billing';
 import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
-import { syncPaymentReminders } from '@/lib/notifications';
+import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
 import { getRelayAutomationProof, getRelayConfig } from '@/lib/relay';
 import { useStore } from '@/lib/store';
@@ -335,6 +335,28 @@ export function useAutoImport(watchForeground = false): AutoImport {
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.hydrated, watchForeground]);
+
+  /**
+   * Tonight's summary follows the ledger, not the launch.
+   *
+   * A local notification's content is fixed when it is scheduled, so the digest
+   * has to be rebuilt every time the day's spending changes — otherwise it
+   * announces whatever was known when the app last opened, which on a day the
+   * user does not open it is nothing at all. Keyed on the transactions array
+   * identity: the store is a reducer, so that reference changes exactly when
+   * the rows do, and never otherwise.
+   *
+   * Not gated on `watchForeground`. Any screen that imported rows should leave
+   * the evening's summary correct, and `syncDailySummary` replaces a single
+   * identified notification rather than appending, so running it more than once
+   * costs nothing.
+   */
+  useEffect(() => {
+    if (!state.hydrated || !state.dailySummary) return;
+    void syncDailySummary(state).catch(() => {
+      // A digest is never worth surfacing an error over.
+    });
+  }, [state]);
 
   return { runAutoImport, needsPermission, captureState };
 }
