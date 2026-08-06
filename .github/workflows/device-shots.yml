@@ -38,10 +38,36 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.platform != 'android') ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'device-shots'))
-    runs-on: macos-15
+    # macos-15 ships Xcode 16.4, and Expo SDK 55 requires 26.2 or newer. On
+    # 16.4 the build reached expo-modules-core and died with 24 Swift errors
+    # inside Expo's OWN sources — "unknown attribute 'MainActor'" on
+    # `extension UIView: @MainActor AnyArgument`, which is an isolated
+    # conformance the older Swift compiler cannot parse. Nothing in this repo
+    # was wrong; the toolchain was.
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      # Assert the toolchain BEFORE spending forty minutes discovering it in a
+      # wall of Swift errors that all point at somebody else's code. A runner
+      # image reshuffle is the likeliest way this breaks again, and this step
+      # names the cause in one line when it does.
+      - name: Select Xcode 26.2 or newer
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null \
+            | sort -V | tail -1)
+          if [ -z "$BEST" ]; then echo "no Xcode on this runner"; exit 1; fi
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          echo "selected Xcode $VER from $BEST"
+          MAJOR=${VER%%.*}
+          if [ "$MAJOR" -lt 26 ]; then
+            echo "::error::Expo SDK 55 needs Xcode 26.2+; this runner offers $VER."
+            echo "Installed: $(ls -d /Applications/Xcode*.app | tr '\n' ' ')"
+            exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with:
