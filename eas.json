@@ -15,6 +15,17 @@
     },
     "preview": {
       "distribution": "internal",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev"
+      }
+    },
+    "preview-simulator": {
+      "extends": "preview",
+      "autoIncrement": false,
+      "ios": {
+        "simulator": true
+      },
       "env": {
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev"
       }
