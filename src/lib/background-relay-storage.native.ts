@@ -77,4 +77,29 @@ export const backgroundRelayStorage = {
     const db = await database();
     await db.runAsync(`DELETE FROM ${TABLE} WHERE key = ?`, key);
   },
+  /**
+   * Delete `key` only while it still holds exactly `expected` — the bytes the
+   * caller read. See the web sibling for why an unconditional delete loses
+   * transactions; this is the implementation that ships.
+   *
+   * The compare and the delete are ONE statement on purpose. A headless wake
+   * and the UI share this JS runtime, so every `await` in a read-compare-write
+   * is a point where `appendDurable()` can interleave, and the rows it wrote
+   * and acknowledged would then be deleted by a comparison that had already
+   * passed. SQLite evaluates the WHERE and the DELETE together, so there is no
+   * such point here.
+   *
+   * Returns whether the delete happened; `false` means another writer moved
+   * the value on and the caller must leave the queue for the next import.
+   */
+  async removeItemIfUnchanged(key: string, expected: string | null): Promise<boolean> {
+    if (expected === null) return false;
+    const db = await database();
+    const result = await db.runAsync(
+      `DELETE FROM ${TABLE} WHERE key = ? AND value = ?`,
+      key,
+      expected,
+    );
+    return result.changes > 0;
+  },
 };

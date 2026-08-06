@@ -72,7 +72,17 @@ ok('picker cache copy is immediately readable and deleted after the attempt',
   /pickedFile\.delete\(\)/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   surface.indexOf('await importBatch(plan.batch).durable') <
-    surface.indexOf('await ackRelay(active, queued.ids)'));
+    surface.indexOf('await ackRelay(active, acknowledge)'));
+// This screen drains the same queue the iOS setup verifier is polling, and a
+// PDF upload or an email check is reachable while /ios-setup is still on its
+// test step. syncRelay() reports a setup probe's id in `ids` AND in `testIds`;
+// acking the whole array consumed the proof, the setup screen timed out, and
+// the retry it offered was byte-identical, so the relay's replay receipt
+// refused it and pushed its own expiry out. Only /ios-setup may ack a probe.
+ok('a supplemental sync leaves the iOS setup probe for the screen waiting on it',
+  /const reserved = new Set\(queued\.testIds\)/.test(surface) &&
+  /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(surface) &&
+  !/ackRelay\(active, queued\.ids\)/.test(surface));
 ok('email forwarding has separate create and revoke actions',
   /method: 'POST'/.test(transport) && /method: 'DELETE'/.test(transport) &&
   /\/v1\/email-token/.test(transport));

@@ -168,9 +168,11 @@ npx wrangler d1 execute wafra --remote --command \
   "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
-Expect eight tables: `device_invites`, `devices`, `ingest_limits`,
+Expect these eight: `device_invites`, `devices`, `ingest_limits`,
 `ingest_receipts`, `pair_limits`, `push_registrations`, `queue`, `vaults`.
-There is no messages table — that is the design, not a missed migration.
+D1 keeps internal tables of its own (`_cf_KV` and similar) in the same
+catalogue, so extra names beginning with an underscore are normal. There is no
+messages table — that is the design, not a missed migration.
 
 **The Worker can actually reach D1** — pairs a throwaway device, then deletes
 it. This is the only check that exercises the binding:
@@ -213,8 +215,9 @@ Rules the app enforces on the URL, from `normalizeRelayBaseUrl`:
 
 There is deliberately **no fallback**. A build with no
 `EXPO_PUBLIC_WAFRA_RELAY_URL` refuses to pair rather than posting bank messages
-at a hostname that merely looks plausible. `npm run release:check` fails until
-all three are set and until `server/wrangler.toml` holds a real D1 uuid.
+at a hostname that merely looks plausible. `npm run release:check` gates all
+three, plus a real D1 uuid in `server/wrangler.toml`, among its other release
+gates.
 
 **These variables are not wired into `eas.json` yet.** Its `production` build
 profile has no `env` block, so a cloud build will not pick them up from your
@@ -234,10 +237,26 @@ npx wrangler rollback [version-id] -m "why"
 ```
 
 `wrangler rollback` with no version id rolls back to the previous one and
-prompts for confirmation (`-y` accepts). Code rolls back; **D1 does not**. The
-schema is additive and `IF NOT EXISTS`, so an older Worker runs fine against a
-newer database, but if you ever add a destructive migration this stops being
-true and you need a D1 export first (`wrangler d1 export`).
+prompts for confirmation (`-y` accepts). Code rolls back; **the database does
+not follow it**. The schema is additive and `IF NOT EXISTS` throughout, so an
+older Worker runs fine against a newer database — but that stops being true the
+day someone adds a destructive migration.
+
+For the data side there are two separate tools, and they are not the same thing
+as a code rollback:
+
+```bash
+npx wrangler d1 export wafra --remote --output=wafra-backup.sql   # take a copy first
+npx wrangler d1 time-travel info wafra                            # what restore points exist
+npx wrangler d1 time-travel restore wafra --timestamp 2026-08-06T09:00:00Z
+```
+
+Time Travel restores a D1 database to a point in time; wrangler's own help says
+a timestamp "within the last 30 days", and the retention you actually get may
+depend on your plan — check
+<https://developers.cloudflare.com/d1/reference/time-travel/> before relying on
+it. Nothing in a normal deploy needs either command; they are here so that the
+answer to "the migration was wrong" is not improvised.
 
 Secrets survive a rollback — they belong to the Worker, not to a version.
 Rotating one is `wrangler secret put` again; re-run `npm run deploy` afterwards

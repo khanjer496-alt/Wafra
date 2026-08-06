@@ -77,7 +77,8 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          insights seed subscriptions cards analytics period purchases markets i18n balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
-         splits db-schema storage-diagnostics daily-summary; do
+         splits db-schema storage-diagnostics daily-summary charge-alert \
+         background-relay-storage; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
@@ -249,10 +250,10 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=19
+EXPECTED_SUITES=20
 SUITES=(parser bank-corpus unit worker relay invariants import-plan arabic instant-alert \
-        kotlin-regex routes perf-config contracts onboarding report trusted-devices \
-        cloud-import fx db)
+        charge-alert kotlin-regex routes perf-config contracts onboarding report \
+        trusted-devices cloud-import fx db)
 
 missing=""
 for t in "${SUITES[@]}"; do

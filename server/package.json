@@ -13,7 +13,7 @@
     "types": "wrangler types",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "build:check": "wrangler deploy --dry-run",
-    "test": "rm -rf .test-build && tsc src/push.ts --module commonjs --target es2022 --lib es2022,dom --outDir .test-build --skipLibCheck && esbuild src/imports.ts --bundle --platform=node --format=cjs --outfile=.test-build/imports.cjs && node test/push.test.cjs && node test/imports.test.cjs && node test/schema.test.cjs",
+    "test": "rm -rf .test-build && tsc src/push.ts --module commonjs --target es2022 --lib es2022,dom --outDir .test-build --skipLibCheck && esbuild src/imports.ts --bundle --platform=node --format=cjs --outfile=.test-build/imports.cjs && node test/push.test.cjs && node test/imports.test.cjs && node test/schema.test.cjs && node test/deploy.test.cjs",
     "migrate": "node scripts/d1.mjs check && wrangler d1 execute wafra --remote --file=./schema.sql"
   },
   "devDependencies": {

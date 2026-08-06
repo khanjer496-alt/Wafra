@@ -786,6 +786,226 @@ async function queueItem(id, row, publicKey) {
     eq('e2e: the app now reports no pairing at all', await relay.getRelayConfig(), null);
   }
 
+  /* ── The collector above the client: src/lib/capture.ts ─────────────── */
+  //
+  // Everything above drives relay.ts. This drives the module that decides what
+  // to DO with what relay.ts returns, because two defects lived there and
+  // neither was visible from either side alone:
+  //
+  //   • THE SETUP PROBE. syncRelay() reports a probe id in both `ids` and
+  //     `testIds`, and only /ios-setup may acknowledge it. Home mounts
+  //     useAutoImport(true) underneath the setup flow, so returning to Wafra
+  //     after running the Shortcut fires a foreground scan; that scan acked the
+  //     probe, the setup screen's poll timed out, and the retry it offered was
+  //     byte-identical, so the relay's replay receipt refused it and refreshed
+  //     its own expiry. Every "Try again" extended the block.
+  //   • THE STAGING WIPE. commit() cleared the whole staging key rather than
+  //     the rows it read, so a push wake that appended and ACKNOWLEDGED rows
+  //     during the user's review had them deleted from the phone after the
+  //     relay had already let them go.
+  //
+  // capture.ts cannot be required — background-relay.ts pulls expo-task-manager
+  // in at module scope — so it is transpiled here with its dependencies
+  // replaced by doubles, the same way db.test.js executes store.tsx. The
+  // storage adapter is NOT a double: the real web backgroundRelayStorage runs,
+  // because the compare-and-swap is the thing under test.
+  {
+    const ts = require('typescript');
+    const fs = require('fs');
+    const path = require('path');
+    const ROOT = path.join(__dirname, '../..');
+    const execute = (rel, requireModule) => {
+      const filename = path.join(ROOT, rel);
+      const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+          esModuleInterop: true,
+        },
+        fileName: filename,
+      }).outputText;
+      const loaded = { exports: {} };
+      Function('require', 'module', 'exports', '__filename', '__dirname', output)(
+        requireModule, loaded, loaded.exports, filename, path.dirname(filename),
+      );
+      return loaded.exports;
+    };
+
+    // AsyncStorage as a Map, so a "push wake" can be made to land at an exact
+    // point between the read and the commit.
+    const disk = new Map();
+    const storage = execute('src/lib/background-relay-storage.ts', (id) => {
+      if (id === '@react-native-async-storage/async-storage') {
+        return {
+          __esModule: true,
+          default: {
+            getItem: async (k) => (disk.has(k) ? disk.get(k) : null),
+            setItem: async (k, v) => void disk.set(k, v),
+            removeItem: async (k) => void disk.delete(k),
+          },
+        };
+      }
+      throw new Error(`unexpected storage dependency ${id}`);
+    }).backgroundRelayStorage;
+
+    const QUEUE_KEY = 'wafra/background-relay/v1';
+    const row = (ts_, merchant) => ({
+      smsTs: ts_, amountFils: 1000, type: 'debit', merchant,
+      currency: 'AED', category: 'other',
+    });
+    const stage = (rows) => disk.set(QUEUE_KEY, JSON.stringify(rows));
+    const staged = () => JSON.parse(disk.get(QUEUE_KEY) ?? '[]').map((r) => r.merchant);
+
+    let synced = { parsed: [], ids: [], unreadable: 0, testReceived: 0, testIds: [] };
+    let acked = [];
+    const captureDep = (id) => {
+      if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
+      if (id === '@/lib/background-relay') {
+        return {
+          // The real reader's shape: parse whatever is on disk right now.
+          readBackgroundRelayRows: async () =>
+            JSON.parse(disk.get(QUEUE_KEY) ?? '[]'),
+          clearBackgroundRelayRows: async () => void disk.delete(QUEUE_KEY),
+        };
+      }
+      if (id === '@/lib/relay') {
+        return {
+          isRelayPlatform: () => true,
+          getRelayConfig: async () => ({ setupState: 'verified' }),
+          syncRelay: async () => synced,
+          ackRelay: async (_cfg, ids) => void acked.push(...ids),
+        };
+      }
+      if (id === '@/lib/auto-import') {
+        return {
+          isSmsScanningAvailable: () => false,
+          scanInbox: async () => ({ parsed: [], newestTs: 0 }),
+          buildImportPlan: (parsed) => ({ parsed }),
+        };
+      }
+      if (id === '@/lib/sms-parser') return { PARSER_VERSION: 1 };
+      throw new Error(`unexpected capture dependency ${id}`);
+    };
+
+    const capture = execute('src/lib/capture.ts', captureDep);
+    const state = { parserVersion: 1, lastScanTs: 0, privateMode: false, merchantOverrides: {} };
+
+    /* Defect A — the foreground scan must not eat the setup probe. */
+    {
+      disk.clear();
+      acked = [];
+      synced = {
+        parsed: [row(1000, 'CARREFOUR')],
+        // A probe id is reported twice on purpose; see relay.ts.
+        ids: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'pppppppp-pppp-4ppp-8ppp-pppppppppppp'],
+        unreadable: 0, testReceived: 1,
+        testIds: ['pppppppp-pppp-4ppp-8ppp-pppppppppppp'],
+      };
+      const result = await capture.collectNewMessages(state);
+      await result.commit();
+      eq('probe: a foreground scan acknowledges the bank row and reserves the probe',
+        acked, ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
+      ok('probe: so the setup screen still has something left to observe',
+        !acked.includes('pppppppp-pppp-4ppp-8ppp-pppppppppppp'),
+        'acking it here is why "Run test" timed out on a working phone');
+    }
+
+    /* And a scan that finds ONLY a probe must acknowledge nothing at all. */
+    {
+      disk.clear();
+      acked = [];
+      synced = {
+        parsed: [], ids: ['pppppppp-pppp-4ppp-8ppp-pppppppppppp'],
+        unreadable: 0, testReceived: 1,
+        testIds: ['pppppppp-pppp-4ppp-8ppp-pppppppppppp'],
+      };
+      const result = await capture.collectNewMessages(state);
+      await result.commit();
+      eq('probe: a scan that finds only a probe acks nothing', acked, []);
+    }
+
+    /* Defect B — the commit clears the rows it read and no others. */
+    {
+      disk.clear();
+      acked = [];
+      stage([row(1, 'ADNOC'), row(2, 'SPINNEYS'), row(3, 'TALABAT')]);
+      synced = { parsed: [], ids: [], unreadable: 0, testReceived: 0, testIds: [] };
+      const result = await capture.collectNewMessages(state);
+      eq('staging: the import reads what the wake left behind',
+        result.parsed.map((r) => r.merchant), ['ADNOC', 'SPINNEYS', 'TALABAT']);
+      await result.commit();
+      eq('staging: an uncontended commit clears the queue', staged(), []);
+    }
+
+    {
+      disk.clear();
+      acked = [];
+      stage([row(1, 'ADNOC'), row(2, 'SPINNEYS'), row(3, 'TALABAT')]);
+      synced = { parsed: [], ids: [], unreadable: 0, testReceived: 0, testIds: [] };
+      const result = await capture.collectNewMessages(state);
+      // The user is now reviewing. A push wake appends two rows and — this is
+      // the part that makes it data loss rather than a re-sync — acknowledges
+      // them to the relay, which drops them from the server queue.
+      stage([
+        row(1, 'ADNOC'), row(2, 'SPINNEYS'), row(3, 'TALABAT'),
+        row(4, 'NOON'), row(5, 'CAREEM'),
+      ]);
+      await result.commit();
+      eq('staging: a commit refuses to delete rows a wake appended after the read',
+        staged(), ['ADNOC', 'SPINNEYS', 'TALABAT', 'NOON', 'CAREEM']);
+
+      // Nothing is stranded: the next pass reads all five, and the ledger
+      // fingerprints the three it already has.
+      const next = await capture.collectNewMessages(state);
+      eq('staging: the next import picks the whole queue up',
+        next.parsed.map((r) => r.merchant),
+        ['ADNOC', 'SPINNEYS', 'TALABAT', 'NOON', 'CAREEM']);
+      await next.commit();
+      eq('staging: and clears it once nothing has moved', staged(), []);
+    }
+
+    /* The unpaired branch stages rows too, and clears them the same way. */
+    {
+      disk.clear();
+      acked = [];
+      stage([row(1, 'ADNOC')]);
+      const unpaired = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/relay') {
+          return {
+            isRelayPlatform: () => true,
+            getRelayConfig: async () => ({ setupState: 'paired' }),
+            syncRelay: async () => { throw new Error('an unfinished setup must not sync'); },
+            ackRelay: async () => { throw new Error('an unfinished setup must not ack'); },
+          };
+        }
+        return captureDep(id);
+      });
+      const result = await unpaired.collectNewMessages(state);
+      eq('staging: an unfinished setup still folds in what a wake collected',
+        result.parsed.map((r) => r.merchant), ['ADNOC']);
+      stage([row(1, 'ADNOC'), row(2, 'NOON')]);
+      await result.commit();
+      eq('staging: and its commit is conditional too',
+        staged(), ['ADNOC', 'NOON']);
+    }
+
+    /* A snapshot of nothing owns nothing. */
+    {
+      disk.clear();
+      acked = [];
+      synced = { parsed: [row(9, 'LULU')], ids: ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'],
+        unreadable: 0, testReceived: 0, testIds: [] };
+      const result = await capture.collectNewMessages(state);
+      // The queue was empty when this import read it; a wake filled it after.
+      stage([row(10, 'NOON')]);
+      await result.commit();
+      eq('staging: an import that read an empty queue deletes nothing from it',
+        staged(), ['NOON']);
+      eq('staging: while its own relay rows are still acknowledged',
+        acked, ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+    }
+  }
+
   // The parser's active pack is module-level state. Leave it as found, so a
   // suite that runs after this one is not reading Saudi rules.
   setActiveMarket('AE');

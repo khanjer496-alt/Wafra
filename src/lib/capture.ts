@@ -23,10 +23,8 @@ import {
   type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
-import {
-  clearBackgroundRelayRows,
-  readBackgroundRelayRows,
-} from '@/lib/background-relay';
+import { readBackgroundRelayRows } from '@/lib/background-relay';
+import { backgroundRelayStorage } from '@/lib/background-relay-storage';
 import { ackRelay, getRelayConfig, isRelayPlatform, syncRelay } from '@/lib/relay';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type { AppState } from '@/lib/types';
@@ -49,6 +47,45 @@ export interface CaptureResult {
 }
 
 const NOOP = async () => {};
+
+/**
+ * The staging queue key. background-relay.ts owns every write to it and
+ * declares the same literal as its own QUEUE_KEY; contracts.test.js asserts
+ * the two agree, because a silent divergence here would clear nothing and the
+ * queue would simply grow until MAX_LOCAL_ROWS started dropping the oldest
+ * rows on the floor.
+ */
+const STAGED_ROWS_KEY = 'wafra/background-relay/v1';
+
+interface StagedRows {
+  rows: ScannedSms[];
+  /** The exact bytes `rows` was parsed from, so the commit can clear only those. */
+  snapshot: string | null;
+}
+
+async function readStagedRows(): Promise<StagedRows> {
+  // The snapshot is taken BEFORE the rows, never after. A push wake landing
+  // between the two reads leaves `rows` a superset of `snapshot`, so the
+  // compare-and-swap in the commit refuses and the queue survives to be
+  // re-imported — a duplicate sync, which buildImportPlan() fingerprints away.
+  // Reading the rows first would produce the opposite: a snapshot newer than
+  // what was imported, a compare that passes, and rows deleted from the phone
+  // that no ledger ever saw.
+  const snapshot = await backgroundRelayStorage.getItem(STAGED_ROWS_KEY);
+  return { rows: await readBackgroundRelayRows(), snapshot };
+}
+
+/**
+ * Retire exactly the staged rows this import read, and nothing a background
+ * wake has appended since. background-relay's own clearBackgroundRelayRows
+ * export deletes the whole key unconditionally and must not be called from an
+ * import commit, whatever it looks like it is for: the review step
+ * between the read and the commit is long enough for a wake to append rows,
+ * acknowledge them to the relay, and have them dropped here.
+ */
+async function clearStagedRows(snapshot: string | null): Promise<void> {
+  await backgroundRelayStorage.removeItemIfUnchanged(STAGED_ROWS_KEY, snapshot);
+}
 
 const EMPTY: CaptureResult = {
   parsed: [],
@@ -95,34 +132,48 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     // A headless wake may already have collected and acknowledged rows while
     // the UI process was not running. They live in SQLCipher until the normal
     // import boundary durably folds them into the ledger.
-    const backgroundRows = await readBackgroundRelayRows();
+    const staged = await readStagedRows();
     const cfg = await getRelayConfig();
     if (!cfg || cfg.setupState === 'paired') {
-      if (backgroundRows.length > 0) {
-        const newestTs = backgroundRows.reduce(
+      if (staged.rows.length > 0) {
+        const newestTs = staged.rows.reduce(
           (max, p) => Math.max(max, p.smsTs ?? 0),
           state.lastScanTs,
         );
         return {
-          parsed: backgroundRows,
+          parsed: staged.rows,
           newestTs,
           source: 'relay',
-          commit: clearBackgroundRelayRows,
+          commit: async () => {
+            await clearStagedRows(staged.snapshot);
+          },
           needsSetup: false,
         };
       }
       return { ...EMPTY, source: 'relay', needsSetup: true };
     }
-    const { parsed, ids } = await syncRelay(cfg);
-    const collected = [...backgroundRows, ...parsed];
+    const { parsed, ids, testIds } = await syncRelay(cfg);
+    const collected = [...staged.rows, ...parsed];
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
     return {
       parsed: collected,
       newestTs,
       source: 'relay',
       commit: async () => {
-        if (ids.length > 0) await ackRelay(cfg, ids);
-        if (backgroundRows.length > 0) await clearBackgroundRelayRows();
+        // The setup probe is addressed to /ios-setup and to nobody else.
+        // syncRelay() reports its id in BOTH `ids` and `testIds` — it does have
+        // to be acknowledged eventually, but only by the screen that is polling
+        // for it. Home mounts useAutoImport(true) underneath that flow, so this
+        // scan runs while the user is still on step 3, and acking the whole
+        // `ids` array here made "Run test" time out on a correctly configured
+        // phone. The retry it offers is byte-identical, so the relay's replay
+        // receipt suppresses it and refreshes its own expiry — every attempt
+        // extended the block. background-relay.ts reserves these ids the same
+        // way; this is the second of the three collectors, not a special case.
+        const reserved = new Set(testIds);
+        const acknowledge = ids.filter((id) => !reserved.has(id));
+        if (acknowledge.length > 0) await ackRelay(cfg, acknowledge);
+        await clearStagedRows(staged.snapshot);
       },
       needsSetup: false,
     };

@@ -40,6 +40,40 @@ function configureHandler() {
   });
 }
 
+/** The same handler, for callers outside this file (the iOS relay wake). */
+export function ensureNotificationHandler(): void {
+  configureHandler();
+}
+
+/**
+ * Will the OS deliver a notification we schedule?
+ *
+ * `status.granted` is NOT that question on iOS, and the difference silently
+ * disabled two features. iOS setup asks for PROVISIONAL authorization on
+ * purpose — a quiet Notification Center entry needs no permission sheet in the
+ * middle of finance setup — and expo-notifications maps `.provisional` onto
+ * `EXPermissionStatusUndetermined`, so `granted` comes back FALSE for a device
+ * that will happily deliver everything we schedule. Both sync functions below
+ * guarded on `granted`, which meant that after iOS setup the payment reminders
+ * and the nightly summary were never scheduled at all, on a screen that
+ * promises Wafra "warns before money leaves".
+ *
+ * Provisional notifications DO deliver. They arrive quietly, straight to
+ * Notification Center, with no banner and no sound — which for a bill due
+ * tomorrow is a worse presentation than a banner and an infinitely better one
+ * than nothing.
+ *
+ * EPHEMERAL is deliberately absent: that is an App Clip's temporary grant, and
+ * this app is not one.
+ */
+export function notificationsAllowed(status: Notifications.NotificationPermissionsStatus): boolean {
+  return (
+    status.granted ||
+    status.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED ||
+    status.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+  );
+}
+
 export async function requestNotificationPermission(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   configureHandler();
@@ -56,12 +90,8 @@ export async function requestNotificationPermission(): Promise<boolean> {
  */
 export async function requestSilentCapturePermission(): Promise<boolean> {
   if (Platform.OS !== 'ios') return requestNotificationPermission();
-  const allowed = (status: Notifications.NotificationPermissionsStatus) =>
-    status.granted ||
-    status.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED ||
-    status.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
   const current = await Notifications.getPermissionsAsync();
-  if (allowed(current)) return true;
+  if (notificationsAllowed(current)) return true;
   if (current.ios?.status === Notifications.IosAuthorizationStatus.DENIED) return false;
   const asked = await Notifications.requestPermissionsAsync({
     ios: {
@@ -71,7 +101,7 @@ export async function requestSilentCapturePermission(): Promise<boolean> {
       allowProvisional: true,
     },
   });
-  return allowed(asked);
+  return notificationsAllowed(asked);
 }
 
 /**
@@ -85,8 +115,10 @@ export async function requestSilentCapturePermission(): Promise<boolean> {
 export async function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
   if (Platform.OS === 'web') return;
   configureHandler();
-  const perms = await Notifications.getPermissionsAsync();
-  if (!perms.granted) return;
+  // Not `perms.granted` — see notificationsAllowed. An iOS device that went
+  // through setup is provisionally authorized, which reads as "undetermined"
+  // and would skip every reminder below.
+  if (!notificationsAllowed(await Notifications.getPermissionsAsync())) return;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
@@ -138,8 +170,7 @@ export async function syncDailySummary(state: AppState, now: Date = new Date()):
   if (Platform.OS === 'web') return;
   if (!state.dailySummary) return;
   configureHandler();
-  const perms = await Notifications.getPermissionsAsync();
-  if (!perms.granted) return;
+  if (!notificationsAllowed(await Notifications.getPermissionsAsync())) return;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(SUMMARY_CHANNEL_ID, {

@@ -132,7 +132,15 @@ export function SupplementImports() {
     } else {
       await ensureDurable();
     }
-    if (queued.ids.length > 0) await ackRelay(active, queued.ids);
+    // A PDF upload or an email check drains the whole queue, and a setup probe
+    // can be sitting in it — this screen is reachable while /ios-setup is still
+    // waiting for one. Acknowledging it here consumes the proof that screen is
+    // polling for, and the "Try again" it then offers sends a byte-identical
+    // probe that the relay's replay receipt refuses. Reserve them the way
+    // background-relay.ts and capture.ts do; only /ios-setup may ack a probe.
+    const reserved = new Set(queued.testIds);
+    const acknowledge = queued.ids.filter((id) => !reserved.has(id));
+    if (acknowledge.length > 0) await ackRelay(active, acknowledge);
     return plan.txCount;
   }, [copy.notHydrated, ensureDurable, importBatch]);
 

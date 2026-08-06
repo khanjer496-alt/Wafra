@@ -1758,6 +1758,33 @@ const S = {
     en: '{spent} of {limit} monthly limits ({percent}%)',
     ar: '{spent} من {limit} من حدودك الشهرية ({percent}%)',
   },
+  // The iOS per-charge banner (charge-alert.ts). Android's equivalent cannot
+  // read this table — it runs in a broadcast receiver with no JavaScript
+  // engine — so its copy lives in modules/sms-reader/.../res/values*/strings.xml
+  // and these deliberately mirror the wording there. Change one, change both.
+  chargeAlertTitle: { en: '{amount} · {merchant}', ar: '{amount} · {merchant}' },
+  chargeAlertTitlePlain: { en: '{amount} spent', ar: 'صُرف {amount}' },
+  chargeAlertTitleCredit: { en: '{amount} received · {merchant}', ar: 'وصل {amount} · {merchant}' },
+  chargeAlertTitleCreditPlain: { en: '{amount} received', ar: 'وصل {amount}' },
+  // One wake can carry several charges. The headline counts and totals one
+  // direction only — a total that netted a refund against two purchases would
+  // be a number matching nothing the user can check.
+  chargeAlertGroupTitle: {
+    en: '{amount} spent · {count} charge{s}',
+    ar: 'صُرف {amount} · {count} عملية',
+  },
+  chargeAlertGroupCreditTitle: {
+    en: '{amount} received · {count} payment{s}',
+    ar: 'وصل {amount} · {count} دفعة',
+  },
+  chargeAlertLineCredit: { en: '+{amount} — {merchant}', ar: '+{amount} — {merchant}' },
+  // For the Settings row that switches the banner off. Off unless turned on,
+  // as on Android: this is an interruption, not a default.
+  chargeAlertsSetting: { en: 'Transaction alerts', ar: 'تنبيهات المعاملات' },
+  chargeAlertsOn: {
+    en: 'A silent note the moment a charge syncs',
+    ar: 'تنبيه صامت فور مزامنة أي عملية',
+  },
   dailySummarySetting: { en: 'Daily spend summary', ar: 'ملخص الصرف اليومي' },
   dailySummaryOn: {
     en: 'Every evening at 9pm, if you spent anything',

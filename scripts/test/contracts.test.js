@@ -493,7 +493,82 @@ function ktSources(dir) {
     /BackgroundRelayConfig = Pick<[\s\S]*'syncToken'[\s\S]*>;/.test(read('src/lib/relay.ts')) &&
       !/BackgroundRelayConfig = Pick<[\s\S]*'adminToken'[\s\S]*>;/.test(read('src/lib/relay.ts')));
   ok('the durable local inbox is cleared only by the UI import commit',
-    /commit: async \(\) => \{[\s\S]*clearBackgroundRelayRows/.test(read('src/lib/capture.ts')));
+    /commit: async \(\) => \{[\s\S]*clearStagedRows\(staged\.snapshot\)/.test(
+      read('src/lib/capture.ts')));
+}
+
+/* ── only the setup screen may acknowledge a setup probe ─────────────── */
+//
+// syncRelay() reports a probe's queue id in BOTH `ids` and `testIds`. It does
+// have to be acknowledged eventually — but only by /ios-setup, which is the
+// screen polling for it. Any other collector that acks the whole `ids` array
+// eats the proof, and because Home mounts useAutoImport(true) UNDERNEATH the
+// setup flow, that is not an unlucky interleaving, it is the ordinary one: the
+// user leaves Wafra to run the Shortcut, comes back, the AppState 'active'
+// scan fires, and step 3 times out on a phone that is configured correctly.
+// The "Try again" it offers resends a byte-identical probe, which the relay's
+// replay receipt suppresses AND whose expiry every retry refreshes, so the
+// remedy extends the outage.
+//
+// background-relay.ts got this right on its own; capture.ts and
+// supplement-imports.tsx did not, and neither failed any test. This is the
+// assertion that stops the fourth collector from repeating it.
+{
+  const collectors = [
+    ['src/lib/background-relay.ts', 'the headless push wake'],
+    ['src/lib/capture.ts', 'the foreground Home and pull-to-refresh scan'],
+    ['src/components/supplement-imports.tsx', 'the PDF and forwarded-email sync'],
+  ];
+  for (const [file, what] of collectors) {
+    const src = read(file);
+    ok(`${what} reserves setup probe ids rather than acking them`,
+      /new Set\((?:queued\.)?testIds\)/.test(src) &&
+        /(?:queued\.)?ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(src) &&
+        /ackRelay\([^,)]+, acknowledge\)/.test(src) &&
+        !/ackRelay\([^,)]+, (?:queued\.)?ids\)/.test(src),
+      file);
+  }
+  const setup = read('src/app/ios-setup.tsx');
+  ok('the setup screen is still the one place that does acknowledge a probe',
+    /ackRelay\(active, ids\)/.test(setup) && /testReceived/.test(setup));
+}
+
+/* ── the staging queue is cleared by snapshot, never by key ──────────── */
+//
+// The queue has two writers that do not take turns. A foreground import reads
+// the staged rows, puts a review screen in front of the user, and commits
+// minutes later; a push wake in that gap appends rows AND acknowledges them to
+// the relay, so the server no longer holds them. An unconditional delete of
+// the key at commit time then loses those rows from both sides at once — the
+// only shape of bug in this pipe that costs a transaction outright instead of
+// costing a re-sync.
+{
+  const capture = read('src/lib/capture.ts');
+  const background = read('src/lib/background-relay.ts');
+  const storage = read('src/lib/background-relay-storage.ts');
+  const native = read('src/lib/background-relay-storage.native.ts');
+  const queueKey = (src) => src.match(/'wafra\/[\w/.-]+'/)?.[0];
+
+  ok('the reader and the writer name the same staging key',
+    queueKey(capture) !== undefined && queueKey(capture) === queueKey(background),
+    `${queueKey(capture)} vs ${queueKey(background)}`);
+  ok('the snapshot is read before the rows are parsed, never after',
+    capture.indexOf('backgroundRelayStorage.getItem(') <
+      capture.indexOf('await readBackgroundRelayRows()'));
+  // The prose below still names clearBackgroundRelayRows to say why it must
+  // not be used here, so this checks the import and the call, not the word.
+  ok('the import commit clears only the snapshot it read',
+    /removeItemIfUnchanged\(STAGED_ROWS_KEY, snapshot\)/.test(capture) &&
+      !/import \{[^}]*\bclearBackgroundRelayRows\b/.test(capture) &&
+      !/\bclearBackgroundRelayRows\(/.test(capture));
+  ok('both storage backends implement the conditional delete',
+    /removeItemIfUnchanged\(key: string, expected: string \| null\)/.test(storage) &&
+      /removeItemIfUnchanged\(key: string, expected: string \| null\)/.test(native));
+  ok('the shipping backend compares and deletes in one statement',
+    /DELETE FROM \$\{TABLE\} WHERE key = \? AND value = \?/.test(native));
+  ok('an empty read owns nothing and deletes nothing',
+    /if \(expected === null\) return false;/.test(storage) &&
+      /if \(expected === null\) return false;/.test(native));
 }
 
 /* iOS Message automation forwards sender identity. */

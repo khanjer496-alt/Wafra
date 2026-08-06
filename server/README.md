@@ -128,6 +128,11 @@ under different packs would file one purchase twice, with two amounts.
 
 ## Configure and deploy
 
+**[`DEPLOY.md`](./DEPLOY.md) is the authoritative sequence** — what the owner
+must supply, what each command does, how to verify the deploy against a real
+endpoint, how to roll it back, and what it costs. What follows is the short
+form of the same thing.
+
 Requirements: Node.js 22 or newer and an authenticated Wrangler session.
 
 ```bash

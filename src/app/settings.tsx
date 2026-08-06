@@ -435,9 +435,13 @@ export default function SettingsScreen() {
     try {
       cfg = await getRelayConfig();
     } catch {
-      // A locked Keychain reads as "not paired". Erasing locally anyway would
-      // leave a live device row and a live ingest token behind while telling
-      // the user everything is gone, so stop instead.
+      // Defensive: getRelayConfig() swallows its own Keychain errors and
+      // answers null today. If that ever changes, wiping locally on the way
+      // past would leave a live device row and a live ingest token behind
+      // while telling the user everything is gone. Stop instead.
+      //
+      // The null it returns for a Keychain it could not read is still
+      // indistinguishable from "never paired" — see the note in relay.ts.
       Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
       return;
     }
