@@ -199,7 +199,9 @@ export function buildImportPlan(
       !p.transferHint &&
       !prior.isTransfer &&
       (titleAfter === 'Card purchase' || (catAfter === 'other' && !STRUCTURAL_TITLES.has(titleAfter)));
-    if (stillLow && !prior.raw) patch.raw = p.raw.slice(0, 300);
+    // Relay rows have no raw text — the Worker drops it — so guard on it
+    // rather than writing an empty string over a row that had none.
+    if (stillLow && !prior.raw && p.raw) patch.raw = p.raw.slice(0, 300);
     if (Object.keys(patch).length > 1) updates.push(patch);
   };
   const smsKeyOf = (p: ScannedSms): string | undefined =>

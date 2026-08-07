@@ -40,16 +40,20 @@ this service too. Do not fork it.
 ## Deploy
 
 ```bash
-cd server
-npm install -g wrangler          # or npx wrangler
-wrangler login
+npm --prefix server install
+npx --prefix server wrangler login
 
-wrangler d1 create wafra          # copy the printed database_id
-# paste it into wrangler.toml -> [[d1_databases]] database_id
-
-wrangler d1 execute wafra --remote --file=./schema.sql
-wrangler deploy
+npm --prefix server run setup     # find-or-create D1, write its id, apply the schema
+npm --prefix server run deploy
 ```
+
+`setup` is idempotent — re-run it on any machine to point a fresh clone at the
+existing database. If your Cloudflare login can see more than one account it
+stops and asks you to set `CLOUDFLARE_ACCOUNT_ID`; that is the expected
+behaviour, not a failure.
+
+There are no secrets to configure. Identity is a key the phone generates, so
+this service has nothing to authenticate itself with and nothing to leak.
 
 Cloudflare's free tier covers early usage comfortably: 100k Worker requests a
 day, and D1's free allowance is far beyond what a queue that empties itself
@@ -61,6 +65,15 @@ Verify:
 curl https://wafra-relay.<your-subdomain>.workers.dev/v1/health
 # {"ok":true}
 ```
+
+## Pointing the app at it
+
+`deploy` prints the Worker's URL. Put it in `eas.json` as
+`EXPO_PUBLIC_WAFRA_RELAY_URL`, in all three build profiles, replacing the
+`REPLACE-ME` placeholder. The app treats a URL still containing `REPLACE-ME`
+as unconfigured and says so on the capture screen rather than failing at the
+first request — a build that was never pointed anywhere should look like a
+build that was never pointed anywhere, not like a broken feature.
 
 ## API
 
@@ -90,10 +103,14 @@ In **Shortcuts → Automation → New → When I get a message**:
    - URL: the `ingestUrl` returned by pairing
    - Method: `POST`
    - Headers: `Authorization: Bearer <token>`, `Content-Type: application/json`
-   - Request Body: JSON, one field `text` = the **Shortcut Input** message content
+   - Request Body: JSON, one field `text` = the **Shortcut Input** message
+     content. Optionally a second field `sender` = the message sender, which is
+     what lets an auto-created account read "ADCB Credit ~4733" rather than
+     "Credit ~4733".
 
-The app shows the URL and token on its pairing screen so none of this is typed
-from memory.
+The app shows the URL and token on its pairing screen (**Settings → Automatic
+capture**, iOS only) so none of this is typed from memory — every row there
+copies to the clipboard on tap.
 
 ### Two limits to be honest about
 

@@ -49,6 +49,11 @@ const S = {
   trialEndedBannerSub: { en: 'Subscribe to keep importing your bank SMS', ar: 'اشترك لمواصلة قراءة رسائل البنك' },
   turnOnTracking: { en: 'Turn on automatic tracking', ar: 'فعّل التتبع التلقائي' },
   trackingPrivacy: { en: 'Wafra reads bank SMS on this device only', ar: 'وفرة تقرأ رسائل البنك على هذا الجهاز فقط' },
+  setUpCapture: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
+  setUpCaptureHint: {
+    en: 'iPhone needs a Shortcut to send bank messages to Wafra',
+    ar: 'يحتاج الآيفون إلى اختصار لإرسال رسائل البنك إلى وفرة',
+  },
 
   // Bills
   billsTitle: { en: 'Bills', ar: 'الفواتير' },

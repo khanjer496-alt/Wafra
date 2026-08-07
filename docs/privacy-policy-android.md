@@ -1,10 +1,14 @@
-# Wafra Privacy Policy
+# Wafra for Android — Privacy Policy
 
-_Last updated: 25 July 2026_
+_Last updated: 7 August 2026_
 
-Wafra ("the app") is a personal money manager for Android. This policy
-explains what the app does with your information. It is short because the app
-does very little with it.
+Wafra ("the app") is a personal money manager for Android. This policy explains
+what the app does with your information. It is short because the app does very
+little with it.
+
+**Using an iPhone?** The iPhone version works differently — iOS gives no app
+access to SMS, so it relies on a relay. It has its own policy at
+<https://wafra-legal.pages.dev/ios/privacy>. This one does not describe it.
 
 **Not legal advice.** Have a lawyer review this before publishing, and keep it
 accurate — every claim below is a statement about how the app behaves, and
@@ -62,10 +66,10 @@ Two features move data, and both are actions you take deliberately:
 
 ## Purchases
 
-Paid plans are handled by Google Play billing. Google processes the payment
-and tells the app whether a subscription is active. Wafra never sees your card
-or payment details. Google's handling of that transaction is covered by
-Google's own privacy policy.
+Paid plans are handled by Google Play billing. Google processes the payment and
+tells the app whether a subscription is active. Wafra never sees your card or
+payment details. Google's handling of that transaction is covered by Google's
+own privacy policy.
 
 ## Permissions, plainly
 
@@ -90,11 +94,12 @@ and your correction is what the app remembers.
 
 ## Security incidents
 
-Wafra holds no user data on any server, so there is no central store to
-breach. The security of your data is the security of your device: keep it
+Wafra holds no user data on any server, so there is no central store to breach.
+The security of your data is the security of your device: keep it
 locked and up to date, and enable the in-app lock if you want a second layer.
-If we ever become aware of a vulnerability in the app itself that could expose
-your data, we will publish a fix and describe the issue in the release notes.
+If we become aware of a vulnerability that could expose your data, we will
+publish a fix, describe the issue in the release notes, and notify affected
+users where the law requires it.
 
 ## International transfers
 
@@ -104,10 +109,12 @@ countries.
 ## Your rights
 
 Privacy law generally gives you rights to access, correct, export and delete
-your personal data. Because we hold none of it, you exercise those rights
-directly in the app: everything is visible in the app, editable in the app,
-exportable as JSON or CSV, and deleted when you clear your data or uninstall.
-There is no request to make of us and no copy of your data for us to return.
+your personal data. You exercise those rights directly in the app: everything
+is visible in the app, editable in the app, exportable as JSON or CSV, and
+deleted when you clear your data or uninstall.
+
+Because we hold none of it, there is no request to make of us and no copy of
+your data for us to return.
 
 ## If the app changes hands
 
@@ -133,5 +140,4 @@ will be surfaced in the app.
 
 ## Contact
 
-<!-- Replace with the real support address before publishing. -->
-support@example.com
+khanjer496@gmail.com

@@ -10,8 +10,9 @@ command = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "wafra"
-# Replace with the id printed by: npx wrangler d1 create wafra
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+# Written by `npm run setup`, which find-or-creates the database by name. Safe
+# to commit: this identifies a database, it does not grant access to one.
+database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
 # Nightly sweep of expired queue rows and long-dead devices.
 [triggers]

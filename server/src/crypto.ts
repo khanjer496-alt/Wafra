@@ -52,14 +52,20 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
     'deriveBits',
   ])) as CryptoKeyPair;
   const shared = await crypto.subtle.deriveBits(
-    { name: 'X25519', public: recipient },
+    // The field is `public` at runtime, in Workers and in Node alike.
+    // @cloudflare/workers-types generates it as `$public` because its codegen
+    // escapes TypeScript reserved words, so the name is asserted here rather
+    // than changed — renaming it to satisfy the types would silently break the
+    // key agreement, which is the one failure this file cannot afford.
+    { name: 'X25519', public: recipient } as Parameters<SubtleCrypto['deriveBits']>[0],
     ephemeral.privateKey,
     256,
   );
   // HKDF over the ECDH output — the raw shared secret is not uniformly random
   // and must never be used as a key directly.
   const ikm = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-  const epkRaw = await crypto.subtle.exportKey('raw', ephemeral.publicKey);
+  // 'raw' always yields bytes; the signature is widened by the 'jwk' overload.
+  const epkRaw = (await crypto.subtle.exportKey('raw', ephemeral.publicKey)) as ArrayBuffer;
   const aes = await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(epkRaw), info: enc.encode('wafra/v1/seal') },
     ikm,
