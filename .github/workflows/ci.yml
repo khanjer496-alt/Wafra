@@ -8,10 +8,6 @@ on:
   push:
     branches:
       - main
-      # The integration branch is where the work actually lands, and it had no
-      # push trigger — so a failing suite sat on it undetected. Anything that
-      # is a working line long enough to accumulate commits belongs here.
-      - integration/combine-prs
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
