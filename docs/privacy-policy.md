@@ -53,9 +53,19 @@ uses a personal automation that the user creates in Apple's Shortcuts app:
    rows expire after 30 days.
 
 The relay also stores a random device identifier, the device's public key and a
-SHA-256 hash of the bearer token. It stores no name, email address, phone
-number, bank login or raw message archive. An inactive device registration is
-deleted after one year.
+SHA-256 hash of the bearer token. An inactive device registration is deleted
+after one year.
+
+Each registered device carries a label, so that a roster of trusted devices can
+be told apart and the right one revoked. For the first device this is taken
+from the name the phone reports for itself, which on an iPhone is usually
+personal — "Naser's iPhone". A device you invite sets its own label as it
+joins, and any device can be renamed afterwards in **Settings → Trusted
+devices**. This label is the only free-text field the relay keeps, and it is
+visible to every device in the same vault.
+
+Beyond that label, the relay stores no email address, phone number, bank login
+or raw message archive.
 
 If the silent-wake path described below is enabled, the relay additionally
 stores that device's Apple push token, encrypted at rest, alongside the Expo
