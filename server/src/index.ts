@@ -22,11 +22,12 @@ import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
 
 import {
   b64encode,
-  b64decode,
+  canSealTo,
   hashToken,
   keyedFingerprint,
   randomToken,
   seal,
+  type SealedBlob,
   timingSafeEqual,
 } from './crypto';
 import {
@@ -237,16 +238,19 @@ async function queueIsFull(env: Env, deviceId: string): Promise<boolean> {
   return (row?.n ?? MAX_QUEUED_ROWS) >= MAX_QUEUED_ROWS;
 }
 
+/**
+ * A key is valid here only if the Worker can still seal to it in a month's
+ * time. Thirty-two bytes that import cleanly is not that test: every
+ * degenerate X25519 point imports, and then fails at agreement. Enrolling one
+ * used to be free, and the bill arrived at the next ingest — see `canSealTo`.
+ *
+ * Both enrollment routes are already capped at PAIR_PER_MINUTE globally, and
+ * the added agreement is roughly a tenth of a millisecond, so this is paid
+ * once per device rather than once per bank alert.
+ */
 async function validPublicKey(value: unknown): Promise<boolean> {
   if (typeof value !== 'string' || value.length > 128) return false;
-  try {
-    const decoded = b64decode(value);
-    if (decoded.length !== 32) return false;
-    await crypto.subtle.importKey('raw', decoded, { name: 'X25519' }, false, []);
-    return true;
-  } catch {
-    return false;
-  }
+  return canSealTo(value);
 }
 
 function friendlyName(value: unknown): string | null | undefined {
@@ -279,9 +283,31 @@ async function queueStructuredRow(
     .all<{ id: string; public_key: string }>();
   const targets = vaultDevices ?? [];
   if (targets.length === 0) return [];
-  const sealedTargets = await Promise.all(
+  // One device is not the vault. Sealing used to be a single Promise.all, so a
+  // device whose stored key cannot be agreed with — enrolled before
+  // `validPublicKey` tested for that — took every later ingest in its vault
+  // down with it: the throw escaped the request as an unhandled exception, and
+  // capture stopped dead while devices, sync and invites all still answered
+  // 200. Total silent loss for the whole household is strictly worse than no
+  // delivery to the one phone that cannot receive anything anyway, so an
+  // unsealable device is skipped and the rest of the vault is served.
+  //
+  // Skipped, but not swallowed: only a key that provably cannot be sealed to
+  // is passed over, and `canSealTo` proves that rather than assuming it —
+  // a runtime that is failing for its own reasons throws out of here instead
+  // of quietly reporting every device in the vault as unreachable. Anything
+  // else that made `seal` throw is a bug rather than a bad key, and is
+  // rethrown rather than costing someone a row in silence. GET /v1/devices
+  // reports `canReceive` so the skip that does happen has a name attached.
+  const attempts = await Promise.allSettled(
     targets.map(async (target) => ({ id: target.id, sealed: await seal(target.public_key, row) })),
   );
+  const sealedTargets: { id: string; sealed: SealedBlob }[] = [];
+  for (let index = 0; index < attempts.length; index++) {
+    const attempt = attempts[index];
+    if (attempt.status === 'fulfilled') sealedTargets.push(attempt.value);
+    else if (await canSealTo(targets[index].public_key)) throw attempt.reason;
+  }
   const results = await env.DB.batch([
     ...sealedTargets.map((target) =>
       env.DB.prepare(
@@ -527,8 +553,30 @@ export default {
           last_seen: number;
           email_enabled: number;
         }>();
+      const rows = results ?? [];
+      // A device that cannot be sealed to receives nothing and says nothing:
+      // it goes on listing, syncing and looking enrolled. This is the one
+      // place the owner can be told which phone that is, so it is reported
+      // rather than left to be inferred from an empty ledger. Recomputed per
+      // request instead of stored — the keys are already here, there are at
+      // most MAX_VAULT_DEVICES of them, and it costs one key agreement each.
+      //
+      // Deliberately a second read: the list query above stays free of key and
+      // token columns by construction, and these keys never leave the Worker.
+      const { results: vaultKeys } = await env.DB.prepare(
+        'SELECT id, public_key FROM devices WHERE vault_id = ?1',
+      )
+        .bind(device.vault_id)
+        .all<{ id: string; public_key: string }>();
+      const canReceive = new Map(
+        await Promise.all(
+          (vaultKeys ?? []).map(
+            async (row) => [row.id, await canSealTo(row.public_key)] as const,
+          ),
+        ),
+      );
       return json({
-        devices: (results ?? []).map((row) => ({
+        devices: rows.map((row) => ({
           id: row.id,
           name: row.friendly_name,
           role: row.role,
@@ -536,6 +584,7 @@ export default {
           joinedAt: row.created_at,
           lastSeenAt: row.last_seen,
           emailForwardingEnabled: row.email_enabled === 1,
+          canReceive: canReceive.get(row.id) ?? false,
         })),
       });
     }

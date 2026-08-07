@@ -115,7 +115,7 @@ in [`../docs/ios-shortcut-spec.md`](../docs/ios-shortcut-spec.md).
 | `DELETE` | `/v1/push` | Admin bearer → remove wake-only delivery |
 | `POST` | `/v1/device-invites` | Admin bearer → one-use ten-minute join token |
 | `POST` | `/v1/join` | `{publicKey, inviteToken}` → independent credentials in the same vault |
-| `GET` | `/v1/devices` | Admin bearer → safe device metadata, roles and current-device marker |
+| `GET` | `/v1/devices` | Admin bearer → safe device metadata, roles, current-device marker and `canReceive` |
 | `PATCH` | `/v1/devices/:id` | Owner (or self) + `{name}` → rename a device |
 | `DELETE` | `/v1/devices/:id` | Owner (or member self) → revoke one device; last owner returns `409` |
 | `DELETE` | `/v1/vault` | Owner bearer → explicitly erase the vault and every device queue |
@@ -124,6 +124,15 @@ in [`../docs/ios-shortcut-spec.md`](../docs/ios-shortcut-spec.md).
 | `DELETE` | `/v1/email-token` | Admin bearer → revoke email forwarding |
 | `POST` | `/v1/email/ingest` | Email bearer + `{text?, html?, eventId?}` → structured sealed rows |
 | `POST` | `/v1/import/pdf` | Admin bearer + `application/pdf` bytes → structured sealed rows |
+
+A public key is accepted at `/v1/pair` and `/v1/join` only if the Worker can
+actually agree with it, which is tested by trying: thirty-two bytes that import
+cleanly is not enough, because every degenerate X25519 point imports and then
+fails at key agreement. Enrolling one used to cost nothing and take the whole
+vault's capture down at the next ingest. Devices enrolled before that check are
+skipped when a row is sealed — the rest of the vault still receives it — and
+reported by `/v1/devices` as `canReceive: false`, which is the signal to revoke
+and re-enroll that phone.
 
 The server sets the receipt timestamp; it does not trust a client-provided
 date. Pull-then-ack sync prevents data loss when a response is interrupted.
