@@ -42,7 +42,7 @@ export default function ProScreen() {
 
   const buy = async () => {
     if (!isBillingAvailable()) {
-      Alert.alert(t('playOnlyTitle'), t('playOnlyBody'));
+      Alert.alert(t('storeUnavailableTitle'), t('storeUnavailableBody'));
       return;
     }
     if (await purchasePro(plan)) setPro(true);

@@ -905,10 +905,17 @@ const S = {
   underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
   transferExplainer: { en: 'Kept in balances, excluded from income and spending', ar: 'يُحتسب في الأرصدة ويُستثنى من الدخل والمصروف' },
   perYear: { en: 'per year', ar: 'سنوياً' },
-  playOnlyTitle: { en: 'Available with the Play Store release', ar: 'متاح مع إصدار متجر Play' },
-  playOnlyBody: {
-    en: 'Purchases go through Google Play billing, which only works when Wafra is installed from the Play Store. This build has every Pro feature unlockable from Settings.',
-    ar: 'تتم عمليات الشراء عبر فوترة Google Play، وهي تعمل فقط عند تثبيت وفرة من متجر Play. في هذا الإصدار يمكن تفعيل كل ميزات برو من الإعدادات.',
+  // Named for the situation, not the store: this build cannot take money,
+  // whichever platform it is on. Saying "Play Store" to someone holding an
+  // iPhone reads as a bug, and telling them the purchase failed reads as one
+  // too — nothing failed, there is nothing to buy from here yet.
+  storeUnavailableTitle: {
+    en: 'Purchases are not set up in this build',
+    ar: 'عمليات الشراء غير مُهيأة في هذا الإصدار',
+  },
+  storeUnavailableBody: {
+    en: 'This build has no store connection, so there is nothing to purchase — and nothing is locked. Every Pro feature stays available. Buying arrives with the store release.',
+    ar: 'لا يتصل هذا الإصدار بأي متجر، فلا يوجد ما يمكن شراؤه — ولا شيء مقفل. تبقى كل ميزات برو متاحة. سيصبح الشراء متاحاً مع إصدار المتجر.',
   },
   nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
   nothingToRestoreBody: { en: 'Purchases arrive with the Play Store release.', ar: 'ستتوفر عمليات الشراء مع إصدار متجر Play.' },

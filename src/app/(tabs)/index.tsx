@@ -68,7 +68,7 @@ import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { refreshEntitlement } from '@/lib/billing';
+import { isBillingAvailable, refreshEntitlement } from '@/lib/billing';
 import { getActiveMarket } from '@/lib/markets';
 import { getRelayAutomationProof, getRelayConfig } from '@/lib/relay';
 import { useStore } from '@/lib/store';
@@ -771,8 +771,9 @@ export default function HomeScreen() {
         if (interactive) toast.show(t('stillLoading'));
         return 'not-hydrated';
       }
-      // Hard paywall: tracking pauses when the trial ends without Pro.
-      if (!isProActive(state)) {
+      // Hard paywall: tracking pauses when the trial ends without Pro — but
+      // only on a build that can actually sell it. See isProActive.
+      if (!isProActive(state, Date.now(), isBillingAvailable())) {
         if (interactive) router.push('/pro');
         return 'not-pro';
       }
@@ -987,10 +988,16 @@ export default function HomeScreen() {
           />
 
           <AutomaticCapture
-            status={!isProActive(state) ? 'paused' : needsPermission ? 'off' : captureState}
+            status={
+              !isProActive(state, Date.now(), isBillingAvailable())
+                ? 'paused'
+                : needsPermission
+                  ? 'off'
+                  : captureState
+            }
             lastCaptureDate={lastAutomatic?.date}
             onPress={() => {
-              if (!isProActive(state)) router.push('/pro');
+              if (!isProActive(state, Date.now(), isBillingAvailable())) router.push('/pro');
               else if (Platform.OS === 'ios') router.push('/ios-setup');
               else void runAutoImport(true);
             }}

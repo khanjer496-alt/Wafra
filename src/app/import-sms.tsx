@@ -41,6 +41,7 @@ import {
 } from '@/lib/auto-import';
 import { categoryLabel } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
+import { isBillingAvailable } from '@/lib/billing';
 import { isProActive } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
@@ -107,7 +108,7 @@ export default function ImportSmsScreen() {
       Alert.alert(t('importOneMoment'), t('dataStillLoading'));
       return;
     }
-    if (!isProActive(state)) {
+    if (!isProActive(state, Date.now(), isBillingAvailable())) {
       router.push('/pro');
       return;
     }
@@ -144,7 +145,7 @@ export default function ImportSmsScreen() {
       Alert.alert(t('importOneMoment'), t('dataStillLoading'));
       return;
     }
-    if (!isProActive(state)) {
+    if (!isProActive(state, Date.now(), isBillingAvailable())) {
       router.push('/pro');
       return;
     }

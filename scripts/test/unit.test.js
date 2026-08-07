@@ -647,6 +647,24 @@ ok('trial: expires after day 3',
 ok('trial: purchase beats an expired trial',
   purch.isProActive({ pro: true, trialStartTs: T0 }, T0 + 30 * DAY));
 
+// A paywall you cannot pay is a dead end, not a paywall.
+//
+// The iOS build shipped with an empty RevenueCat key, so `isBillingAvailable()`
+// was false and no purchase could complete. The trial still expired on day
+// three, tracking still paused, and "Get Pro" still opened a screen whose buy
+// button could only report that purchases were unavailable. The only way out
+// was seven undocumented taps on the logo.
+ok('an unsellable build never locks, however long the trial has been over',
+  purch.isProActive({ pro: false, trialStartTs: T0 }, T0 + 400 * DAY, false));
+ok('a sellable build still locks when the trial is over',
+  !purch.isProActive({ pro: false, trialStartTs: T0 }, T0 + 3 * DAY + 1, true));
+ok('and still unlocks for someone who actually bought it',
+  purch.isProActive({ pro: true, trialStartTs: T0 }, T0 + 400 * DAY, true));
+// Omitting the argument must gate, not give the app away: a call site that
+// forgets should cost a sale rather than every sale.
+ok('the default is gated, not unlocked',
+  !purch.isProActive({ pro: false, trialStartTs: T0 }, T0 + 3 * DAY + 1));
+
 // ── market packs: automatic localization (runs last: mutates globals) ──
 const markets = require('./build/markets');
 const mparser = require('./build/sms-parser');

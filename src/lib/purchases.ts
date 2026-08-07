@@ -78,10 +78,31 @@ export function trialDaysLeft(
   return Math.max(0, Math.ceil(TRIAL_DAYS - elapsedDays));
 }
 
-/** Pro features unlocked: purchased/founder Pro, or still inside the trial. */
+/**
+ * Pro features unlocked: purchased/founder Pro, or still inside the trial.
+ *
+ * `sellable` is whether a purchase can actually be completed on this build —
+ * `isBillingAvailable()` from billing.ts. When it is false, nothing locks.
+ *
+ * That is not generosity, it is the only honest option. A build with no
+ * billing key cannot take money, so at the end of the trial the paywall
+ * becomes a door with no handle: tracking pauses, "Get Pro" opens a screen
+ * whose buy button reports that purchases are unavailable, and the only way
+ * out is seven taps on the logo that nobody has been told about. Every
+ * TestFlight tester reaches that on day four.
+ *
+ * Passed in rather than read here, because this module is deliberately pure —
+ * the node contract tests compile and call it directly, and it must not
+ * acquire an Expo dependency to answer a question about arithmetic.
+ *
+ * Defaults to true so a caller that forgets is gated rather than unlocked;
+ * the failure of omission should cost a sale, not give the app away.
+ */
 export function isProActive(
   state: { pro: boolean; trialStartTs: number },
   nowMs: number = Date.now(),
+  sellable: boolean = true,
 ): boolean {
+  if (!sellable) return true;
   return state.pro || trialDaysLeft(state, nowMs) > 0;
 }

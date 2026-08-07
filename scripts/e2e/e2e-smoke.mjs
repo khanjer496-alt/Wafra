@@ -668,7 +668,13 @@ await page.evaluate(() => {
 });
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
-ok('expired trial pauses tracking on home', !!(await visibleText(page, 'Trial ended · tracking paused')));
+// The web export has no billing key, so it cannot sell Pro — and a build that
+// cannot take money must not lock the user out when the trial ends. Before
+// this, day four of a TestFlight left tracking paused behind a "Get Pro"
+// button whose only outcome was an alert saying purchases were unavailable.
+// So the assertion is the inverse of what it used to be, deliberately.
+ok('an expired trial does NOT pause tracking on a build that cannot sell Pro',
+  !(await visibleText(page, 'Trial ended · tracking paused', 3000)));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

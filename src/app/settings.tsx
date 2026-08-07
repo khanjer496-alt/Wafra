@@ -39,6 +39,7 @@ import { shareExistingFile, shareTextFile } from '@/lib/file-sharing';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
+import { isBillingAvailable } from '@/lib/billing';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 import { getRelayConfig, unpairDevice } from '@/lib/relay';
 import {
@@ -97,7 +98,9 @@ export default function SettingsScreen() {
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
   const gated = (fn: () => void) => () => {
-    if (isProActive(state)) fn();
+    // Same rule as Home: a build with no billing key cannot sell Pro, so it
+    // must not withhold it either. See isProActive.
+    if (isProActive(state, Date.now(), isBillingAvailable())) fn();
     else router.push('/pro');
   };
 
