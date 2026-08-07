@@ -1486,6 +1486,68 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('a real Liv card with different digits stays its own card',
     acc.mergeDuplicateAccounts(livOwn).accounts.length === 2);
 
+  // ── The regression the sub-brand fix nearly shipped ──
+  //
+  // Folding by issuer alone, with the displayed NAME dropped from the key,
+  // merged two genuinely different FAB cards ending 3749 — and computeOpenDues
+  // keeps one row per (account, dueDate), so an entire statement was DISCARDED
+  // rather than merged. The two tests above pass for the wrong reason: they
+  // differ in cardType, which is still in the key.
+  const namedCard = (id, name, dueTotal) => ({
+    id, name, kind: 'card', cardType: 'credit', last4: '3749',
+    bankName: 'FAB', openingFils: 0, color: '#0a0',
+    snapshotFils: 1000, snapshotKind: 'outstanding', snapshotTs: 1,
+  });
+  const twoRealFab = {
+    accounts: [namedCard('fab-a', 'FAB Cashback Card'), namedCard('fab-b', 'FAB Business Card')],
+    transactions: [],
+    cardDues: [
+      { id: 'da', accountId: 'fab-a', dueDate: '2026-08-26', totalDueFils: 50000, minDueFils: 5000, paidFils: 0 },
+      { id: 'db', accountId: 'fab-b', dueDate: '2026-08-26', totalDueFils: 70000, minDueFils: 7000, paidFils: 0 },
+    ],
+    bills: [], accountHints: {},
+  };
+  const twoRealAfter = acc.mergeDuplicateAccounts(twoRealFab);
+  ok('two differently NAMED cards at one bank are never fused',
+    twoRealAfter.accounts.length === 2, twoRealAfter.accounts.map((a) => a.name));
+  ok('...so neither statement is discarded',
+    twoRealAfter.cardDues.length === 2 &&
+      twoRealAfter.cardDues.reduce((n, d) => n + d.totalDueFils, 0) === 120000,
+    twoRealAfter.cardDues);
+
+  // Same shape for bank accounts: "Salary" and "Joint" are not one account.
+  const twoRealBanks = {
+    accounts: [
+      { id: 'sal', name: 'FAB Salary Account', kind: 'bank', last4: '0004', bankName: 'FAB',
+        openingFils: 0, color: '#0a0', snapshotFils: 42354500, snapshotKind: 'balance', snapshotTs: 1 },
+      { id: 'joint', name: 'FAB Joint Account', kind: 'bank', last4: '0004', bankName: 'FAB',
+        openingFils: 0, color: '#0a0', snapshotFils: 1200, snapshotKind: 'balance', snapshotTs: 2 },
+    ],
+    transactions: [], cardDues: [], bills: [], accountHints: {},
+  };
+  const banksAfter = acc.mergeDuplicateAccounts(twoRealBanks);
+  ok('two differently NAMED bank accounts keep both balances',
+    banksAfter.accounts.length === 2 &&
+      banksAfter.accounts.reduce((n, a) => n + (a.snapshotFils ?? 0), 0) === 42355700,
+    banksAfter.accounts.map((a) => [a.name, a.snapshotFils]));
+
+  // And the guard that says "two instruments" out loud: one card cannot owe
+  // two different totals on one date, even under one issuer across brands.
+  const contradicting = {
+    accounts: [
+      brandClone({ id: 'liv2', name: 'Liv Credit Card •4242', bankName: 'Liv', last4: '4242' }),
+      brandClone({ id: 'enbd2', name: 'Emirates NBD Credit Card •4242', bankName: 'Emirates NBD', last4: '4242' }),
+    ],
+    transactions: [],
+    cardDues: [
+      { id: 'c1', accountId: 'liv2', dueDate: '2026-09-01', totalDueFils: 10000, minDueFils: 1000, paidFils: 0 },
+      { id: 'c2', accountId: 'enbd2', dueDate: '2026-09-01', totalDueFils: 90000, minDueFils: 9000, paidFils: 0 },
+    ],
+    bills: [], accountHints: {},
+  };
+  ok('contradicting statements on one date block even a cross-brand fold',
+    acc.mergeDuplicateAccounts(contradicting).accounts.length === 2);
+
   const meaningfulVariants = [
     { openingFils: 1 },
     { creditLimitFils: 1 },

@@ -89,20 +89,64 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
   const dropped = new Set<string>();
   /**
    * Identity a real card or account cannot share with a different one: same
-   * bank, same last four, same kind, same card type, same displayed name.
-   * Two distinct cards collide on last4 only by accident, and even then they
-   * would carry different names — so rows agreeing on every one of these are
-   * the same product recorded twice, not two products.
+   * kind, same card type, same last four, same issuer — AND the same displayed
+   * name.
+   *
+   * The name is load-bearing and was briefly dropped from this key so that a
+   * sub-brand row ("Liv Credit Card •8575") could fold into its issuer's
+   * ("Emirates NBD Credit Card •8575"), which differ by construction. Dropping
+   * it folded far more than intended: two genuinely different FAB cards ending
+   * 3749 became one and an entire AED 500 statement was discarded rather than
+   * merged, because computeOpenDues keeps one row per (account, dueDate).
+   *
+   * So the name stays, and the sub-brand case is handled by
+   * `sameCardAcrossBrands` below, which is allowed to ignore the name only
+   * when the two rows differ in BRAND while sharing an issuer — and only when
+   * both names are the generated "<Bank> <Card noun> •<last4>" shape, never a
+   * name a human chose.
    */
   const identityOf = (a: Account): string =>
     [
       a.kind,
       a.cardType ?? '-',
       a.last4 ?? '-',
-      // Issuer, not brand: "Liv Credit Card •8575" and "Emirates NBD Credit
-      // Card •8575" differ in both bankName and name while being one card.
       issuerIdentityForName(a.bankName) ?? '-',
+      a.name.trim().toLowerCase(),
     ].join('|');
+
+  /**
+   * One card described by two brands of the same issuer — Liv and Emirates
+   * NBD. Both names must be generated, because a name the user or the bank
+   * chose ("FAB Cashback Card") is a statement that these are different
+   * products.
+   */
+  const sameCardAcrossBrands = (a: Account, b: Account): boolean =>
+    a.kind === 'card' &&
+    b.kind === 'card' &&
+    a.cardType === b.cardType &&
+    a.last4 === b.last4 &&
+    bankIdentityForName(a.bankName) !== bankIdentityForName(b.bankName) &&
+    issuerIdentityForName(a.bankName) === issuerIdentityForName(b.bankName) &&
+    generatedName(a) &&
+    generatedName(b);
+
+  /**
+   * Positive evidence that two rows are two INSTRUMENTS, not one recorded
+   * twice: statements falling due on the same day for different totals. One
+   * card cannot owe two different amounts on one date.
+   */
+  const contradict = (rows: Account[]): boolean => {
+    const byDate = new Map<string, number>();
+    for (const r of rows) {
+      for (const d of state.cardDues) {
+        if (d.accountId !== r.id) continue;
+        const seen = byDate.get(d.dueDate);
+        if (seen !== undefined && seen !== d.totalDueFils) return true;
+        byDate.set(d.dueDate, d.totalDueFils);
+      }
+    }
+    return false;
+  };
 
   for (const group of dupes) {
     const substantive = group.filter((a) => !isEmptyArtifact(a));
@@ -129,11 +173,17 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
     // quoted balance is the one that stands.
     const byIdentity = new Map<string, Account[]>();
     for (const a of substantive) {
-      const key = identityOf(a);
+      // A sub-brand row joins its issuer's bucket despite the differing name.
+      const twin = [...byIdentity.values()]
+        .flat()
+        .find((b) => sameCardAcrossBrands(a, b));
+      const key = twin ? identityOf(twin) : identityOf(a);
       byIdentity.set(key, [...(byIdentity.get(key) ?? []), a]);
     }
     for (const clones of byIdentity.values()) {
       if (clones.length < 2) continue;
+      // Two statements owed on one date for different totals is two cards.
+      if (contradict(clones)) continue;
       // Prefer the row filed under the ISSUER itself over a sub-brand: the
       // card is an Emirates NBD card that Liv also talks about, and its
       // statements name Emirates NBD. Then the most recently quoted balance.
