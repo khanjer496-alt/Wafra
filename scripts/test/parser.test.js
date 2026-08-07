@@ -3867,5 +3867,94 @@ t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBA
     typeof PARSER_VERSION === 'number' && PARSER_VERSION > 9, String(PARSER_VERSION));
 }
 
+/* ── a merchant rule may not cross the direction it was chosen under ──────
+ *
+ * `EXPENSE_CATEGORIES` and `INCOME_CATEGORIES` are disjoint, and the entry
+ * sheet draws one set or the other according to the row's type. So a rule that
+ * puts `dining` on a credit does not merely mis-file the row, it puts the row
+ * OFF-LIST: reopen that refund and the sheet shows Salary and Business with
+ * neither selected, and the category the row actually holds is invisible to
+ * the person who came to fix it.
+ *
+ * `overrideAppliesTo` in uncategorised.ts has refused to do this on the
+ * bulk-rewrite path since c79a2d6. `categoryOf` consulted the override table
+ * BEFORE its `type === 'income'` branch and so did it anyway — on the path
+ * that decides every future row, which is the one the screen actually promises
+ * ("future imports from {merchant} will use this category").
+ */
+{
+  const { guessCategory, overrideFitsDirection } = require('./build/sms-parser');
+  const { EXPENSE_CATEGORIES, INCOME_CATEGORIES } = require('./build/categories');
+
+  ok('an expense rule does not file a credit',
+    guessCategory('TALABAT', 'income', { talabat: 'dining' }, 'TALABAT') !== 'dining',
+    guessCategory('TALABAT', 'income', { talabat: 'dining' }, 'TALABAT'));
+  ok('the credit falls through to the income rules instead',
+    guessCategory('TALABAT', 'income', { talabat: 'dining' }, 'TALABAT') ===
+      guessCategory('TALABAT', 'income', {}, 'TALABAT'));
+  ok('an income rule does not file a purchase',
+    guessCategory('TALABAT', 'expense', { talabat: 'salary' }, 'TALABAT') !== 'salary',
+    guessCategory('TALABAT', 'expense', { talabat: 'salary' }, 'TALABAT'));
+
+  // Not "expenses only": correcting a credit from Business to Salary in the
+  // entry sheet offers to remember that merchant, so an income rule is
+  // reachable and has to go on working for that merchant's future credits.
+  ok('an income rule still files a credit',
+    guessCategory('SOME PAYER', 'income', { 'some payer': 'salary' }, 'SOME PAYER') === 'salary');
+  ok('an expense rule still files a purchase',
+    guessCategory('SOME SHOP', 'expense', { 'some shop': 'dining' }, 'SOME SHOP') === 'dining');
+
+  // End to end, which is the shape that reached a real ledger: a reversal of a
+  // purchase at a merchant the user had pinned.
+  const reversal = parseSms(
+    'Your purchase of AED 250.00 at TALABAT with card ending 4833 has been reversed on 05/07/2026.',
+    { talabat: 'dining' },
+  );
+  ok('a reversal of a pinned purchase is not filed under the pin',
+    reversal.type === 'income' && reversal.categoryGuess !== 'dining',
+    JSON.stringify({ type: reversal.type, cat: reversal.categoryGuess }));
+  ok('and the category it does get is one the income chips can draw',
+    ['salary', 'business', 'other'].includes(reversal.categoryGuess), reversal.categoryGuess);
+
+  // A utility refund reads as "...has been credited... SEWA NO.-8765". That
+  // branch decided its direction from the message and its category from a
+  // hardcoded 'expense', so the credit was filed `utilities` — the same
+  // off-list harm with no override involved at all.
+  const utilityBody = 'AED 412.00 has been credited to your account no. 095-XXX11XXX-01 SEWA NO.-8765';
+  for (const [label, overrides] of [['on its own', undefined], ['with SEWA pinned', { sewa: 'utilities' }]]) {
+    const row = parseSms(utilityBody, overrides);
+    ok(`a credited utility row is not filed under an expense category (${label})`,
+      row !== null && row.type === 'income' &&
+        ['salary', 'business', 'other'].includes(row.categoryGuess),
+      JSON.stringify(row && { type: row.type, cat: row.categoryGuess }));
+  }
+
+  // The predicate and the chip lists are two spellings of one fact, and they
+  // live in different files because sms-parser.ts is bundled into the Worker
+  // and categories.ts reaches i18n. Assert they agree rather than trusting it.
+  ok('the parser and categories.ts agree on which categories are credits',
+    INCOME_CATEGORIES.every((c) => overrideFitsDirection(c.id, 'income')) &&
+      INCOME_CATEGORIES.every((c) => !overrideFitsDirection(c.id, 'expense')) &&
+      EXPENSE_CATEGORIES.every((c) => overrideFitsDirection(c.id, 'expense')) &&
+      EXPENSE_CATEGORIES.every((c) => !overrideFitsDirection(c.id, 'income')),
+    JSON.stringify({
+      income: INCOME_CATEGORIES.map((c) => c.id),
+      expense: EXPENSE_CATEGORIES.map((c) => c.id),
+    }));
+
+  // The pin is announced, so heal.ts can tell the user's answer from ours.
+  // `categoryDeliberate` cannot: it is true for a vocabulary rule too.
+  const pinned = parseSms(
+    'Purchase of AED 76.50 with Debit Card ending 1234 at SPINNEYS, DUBAI.',
+    { spinneys: 'home-services' },
+  );
+  ok('a category taken from the user\'s rule says so',
+    pinned.categoryGuess === 'home-services' && pinned.categoryPinned === true,
+    JSON.stringify({ cat: pinned.categoryGuess, pinned: pinned.categoryPinned }));
+  const unpinned = parseSms('Purchase of AED 76.50 with Debit Card ending 1234 at SPINNEYS, DUBAI.');
+  ok('a category the parser reached on its own does not',
+    unpinned.categoryPinned === undefined, String(unpinned.categoryPinned));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

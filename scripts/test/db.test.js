@@ -271,8 +271,16 @@ const store = stripComments(read('src/lib/store.tsx'));
  * Native. The production functions themselves execute; only their platform
  * dependencies are replaced with deterministic test doubles. Transpiling at
  * test time means a focused `node db.test.js` never reads a stale build.
+ *
+ * `realModules` swaps named doubles back for the shipping modules out of
+ * build/. Everything above this line wants the doubles — those assertions are
+ * about the migration's own control flow and a real parser would make them
+ * depend on the whole grammar. The pinned-merchant block at the bottom wants
+ * the opposite: it is about what the REAL parser, the REAL heal and the REAL
+ * override table do to each other across a launch, and every one of the three
+ * doubles hides the defect it exists to catch.
  */
-function loadHydrationExports() {
+function loadHydrationExports(realModules = {}) {
   const ts = require('typescript');
   const execute = (rel, requireModule) => {
     const filename = path.join(ROOT, rel);
@@ -362,6 +370,7 @@ function loadHydrationExports() {
     // exact drift the shared predicate exists to prevent.
     '@/lib/uncategorised': require('./build/uncategorised'),
     './balances': {},
+    ...realModules,
   };
   return execute('src/lib/store.tsx', (id) => {
     if (Object.hasOwn(modules, id)) return modules[id];
@@ -1606,6 +1615,168 @@ if (!workflow) {
     /::error::[^\n]*useSQLCipher|::error::[^\n]*SQLCipher/.test(workflow) &&
       /useSQLCipher[\s\S]{0,400}?exit 1/.test(workflow),
     'a warning in a 15-minute build log is not a guard');
+}
+
+/* ── a pinned category survives the release that renames its merchant ────
+ *
+ * WHAT HAPPENED. `setMerchantOverride` used to stamp `userEdited` on every row
+ * a merchant rule touched. That was laundering — hundreds of rows the user
+ * never opened counted as hand-corrected — and c79a2d6 rightly stopped it. But
+ * `userEdited` was also the thing that kept `healPatch` off those rows
+ * (heal.ts returns null on it), and nothing replaced it.
+ *
+ * The trigger is already in this repo. a2838e4 added five `SERVICE_NAMES`
+ * entries — Shein, Dr. Vranjes, Foot Locker, M.H. Alshaya — which is to say it
+ * changed the title the parser produces for messages ALREADY on users' phones.
+ * The retitle in `migratePersistedState` renames the row, the rule stays keyed
+ * on the spelling the row no longer carries, and three things break at once:
+ * the pin stops reaching the row and heal overwrites the user's category with
+ * the parser's; `raw` is dropped as "readable now", which is the only path any
+ * later release has back to an already-imported row; and `parserCoverage`
+ * moves the row out of `decided` and into `categorised`, crediting the user's
+ * own answer to the parser — the exact laundering c79a2d6 removed, arriving
+ * through the back door.
+ *
+ * The blast radius is the opposite of harmless. heal's deliberate-category
+ * branch requires `p.categoryGuess !== prior.category`, so it fires ONLY where
+ * the new parser is confidently different from what the user pinned — which is
+ * exactly why the user pinned it. It hits the highest-value pins.
+ *
+ * Nothing here is stubbed: the real parser renames the row, the real heal
+ * decides what to do with it, and the real coverage function scores it.
+ */
+{
+  const real = loadHydrationExports({
+    '@/lib/sms-parser': require('./build/sms-parser'),
+    '@/lib/heal': require('./build/heal'),
+    '@/lib/ledger': require('./build/ledger'),
+    '@/lib/markets': {
+      detectMarketId: () => 'AE',
+      setActiveMarket: require('./build/markets').setActiveMarket,
+    },
+  });
+  const { parserCoverage } = require('./build/accuracy');
+  const { normalizeServiceName } = require('./build/sms-parser');
+
+  const SHEIN_SMS =
+    'Purchase of AED 123.00 with card ending 1234 at WWW.SHEIN.COM on 01/07/2026';
+
+  // The premise, asserted rather than assumed: this release renames the row.
+  // If a future edit drops the Shein rule this block would pass vacuously.
+  ok('the parser renames this merchant, which is what puts the pin at risk',
+    normalizeServiceName('Www.shein.com') === 'Shein',
+    String(normalizeServiceName('Www.shein.com')));
+
+  const onDisk = () => ({
+    transactions: [
+      // The pinned row. `groceries` is the user's answer; the parser reads
+      // this merchant as `shopping`, which is what makes heal's deliberate
+      // branch fire. No `userEdited` — c79a2d6 stopped setting it, and this
+      // fix must not put it back.
+      {
+        id: 'pinned', type: 'expense', amountFils: 12300, category: 'groceries',
+        accountId: 'main', title: 'Www.shein.com', date: '2026-07-01',
+        source: 'sms', raw: SHEIN_SMS,
+      },
+      // A row nobody pinned, carried alongside so this cannot pass by turning
+      // heal off.
+      {
+        id: 'unpinned', type: 'expense', amountFils: 4500, category: 'other',
+        accountId: 'main', title: 'Card purchase', date: '2026-07-02',
+        source: 'sms',
+        raw: 'Purchase of AED 45.00 with card ending 1234 at CARREFOUR, DUBAI on 02/07/2026',
+      },
+    ],
+    merchantOverrides: { 'www.shein.com': 'groceries' },
+    marketId: 'AE',
+  });
+
+  const before = onDisk();
+  const coverageBefore = parserCoverage(before);
+  const after = real.migratePersistedState(onDisk());
+  const pinned = after.transactions.find((t) => t.id === 'pinned');
+  const unpinned = after.transactions.find((t) => t.id === 'unpinned');
+  const coverageAfter = parserCoverage(after);
+
+  ok('the row still takes the parser\'s better name',
+    pinned.title === 'Shein', pinned.title);
+  ok('but the category the user pinned survives the rename',
+    pinned.category === 'groceries', pinned.category);
+  ok('and the pin is not laundered back into a hand edit',
+    pinned.userEdited === undefined, String(pinned.userEdited));
+  ok('the raw message survives, so a later release can still reach this row',
+    pinned.raw === SHEIN_SMS, String(pinned.raw));
+
+  // The rule follows the merchant. This is the half a per-row marker cannot
+  // do: without it every FUTURE message from this shop arrives titled "Shein",
+  // misses a rule keyed on "www.shein.com", and the screen's promise — "future
+  // imports from {merchant} will use this category" — quietly stops holding.
+  ok('the merchant rule is re-keyed onto the name the parser now produces',
+    after.merchantOverrides.shein === 'groceries',
+    JSON.stringify(after.merchantOverrides));
+  ok('and the old key is kept, so a rescan of an old spelling still matches',
+    after.merchantOverrides['www.shein.com'] === 'groceries',
+    JSON.stringify(after.merchantOverrides));
+
+  // Symptom (b): the same laundering c79a2d6 was written to remove.
+  ok('the user\'s answer is not re-credited to the parser',
+    coverageAfter.decided === coverageBefore.decided &&
+      coverageAfter.categoryMeasured === coverageBefore.categoryMeasured,
+    JSON.stringify({ before: coverageBefore, after: coverageAfter }));
+
+  // Heal is still doing its job on everything else.
+  ok('an unpinned row is still healed by the same pass',
+    unpinned.title === 'Carrefour' && unpinned.category === 'groceries',
+    JSON.stringify({ title: unpinned.title, category: unpinned.category }));
+  ok('and its raw IS dropped, because the parser really did learn that one',
+    unpinned.raw === undefined, String(unpinned.raw));
+
+  // Re-keying is idempotent and never overwrites an answer the user gave under
+  // the canonical name themselves.
+  const twice = real.migratePersistedState(real.migratePersistedState(onDisk()));
+  ok('running the migration twice changes nothing further',
+    twice.merchantOverrides.shein === 'groceries' &&
+      twice.transactions.find((t) => t.id === 'pinned').category === 'groceries',
+    JSON.stringify(twice.merchantOverrides));
+
+  const bothKeys = onDisk();
+  bothKeys.merchantOverrides = { 'www.shein.com': 'groceries', shein: 'shopping' };
+  const kept = real.migratePersistedState(bothKeys);
+  ok('an existing answer under the canonical key is not overwritten',
+    kept.merchantOverrides.shein === 'shopping',
+    JSON.stringify(kept.merchantOverrides));
+
+  // A rule the LEDGER gives no evidence for is left where it is. SERVICE_NAMES
+  // matches on substrings — that is how one shop stops arriving under six
+  // spellings — so a hand-typed "Claudes Diner" canonicalises to Claude. Doing
+  // that to a row is what already happens and the user is looking at the row;
+  // doing it to a RULE would silently file their Claude subscription under
+  // whatever they pinned a diner as.
+  const handTyped = onDisk();
+  handTyped.transactions = [{
+    id: 'typed', type: 'expense', amountFils: 6000, category: 'dining',
+    accountId: 'main', title: 'Claudes Diner', date: '2026-07-03',
+    source: 'sms', userEdited: true, titleEdited: true,
+  }];
+  handTyped.merchantOverrides = { 'claudes diner': 'dining' };
+  const notMoved = real.migratePersistedState(handTyped);
+  ok('a rule the parser never produced a title for is not re-keyed',
+    notMoved.merchantOverrides.claude === undefined,
+    JSON.stringify(notMoved.merchantOverrides));
+
+  // ...but a parser-owned row under the same name IS evidence, so the rule
+  // moves. This is the case the whole block exists for and it must not be shut
+  // off by the guard above.
+  const evidenced = onDisk();
+  evidenced.transactions = [{
+    id: 'parsed', type: 'expense', amountFils: 6000, category: 'dining',
+    accountId: 'main', title: 'Claudes Diner', date: '2026-07-03', source: 'sms',
+  }];
+  evidenced.merchantOverrides = { 'claudes diner': 'dining' };
+  const moved = real.migratePersistedState(evidenced);
+  ok('...but a rule the parser DID title a row with is re-keyed',
+    moved.merchantOverrides.claude === 'dining',
+    JSON.stringify(moved.merchantOverrides));
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

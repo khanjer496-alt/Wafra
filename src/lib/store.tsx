@@ -143,6 +143,79 @@ const PERSISTED_INCOME_ORIGINATOR_RE =
 export function migratePersistedState(
   parsed: Partial<Omit<AppState, 'hydrated'>>,
 ): Partial<Omit<AppState, 'hydrated'>> {
+  // A merchant rule is keyed on the TITLE, and the parser renames titles.
+  //
+  // `normalizeServiceName` is how one shop stops arriving under six spellings,
+  // and every release adds to it — a2838e4 alone added Shein, Dr. Vranjes,
+  // Foot Locker and M.H. Alshaya, which is to say it changed the title the
+  // parser produces for messages ALREADY on users' phones. The retitle below
+  // then rewrites those rows, and the rule the user set under the old spelling
+  // is left keyed on a string nothing carries any more. Three things break at
+  // once, and none of them is visible:
+  //
+  //  - the pin stops reaching the row, so heal — which now runs on pinned rows
+  //    at all, since `setMerchantOverride` rightly no longer stamps
+  //    `userEdited` — finds the parser's answer disagreeing with the stored
+  //    one and overwrites the user's category with it;
+  //  - `parserCoverage` keys `decided` on `merchantOverrides[title]`, so the
+  //    row moves out of "the user answered this" and into "the parser got it
+  //    right" — the user's own answer credited to us, which is precisely the
+  //    laundering c79a2d6 was written to remove;
+  //  - and every FUTURE message from that shop misses the rule, so the
+  //    screen's promise ("future imports from {merchant} will use this
+  //    category") quietly stops being true.
+  //
+  // The fix is to move the rule with the merchant rather than to defend the
+  // row: a pin on "www.shein.com" IS a pin on Shein, because the same
+  // canonicalisation that renamed the row maps the key onto the same name.
+  // Keyed on the merchant, the rule reaches the retitled rows, the new rows,
+  // and the coverage figure, all three, without a per-row marker that only
+  // rows already in the ledger could ever carry.
+  //
+  // ADDITIVE AND IDEMPOTENT. The old key is kept — a rescan of an old message
+  // can still produce the old title, and `isCandidate` reads the map to decide
+  // it has already asked about that merchant — and an existing answer under
+  // the canonical key is never overwritten, so a user who has pinned "Shein"
+  // directly keeps the answer they gave last. Runs before the transaction
+  // transforms below because the retitle, the re-file and the reparse all read
+  // this map.
+  //
+  // AND IT MOVES ONLY ON EVIDENCE. `SERVICE_NAMES` matches on substrings, by
+  // design — that is how one shop stops arriving under six spellings — so
+  // "Shein Wholesale" canonicalises to Shein and "Anthropic Consulting" to
+  // Claude. Run over a TITLE that is exactly what happens today, one row at a
+  // time, and the row is what the user is looking at. Run over a RULE it would
+  // be silently deciding the category of every future row from a merchant the
+  // user never named: a hand-typed "Claudes Diner" pinned to Dining would
+  // quietly file their Claude subscription as Dining forever. Hand-typed
+  // titles are the gap, because `editTransaction` marks that row `userEdited`
+  // and the retitle map skips it, so the parser's canonicalisation never ran
+  // on the string this key came from.
+  //
+  // So the rule only moves where the LEDGER shows the parser producing that
+  // merchant: some parser-owned row is titled with the old key (it is about to
+  // be renamed below) or already carries the canonical name (it was renamed by
+  // an earlier launch, which is the state a damaged ledger is in). Both are the
+  // cases this exists for; a key with neither is a name only the user has ever
+  // written, and nothing licenses moving it.
+  if (parsed.merchantOverrides) {
+    const parserTitles = new Set(
+      (parsed.transactions ?? [])
+        .filter((t) => t.source === 'sms' && !t.userEdited)
+        .map((t) => t.title.trim().toLowerCase()),
+    );
+    const rekeyed = { ...parsed.merchantOverrides };
+    for (const [key, category] of Object.entries(parsed.merchantOverrides)) {
+      const canonical = normalizeServiceName(key);
+      if (!canonical) continue;
+      const canonicalKey = canonical.trim().toLowerCase();
+      if (canonicalKey === key || rekeyed[canonicalKey] !== undefined) continue;
+      if (!parserTitles.has(key) && !parserTitles.has(canonicalKey)) continue;
+      rekeyed[canonicalKey] = category;
+    }
+    parsed.merchantOverrides = rekeyed;
+  }
+
   if (parsed.transactions) {
     parsed.transactions = parsed.transactions
       .map((t) =>

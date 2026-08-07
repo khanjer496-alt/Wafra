@@ -116,10 +116,24 @@ export function healPatch(
       (catAfter === 'other' && !p.categoryDeliberate && !STRUCTURAL_TITLES.has(titleAfter)));
   if (stillLow) {
     if (!prior.raw && p.raw) patch.raw = p.raw.slice(0, 300);
-  } else if (prior.raw) {
+  } else if (prior.raw && !p.categoryPinned) {
     // The row is readable now — a name, a category, or a direction correction
     // landed above. Drop the source text, or the accuracy report keeps offering
     // this format for the user to send in long after the parser learned it.
+    //
+    // NOT when the only thing making it readable is the user's own merchant
+    // rule. `categoryDeliberate` is true for a pin exactly as it is for a
+    // vocabulary rule, so `stillLow` reads a pinned row as understood and this
+    // branch deleted its raw text — which is the ONLY path any later release
+    // has back to an already-imported row, since heal can rewrite a row but
+    // never delete one. It fired on every pinned row on the first launch after
+    // c79a2d6 stopped `setMerchantOverride` stamping `userEdited` (which had
+    // returned null at the top of this function and kept the raw by accident),
+    // and it fired hardest where it hurt most: a pinned row is by definition
+    // one the parser could not categorise, so it is one of the rows most
+    // likely to be carrying raw in the first place. The parser has still not
+    // learned this format — the user papered over it merchant by merchant —
+    // so the accuracy report is right to go on offering it.
     patch.raw = null;
   }
 

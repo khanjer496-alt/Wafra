@@ -1051,6 +1051,57 @@ const afterFirst = apply(BASE, first);
     healPlan.batch.updates);
 }
 
+/* ── and the rule stops at the direction it was chosen under ─────────────
+ *
+ * `applyMerchantOverride` is the fourth consumer of the blast-radius rule that
+ * `overrideAppliesTo` states in uncategorised.ts, and the only one that was
+ * never wired to it. The store's reducer, the categorise screen's count and
+ * the entry sheet's count all refuse to put an expense category on a credit —
+ * `EXPENSE_CATEGORIES` and `INCOME_CATEGORIES` are disjoint, so the row goes
+ * OFF-LIST and the sheet draws the income chips with none of them selected.
+ * This path did it anyway, on every iPhone, for every refund of a pinned
+ * merchant. */
+{
+  const ts = T0 + 6_500_000;
+  const state = {
+    ...BASE,
+    accounts: [{
+      id: 'cash', name: 'Current account', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    merchantOverrides: { talabat: 'groceries', 'acme payroll': 'salary' },
+  };
+  const relay = (over) => ({
+    kind: 'transaction', type: 'expense', amountFils: 4200, currency: 'AED',
+    merchant: 'Talabat', date: '2026-07-20', dueDay: null, minDueFils: null,
+    card: null, reference: null, transferHint: false, snapshotFils: null,
+    snapshotKind: null, categoryGuess: 'dining', categoryDeliberate: true,
+    raw: undefined, sender: 'FAB', channel: 'inbox', captureSource: 'shortcut',
+    ...over,
+  });
+
+  const refund = relay({ type: 'income', categoryGuess: 'other', smsTs: ts });
+  const refundPlan = buildImportPlan([refund], state, ts);
+  ok('a Groceries rule does not file the refund of that merchant',
+    refundPlan.batch.transactions[0]?.category === 'other',
+    refundPlan.batch.transactions[0]);
+
+  // The mirror: an income rule must not reach a purchase either.
+  const purchase = relay({ merchant: 'Acme Payroll', categoryGuess: 'other', smsTs: ts + 1000 });
+  const purchasePlan = buildImportPlan([purchase], state, ts + 1000);
+  ok('a Salary rule does not file a purchase from the same name',
+    purchasePlan.batch.transactions[0]?.category === 'other',
+    purchasePlan.batch.transactions[0]);
+
+  // Same direction, still applied — the feature this path exists for.
+  const credit = relay({
+    merchant: 'Acme Payroll', type: 'income', categoryGuess: 'business', smsTs: ts + 2000,
+  });
+  const creditPlan = buildImportPlan([credit], state, ts + 2000);
+  ok('an income rule still reaches a credit from that merchant',
+    creditPlan.batch.transactions[0]?.category === 'salary',
+    creditPlan.batch.transactions[0]);
+}
+
 /* ── the watermark ───────────────────────────────────────────────────── */
 
 {

@@ -3,7 +3,7 @@ import { bankBrandForName, bankFromSender, bankIdentityForName } from '@/lib/mar
 import { duplicateGuard } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
-import { STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
+import { overrideFitsDirection, STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
 import type { Account, AppState, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
@@ -402,11 +402,22 @@ export function buildImportPlan(
     if (p.raw !== undefined) return p;
     const hit = overrides[p.merchant.trim().toLowerCase()];
     if (!hit || hit === p.categoryGuess) return p;
+    // The SAME direction check `categoryOf` makes, because this is the same
+    // decision taken on the other platform. Without it a Talabat refund
+    // arriving over the relay was filed `dining` — a category the entry sheet
+    // will not draw for a credit, so the row's real category is invisible to
+    // the person who opens it. `overrideFitsDirection` states why.
+    if (!overrideFitsDirection(hit, p.type)) return p;
     // `categoryDeliberate` is what the parser sets on an override hit, and it
     // is load-bearing in both directions: it keeps the row out of the
     // low-confidence accuracy report, and it is the flag heal.ts requires
     // before a rescan may correct a stored category that is not `other`.
-    return { ...p, categoryGuess: hit, categoryDeliberate: true };
+    //
+    // `categoryPinned` is the narrower fact — this category is the USER's, not
+    // ours — and heal.ts needs it to know not to treat the row as one the
+    // parser learned to read. Set here for the same reason `categoryOf` sets
+    // it on the Android path: it is the same pin, applied a step later.
+    return { ...p, categoryGuess: hit, categoryDeliberate: true, categoryPinned: true };
   };
 
   // Prefer the fuller SMS when a notification and SMS for one event are in

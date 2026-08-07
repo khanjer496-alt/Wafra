@@ -219,6 +219,20 @@ export interface ParsedSms {
    * like a parser failure — 30-odd of them in one export.
    */
   categoryDeliberate?: boolean;
+  /**
+   * True when `categoryGuess` is the USER's stored merchant rule, not ours.
+   *
+   * `categoryDeliberate` cannot answer this: it is true for a vocabulary rule
+   * and for a pin alike, which is right for the accuracy report ("the parser
+   * was not asked") and wrong for `healPatch`, which reads it as "the row is
+   * readable now" and drops the raw SMS. Dropping it on a PINNED row destroys
+   * the only path back to an already-imported row — heal can rewrite a row but
+   * never delete one, so `raw` plus a PARSER_VERSION bump is the only reach
+   * later releases have — and it does so on exactly the rows the user cared
+   * enough about to answer. Absent everywhere else, including on the relay,
+   * where the Worker parses with no overrides at all.
+   */
+  categoryPinned?: boolean;
   raw: string;
 }
 
@@ -2222,6 +2236,48 @@ const TRUNCATED_DESCRIPTOR_KEYWORDS: [RegExp, CategoryId][] = [
 const ORIGINATOR_RE = /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b|inc\b)/i;
 
 /**
+ * The only categories a CREDIT can be filed under.
+ *
+ * Spelled here rather than imported from categories.ts because this module is
+ * bundled into the Cloudflare Worker (`server/src/index.ts` imports
+ * `parseSms`), and categories.ts reaches i18n.ts — 140 KB of translation
+ * dictionaries — and the icon type in `src/components`. Neither belongs in a
+ * Worker, and `categoryOf` below is already the authority on this fact: its
+ * income branch can return `salary`, `business` or `other` and nothing else.
+ * `INCOME_CATEGORIES` in categories.ts is the same list minus `other`, and
+ * parser.test.js asserts the two agree so they cannot drift.
+ */
+const CREDIT_CATEGORIES = new Set<CategoryId>(['salary', 'business']);
+
+/**
+ * May a merchant rule pinned to `category` decide a row moving in this
+ * direction?
+ *
+ * WHY A MERCHANT RULE NEEDS A DIRECTION CHECK AT ALL. `EXPENSE_CATEGORIES` and
+ * `INCOME_CATEGORIES` are disjoint, and the entry sheet renders one set or the
+ * other according to the row's `type`. So a merchant rule that puts `dining`
+ * on a credit does not merely mis-file the row, it puts the row OFF-LIST:
+ * reopen that Talabat refund and the sheet draws the income chips with none of
+ * them selected, and the category the row actually holds is invisible to the
+ * person who came to fix it.
+ *
+ * `overrideAppliesTo` in uncategorised.ts has excluded non-expense rows from
+ * the bulk-rewrite path for exactly that reason since c79a2d6. This is the
+ * same rule on the path that decides every FUTURE row — the one the screen
+ * actually promises ("future imports from {merchant} will use this category"),
+ * and the one that was never wired to it.
+ *
+ * It is a direction MATCH rather than a flat "expenses only" because an income
+ * override is reachable and legitimate: correcting a credit from Business to
+ * Salary in the entry sheet offers to remember that merchant, and the rule it
+ * writes should go on working for that merchant's future credits. What must
+ * never happen is a category crossing the direction it was chosen under.
+ */
+export function overrideFitsDirection(category: CategoryId, type: TransactionType): boolean {
+  return type === 'income' ? CREDIT_CATEGORIES.has(category) : !CREDIT_CATEGORIES.has(category);
+}
+
+/**
  * The category, AND whether the parser actually decided it.
  *
  * `other` means two opposite things and the caller has to be able to tell them
@@ -2231,16 +2287,26 @@ const ORIGINATOR_RE = /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b
  * the report itself uses it to decide whether a row is an unread format. Both
  * treated the two as one and reported every deliberate `other` as a parser
  * failure — 30-odd eToro and Capital.com rows in a single export.
+ *
+ * `pinned` is the third answer, and it is a different question from
+ * `deliberate`: it says the category came from the USER's merchant rule rather
+ * than from any rule of ours. `deliberate` is true for both, which is correct
+ * for the accuracy report and wrong for `healPatch` — see the raw-retention
+ * branch there for what it cost.
  */
 function categoryOf(
   text: string,
   type: TransactionType,
   overrides?: Record<string, CategoryId>,
   merchant?: string,
-): { id: CategoryId; deliberate: boolean } {
+): { id: CategoryId; deliberate: boolean; pinned?: boolean } {
   if (overrides && merchant) {
     const hit = overrides[merchant.trim().toLowerCase()];
-    if (hit) return { id: hit, deliberate: true };
+    // A rule pinned on a purchase does not get to file the refund of that
+    // purchase. See `overrideFitsDirection`.
+    if (hit && overrideFitsDirection(hit, type)) {
+      return { id: hit, deliberate: true, pinned: true };
+    }
   }
   // This function is exported and called from the store with a transaction
   // TITLE that never went through parseSms, so it cannot assume anything has
@@ -3348,6 +3414,7 @@ export function parseSms(
     if (!amountFils) return null;
     const payee = billerPay[1].trim().replace(/\s{2,}/g, ' ');
     const merchant = normalizeServiceName(payee) ?? titleCase(payee);
+    const cat = categoryOf(payee, 'expense', overrides, merchant);
     return {
       kind: 'transaction',
       type: 'expense',
@@ -3361,9 +3428,8 @@ export function parseSms(
       snapshotFils,
       snapshotKind,
       // A named biller beats the default; "Du" should still read as telecom.
-      categoryGuess: guessCategory(payee, 'expense', overrides, merchant) === 'other'
-        ? 'utilities'
-        : guessCategory(payee, 'expense', overrides, merchant),
+      categoryGuess: cat.id === 'other' ? 'utilities' : cat.id,
+      ...(cat.pinned ? { categoryPinned: true as const } : {}),
       currency,
       reference,
       raw: source,
@@ -3390,9 +3456,18 @@ export function parseSms(
     if (amountFils) {
       const payee = billerRef[1].trim();
       const merchant = normalizeServiceName(payee) ?? titleCase(payee);
+      // This branch is the one shape here that can be a CREDIT — a utility
+      // refunding a closed account reads as "AED 412.00 has been credited ...
+      // SEWA NO.-8765". Both lines below used to read `'expense'` regardless,
+      // so that credit was filed `utilities`: a category the entry sheet does
+      // not draw for an income row, leaving the user looking at Salary and
+      // Business with neither selected. The direction is decided once and
+      // both the row and its category are asked the same question.
+      const type = CREDIT_WORDS.test(raw) && !DEBIT_WORDS.test(raw) ? 'income' : 'expense';
+      const cat = categoryOf(payee, type, overrides, merchant);
       return {
         kind: 'transaction',
-        type: CREDIT_WORDS.test(raw) && !DEBIT_WORDS.test(raw) ? 'income' : 'expense',
+        type,
         amountFils,
         merchant,
         date,
@@ -3402,9 +3477,11 @@ export function parseSms(
         transferHint: false,
         snapshotFils,
         snapshotKind,
-        categoryGuess: guessCategory(payee, 'expense', overrides, merchant) === 'other'
-          ? 'utilities'
-          : guessCategory(payee, 'expense', overrides, merchant),
+        // `utilities` is the biller default and therefore an EXPENSE default;
+        // on a credit `categoryOf` has already answered salary/business/other
+        // deliberately and there is nothing to fall back to.
+        categoryGuess: type === 'expense' && cat.id === 'other' ? 'utilities' : cat.id,
+        ...(cat.pinned ? { categoryPinned: true as const } : {}),
         currency,
         reference,
         raw: source,
@@ -3445,6 +3522,7 @@ export function parseSms(
     const biller = channel ? (RECEIPT_BILLERS.find(([re]) => re.test(channel))?.[1] ?? null) : null;
     const merchant = biller ?? `Payment to •${last4}`;
     if (amountFils > 0) {
+      const cat = categoryOf(raw, 'expense', overrides, merchant);
       return {
         kind: 'transaction',
         type: 'expense',
@@ -3457,7 +3535,8 @@ export function parseSms(
         transferHint: false,
         snapshotFils,
         snapshotKind,
-        categoryGuess: guessCategory(raw, 'expense', overrides, merchant),
+        categoryGuess: cat.id,
+        ...(cat.pinned ? { categoryPinned: true as const } : {}),
         currency,
         reference,
         raw: source,
@@ -3970,6 +4049,7 @@ export function parseSms(
     // override on that title still wins, which is the one thing that should
     // always beat a structural guess.
     categoryGuess: cat.id,
+    ...(cat.pinned ? { categoryPinned: true as const } : {}),
     // A row the parser named STRUCTURALLY — a savings sweep, "Transfer to
     // Khalid Rashid", a bank transfer — is understood even though no spending
     // category applies to it. Money moving between places has no category, and
