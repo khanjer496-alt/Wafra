@@ -113,6 +113,10 @@ ok('lazy tab loading is not disabled',
 for (const rel of TAB_SCREENS) {
   const src = stripComments(read(rel));
 
+  ok(`${rel}: clips offscreen Android ScrollView children`,
+    /removeClippedSubviews=\{Platform\.OS === 'android'\}/.test(src),
+    'detached tabs must not reissue every below-the-fold native draw command on re-attach');
+
   /**
    * The whole guard. Every `entering=` in a tab screen must be wrapped, so the
    * Android short-circuit is impossible to route around by copying the line
@@ -214,6 +218,42 @@ ok('useScreenEntering still honours Reduce Motion',
   /reducedMotion/.test(hook) && /useReducedMotion/.test(hook),
   'Flow and Bills were not checking Reduce Motion before this hook existed — routing them ' +
     'through it is what fixed that, and dropping the check would undo it silently');
+
+const flow = stripComments(read('src/app/(tabs)/flow.tsx'));
+ok('Flow groups the six-month chart in one ledger pass',
+  /summarizeCashflowMonths\(state\.transactions, keys, liveAccounts, internal\)/.test(flow) &&
+    !/summarizeMonth\(state\.transactions, k, liveAccounts, internal\)/.test(flow),
+  'six separate full-ledger summaries stall first visit on large imported histories');
+ok('Flow reuses category totals instead of scanning once per budget',
+  /spentByCategory\.get\(b\.category\)/.test(flow) &&
+    !/spentInMonthForCategory/.test(flow),
+  'budget count must not multiply the cost of opening Flow');
+ok('Flow defers below-the-fold insight analysis until after Android navigation',
+  /InteractionManager\.runAfterInteractions/.test(flow) &&
+    /Platform\.OS === 'android'[\s\S]*deferredInsights/.test(flow),
+  'subscription and comparison analysis must not block the first visible tab draw');
+
+// ---------------------------------------------------------------------------
+// Fonts: native binaries embed them; JavaScript must not load them twice.
+// ---------------------------------------------------------------------------
+
+{
+  const appConfig = JSON.parse(read('app.json')).expo;
+  const fontPlugin = appConfig.plugins.find(
+    (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-font',
+  );
+  const configuredFonts = fontPlugin?.[1]?.fonts ?? [];
+  const root = stripComments(read('src/app/_layout.tsx'));
+  ok('all eight product fonts are embedded by the expo-font config plugin',
+    configuredFonts.length === 8,
+    `configured ${configuredFonts.length}; native rendering depends on every Latin, mono and Arabic face`);
+  ok('native startup does not reload embedded fonts through JavaScript',
+    /WEB_FONTS.*from '@\/lib\/web-fonts'/.test(root) &&
+      /Platform\.OS === 'web' && !webFontsLoaded/.test(root) &&
+      /export const WEB_FONTS = \{\};/.test(stripComments(read('src/lib/web-fonts.ts'))) &&
+      !/SplashScreen\.(?:preventAutoHideAsync|hideAsync)/.test(root),
+    'Expo v55 makes config-plugin fonts available before React mounts; a second useFonts/splash gate delays first paint');
+}
 
 // ---------------------------------------------------------------------------
 // The upstream behaviour this rests on. Skipped rather than failed when

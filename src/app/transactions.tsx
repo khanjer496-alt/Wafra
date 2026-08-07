@@ -24,10 +24,24 @@ import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
+import {
+  formatAED,
+  friendlyDate,
+  monthKey,
+  shiftMonthKey,
+  shortDate,
+  toISODate,
+  wholeFilsAsShown,
+} from '@/lib/format';
 import { inPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import {
+  countsInTotals,
+  internalTransferIds,
+  isTransfer,
+  isUnassignedAccountRef,
+  liveAccountIds,
+} from '@/lib/ledger';
 import { tapped } from '@/lib/haptics';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
@@ -35,6 +49,7 @@ import { t, tf, type StringKey } from '@/lib/i18n';
 
 type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 type SortMode = 'newest' | 'oldest' | 'largest';
+const UNASSIGNED_FILTER = '__wafra-filter-unassigned__';
 
 interface Filters {
   type: TransactionType | null;
@@ -83,11 +98,13 @@ export default function TransactionsScreen() {
     type: typeParam,
     category: categoryParam,
     merchant: merchantParam,
+    review: reviewParam,
   } = useLocalSearchParams<{
     source?: string;
     type?: string;
     category?: string;
     merchant?: string;
+    review?: string;
   }>();
   // One category, or several — Flow's pooled "N more" slice hands over every
   // category behind it, so the drill-down covers exactly what the row totalled.
@@ -125,9 +142,12 @@ export default function TransactionsScreen() {
     // reads "Groceries · 16% · 1,774" FOR THE SELECTED PERIOD. Landing on
     // all-time rows would show a list that cannot add up to the figure that
     // was tapped, which is the whole class of bug this app has been fixing.
-    datePreset: source === 'sms' || merchantParam ? 'all' : 'selected',
+    datePreset: source === 'sms' || merchantParam || reviewParam === 'unassigned' ? 'all' : 'selected',
     // Home's In/Out figures deep-link here pre-filtered by type
     type: typeParam === 'income' || typeParam === 'expense' ? typeParam : null,
+    // Home's review warning is not a generic Activity link: it must land on
+    // every unresolved row, including one outside the selected month.
+    accountId: reviewParam === 'unassigned' ? UNASSIGNED_FILTER : null,
   }));
   const [sheetVisible, setSheetVisible] = useState(false);
   /** Which end of the custom range is currently open in the native picker. */
@@ -145,6 +165,11 @@ export default function TransactionsScreen() {
     (filters.minFils ? 1 : 0) +
     (merchantFilter ? 1 : 0);
 
+  const unassignedCount = useMemo(
+    () => state.transactions.filter((transaction) => isUnassignedAccountRef(transaction.accountId)).length,
+    [state.transactions],
+  );
+
   const filtered = useMemo(() => {
     const q = appliedQuery.trim().toLowerCase();
     const lastKey = shiftMonthKey(currentKey, -1);
@@ -154,7 +179,11 @@ export default function TransactionsScreen() {
       if (source === 'sms' && t.source !== 'sms') return false;
       if (merchantKey && t.title.trim().toLowerCase() !== merchantKey) return false;
       if (filters.type && t.type !== filters.type) return false;
-      if (filters.accountId && t.accountId !== filters.accountId) return false;
+      if (
+        filters.accountId === UNASSIGNED_FILTER
+          ? !isUnassignedAccountRef(t.accountId)
+          : filters.accountId && t.accountId !== filters.accountId
+      ) return false;
       if (filters.categories.size > 0 && !filters.categories.has(t.category)) return false;
       if (filters.minFils && t.amountFils < filters.minFils) return false;
       const k = monthKey(t.date);
@@ -194,9 +223,10 @@ export default function TransactionsScreen() {
 
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccountIds(state.accounts)),
-    [state.transactions, state.accounts],
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
   );
 
   const accountById = useMemo(
@@ -233,29 +263,43 @@ export default function TransactionsScreen() {
    * two of your own accounts read as AED 20,000 earned.
    */
   const counts = useCallback(
-    (t: Transaction) => !t.isTransfer && !internal.has(t.id),
-    [internal],
+    (t: Transaction) => countsInTotals(t, liveAccounts, internal),
+    [internal, liveAccounts],
   );
 
   const totalShown = useMemo(
     () =>
       filtered.reduce(
-        (s, t) => (counts(t) ? s + (t.type === 'expense' ? -t.amountFils : t.amountFils) : s),
+        (sum, transaction) =>
+          counts(transaction)
+            ? sum + wholeFilsAsShown(
+                transaction.type === 'expense' ? -transaction.amountFils : transaction.amountFils,
+              )
+            : sum,
         0,
       ),
     [filtered, counts],
   );
 
-  // Transfers are listed — they are real records and the user wants to find
-  // them — but they are money moving between your own accounts, so they do
-  // not count toward a total. The two were silently disagreeing: Home's
+  // Excluded rows are still listed — they are real records and the user wants
+  // to find and fix them — but the reason each one is absent from the total
+  // must be stated accurately. The two were silently disagreeing: Home's
   // "In AED 25,000" links here, a AED 3,000 card payment is an income-side
   // transfer, and the header read 25,000 above rows summing to 28,000. The
-  // rule is stated now rather than left for the user to work out.
-  const transfersShown = useMemo(
-    () => filtered.filter((t) => !counts(t)).length,
-    [filtered, counts],
-  );
+  // rule is stated now rather than left for the user to work out. Unassigned
+  // parser rows and archived accounts get their own labels instead of being
+  // falsely called transfers.
+  const excludedShown = useMemo(() => {
+    let transfers = 0;
+    let unassigned = 0;
+    let archived = 0;
+    for (const transaction of filtered) {
+      if (isTransfer(transaction) || internal.has(transaction.id)) transfers += 1;
+      else if (isUnassignedAccountRef(transaction.accountId)) unassigned += 1;
+      else if (!liveAccounts.has(transaction.accountId)) archived += 1;
+    }
+    return { transfers, unassigned, archived };
+  }, [filtered, internal, liveAccounts]);
 
   const sections = useMemo<DaySection[]>(() => {
     if (filters.sort === 'largest') {
@@ -270,7 +314,12 @@ export default function TransactionsScreen() {
     return [...byDay.entries()].map(([date, data]) => ({
       title: friendlyDate(date, todayISO),
       totalFils: data.reduce(
-        (s, t) => (counts(t) ? s + (t.type === 'expense' ? -t.amountFils : t.amountFils) : s),
+        (sum, transaction) =>
+          counts(transaction)
+            ? sum + wholeFilsAsShown(
+                transaction.type === 'expense' ? -transaction.amountFils : transaction.amountFils,
+              )
+            : sum,
         0,
       ),
       data,
@@ -289,6 +338,19 @@ export default function TransactionsScreen() {
   const clearFilters = () => {
     setMerchantFilter(null);
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
+  };
+
+  const reviewUnassigned = () => {
+    tapped();
+    setQuery('');
+    setMerchantFilter(null);
+    setFilters({
+      ...DEFAULT_FILTERS,
+      accountId: UNASSIGNED_FILTER,
+      categories: new Set(),
+      datePreset: 'all',
+    });
+    setSheetVisible(false);
   };
 
   const presetLabel: Record<DatePreset, string> = {
@@ -415,10 +477,22 @@ export default function TransactionsScreen() {
                     s: activeFilterCount === 1 ? '' : 's',
                   })}`
                 : ''}
-              {transfersShown > 0
+              {excludedShown.transfers > 0
                 ? ` · ${trf('transfersExcluded', {
-                    count: transfersShown,
-                    s: transfersShown === 1 ? '' : 's',
+                    count: excludedShown.transfers,
+                    s: excludedShown.transfers === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excludedShown.unassigned > 0
+                ? ` · ${trf('unassignedExcluded', {
+                    count: excludedShown.unassigned,
+                    s: excludedShown.unassigned === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excludedShown.archived > 0
+                ? ` · ${trf('archivedExcluded', {
+                    count: excludedShown.archived,
+                    s: excludedShown.archived === 1 ? '' : 's',
                   })}`
                 : ''}
             </ThemedText>
@@ -443,6 +517,36 @@ export default function TransactionsScreen() {
               )}
             </View>
           </View>
+
+          {unassignedCount > 0 && filters.accountId !== UNASSIGNED_FILTER && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={trf('reviewUnassignedCount', {
+                count: unassignedCount,
+                s: unassignedCount === 1 ? '' : 's',
+              })}
+              onPress={reviewUnassigned}
+              style={[
+                styles.reviewBanner,
+                { backgroundColor: `${theme.warning}14`, borderColor: `${theme.warning}55` },
+              ]}>
+              <View style={[styles.reviewIcon, { backgroundColor: `${theme.warning}22` }]}>
+                <Icon name="alert" size={17} color={theme.warning} />
+              </View>
+              <View style={styles.reviewCopy}>
+                <ThemedText type="smallBold">
+                  {trf('reviewUnassignedCount', {
+                    count: unassignedCount,
+                    s: unassignedCount === 1 ? '' : 's',
+                  })}
+                </ThemedText>
+                <ThemedText type="micro" themeColor="textSecondary">
+                  {tr('reviewUnassignedBody')}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+            </Pressable>
+          )}
         </View>
 
         <SectionList
@@ -614,6 +718,19 @@ export default function TransactionsScreen() {
               active={!filters.accountId}
               onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
             />
+            {unassignedCount > 0 && (
+              <Chip
+                label={`${tr('unassigned')} (${unassignedCount})`}
+                active={filters.accountId === UNASSIGNED_FILTER}
+                onPress={() => {
+                  if (filters.accountId === UNASSIGNED_FILTER) {
+                    setFilters((current) => ({ ...current, accountId: null }));
+                  } else {
+                    reviewUnassigned();
+                  }
+                }}
+              />
+            )}
             {state.accounts.map((account) => (
               <Chip
                 key={account.id}
@@ -769,6 +886,27 @@ const styles = StyleSheet.create({
     gap: Spacing.two + 2,
     // The figure is the point of the row; it never gives up space.
     flexShrink: 0,
+  },
+  reviewBanner: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.two + 2,
+    paddingVertical: Spacing.two,
+  },
+  reviewIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewCopy: {
+    flex: 1,
+    gap: 2,
   },
   listContent: {
     paddingHorizontal: Spacing.three,

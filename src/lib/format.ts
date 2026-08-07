@@ -22,6 +22,19 @@ function groupThousands(n: number): string {
 }
 
 /**
+ * The signed whole-dirham value a reader sees when decimals are hidden.
+ *
+ * JavaScript's `Math.round` is asymmetric for negative halves (`-1.5` becomes
+ * `-1`), while a transaction row formats the absolute amount and adds its sign
+ * separately (`-1.50` is shown as `-2`). Totals must use that same operation or
+ * a day containing a refund can disagree with the rows directly beneath it.
+ */
+export function wholeFilsAsShown(fils: number): number {
+  const rounded = Math.round(Math.abs(fils) / 100) * 100;
+  return fils < 0 ? -rounded : rounded;
+}
+
+/**
  * Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234".
  *
  * When the decimals are hidden the whole part is ROUNDED, not truncated.
@@ -35,7 +48,7 @@ export function formatAmount(fils: number, opts?: { decimals?: boolean }): strin
   const abs = Math.abs(Math.round(fils));
   const cents = abs % 100;
   const showDecimals = opts?.decimals ?? cents !== 0;
-  const whole = showDecimals ? Math.floor(abs / 100) : Math.round(abs / 100);
+  const whole = showDecimals ? Math.floor(abs / 100) : Math.abs(wholeFilsAsShown(fils)) / 100;
   // Take the sign from what is actually printed, not from the input. A net of
   // −20 fils rounds to zero at whole-dirham precision, and "AED -0" under
   // "Overspent so far this month" is not a number anyone recognizes — the
@@ -58,7 +71,7 @@ export function formatAmount(fils: number, opts?: { decimals?: boolean }): strin
  * For arithmetic, not display: keep using the raw fils.
  */
 export function totalAsShown(values: number[]): number {
-  return values.reduce((sum, v) => sum + Math.round(v / 100) * 100, 0);
+  return values.reduce((sum, value) => sum + wholeFilsAsShown(value), 0);
 }
 
 /** "AED 1,234.56" — currency symbol follows the active market. */

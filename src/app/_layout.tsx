@@ -1,10 +1,9 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { StyleSheet, useColorScheme, View } from 'react-native';
+import { Platform, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
 import { OnboardingGate } from '@/components/onboarding-gate';
@@ -13,6 +12,8 @@ import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
 import { PeriodProvider } from '@/lib/period-context';
 import { StoreProvider, useStore } from '@/lib/store';
+import { WEB_FONTS } from '@/lib/web-fonts';
+import { sweepStaleExportFiles } from '@/lib/file-sharing';
 // Required at module scope so expo-task-manager can load the wake-only relay
 // handler when iOS launches the JS bundle in the background.
 import '@/lib/background-relay';
@@ -56,38 +57,17 @@ function Direction({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Held until the faces are in memory. A money screen that paints in the system
-// font and then reflows into Geist Mono moves every figure sideways, which
-// reads as a glitch on the one screen that most needs to look exact.
-SplashScreen.preventAutoHideAsync().catch(() => {});
-
 export default function RootLayout() {
   const colorScheme = useColorScheme();
   const dark = colorScheme === 'dark';
   const palette = Colors[dark ? 'dark' : 'light'];
 
-  // Weight is a family here, not a `fontWeight`: Android applies no synthetic
-  // weights to a bundled face, so 400/500/600 have to be three separate files.
-  const [fontsLoaded, fontError] = useFonts({
-    'Geist-Regular': require('../../assets/fonts/Geist-Regular.ttf'),
-    'Geist-Medium': require('../../assets/fonts/Geist-Medium.ttf'),
-    'Geist-SemiBold': require('../../assets/fonts/Geist-SemiBold.ttf'),
-    'GeistMono-Regular': require('../../assets/fonts/GeistMono-Regular.ttf'),
-    'GeistMono-Medium': require('../../assets/fonts/GeistMono-Medium.ttf'),
-    'GeistMono-SemiBold': require('../../assets/fonts/GeistMono-SemiBold.ttf'),
-    'NotoKufiArabic-Regular': require('../../assets/fonts/NotoKufiArabic-Regular.ttf'),
-    'NotoKufiArabic-Bold': require('../../assets/fonts/NotoKufiArabic-Bold.ttf'),
-  });
-
-  // A font that fails to decode must not leave the user on the splash forever;
-  // the app falls back to the system face, which is ugly but usable.
-  const ready = fontsLoaded || !!fontError;
-
+  const [webFontsLoaded, webFontError] = useFonts(WEB_FONTS);
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync().catch(() => {});
-  }, [ready]);
-
-  if (!ready) return null;
+    void sweepStaleExportFiles();
+  }, []);
+  // A browser font that fails to decode must not leave the preview blank.
+  if (Platform.OS === 'web' && !webFontsLoaded && !webFontError) return null;
 
   const navTheme = {
     ...(dark ? DarkTheme : DefaultTheme),

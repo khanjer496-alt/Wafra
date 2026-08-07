@@ -1,18 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button, Chip, Toggle } from '@/components/ui/controls';
+import { CategoryChips } from '@/components/ui/category-chips';
+import { Button, Toggle } from '@/components/ui/controls';
+import { Icon } from '@/components/ui/icon';
 import { Block, LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
-import { CategoryTile } from '@/components/ui/tile';
+import { AccountTile, CategoryTile } from '@/components/ui/tile';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { getActiveMarket } from '@/lib/markets';
+import { isUnassignedAccountRef } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
@@ -68,6 +71,38 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     ).length;
   }, [transaction, state.transactions]);
 
+  const accountChoices = useMemo(() => {
+    const currentId = transaction?.accountId;
+    const accounts = state.accounts.filter((candidate) => !candidate.archived || candidate.id === currentId);
+    const duplicateNames = new Map<string, number>();
+    for (const candidate of accounts) {
+      const key = candidate.name.trim().toLocaleLowerCase();
+      duplicateNames.set(key, (duplicateNames.get(key) ?? 0) + 1);
+    }
+    const duplicatePosition = new Map<string, number>();
+    const activity = new Map<string, { rows: number; latest: Transaction | null }>();
+    for (const row of state.transactions) {
+      const current = activity.get(row.accountId) ?? { rows: 0, latest: null };
+      const rowTime = row.ts ?? Date.parse(`${row.date}T12:00:00`);
+      const latestTime = current.latest
+        ? current.latest.ts ?? Date.parse(`${current.latest.date}T12:00:00`)
+        : Number.NEGATIVE_INFINITY;
+      activity.set(row.accountId, {
+        rows: current.rows + 1,
+        latest: rowTime > latestTime ? row : current.latest,
+      });
+    }
+
+    return accounts.map((candidate) => {
+      const stats = activity.get(candidate.id) ?? { rows: 0, latest: null };
+      const key = candidate.name.trim().toLocaleLowerCase();
+      const duplicateCount = duplicateNames.get(key) ?? 1;
+      const position = (duplicatePosition.get(key) ?? 0) + 1;
+      duplicatePosition.set(key, position);
+      return { account: candidate, ...stats, duplicateCount, position };
+    });
+  }, [state.accounts, state.transactions, transaction?.accountId]);
+
   if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
@@ -78,7 +113,9 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   const amountFils = parseAmountToFils(amountText);
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
   const stamp = transaction ? fullDateTime(transaction) : '';
-  const canSave = !!amountFils && !!title.trim() && dateValid;
+  const hasRealAccount =
+    !isUnassignedAccountRef(accountId) && state.accounts.some((candidate) => candidate.id === accountId);
+  const canSave = !!amountFils && !!title.trim() && dateValid && hasRealAccount;
 
   const save = () => {
     if (!canSave || !amountFils) return;
@@ -234,16 +271,11 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
               <ThemedText type="micro" themeColor="textTertiary">
                 {t('category')}
               </ThemedText>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {categories.map((c) => (
-                  <Chip
-                    key={c.id}
-                    label={categoryLabel(c)}
-                    active={category === c.id}
-                    onPress={() => setCategory(c.id)}
-                  />
-                ))}
-              </ScrollView>
+              <CategoryChips
+                categories={categories}
+                selected={category}
+                onToggle={setCategory}
+              />
             </View>
           )}
 
@@ -251,16 +283,71 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             <ThemedText type="micro" themeColor="textTertiary">
               {t('account')}
             </ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {state.accounts.map((a) => (
-                <Chip
-                  key={a.id}
-                  label={a.name}
-                  active={accountId === a.id}
-                  onPress={() => setAccountId(a.id)}
-                />
-              ))}
-            </ScrollView>
+            <View style={styles.accountList}>
+              {accountChoices.map(({ account: choice, rows, latest, duplicateCount, position }) => {
+                const selected = accountId === choice.id;
+                const identity = [
+                  choice.bankName,
+                  choice.cardType === 'credit'
+                    ? t('credit')
+                    : choice.cardType === 'debit'
+                      ? t('debit')
+                      : undefined,
+                  choice.last4 ? `·· ${choice.last4}` : undefined,
+                ].filter(Boolean).join(' · ');
+                const history = latest
+                  ? tf('accountChoiceHistory', {
+                      count: rows,
+                      merchant: latest.title,
+                      date: shortDate(latest.date),
+                    })
+                  : t('accountChoiceNoHistory');
+                return (
+                  <Pressable
+                    key={choice.id}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${choice.name}. ${identity}. ${history}`}
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => setAccountId(choice.id)}
+                    style={({ pressed }) => [
+                      styles.accountChoice,
+                      {
+                        backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
+                        borderColor: selected ? theme.primaryBorder : theme.cardBorder,
+                        opacity: pressed ? 0.78 : 1,
+                      },
+                    ]}>
+                    <AccountTile account={choice} size={38} />
+                    <View style={styles.accountChoiceText}>
+                      <View style={styles.accountChoiceTitle}>
+                        <ThemedText type="smallBold" numberOfLines={1} style={styles.flex}>
+                          {choice.name}
+                        </ThemedText>
+                        {duplicateCount > 1 && (
+                          <ThemedText type="nano" themeColor="textTertiary">
+                            {tf('duplicateAccountOrdinal', { position, count: duplicateCount })}
+                          </ThemedText>
+                        )}
+                      </View>
+                      {identity && (
+                        <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                          {identity}
+                        </ThemedText>
+                      )}
+                      <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
+                        {history}
+                      </ThemedText>
+                    </View>
+                    {selected && <Icon name="check" size={17} color={theme.primary} />}
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!hasRealAccount && (
+              <ThemedText type="meta" style={{ color: theme.expense }}>
+                {t('chooseAccountBeforeSave')}
+              </ThemedText>
+            )}
           </View>
 
           <View style={styles.transferRow}>
@@ -417,9 +504,28 @@ const styles = StyleSheet.create({
   mono: {
     fontVariant: ['tabular-nums'],
   },
-  chipRow: {
+  accountList: {
     gap: Spacing.two,
-    paddingEnd: Spacing.three,
+  },
+  accountChoice: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.two,
+  },
+  accountChoiceText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  accountChoiceTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   transferRow: {
     flexDirection: 'row',

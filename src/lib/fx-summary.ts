@@ -1,4 +1,5 @@
 import type { Transaction } from '@/lib/types';
+import { totalAsShown } from '@/lib/format';
 
 export interface CurrencyActivity {
   currency: string;
@@ -18,6 +19,35 @@ export interface ForeignActivitySummary {
   bankQuotedCount: number;
   referenceCount: number;
   estimatedCount: number;
+}
+
+export interface ForeignActivityPreviewSummary {
+  groups: CurrencyActivity[];
+  remainingCount: number;
+  remainingLocalFils: number;
+  totalLocalFils: number;
+}
+
+/**
+ * The compact Home breakdown, reconciled at the whole-AED precision it shows.
+ *
+ * The card has room for only a few currencies, but its heading covers all of
+ * them. The hidden tail therefore needs an explicit remainder row, calculated
+ * from the same per-currency rounding as the visible rows.
+ */
+export function previewForeignActivity(
+  summary: ForeignActivitySummary,
+  maxGroups = 2,
+): ForeignActivityPreviewSummary {
+  const limit = Math.max(0, Math.floor(maxGroups));
+  const groups = summary.groups.slice(0, limit);
+  const remaining = summary.groups.slice(limit);
+  return {
+    groups,
+    remainingCount: remaining.length,
+    remainingLocalFils: totalAsShown(remaining.map((group) => group.localFils)),
+    totalLocalFils: totalAsShown(summary.groups.map((group) => group.localFils)),
+  };
 }
 
 /**
@@ -72,7 +102,9 @@ export function summarizeForeignActivity(
   return {
     groups,
     transactions: foreign,
-    totalLocalFils: groups.reduce((sum, group) => sum + group.localFils, 0),
+    // This is a display summary: the headline must equal the whole-AED group
+    // rows below it, not a separately rounded sum of their hidden fils.
+    totalLocalFils: totalAsShown(groups.map((group) => group.localFils)),
     bankQuotedCount: groups.reduce((sum, group) => sum + group.bankQuotedCount, 0),
     referenceCount: groups.reduce((sum, group) => sum + group.referenceCount, 0),
     estimatedCount: groups.reduce((sum, group) => sum + group.estimatedCount, 0),

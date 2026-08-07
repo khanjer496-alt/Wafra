@@ -41,14 +41,18 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
   );
   const generatedName = (account: Account): boolean => {
     if (!account.last4) return false;
-    const suffixes = [
-      `Credit Card •${account.last4}`,
-      `Debit Card •${account.last4}`,
-      `Card •${account.last4}`,
-      `بطاقة ائتمانية •${account.last4}`,
-      `بطاقة خصم •${account.last4}`,
-      `بطاقة •${account.last4}`,
-    ];
+    // Early parser builds used the middle dot `·`; newer builds use the bullet
+    // `•`. They are the same generated identity, and treating the old glyph as
+    // a user rename left several empty copies of one card in the correction
+    // picker forever.
+    const suffixes = ['•', '·'].flatMap((bullet) => [
+      `Credit Card ${bullet}${account.last4}`,
+      `Debit Card ${bullet}${account.last4}`,
+      `Card ${bullet}${account.last4}`,
+      `بطاقة ائتمانية ${bullet}${account.last4}`,
+      `بطاقة خصم ${bullet}${account.last4}`,
+      `بطاقة ${bullet}${account.last4}`,
+    ]);
     const bankPrefixes = account.bankName
       ? [account.bankName, bankBrandForName(account.bankName)?.name].filter(
           (name): name is string => Boolean(name),
@@ -77,17 +81,79 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
   /** old account id → surviving account id */
   const remap = new Map<string, string>();
   const dropped = new Set<string>();
+  const replacements = new Map<string, Account>();
+  const stageDrop = (artifact: Account, keep: Account) => {
+    remap.set(artifact.id, keep.id);
+    dropped.add(artifact.id);
+  };
   for (const group of dupes) {
     const substantive = group.filter((a) => !isEmptyArtifact(a));
-    // More than one real row is ambiguous. Nothing in a four-digit suffix can
-    // choose between them safely, including where a third empty row's hint
-    // should point, so leave the entire group alone.
-    if (substantive.length !== 1) continue;
-    const keep = substantive[0];
-    for (const artifact of group) {
-      if (artifact.id === keep.id || !isEmptyArtifact(artifact)) continue;
-      remap.set(artifact.id, keep.id);
-      dropped.add(artifact.id);
+    if (substantive.length === 1) {
+      const keep = substantive[0];
+      for (const artifact of group) {
+        if (artifact.id === keep.id || !isEmptyArtifact(artifact)) continue;
+        stageDrop(artifact, keep);
+      }
+      continue;
+    }
+
+    /**
+     * Snapshot-only clones of one active, explicitly typed card.
+     *
+     * Older imports created a fresh debit-card row for every balance alert.
+     * Those clones are not "empty" under the conservative rule above because
+     * each may carry a bank snapshot, yet none has a transaction, bill, due or
+     * opening balance. When every row has the same proven card type and exactly
+     * one generated row is financially referenced, there is still only one
+     * user-distinguishable identity. Fold the metadata-only clones into it and
+     * retain the newest bank snapshot. Two active siblings remain untouched.
+     */
+    const typed = group[0].cardType;
+    const sameExplicitType = typed !== undefined && group.every((account) => account.cardType === typed);
+    const anchored = group.filter(
+      (account) =>
+        !generatedName(account) ||
+        account.openingFils !== 0 ||
+        account.archived ||
+        account.renewedFrom !== undefined ||
+        txIds.has(account.id) ||
+        dueIds.has(account.id) ||
+        billIds.has(account.id),
+    );
+    if (!sameExplicitType || anchored.length !== 1) continue;
+    const keep = anchored[0];
+    const metadataOnly = group.filter(
+      (account) =>
+        account.id !== keep.id &&
+        generatedName(account) &&
+        account.openingFils === 0 &&
+        !account.archived &&
+        account.renewedFrom === undefined &&
+        !txIds.has(account.id) &&
+        !dueIds.has(account.id) &&
+        !billIds.has(account.id),
+    );
+    if (metadataOnly.length !== group.length - 1) continue;
+
+    const snapshotSource = group.reduce<Account | undefined>((latest, account) => {
+      if (account.snapshotFils === undefined) return latest;
+      if (!latest || (account.snapshotTs ?? 0) > (latest.snapshotTs ?? 0)) return account;
+      return latest;
+    }, undefined);
+    const creditLimitFils = keep.creditLimitFils ?? group.find((account) => account.creditLimitFils !== undefined)?.creditLimitFils;
+    replacements.set(keep.id, {
+      ...keep,
+      ...(creditLimitFils !== undefined ? { creditLimitFils } : {}),
+      ...(snapshotSource
+        ? {
+            snapshotFils: snapshotSource.snapshotFils,
+            snapshotKind: snapshotSource.snapshotKind,
+            snapshotTs: snapshotSource.snapshotTs,
+          }
+        : {}),
+    });
+    for (const artifact of metadataOnly) {
+      stageDrop(artifact, keep);
     }
   }
   if (dropped.size === 0) return state;
@@ -95,7 +161,9 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
 
   return {
     ...state,
-    accounts: state.accounts.filter((a) => !dropped.has(a.id)),
+    accounts: state.accounts
+      .filter((a) => !dropped.has(a.id))
+      .map((account) => replacements.get(account.id) ?? account),
     transactions: state.transactions.map((t) =>
       remap.has(t.accountId) ? { ...t, accountId: to(t.accountId) } : t,
     ),

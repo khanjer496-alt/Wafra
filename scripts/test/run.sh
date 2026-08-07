@@ -31,7 +31,7 @@ for f in types format categories ledger dedupe arabic-sms sms-parser import-plan
          subscriptions cards analytics period purchases markets i18n balances brand-marks leaving-soon \
          accounts heal accuracy onboarding \
          relay-crypto relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx splits db-schema \
-         storage-diagnostics; do
+         storage-diagnostics export-data fx-summary; do
   [ -f "../../src/lib/$f.ts" ] || continue
   sed -e "s|from '@/lib/|from './|g" \
       -e "s|import type { IconName } from '@/components/ui/icon';|type IconName = string;|" \

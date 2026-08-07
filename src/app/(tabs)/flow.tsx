@@ -10,8 +10,8 @@
  * the trend that explains both closes the screen.
  */
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { InteractionManager, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -38,7 +38,7 @@ import {
   shiftMonthKey,
 } from '@/lib/format';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
-import { buildInsights, composition, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
+import { buildInsights, composition, summarizeCashflowMonths, summarizeMonth, type Insight } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
@@ -80,19 +80,72 @@ export default function FlowScreen() {
     [state.transactions, period, liveAccounts, internal],
   );
 
-  const insights = useMemo(
-    () =>
-      buildInsights(
-        state.transactions,
-        state.budgets,
-        period,
-        now,
-        state.notSubscriptions,
-        liveAccounts,
-        internal,
-      ),
-    [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal],
+  // The selected period is normally this same month. Reuse its one-pass
+  // category totals for every limit instead of rescanning the full SMS ledger
+  // once per budget. Non-month scopes still need one dedicated month summary.
+  const budgetSummary = useMemo(
+    () => period.mode === 'month' && period.key === key
+      ? summary
+      : summarizeMonth(state.transactions, key, liveAccounts, internal),
+    [period, key, summary, state.transactions, liveAccounts, internal],
   );
+  const spentByCategory = useMemo(
+    () => new Map(budgetSummary.byCategory.map((row) => [row.category, row.totalFils] as const)),
+    [budgetSummary],
+  );
+
+  const insightRequest = useMemo(() => ({
+    transactions: state.transactions,
+    budgets: state.budgets,
+    period,
+    now,
+    notSubscriptions: state.notSubscriptions,
+    liveAccounts,
+    internal,
+    summary,
+    spentByCategory,
+  }), [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, summary, spentByCategory]);
+  const immediateInsights = useMemo(
+    () => Platform.OS === 'android'
+      ? []
+      : buildInsights(
+          insightRequest.transactions,
+          insightRequest.budgets,
+          insightRequest.period,
+          insightRequest.now,
+          insightRequest.notSubscriptions,
+          insightRequest.liveAccounts,
+          insightRequest.internal,
+          { current: insightRequest.summary, categorySpend: insightRequest.spentByCategory },
+        ),
+    [insightRequest],
+  );
+  const [deferredInsights, setDeferredInsights] = useState<{
+    request: typeof insightRequest;
+    rows: Insight[];
+  } | null>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const task = InteractionManager.runAfterInteractions(() => {
+      setDeferredInsights({
+        request: insightRequest,
+        rows: buildInsights(
+          insightRequest.transactions,
+          insightRequest.budgets,
+          insightRequest.period,
+          insightRequest.now,
+          insightRequest.notSubscriptions,
+          insightRequest.liveAccounts,
+          insightRequest.internal,
+          { current: insightRequest.summary, categorySpend: insightRequest.spentByCategory },
+        ),
+      });
+    });
+    return () => task.cancel();
+  }, [insightRequest]);
+  const insights = Platform.OS === 'android'
+    ? deferredInsights?.request === insightRequest ? deferredInsights.rows : []
+    : immediateInsights;
 
   /**
    * Top five categories plus an "everything else" slice. The split and its
@@ -118,16 +171,10 @@ export default function FlowScreen() {
       state.budgets
         .map((b) => ({
           budget: b,
-          spent: spentInMonthForCategory(
-            state.transactions,
-            key,
-            b.category,
-            liveAccounts,
-            internal,
-          ),
+          spent: spentByCategory.get(b.category) ?? 0,
         }))
         .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils),
-    [state.budgets, state.transactions, key, liveAccounts, internal],
+    [state.budgets, spentByCategory],
   );
 
   const totalLimit = limits.reduce((s, r) => s + r.budget.limitFils, 0);
@@ -148,18 +195,17 @@ export default function FlowScreen() {
 
   /** In and out for the six months ending at the selected one. */
   const trend = useMemo(() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const k = shiftMonthKey(key, -i);
-      const s = summarizeMonth(state.transactions, k, liveAccounts, internal);
-      months.push({
+    const keys = Array.from({ length: 6 }, (_, index) => shiftMonthKey(key, index - 5));
+    const summaries = summarizeCashflowMonths(state.transactions, keys, liveAccounts, internal);
+    return keys.map((k) => {
+      const cashflow = summaries.get(k) ?? { incomeFils: 0, expenseFils: 0 };
+      return {
         key: k,
         label: monthLabel(k, true).split(' ')[0],
-        income: s.incomeFils,
-        expense: s.expenseFils,
-      });
-    }
-    return months;
+        income: cashflow.incomeFils,
+        expense: cashflow.expenseFils,
+      };
+    });
   }, [state.transactions, key, liveAccounts, internal]);
 
   const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
@@ -178,6 +224,7 @@ export default function FlowScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
+          removeClippedSubviews={Platform.OS === 'android'}
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>

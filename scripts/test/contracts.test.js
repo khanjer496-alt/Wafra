@@ -186,7 +186,12 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     ];
     for (const m of shapes.flatMap((re) => [...text.matchAll(re)])) {
       const near = text.slice(Math.max(0, text.indexOf(m[0]) - 600), text.indexOf(m[0]));
-      if (!/internalTransferIds|internal\.has/.test(near)) totalling.push(`${rel}: ${m[0].trim()}`);
+      const delegatesToSharedPredicate =
+        /counts\(\w+\)/.test(near) &&
+        /const counts = useCallback\([\s\S]*?countsInTotals\(t, liveAccounts, internal\)/.test(text);
+      if (!/internalTransferIds|internal\.has/.test(near) && !delegatesToSharedPredicate) {
+        totalling.push(`${rel}: ${m[0].trim()}`);
+      }
     }
   }
   ok('every running money total knows about internal transfers',
@@ -773,6 +778,76 @@ ok('green is still reserved for money actually earned',
 ok('the spoken label agrees with the sign on screen',
   /\$\{arrived \? t\('plusWord'/.test(txRow),
   'a screen reader saying "minus" over a plus is worse than either alone');
+
+// File exports must use the platform share sheet with a local file. Passing a
+// large diagnostic as Share.share({message}) failed silently on Android.
+{
+  const settings = read('src/app/settings.tsx');
+  const accuracy = read('src/app/accuracy.tsx');
+  const sharing = read('src/lib/file-sharing.ts');
+  ok('transaction and card exports use file sharing instead of silent text payloads',
+    /shareTextFile/.test(settings) && /shareTextFile/.test(accuracy) &&
+      /Sharing\.shareAsync/.test(sharing) && !/Share\.share\(/.test(settings));
+  const exportData = read('src/lib/export-data.ts');
+  ok('large transaction exports yield so the busy state can paint',
+    /transactionsCsvAsync/.test(settings) && /await yieldToUi\(\)/.test(exportData) &&
+      /% chunkSize === 0\) await yieldToUi\(\)/.test(exportData));
+  const smsNative = read('modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt');
+  ok('Settings exports only financial SMS and never offers the whole personal inbox',
+    /exportInboxSms\(\)/.test(settings) && !/allSmsWarningTitle|exportAllSms/.test(settings));
+  ok('the native financial export excludes obvious authentication secrets',
+    /SENSITIVE_AUTH_RE\.containsMatchIn\(body\)/.test(smsNative) &&
+      /OTP\|one\[- \]time password/.test(smsNative) &&
+      /authori\[sz\]ation code/.test(smsNative) && /CVV\|CVC/.test(smsNative));
+  ok('the native financial export refuses amount-bearing personal conversations',
+    /isRecognizedBankSender\(it\.getString\(addressIdx\)/.test(smsNative) &&
+      /val normalized = sender\.trim\(\)/.test(smsNative) &&
+      /\^\[A-Za-z0-9\._-\]\{2,32\}\$/.test(smsNative) &&
+      /FINANCIAL_BRAND_RE\.matches\(normalized\)/.test(smsNative) &&
+      !/isRecognizedBankMessage/.test(smsNative));
+  ok('the NDJSON SMS export declares an NDJSON MIME type',
+    /mimeType: 'application\/x-ndjson'/.test(settings));
+  ok('shared files are not deleted as soon as a background share target opens',
+    /SHARED_FILE_GRACE_MS/.test(sharing) && /deleteSharedFileLater\(uri\)/.test(sharing) &&
+      !/finally\s*\{[\s\S]*deleteAsync/.test(sharing));
+  ok('crash-left plaintext exports are swept and failed shares delete their file',
+    /sweepStaleExportFiles/.test(sharing) && /STALE_EXPORT_AGE_MS/.test(sharing) &&
+      /readDirectoryAsync/.test(sharing) && /getInfoAsync/.test(sharing) &&
+      /catch \(error\)[\s\S]*deleteAsync\(uri/.test(sharing) &&
+      /sweepStaleExportFiles/.test(read('src/app/_layout.tsx')));
+  const entrySheet = read('src/components/entry-detail-sheet.tsx');
+  ok('an unresolved row cannot be user-pinned until a real account is selected',
+    /!isUnassignedAccountRef\(accountId\)/.test(entrySheet) &&
+      /state\.accounts\.some\(\(candidate\) => candidate\.id === accountId\)/.test(entrySheet) &&
+      /chooseAccountBeforeSave/.test(entrySheet));
+  ok('unresolved transactions use the shared total predicate',
+    /countsInTotals\(t, liveAccounts, internal\)/.test(read('src/app/transactions.tsx')));
+  ok('unresolved transactions have a visible all-time review path',
+    /reviewUnassigned/.test(read('src/app/transactions.tsx')) &&
+      /accountId: UNASSIGNED_FILTER/.test(read('src/app/transactions.tsx')) &&
+      /datePreset: 'all'/.test(read('src/app/transactions.tsx')));
+  const home = read('src/app/(tabs)/index.tsx');
+  ok('Home warns about every excluded unassigned row and opens its review filter',
+    /unassignedCount > 0/.test(home) &&
+      /reviewUnassignedCount/.test(home) &&
+      /\/transactions\?review=unassigned/.test(home) &&
+      /reviewParam === 'unassigned'/.test(read('src/app/transactions.tsx')));
+  ok('whole-AED Activity totals use the same per-row rounding as Home',
+    /summary\.expenseShownFils/.test(home) &&
+      /filtered\.reduce\([\s\S]*wholeFilsAsShown/.test(read('src/app/transactions.tsx')) &&
+      /totalFils: data\.reduce\([\s\S]*wholeFilsAsShown/.test(read('src/app/transactions.tsx')));
+  const insightsSource = read('src/lib/insights.ts');
+  ok('Flow allocates each displayed transaction across categories in the same ledger pass',
+    /expenseShownFils \+= wholeFilsAsShown\(t\.amountFils\)/.test(insightsSource) &&
+      /categoryAllocationsAsShown\(t, allocations\)/.test(insightsSource) &&
+      /totalFils: c\.shownFils/.test(insightsSource));
+  ok('Home foreign activity applies the same account exclusions as its hero',
+    /summarizeForeignActivity\([\s\S]*isSpending\(transaction, liveAccounts, internal\)/.test(home));
+  ok('Home foreign activity exposes a displayed remainder for omitted currencies',
+    /previewForeignActivity\(summary\)/.test(home) &&
+      /preview\.remainingCount > 0/.test(home) &&
+      /preview\.remainingLocalFils/.test(home));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

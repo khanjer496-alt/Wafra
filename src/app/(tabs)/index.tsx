@@ -43,12 +43,27 @@ import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '
 import { enableRelayBackgroundSync } from '@/lib/background-relay';
 import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
+import {
+  formatAED,
+  formatAmount,
+  formatCompactAED,
+  shortDate,
+  totalAsShown,
+} from '@/lib/format';
 import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
-import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
+import {
+  previewForeignActivity,
+  summarizeForeignActivity,
+  type ForeignActivitySummary,
+} from '@/lib/fx-summary';
 import { committed, tapped } from '@/lib/haptics';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
-import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
+import {
+  internalTransferIds,
+  isSpending,
+  isUnassignedAccountRef,
+  liveAccountIds,
+} from '@/lib/ledger';
+import { buildInsights, summarizeMonth } from '@/lib/insights';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -222,12 +237,12 @@ function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }
   const router = useRouter();
   const language = useStore().state.language === 'ar' ? 'ar' : 'en';
   if (summary.groups.length === 0) return null;
-  const top = summary.groups.slice(0, 2);
+  const preview = previewForeignActivity(summary);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${t('foreignActivity')}, ${formatAED(summary.totalLocalFils)}`}
+      accessibilityLabel={`${t('foreignActivity')}, ${formatAED(preview.totalLocalFils)}`}
       onPress={() => {
         tapped();
         router.push('/currency');
@@ -250,10 +265,10 @@ function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }
         <Icon name="chevron-right" size={16} color={theme.textTertiary} />
       </View>
       <ThemedText type="heading" tabular>
-        {formatAED(summary.totalLocalFils, { decimals: false })}
+        {formatAED(preview.totalLocalFils, { decimals: false })}
       </ThemedText>
       <View style={styles.currencyRows}>
-        {top.map((group) => (
+        {preview.groups.map((group) => (
           <View key={group.currency} style={styles.currencyRow}>
             <ThemedText type="smallBold" tabular style={{ color: theme.primary }}>
               {group.currency}
@@ -266,6 +281,17 @@ function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }
             </ThemedText>
           </View>
         ))}
+        {preview.remainingCount > 0 && (
+          <View style={styles.currencyRow}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>
+              +{tf('moreItems', { count: preview.remainingCount })}
+            </ThemedText>
+            <View style={styles.currencyOriginal} />
+            <ThemedText type="small" tabular>
+              {formatAED(preview.remainingLocalFils, { decimals: false })}
+            </ThemedText>
+          </View>
+        )}
       </View>
     </Pressable>
   );
@@ -638,22 +664,35 @@ export default function HomeScreen() {
     [state.transactions, liveAccounts],
   );
 
+  // Raw financial totals and their per-row displayed equivalents are built in
+  // one pass. Home and Flow consume these same fields, so neither screen gets
+  // to invent a second whole-AED answer.
   const summary = useMemo(
     () => summarizeMonth(state.transactions, period, liveAccounts, internal),
     [state.transactions, period, liveAccounts, internal],
   );
+  const categorySpend = useMemo(
+    () => new Map(summary.byCategory.map((row) => [row.category, row.totalFils] as const)),
+    [summary],
+  );
 
   // One insight, not five. The rest are on Flow.
   /**
-   * The hero's three figures, reconciled. Rounding each of in and out to whole
-   * dirhams first and subtracting those is the only way the caption under them
-   * can be checked by eye — which is the entire point of showing all three.
+   * The hero's three figures, reconciled. Every transaction is rounded exactly
+   * as its Activity row is shown before it enters In or Out, and the net is the
+   * difference of those visible columns. A drill-down can therefore be checked
+   * by eye instead of exposing a second, hidden-fils answer.
    */
   const hero = useMemo(() => {
-    const expenseFils = composition(summary).totalFils;
-    const incomeFils = Math.round(summary.incomeFils / 100) * 100;
+    const incomeFils = summary.incomeShownFils;
+    const expenseFils = summary.expenseShownFils;
     return { incomeFils, expenseFils, netFils: incomeFils - expenseFils };
   }, [summary]);
+
+  const unassignedCount = useMemo(
+    () => state.transactions.filter((transaction) => isUnassignedAccountRef(transaction.accountId)).length,
+    [state.transactions],
+  );
 
   const insight = useMemo(() => {
     const all = buildInsights(
@@ -664,9 +703,10 @@ export default function HomeScreen() {
       state.notSubscriptions,
       liveAccounts,
       internal,
+      { current: summary, categorySpend },
     );
     return all.find((i) => i.id !== dismissedInsight) ?? null;
-  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, dismissedInsight]);
+  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, summary, categorySpend, dismissedInsight]);
 
   const today = useMemo(
     () =>
@@ -683,8 +723,13 @@ export default function HomeScreen() {
   );
 
   const foreignActivity = useMemo(
-    () => summarizeForeignActivity(state.transactions, (tx) => inPeriod(tx.date, period)),
-    [state.transactions, period],
+    () =>
+      summarizeForeignActivity(
+        state.transactions,
+        (transaction) =>
+          inPeriod(transaction.date, period) && isSpending(transaction, liveAccounts, internal),
+      ),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   const lastAutomatic = useMemo(
@@ -907,6 +952,7 @@ export default function HomeScreen() {
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
         <ScrollView
+          removeClippedSubviews={Platform.OS === 'android'}
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -933,9 +979,8 @@ export default function HomeScreen() {
             // the screen. Each cell was rounded on its own while the net was
             // computed from the raw fils and rounded once more.
             //
-            // Out is the composition total, which Flow prints above the
-            // category split; in is rounded the same way; and the net is the
-            // difference between those two, not a third measurement.
+            // Both cells use the same per-row whole-AED rule as Activity; net
+            // is their difference, not a third measurement of the raw fils.
             netFils={hero.netFils}
             incomeFils={hero.incomeFils}
             expenseFils={hero.expenseFils}
@@ -950,6 +995,43 @@ export default function HomeScreen() {
               else void runAutoImport(true);
             }}
           />
+
+          {state.hydrated && unassignedCount > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tf('reviewUnassignedCount', {
+                count: unassignedCount,
+                s: unassignedCount === 1 ? '' : 's',
+              })}
+              onPress={() => {
+                tapped();
+                router.push('/transactions?review=unassigned');
+              }}
+              style={({ pressed }) => [
+                styles.unassignedWarning,
+                {
+                  backgroundColor: `${theme.warning}14`,
+                  borderColor: `${theme.warning}55`,
+                  transform: [{ scale: pressed ? 0.985 : 1 }],
+                },
+              ]}>
+              <View style={[styles.unassignedIcon, { backgroundColor: `${theme.warning}22` }]}>
+                <Icon name="alert" size={17} color={theme.warning} />
+              </View>
+              <View style={styles.unassignedCopy}>
+                <ThemedText type="smallBold">
+                  {tf('reviewUnassignedCount', {
+                    count: unassignedCount,
+                    s: unassignedCount === 1 ? '' : 's',
+                  })}
+                </ThemedText>
+                <ThemedText type="micro" themeColor="textSecondary">
+                  {t('reviewUnassignedBody')}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+            </Pressable>
+          )}
 
           {/* One sentence, with somewhere to go. A carousel of five of these
               was five things to skim and nothing to act on. */}
@@ -1133,6 +1215,26 @@ const styles = StyleSheet.create({
   currencyRows: { gap: 5, marginTop: Spacing.one },
   currencyRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   currencyOriginal: { flex: 1 },
+
+  unassignedWarning: {
+    minHeight: 64,
+    marginTop: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.tile,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  unassignedIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unassignedCopy: { flex: 1, gap: 2 },
 
   section: { marginTop: Spacing.five },
 

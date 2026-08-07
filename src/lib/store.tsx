@@ -18,7 +18,7 @@ import {
 import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
-import { detectMarketId, setActiveMarket } from '@/lib/markets';
+import { bankFromSender, bankIdentityForName, detectMarketId, setActiveMarket } from '@/lib/markets';
 import { generateSeedTransactions, SEED_ACCOUNTS, SEED_BUDGETS } from '@/lib/seed';
 import { applyHealPatch, healPatch } from '@/lib/heal';
 import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
@@ -134,8 +134,29 @@ const PERSISTED_INCOME_ORIGINATOR_RE =
 export function migratePersistedState(
   parsed: Partial<Omit<AppState, 'hydrated'>>,
 ): Partial<Omit<AppState, 'hydrated'>> {
+  // Bank inference below must use the market this ledger was created in, not
+  // whichever market happened to be active before hydration began.
+  if (parsed.marketId) setActiveMarket(parsed.marketId);
   if (parsed.transactions) {
+    const accountById = new Map((parsed.accounts ?? []).map((account) => [account.id, account]));
     parsed.transactions = parsed.transactions
+      // A bank SMS can never be cash. Older imports used accounts[0] whenever
+      // the message did not expose a PAN/account suffix, and a Cash account
+      // happened to occupy that slot on a real phone. Move only untouched
+      // automatic rows into the review bucket; a user-selected Cash account
+      // remains authoritative.
+      .map((t) => {
+        if (t.userEdited || t.source !== 'sms' || accountById.get(t.accountId)?.kind !== 'cash') {
+          return t;
+        }
+        // Low-confidence rows retain a short on-device raw excerpt. When it
+        // names the issuer, preserve that identity in the review reference so
+        // a later resolver can safely offer only matching accounts. If the
+        // message does not identify a bank, "unknown" is the honest answer.
+        const bank = bankFromSender(t.raw);
+        const identity = bankIdentityForName(bank?.name) ?? 'unknown';
+        return { ...t, accountId: `__unassigned-account__:${identity}` };
+      })
       .map((t) =>
         t.userEdited
           ? t
@@ -150,7 +171,7 @@ export function migratePersistedState(
           ? t
           : t.source === 'sms' &&
               t.type === 'income' &&
-              !['salary', 'business', 'other'].includes(t.category)
+              !['salary', 'business', 'refund', 'other'].includes(t.category)
             ? { ...t, category: 'business' as const }
             : t,
       )
@@ -219,7 +240,6 @@ export function migratePersistedState(
     // Rows that kept their raw SMS re-parse under the CURRENT grammar on
     // every launch. A hand-corrected row is the user's answer, not the
     // parser's, so it remains the exact object supplied to this migration.
-    if (parsed.marketId) setActiveMarket(parsed.marketId);
     parsed.transactions = parsed.transactions.flatMap((t) => {
       if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
       const p = parseSms(t.raw, parsed.merchantOverrides);

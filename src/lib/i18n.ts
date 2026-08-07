@@ -578,6 +578,37 @@ const S = {
   backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
   restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
   exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
+  exportSmsDiagnostic: { en: 'Export SMS diagnostic', ar: 'تصدير تشخيص الرسائل' },
+  exportSmsDiagnosticDetail: {
+    en: 'Recognized bank SMS with amounts · local file only',
+    ar: 'رسائل البنوك المعروفة التي تحتوي مبالغ · ملف محلي فقط',
+  },
+  exportSmsDiagnosticBody: {
+    en: 'This local file contains raw messages from recognized banks that include currency amounts, which are needed to fix Wafra’s parser. It can include balances and partial card or account numbers. Personal senders and messages containing actual OTP/security codes are excluded. Wafra never uploads it automatically.',
+    ar: 'يحتوي هذا الملف المحلي على الرسائل الخام من البنوك المعروفة التي تتضمن مبالغ مالية، وهي لازمة لإصلاح محلّل وفرة. وقد يتضمن أرصدة وأجزاء من أرقام البطاقات أو الحسابات. تُستبعد الرسائل الشخصية والرسائل التي تحتوي فعلياً على رموز تحقق أو أمان. لا يرفعه وفرة تلقائياً.',
+  },
+  exportFinancialSmsAction: { en: 'Export bank SMS', ar: 'تصدير رسائل البنوك' },
+  smsExportAndroidOnlyTitle: { en: 'Android only', ar: 'متاح على أندرويد فقط' },
+  smsExportAndroidOnlyBody: {
+    en: 'Apple does not allow iPhone apps to read or export the Messages inbox.',
+    ar: 'لا تسمح آبل لتطبيقات الآيفون بقراءة صندوق الرسائل أو تصديره.',
+  },
+  smsExportAndroidOnlyDetail: {
+    en: 'iPhone apps cannot read the Messages inbox',
+    ar: 'لا تستطيع تطبيقات الآيفون قراءة صندوق الرسائل',
+  },
+  noSmsToExport: { en: 'No matching SMS messages were found.', ar: 'لم يُعثر على رسائل مطابقة.' },
+  shareSmsExportCount: {
+    en: 'Share {count} SMS messages',
+    ar: 'مشاركة {count} رسالة',
+  },
+  preparingExport: { en: 'Preparing file…', ar: 'جارٍ تجهيز الملف…' },
+  exportFailedTitle: { en: 'Export failed', ar: 'تعذّر التصدير' },
+  exportFailedBody: {
+    en: 'Wafra could not create or share the file. Try again.',
+    ar: 'تعذّر على وفرة إنشاء الملف أو مشاركته. حاول مرة أخرى.',
+  },
+  nothingToExport: { en: 'There are no transactions to export.', ar: 'لا توجد عمليات لتصديرها.' },
   exportExpensePdf: { en: 'Expense report (PDF)', ar: 'تقرير المصروفات (PDF)' },
   expenseReportPeriod: { en: 'Expense report period', ar: 'فترة تقرير المصروفات' },
   expenseReportPeriodBody: {
@@ -1024,6 +1055,22 @@ const S = {
     en: '{count} transfer{s} not counted',
     ar: '{count} تحويل مستبعد من الإجمالي',
   },
+  unassignedExcluded: {
+    en: '{count} unassigned item{s} not counted',
+    ar: '{count} عملية غير معيّنة مستبعدة من الإجمالي',
+  },
+  reviewUnassignedCount: {
+    en: 'Review {count} unassigned transaction{s}',
+    ar: 'راجع {count} عمليات غير معيّنة',
+  },
+  reviewUnassignedBody: {
+    en: 'Choose the right account before Wafra counts them.',
+    ar: 'اختر الحساب الصحيح قبل أن تحتسبها وفرة.',
+  },
+  archivedExcluded: {
+    en: '{count} archived item{s} not counted',
+    ar: '{count} عملية مؤرشفة مستبعدة من الإجمالي',
+  },
   showResults: { en: 'Show {count} result{s}', ar: 'عرض {count} نتيجة' },
   nothingMatches: {
     en: 'Nothing matches. Adjust search or filters.',
@@ -1252,6 +1299,22 @@ const S = {
   yesUpdateAll: { en: 'Yes, update all', ar: 'نعم، حدّث الكل' },
   category: { en: 'Category', ar: 'التصنيف' },
   account: { en: 'Account', ar: 'الحساب' },
+  accountChoiceHistory: {
+    en: '{count} entries · Last: {merchant}, {date}',
+    ar: '{count} عمليات · الأخيرة: {merchant}، {date}',
+  },
+  accountChoiceNoHistory: {
+    en: 'No transactions on this account',
+    ar: 'لا توجد عمليات على هذا الحساب',
+  },
+  chooseAccountBeforeSave: {
+    en: 'Choose the account this transaction belongs to before saving.',
+    ar: 'اختر الحساب الذي تنتمي إليه هذه العملية قبل الحفظ.',
+  },
+  duplicateAccountOrdinal: {
+    en: 'Account {position} of {count}',
+    ar: 'الحساب {position} من {count}',
+  },
   source: { en: 'Source', ar: 'المصدر' },
   unassigned: { en: 'Unassigned', ar: 'غير معيّن' },
   date: { en: 'Date', ar: 'التاريخ' },

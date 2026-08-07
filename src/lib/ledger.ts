@@ -33,6 +33,11 @@ export function isTransfer(t: Transaction): boolean {
   return t.isTransfer === true;
 }
 
+/** Parser-known money whose owning account is still unresolved. */
+export function isUnassignedAccountRef(accountId: string): boolean {
+  return accountId.startsWith('__unassigned-');
+}
+
 /**
  * Does this row belong in a spending or income total?
  *
@@ -46,6 +51,7 @@ export function countsInTotals(
   internal?: Set<string>,
 ): boolean {
   if (isTransfer(t)) return false;
+  if (isUnassignedAccountRef(t.accountId)) return false;
   if (live && !live.has(t.accountId)) return false;
   // Both halves of a move between your own accounts. See internalTransferIds.
   if (internal?.has(t.id)) return false;

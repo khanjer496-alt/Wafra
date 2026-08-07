@@ -64,6 +64,8 @@ const PATTERNS = [
   ['BANK_WORD_RE', patternSource('InstantAlert', 'BANK_WORD_RE', vars)],
   ['MONEY_RE', patternSource('BankNotificationListenerService', 'MONEY_RE')],
   ['SMS_MONEY_RE', patternSource('SmsDeliveryReceiver', 'MONEY_RE')],
+  ['FINANCIAL_BRAND_RE', patternSource('SmsReaderModule', 'FINANCIAL_BRAND_RE')],
+  ['SENSITIVE_AUTH_RE', patternSource('SmsReaderModule', 'SENSITIVE_AUTH_RE')],
 ];
 
 // Two gates decide whether a message is about money at all — one for SMS at
@@ -92,6 +94,39 @@ const AMOUNT_CASES = [
   ['Using your card for GHS 120.00 at SHOP. Avl Limit AED 5,000.00', '120.00'],
 ];
 
+// Diagnostic export is intentionally fail-closed. A known bank name in a
+// personal message body is never enough, and a sender label that merely
+// contains a bank token is not a trusted bank sender either.
+const SENDER_CASES = [
+  ['FAB', true],
+  ['EmiratesNBD', true],
+  ['AE-ADCB', true],
+  ['Wio-Alerts', true],
+  ['ADCBAlert', true],
+  ['FABAlert', true],
+  ['MashreqAlert', true],
+  ['RAKBANKUAE', true],
+  ['ADIBAlerts', true],
+  ['Liv.', true],
+  ['+971501234567', false],
+  ['971501234567', false],
+  ['My FAB friend', false],
+  ['ADCB scam support', false],
+  ['ADCBSupport', false],
+];
+
+const SECRET_CASES = [
+  ['Your OTP for AED 1 is 123456', true],
+  ['Use authorization code 1234 for AED 1', true],
+  ['Your card PIN is 1234. Amount AED 1', true],
+  ['Never share your CVV. Purchase AED 1', false],
+  ['Purchase AED 120 at Noon. Never share your OTP, PIN or CVV.', false],
+  ['Password reset requested after AED 1 purchase', true],
+  ['رمز التحقق ١٢٣٤ لعملية AED 1', true],
+  ['Purchase of AED 12.00 at Carrefour was approved', false],
+  ['If you did not authorize this AED 12 purchase, call us', false],
+];
+
 /* ── hand it to javac ────────────────────────────────────────────────── */
 
 function javaString(s) {
@@ -103,10 +138,14 @@ public class WafraRegexCheck {
   public static void main(String[] a) {
     int bad = 0;
     Pattern amount = null;
+    Pattern sender = null;
+    Pattern secret = null;
 ${PATTERNS.map(
   ([name, body]) => `    try {
       Pattern p = Pattern.compile(${javaString(body)}, Pattern.CASE_INSENSITIVE);
       if ("AMOUNT_RE".equals(${javaString(name)})) amount = p;
+      if ("FINANCIAL_BRAND_RE".equals(${javaString(name)})) sender = p;
+      if ("SENSITIVE_AUTH_RE".equals(${javaString(name)})) secret = p;
       System.out.println("COMPILES ${name}");
     } catch (Exception e) { bad++; System.out.println("BROKEN ${name} " + e.getMessage()); }`,
 ).join('\n')}
@@ -117,6 +156,20 @@ ${AMOUNT_CASES.map(
       if (m.find()) got = m.group(2) != null ? m.group(2) : m.group(3);
       if (!${javaString(want)}.equals(got)) { bad++; System.out.println("WRONG " + got + " want ${want}"); }
       else System.out.println("AMOUNT ok ${want}");
+    }`,
+).join('\n')}
+${SENDER_CASES.map(
+  ([value, want]) => `    {
+      boolean got = sender.matcher(${javaString(value)}.trim()).matches();
+      if (got != ${want}) { bad++; System.out.println("SENDER wrong " + got + " want ${want}: ${value}"); }
+      else System.out.println("SENDER ok ${want}: ${value}");
+    }`,
+).join('\n')}
+${SECRET_CASES.map(
+  ([value, want]) => `    {
+      boolean got = secret.matcher(${javaString(value)}).find();
+      if (got != ${want}) { bad++; System.out.println("SECRET wrong " + got + " want ${want}: ${value}"); }
+      else System.out.println("SECRET ok ${want}: ${value}");
     }`,
 ).join('\n')}
     System.exit(bad == 0 ? 0 : 1);
@@ -150,6 +203,16 @@ for (const [name] of PATTERNS) {
 for (const [, want] of AMOUNT_CASES) {
   ok(`Java reads the amount as ${want}`, out.includes(`AMOUNT ok ${want}`),
     out.split('\n').filter((l) => l.startsWith('WRONG')));
+}
+
+for (const [value, want] of SENDER_CASES) {
+  ok(`bank sender gate reads ${JSON.stringify(value)} as ${want}`, out.includes(`SENDER ok ${want}: ${value}`),
+    out.split('\n').filter((l) => l.startsWith('SENDER wrong')));
+}
+
+for (const [value, want] of SECRET_CASES) {
+  ok(`secret gate reads ${JSON.stringify(value)} as ${want}`, out.includes(`SECRET ok ${want}: ${value}`),
+    out.split('\n').filter((l) => l.startsWith('SECRET wrong')));
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

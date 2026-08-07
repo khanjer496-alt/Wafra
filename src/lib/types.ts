@@ -20,6 +20,8 @@ export type CategoryId =
   | 'government'
   /** Loan and finance instalments, usually paid by direct debit to a bank. */
   | 'loan'
+  /** Money returned for an earlier purchase: an offset, never revenue. */
+  | 'refund'
   | 'salary'
   | 'business'
   | 'other';

@@ -929,9 +929,8 @@ function categoryOf(
     if (/salary|payroll|wages/i.test(text)) return { id: 'salary', deliberate: true };
     // `revers(al|ed)`: the rule named one inflection of a word and missed the
     // other, so a chargeback credit read as business REVENUE.
-    if (/refund|revers(?:al|ed)|cashback|\binterest\b|\bprofit\b/i.test(text)) {
-      return { id: 'other', deliberate: true };
-    }
+    if (/refund|revers(?:al|ed)/i.test(text)) return { id: 'refund', deliberate: true };
+    if (/cashback|\binterest\b|\bprofit\b/i.test(text)) return { id: 'other', deliberate: true };
     // Money arrived and we could not say from whom. `business` is a claim
     // about WHERE money came from, and a structurally-titled credit — the
     // parser's own words for "a credit with no payer in it" — is exactly the

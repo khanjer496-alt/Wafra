@@ -3,6 +3,7 @@ const bills = require('./build/bills');
 const insights = require('./build/insights');
 const seed = require('./build/seed');
 const leaving = require('./build/leaving-soon');
+const exportData = require('./build/export-data');
 
 let pass = 0, fail = 0;
 function eq(name, actual, expected) {
@@ -34,6 +35,10 @@ eq('formatAED sub-dirham negative keeps its sign with decimals', fmt.formatAED(-
   eq('rows add up to their own total', shown, read(fmt.totalAsShown(rows)));
   eq('totalAsShown of nothing', fmt.totalAsShown([]), 0);
   eq('totalAsShown keeps whole amounts exact', fmt.totalAsShown([50000, 25000]), 75000);
+  // Signed totals must round the same absolute figure a row prints. Native
+  // Math.round(-1.5) is -1, but the row visibly says −2 for AED -1.50.
+  eq('wholeFilsAsShown rounds negative halves symmetrically', fmt.wholeFilsAsShown(-150), -200);
+  eq('signed rows add up to their own visible total', fmt.totalAsShown([149, -150, 251]), 200);
 }
 eq('formatAED millions grouping', fmt.formatAED(123456789), 'AED 1,234,567.89');
 eq('parseAmountToFils decimal', fmt.parseAmountToFils('12.5'), 1250);
@@ -96,15 +101,92 @@ eq('summarize income', sum.incomeFils, 1000000);
 eq('summarize expense', sum.expenseFils, 400000);
 eq('summarize top category', sum.byCategory[0].category, 'groceries');
 ok('summarize share', Math.abs(sum.byCategory[0].share - 0.75) < 1e-9);
+const roundedRows = [
+  { id: 'round-1', type: 'expense', amountFils: 149, category: 'groceries', accountId: 'a', title: 'One', date: '2026-07-11' },
+  { id: 'round-2', type: 'expense', amountFils: 150, category: 'dining', accountId: 'a', title: 'Two', date: '2026-07-12' },
+  {
+    id: 'round-split', type: 'expense', amountFils: 250, category: 'groceries', accountId: 'a',
+    title: 'Split', date: '2026-07-13',
+    splits: [
+      { category: 'groceries', amountFils: 125 },
+      { category: 'shopping', amountFils: 125 },
+    ],
+  },
+];
+const roundedSummary = insights.summarizeMonth(roundedRows, '2026-07');
+const roundedComposition = insights.composition(roundedSummary);
+const activityOut = fmt.totalAsShown(roundedRows.map((transaction) => transaction.amountFils));
+eq('display summary keeps exact fils for financial arithmetic', roundedSummary.expenseFils, 549);
+eq('Home and Activity use the same per-row whole-AED Out total', roundedSummary.expenseShownFils, activityOut);
+eq('Flow headline uses that same per-row Out total', roundedComposition.totalFils, activityOut);
+eq(
+  'Flow category slices allocate split rounding and add exactly to the headline',
+  roundedComposition.slices.reduce((total, slice) => total + slice.totalFils, 0),
+  roundedComposition.totalFils,
+);
 eq('other month empty', insights.summarizeMonth(txs, '2026-06').expenseFils, 0);
+const cashflowMonths = insights.summarizeCashflowMonths(txs, ['2026-06', '2026-07']);
+eq('multi-month cashflow keeps an empty month', cashflowMonths.get('2026-06').expenseFils, 0);
+eq('multi-month cashflow matches the one-month income total', cashflowMonths.get('2026-07').incomeFils, 1000000);
+eq('multi-month cashflow matches the one-month expense total', cashflowMonths.get('2026-07').expenseFils, 400000);
 
 const ins = insights.buildInsights(txs, [{ category: 'groceries', limitFils: 250000 }], '2026-07', new Date(2026, 6, 18));
+const preparedIns = insights.buildInsights(
+  txs,
+  [{ category: 'groceries', limitFils: 250000 }],
+  '2026-07',
+  new Date(2026, 6, 18),
+  [],
+  undefined,
+  undefined,
+  { current: sum, categorySpend: new Map([['groceries', 300000], ['dining', 100000]]) },
+);
+eq('prepared Flow insight totals preserve the same decisions',
+  preparedIns.map(i => i.id).join(','), ins.map(i => i.id).join(','));
 ok('budget-over insight fires', ins.some(i => i.id === 'budget-over-groceries'));
 ok('savings insight fires', ins.some(i => i.id === 'savings'));
 ok('warnings ranked before neutral',
   ins.findIndex(i => i.tone === 'warning') < ins.findIndex(i => i.tone === 'neutral'));
 
 eq('spentInMonthForCategory', insights.spentInMonthForCategory(txs, '2026-07', 'dining'), 100000);
+
+// ── exports and unresolved rows ──
+{
+  const dangerousTitles = ['=2+2', '+2+2', '-2+2', '@SUM(A1:A2)', '\t=2+2', '\r=2+2'];
+  const csv = exportData.transactionsCsv(
+    [
+      {
+        id: 'export-1', type: 'income', amountFils: 1216800, category: 'other',
+        accountId: '__unassigned-account__:fab', title: 'Refund, "unknown"\nline',
+        date: '2026-08-01', ts: Date.parse('2026-08-01T21:51:00Z'), source: 'sms',
+      },
+      ...dangerousTitles.map((title, index) => ({
+        id: `formula-${index}`, type: 'expense', amountFils: 100, category: 'other',
+        accountId: 'a', title, date: '2026-08-02', source: 'sms',
+      })),
+    ],
+    [{ id: 'a', name: '@Injected account', kind: 'debit' }],
+    'SAR',
+  );
+  ok('transaction export is a real UTF-8 CSV file', csv.startsWith('\uFEFF"date","timestamp"'));
+  ok('transaction export names local money without falsely calling SAR AED',
+    csv.includes('"amount_local","local_currency"') &&
+      csv.includes('"12168.00","SAR"') && !csv.includes('amount_aed'));
+  ok('transaction export escapes commas, quotes, and line breaks',
+    csv.includes('"Refund, ""unknown""\nline"'));
+  ok('transaction export neutralizes spreadsheet formulas from SMS and account names',
+    dangerousTitles.every((title) => csv.includes(`"'${title}"`)) &&
+      csv.includes('"\'@Injected account"'));
+  ok('transaction export marks unresolved account attribution for review',
+    csv.includes('"true"'));
+
+  const ledger = require('./build/ledger');
+  ok('unassigned parser rows never count in financial totals',
+    !ledger.countsInTotals({
+      id: 'unassigned', type: 'income', amountFils: 1216800, category: 'other',
+      accountId: '__unassigned-account__:fab', title: 'Refund', date: '2026-08-01',
+    }));
+}
 
 // ── seed ──
 const now = new Date(2026, 6, 18);
@@ -1146,7 +1228,9 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const dup = {
     accounts: [
       { id: 'a1', name: 'FAB Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
-      { id: 'a2', name: 'FAB Debit Card •5793', kind: 'card', cardType: 'debit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
+      // Legacy builds used a middle dot here. It is still a generated parser
+      // name, not a user rename, and must be eligible for artifact cleanup.
+      { id: 'a2', name: 'FAB Debit Card ·5793', kind: 'card', cardType: 'debit', last4: '5793', bankName: 'FAB', openingFils: 0, color: '#fff' },
       { id: 'b1', name: 'ENBD Credit Card •5793', kind: 'card', cardType: 'credit', last4: '5793', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' },
       { id: 'cash', name: 'Cash', kind: 'cash', openingFils: 5000, color: '#fff' },
     ],
@@ -1212,6 +1296,25 @@ ok('stale: a stale statement that gets paid leaves openDues',
   };
   ok('artifact cleanup: two active same-last4 siblings are never auto-merged',
     acc.mergeDuplicateAccounts(activeSiblings) === activeSiblings);
+  const snapshotClones = {
+    ...activeSiblings,
+    accounts: [
+      { ...dup.accounts[1], id: 'active-debit', name: 'FAB Debit Card ·5793', snapshotFils: 1000, snapshotKind: 'balance', snapshotTs: 10 },
+      { ...dup.accounts[1], id: 'snapshot-old', name: 'FAB Debit Card ·5793', snapshotFils: 900, snapshotKind: 'balance', snapshotTs: 5 },
+      { ...dup.accounts[1], id: 'snapshot-new', name: 'FAB Debit Card ·5793', snapshotFils: 1100, snapshotKind: 'balance', snapshotTs: 20 },
+    ],
+    transactions: [{ ...dup.transactions[0], accountId: 'active-debit' }],
+    cardDues: [], bills: [], accountHints: { '5793': 'snapshot-new' },
+  };
+  const snapshotsMerged = acc.mergeDuplicateAccounts(snapshotClones);
+  ok('artifact cleanup: snapshot-only clones fold into the one active typed card',
+    snapshotsMerged.accounts.length === 1 && snapshotsMerged.accounts[0].id === 'active-debit',
+    snapshotsMerged.accounts);
+  ok('artifact cleanup: newest bank snapshot and account hint survive clone cleanup',
+    snapshotsMerged.accounts[0].snapshotFils === 1100 &&
+      snapshotsMerged.accounts[0].snapshotTs === 20 &&
+      snapshotsMerged.accountHints['5793'] === 'active-debit',
+    snapshotsMerged);
   const emptyTypedSiblings = {
     ...dup,
     accounts: [
@@ -1465,11 +1568,11 @@ ok('stale: a stale statement that gets paid leaves openDues',
     title: 'Carrefour', isTransfer: undefined,
   };
   const nowRefund = {
-    ...reparsedRemittance, merchant: 'Refund', categoryGuess: 'other', transferHint: false,
+    ...reparsedRemittance, merchant: 'Refund', categoryGuess: 'refund', transferHint: false,
   };
   const refundPatch = heal.healPatch(oldExpense, nowRefund);
   ok('direction healing: expense to income also replaces stale category and merchant',
-    refundPatch?.type === 'income' && refundPatch.category === 'other' &&
+    refundPatch?.type === 'income' && refundPatch.category === 'refund' &&
       refundPatch.title === 'Refund', refundPatch);
 
   const oldIncome = {

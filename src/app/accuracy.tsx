@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
-import { ScrollView, Share, StyleSheet, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -13,6 +13,7 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { cardDiagnostics, unreadFormats } from '@/lib/accuracy';
 import { categoryLabel } from '@/lib/categories';
+import { shareTextFile } from '@/lib/file-sharing';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
 
@@ -30,6 +31,7 @@ export default function AccuracyScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { state } = useStore();
+  const [sharing, setSharing] = useState<'formats' | 'cards' | null>(null);
 
   const rows = useMemo(
     () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
@@ -42,7 +44,7 @@ export default function AccuracyScreen() {
   // Two headings, not one. The old export called every row "could not read",
   // which was wrong about most of them — the merchant was read fine, it just
   // had no category — and that made a long list look like a broken parser.
-  const shareAll = () => {
+  const shareAll = async () => {
     const section = (label: string, list: typeof rows) =>
       list.length === 0
         ? ''
@@ -59,16 +61,40 @@ export default function AccuracyScreen() {
                 }),
             )
             .join('\n\n');
-    Share.share({
-      message:
-        t('accuracyShareTitle') +
-        section(t('accuracyShareUnread'), unread) +
-        section(t('accuracyShareUncategorized'), uncategorized),
-    }).catch(() => {});
+    if (sharing) return;
+    setSharing('formats');
+    try {
+      await shareTextFile({
+        filename: 'wafra-unrecognized-sms.txt',
+        contents:
+          t('accuracyShareTitle') +
+          section(t('accuracyShareUnread'), unread) +
+          section(t('accuracyShareUncategorized'), uncategorized),
+        dialogTitle: t('shareUnrecognized'),
+        mimeType: 'text/plain',
+      });
+    } catch {
+      Alert.alert(t('exportFailedTitle'), t('exportFailedBody'));
+    } finally {
+      setSharing(null);
+    }
   };
 
-  const shareCards = () => {
-    Share.share({ message: cardDiagnostics(state) }).catch(() => {});
+  const shareCards = async () => {
+    if (sharing) return;
+    setSharing('cards');
+    try {
+      await shareTextFile({
+        filename: 'wafra-card-diagnostic.txt',
+        contents: cardDiagnostics(state),
+        dialogTitle: t('shareCardDiagnostic'),
+        mimeType: 'text/plain',
+      });
+    } catch {
+      Alert.alert(t('exportFailedTitle'), t('exportFailedBody'));
+    } finally {
+      setSharing(null);
+    }
   };
 
   return (
@@ -85,9 +111,10 @@ export default function AccuracyScreen() {
             </ThemedText>
             {rows.length > 0 && (
               <Button
-                label={`${t('shareUnrecognized')} · ${rows.length}`}
+                label={sharing === 'formats' ? t('preparingExport') : `${t('shareUnrecognized')} · ${rows.length}`}
                 icon="upload"
-                onPress={shareAll}
+                disabled={sharing !== null}
+                onPress={() => void shareAll()}
               />
             )}
             {/* Always offered, even when nothing is unread: the card bugs this
@@ -95,10 +122,11 @@ export default function AccuracyScreen() {
                 wrong account — happen to messages the parser read CONFIDENTLY,
                 so they never appear in the list above. */}
             <Button
-              label={t('shareCardDiagnostic')}
+              label={sharing === 'cards' ? t('preparingExport') : t('shareCardDiagnostic')}
               icon="upload"
               variant="outline"
-              onPress={shareCards}
+              disabled={sharing !== null}
+              onPress={() => void shareCards()}
             />
             <ThemedText type="meta" themeColor="textTertiary">
               {t('shareCardDiagnosticHint')}

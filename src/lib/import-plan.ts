@@ -147,8 +147,6 @@ export function buildImportPlan(
   const transactions: Omit<Transaction, 'id'>[] = [];
   const newDues: Omit<CardDue, 'id'>[] = [];
   const billDues: ScannedSms[] = [];
-  const fallbackAccountId = state.accounts[0]?.id ?? '';
-
   // Bank identity per account, learned from SMS sender IDs (existing accounts
   // that predate this get theirs backfilled).
   const bankNames: Record<string, string> = {};
@@ -167,6 +165,10 @@ export function buildImportPlan(
     kind: ResolvedCardKind,
   ): string =>
     `__unassigned-card__:${bankName ? bankIdentityForName(bankName) : 'unknown'}:${kind}:${last4}`;
+  const unassignedAccountRef = (sender: string | undefined): string => {
+    const bank = bankFromSender(sender);
+    return `__unassigned-account__:${bank ? bankIdentityForName(bank.name) : 'unknown'}`;
+  };
   const accountAtRef = (
     ref: string,
   ): Pick<Account, 'kind' | 'cardType' | 'last4' | 'bankName' | 'name'> | undefined => {
@@ -228,7 +230,15 @@ export function buildImportPlan(
     ambiguousFallbackAccountId?: string,
     refuseAmbiguous = false,
   ): AccountResolution => {
-    if (!p.card) return { accountId: fallbackAccountId, confident: true };
+    // An alert with no account/card identity cannot honestly be attached to
+    // whichever account happens to be first in the array. On one real ledger
+    // that fallback was Cash, so a supposed AED 12,168 refund appeared as cash
+    // income and distorted every total. Keep the money event losslessly in a
+    // stable staging bucket; it remains editable but is excluded from totals
+    // until the user chooses a real account.
+    if (!p.card) {
+      return { accountId: unassignedAccountRef(p.sender), confident: false };
+    }
     const { last4 } = p.card;
     // The parser owns card-kind evidence, including Arabic forms such as
     // Mada. Reinterpreting its structured result from English-only raw-text

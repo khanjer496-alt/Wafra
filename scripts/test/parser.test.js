@@ -305,8 +305,8 @@ else { fail++; console.log('✗ insurance categorized health', JSON.stringify(in
 
 // ── accounting sweep: refund income is not revenue, pre-auth holds skip, cheques named ──
 const refundIncome = parseSms('Refund of AED 89.00 has been credited to your card from DELIVEROO');
-if (refundIncome && refundIncome.categoryGuess === 'other') { pass++; console.log('✓ refund income filed as other, not business revenue'); }
-else { fail++; console.log('✗ refund income filed as other', JSON.stringify(refundIncome && refundIncome.categoryGuess)); }
+if (refundIncome && refundIncome.categoryGuess === 'refund') { pass++; console.log('✓ refund income filed as refund, not business revenue'); }
+else { fail++; console.log('✗ refund income filed as refund', JSON.stringify(refundIncome && refundIncome.categoryGuess)); }
 
 const cashback = parseSms('Cashback of AED 25.00 has been credited to your Credit Card ending 4821');
 if (cashback && cashback.type === 'income' && cashback.categoryGuess === 'other') { pass++; console.log('✓ cashback income filed as other'); }
@@ -1179,7 +1179,7 @@ t('a salary is still a salary',
   { category: 'salary', type: 'income' });
 t('a refund is still an offset, not revenue',
   'AED 250.00 refunded to your card ending 4110.',
-  { category: 'other', type: 'income' });
+  { category: 'refund', type: 'income' });
 
 function ok2(name, cond) {
   if (cond) { pass++; console.log(`\u2713 ${name}`); }
@@ -2038,25 +2038,25 @@ for (const [descriptor, category] of [
 // about messages nobody has seen. No format-reading rule rests on them.
 t('a reversal credited to the account is money coming back',
   'Your transaction of AED 1,101.75 at WASSAGY EBOOKS has been reversed and credited to your account.',
-  { type: 'income', amountFils: 110175, merchant: 'Wassagy Ebooks', category: 'other' });
+  { type: 'income', amountFils: 110175, merchant: 'Wassagy Ebooks', category: 'refund' });
 
 t('a reversal credited to the CARD is money coming back too',
   'Your transaction of AED 1,101.75 has been reversed and credited to your Card ending 9960.',
-  { type: 'income', amountFils: 110175, category: 'other' });
+  { type: 'income', amountFils: 110175, category: 'refund' });
 
 // Purchase wording must not flip the direction back to spending: the message
 // names the original charge, and "reversed ... credited" outranks it.
 t('a reversal keeps its direction even when worded as a purchase',
   'Your purchase of AED 1,101.75 at WASSAGY EBOOKS has been reversed and credited to your Card ending 9960.',
-  { type: 'income', amountFils: 110175, merchant: 'Wassagy Ebooks', category: 'other' });
+  { type: 'income', amountFils: 110175, merchant: 'Wassagy Ebooks', category: 'refund' });
 
 t('the reversal wording already handled still works',
   'Reversal of AED 1,101.75 has been credited to your Card ending 9960.',
-  { type: 'income', amountFils: 110175, category: 'other' });
+  { type: 'income', amountFils: 110175, category: 'refund' });
 
 t('...and so does the refund wording',
   'AED 1,101.75 has been refunded to your Credit Card ending 9960.',
-  { type: 'income', amountFils: 110175, category: 'other' });
+  { type: 'income', amountFils: 110175, category: 'refund' });
 
 // The failed-at-the-terminal reading is why the word was refused, and it must
 // keep being refused. The last two are the reason the guard does NOT use

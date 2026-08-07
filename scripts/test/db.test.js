@@ -347,7 +347,12 @@ function loadHydrationExports() {
     '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
     '@/lib/theme-preference': { setThemePreference() {} },
     '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
-    '@/lib/markets': { detectMarketId: () => 'AE', setActiveMarket() {} },
+    '@/lib/markets': {
+      bankFromSender: (sender) => /\bfab\b/i.test(sender ?? '') ? { name: 'FAB' } : null,
+      bankIdentityForName: (name) => name?.toLowerCase(),
+      detectMarketId: () => 'AE',
+      setActiveMarket() {},
+    },
     '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
@@ -563,6 +568,30 @@ const tx = (id, extra = {}) => ({
   source: 'sms',
   ...extra,
 });
+
+{
+  const automatic = tx('cash-refund', {
+    type: 'income', amountFils: 1216800, title: 'Refund', accountId: 'cash',
+  });
+  const attributable = tx('cash-fab-refund', {
+    type: 'income', amountFils: 1216800, title: 'Refund', accountId: 'cash',
+    raw: 'Your FAB purchase was refunded',
+  });
+  const corrected = tx('corrected-cash-refund', {
+    type: 'income', amountFils: 1216800, title: 'Refund', accountId: 'cash', userEdited: true,
+  });
+  const migrated = hydration.migratePersistedState({
+    accounts: [{ id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#999' }],
+    transactions: [automatic, attributable, corrected],
+  });
+  const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
+  ok('hydration removes untouched bank SMS from the impossible Cash account',
+    byId.get('cash-refund')?.accountId === '__unassigned-account__:unknown');
+  ok('hydration preserves recoverable bank identity in the review bucket',
+    byId.get('cash-fab-refund')?.accountId === '__unassigned-account__:fab');
+  ok('hydration preserves a user-confirmed Cash account exactly',
+    JSON.stringify(byId.get('corrected-cash-refund')) === JSON.stringify(corrected));
+}
 
 {
   const legacy = {

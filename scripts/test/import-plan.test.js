@@ -860,6 +860,34 @@ const afterFirst = apply(BASE, first);
   ok('a genuinely new message still imports', plan.txCount === 1, plan.txCount);
 }
 
+{
+  // No PAN/account suffix is not evidence for the first account in the array.
+  // A real phone had Cash first, and this exact fallback turned an ambiguous
+  // AED 12,168 refund alert into cash income.
+  const refund = scan([{
+    body: 'Refund of AED 12,168.00 has been credited to your account.',
+    ts: T0 + 700_000,
+    sender: 'FAB',
+  }]);
+  const state = {
+    ...BASE,
+    accounts: [
+      { id: 'cash', name: 'Cash', kind: 'cash', openingFils: 0, color: '#999' },
+      { id: 'fab-0002', name: 'FAB Account •0002', kind: 'bank', last4: '0002', bankName: 'FAB', openingFils: 0, color: '#09f' },
+    ],
+  };
+  const plan = buildImportPlan(refund.parsed, state, refund.newestTs);
+  ok('account safety: an alert with no account identity is retained for review',
+    plan.txCount === 1 &&
+      plan.batch.transactions[0]?.accountId === '__unassigned-account__:fab',
+    plan.batch);
+  ok('account safety: an unresolved bank alert is never attached to Cash or a guessed bank account',
+    plan.batch.transactions[0]?.accountId !== 'cash' &&
+      plan.batch.transactions[0]?.accountId !== 'fab-0002' &&
+      plan.newAccountCount === 0,
+    plan.batch);
+}
+
 /* ── the watermark ───────────────────────────────────────────────────── */
 
 {

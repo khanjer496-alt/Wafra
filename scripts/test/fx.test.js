@@ -5,6 +5,10 @@ const {
   formatOriginalCurrency,
   referenceQuoteUrl,
 } = require('./build/fx.js');
+const {
+  previewForeignActivity,
+  summarizeForeignActivity,
+} = require('./build/fx-summary.js');
 
 let pass = 0;
 let fail = 0;
@@ -75,6 +79,31 @@ async function main() {
   ok('one pair/day makes one request', calls === 1);
   ok('updated local amount is exact to one fils', updates[0].amountFils === 7345);
   ok('currency formatting retains original code', /USD/.test(formatOriginalCurrency(2000, 'USD', 'en')));
+
+  const roundedBreakdown = summarizeForeignActivity(
+    ['USD', 'EUR', 'GBP'].map((currency, index) => ({
+      ...base,
+      id: `rounded-${currency}`,
+      originalCurrency: currency,
+      originalAmountMinor: 100 + index,
+      amountFils: 149,
+    })),
+  );
+  const preview = previewForeignActivity(roundedBreakdown, 2);
+  ok(
+    'foreign headline totals the whole-AED currency rows, not hidden fils',
+    roundedBreakdown.totalLocalFils === 300,
+    JSON.stringify(roundedBreakdown),
+  );
+  ok(
+    'foreign preview exposes every omitted currency as a reconciling remainder',
+    preview.groups.length === 2 &&
+      preview.remainingCount === 1 &&
+      preview.remainingLocalFils === 100 &&
+      preview.groups.reduce((sum, group) => sum + Math.round(group.localFils / 100) * 100, 0) +
+        preview.remainingLocalFils === preview.totalLocalFils,
+    JSON.stringify(preview),
+  );
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

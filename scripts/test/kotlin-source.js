@@ -19,6 +19,10 @@ const FILES = {
     MODULES,
     'sms-reader/android/src/main/java/expo/modules/smsreader/SmsDeliveryReceiver.kt',
   ),
+  SmsReaderModule: path.join(
+    MODULES,
+    'sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
+  ),
   BankNotificationListenerService: path.join(
     MODULES,
     'notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt',

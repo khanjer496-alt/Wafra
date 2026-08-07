@@ -1,6 +1,6 @@
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { formatAED, shortDate, totalAsShown } from '@/lib/format';
+import { formatAED, monthKey, shortDate, totalAsShown, wholeFilsAsShown } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
@@ -21,9 +21,50 @@ import {
 import type { Budget, CategoryId, Transaction } from '@/lib/types';
 
 export interface MonthSummary {
+  /** Exact fils for rates, budgets and other financial arithmetic. */
   incomeFils: number;
   expenseFils: number;
-  byCategory: { category: CategoryId; totalFils: number; share: number }[];
+  /** Per-transaction whole-AED figures, exactly as Activity rows are printed. */
+  incomeShownFils: number;
+  expenseShownFils: number;
+  byCategory: {
+    category: CategoryId;
+    /** Exact fils for budget arithmetic. */
+    totalFils: number;
+    /** Whole-AED allocation whose category sum equals expenseShownFils. */
+    shownFils: number;
+    share: number;
+  }[];
+}
+
+export interface CashflowSummary {
+  incomeFils: number;
+  expenseFils: number;
+}
+
+/**
+ * One ledger pass for charts that need several reporting months at once.
+ * Values use the same per-row whole-AED rule as the chart labels and Home.
+ */
+export function summarizeCashflowMonths(
+  transactions: Transaction[],
+  keys: string[],
+  live?: Set<string>,
+  internal?: Set<string>,
+): Map<string, CashflowSummary> {
+  const summaries = new Map<string, CashflowSummary>(
+    keys.map((key) => [key, { incomeFils: 0, expenseFils: 0 }] as const),
+  );
+  for (const transaction of transactions) {
+    const summary = summaries.get(monthKey(transaction.date));
+    if (!summary) continue;
+    if (isIncome(transaction, live, internal)) {
+      summary.incomeFils += wholeFilsAsShown(transaction.amountFils);
+    } else if (isSpending(transaction, live, internal)) {
+      summary.expenseFils += wholeFilsAsShown(transaction.amountFils);
+    }
+  }
+  return summaries;
 }
 
 /** Beyond five slices the ramp stops being readable, so the tail is pooled. */
@@ -62,21 +103,51 @@ export function composition(
     key: c.category as string,
     category: c.category,
     categories: [c.category],
-    totalFils: c.totalFils,
-    share: c.share,
+    totalFils: c.shownFils,
+    share: summary.expenseShownFils > 0 ? c.shownFils / summary.expenseShownFils : 0,
   }));
   const tail = summary.byCategory.slice(maxSlices);
   if (tail.length > 0) {
-    const totalFils = tail.reduce((sum, c) => sum + c.totalFils, 0);
+    const totalFils = tail.reduce((sum, c) => sum + c.shownFils, 0);
     head.push({
       key: 'rest',
       category: null,
       categories: tail.map((c) => c.category),
       totalFils,
-      share: summary.expenseFils > 0 ? totalFils / summary.expenseFils : 0,
+      share: summary.expenseShownFils > 0 ? totalFils / summary.expenseShownFils : 0,
     });
   }
   return { slices: head, totalFils: totalAsShown(head.map((h) => h.totalFils)) };
+}
+
+/**
+ * Allocate one row's displayed whole dirhams across its split categories.
+ *
+ * Rounding each split independently can manufacture or lose dirhams. Floor
+ * every part, then give the row's remaining displayed dirhams to the largest
+ * fractional parts. The result is deterministic, non-negative and sums to the
+ * same `wholeFilsAsShown(transaction.amountFils)` printed in Activity.
+ */
+function categoryAllocationsAsShown(
+  transaction: Transaction,
+  allocations: readonly { category: CategoryId; amountFils: number }[],
+): { category: CategoryId; amountFils: number }[] {
+  if (allocations.length === 0) return [];
+  const rows = allocations.map((allocation, index) => ({
+    category: allocation.category,
+    index,
+    units: Math.floor(allocation.amountFils / 100),
+    fraction: allocation.amountFils % 100,
+  }));
+  let remaining = wholeFilsAsShown(transaction.amountFils) / 100 -
+    rows.reduce((sum, row) => sum + row.units, 0);
+  const byRemainder = [...rows].sort(
+    (a, b) => b.fraction - a.fraction || a.index - b.index,
+  );
+  for (let index = 0; remaining > 0; index += 1, remaining -= 1) {
+    byRemainder[index % byRemainder.length].units += 1;
+  }
+  return rows.map((row) => ({ category: row.category, amountFils: row.units * 100 }));
 }
 
 export function summarizeMonth(
@@ -87,7 +158,10 @@ export function summarizeMonth(
 ): MonthSummary {
   let incomeFils = 0;
   let expenseFils = 0;
+  let incomeShownFils = 0;
+  let expenseShownFils = 0;
   const catTotals = new Map<CategoryId, number>();
+  const catShownTotals = new Map<CategoryId, number>();
 
   for (const t of transactions) {
     if (!inPeriod(t.date, period)) continue;
@@ -95,10 +169,19 @@ export function summarizeMonth(
     // that adds money up. See ledger.ts for what these exclude and why.
     if (isIncome(t, live, internal)) {
       incomeFils += t.amountFils;
+      incomeShownFils += wholeFilsAsShown(t.amountFils);
     } else if (isSpending(t, live, internal)) {
       expenseFils += t.amountFils;
-      for (const a of allocationsOf(t)) {
+      expenseShownFils += wholeFilsAsShown(t.amountFils);
+      const allocations = allocationsOf(t);
+      for (const a of allocations) {
         catTotals.set(a.category, (catTotals.get(a.category) ?? 0) + a.amountFils);
+      }
+      for (const allocation of categoryAllocationsAsShown(t, allocations)) {
+        catShownTotals.set(
+          allocation.category,
+          (catShownTotals.get(allocation.category) ?? 0) + allocation.amountFils,
+        );
       }
     }
   }
@@ -107,11 +190,12 @@ export function summarizeMonth(
     .map(([category, totalFils]) => ({
       category,
       totalFils,
+      shownFils: catShownTotals.get(category) ?? 0,
       share: expenseFils > 0 ? totalFils / expenseFils : 0,
     }))
     .sort((a, b) => b.totalFils - a.totalFils);
 
-  return { incomeFils, expenseFils, byCategory };
+  return { incomeFils, expenseFils, incomeShownFils, expenseShownFils, byCategory };
 }
 
 export function spentInMonthForCategory(
@@ -188,14 +272,25 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
+  prepared?: {
+    current?: MonthSummary;
+    categorySpend?: ReadonlyMap<CategoryId, number>;
+  },
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
-  const current = summarizeMonth(transactions, period, liveAccounts, internalTransfers);
+  const current = prepared?.current ??
+    summarizeMonth(transactions, period, liveAccounts, internalTransfers);
   const prev = previousPeriod(period);
   const previous = prev
     ? summarizeMonth(transactions, prev, liveAccounts, internalTransfers)
-    : { incomeFils: 0, expenseFils: 0, byCategory: [] };
+    : {
+        incomeFils: 0,
+        expenseFils: 0,
+        incomeShownFils: 0,
+        expenseShownFils: 0,
+        byCategory: [],
+      };
   const live = isCurrentMonth(period, today);
   const isMonthMode = period.mode === 'month';
   const dayOfMonth = Math.max(1, elapsedDays(period, today, transactions));
@@ -255,13 +350,14 @@ export function buildInsights(
 
   // Budget alerts (budgets are monthly — skip in year/range/all views)
   for (const b of isMonthMode ? budgets : []) {
-    const spent = spentInMonthForCategory(
-      transactions,
-      period,
-      b.category,
-      liveAccounts,
-      internalTransfers,
-    );
+    const spent = prepared?.categorySpend?.get(b.category) ??
+      spentInMonthForCategory(
+        transactions,
+        period,
+        b.category,
+        liveAccounts,
+        internalTransfers,
+      );
     if (b.limitFils <= 0) continue;
     const ratio = spent / b.limitFils;
     const cat = getCategory(b.category);

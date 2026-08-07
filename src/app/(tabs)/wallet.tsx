@@ -284,7 +284,10 @@ export default function WalletScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          removeClippedSubviews={Platform.OS === 'android'}
+          contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]}
+          showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow}>
             <ThemedText type="title">{t('walletTitle')}</ThemedText>
             <View style={styles.headerActions}>

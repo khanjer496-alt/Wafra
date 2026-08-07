@@ -41,6 +41,7 @@ export const CATEGORIES: CategoryMeta[] = [
   { id: 'government', label: 'Government', labelAr: 'الخدمات الحكومية', icon: 'bank', type: 'expense' },
   { id: 'loan', label: 'Loan', labelAr: 'القروض', icon: 'bank', type: 'expense' },
   { id: 'other', label: 'Other', labelAr: 'أخرى', icon: 'receipt', type: 'expense' },
+  { id: 'refund', label: 'Refund', labelAr: 'استرداد', icon: 'repeat', type: 'income' },
   { id: 'salary', label: 'Salary', labelAr: 'الراتب', icon: 'briefcase', type: 'income' },
   { id: 'business', label: 'Business', labelAr: 'الأعمال', icon: 'chart', type: 'income' },
 ];
@@ -58,7 +59,14 @@ export function categoryLabel(category: CategoryMeta | CategoryId, language: Lan
 }
 
 export const EXPENSE_CATEGORIES = CATEGORIES.filter((c) => c.type === 'expense');
-export const INCOME_CATEGORIES = CATEGORIES.filter((c) => c.type === 'income');
+// Cashback, bank profit, interest and unattributed credits are legitimate
+// income-side offsets without being salary, business revenue or a purchase
+// refund. Keep the neutral Other choice visible in every income editor so an
+// existing value never disappears merely because the row points inward.
+export const INCOME_CATEGORIES = [
+  ...CATEGORIES.filter((c) => c.type === 'income'),
+  getCategory('other'),
+];
 
 /**
  * The one place several categories have to be told apart at a glance: the

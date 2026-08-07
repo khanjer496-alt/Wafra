@@ -8,6 +8,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { clockTime, formatAmount } from '@/lib/format';
+import { isUnassignedAccountRef } from '@/lib/ledger';
 import { getActiveMarket } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
@@ -58,6 +59,9 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
    */
   const arrived = transaction.type === 'income';
   const where = isTransfer ? t('transferLabel', language) : categoryLabel(meta, language);
+  const accountName =
+    account?.name ??
+    (isUnassignedAccountRef(transaction.accountId) ? t('unassigned', language) : undefined);
 
   // Spoken as one sentence. Left to itself RN would concatenate the children,
   // which reads the sign as a stray "minus" and drops the currency entirely —
@@ -65,7 +69,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
   const label = [
     transaction.title,
     where,
-    account?.name,
+    accountName,
     clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
   ]
@@ -85,7 +89,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
           {where}
-          {account ? ` · ${account.name}` : ''}
+          {accountName ? ` · ${accountName}` : ''}
           {/* The clock, when the bank gave one. Two coffees on the same day
               at the same shop are otherwise indistinguishable in this list. */}
           {clock ? ` · ${clock}` : ''}

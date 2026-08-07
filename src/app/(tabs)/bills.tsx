@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -426,6 +427,7 @@ export default function BillsScreen() {
         </View>
 
         <ScrollView
+          removeClippedSubviews={Platform.OS === 'android'}
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
           showsVerticalScrollIndicator={false}>
           {/* Credit-card statement dues live in their own tab. */}

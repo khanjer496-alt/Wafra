@@ -19,7 +19,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -36,6 +35,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { unreadFormatCount } from '@/lib/accuracy';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { transactionsCsvAsync } from '@/lib/export-data';
+import { shareExistingFile, shareTextFile } from '@/lib/file-sharing';
 import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
@@ -84,6 +85,7 @@ export default function SettingsScreen() {
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
   const [smsGranted, setSmsGranted] = useState(false);
+  const [exportBusy, setExportBusy] = useState<'backup' | 'transactions' | 'sms' | null>(null);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -265,18 +267,91 @@ export default function SettingsScreen() {
 
   /* ── Data ───────────────────────────────────────────────────────────── */
 
+  const runExport = async (
+    kind: 'backup' | 'transactions' | 'sms',
+    task: () => Promise<void>,
+  ) => {
+    if (exportBusy) return;
+    setExportBusy(kind);
+    try {
+      await task();
+    } catch {
+      Alert.alert(t('exportFailedTitle'), t('exportFailedBody'));
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
   const exportCsv = () => {
-    const header = 'date,type,amount_aed,category,title,account,transfer';
-    const lines = state.transactions.map((tx) => {
-      const account = state.accounts.find((a) => a.id === tx.accountId)?.name ?? '';
-      const title = `"${tx.title.replace(/"/g, '""')}"`;
-      return `${tx.date},${tx.type},${(tx.amountFils / 100).toFixed(2)},${tx.category},${title},"${account}",${tx.isTransfer ? 1 : 0}`;
+    if (state.transactions.length === 0) {
+      Alert.alert(t('nothingToExport'));
+      return;
+    }
+    void runExport('transactions', async () => {
+      const contents = await transactionsCsvAsync(
+        state.transactions,
+        state.accounts,
+        market.currency.code,
+      );
+      await shareTextFile({
+        filename: 'wafra-transactions.csv',
+        contents,
+        dialogTitle: t('exportCsv'),
+        mimeType: 'text/csv',
+      });
     });
-    Share.share({ title: 'wafra-export.csv', message: [header, ...lines].join('\n') }).catch(() => {});
   };
 
   const backupJson = () => {
-    Share.share({ title: 'wafra-backup.json', message: exportBackup() }).catch(() => {});
+    void runExport('backup', () =>
+      shareTextFile({
+        filename: 'wafra-backup.json',
+        contents: exportBackup(),
+        dialogTitle: t('backupJson'),
+        mimeType: 'application/json',
+      }),
+    );
+  };
+
+  const exportSms = () => {
+    void runExport('sms', async () => {
+      if (Platform.OS !== 'android' || !SmsReader?.exportInboxSms) {
+        Alert.alert(t('smsExportAndroidOnlyTitle'), t('smsExportAndroidOnlyBody'));
+        return;
+      }
+      let granted = await hasSmsPermission();
+      if (!granted) granted = await requestSmsPermission();
+      setSmsGranted(granted);
+      if (!granted) {
+        Alert.alert(t('smsAccessOff'), t('smsPermissionPath'));
+        return;
+      }
+      const result = await SmsReader.exportInboxSms();
+      if (!result.uri || result.count === 0) {
+        if (result.uri) {
+          await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => {});
+        }
+        Alert.alert(t('noSmsToExport'));
+        return;
+      }
+      await shareExistingFile({
+        uri: result.uri,
+        dialogTitle: tf('shareSmsExportCount', { count: result.count }),
+        mimeType: 'application/x-ndjson',
+        deleteAfter: true,
+      });
+    });
+  };
+
+  const chooseSmsExport = () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert(t('smsExportAndroidOnlyTitle'), t('smsExportAndroidOnlyBody'));
+      return;
+    }
+    Alert.alert(t('exportSmsDiagnostic'), t('exportSmsDiagnosticBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('exportFinancialSmsAction'), onPress: exportSms },
+    ]);
   };
 
   const createExpenseReport = async (scope: 'month' | 'all') => {
@@ -664,9 +739,26 @@ export default function SettingsScreen() {
 
           <Section index={5}>
             <SectionHeader title={t('dataHeader')} />
-            {linkRow(t('backupJson'), null, gated(backupJson))}
+            {linkRow(
+              t('backupJson'),
+              exportBusy === 'backup' ? t('preparingExport') : null,
+              gated(backupJson),
+            )}
             {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
-            {linkRow(t('exportCsv'), null, exportCsv)}
+            {linkRow(
+              t('exportCsv'),
+              exportBusy === 'transactions' ? t('preparingExport') : null,
+              exportCsv,
+            )}
+            {linkRow(
+              t('exportSmsDiagnostic'),
+              exportBusy === 'sms'
+                ? t('preparingExport')
+                : Platform.OS === 'android'
+                  ? t('exportSmsDiagnosticDetail')
+                  : t('smsExportAndroidOnlyDetail'),
+              chooseSmsExport,
+            )}
             {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod)}
             {linkRow(
               t('improveAccuracy'),
