@@ -1,12 +1,11 @@
 # Wafra Privacy Policy
 
-_Last updated: 2 August 2026_
+_Last updated: 7 August 2026_
 
-Wafra ("the app") is a personal money manager for Android and iOS.
+Wafra ("the app") is a personal money manager for Android and iOS,
+published by Naser Khanjar ("we", "us").
 
-**Not legal advice.** Have a lawyer review this before publishing. The relay
-hosting entity, processing region and support address must also be filled in
-before release.
+**Not legal advice.** Have a lawyer review this before publishing.
 
 ## The short version
 
@@ -57,6 +56,12 @@ The relay also stores a random device identifier, the device's public key and a
 SHA-256 hash of the bearer token. It stores no name, email address, phone
 number, bank login or raw message archive. An inactive device registration is
 deleted after one year.
+
+If the silent-wake path described below is enabled, the relay additionally
+stores that device's Apple push token, encrypted at rest, alongside the Expo
+project it belongs to and an expiry date. The token is a delivery address for
+push notifications and nothing else — it carries no transaction data and is
+deleted with the device registration.
 
 Shortcuts can send an alert while Wafra is closed. After the first unlock
 following a restart, iOS may wake Wafra silently and stage the sealed,
@@ -134,11 +139,17 @@ archive exists.
 
 ## Processing location
 
-The iPhone relay is hosted using Cloudflare Workers and D1. Its production
-jurisdiction and the legal entity responsible for that processing are
-**[pending before release]**. Depending on that configuration, processing may
-occur outside the user's country. This section must be completed before the
-iOS build is published.
+The iPhone relay is hosted on Cloudflare Workers and D1, with Cloudflare, Inc.
+acting as processor. Naser Khanjar is the entity responsible for that
+processing.
+
+Workers execute at Cloudflare edge locations worldwide, and the D1 database has
+a primary region fixed when it was created. Processing therefore may occur
+outside the user's own country. What crosses the network is one bank alert at a
+time; what is retained is a sealed structured row the relay cannot decrypt.
+
+Android sends nothing to the relay and no Android data leaves the device, so
+none of this applies to the Android build.
 
 ## Your choices and deletion
 
@@ -170,5 +181,4 @@ will be surfaced in the app.
 
 ## Contact
 
-<!-- Replace with the real support address before publishing. -->
-support@example.com
+khanjer496@gmail.com

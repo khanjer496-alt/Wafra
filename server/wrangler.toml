@@ -10,8 +10,9 @@ command = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "wafra"
-# Replace with the id printed by: npx wrangler d1 create wafra
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+# Created by `npm run setup`. This names a database; it does not open one, so
+# it is not a credential and is safe in the repo.
+database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
 # Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]

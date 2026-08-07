@@ -8,6 +8,10 @@ on:
   push:
     branches:
       - main
+      # The integration branch is where the work actually lands, and it had no
+      # push trigger — so a failing suite sat on it undetected. Anything that
+      # is a working line long enough to accumulate commits belongs here.
+      - integration/combine-prs
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,6 +35,15 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             server/package-lock.json
+
+      # kotlin-regex.test.js compiles the receiver's regexes with javac and
+      # runs them, which is the only check that the Kotlin and the JS agree.
+      # Without this it depends on whatever JDK the runner image ships, and it
+      # silently degrades to "the generated check compiles" failing.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
       - name: Install dependencies
         run: npm ci

@@ -1,6 +1,6 @@
 # Wafra Terms of Use
 
-_Last updated: 2 August 2026_
+_Last updated: 7 August 2026_
 
 > **Draft — needs a lawyer and two decisions before publishing.**
 > Placeholders marked `[[…]]` must be filled: the legal entity that publishes
@@ -9,7 +9,7 @@ _Last updated: 2 August 2026_
 > app actually behaves today; if the app changes, this changes with it.
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for Android and iOS published by `[[LEGAL ENTITY]]` ("we", "us").
+for Android and iOS published by Naser Khanjar ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -124,5 +124,4 @@ These terms are governed by the laws of `[[JURISDICTION]]`.
 
 ## Contact
 
-<!-- Replace with the real support address before publishing. -->
-support@example.com
+khanjer496@gmail.com

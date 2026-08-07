@@ -185,10 +185,21 @@ let compiled = false;
 try {
   execFileSync('javac', ['-encoding', 'UTF-8', 'WafraRegexCheck.java'], { cwd: dir, stdio: 'pipe' });
   compiled = true;
-  out = execFileSync('java', ['-Dfile.encoding=UTF-8', 'WafraRegexCheck'], {
-    cwd: dir,
-    encoding: 'utf8',
-  });
+  // JEP 400 (JDK 18) decoupled System.out's charset from file.encoding, so on
+  // a modern JDK the Arabic cases printed as "???" and every one of them
+  // failed — the regex was correct the whole time. stdout.encoding is the
+  // JDK 19+ spelling and sun.stdout.encoding the older one; both are passed so
+  // the suite reports the same result on 17 and on 21. An unknown -D is inert.
+  out = execFileSync(
+    'java',
+    [
+      '-Dfile.encoding=UTF-8',
+      '-Dstdout.encoding=UTF-8',
+      '-Dsun.stdout.encoding=UTF-8',
+      'WafraRegexCheck',
+    ],
+    { cwd: dir, encoding: 'utf8' },
+  );
 } catch (e) {
   out = `${e.stdout ?? ''}${e.stderr ?? ''}`;
 }

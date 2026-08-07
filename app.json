@@ -2,6 +2,7 @@
   "expo": {
     "name": "Wafra",
     "slug": "wafra",
+    "owner": "nnnkk",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -10,7 +11,10 @@
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "app.wafra.ios",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": true
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -95,7 +99,11 @@
     },
     "extra": {
       "revenueCatAndroidKey": "",
-      "revenueCatIosKey": ""
+      "revenueCatIosKey": "",
+      "router": {},
+      "eas": {
+        "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
+      }
     }
   }
 }
