@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 25 July 2026_
+_Last updated: 7 August 2026_
 
 Wafra ("the app") is a personal money manager for Android and iPhone. This
 policy explains what the app does with your information.
@@ -216,5 +216,4 @@ will be surfaced in the app.
 
 ## Contact
 
-<!-- Replace with the real support address before publishing. -->
-support@example.com
+khanjer496@gmail.com

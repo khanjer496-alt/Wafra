@@ -13,7 +13,8 @@
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Wafra uses Face ID to unlock the app so your spending stays private if someone else picks up your phone."
+        "NSFaceIDUsageDescription": "Wafra uses Face ID to unlock the app so your spending stays private if someone else picks up your phone.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
