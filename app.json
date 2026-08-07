@@ -10,10 +10,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "app.wafra.ios",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": true
-      }
+      "bundleIdentifier": "app.wafra.ios"
     },
     "android": {
       "adaptiveIcon": {
