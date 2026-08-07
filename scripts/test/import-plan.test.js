@@ -67,7 +67,13 @@ function apply(state, plan) {
     ...plan.batch.transactions.map((t, i) => ({
       ...t,
       id: `tx${state.transactions.length + i}`,
-      accountId: hints[t.accountId] ?? t.accountId,
+      // Index-refs resolve positionally, exactly as the store does. Going
+      // through `hints` first was wrong: a deliberately NON-confident
+      // resolution writes no hint, so a card payment kept its placeholder.
+      accountId:
+        /^\d+$/.test(t.accountId) && Number(t.accountId) < plan.batch.newAccounts.length
+          ? `acc${state.accounts.length + Number(t.accountId)}`
+          : (hints[t.accountId] ?? t.accountId),
     })),
   ];
   return {
@@ -75,7 +81,21 @@ function apply(state, plan) {
     accounts,
     accountHints: hints,
     transactions,
-    cardDues: [...state.cardDues, ...plan.batch.newDues.map((d, i) => ({ ...d, id: `due${i}` }))],
+    // Dues carry the same index-refs transactions do, and the store resolves
+    // BOTH (see importBatch in store.tsx). Leaving them unresolved here made
+    // this helper quietly unfaithful: a due kept the placeholder "0", so it
+    // matched no account and every rescan looked like it added a second copy.
+    cardDues: [
+      ...state.cardDues,
+      ...plan.batch.newDues.map((d, i) => ({
+        ...d,
+        id: `due${state.cardDues.length + i}`,
+        accountId:
+          /^\d+$/.test(d.accountId) && Number(d.accountId) < plan.batch.newAccounts.length
+            ? `acc${state.accounts.length + Number(d.accountId)}`
+            : (hints[d.accountId] ?? d.accountId),
+      })),
+    ],
     lastScanTs: Math.max(state.lastScanTs, plan.batch.lastScanTs),
   };
 }
@@ -1164,6 +1184,59 @@ const afterFirst = apply(BASE, first);
   // that correcting anything is pointless.
   ok('a hand-edited row is left alone by the same rescan',
     healPatch({ ...stored, userEdited: true }, reread) === null);
+}
+
+
+// ── A real FAB statement and its real payment must settle each other ──
+//
+// Verbatim from a user's phone. The reported symptom was every statement stuck
+// at "NOT settled" with a matching payment sitting on a different card, which
+// turned out to be stale rows from a duplicated account list rather than a
+// parsing fault. This pins the guarantee so it cannot quietly regress: the
+// payment names a masked PAN (5492********3749) and the statement names
+// "the card ending with 3749" — two different ways of writing one card, and
+// they must land on the same account.
+{
+  const D = (iso) => new Date(iso + 'T12:00:00Z').getTime();
+  const { parsed, newestTs } = scan([
+    { body: 'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ or Google Play goo.gl/7dXnNc. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26',
+      ts: D('2026-08-01'), sender: 'FAB' },
+    { body: 'Dear Customer, Your payment instructions of AED 5,645.07 to 5492********3749 has been processed on 05/08/2026 20:02',
+      ts: D('2026-08-05'), sender: 'FAB' },
+  ]);
+  ok('both the statement and the payment are read', parsed.length === 2,
+    parsed.map((p) => p.kind));
+
+  const plan = buildImportPlan(parsed, BASE, newestTs, new Date('2026-08-07T12:00:00Z'));
+  const state = apply(BASE, plan);
+
+  ok('the statement produced exactly one due', state.cardDues.length === 1,
+    state.cardDues);
+  ok('the due carries the stated total, not the available limit',
+    state.cardDues[0]?.totalDueFils === 564507, state.cardDues[0]);
+  ok('the due carries the stated minimum',
+    state.cardDues[0]?.minDueFils === 28225, state.cardDues[0]);
+
+  // The whole point: a masked PAN and an "ending with" suffix are one card.
+  const payment = state.transactions.find((t) => t.isTransfer);
+  ok('the payment was filed as a transfer, not spending', Boolean(payment), state.transactions);
+  ok('the payment and the statement landed on the SAME card',
+    Boolean(payment) && payment.accountId === state.cardDues[0].accountId,
+    { payment: payment && payment.accountId, due: state.cardDues[0].accountId });
+
+  const card = state.accounts.find((a) => a.id === state.cardDues[0].accountId);
+  ok('and that card is the credit card ending 3749',
+    card?.last4 === '3749' && card?.cardType === 'credit', card);
+
+  // Re-reading the same two messages must not double the due or the payment.
+  const again = buildImportPlan(scan([
+    { body: 'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ or Google Play goo.gl/7dXnNc. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26',
+      ts: D('2026-08-01'), sender: 'FAB' },
+    { body: 'Dear Customer, Your payment instructions of AED 5,645.07 to 5492********3749 has been processed on 05/08/2026 20:02',
+      ts: D('2026-08-05'), sender: 'FAB' },
+  ]).parsed, state, newestTs, new Date('2026-08-07T12:00:00Z'));
+  ok('a rescan adds no second copy of either', again.txCount === 0 && again.dueCount === 0,
+    { tx: again.txCount, dues: again.dueCount });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
