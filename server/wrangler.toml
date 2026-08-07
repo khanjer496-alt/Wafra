@@ -14,6 +14,14 @@ database_name = "wafra"
 # it is not a credential and is safe in the repo.
 database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
+# Not a secret: this is the same project id `eas init` wrote into app.json, and
+# it is embedded in every build anyway. It is here because /v1/push compares the
+# projectId a device claims against this one and rejects the registration if
+# they differ — so a mismatch does not fail loudly, it just means wake pushes
+# stop arriving. Keep it equal to expo.extra.eas.projectId in app.json.
+[vars]
+EXPO_PROJECT_ID = "fa920e7b-c661-4517-917d-26e8b4878721"
+
 # Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]
 crons = ["*/30 * * * *"]
