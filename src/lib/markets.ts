@@ -15,6 +15,17 @@ export interface BankDef {
   color: string;
   /** Bank website, used to fetch its logo (favicon) at runtime. */
   domain?: string;
+  /**
+   * The bank that actually issues this brand's cards, when the brand is a
+   * digital sub-brand rather than a licence of its own. Liv is Emirates NBD's
+   * app; a Liv card and an ENBD card with the same last four digits are one
+   * piece of plastic, filed twice because two sender IDs describe it.
+   *
+   * This is NOT a display alias — the brands stay distinct everywhere the user
+   * can see them. It only says whose card it is when deciding whether two rows
+   * are the same card.
+   */
+  issuer?: string;
 }
 
 export interface MarketPack {
@@ -124,7 +135,7 @@ const AE: MarketPack = {
     { re: /\bsib\b|sharjah\s*islamic/i, name: 'Sharjah Islamic', color: '#006B54', domain: 'sib.ae' },
     { re: /\bnbf\b/i, name: 'NBF', color: '#5C6670', domain: 'nbf.ae' },
     { re: /\bwio\b/i, name: 'Wio', color: '#C4F04A', domain: 'wio.io' },
-    { re: /\bliv\b/i, name: 'Liv', color: '#00D3B9', domain: 'liv.me' },
+    { re: /\bliv\b/i, name: 'Liv', color: '#00D3B9', domain: 'liv.me', issuer: 'Emirates NBD' },
     { re: /\bajman\s*bank/i, name: 'Ajman Bank', color: '#00747A', domain: 'ajmanbank.ae' },
     { re: /\bcbi\b/i, name: 'CBI', color: '#7A2048', domain: 'cbi.ae' },
   ],
@@ -231,6 +242,26 @@ export function bankFromName(
     if (b.name === name) return { name: b.name, color: b.color, domain: b.domain };
   }
   return null;
+}
+
+/**
+ * The identity of whoever ISSUED this bank's cards — the sub-brand's parent
+ * when it has one, otherwise the bank itself.
+ *
+ * Use this to decide whether two card rows are the same card. Use
+ * bankIdentityForName for anything the user reads: Liv and Emirates NBD are
+ * different products and are still shown as such.
+ */
+export function issuerIdentityForName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  for (const m of MARKETS) {
+    for (const b of m.banks) {
+      if (b.name.toLowerCase() === name.toLowerCase() || b.re.test(name)) {
+        return bankIdentityForName(b.issuer ?? b.name);
+      }
+    }
+  }
+  return bankIdentityForName(name);
 }
 
 /** Brand identity for a bank NAME shown in the UI (any market's pack). */

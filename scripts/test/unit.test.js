@@ -1441,6 +1441,51 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('two genuinely different cards sharing a suffix are still left alone',
     acc.mergeDuplicateAccounts(twoReal).accounts.length === 2);
 
+  // ── A sub-brand and its issuer are one card ──
+  //
+  // Liv is Emirates NBD's app. A user with ONE card ending 8575 saw it filed
+  // twice — once under each sender — so the ENBD statement sat on one row and
+  // the payment clearing it on the other, and the balance never settled.
+  const brandClone = (over) => ({
+    id: 'x', kind: 'card', cardType: 'credit', last4: '8575',
+    openingFils: 0, color: '#333', ...over,
+  });
+  const crossBrand = {
+    accounts: [
+      brandClone({ id: 'liv', name: 'Liv Credit Card •8575', bankName: 'Liv',
+        snapshotFils: 0, snapshotKind: 'outstanding', snapshotTs: 99 }),
+      brandClone({ id: 'enbd', name: 'Emirates NBD Credit Card •8575',
+        bankName: 'Emirates NBD', snapshotFils: 407602,
+        snapshotKind: 'outstanding', snapshotTs: 10 }),
+    ],
+    transactions: [
+      { id: 'p1', accountId: 'liv', date: '2026-07-17', amountFils: 406169,
+        type: 'income', category: 'other', title: 'Card •8575 payment', isTransfer: true },
+    ],
+    cardDues: [{ id: 'd1', accountId: 'enbd', dueDate: '2026-07-23',
+      totalDueFils: 406196, minDueFils: 20310, paidFils: 0 }],
+    bills: [], accountHints: { '8575': 'liv' },
+  };
+  const brandMerged = acc.mergeDuplicateAccounts(crossBrand);
+  ok('a sub-brand card folds into its issuer',
+    brandMerged.accounts.length === 1, brandMerged.accounts.map((a) => a.name));
+  ok('the ISSUER survives, not the sub-brand, even with an older snapshot',
+    brandMerged.accounts[0]?.bankName === 'Emirates NBD', brandMerged.accounts[0]);
+  ok('the payment moves onto the surviving card, so the due can settle',
+    brandMerged.transactions[0].accountId === brandMerged.cardDues[0].accountId,
+    { tx: brandMerged.transactions[0].accountId, due: brandMerged.cardDues[0].accountId });
+
+  // Liv's OWN card must not be dragged in — different digits, different card.
+  const livOwn = {
+    accounts: [
+      brandClone({ id: 'liv-8917', name: 'Liv Credit Card •8917', bankName: 'Liv', last4: '8917' }),
+      brandClone({ id: 'enbd-8575', name: 'Emirates NBD Credit Card •8575', bankName: 'Emirates NBD' }),
+    ],
+    transactions: [], cardDues: [], bills: [], accountHints: {},
+  };
+  ok('a real Liv card with different digits stays its own card',
+    acc.mergeDuplicateAccounts(livOwn).accounts.length === 2);
+
   const meaningfulVariants = [
     { openingFils: 1 },
     { creditLimitFils: 1 },

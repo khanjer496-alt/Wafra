@@ -1,4 +1,4 @@
-import { bankBrandForName, bankIdentityForName } from '@/lib/markets';
+import { bankBrandForName, bankIdentityForName, issuerIdentityForName } from '@/lib/markets';
 import type { Account, AppState } from '@/lib/types';
 
 /**
@@ -29,7 +29,12 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
     // netWorthFils sums each non-archived account's snapshot, so one duplicated
     // balance was counted twice in the headline figure on Wallet.
     if ((a.kind !== 'card' && a.kind !== 'bank') || !a.last4 || !a.bankName) continue;
-    const bankIdentity = bankIdentityForName(a.bankName);
+    // Grouped by ISSUER, not brand. A Liv card and an Emirates NBD card with
+    // the same last four digits are one piece of plastic described by two
+    // sender IDs — one user's ENBD statement sat on one row while the payment
+    // clearing it sat on the other, so the balance never settled. The brands
+    // stay distinct everywhere the user reads them; this only decides sameness.
+    const bankIdentity = issuerIdentityForName(a.bankName);
     if (!bankIdentity) continue;
     const key = `${a.kind}|${bankIdentity}|${a.last4}`;
     groups.set(key, [...(groups.get(key) ?? []), a]);
@@ -90,7 +95,14 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
    * the same product recorded twice, not two products.
    */
   const identityOf = (a: Account): string =>
-    [a.kind, a.cardType ?? '-', a.last4 ?? '-', a.bankName ?? '-', a.name.trim()].join('|');
+    [
+      a.kind,
+      a.cardType ?? '-',
+      a.last4 ?? '-',
+      // Issuer, not brand: "Liv Credit Card •8575" and "Emirates NBD Credit
+      // Card •8575" differ in both bankName and name while being one card.
+      issuerIdentityForName(a.bankName) ?? '-',
+    ].join('|');
 
   for (const group of dupes) {
     const substantive = group.filter((a) => !isEmptyArtifact(a));
@@ -122,8 +134,16 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
     }
     for (const clones of byIdentity.values()) {
       if (clones.length < 2) continue;
+      // Prefer the row filed under the ISSUER itself over a sub-brand: the
+      // card is an Emirates NBD card that Liv also talks about, and its
+      // statements name Emirates NBD. Then the most recently quoted balance.
+      const isIssuerBrand = (a: Account) =>
+        bankIdentityForName(a.bankName) === issuerIdentityForName(a.bankName);
       const keep = [...clones].sort(
-        (a, b) => (b.snapshotTs ?? 0) - (a.snapshotTs ?? 0) || a.id.localeCompare(b.id),
+        (a, b) =>
+          Number(isIssuerBrand(b)) - Number(isIssuerBrand(a)) ||
+          (b.snapshotTs ?? 0) - (a.snapshotTs ?? 0) ||
+          a.id.localeCompare(b.id),
       )[0];
       for (const clone of clones) {
         if (clone.id === keep.id) continue;
