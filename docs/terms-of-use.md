@@ -9,7 +9,7 @@ _Last updated: 25 July 2026_
 > app actually behaves today; if the app changes, this changes with it.
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for Android published by `[[LEGAL ENTITY]]` ("we", "us").
+for Android and iPhone published by `[[LEGAL ENTITY]]` ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -65,13 +65,15 @@ Some features require **Wafra Pro**. Every feature is free for the first
 **3 days** after first launch. When the trial ends, Pro features require a
 subscription.
 
-Subscriptions are sold and processed by **Google Play**, in the plans offered
+Subscriptions are sold and processed by the store you installed from —
+**Google Play** on Android, the **App Store** on iPhone — in the plans offered
 in the app (currently a monthly and a yearly plan). We never see or handle
 your payment details.
 
 - Billing, renewal, price changes, cancellation and refunds are governed by
-  Google Play's terms and your Play account settings.
-- Subscriptions **renew automatically** until cancelled. Cancel in Google Play.
+  that store's terms and your account settings with it.
+- Subscriptions **renew automatically** until cancelled. Cancel in Google Play
+  or in your Apple subscription settings, depending on where you bought it.
 - Cancelling stops future renewals. It does not refund the current period.
 - Prices shown in the app may vary by region and may change; a change never
   affects a period you have already paid for.
