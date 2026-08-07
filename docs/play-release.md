@@ -78,8 +78,10 @@ RECEIVE_WAP_PUSH`.
 
 ## Legal documents
 
-- [Privacy policy](./privacy-policy.md) — required by Play; needs a public URL
-- [Terms of use](./terms-of-use.md) — has two placeholders (legal entity,
+- [Privacy policy](./privacy-policy-android.md) — required by Play. Published at
+  <https://wafra-legal.pages.dev/android/privacy>. The iPhone build has its own
+  at `privacy-policy-ios.md`; do not submit that one to Play.
+- [Terms of use](./terms-of-use-android.md) — placeholders now filled (legal entity,
   jurisdiction) that must be filled before publishing
 
 Both are written against what the code actually does. Every claim in them is

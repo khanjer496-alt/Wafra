@@ -1,4 +1,4 @@
-# Wafra Terms of Use
+# Wafra for iPhone — Terms of Use
 
 _Last updated: 7 August 2026_
 
@@ -9,7 +9,7 @@ _Last updated: 7 August 2026_
 > app actually behaves today; if the app changes, this changes with it.
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for Android and iPhone published by Naser Khanjar ("we", "us").
+for iPhone published by Naser Khanjar ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -52,9 +52,13 @@ attempt to defeat its licensing or subscription controls.
 
 ## Your data
 
-Your financial data stays on your device. What the app reads, stores and does
-not transmit is set out in the [Privacy Policy](./privacy-policy.md), which
-forms part of these terms.
+Your financial data stays on your device, apart from the one path the iPhone
+version needs: if you choose to set up automatic capture, bank messages are
+forwarded by a Shortcut you build to a relay that parses them, discards the
+text, and holds the encrypted result until your phone collects it. What the app
+and that relay read, keep and discard is set out in full in the
+[Privacy Policy](https://wafra-legal.pages.dev/ios/privacy), which forms part of
+these terms.
 
 Backups and exports you create are files you control. Once you move one off
 your device, its security is in your hands, and these terms stop protecting it.
@@ -65,22 +69,21 @@ Some features require **Wafra Pro**. Every feature is free for the first
 **3 days** after first launch. When the trial ends, Pro features require a
 subscription.
 
-Subscriptions are sold and processed by the store you installed from —
-**Google Play** on Android, the **App Store** on iPhone — in the plans offered
+Subscriptions are sold and processed by the **Apple App Store**, in the plans offered
 in the app (currently a monthly and a yearly plan). We never see or handle
 your payment details.
 
 - Billing, renewal, price changes, cancellation and refunds are governed by
-  that store's terms and your account settings with it.
-- Subscriptions **renew automatically** until cancelled. Cancel in Google Play
-  or in your Apple subscription settings, depending on where you bought it.
+  Apple's terms and your Apple account settings.
+- Subscriptions **renew automatically** until cancelled. Cancel in your Apple
+  subscription settings.
 - Cancelling stops future renewals. It does not refund the current period.
 - Prices shown in the app may vary by region and may change; a change never
   affects a period you have already paid for.
 
-Play Billing only functions for installs from the Play Store. A copy installed
-another way cannot purchase Pro — that is a Google restriction, not a fault in
-the app.
+App Store billing only functions for installs from the App Store or TestFlight.
+A copy installed another way cannot purchase Pro — that is an Apple
+restriction, not a fault in the app.
 
 Your data is never held hostage to a subscription: if Pro lapses, everything
 already recorded stays readable and exportable.
