@@ -340,5 +340,322 @@ eq('legacy: notSubscriptions dedupe after lowercasing',
 const twice = schema.rowsToState(schema.stateToRows(restored));
 eq('state → rows → state is stable', twice, restored);
 
+// ── replaceAll: what a restore is allowed to destroy ──
+// db.replaceAll truncates REPLACEABLE_TABLES and merges the settings it was
+// given. The bug this replaced truncated `settings` too, so restoring a
+// transactions-only backup read every setting back at its default: biometric
+// lock silently off, Pro revoked, every budget window recomputed against day 1,
+// RTL dropped. Nothing told the user any of it had happened.
+ok('replaceAll does not truncate settings', !schema.REPLACEABLE_TABLES.includes('settings'));
+eq('replaceAll truncates every other table',
+  schema.ALL_TABLES.filter((t) => t !== 'settings'), [...schema.REPLACEABLE_TABLES]);
+ok('replaceAll never truncates meta', !schema.REPLACEABLE_TABLES.includes('meta'));
+
+// The evidence: the whole-state mapper emits one settings row for a payload
+// that carries no settings, and it is the invented one.
+eq('a settings-less payload maps to exactly the invented onboarded row',
+  schema.stateToRows({ transactions: [tx] }).settings, [{ key: 'onboarded', value: 'true' }]);
+
+// The replacement path emits none, so nothing stored is disturbed.
+const partial = schema.stateToReplacement({ transactions: [tx] });
+eq('a transactions-only restore writes no settings at all', partial.settings, []);
+eq('a transactions-only restore inserts no settings rows', partial.rows.settings, []);
+eq('a transactions-only restore still carries its transactions',
+  partial.rows.transactions.map((r) => r.id), ['tx-1']);
+
+// The regression itself, played out against the settings table. `stored` is the
+// user before the restore; only the keys the payload names may change.
+const stored = schema.settingsToRows({
+  lastScanTs: 1753700000000, onboarded: true, userName: 'Jerry', appLock: true,
+  monthStartDay: 25, pro: true, trialStartTs: 1750000000000, marketId: 'ae', language: 'ar',
+});
+function applyReplacement(existing, replacement) {
+  const byKey = new Map(existing.map((r) => [r.key, r.value]));
+  for (const row of replacement.settings) byKey.set(row.key, row.value);
+  return [...byKey].map(([key, value]) => ({ key, value }));
+}
+eq('restoring a transactions-only backup keeps app lock, Pro, month start and language',
+  schema.rowsToSettings(applyReplacement(stored, partial)),
+  { lastScanTs: 1753700000000, onboarded: true, userName: 'Jerry', appLock: true,
+    monthStartDay: 25, pro: true, trialStartTs: 1750000000000, marketId: 'ae', language: 'ar' });
+
+// Demo data names no security or entitlement setting either, and loading it is
+// not a request to give up a purchase.
+eq('loading demo data does not revoke Pro or disarm the lock',
+  schema.rowsToSettings(applyReplacement(stored, schema.stateToReplacement({
+    accounts: [bareAccount], transactions: [bareTx], onboarded: true, userName: 'there',
+  }))),
+  { lastScanTs: 1753700000000, onboarded: true, userName: 'there', appLock: true,
+    monthStartDay: 25, pro: true, trialStartTs: 1750000000000, marketId: 'ae', language: 'ar' });
+
+// A full backup carries every setting, so a full restore still replaces every
+// setting — the merge changes the partial case, not this one.
+const fullRestore = schema.stateToReplacement({
+  transactions: [tx],
+  lastScanTs: 0, onboarded: false, userName: 'Ada', appLock: false, monthStartDay: 1,
+  pro: false, trialStartTs: 0, marketId: 'sa', language: 'en',
+});
+eq('a full backup restore overwrites every setting',
+  schema.rowsToSettings(applyReplacement(stored, fullRestore)),
+  { lastScanTs: 0, onboarded: false, userName: 'Ada', appLock: false, monthStartDay: 1,
+    pro: false, trialStartTs: 0, marketId: 'sa', language: 'en' });
+// "Absent" and "explicitly false" are different requests and must stay so.
+eq('an explicit appLock:false is written, not skipped',
+  schema.stateToReplacement({ appLock: false }).settings, [{ key: 'appLock', value: 'false' }]);
+eq('an omitted appLock is not written',
+  schema.stateToReplacement({ pro: true }).settings, [{ key: 'pro', value: 'true' }]);
+// The pre-onboarding heuristic belongs to the AsyncStorage migration only. A
+// restore that never mentions `onboarded` must not decide the user is past it.
+eq('a restore does not invent onboarded', schema.stateToReplacement({}).settings, []);
+eq('the legacy import still assumes onboarded',
+  schema.scalarSettingsFrom({ transactions: [] }, true).onboarded, true);
+eq('everything else still assumes nothing',
+  schema.scalarSettingsFrom({ transactions: [] }).onboarded, undefined);
+// Values are coerced on the way in, so a hand-edited backup cannot store a
+// string where a number belongs and blank the setting on the next read.
+eq('a wrong-typed setting in a payload is dropped, not written',
+  schema.stateToReplacement({ monthStartDay: '25', appLock: 'yes' }).settings, []);
+
+// ── the legacy AsyncStorage layout ──
+// The meta key is rewritten on every state change; the :tx:N chunks only when
+// their contents change. So a kill mid-write truncates the meta key while the
+// chunks holding the entire history stay intact, and reading "meta will not
+// parse" as "fresh install" throws that history away permanently.
+eq('a missing meta key is absent', schema.parseLegacyMeta(null).kind, 'absent');
+eq('an undefined meta key is absent', schema.parseLegacyMeta(undefined).kind, 'absent');
+// A zero-byte value is a write that got as far as truncating the old one.
+eq('an empty meta key is corrupt, not absent', schema.parseLegacyMeta('').kind, 'corrupt');
+eq('a truncated meta key is corrupt',
+  schema.parseLegacyMeta('{"accounts":[],"txChunks":13,"userNam').kind, 'corrupt');
+eq('a meta key holding a bare string is corrupt', schema.parseLegacyMeta('"hi"').kind, 'corrupt');
+eq('a meta key holding an array is corrupt', schema.parseLegacyMeta('[1,2]').kind, 'corrupt');
+eq('a meta key holding null is corrupt', schema.parseLegacyMeta('null').kind, 'corrupt');
+const okMeta = schema.parseLegacyMeta(JSON.stringify({ userName: 'Jerry', txChunks: 13 }));
+eq('a healthy meta key reports its chunk count', [okMeta.kind, okMeta.chunks], ['ok', 13]);
+eq('a healthy meta key keeps its state', okMeta.state.userName, 'Jerry');
+eq('a negative chunk count reads as none',
+  schema.parseLegacyMeta(JSON.stringify({ txChunks: -4 })).chunks, 0);
+eq('a non-numeric chunk count reads as none',
+  schema.parseLegacyMeta(JSON.stringify({ txChunks: 'lots' })).chunks, 0);
+// Pre-chunking builds stored transactions inline.
+const inlineMeta = schema.parseLegacyMeta(JSON.stringify({ transactions: [tx] }));
+eq('an inline-transactions meta key is recognised',
+  [inlineMeta.kind, inlineMeta.inlineTransactions, inlineMeta.chunks], ['ok', true, 0]);
+
+// Chunk keys are found by scanning, because a truncated meta key has no count
+// to trust and a partly applied multiSet can leave the count one chunk behind.
+const diskKeys = [
+  'wafra/state/v1', 'wafra/state/v1:tx:0', 'wafra/state/v1:tx:10', 'wafra/state/v1:tx:2',
+  'wafra/state/v1:tx:2', 'wafra/state/v1:tx:007', 'wafra/state/v1:tx:', 'wafra/state/v1:tx:1x',
+  'wafra/state/v2:tx:3', 'some-other-library/cache',
+];
+eq('chunk indices sort numerically, not lexically',
+  schema.legacyChunkIndices(diskKeys), [0, 2, 10]);
+eq('a duplicated key counts once', schema.legacyChunkIndices(['wafra/state/v1:tx:4', 'wafra/state/v1:tx:4']), [4]);
+eq('no keys means no chunks', schema.legacyChunkIndices([]), []);
+// Reclaim may only delete keys the import could read — never a `:tx:007` that
+// no build writes and legacyChunkIndices refuses, and never another library's.
+eq('reclaim sweeps the meta key and every readable chunk, and nothing else',
+  schema.legacyKeysToReclaim(diskKeys),
+  ['wafra/state/v1', 'wafra/state/v1:tx:0', 'wafra/state/v1:tx:2', 'wafra/state/v1:tx:10']);
+eq('reclaim never deletes a chunk the import skipped',
+  schema.legacyKeysToReclaim(['wafra/state/v1:tx:007']), []);
+eq('reclaim finds the chunks even with the meta key already gone',
+  schema.legacyKeysToReclaim(['wafra/state/v1:tx:1']), ['wafra/state/v1:tx:1']);
+eq('reclaim on a device with nothing left removes nothing', schema.legacyKeysToReclaim([]), []);
+eq('legacyChunkKey matches what the scanner accepts',
+  schema.legacyChunkIndices([schema.legacyChunkKey(0), schema.legacyChunkKey(12)]), [0, 12]);
+
+// The decision the whole defect turns on.
+const chunkKeys13 = Array.from({ length: 13 }, (_, i) => schema.legacyChunkKey(i));
+const truncated = schema.planLegacyImport(
+  schema.parseLegacyMeta('{"accounts":[],"txChunks":13,"userNam'),
+  schema.legacyChunkIndices([schema.LEGACY_STATE_KEY, ...chunkKeys13]),
+);
+eq('a truncated meta key beside intact chunks is not a fresh install', truncated.action, 'import');
+eq('...and is flagged as a recovery, not an ordinary import', truncated.source, 'orphaned-chunks');
+eq('...and reads every chunk on disk', [...truncated.chunkIndices],
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+// Chunks with no meta key at all — an interrupted reclaim, or a meta key that
+// never came back from a write — are the same rescue.
+eq('orphaned chunks with no meta key are still imported',
+  schema.planLegacyImport(schema.parseLegacyMeta(null), [0, 1]).source, 'orphaned-chunks');
+// Only a device with genuinely nothing on it is a fresh install.
+eq('nothing at all is a fresh install',
+  schema.planLegacyImport(schema.parseLegacyMeta(null), []),
+  { action: 'skip', reason: 'fresh-install' });
+// A corrupt meta key with nothing behind it imports nothing either, but it is
+// not the same event and the caller has to be able to tell the user so.
+eq('a corrupt meta key with no chunks is unreadable, not fresh',
+  schema.planLegacyImport(schema.parseLegacyMeta('{oops'), []),
+  { action: 'skip', reason: 'unreadable' });
+
+// A healthy meta key drives the import as before...
+const healthy = schema.planLegacyImport(
+  schema.parseLegacyMeta(JSON.stringify({ userName: 'Jerry', txChunks: 3 })),
+  [0, 1, 2],
+);
+eq('a healthy blob imports from its meta key', [healthy.action, healthy.source], ['import', 'meta']);
+eq('a healthy blob reads the chunks it claims', [...healthy.chunkIndices], [0, 1, 2]);
+// ...but a chunk the meta key never learned about is read anyway: store.tsx
+// writes the meta and the changed chunks in one multiSet, and a partial one
+// leaves the count behind the rows.
+eq('a chunk the meta count missed is still read',
+  [...schema.planLegacyImport(
+    schema.parseLegacyMeta(JSON.stringify({ txChunks: 3 })), [0, 1, 2, 3],
+  ).chunkIndices],
+  [0, 1, 2, 3]);
+// Inline transactions are the whole ledger by themselves; reading rolled-back
+// chunk residue beside them would duplicate or resurrect rows.
+eq('inline transactions ignore chunk residue',
+  [...schema.planLegacyImport(inlineMeta, [0, 1]).chunkIndices], []);
+eq('a healthy blob with no transactions reads no chunks',
+  [...schema.planLegacyImport(schema.parseLegacyMeta('{}'), []).chunkIndices], []);
+
+// End to end: 5,000 transactions across 13 chunks, meta key truncated. Every
+// row has to reach the database, and the user must not be sent back through
+// onboarding on the strength of a meta key that no longer parses.
+const bigChunks = [];
+for (let i = 0; i < 5000; i++) {
+  const chunk = Math.floor(i / 400);
+  (bigChunks[chunk] ||= []).push({ ...tx, id: `tx-${i}`, smsKey: `s${i}` });
+}
+const rescuePlan = schema.planLegacyImport(
+  schema.parseLegacyMeta('{"accounts":[{"id":"acc-1"'),
+  schema.legacyChunkIndices(bigChunks.map((_, i) => schema.legacyChunkKey(i))),
+);
+const rescued = { ...rescuePlan.state };
+rescued.transactions = rescuePlan.chunkIndices.flatMap((i) => JSON.parse(JSON.stringify(bigChunks[i])));
+const rescuedRows = schema.legacyStateToRows(rescued);
+eq('a truncated meta key still rescues all 5,000 transactions',
+  rescuedRows.rows.transactions.length, 5000);
+eq('...dropping none of them', rescuedRows.dropped.transactions, 0);
+eq('...and does not send the user back through onboarding',
+  schema.rowsToSettings(rescuedRows.rows.settings).onboarded, true);
+// A single unreadable chunk costs its own ~400 rows and nothing more.
+const holed = rescuePlan.chunkIndices
+  .filter((i) => i !== 5)
+  .flatMap((i) => JSON.parse(JSON.stringify(bigChunks[i])));
+eq('one unreadable chunk costs only its own rows',
+  schema.legacyStateToRows({ transactions: holed }).rows.transactions.length, 4600);
+
+// ── WAL sidecars ──
+// expo-sqlite's deleteDatabaseAsync removes only the main file (ios/
+// SQLiteModule.swift and android/.../SQLiteModule.kt both call removeItem /
+// File.delete on the one path), so a reset that stops there leaves committed
+// ledger pages in -wal — and leaves a -wal written under the old key beside the
+// new database, which is what makes the key-loss error unrecoverable.
+eq('both sidecars are named',
+  schema.walSidecarUris('/data/user/0/com.wafra/files/SQLite', 'wafra.db'),
+  ['file:///data/user/0/com.wafra/files/SQLite/wafra.db-wal',
+   'file:///data/user/0/com.wafra/files/SQLite/wafra.db-shm']);
+// expo-file-system rejects a bare path: iOS checks url.isFileURL.
+ok('every sidecar uri carries the file scheme',
+  schema.walSidecarUris('/x/SQLite', 'wafra.db').every((u) => u.startsWith('file:///')));
+eq('a directory that is already a uri is not double-prefixed',
+  schema.walSidecarUris('file:///x/SQLite', 'wafra.db')[0], 'file:///x/SQLite/wafra.db-wal');
+eq('a trailing slash does not double up',
+  schema.walSidecarUris('/x/SQLite/', 'wafra.db')[0], 'file:///x/SQLite/wafra.db-wal');
+eq('a leading slash on the name does not double up',
+  schema.walSidecarUris('/x/SQLite', '/wafra.db')[0], 'file:///x/SQLite/wafra.db-wal');
+ok('the main database file is not among them',
+  schema.walSidecarUris('/x/SQLite', 'wafra.db').every((u) => !u.endsWith('/wafra.db')));
+
+// ── against a real SQLite ──
+// Everything above proves what the mappers decide. This proves the statements
+// db.ts builds out of them actually run, and that the replaceAll sequence —
+// DELETE the ledger tables, insert, merge settings — behaves in a database the
+// way it does in the model above. SQLCipher is not needed for any of it: the
+// migrations are plain DDL, and `PRAGMA key` is db.ts's business.
+let DatabaseSync = null;
+try { ({ DatabaseSync } = require('node:sqlite')); } catch { /* older Node: skip */ }
+if (!DatabaseSync) {
+  console.log('· node:sqlite unavailable — SQL execution tests skipped');
+} else {
+  const sql = new DatabaseSync(':memory:');
+  // Exactly what migrate() does, minus the transaction wrapper.
+  for (const migration of schema.migrationsToApply(0)) {
+    for (const statement of migration.statements) sql.exec(statement);
+    sql.exec(`PRAGMA user_version = ${migration.version}`);
+  }
+  ok('every migration statement is valid SQLite', true);
+  eq('migrating from scratch lands on SCHEMA_VERSION',
+    sql.prepare('PRAGMA user_version').get().user_version, schema.SCHEMA_VERSION);
+  // Replaying is what a crash mid-migration forces; it must not throw.
+  for (const migration of schema.MIGRATIONS) {
+    for (const statement of migration.statements) sql.exec(statement);
+  }
+  ok('replaying every migration over a live schema is a no-op', true);
+
+  // insertRows(), in miniature.
+  function insertRows(rows) {
+    for (const { table, key } of schema.TABLE_SOURCES) {
+      const statement = sql.prepare(schema.upsertSql(table));
+      for (const row of rows[key]) statement.run(...schema.rowValues(table, row));
+    }
+  }
+  const seeded = schema.legacyStateToRows(legacyBlob).rows;
+  insertRows(seeded);
+  ok('every table accepts the columns upsertSql names', true);
+  eq('the seeded ledger reads back whole',
+    [sql.prepare('SELECT count(*) n FROM transactions').get().n,
+     sql.prepare('SELECT count(*) n FROM accounts').get().n,
+     sql.prepare('SELECT count(*) n FROM bills').get().n], [2, 2, 1]);
+  // The settings the user actually has, written the way saveSettings does.
+  for (const row of schema.settingsToRows({ appLock: true, pro: true, monthStartDay: 25, language: 'ar' })) {
+    sql.prepare(schema.upsertSql('settings')).run(row.key, row.value);
+  }
+
+  // The defect, reproduced: the sequence replaceAll used to run — truncate
+  // ALL_TABLES (settings among them) and insert stateToRows(payload) — against
+  // the same database and the same transactions-only backup.
+  const beforeFix = new DatabaseSync(':memory:');
+  for (const migration of schema.migrationsToApply(0)) {
+    for (const statement of migration.statements) beforeFix.exec(statement);
+  }
+  for (const row of schema.settingsToRows({ appLock: true, pro: true, monthStartDay: 25, language: 'ar' })) {
+    beforeFix.prepare(schema.upsertSql('settings')).run(row.key, row.value);
+  }
+  for (const table of schema.ALL_TABLES) beforeFix.exec(`DELETE FROM ${table}`);
+  for (const row of schema.stateToRows({ transactions: [{ ...tx, id: 'restored-1' }] }).settings) {
+    beforeFix.prepare(schema.upsertSql('settings')).run(row.key, row.value);
+  }
+  eq('truncating settings silently disarms the lock, revokes Pro, moves the month and drops RTL',
+    schema.rowsToSettings(beforeFix.prepare('SELECT key, value FROM settings').all()),
+    { ...schema.DEFAULT_SETTINGS, onboarded: true });
+  beforeFix.close();
+
+  // db.replaceAll(), statement for statement, with a transactions-only backup.
+  const replacement = schema.stateToReplacement({ transactions: [{ ...tx, id: 'restored-1' }] });
+  for (const table of schema.REPLACEABLE_TABLES) sql.exec(`DELETE FROM ${table}`);
+  insertRows(replacement.rows);
+  for (const row of replacement.settings) {
+    sql.prepare(schema.upsertSql('settings')).run(row.key, row.value);
+  }
+  eq('replaceAll replaces the ledger',
+    sql.prepare('SELECT id FROM transactions').all().map((r) => r.id), ['restored-1']);
+  eq('replaceAll empties the other collections',
+    [sql.prepare('SELECT count(*) n FROM accounts').get().n,
+     sql.prepare('SELECT count(*) n FROM bills').get().n,
+     sql.prepare('SELECT count(*) n FROM goals').get().n], [0, 0, 0]);
+  // The defect, in a database: app lock stayed armed, Pro stayed paid for, the
+  // month still turns over on the 25th and the UI is still Arabic.
+  eq('replaceAll leaves the settings the backup never mentioned',
+    schema.rowsToSettings(sql.prepare('SELECT key, value FROM settings').all()),
+    { lastScanTs: 1753700000000, onboarded: true, userName: 'Jerry', appLock: true,
+      monthStartDay: 25, pro: true, trialStartTs: 1750000000000, marketId: 'ae', language: 'ar' });
+
+  // clearAll() is the deliberate "erase everything", and it does take settings.
+  for (const table of schema.ALL_TABLES) sql.exec(`DELETE FROM ${table}`);
+  eq('clearAll does empty settings', sql.prepare('SELECT count(*) n FROM settings').get().n, 0);
+  // meta is not in ALL_TABLES: losing it re-runs the legacy import over a live
+  // ledger and resurrects every row the user has deleted since.
+  sql.prepare(schema.upsertSql('meta')).run(schema.META_LEGACY_IMPORTED, '1');
+  for (const table of schema.ALL_TABLES) sql.exec(`DELETE FROM ${table}`);
+  eq('clearAll does not forget that the legacy import already ran',
+    sql.prepare('SELECT value FROM meta WHERE key = ?').get(schema.META_LEGACY_IMPORTED).value, '1');
+  sql.close();
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

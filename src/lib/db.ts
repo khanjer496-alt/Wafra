@@ -24,12 +24,15 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import { File } from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
 import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 import {
   ALL_TABLES,
+  LEGACY_STATE_KEY,
+  REPLACEABLE_TABLES,
   emptyRows,
   META_LEGACY_IMPORTED,
   META_LEGACY_RETAINED,
@@ -41,8 +44,13 @@ import {
   budgetToRow,
   cardDueToRow,
   goalToRow,
+  legacyChunkIndices,
+  legacyChunkKey,
+  legacyKeysToReclaim,
   legacyStateToRows,
   migrationsToApply,
+  parseLegacyMeta,
+  planLegacyImport,
   rowToAccount,
   rowToBill,
   rowToBudget,
@@ -53,9 +61,10 @@ import {
   rowsToSettings,
   rowsToState,
   settingsToRows,
-  stateToRows,
+  stateToReplacement,
   transactionToRow,
   upsertSql,
+  walSidecarUris,
   type AccountHintRow,
   type AccountRow,
   type BillRow,
@@ -64,6 +73,7 @@ import {
   type DbRows,
   type GoalRow,
   type LegacyDropCounts,
+  type LegacyImportPlan,
   type MerchantOverrideRow,
   type NotSubscriptionRow,
   type ScalarSettings,
@@ -106,10 +116,6 @@ const KEY_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
 
-/** The legacy AsyncStorage keys, mirrored from store.tsx. */
-const LEGACY_KEY = 'wafra/state/v1';
-const legacyChunkKey = (i: number) => `${LEGACY_KEY}:tx:${i}`;
-
 /**
  * The database exists but its key does not, or no longer opens it.
  *
@@ -143,6 +149,18 @@ export interface DbStatus {
   importedLegacy: boolean;
   /** Entries the legacy conversion refused to carry over, when it ran. */
   dropped?: LegacyDropCounts;
+  /**
+   * Present only when the legacy meta key was on disk but unreadable, which
+   * means data existed and some of it did not survive. `'transactions-only'`:
+   * the `:tx:` chunks were rescued, but accounts, budgets, bills, goals and
+   * settings are gone. `'nothing'`: there were no chunks either.
+   *
+   * Absent is the normal case — including a genuine fresh install, which the
+   * caller must be able to tell apart from this. A launch that quietly loses a
+   * user's accounts and reports the same status as a new phone gives the UI
+   * nothing to say, and the user finds out by noticing.
+   */
+  legacyRecovery?: 'transactions-only' | 'nothing';
 }
 
 let handle: SQLite.SQLiteDatabase | null = null;
@@ -246,20 +264,57 @@ async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
 }
 
 /**
- * Deletes the encrypted file and its key, then rebuilds from scratch. The only
- * exit from `DatabaseKeyLostError`, and it destroys data — call it after the
- * user has been told what is going and has agreed, never automatically.
+ * Removes `<db>-wal` and `<db>-shm`, which `deleteDatabaseAsync` does not.
+ *
+ * Two things go wrong if this is skipped. The user consented to erasing their
+ * finances and the last committed pages are still sitting in the -wal, which is
+ * not what "delete" means. And the fresh database is created next to a -wal
+ * written under the old key: if SQLite tries to recover from it, reading
+ * `sqlite_master` fails, `keyOpensDatabase` says no with `isFreshKey` true, the
+ * brand-new key is deleted and `DatabaseKeyLostError` is thrown again — a loop
+ * with no exit, because reset is the exit and reset is what left the -wal there.
+ *
+ * Called after the main file is gone, never before: a sidecar without its
+ * database is inert, a database without its sidecars is a truncated ledger.
+ */
+function deleteWalSidecars(): void {
+  // Web stores its database in the browser (OPFS/IndexedDB); there are no files
+  // beside it and expo-file-system has nothing to point at.
+  if (Platform.OS === 'web') return;
+  const directory: unknown = SQLite.defaultDatabaseDirectory;
+  if (typeof directory !== 'string' || directory.length === 0) return;
+  for (const uri of walSidecarUris(directory, DATABASE_NAME)) {
+    try {
+      const file = new File(uri);
+      // `delete()` throws on a file that is not there, and a checkpointed close
+      // legitimately leaves no -wal, so absence is the expected case.
+      if (file.exists) file.delete();
+    } catch {
+      // A sidecar we cannot remove is worth neither failing the reset nor
+      // leaving the user stuck on a key error; the reset still gets rid of the
+      // key and the main file.
+    }
+  }
+}
+
+/**
+ * Deletes the encrypted file, its WAL sidecars and its key, then rebuilds from
+ * scratch. The only exit from `DatabaseKeyLostError`, and it destroys data —
+ * call it after the user has been told what is going and has agreed, never
+ * automatically.
  *
  * If the legacy blob is still on disk (key loss shortly after upgrading), the
  * fresh database re-imports it, because the import is driven by a meta row
  * that dies with the old file.
  */
 export async function resetEncryptedDatabase(): Promise<DbStatus> {
-  if (handle) {
-    await handle.closeAsync().catch(() => undefined);
-    handle = null;
-  }
+  // closeDatabase() rather than an inline close: on the key-mismatch path
+  // openDatabase() threw before `handle` was ever assigned, so there is nothing
+  // open to checkpoint and the sidecar sweep below is the only thing standing
+  // between the user and the loop described in deleteWalSidecars.
+  await closeDatabase();
   await SQLite.deleteDatabaseAsync(DATABASE_NAME).catch(() => undefined);
+  deleteWalSidecars();
   if (Platform.OS !== 'web') {
     await SecureStore.deleteItemAsync(KEY_ALIAS, KEY_OPTIONS).catch(() => undefined);
   }
@@ -302,7 +357,12 @@ export async function initDatabase(): Promise<DbStatus> {
   const imported = await importLegacyBlob(database);
   if (!imported.ran) await reclaimLegacyBlob(database);
 
-  return { encrypted, importedLegacy: imported.ran, dropped: imported.dropped };
+  return {
+    encrypted,
+    importedLegacy: imported.ran,
+    dropped: imported.dropped,
+    legacyRecovery: imported.recovery,
+  };
 }
 
 export async function closeDatabase(): Promise<void> {
@@ -331,28 +391,24 @@ async function setMeta(database: SQLite.SQLiteDatabase, key: string, value: stri
  * `:tx:N` keys because Android caps a single AsyncStorage row at ~2MB and a
  * full SMS history blew past it; a device that upgraded mid-history can have
  * either layout, so both are read.
+ *
+ * The key scan is not an optimisation to be removed later: it is the only thing
+ * that tells a truncated meta key apart from a device that never had the app.
+ * Both cost one `getAllKeys` call, once, on the single launch that migrates.
  */
-async function readLegacyBlob(): Promise<{ state: Record<string, unknown>; chunks: number } | null> {
-  const raw = await AsyncStorage.getItem(LEGACY_KEY);
-  if (!raw) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    // Unparseable meta means the ledger is already unreadable by the old code
-    // path too. Nothing to rescue, and no reason to keep retrying every launch.
-    return null;
-  }
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const state = parsed as Record<string, unknown>;
-  if (Array.isArray(state.transactions)) return { state, chunks: 0 };
+async function readLegacyBlob(): Promise<{
+  plan: LegacyImportPlan;
+  state: Record<string, unknown>;
+  chunkCount: number;
+}> {
+  const meta = parseLegacyMeta(await AsyncStorage.getItem(LEGACY_STATE_KEY));
+  const onDisk = legacyChunkIndices(await AsyncStorage.getAllKeys());
+  const plan = planLegacyImport(meta, onDisk);
+  if (plan.action === 'skip') return { plan, state: {}, chunkCount: onDisk.length };
 
-  const chunks = Number(state.txChunks) || 0;
-  const transactions: unknown[] = [];
-  if (chunks > 0) {
-    const pairs = await AsyncStorage.multiGet(
-      Array.from({ length: chunks }, (_, i) => legacyChunkKey(i)),
-    );
+  if (plan.chunkIndices.length > 0) {
+    const transactions: unknown[] = [];
+    const pairs = await AsyncStorage.multiGet(plan.chunkIndices.map(legacyChunkKey));
     for (const [, value] of pairs) {
       if (!value) continue;
       try {
@@ -362,27 +418,33 @@ async function readLegacyBlob(): Promise<{ state: Record<string, unknown>; chunk
         // A single corrupt chunk costs those ~400 rows, not the whole import.
       }
     }
+    plan.state.transactions = transactions;
   }
-  state.transactions = transactions;
-  return { state, chunks };
+  return { plan, state: plan.state, chunkCount: onDisk.length };
 }
 
-async function importLegacyBlob(
-  database: SQLite.SQLiteDatabase,
-): Promise<{ ran: boolean; dropped?: LegacyDropCounts }> {
+async function importLegacyBlob(database: SQLite.SQLiteDatabase): Promise<{
+  ran: boolean;
+  dropped?: LegacyDropCounts;
+  recovery?: DbStatus['legacyRecovery'];
+}> {
   if ((await getMeta(database, META_LEGACY_IMPORTED)) === '1') return { ran: false };
 
-  const legacy = await readLegacyBlob();
-  if (!legacy) {
-    // Fresh install (or nothing salvageable). Record it so the AsyncStorage
-    // read never happens again — it is otherwise a disk hit on every launch
-    // for the entire life of the app.
+  const { plan, state, chunkCount } = await readLegacyBlob();
+  if (plan.action === 'skip') {
+    // Nothing to import either way, so both cases record the decision — the
+    // AsyncStorage read is otherwise a disk hit on every launch for the entire
+    // life of the app, and no amount of retrying will make a truncated key
+    // parse. They differ in what the caller is told, and in the blob's fate:
+    // RETAINED stays '0' so reclaim never runs, which leaves an unreadable meta
+    // key sitting on disk rather than deleted. It is the last copy of whatever
+    // was in it, and a later build with a smarter reader can still find it.
     await setMeta(database, META_LEGACY_IMPORTED, '1');
     await setMeta(database, META_LEGACY_RETAINED, '0');
-    return { ran: false };
+    return { ran: false, recovery: plan.reason === 'unreadable' ? 'nothing' : undefined };
   }
 
-  const { rows, dropped } = legacyStateToRows(legacy.state);
+  const { rows, dropped } = legacyStateToRows(state);
   // Rows and the "already imported" flag commit together. If they did not, a
   // crash after the insert would re-run the import on the next launch and
   // double every transaction — the ids would collide and REPLACE, but any row
@@ -391,9 +453,16 @@ async function importLegacyBlob(
     await insertRows(database, rows);
     await setMeta(database, META_LEGACY_IMPORTED, '1');
     await setMeta(database, META_LEGACY_RETAINED, '1');
-    await setMeta(database, META_LEGACY_TX_CHUNKS, String(legacy.chunks));
+    // Kept as a record of what the import saw. Reclaim rescans the keys rather
+    // than trusting this number, precisely because the launch that produced it
+    // may have been one where the count could not be trusted.
+    await setMeta(database, META_LEGACY_TX_CHUNKS, String(chunkCount));
   });
-  return { ran: true, dropped };
+  return {
+    ran: true,
+    dropped,
+    recovery: plan.source === 'orphaned-chunks' ? 'transactions-only' : undefined,
+  };
 }
 
 /**
@@ -402,17 +471,22 @@ async function importLegacyBlob(
  * means a crash in between, or a first read that turns out to fail, leaves the
  * user with neither copy. Costing a few megabytes for one extra launch is the
  * cheapest insurance in the app.
+ *
+ * The keys are found by scanning rather than counted from META_LEGACY_TX_CHUNKS
+ * so that a chunk the meta key never knew about — the exact residue the import
+ * now recovers from — is swept up too instead of being orphaned forever.
  */
 async function reclaimLegacyBlob(database: SQLite.SQLiteDatabase): Promise<void> {
   if ((await getMeta(database, META_LEGACY_RETAINED)) !== '1') return;
-  const chunks = Number(await getMeta(database, META_LEGACY_TX_CHUNKS)) || 0;
-  const keys = [LEGACY_KEY, ...Array.from({ length: chunks }, (_, i) => legacyChunkKey(i))];
-  try {
-    await AsyncStorage.multiRemove(keys);
-  } catch {
-    // The flag stays at '1', so the next launch tries again. A blob that never
-    // goes away is wasted space, never lost data.
-    return;
+  const keys = legacyKeysToReclaim(await AsyncStorage.getAllKeys());
+  if (keys.length > 0) {
+    try {
+      await AsyncStorage.multiRemove(keys);
+    } catch {
+      // The flag stays at '1', so the next launch tries again. A blob that
+      // never goes away is wasted space, never lost data.
+      return;
+    }
   }
   await setMeta(database, META_LEGACY_RETAINED, '0');
 }
@@ -881,16 +955,25 @@ export const db = {
   },
 
   /**
-   * Backup restore and demo data: the new state replaces the old one whole.
+   * Backup restore and demo data: the new state replaces the old ledger whole.
    * The wipe and the refill share a transaction, so a failure part-way leaves
    * the previous ledger intact rather than an empty app.
+   *
+   * Settings are the exception — they are merged, not replaced. A payload that
+   * does not mention `appLock` is not asking for the lock to be switched off,
+   * and one that does not mention `pro` is not asking for the purchase to be
+   * revoked. See `stateToReplacement` for the full argument; a full backup
+   * carries every setting and so still overwrites every setting.
    */
   replaceAll(state: Partial<Omit<AppState, 'hydrated'>>): Promise<void> {
-    const rows = stateToRows(state);
+    const { rows, settings } = stateToReplacement(state);
     return write(async () => {
       const database = requireDb();
-      for (const table of ALL_TABLES) await database.execAsync(`DELETE FROM ${table}`);
+      for (const table of REPLACEABLE_TABLES) await database.execAsync(`DELETE FROM ${table}`);
       await insertRows(database, rows);
+      for (const row of settings) {
+        await database.runAsync(upsertSql('settings'), [row.key, row.value]);
+      }
     });
   },
 

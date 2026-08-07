@@ -42,8 +42,36 @@ export interface ParsedSms {
  * card purchase as INCOME. The lookahead lets "credited"/"credit to your
  * account" through and blocks the noun phrases that name a card or a limit.
  */
+// The dot is what "Credit.Card" is separated by, and a lookahead that only
+// knew whitespace let that spelling through as an income word. It deliberately
+// stops at the dot rather than allowing space after it: "AED 500 credited.
+// Card ending 1234..." is a sentence boundary, and blocking there would strip
+// the only direction word the message has and drop it entirely.
 const CREDIT_WORDS =
-  /credit(?:ed)?(?!\s*(?:card|cards|limit|facility|shield|score))|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
+  /credit(?:ed)?(?!\s*\.?(?:card|cards|limit|facility|shield|score))|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your/i;
+
+/**
+ * UAE banks punctuate the same banking term three different ways, and the
+ * separator is house style rather than meaning: ADCB writes "Cr.Card" and
+ * "Avl.Bal" where ENBD writes "Credit Card" and "Avl Bal". Every rule that
+ * spans two banking words therefore has to survive the space being a dot or
+ * being absent — a rule that demanded whitespace read ADCB's settlements as
+ * spending and its credit headroom as cash.
+ *
+ * The lone-letter form "C.Card" must bring its dot: `\bcr` is a token no
+ * English word ends in, so it is safe unanchored on the right, but a bare
+ * `\bc` next to "card" would read "Emirates Islamic Card" as a credit card
+ * and turn that account's balance into a limit.
+ */
+const CREDIT_CARD_SRC = String.raw`(?:\bcr(?:edit)?|\bc\.)\.?\s*card`;
+const CREDIT_CARD_RE = new RegExp(CREDIT_CARD_SRC, 'i');
+/**
+ * A card named with up to three qualifying tokens in front of it: "your ADCB
+ * Cr.Card", "your Liv. Credit Card", "your FAB Credit Card ending with 4833".
+ * The tokens carry their own optional dot AND their own optional space, so the
+ * brand's dot ("Liv.") and the abbreviation's dot ("Cr.Card") both fit.
+ */
+const CARD_PHRASE_SRC = String.raw`(?:\w+\.?\s*){0,3}card`;
 // DEBIT_WORDS is market-compiled below (its payment guard embeds the currency).
 const BILL_DUE_WORDS = /\bdue\s+(?:on|by|date)\b|\bbill\b.*\b(?:due|generated|payable)\b|\bbill amount\b|\bpay\s+by\b|\bpayment\s+due\b|\bmin(?:imum)?\s+(?:amount\s+)?due\b/i;
 const BILL_MERCHANT_RE = /(?:your|the)\s+([A-Za-z0-9][A-Za-z0-9 &.'\-]{1,30}?)\s+bill\b/i;
@@ -131,10 +159,16 @@ function ensureCurrencyPatterns(): void {
   // enough, and every one of those settlements arrived as a plain expense —
   // counted as spending on top of the purchases it was paying off.
   //
+  // ADCB glues the abbreviation straight onto the noun — "your ADCB Cr.Card
+  // XXX7720" — so the token separator has to be optional as well as the token.
+  // While it demanded whitespace the whole ADCB register fell through to the
+  // spending branch, which double-counts the month: the settlement is booked
+  // again on top of the purchases it was paying off.
+  //
   // The "received your payment of ... towards" order is ENBD's, and it is the
   // mirror image of the first alternative rather than a variant of it.
   CARD_PAYMENT_RE = new RegExp(
-    `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?(?:\\w+\\.?\\s+){0,3}card|received\\s+your\\s+payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+(?:towards?|against|for|on)\\s+(?:your\\s+)?(?:\\w+\\.?\\s+){0,3}card|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?(?:\\w+\\.?\\s+){0,3}card|received\\s+payment\\s+for\\s+your\\s+(?:credit\\s+)?card|thank you for (?:your )?payment.*card|card\\s+(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`, 'i');
+    `payment\\s+(?:of\\s+(?:${CUR})\\s*[\\d,.]+\\s+)?(?:is\\s+|was\\s+|has\\s+been\\s+)?(?:received|credited|processed)\\s+(?:towards?|to|on|for)\\s+(?:your\\s+)?${CARD_PHRASE_SRC}|received\\s+your\\s+payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+(?:towards?|against|for|on)\\s+(?:your\\s+)?${CARD_PHRASE_SRC}|payment\\s+of\\s+(?:${CUR})\\s*[\\d,.]+\\s+against\\s+(?:your\\s+)?${CARD_PHRASE_SRC}|received\\s+payment\\s+for\\s+your\\s+${CARD_PHRASE_SRC}|thank you for (?:your )?payment.*card|card\\s*(?:no\\.?\\s*)?[\\dXx*•]*\\s*has\\s+been\\s+paid`, 'i');
   // "Payment for GINNYS PLUS TRADING of AED 2.25 has been made using Credit
   // Card ending with 4110." The payee sits BEFORE the amount with none of the
   // prepositions MERCHANT_RE looks for, so every message in this format
@@ -215,17 +249,25 @@ const BALANCE_PREFIX_RE = /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|
  * as a covered DEBIT card. Reading them as debit cards attached a whole card
  * portfolio to the wrong account kind, which is also what decides whether
  * "Avl Bal" means money or borrowing headroom.
+ *
+ * "Cr" is the same trap one abbreviation further on: ADCB's "Cr.Card XXX7720"
+ * carries the kind word, but a rule spelling it out in full never saw it and
+ * filed a credit card as a debit one — which stores the card's remaining
+ * limit as money in an account. "Dr" is deliberately absent: debit is what
+ * the fallback already assumes, so the alternative would buy nothing and
+ * only widen what an unanchored two-letter token can attach itself to.
  */
 const CARD_RE =
-  /(credit|debit|covered)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
-// "Acc XXX7720" is ADCB's spelling and it matched none of a/c, ac or account.
+  /(credit|cr|debit|covered)?\.?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+// "Acc XXX7720" is ADCB's spelling and it matched none of a/c, ac or account;
+// "Acct No" is the next abbreviation along and matched none of those either.
 const ACCOUNT_RE =
-  /\ba\/?c(?:c|count)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+  /\ba\/?c(?:count|ct|c)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
 /** Fully masked PAN like "4782********4833" — the LAST four digits identify the card. */
 const MASKED_PAN_RE = /\b\d{4,6}[Xx*•]{2,}(\d{4})\b/;
 
 const MERCHANT_STOP =
-  String.raw`(?=\s*(?:,|\.|;|\bon\b|\bwith\b|\busing\b|\bvia\b|\bending\b|\bcard\b|\ba\/c\b|\bacc(?:ount)?\b|\bref\b|\btxn\b|\bdated\b|\bavl\b|\bavail(?:able)?\b|\bbal(?:ance)?\b|\botp\b|\bfor\b|\bis\b|\bhas\b|\bhave\b|\bwas\b|\bwill\b|\baed\b|\bdhs\b|\bsar\b|\busd\b|\beur\b|\bgbp\b|$))`;
+  String.raw`(?=\s*(?:,|\.|;|\bon\b|\bwith\b|\busing\b|\bvia\b|\bending\b|\bcard\b|\ba\/c\b|\bacc(?:t|ount)?\b|\bref\b|\btxn\b|\bdated\b|\bavl\b|\bavail(?:able)?\b|\bbal(?:ance)?\b|\botp\b|\bfor\b|\bis\b|\bhas\b|\bhave\b|\bwas\b|\bwill\b|\baed\b|\bdhs\b|\bsar\b|\busd\b|\beur\b|\bgbp\b|$))`;
 // "%" leads a real brand ("% ARABICA"); "·•" appear inside acquirer terminal
 // IDs ("BLOOMFIELD TREAT-····5814"). Both used to break the match outright and
 // cost the whole merchant name.
@@ -273,7 +315,7 @@ const DEPOSIT_RE = /cash\s+deposit|\bcdm\b|deposit(?:ed)?\s+(?:in|into|to)\b/i;
 // ("WL *STEAM PURCHASE"), and dropping those lines cost the merchant. The
 // plural form and the "card purchase" header are the noise.
 const LINE_NOISE_RE =
-  /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
+  /\bcard\b|a\/?c(?:ct?)?\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
 const LINE_DATE_RE = /^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/;
 const TRAILING_PLACE_RE =
   /\s+(?:DXB|DUBAI|ABU DHABI|SHARJAH|AJMAN|ARE|UAE|FRA|USA|GBR|DEU|NLD|ESP|ITA|IRL|SGP|HKG|IND|SAU|KSA|LUX|CAN|AUS|CHE|SWE|POL|JPN|RIYADH|JEDDAH|QAT|GHA|KWT|BHR|OMN|JOR|LBN|EGY|TUR|THA|MYS|KOR|CHN|PAK|LKA|PHL|BGD|ZAF|KEN|NGA|MAR|GRC|PRT|BEL|AUT|DNK|NOR|FIN|CZE|RUS|BRA|MEX|NZL|VNM|IDN|TWN|MCO|LIE)$/i;
@@ -368,9 +410,24 @@ function merchantFromLines(raw: string): string {
   return '';
 }
 
-/** Debit messages that are actually transfers: paying a card bill, moving between own accounts. */
-const TRANSFER_HINT_RE =
-  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance/i;
+/**
+ * Debit messages that are actually transfers: paying a card bill, moving
+ * between own accounts.
+ *
+ * This is the bank-account side of a card settlement, so it has to read the
+ * same abbreviations the card side does — "towards your ADCB Cr.Card",
+ * "towards Cr.Card payment". Missing them books the settlement as spending on
+ * top of the purchases it was paying off.
+ *
+ * The bank-name tokens are allowed only in FRONT of a required credit marker,
+ * never in front of a bare "card". "for your Nol card recharge" is a transport
+ * purchase, and a rule loose enough to swallow the qualifier would have flagged
+ * every prepaid top-up in the market as a transfer.
+ */
+const TRANSFER_HINT_RE = new RegExp(
+  String.raw`(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:card\b|(?:\w+\.?\s*){0,2}${CREDIT_CARD_SRC})|${CREDIT_CARD_SRC}|card\s*(?:no\.?\s*)?[\dXx*•])|${CREDIT_CARD_SRC}\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance`,
+  'i',
+);
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // First, because a direct-debit instalment names a bank and would otherwise
@@ -697,13 +754,16 @@ function extractMerchant(raw: string, re: RegExp): string {
 // The gap before the figure excludes mask characters: "Avl Bal AED ····9235.93"
 // must not report a 9,235.93 balance, because the real one has digits the bank
 // redacted.
+// The "Cr." infix loses its space for exactly the reason the rest of ADCB's
+// register does: "Avl.Cr.Limit is AED 2,508.31" carries no whitespace at all,
+// and while one was required the card's headroom went unread entirely.
 const SNAPSHOT_RE =
-  /(?:avl|avail(?:able)?|remaining|total)\.?\s*(?:cr(?:edit)?\.?\s+)?(limit|bal(?:ance)?|outstanding)[^0-9·•*-]{0,12}([\d,]+(?:\.\d{1,2})?)/i;
+  /(?:avl|avail(?:able)?|remaining|total)\.?\s*(?:cr(?:edit)?\.?\s*)?(limit|bal(?:ance)?|outstanding)[^0-9·•*-]{0,12}([\d,]+(?:\.\d{1,2})?)/i;
 // "Your balance is AED 401913.68" — balance quotes without an Avl/Total
 // prefix. Kept separate so bare "limit" mentions (daily limits, offers)
 // still need the availability prefix above.
 const PLAIN_BALANCE_RE =
-  /(?:your|current|new|updated|net|a\/?c(?:count)?)\s+bal(?:ance)?\s*(?:is|:|now)?[^0-9·•*-]{0,10}([\d,]+(?:\.\d{1,2})?)/i;
+  /(?:your|current|new|updated|net|a\/?c(?:count|ct|c)?)\.?\s*bal(?:ance)?\s*(?:is|:|now)?[^0-9·•*-]{0,10}([\d,]+(?:\.\d{1,2})?)/i;
 const MAX_SNAPSHOT_FILS = 1_000_000_000; // 10M in the local currency
 
 /** The balance / available-limit figure banks append to most alerts. */
@@ -741,7 +801,10 @@ function extractCard(raw: string): ParsedCard | null {
   // "Credit Card 4782********4833" as the identity.
   const masked = raw.match(MASKED_PAN_RE);
   if (masked) {
-    return { last4: masked[1], kind: /credit/i.test(raw) ? 'credit' : 'debit' };
+    return {
+      last4: masked[1],
+      kind: /credit/i.test(raw) || CREDIT_CARD_RE.test(raw) ? 'credit' : 'debit',
+    };
   }
   const cardMatch = raw.match(CARD_RE);
   if (cardMatch) {
@@ -749,10 +812,17 @@ function extractCard(raw: string): ParsedCard | null {
     // Multi-line formats say "Credit Card Purchase" in the header and
     // "Card No XXXX4711" further down — when the number clause carries no
     // kind word, look at the whole message before assuming debit.
+    //
+    // The whole-message fallback has to read the abbreviation too. Left
+    // spelling it out in full, "Your ADCB Cr.Card XXX7720 ... Avl.Bal is AED
+    // 6,292.43" came back as a DEBIT card, and the balance-to-limit rule that
+    // hangs off this field then persisted 6,292.43 of borrowing headroom as
+    // money the user does not have.
     const kind =
       kindWord === 'credit' ||
+      kindWord === 'cr' ||
       kindWord === 'covered' ||
-      (!kindWord && /credit\s+card|covered\s+card/i.test(raw))
+      (!kindWord && (CREDIT_CARD_RE.test(raw) || /covered\s*card/i.test(raw)))
         ? 'credit'
         : 'debit';
     return { last4: cardMatch[2], kind };
@@ -1209,7 +1279,7 @@ export function parseSms(
   // messages carry a reference line naming the sender — "...B/O DELIVERY HERO
   // TALABAT DB LLC Talabat Biweekly Payment" — and the word Payment in it was
   // enough to trip the debit test, filing an incoming payout as spending.
-  const creditedIn = /credited to your (?:account|a\/c)\b/i.test(prose);
+  const creditedIn = /credited to your (?:account|a\/?c(?:ct|c)?)\b/i.test(prose);
   const type: TransactionType =
     isRefund || creditedIn || (!isBillDue && hasCredit && !hasDebit) ? 'income' : 'expense';
 
@@ -1306,7 +1376,7 @@ export function parseSms(
       // further down ("Outgoing transfer", "Bank fee") say both better than a
       // title-cased fragment of the sentence does.
       if (
-        /^(?:instant|local|domestic|international|fund|funds|telegraphic|outward|inward|mobile|own|self|savings?|cash|settlement|card|credit\s+card|salary|profit|annual|monthly|service|processing|late|fee|fees|charge|charges|vat|value\s+added)\b/i.test(
+        /^(?:instant|local|domestic|international|fund|funds|telegraphic|outward|inward|mobile|own|self|savings?|cash|settlement|card|cr(?:edit)?\.?\s*card|salary|profit|annual|monthly|service|processing|late|fee|fees|charge|charges|vat|value\s+added)\b/i.test(
           candidate,
         )
       ) {

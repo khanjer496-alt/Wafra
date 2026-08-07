@@ -956,12 +956,34 @@ export function legacyStateToRows(blob: unknown): LegacyConversion {
     rows.notSubscriptions.push({ merchant });
   }
 
-  rows.settings = settingsToRows({
+  rows.settings = settingsToRows(scalarSettingsFrom(state, true));
+
+  return { rows, dropped };
+}
+
+/**
+ * The scalar settings a blob actually carries, coerced.
+ *
+ * A key the blob does not mention comes back `undefined`, and that distinction
+ * is the whole point: `settingsToRows` skips undefined, so a caller can write
+ * exactly what it was given and leave every other stored setting standing. A
+ * restore that cannot tell "the user set this to false" from "this payload
+ * never mentioned it" has no choice but to reset the second case, which is how
+ * a transactions-only backup ends up revoking Pro and switching off app lock.
+ *
+ * `assumeOnboarded` belongs to the AsyncStorage migration alone: builds that
+ * predate onboarding stored data with no flag at all, and anyone holding such a
+ * blob has plainly used the app. Applying that heuristic anywhere else would
+ * invent a value — and `onboarded` is the one setting that decides whether the
+ * app opens on the intro or the ledger.
+ */
+export function scalarSettingsFrom(blob: unknown, assumeOnboarded = false): Partial<ScalarSettings> {
+  const state = asRecord(blob);
+  if (!state) return {};
+  const onboardedFallback = assumeOnboarded ? true : undefined;
+  return {
     lastScanTs: optInt(state.lastScanTs) ?? undefined,
-    // Builds that predate onboarding stored data with no flag at all. Anyone
-    // who already has a blob has clearly used the app, so they are onboarded —
-    // the same rule store.tsx applies today when it hydrates.
-    onboarded: typeof state.onboarded === 'boolean' ? state.onboarded : true,
+    onboarded: typeof state.onboarded === 'boolean' ? state.onboarded : onboardedFallback,
     userName: optText(state.userName) ?? undefined,
     appLock: typeof state.appLock === 'boolean' ? state.appLock : undefined,
     monthStartDay: optInt(state.monthStartDay) ?? undefined,
@@ -969,9 +991,7 @@ export function legacyStateToRows(blob: unknown): LegacyConversion {
     trialStartTs: optInt(state.trialStartTs) ?? undefined,
     marketId: optText(state.marketId) ?? undefined,
     language: optText(state.language) ?? undefined,
-  });
-
-  return { rows, dropped };
+  };
 }
 
 function parsePaidMonthsInput(value: unknown): string[] {
@@ -1007,6 +1027,40 @@ export function rowsToState(rows: DbRows): Omit<AppState, 'hydrated'> {
 /** The inverse: a live AppState as rows, for backup restore and demo data. */
 export function stateToRows(state: Partial<Omit<AppState, 'hydrated'>>): DbRows {
   return legacyStateToRows(state).rows;
+}
+
+/** What a whole-state replacement truncates and what it merely writes over. */
+export interface Replacement {
+  /** Goes into the tables listed in `REPLACEABLE_TABLES`, after they are emptied. */
+  rows: DbRows;
+  /** Merged into `settings`. Keys the payload never mentioned are not here. */
+  settings: SettingRow[];
+}
+
+/**
+ * Splits a replacement payload into the part that is wiped and refilled and the
+ * part that is merged.
+ *
+ * The collections are the ledger: a restore or a demo load means "these rows,
+ * and nothing else", so they are truncated first. Settings are not ledger. They
+ * describe the device the app is running on — whether biometric lock is armed,
+ * whether this install has paid, which day the user's month turns over, which
+ * language the UI is laid out in — and a payload that simply does not mention
+ * them is not asking for any of that to change. Truncating `settings` and
+ * writing back only what the payload happened to carry silently disarms the
+ * lock, revokes the purchase, moves every budget window and drops RTL, and the
+ * user is never told; a transactions-only backup does exactly that.
+ *
+ * So: absent means untouched, present means overwritten. A full backup carries
+ * every setting and therefore still replaces every setting.
+ */
+export function stateToReplacement(state: Partial<Omit<AppState, 'hydrated'>>): Replacement {
+  const rows = legacyStateToRows(state).rows;
+  // Dropped rather than inserted: legacyStateToRows applies the pre-onboarding
+  // heuristic, which would make `onboarded` the one setting a partial payload
+  // could invent.
+  rows.settings = [];
+  return { rows, settings: settingsToRows(scalarSettingsFrom(state)) };
 }
 
 // ── Statement builders ───────────────────────────────────────────────────────
@@ -1065,7 +1119,11 @@ export function rowValues(table: TableName, row: object): (string | number | nul
   });
 }
 
-/** Order matters only for readability; there are no foreign keys to satisfy. */
+/**
+ * Order matters only for readability; there are no foreign keys to satisfy.
+ * `meta` is absent on purpose — it records that the legacy migration already
+ * ran, and losing that record re-runs the import over a live ledger.
+ */
 export const ALL_TABLES: readonly TableName[] = [
   'transactions',
   'card_dues',
@@ -1078,6 +1136,13 @@ export const ALL_TABLES: readonly TableName[] = [
   'not_subscriptions',
   'settings',
 ];
+
+/**
+ * The tables a whole-state replacement empties. `settings` is deliberately not
+ * one of them — see `stateToReplacement`. Derived from ALL_TABLES so a table
+ * added later is wiped by a restore unless someone decides otherwise here.
+ */
+export const REPLACEABLE_TABLES: readonly TableName[] = ALL_TABLES.filter((t) => t !== 'settings');
 
 /** Which collection of `DbRows` fills which table, for a generic bulk insert. */
 export const TABLE_SOURCES: readonly { table: TableName; key: keyof DbRows }[] = [
@@ -1100,3 +1165,174 @@ export const META_LEGACY_IMPORTED = 'legacy_import_v1';
 export const META_LEGACY_RETAINED = 'legacy_blob_retained';
 /** How many `:tx:N` chunk keys the legacy blob spread its transactions over. */
 export const META_LEGACY_TX_CHUNKS = 'legacy_tx_chunks';
+
+// ── The legacy AsyncStorage layout ───────────────────────────────────────────
+
+/**
+ * Mirrors store.tsx. Two kinds of key, and the difference between them is the
+ * whole reason the recovery below exists:
+ *
+ *  - `wafra/state/v1` holds everything except transactions, plus a `txChunks`
+ *    count. It is small, and store.tsx rewrites it on EVERY state change —
+ *    flipping a setting, editing a budget, dismissing a toast.
+ *  - `wafra/state/v1:tx:N` each hold ~400 transactions, and are rewritten only
+ *    when their contents change.
+ *
+ * So the meta key is by far the likelier of the two to be caught half-written
+ * by a kill, and a truncated meta key sitting next to intact chunks is the
+ * common shape of this failure — not a missing ledger. Reading "meta will not
+ * parse" as "fresh install" throws away a history that is still entirely on
+ * disk, and does it permanently, because the migration then records itself as
+ * done.
+ */
+export const LEGACY_STATE_KEY = 'wafra/state/v1';
+
+export function legacyChunkKey(index: number): string {
+  return `${LEGACY_STATE_KEY}:tx:${index}`;
+}
+
+/** Safe to interpolate: the key above contains no regex metacharacters. */
+const LEGACY_CHUNK_PATTERN = new RegExp(`^${LEGACY_STATE_KEY}:tx:(\\d+)$`);
+
+/**
+ * The chunk indices actually present in AsyncStorage, ascending and unique.
+ *
+ * Scanning the key list rather than trusting `txChunks` is what makes the
+ * recovery possible at all: when the meta key is unreadable there is no count
+ * to trust, and when it is readable a partially applied `multiSet` can still
+ * leave the count one chunk behind what was written.
+ *
+ * An index is only accepted if it round-trips (`:tx:007` does not), because the
+ * caller rebuilds the key from the number — a non-canonical spelling would send
+ * it reading a different key than the one it found.
+ */
+export function legacyChunkIndices(keys: readonly string[]): number[] {
+  const found = new Set<number>();
+  for (const key of keys) {
+    const match = LEGACY_CHUNK_PATTERN.exec(key);
+    if (!match) continue;
+    const index = Number(match[1]);
+    if (String(index) === match[1]) found.add(index);
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+/**
+ * Every legacy key still on disk, for the reclaim pass.
+ *
+ * Deliberately the same acceptance rule as `legacyChunkIndices`, so reclaim can
+ * only ever delete a key the import was able to read. Anything else keeping the
+ * prefix — a `:tx:007` no build has ever written — is left where it is: a few
+ * kilobytes is a cheaper mistake than deleting rows nobody imported.
+ */
+export function legacyKeysToReclaim(keys: readonly string[]): string[] {
+  const out: string[] = [];
+  if (keys.includes(LEGACY_STATE_KEY)) out.push(LEGACY_STATE_KEY);
+  for (const index of legacyChunkIndices(keys)) out.push(legacyChunkKey(index));
+  return out;
+}
+
+export type LegacyMeta =
+  | { kind: 'absent' }
+  | { kind: 'corrupt' }
+  | { kind: 'ok'; state: Record<string, unknown>; inlineTransactions: boolean; chunks: number };
+
+/**
+ * Classifies the small meta key. An empty string counts as corrupt, not absent:
+ * a zero-byte value is a write that got as far as truncating the old one, and
+ * on a device that has chunks behind it that is precisely the case worth
+ * rescuing. Only a genuinely missing key is `absent`.
+ */
+export function parseLegacyMeta(raw: string | null | undefined): LegacyMeta {
+  if (raw === null || raw === undefined) return { kind: 'absent' };
+  if (raw === '') return { kind: 'corrupt' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { kind: 'corrupt' };
+  }
+  const state = asRecord(parsed);
+  if (!state) return { kind: 'corrupt' };
+  // Builds before the chunk split stored transactions inline. A device that
+  // upgraded mid-history can have written either layout last, and the meta key
+  // is written by whichever build wrote last, so it decides.
+  if (Array.isArray(state.transactions)) {
+    return { kind: 'ok', state, inlineTransactions: true, chunks: 0 };
+  }
+  return { kind: 'ok', state, inlineTransactions: false, chunks: Math.max(0, optInt(state.txChunks) ?? 0) };
+}
+
+export type LegacyImportPlan =
+  | { action: 'skip'; reason: 'fresh-install' | 'unreadable' }
+  | {
+      action: 'import';
+      /** 'orphaned-chunks' means the meta key was lost and only rows survive. */
+      source: 'meta' | 'orphaned-chunks';
+      state: Record<string, unknown>;
+      chunkIndices: readonly number[];
+    };
+
+/**
+ * What the migration should do, given the meta key and the chunk keys on disk.
+ *
+ * The case this exists for is the third one: no readable meta, but chunks. That
+ * is a ledger, and it is imported even though everything the meta key carried —
+ * accounts, budgets, bills, settings — is gone with it. Transactions are the
+ * irreplaceable half; the rest the user can rebuild in an afternoon, and on
+ * Android an SMS rescan restores much of it by itself.
+ *
+ * `unreadable` is kept distinct from `fresh-install` even though both import
+ * nothing, because they are not the same event: one is a new user, the other is
+ * a user who just lost data, and the caller has to be able to say so.
+ */
+export function planLegacyImport(
+  meta: LegacyMeta,
+  diskChunkIndices: readonly number[],
+): LegacyImportPlan {
+  if (meta.kind === 'ok') {
+    const claimed = Array.from({ length: meta.chunks }, (_, i) => i);
+    return {
+      action: 'import',
+      source: 'meta',
+      state: meta.state,
+      // Inline transactions are the whole ledger by themselves; any chunk keys
+      // beside them are residue from a newer build that was rolled back, and
+      // reading them would duplicate or resurrect rows. Reclaim still sweeps
+      // them up later.
+      chunkIndices: meta.inlineTransactions
+        ? []
+        : [...new Set([...claimed, ...diskChunkIndices])].sort((a, b) => a - b),
+    };
+  }
+  if (diskChunkIndices.length > 0) {
+    return { action: 'import', source: 'orphaned-chunks', state: {}, chunkIndices: [...diskChunkIndices] };
+  }
+  return { action: 'skip', reason: meta.kind === 'absent' ? 'fresh-install' : 'unreadable' };
+}
+
+// ── WAL sidecars ─────────────────────────────────────────────────────────────
+
+/**
+ * SQLite in WAL mode keeps committed pages in `<db>-wal` until a checkpoint
+ * folds them back, and `<db>-shm` is the index into it. expo-sqlite's
+ * `deleteDatabaseAsync` removes only the main file on both platforms (verified
+ * in ios/SQLiteModule.swift and android/.../SQLiteModule.kt), so a "delete
+ * everything" that stops there leaves committed ledger pages on disk — and,
+ * worse, leaves a -wal written under the old encryption key sitting next to the
+ * fresh database, which is unopenable by anything.
+ */
+export const WAL_SIDECAR_SUFFIXES = ['-wal', '-shm'] as const;
+
+/**
+ * `file://` URIs for the sidecars beside a database. expo-file-system rejects a
+ * bare path (iOS checks `url.isFileURL`) while expo-sqlite's
+ * `defaultDatabaseDirectory` hands back exactly that, so the scheme is added
+ * here rather than at four call sites.
+ */
+export function walSidecarUris(directory: string, databaseName: string): string[] {
+  const withScheme = directory.startsWith('file://') ? directory : `file://${directory}`;
+  const base = withScheme.replace(/\/+$/, '');
+  const name = databaseName.replace(/^\/+/, '');
+  return WAL_SIDECAR_SUFFIXES.map((suffix) => `${base}/${name}${suffix}`);
+}

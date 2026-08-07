@@ -15,10 +15,17 @@ const { seal, b64encode: workerB64encode, b64decode: workerB64decode } = require
 const {
   b64decode,
   b64encode,
+  isRelayPayload,
   keypairFromSeed,
+  makeRowClock,
   open,
+  openPage,
+  parseRelayInstant,
+  payloadTimestampMs,
   publicKeyFor,
   RELAY_KEY_BYTES,
+  RELAY_QUEUE_TTL_MS,
+  rowFirstSeenMs,
 } = require('./build/relay-crypto');
 
 let pass = 0, fail = 0;
@@ -163,6 +170,130 @@ function threw(fn) {
     wire.categoryGuess === 'dining' && wire.card.last4 === '4733');
   ok('wire: no raw message text survives the relay',
     wire.raw === undefined && !JSON.stringify(wire).includes('Avl Balance'));
+
+  // ── Acking is destructive: only two of the three outcomes may be acked ──
+  //
+  // The relay holds the ONLY copy of a parsed transaction, and an ack deletes
+  // it. A row that fails to decrypt can never be read by anything, so acking it
+  // costs nothing. A row that decrypts into a shape this build does not know is
+  // a Worker that was deployed ahead of this app binary — acking that one
+  // destroys a real transaction that a later app version could have read.
+  const newKind = { ...payload, kind: 'cashback', merchant: 'Newer Worker' };
+  const queue = [
+    { id: 'good', ...(await seal(device.publicKey, { ...payload, merchant: 'Kept' })) },
+    { id: 'sealed', ...(() => { const s = { ...blob }; s.ct = tamper(s.ct); return s; })() },
+    { id: 'future', ...(await seal(device.publicKey, newKind)) },
+  ];
+  const page = openPage(device.privateKey, queue, 200);
+  ok('page: an undecryptable row is counted, acked and dropped',
+    page.sealedCount === 1 && page.ackIds.includes('sealed'));
+  ok('page: a row this build does not understand is NOT acked',
+    page.unsupportedCount === 1 && !page.ackIds.includes('future'),
+    JSON.stringify(page.ackIds));
+  ok('page: understood rows are handed over and acked',
+    page.rows.length === 1 && page.rows[0].id === 'good' &&
+    page.rows[0].payload.merchant === 'Kept' && page.ackIds.includes('good'));
+  // The point of not acking: the bytes are intact, so the app version that
+  // learns the new kind still finds it on the relay and can read it.
+  const stillThere = open(device.privateKey, queue[2]);
+  ok('page: the row left on the relay is intact and readable by a newer build',
+    stillThere.kind === 'cashback' && stillThere.amountFils === payload.amountFils);
+  // No id means no way to ack it; it must not be counted as collected either.
+  const idless = openPage(device.privateKey,
+    [{ ...(await seal(device.publicKey, payload)) }, { id: 42, ...blob }], 200);
+  ok('page: a row with no usable id is skipped entirely',
+    idless.rows.length === 0 && idless.ackIds.length === 0);
+  ok('page: the page limit is the Worker page size, not the array length',
+    openPage(device.privateKey, [
+      { id: 'a', ...blob }, { id: 'b', ...blob }, { id: 'c', ...blob },
+    ], 2).ackIds.length === 2);
+  // A Worker that starts sending `sender` must not make every row unopenable on
+  // a device that predates the field, and vice versa.
+  ok('page: sender is optional in both directions',
+    isRelayPayload({ ...payload, sender: 'ENBD' }) && isRelayPayload(payload));
+
+  // ── The fingerprint must not move between redeliveries ──
+  //
+  // A lost ack is explicitly treated as harmless: the row comes back and the
+  // importer drops it on `smsKey`, which is `s<smsTs>-<amountFils>`. That only
+  // holds if smsTs is derived from something invariant. Date.parse of an
+  // unvalidated receivedAt is not: it yields NaN for anything it does not
+  // recognise, and the old fallback was Date.now(), which is different every
+  // time — the same purchase, imported twice.
+  const smsKey = (ms) => `s${ms}-${payload.amountFils}`;
+  // Two days after every fixture below, so no timezone the suite might run in
+  // can push a local-time fixture into the "clock skew" window and change what
+  // is being asserted.
+  const nowMs = Date.UTC(2026, 6, 30, 10, 0, 0);
+  ok('ts: a sealed ISO receivedAt is used as-is',
+    payloadTimestampMs(payload, nowMs) === Date.parse('2026-07-18T09:14:02.000Z'));
+  // What Shortcuts' "Current Date" actually renders in en-GB and en-US. These
+  // are unambiguous, so the real instant is recovered rather than guessed at.
+  ok('ts: the Shortcuts en-GB long form parses to the instant it names',
+    parseRelayInstant('28 Jul 2026 at 09:14', nowMs) === new Date(2026, 6, 28, 9, 14).getTime());
+  ok('ts: the Shortcuts en-US long form parses, pm included',
+    parseRelayInstant('Jul 28, 2026 at 9:14 PM', nowMs) === new Date(2026, 6, 28, 21, 14).getTime());
+  // Ambiguous by construction: 03/07/26 is two different months depending on
+  // who wrote it, and guessing wrong dates the transaction to the wrong one.
+  ok('ts: an ambiguous numeric date is refused rather than guessed',
+    parseRelayInstant('03/07/26 05:53', nowMs) === null);
+  ok('ts: garbage is refused', parseRelayInstant('sometime last tuesday', nowMs) === null &&
+    parseRelayInstant('', nowMs) === null && parseRelayInstant(undefined, nowMs) === null);
+  // Out of range rather than clamped: clamping to "now" is the moving target.
+  ok('ts: a timestamp beyond clock skew is refused',
+    parseRelayInstant('2031-01-01T00:00:00Z', nowMs) === null &&
+    parseRelayInstant('1999-05-05T00:00:00Z', nowMs) === null);
+  ok('ts: the sealed parse does not depend on the host engine\'s Date.parse',
+    parseRelayInstant('2026-07-18T09:14:02+04:00', nowMs) ===
+      Date.parse('2026-07-18T09:14:02+04:00'));
+
+  // Fallback 1: the message's own date. Sealed, so still invariant.
+  const dated = { ...payload, receivedAt: '28 Jul 2026 at 09:14 GST', date: '2026-07-18' };
+  ok('ts: an unparseable receivedAt falls back to the sealed message date',
+    payloadTimestampMs(dated, nowMs) === new Date(2026, 6, 18, 12).getTime());
+  // A statement reminder's date is in the FUTURE. Taking it would push
+  // lastScanTs past today and blind the Android inbox scan from then on.
+  ok('ts: a future due date is not accepted as a receive time',
+    payloadTimestampMs({ ...payload, receivedAt: 'nope', date: '2026-12-01' }, nowMs) === null);
+
+  // Fallback 2: first sighting, keyed by the queue id — the one thing that is
+  // genuinely invariant for a queue row. This is the redelivery test.
+  const undated = { ...payload, receivedAt: '28 Jul 2026 at 09:14 GST', date: null };
+  ok('ts: an undated row has no timestamp of its own',
+    payloadTimestampMs(undated, nowMs) === null);
+  let clock = makeRowClock(null, nowMs);
+  const first = rowFirstSeenMs(clock, 'queue-row-1', nowMs);
+  ok('clock: a first sighting is recorded and flagged for persisting',
+    first === nowMs && clock.dirty === true);
+  // The ack was lost; the same queue row comes back on the next sync, in a new
+  // process, at a different wall-clock time.
+  const persisted = JSON.parse(JSON.stringify(clock.seen));
+  clock = makeRowClock(persisted, nowMs + 90_000);
+  const second = rowFirstSeenMs(clock, 'queue-row-1', nowMs + 90_000);
+  ok('clock: redelivery of the same queue row keeps the same fingerprint',
+    second === first && smsKey(second) === smsKey(first) && clock.dirty === false,
+    `${first} vs ${second}`);
+  ok('clock: a different queue row gets a different sighting',
+    rowFirstSeenMs(clock, 'queue-row-2', nowMs + 90_000) === nowMs + 90_000);
+  // Past the relay's own TTL the row has been swept and can never come back,
+  // so the entry is dead weight in a keychain value with a size limit.
+  ok('clock: entries older than the relay TTL are dropped',
+    Object.keys(makeRowClock(persisted, nowMs + RELAY_QUEUE_TTL_MS + 1000).seen).length === 0);
+  // A clock that jumped backwards would otherwise pin entries there forever.
+  ok('clock: entries from the future are dropped',
+    Object.keys(makeRowClock({ ffff0000: nowMs + 60_000 }, nowMs).seen).length === 0);
+  ok('clock: a corrupt record reads as empty rather than throwing',
+    Object.keys(makeRowClock('not an object', nowMs).seen).length === 0 &&
+    Object.keys(makeRowClock({ a: 'later' }, nowMs).seen).length === 0);
+  // Bounded: iOS refuses large keychain values, and a refused write is a write
+  // that never becomes durable.
+  const capped = makeRowClock(null, nowMs);
+  for (let i = 0; i < 200; i++) rowFirstSeenMs(capped, `row-${i}`, nowMs + i);
+  const capKeys = Object.keys(capped.seen);
+  ok('clock: the record stays bounded and evicts the oldest first',
+    capKeys.length <= 48 && JSON.stringify(capped.seen).length < 1500 &&
+    capKeys.every((k) => capped.seen[k] > nowMs + 100),
+    String(capKeys.length));
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

@@ -21,9 +21,15 @@ import { Platform } from 'react-native';
 
 import type { ScannedSms } from '@/lib/auto-import';
 import { toISODate } from '@/lib/format';
-import { keypairFromSeed, open, RELAY_KEY_BYTES } from '@/lib/relay-crypto';
-import type { SealedBlob } from '@/lib/relay-crypto';
-import type { CategoryId, TransactionType } from '@/lib/types';
+import {
+  keypairFromSeed,
+  makeRowClock,
+  openPage,
+  payloadTimestampMs,
+  RELAY_KEY_BYTES,
+  rowFirstSeenMs,
+} from '@/lib/relay-crypto';
+import type { RelayPayload, RelayRowClock } from '@/lib/relay-crypto';
 
 /**
  * Where the relay lives. `wrangler deploy` prints the real hostname (see
@@ -41,6 +47,16 @@ export const DEFAULT_RELAY_BASE_URL = 'https://wafra-relay.workers.dev';
  * server from inside the app.
  */
 const STORE_KEY = 'wafra.relay.v1';
+
+/**
+ * The first-seen times from `makeRowClock`, kept in their own keychain entry
+ * rather than inside the pairing record. Two reasons: this one is written on a
+ * different schedule (it has to be durable before an ack, the pairing does
+ * not), and it is the one that grows, so a value that ever gets big enough for
+ * the platform to refuse must not be able to take the private key's write down
+ * with it.
+ */
+const CLOCK_KEY = 'wafra.relay.clock.v1';
 
 /**
  * AFTER_FIRST_UNLOCK rather than the WHEN_UNLOCKED default: sync runs from
@@ -114,8 +130,16 @@ export interface RelaySyncResult {
   outcome: RelayOutcome;
   /** Ready for buildImportPlan. Empty unless outcome is 'ok'. */
   rows: ScannedSms[];
-  /** Items this device could not open. See the note on ackIds below. */
+  /** Items sealed to a key this device does not have. Acked and dropped. */
   corruptCount: number;
+  /**
+   * Items that opened but are not a shape this build knows — the Worker has
+   * been deployed ahead of this app binary. They are left on the relay, so this
+   * is the number of transactions an app update would still recover. It stays
+   * accurate for the 72 hours the relay keeps them; after that they are gone
+   * whatever anyone does, which is worth saying on screen while it is not.
+   */
+  unsupportedCount: number;
   /** Whether the relay was told it may delete what it just sent. */
   acked: boolean;
   state: RelayState;
@@ -155,23 +179,6 @@ interface StoredPairing {
   lastItemAt: string | null;
   itemsCollected: number;
   revoked?: boolean;
-}
-
-/** What the Worker seals: a ParsedSms without `raw`, plus arrival time. */
-interface RelayPayload {
-  kind: 'transaction' | 'billDue' | 'cardStatement' | 'cardPayment';
-  type: TransactionType;
-  amountFils: number;
-  merchant: string;
-  date: string | null;
-  dueDay: number | null;
-  minDueFils: number | null;
-  card: { last4: string; kind: 'credit' | 'debit' | 'account' } | null;
-  transferHint: boolean;
-  snapshotFils: number | null;
-  snapshotKind: 'balance' | 'limit' | 'outstanding' | null;
-  categoryGuess: CategoryId;
-  receivedAt: string;
 }
 
 const UNPAIRED: RelayState = {
@@ -361,6 +368,9 @@ export async function unpairRelay(): Promise<RelayState> {
   cached = null;
   try {
     await SecureStore.deleteItemAsync(STORE_KEY, KEYCHAIN);
+    // The clock outlives the pairing otherwise, and it is the one thing here
+    // that is derived from the user's messages, however thinly.
+    await SecureStore.deleteItemAsync(CLOCK_KEY, KEYCHAIN);
   } catch {
     // Already gone, or the keychain is locked. The in-memory cache is cleared
     // either way, and a stale entry is overwritten by the next pairing.
@@ -380,30 +390,13 @@ export function relayShortcutSetup(state: RelayState = relayState()): RelayShort
   };
 }
 
-function isPayload(v: unknown): v is RelayPayload {
-  if (!v || typeof v !== 'object') return false;
-  const p = v as Partial<RelayPayload>;
-  return (
-    typeof p.amountFils === 'number' &&
-    Number.isFinite(p.amountFils) &&
-    typeof p.merchant === 'string' &&
-    (p.type === 'expense' || p.type === 'income') &&
-    (p.kind === 'transaction' ||
-      p.kind === 'billDue' ||
-      p.kind === 'cardStatement' ||
-      p.kind === 'cardPayment')
-  );
-}
-
 /**
  * A sealed payload becomes the same shape scanInbox produces on Android.
  *
- * Two fields are synthesised rather than carried:
- *
- * `smsTs` is the relay's receivedAt. It is the dedupe fingerprint the importer
- * builds `smsKey` from, and because it is sealed inside the payload it is
- * identical on every redelivery — an ack that gets lost cannot turn into a
- * duplicate transaction.
+ * `smsTs` is supplied by the caller rather than derived here, because deriving
+ * it can require the keychain: see the timestamp resolution in `syncRelay`. It
+ * is the dedupe fingerprint the importer builds `smsKey` from, so it must come
+ * out the same on every redelivery of the same queue row.
  *
  * `raw` is the empty string, because the relay never had the message text to
  * give back: it parses and drops it, which is the guarantee the whole service
@@ -412,9 +405,7 @@ function isPayload(v: unknown): v is RelayPayload {
  * keeps these rows out of Settings → Improve accuracy, which is correct — we
  * cannot ask the user to report text we deliberately never stored.
  */
-function toScanned(p: RelayPayload): ScannedSms {
-  const ts = Date.parse(p.receivedAt);
-  const smsTs = Number.isFinite(ts) ? ts : Date.now();
+function toScanned(p: RelayPayload, smsTs: number): ScannedSms {
   return {
     ...p,
     dueDay: p.dueDay ?? null,
@@ -426,11 +417,29 @@ function toScanned(p: RelayPayload): ScannedSms {
     date: p.date ?? toISODate(new Date(smsTs)),
     raw: '',
     smsTs,
-    // The Shortcut posts the message body and nothing else, so there is no
-    // sender to learn the bank's name from. Accounts auto-created from iOS rows
-    // are named after the card's last four digits alone.
-    sender: undefined,
+    // Carried through when the Shortcut was built to send it: this is the only
+    // thing that lets bankFromSender name an auto-created account "ENBD Card
+    // ••1234" in the bank's colour instead of a bare "Card ••1234", which is
+    // the visible difference between the iOS and Android versions of the same
+    // account. A Shortcut that sends nothing leaves it undefined, exactly as
+    // before — bankFromSender treats undefined as "no bank known".
+    sender: typeof p.sender === 'string' && p.sender.trim() !== '' ? p.sender.trim() : undefined,
   };
+}
+
+/**
+ * The clock lives in its own keychain entry and is read only when a row needs
+ * it, which is close to never. A failed read yields an empty clock rather than
+ * a failed sync — and cannot quietly clobber what is on disk, because the thing
+ * that refuses a read here (a locked keychain) refuses the write that follows.
+ */
+async function readRowClock(nowMs: number): Promise<RelayRowClock> {
+  try {
+    const raw = await SecureStore.getItemAsync(CLOCK_KEY, KEYCHAIN);
+    return makeRowClock(raw ? JSON.parse(raw) : null, nowMs);
+  } catch {
+    return makeRowClock(null, nowMs);
+  }
 }
 
 async function markRevoked(p: StoredPairing): Promise<void> {
@@ -457,17 +466,17 @@ async function markRevoked(p: StoredPairing): Promise<void> {
  */
 export async function syncRelay(commit?: RelayCommit): Promise<RelaySyncResult> {
   const p = await readStored();
-  if (!p) return { outcome: 'unpaired', rows: [], corruptCount: 0, acked: false, state: UNPAIRED };
-  if (p.revoked) {
-    return { outcome: 'revoked', rows: [], corruptCount: 0, acked: false, state: publicState(p) };
-  }
+  // A fresh array per result: callers own what they are handed, and one that
+  // sorts or splices its (empty) rows must not reach into another's.
+  const empty = (): Pick<RelaySyncResult, 'rows' | 'corruptCount' | 'unsupportedCount' | 'acked'> =>
+    ({ rows: [], corruptCount: 0, unsupportedCount: 0, acked: false });
+  if (!p) return { outcome: 'unpaired', ...empty(), state: UNPAIRED };
+  if (p.revoked) return { outcome: 'revoked', ...empty(), state: publicState(p) };
 
   const res = await call(p.baseUrl, '/v1/sync', { method: 'GET', token: p.token });
   const fail = (outcome: RelayOutcome, error?: string): RelaySyncResult => ({
     outcome,
-    rows: [],
-    corruptCount: 0,
-    acked: false,
+    ...empty(),
     state: publicState(cached ?? p),
     status: res.status || undefined,
     error,
@@ -487,28 +496,40 @@ export async function syncRelay(commit?: RelayCommit): Promise<RelaySyncResult> 
   const items = (res.body as { items?: unknown } | null)?.items;
   if (!Array.isArray(items)) return fail('error', 'malformed sync response');
 
+  // One bad row must not strand the other 199, and which kind of bad it is
+  // decides whether the relay is allowed to delete it. openPage owns that call.
+  const page = openPage(p.privateKey, items, SYNC_PAGE);
+  const { ackIds, sealedCount: corruptCount, unsupportedCount } = page;
+
+  const nowMs = Date.now();
   const rows: ScannedSms[] = [];
-  const ackIds: string[] = [];
-  let corruptCount = 0;
-  for (const item of items.slice(0, SYNC_PAGE)) {
-    const blob = item as Partial<SealedBlob> & { id?: string };
-    if (typeof blob.id !== 'string') continue;
-    try {
-      const payload = open<unknown>(p.privateKey, {
-        epk: String(blob.epk),
-        iv: String(blob.iv),
-        ct: String(blob.ct),
-      });
-      if (!isPayload(payload)) throw new Error('unexpected payload shape');
-      rows.push(toScanned(payload));
-    } catch {
-      // One unopenable row must not strand the other 199. It is sealed to a key
-      // this device does not have and never will, so it is acked with the rest:
-      // leaving it queued only guarantees it is re-downloaded and re-fails on
-      // every sync until the 72-hour sweep takes it.
-      corruptCount++;
+  let clock: RelayRowClock | null = null;
+  for (const r of page.rows) {
+    // Almost always this branch: the instant is sealed inside the row, so it is
+    // the same number on every redelivery and nothing has to be remembered.
+    const ms = payloadTimestampMs(r.payload, nowMs);
+    if (ms !== null) {
+      rows.push(toScanned(r.payload, ms));
+      continue;
     }
-    ackIds.push(blob.id);
+    // A Shortcut sending a locale date, on an alert that names no date of its
+    // own. The queue id is then the only invariant left, so the first time this
+    // device sees it becomes the row's time — and has to be remembered, or the
+    // next delivery of the same row invents a different one.
+    clock ??= await readRowClock(nowMs);
+    rows.push(toScanned(r.payload, rowFirstSeenMs(clock, r.id, nowMs)));
+  }
+  if (clock?.dirty) {
+    try {
+      // Before the commit, and so before the ack: if this device dies here the
+      // row is still queued and still undated, and the next sync has to reach
+      // the same fingerprint or the user gets the purchase twice.
+      await SecureStore.setItemAsync(CLOCK_KEY, JSON.stringify(clock.seen), KEYCHAIN);
+    } catch {
+      // A refused write costs idempotency for these rows across a process
+      // restart only — within this process nothing is redelivered, and the
+      // alternative (abandoning the sync) drops them for certain.
+    }
   }
 
   if (rows.length > 0 && commit) {
@@ -522,6 +543,7 @@ export async function syncRelay(commit?: RelayCommit): Promise<RelaySyncResult> 
         outcome: 'error',
         rows,
         corruptCount,
+        unsupportedCount,
         acked: false,
         state: publicState(cached ?? p),
         status: res.status,
@@ -563,6 +585,7 @@ export async function syncRelay(commit?: RelayCommit): Promise<RelaySyncResult> 
     outcome: 'ok',
     rows,
     corruptCount,
+    unsupportedCount,
     acked,
     state: publicState(next),
     status: res.status,

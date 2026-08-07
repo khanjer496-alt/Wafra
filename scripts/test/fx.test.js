@@ -14,6 +14,10 @@ function ok(name, cond, detail = '') {
 function near(name, actual, expected, tolerance) {
   ok(name, Math.abs(actual - expected) <= tolerance, `got ${actual}, want ~${expected}`);
 }
+/** Turns a throw into a value, so "it crashed" is a failed assertion and not a dead run. */
+function attempt(fn) {
+  try { return fn(); } catch (e) { return `threw ${e.name}`; }
+}
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 6, 28, 12);
@@ -49,6 +53,28 @@ eq('parseMoney honours the exponent', fx.parseMoney('12.345', 'KWD'), { code: 'K
 eq('parseMoney AED rounds to fils', fx.parseMoney('AED 12.345', 'AED'), { code: 'AED', minor: 1235 });
 eq('parseMoney negative', fx.parseMoney('-40', 'AED'), { code: 'AED', minor: -4000 });
 eq('parseMoney junk', fx.parseMoney('abc', 'AED'), null);
+// A minus that is not the first character used to be dropped by the digit
+// scrub while the sign test only looked at the front of the string, so the
+// parser could not read back what the formatter had just written and every
+// refund came back a charge.
+eq('parseMoney reads back its own negative output',
+  fx.parseMoney(fx.formatMoney({ code: 'AED', minor: -50000 }), 'AED'), { code: 'AED', minor: -50000 });
+eq('and the same for a three-decimal currency',
+  fx.parseMoney(fx.formatMoney({ code: 'KWD', minor: -1234 }), 'KWD'), { code: 'KWD', minor: -1234 });
+eq('a grouped positive round-trips too',
+  fx.parseMoney(fx.formatMoney({ code: 'AED', minor: 123456 }), 'AED'), { code: 'AED', minor: 123456 });
+// How every accounting export and most bank PDFs write a credit.
+eq('a parenthesised amount is a credit', fx.parseMoney('(50)', 'AED'), { code: 'AED', minor: -5000 });
+// U+2212, what arrives when a figure is copied out of a statement.
+eq('a real minus sign counts as a minus', fx.parseMoney('AED −500', 'AED'), { code: 'AED', minor: -50000 });
+eq('a leading minus before the code still counts', fx.parseMoney('-AED 500', 'AED'), { code: 'AED', minor: -50000 });
+// The scrub turned "1e3" into "13" and answered AED 13.00 for it.
+eq('scientific notation is refused, not rescaled', fx.parseMoney('1e3', 'AED'), null);
+eq('two decimal points are not one number', fx.parseMoney('1.2.3', 'AED'), null);
+eq('a bare decimal keeps its magnitude', fx.parseMoney('.5', 'AED'), { code: 'AED', minor: 50 });
+// Trailing-minus exports exist, but reading one as a positive is the exact
+// bug this fixes, so an unreadable sign is a null rather than a guess.
+eq('a trailing minus is refused rather than read as positive', fx.parseMoney('500-', 'AED'), null);
 
 // ── formatting ─────────────────────────────────────────────────────────────
 eq('formatMoney AED', fx.formatMoney({ code: 'AED', minor: 123456 }), 'AED 1,234.56');
@@ -60,6 +86,19 @@ eq('formatMoney JPY never shows decimals',
 eq('formatMoney negative', fx.formatMoney({ code: 'AED', minor: -50000 }), 'AED -500');
 eq('formatMoney symbol', fx.formatMoney({ code: 'USD', minor: 4200 }, { symbol: true }), '$ 42');
 eq('formatMoney bare', fx.formatMoney({ code: 'USD', minor: 4200 }, { prefix: false }), '42');
+// TND, LYD and IQD are ISO 4217 three-decimal currencies. Defaulting an
+// unknown code to two decimals made TND 1.234 render as "TND 12.34" — a
+// factor of ten in the one function allowed to accept a code it cannot define.
+eq('a three-decimal dinar is not printed as a two-decimal one',
+  fx.formatMoney({ code: 'TND', minor: 1234 }), 'TND 1.234');
+eq('and the rest of them are defined too',
+  [fx.minorDigits('LYD'), fx.minorDigits('IQD'), fx.minorDigits('JOD')], [3, 3, 3]);
+eq('an exponent we do not know is never guessed',
+  fx.formatMoney({ code: 'XYZ', minor: 1234 }), 'XYZ 1,234 (minor units)');
+ok('an unknown code cannot be misread as a major amount',
+  !fx.formatMoney({ code: 'XYZ', minor: 1234 }).includes('12.34'));
+eq('an unknown negative keeps its sign',
+  fx.formatMoney({ code: 'XYZ', minor: -1234 }, { prefix: false }), '-1,234 (minor units)');
 // The app-wide AED formatter and this one must never disagree, or the same
 // amount would render two ways on two screens.
 ok('formatMoney agrees with formatAED on dirhams',
@@ -144,34 +183,105 @@ eq('the peg-only table converts every GCC pair',
 
 // ── merging a fetched table into the cache ─────────────────────────────────
 const cached = { base: 'USD', rates: { USD: 1, AED: 3.6725, INR: 90, PKR: 280 }, asOf: NOW - 5 * DAY, origin: 'seed' };
-const merged = fx.mergeRateTable(cached, table({ USD: 1, INR: 95 }, NOW));
+const merged = fx.mergeRateTable(cached, table({ USD: 1, INR: 95 }, NOW), NOW);
 eq('a newer rate wins', merged.rates.INR, 95);
 eq('the merged table takes the new timestamp', merged.asOf, NOW);
 eq('a code the feed skipped keeps its cached value', merged.rates.PKR, 280);
-eq('an older response is ignored', fx.mergeRateTable(cached, table({ INR: 1 }, NOW - 9 * DAY)).rates.INR, 90);
-eq('a response with the same timestamp is ignored', fx.mergeRateTable(cached, table({ INR: 1 }, cached.asOf)).rates.INR, 90);
+eq('an older response is ignored', fx.mergeRateTable(cached, table({ INR: 1 }, NOW - 9 * DAY), NOW).rates.INR, 90);
+eq('a response with the same timestamp is ignored', fx.mergeRateTable(cached, table({ INR: 1 }, cached.asOf), NOW).rates.INR, 90);
 eq('a broken provider peg is overwritten by the real one',
-  fx.mergeRateTable(cached, table({ AED: 3.9, INR: 95 }, NOW)).rates.AED, 3.6725);
+  fx.mergeRateTable(cached, table({ AED: 3.9, INR: 95 }, NOW), NOW).rates.AED, 3.6725);
 eq('null, zero, negative and non-numeric rates are dropped',
-  fx.mergeRateTable(cached, table({ INR: null, PKR: 0, EUR: -1, GBP: 'x', THB: 33 }, NOW)).rates,
+  fx.mergeRateTable(cached, table({ INR: null, PKR: 0, EUR: -1, GBP: 'x', THB: 33 }, NOW), NOW).rates,
   { USD: 1, AED: 3.6725, INR: 90, PKR: 280, THB: 33, SAR: 3.75, QAR: 3.64, OMR: 0.3845, BHD: 0.376, JOD: 0.709 });
 eq('currencies we do not carry are not stored',
-  'XYZ' in fx.mergeRateTable(cached, table({ XYZ: 5, INR: 95 }, NOW)).rates, false);
+  'XYZ' in fx.mergeRateTable(cached, table({ XYZ: 5, INR: 95 }, NOW), NOW).rates, false);
 // A payload we understood nothing from must not mark the cache fresh.
-eq('an empty response leaves the cache untouched', fx.mergeRateTable(cached, table({}, NOW)).asOf, cached.asOf);
-eq('a null response leaves the cache untouched', fx.mergeRateTable(cached, null), cached);
+eq('an empty response leaves the cache untouched', fx.mergeRateTable(cached, table({}, NOW), NOW).asOf, cached.asOf);
+eq('a null response leaves the cache untouched', fx.mergeRateTable(cached, null, NOW), cached);
 eq('a non-USD response is refused',
-  fx.mergeRateTable(cached, { base: 'EUR', rates: { INR: 1 }, asOf: NOW, origin: 'network' }).rates.INR, 90);
-eq('no cache at all falls back to the seed', fx.mergeRateTable(null, null), fx.SEED_RATES);
+  fx.mergeRateTable(cached, { base: 'EUR', rates: { INR: 1 }, asOf: NOW, origin: 'network' }, NOW).rates.INR, 90);
+eq('no cache at all falls back to the seed', fx.mergeRateTable(null, null, NOW), fx.SEED_RATES);
 ok('merging never mutates the cached table', cached.rates.INR === 90 && cached.asOf === NOW - 5 * DAY);
 
-// ── reading a provider payload ─────────────────────────────────────────────
+// ── staleness is a property of each rate, not of the table ─────────────────
+// A currency the feed stops publishing comes back as null every day (which is
+// what a suspended currency really does), so the merge keeps the old number —
+// correctly — but the table's new timestamp used to be copied onto it, and a
+// quote built from a number nobody has published since last year called
+// itself 'live' and zero milliseconds old.
+let suspended = { base: 'USD', rates: { USD: 1, LBP: 89500, INR: 90 }, asOf: NOW - 400 * DAY, origin: 'network' };
+for (let d = 400; d >= 1; d--) {
+  suspended = fx.mergeRateTable(suspended, table({ USD: 1, LBP: null, INR: 90 + d }, NOW - d * DAY), NOW);
+}
+eq('the suspended currency keeps its last known value', suspended.rates.LBP, 89500);
+eq('a rate nobody has published in 400 days is not live', fx.rateFor('USD', 'LBP', suspended, NOW).basis, 'stale');
+eq('and it reports the age it really has', fx.rateFor('USD', 'LBP', suspended, NOW).ageMs, 400 * DAY);
+eq('while the rate that did arrive is still live', fx.rateFor('USD', 'INR', suspended, NOW).basis, 'live');
+eq('a cross rate is only as fresh as its stalest leg',
+  fx.rateFor('INR', 'LBP', suspended, NOW).basis, 'stale');
+
+// Fresh install: the first response carries a few codes, and every code it did
+// not carry is still the build-time seed. Those must not inherit its timestamp.
+const LATER = NOW + 10 * DAY;
+const partial = fx.mergeRateTable(fx.SEED_RATES, table({ USD: 1, EGP: 51 }, LATER), LATER);
+eq('a code the first response skipped keeps the seed value', partial.rates.INR, fx.SEED_RATES.rates.INR);
+eq('and is not relabelled live by it', fx.rateFor('USD', 'INR', partial, LATER).basis, 'stale');
+eq('its age is measured from the seed, not the download',
+  fx.rateFor('USD', 'INR', partial, LATER).ageMs, LATER - fx.SEED_RATES.asOf);
+eq('the code that did arrive is live', fx.rateFor('USD', 'EGP', partial, LATER).basis, 'live');
+// The table-level question is still the table-level one: refreshing cannot
+// help a code the feed no longer publishes, so it must not force a request.
+eq('shouldRefresh still follows the newest rate', fx.shouldRefresh(partial, LATER), false);
+
+// A real open.er-api.com payload, declared here because the checks below feed
+// mutated copies of it before the provider-shape group gets to it.
 const erApi = {
   result: 'success',
   base_code: 'USD',
   time_last_update_unix: 1785196951,
   rates: { USD: 1, AED: 3.6725, INR: 95.938043, XYZ: 4, BTC: 0.00001 },
 };
+
+// ── a publish time that cannot be true ─────────────────────────────────────
+// A feed emitting milliseconds in a field documented as seconds is a common
+// bug. Multiplied by 1000 again it dates the table in the year 58540, and
+// nothing newer can ever beat that timestamp again.
+const MS_BUG = 1785196951000;
+eq('a millisecond publish time is read as milliseconds, not multiplied again',
+  fx.parseRateResponse({ ...erApi, time_last_update_unix: MS_BUG }, NOW).asOf, MS_BUG);
+eq('a publish time that fits neither reading falls back to arrival',
+  fx.parseRateResponse({ ...erApi, time_last_update_unix: 9.99e14 }, NOW).asOf, NOW);
+eq('a future-dated currency-api date falls back to arrival',
+  fx.parseRateResponse({ date: '2999-01-01', usd: { aed: 3.6725 } }, NOW).asOf, NOW);
+
+const poisoned = table({ USD: 1, INR: 90 }, MS_BUG * 1000);
+eq('a table dated in the future does not report itself as fresh', fx.isStale(poisoned, NOW), true);
+eq('nor as zero milliseconds old', fx.rateFor('USD', 'INR', poisoned, NOW).basis, 'stale');
+eq('so the app keeps trying to refresh it', fx.shouldRefresh(poisoned, NOW), true);
+// The poison is persisted, so this is the state the app wakes up in.
+const healed = fx.mergeRateTable(poisoned, table({ USD: 1, INR: 95 }, NOW), NOW);
+eq('a cache dated in the future cannot veto a real response', healed.rates.INR, 95);
+eq('and the merge takes the response timestamp', healed.asOf, NOW);
+
+// ── a table that is not a table ────────────────────────────────────────────
+// A truncated AsyncStorage write leaves an object that satisfies the type and
+// has no rates. rateFor read straight through `base` and threw a TypeError on
+// any foreign pair, while the pegged pairs kept working, so it looked random.
+const truncated = { base: 'USD', asOf: NOW, origin: 'network' };
+eq('a table with no rates does not crash a foreign quote',
+  attempt(() => fx.rateFor('USD', 'INR', truncated, NOW)), null);
+eq('nor a conversion', attempt(() => fx.convertMinor(100, 'USD', 'INR', truncated, NOW)), null);
+eq('and a pegged pair still answers from the constants',
+  attempt(() => fx.rateFor('USD', 'AED', truncated, NOW).rate), 3.6725);
+eq('a table with no rates is not laundered through the merge',
+  fx.mergeRateTable(truncated, null, NOW), fx.SEED_RATES);
+eq('a table with null rates is not one either',
+  fx.mergeRateTable({ base: 'USD', rates: null, asOf: NOW - DAY, origin: 'seed' }, null, NOW), fx.SEED_RATES);
+eq('a corrupt cache does not get to swallow a good response',
+  fx.mergeRateTable(truncated, table({ USD: 1, INR: 95 }, NOW), NOW).rates.INR, 95);
+
+// ── reading a provider payload ─────────────────────────────────────────────
 eq('open.er-api.com shape', fx.parseRateResponse(erApi, NOW).rates.INR, 95.938043);
 eq('and its publish time, not our fetch time', fx.parseRateResponse(erApi, NOW).asOf, 1785196951000);
 eq('unknown tickers are stripped on the way in',

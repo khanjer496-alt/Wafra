@@ -56,8 +56,16 @@ export const CURRENCIES: Readonly<Record<string, Currency>> = Object.freeze({
   KWD: def('KWD', 'د.ك', 3, 'Kuwaiti Dinar'),
   BHD: def('BHD', 'د.ب', 3, 'Bahraini Dinar'),
   OMR: def('OMR', 'ر.ع', 3, 'Omani Rial'),
-  // Wider region.
+  // Wider region. The three-decimal dinars are listed even though the seed
+  // carries no rate for them: an exponent is a fact about the currency and is
+  // needed the moment an amount is rendered, while a rate is a fact about
+  // today and can arrive with the first refresh. Leaving them out did not make
+  // them unreachable — formatMoney tolerates an unknown code — it made
+  // formatMoney print millimes as if they were hundredths, a factor of ten.
   JOD: def('JOD', 'د.ا', 3, 'Jordanian Dinar'),
+  TND: def('TND', 'د.ت', 3, 'Tunisian Dinar'),
+  LYD: def('LYD', 'ل.د', 3, 'Libyan Dinar'),
+  IQD: def('IQD', 'ع.د', 3, 'Iraqi Dinar'),
   EGP: def('EGP', 'E£', 2, 'Egyptian Pound'),
   LBP: def('LBP', 'ل.ل', 2, 'Lebanese Pound'),
   TRY: def('TRY', '₺', 2, 'Turkish Lira'),
@@ -164,18 +172,44 @@ export function toMajor(minor: number, code: string): number | null {
   return minor / pow10(c.digits);
 }
 
+/** Digits plus the separators a human, a locale or a bank PDF puts between them. */
+const NUMBER_BODY = /^(?:\d[\d,\u0020\u00a0\u2009\u202f']*)?(?:\.\d*)?$/;
+
 /**
- * User-typed text to Money. Mirrors parseAmountToFils in format.ts (strip
- * everything that isn't a digit, a dot or a leading minus) but honours the
- * currency's own exponent, so "12.345" is 12345 minor units of KWD and 1235
- * of AED.
+ * Text to Money, honouring the currency's own exponent, so "12.345" is 12345
+ * minor units of KWD and 1235 of AED.
+ *
+ * Unlike parseAmountToFils in format.ts this accepts negatives, and that is
+ * the whole reason it cannot reuse format.ts's approach of scrubbing
+ * everything that is not a digit or a dot and testing the sign with /^\s*-/.
+ * The scrub deletes the minus, so the sign has to be read before it and from
+ * the right side of the number: the minus in "AED -500" — which is exactly
+ * what formatMoney prints for a refund — is not the first non-space
+ * character, so the anchored test missed it and the function returned a
+ * positive 500. A parse that cannot read back its own formatter's output
+ * turns every refund into a charge, silently and with no null to catch.
+ *
+ * The sign is therefore anything ahead of the digits (a currency code or
+ * symbol may sit in between) or a wrapping pair of parentheses, which is how
+ * every accounting export and every bank PDF writes a credit. U+2212, the
+ * real minus sign, arrives whenever a figure is copied out of a statement.
+ *
+ * What follows the first digit must be a plain decimal number. The old scrub
+ * turned "1e3" into "13" and answered AED 13, and "1.2.3" into a NaN that at
+ * least failed loudly; anything we cannot read as one number is now null.
  */
 export function parseMoney(text: string, code: string): Money | null {
-  if (!getCurrency(code)) return null;
-  const negative = /^\s*-/.test(text);
-  const cleaned = text.replace(/[^0-9.]/g, '');
-  if (!cleaned) return null;
-  const value = Number(cleaned);
+  if (!getCurrency(code) || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  const wrapped = trimmed.length > 2 && trimmed.startsWith('(') && trimmed.endsWith(')');
+  const body = wrapped ? trimmed.slice(1, -1) : trimmed;
+  // The number starts at its first digit, or at the dot of a bare ".5".
+  const start = body.search(/\d|\.\d/);
+  if (start < 0) return null;
+  const digits = body.slice(start);
+  if (!NUMBER_BODY.test(digits) || !/\d/.test(digits)) return null;
+  const negative = wrapped || /[-−]/.test(body.slice(0, start));
+  const value = Number(digits.replace(/[^0-9.]/g, ''));
   if (!Number.isFinite(value)) return null;
   const minor = toMinor(negative ? -value : value, code);
   return minor === null ? null : { code: code.toUpperCase(), minor };
@@ -194,17 +228,27 @@ function groupThousands(n: number): string {
  * whole app depends on, foreign amounts render here and AED keeps using
  * formatAED — the two agree digit for digit on 2-decimal currencies.
  *
- * This is the one place an unknown code is tolerated rather than refused: it
- * falls back to two decimals and prints the code as given. Arithmetic on a
- * currency we can't define is a bug and returns null everywhere else, but a
- * render path that throws takes a screen down over a label.
+ * This is the one place an unknown code is tolerated rather than refused,
+ * because a render path that throws takes a screen down over a label. What it
+ * must NOT do is guess the exponent. Assuming two decimals printed TND 1234
+ * millimes as "TND 12.34" when the amount is TND 1.234 — a factor of ten, in
+ * the one function that was allowed to be lenient, on exactly the codes most
+ * likely to be missing: the three-decimal dinars of the region. An exponent we
+ * do not know cannot be defaulted, so the integer is printed unscaled and said
+ * to be unscaled. Ugly on a screen, and impossible to read as an amount it is
+ * not.
  */
 export function formatMoney(
   amount: Money,
   opts?: { decimals?: boolean; symbol?: boolean; prefix?: boolean },
 ): string {
   const c = getCurrency(amount.code);
-  const digits = c?.digits ?? 2;
+  if (!c) {
+    const raw = Math.round(amount.minor);
+    const bare = `${raw < 0 ? '-' : ''}${groupThousands(Math.abs(raw))} (minor units)`;
+    return opts?.prefix === false ? bare : `${amount.code} ${bare}`;
+  }
+  const digits = c.digits;
   const unit = pow10(digits);
   const abs = Math.abs(Math.round(amount.minor));
   const whole = Math.floor(abs / unit);
@@ -215,7 +259,7 @@ export function formatMoney(
     showDecimals ? `.${String(fraction).padStart(digits, '0')}` : ''
   }`;
   if (opts?.prefix === false) return body;
-  return `${opts?.symbol && c ? c.symbol : amount.code} ${body}`;
+  return `${opts?.symbol ? c.symbol : amount.code} ${body}`;
 }
 
 // ── rates ──────────────────────────────────────────────────────────────────
@@ -273,11 +317,33 @@ export interface RateTable {
   /** Units of each currency per 1 unit of base. */
   rates: Readonly<Record<string, number>>;
   /**
-   * When the PROVIDER published these, in epoch ms — not when we fetched
-   * them. A daily feed fetched five minutes ago can still be twenty hours
-   * old, and staleness is a property of the numbers, not of the download.
+   * When the PROVIDER published the NEWEST of these, in epoch ms — not when
+   * we fetched them. A daily feed fetched five minutes ago can still be
+   * twenty hours old, and staleness is a property of the numbers, not of the
+   * download.
+   *
+   * This is a table-level figure and answers exactly one question: is another
+   * request worth making (see shouldRefresh). It is NOT the age of any given
+   * rate, because a merge keeps a code the feed omitted — see asOfByCode.
    */
   asOf: number;
+  /**
+   * Publish time per code, for the rates that did not all arrive together.
+   *
+   * A merge carries forward any code the response omitted or sent as null,
+   * which is right — a value one publish cycle old beats no value at all —
+   * but it means the table's own asOf describes only the codes that were
+   * actually refreshed. Without this map a currency the feed quietly stopped
+   * publishing (a suspended one really does come back null, and LBP has been
+   * exactly that) kept its number forever while every quote built from it
+   * claimed to be seconds old and 'live', which is the one thing this module
+   * promises never to do.
+   *
+   * Optional because a table persisted by an older build, or hand-built in a
+   * test, has none; those fall back to the table's asOf, which is the old
+   * behaviour and no worse than it was.
+   */
+  asOfByCode?: Readonly<Record<string, number>>;
   origin: RateOrigin;
 }
 
@@ -344,16 +410,47 @@ export const SEED_RATES: RateTable = Object.freeze({
  */
 export const RATE_FRESH_MS = 36 * 60 * 60 * 1000;
 
-export function rateAgeMs(table: RateTable, now = Date.now()): number {
-  return Math.max(0, now - table.asOf);
+/**
+ * How far ahead of the device clock a publish time may sit before we stop
+ * believing it. A phone's clock and a provider's differ by seconds; a day of
+ * slack covers a wrong time zone and a user who set the date by hand. Past
+ * that, one side is broken and the timestamp cannot order anything.
+ */
+export const MAX_FUTURE_SKEW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Distance in time from a publish stamp, in either direction.
+ *
+ * The absolute value is the point. Clamping a future timestamp to age 0 —
+ * `Math.max(0, now - asOf)` — reported a rate stamped with the year 58540 as
+ * zero milliseconds old, so it was 'live', never stale, and shouldRefresh
+ * said no forever: one provider emitting milliseconds in a field documented
+ * as seconds stopped the app fetching for good. A number we cannot place in
+ * time is not fresh, it is unmeasurable, and the only safe reading of a
+ * distance is how far it is from now whichever side it falls.
+ */
+function ageOf(asOf: unknown, now: number): number {
+  if (typeof asOf !== 'number' || !Number.isFinite(asOf)) return Number.MAX_SAFE_INTEGER;
+  return Math.abs(now - asOf);
 }
 
-/** True when the table's floating rates are past the freshness window. */
+export function rateAgeMs(table: RateTable, now = Date.now()): number {
+  return ageOf(table?.asOf, now);
+}
+
+/** True when the table's freshest floating rate is past the freshness window. */
 export function isStale(table: RateTable, now = Date.now()): boolean {
   return rateAgeMs(table, now) > RATE_FRESH_MS;
 }
 
-/** Whether a refresh is worth attempting — call before spending a request. */
+/**
+ * Whether a refresh is worth attempting — call before spending a request.
+ *
+ * Deliberately asks about the table and not about any one rate: a code the
+ * feed has stopped publishing stays old no matter how often we fetch, and
+ * refreshing on its account would burn a request every call forever. Age per
+ * rate is a labelling question and lives in rateFor.
+ */
 export function shouldRefresh(table: RateTable, now = Date.now()): boolean {
   return isStale(table, now);
 }
@@ -373,7 +470,11 @@ export interface RateQuote {
    * it can never be wrong SILENTLY.
    */
   basis: 'peg' | 'live' | 'stale';
-  /** Publish time of the table the rate came from; 0 for a peg. */
+  /**
+   * Publish time of the OLDEST leg the rate was built from; 0 for a peg. A
+   * cross rate is only as current as its stalest half, so this is the figure
+   * a "rate from 3 days ago" label has to quote.
+   */
   asOf: number;
   ageMs: number;
 }
@@ -389,6 +490,10 @@ function pegQuote(from: string, to: string, rate: number): RateQuote {
  * A pair that is pegged on both legs is answered from the constants and never
  * touches the table, so AED→USD, AED→SAR and OMR→BHD keep working with an
  * empty cache, a year-old cache, or no network since install.
+ *
+ * `table` is treated as hostile: it comes off disk, and a truncated write
+ * leaves an object with no `rates` at all. This function is called on render
+ * paths, so it returns null rather than throwing.
  */
 export function rateFor(
   from: string,
@@ -403,17 +508,24 @@ export function rateFor(
   if (a in PEGGED_PER_USD && b in PEGGED_PER_USD) {
     return pegQuote(a, b, PEGGED_PER_USD[b] / PEGGED_PER_USD[a]);
   }
-  if (table.base !== FX_BASE) return null;
+  if (!isRateTable(table)) return null;
   const perA = a in PEGGED_PER_USD ? PEGGED_PER_USD[a] : table.rates[a];
   const perB = b in PEGGED_PER_USD ? PEGGED_PER_USD[b] : table.rates[b];
   if (!isUsableRate(perA) || !isUsableRate(perB)) return null;
-  const age = rateAgeMs(table, now);
+  // Each floating leg carries its own publish time and the pair inherits the
+  // worse of the two; a pegged leg is a legal constant and contributes none.
+  // At least one leg is floating here — both-pegged returned above.
+  const asOf = Math.min(
+    a in PEGGED_PER_USD ? Infinity : rateAsOf(table, a),
+    b in PEGGED_PER_USD ? Infinity : rateAsOf(table, b),
+  );
+  const age = ageOf(asOf, now);
   return {
     from: a,
     to: b,
     rate: perB / perA,
     basis: age > RATE_FRESH_MS ? 'stale' : 'live',
-    asOf: table.asOf,
+    asOf,
     ageMs: age,
   };
 }
@@ -473,6 +585,36 @@ function isUsableRate(value: unknown): value is number {
 }
 
 /**
+ * Is this actually a table, or the wreckage of one?
+ *
+ * Every table in this module has been through AsyncStorage, and a write that
+ * was interrupted comes back as a shape that satisfies the type and nothing
+ * else. Checking only `base` — which is what every function here used to do —
+ * let a table with no `rates` at all travel: `{ ...undefined }` is silently
+ * `{}`, so the merge laundered the corruption instead of falling back to the
+ * seed, and rateFor read `.rates[a]` off undefined and threw. Pegged pairs
+ * still answered from the constants, so the crash only ever fired on foreign
+ * currencies and read as intermittent. `asOf` is deliberately not required
+ * here: a table whose timestamp is unreadable still has usable numbers and is
+ * quoted as stale rather than withheld.
+ */
+function isRateTable(value: RateTable | null | undefined): value is RateTable {
+  return (
+    !!value &&
+    value.base === FX_BASE &&
+    !!value.rates &&
+    typeof value.rates === 'object'
+  );
+}
+
+/** When THIS code was last published, falling back to the table's own stamp. */
+function rateAsOf(table: RateTable, code: string): number {
+  const stamp = table.asOfByCode?.[code];
+  const asOf = typeof stamp === 'number' && Number.isFinite(stamp) ? stamp : table.asOf;
+  return Number.isFinite(asOf) ? asOf : 0;
+}
+
+/**
  * Pure reducer: fold a freshly fetched table into the cached one.
  *
  * The rules, and what each is defending against:
@@ -485,30 +627,54 @@ function isUsableRate(value: unknown): value is number {
  * - Non-numeric, zero, negative and non-finite values are dropped rather than
  *   allowed to poison a conversion. `null` for a suspended currency is a real
  *   thing feeds do.
- * - A code missing from the incoming set keeps its cached value. The feeds
- *   publish every code at once, so a gap means a provider hiccup on that one
- *   currency, and a value one publish cycle old beats no value at all.
+ * - A code missing from the incoming set keeps its cached value AND the
+ *   publish time it was last seen with. The feeds publish every code at once,
+ *   so a gap means a provider hiccup on that one currency and a value one
+ *   cycle old beats no value at all — but only the codes that actually
+ *   arrived may claim the new timestamp. Copying it onto the whole map is how
+ *   a suspended currency ended up months old and labelled 'live'.
+ * - A cached timestamp in the future cannot order anything, so it does not
+ *   get to veto the response. Without that, one bad publish time was
+ *   permanent: nothing newer could ever beat the year 58540, and the table
+ *   was persisted, so it survived restarts.
  * - The pegs are re-asserted last and always win. See PEGGED_PER_USD.
  */
-export function mergeRateTable(cached: RateTable | null, incoming: RateTable | null): RateTable {
-  const base = cached && cached.base === FX_BASE ? cached : SEED_RATES;
-  if (!incoming || incoming.base !== FX_BASE || !Number.isFinite(incoming.asOf)) return base;
-  if (incoming.asOf <= base.asOf) return base;
+export function mergeRateTable(
+  cached: RateTable | null,
+  incoming: RateTable | null,
+  now = Date.now(),
+): RateTable {
+  const base = isRateTable(cached) ? cached : SEED_RATES;
+  if (!isRateTable(incoming) || !Number.isFinite(incoming.asOf)) return base;
+  const ordered = Number.isFinite(base.asOf) && base.asOf <= now + MAX_FUTURE_SKEW_MS;
+  if (ordered && incoming.asOf <= base.asOf) return base;
 
   const merged: Record<string, number> = { ...base.rates };
+  const stamps: Record<string, number> = {};
+  for (const code of Object.keys(merged)) stamps[code] = rateAsOf(base, code);
   let accepted = 0;
   for (const code of SUPPORTED_CODES) {
     const value = incoming.rates[code];
     if (!isUsableRate(value)) continue;
     merged[code] = value;
+    stamps[code] = incoming.asOf;
     accepted++;
   }
   // A response that carried nothing we understand is not a newer table, it is
   // a broken one — keeping its timestamp would mark the cache fresh while its
   // numbers stayed exactly as old as before.
   if (accepted === 0) return base;
+  // The pegs are constants, not observations: their entries in the stamp map
+  // exist only so the map covers the table, and rateFor never reads them
+  // because it answers a pegged leg from PEGGED_PER_USD directly.
   Object.assign(merged, PEGGED_PER_USD);
-  return { base: FX_BASE, rates: merged, asOf: incoming.asOf, origin: incoming.origin };
+  return {
+    base: FX_BASE,
+    rates: merged,
+    asOfByCode: stamps,
+    asOf: incoming.asOf,
+    origin: incoming.origin,
+  };
 }
 
 // ── the feed ───────────────────────────────────────────────────────────────
@@ -550,10 +716,26 @@ function ratesFromRecord(raw: Record<string, unknown>): Record<string, number> {
  * both here means switching feeds is a one-line change to FX_ENDPOINT with no
  * new parsing code and no new tests.
  *
- * `receivedAt` is only a fallback for a payload that carries no publish time.
- * Dating an undated response "now" is a small lie, but marking it 1970 would
- * flag a genuinely fresh table as stale forever.
+ * `receivedAt` is only a fallback for a payload that carries no publish time,
+ * or one whose publish time cannot be true. Dating an undated response "now"
+ * is a small lie, but marking it 1970 would flag a genuinely fresh table as
+ * stale forever.
  */
+function publishedAtMs(value: unknown, receivedAt: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return receivedAt;
+  const believable = receivedAt + MAX_FUTURE_SKEW_MS;
+  const asSeconds = value * 1000;
+  if (asSeconds <= believable) return asSeconds;
+  // A feed emitting milliseconds in a field documented as seconds is a common
+  // enough bug to be worth reading rather than discarding: 1785196951000 is a
+  // fine timestamp, it is just already in milliseconds. Multiplying it again
+  // put the table in the year 58540, and a single one of those poisoned the
+  // cache permanently — see mergeRateTable and ageOf.
+  if (value <= believable) return value;
+  // Neither reading lands in a time that has happened. We know when it
+  // arrived and nothing else, so say that and let it age from here.
+  return receivedAt;
+}
 export function parseRateResponse(payload: unknown, receivedAt = Date.now()): RateTable | null {
   if (!payload || typeof payload !== 'object') return null;
   const body = payload as Record<string, unknown>;
@@ -565,9 +747,12 @@ export function parseRateResponse(payload: unknown, receivedAt = Date.now()): Ra
     if (typeof body.base_code === 'string' && body.base_code.toUpperCase() !== FX_BASE) return null;
     const rates = ratesFromRecord(body.rates as Record<string, unknown>);
     if (Object.keys(rates).length === 0) return null;
-    const published = body.time_last_update_unix;
-    const asOf = typeof published === 'number' && published > 0 ? published * 1000 : receivedAt;
-    return { base: FX_BASE, rates, asOf, origin: 'network' };
+    return {
+      base: FX_BASE,
+      rates,
+      asOf: publishedAtMs(body.time_last_update_unix, receivedAt),
+      origin: 'network',
+    };
   }
 
   // currency-api: the base currency is the key, lowercased.
@@ -579,7 +764,9 @@ export function parseRateResponse(payload: unknown, receivedAt = Date.now()): Ra
     return {
       base: FX_BASE,
       rates,
-      asOf: Number.isFinite(date) ? date : receivedAt,
+      // NaN fails the comparison too, so an unparseable date lands on
+      // receivedAt exactly like a date that has not happened yet.
+      asOf: date <= receivedAt + MAX_FUTURE_SKEW_MS ? date : receivedAt,
       origin: 'network',
     };
   }
@@ -597,16 +784,20 @@ export function parseRateResponse(payload: unknown, receivedAt = Date.now()): Ra
  * seed table → the pegs, and the pegs alone still convert every GCC and
  * dollar pair correctly. There is no branch that ends in a crash and none
  * that ends in a rate we can't account for.
+ *
+ * A cached table that is not one — a half-written record with no `rates` — is
+ * not a cache, it is damage, and it degrades to the seed here rather than
+ * being handed back to the caller to be persisted again.
  */
 export async function fetchRateTable(
   fetchJson: FxFetcher,
   cached: RateTable | null = SEED_RATES,
   now = Date.now(),
 ): Promise<RateTable> {
-  const base = cached && cached.base === FX_BASE ? cached : SEED_RATES;
+  const base = isRateTable(cached) ? cached : SEED_RATES;
   try {
     const payload = await fetchJson(FX_ENDPOINT);
-    return mergeRateTable(base, parseRateResponse(payload, now));
+    return mergeRateTable(base, parseRateResponse(payload, now), now);
   } catch {
     // Deliberately silent: a failed refresh is the expected state on a phone,
     // not an incident, and the previous table is still serving.
