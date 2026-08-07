@@ -1,5 +1,10 @@
 import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
-import { bankBrandForName, bankFromSender, bankIdentityForName } from '@/lib/markets';
+import {
+  bankBrandForName,
+  bankFromSender,
+  bankIdentityForName,
+  bankFromName,
+} from '@/lib/markets';
 import { duplicateGuard } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
@@ -234,7 +239,13 @@ export function buildImportPlan(
     // Mada. Reinterpreting its structured result from English-only raw-text
     // heuristics silently downgraded explicit Arabic debit cards to unknown.
     const kind = p.card.kind as ResolvedCardKind;
-    const bank = bankFromSender(p.sender);
+    // A message that spells out its issuer ("Emirates NBD Credit Card Mini
+    // Stmt for Card ending 8575") is STATING the bank; a sender ID only
+    // suggests one. That distinction is the only thing that can separate two
+    // real cards sharing their last four digits at different banks — one user
+    // holds a Liv card and an ENBD card both ending 8575, and payments were
+    // settling against the wrong one.
+    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
     const scoped = hintKey(bank?.name, last4, kind);
     const noteType = (ref: string) => {
       if (kind === 'account' || kind === 'unknown') return;
@@ -456,7 +467,7 @@ export function buildImportPlan(
       }
       if (!p.date) continue;
       if (p.date < staleDueCutoff) continue;
-      const statementBank = bankFromSender(p.sender);
+      const statementBank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
         ? accountCandidates().filter(
             ({ ref, account }) =>

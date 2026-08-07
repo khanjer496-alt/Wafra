@@ -1,4 +1,4 @@
-import { bankFromSender, getActiveMarket } from '@/lib/markets';
+import { bankFromMessage, bankFromSender, getActiveMarket } from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -202,6 +202,12 @@ export interface ParsedSms {
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
   /** Balance / available-limit / outstanding figure the bank quoted, if any. */
+  /**
+   * The bank this message NAMES, when it names one before a card noun. Stronger
+   * evidence than the sender ID, and the only thing that can tell two real
+   * cards apart when they share their last four digits at different banks.
+   */
+  bankHint?: string;
   snapshotFils: number | null;
   snapshotKind: SnapshotKind | null;
   categoryGuess: CategoryId;
@@ -3182,7 +3188,7 @@ function extractDate(raw: string): string | null {
  * it took before senders existed. It is never allowed to decide WHETHER a
  * message is a transaction — only to disambiguate one that already is.
  */
-export function parseSms(
+function parseSmsInner(
   message: string,
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
@@ -4242,6 +4248,25 @@ function merchantsAgree(a: ParsedSms, b: ParsedSms): boolean {
   if (!ka || !kb) return true;
   return ka === kb;
 }
+/**
+ * The parse, plus the bank the message NAMES.
+ *
+ * A wrapper rather than 27 edited return sites, and the hint is advisory: the
+ * import planner prefers it over the sender when both exist, because a message
+ * that spells out "Emirates NBD Credit Card" is stating its issuer, while a
+ * sender ID only suggests one.
+ */
+export function parseSms(
+  message: string,
+  overrides?: Record<string, CategoryId>,
+  options?: ParseOptions,
+): ParsedSms | null {
+  const parsed = parseSmsInner(message, overrides, options);
+  if (!parsed) return null;
+  const named = bankFromMessage(message);
+  return named ? { ...parsed, bankHint: named.name } : parsed;
+}
+
 export function parseSmsBatch(
   text: string,
   overrides?: Record<string, CategoryId>,

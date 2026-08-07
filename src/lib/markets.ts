@@ -196,6 +196,43 @@ export function bankFromSender(
   return null;
 }
 
+/**
+ * The bank a message NAMES, as opposed to the one its sender ID implies.
+ *
+ * Sender was the only source of bank identity, which is fine until two real
+ * cards share their last four digits at different banks — one user holds a Liv
+ * card and an Emirates NBD card both ending 8575, and every alert had to be
+ * attributed by sender alone, so statements and payments landed on whichever
+ * card the sender happened to name.
+ *
+ * Deliberately narrow: only a bank name sitting immediately before a card noun
+ * counts, as in "Emirates NBD Credit Card Mini Stmt for Card ending 8575".
+ * A bank named anywhere in the body would be worse than useless — banks put
+ * their own name in promo footers ("download the new FAB mobile banking app"),
+ * and co-branded cards name a partner that is not the issuer.
+ */
+export function bankFromMessage(
+  text: string | undefined,
+): { name: string; color: string; domain?: string } | null {
+  if (!text) return null;
+  for (const b of active.banks) {
+    const re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+    if (re.test(text)) return { name: b.name, color: b.color, domain: b.domain };
+  }
+  return null;
+}
+
+/** The active market's entry for a bank name, in bankFromSender's shape. */
+export function bankFromName(
+  name: string | undefined,
+): { name: string; color: string; domain?: string } | null {
+  if (!name) return null;
+  for (const b of active.banks) {
+    if (b.name === name) return { name: b.name, color: b.color, domain: b.domain };
+  }
+  return null;
+}
+
 /** Brand identity for a bank NAME shown in the UI (any market's pack). */
 export function bankBrandForName(
   name: string,

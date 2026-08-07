@@ -4071,5 +4071,34 @@ t('Western Union is not a shop',
   same('telecom descriptors are left alone', 'Etisalat Gsm', null);
 }
 
+
+// ── The bank a message NAMES ──
+//
+// One user holds a Liv card AND an Emirates NBD card that both end 8575. The
+// sender ID was the only source of bank identity, so alerts about one card
+// settled against the other. A message that spells out its issuer is stating
+// it; that has to outrank a sender ID.
+{
+  const hint = (msg) => { const p = parseSms(msg); return p && p.bankHint; };
+  const same = (name, got, want) => {
+    if (got === want) { pass++; console.log(`\u2713 ${name}`); }
+    else { fail++; console.log(`\u2717 ${name}\n    got ${got} != ${want}`); }
+  };
+  same('a statement naming Emirates NBD is evidence of Emirates NBD',
+    hint('Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/06/26. Total Amt Due AED 4061.96, Due Date 23/07/26. Min Amt Due AED 203.10'),
+    'Emirates NBD');
+  same('...and one naming Mashreq is evidence of Mashreq',
+    hint('Your Mashreq Credit Card ending 1234 has been used for AED 250.00 at CARREFOUR, DUBAI on 12/07/2026. Available Limit: AED 5,000.00'),
+    'Mashreq');
+  same('a message naming no bank offers no hint',
+    hint('Payment of AED 17.86 to Noon with Credit Card ending 8575. Avl Cr. Limit is AED 20,475.99.'),
+    undefined);
+  // The one that would make this worse than useless: banks advertise
+  // themselves in footers, and that is not a statement of the card's issuer.
+  same('a promo footer naming the bank is NOT evidence',
+    hint('Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26'),
+    undefined);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
