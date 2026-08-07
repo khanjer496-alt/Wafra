@@ -1860,6 +1860,12 @@ const TRANSFER_HINT_RE =
   /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
+  // Exchange houses move money; they do not sell anything. There is no
+  // remittance category to file them under, so they resolve to `other` —
+  // honestly unclassified rather than confidently wrong — and the
+  // per-merchant categorise flow lets the user pin them once. This sits
+  // first so no later consumption rule can claim them.
+  [/\b(?:al\s*ansari|al\s*fardan|lulu|uae|sharaf|index|orient|wall\s*street|al\s*rostamani|gcc|joyalukkas)\s*exchange\b|\bexchange\s*(?:centre|center|house)\b|\bmoney\s*exchange\b|western\s*union|\bmoneygram\b/i, 'other'],
   // First, because a direct-debit instalment names a bank and would otherwise
   // fall through every other rule into "other". These three phrasings are
   // specific to standing debt instructions, not to utility direct debits.
@@ -1905,7 +1911,11 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village/i, 'entertainment'],
   [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'software'],
   [/\bunigaz\b/i, 'utilities'],
-  [/carrefour|lulu|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
+  // `lulu` carries a negative lookahead because Lulu Exchange is a
+  // remittance house, not the hypermarket — a money transfer was being
+  // filed as a grocery shop, which overstates consumption for exactly the
+  // users who send money home every month.
+  [/carrefour|lulu(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
   [/talabat|deliveroo|zomato|noon food|careem food|eateasy|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
   // `toll` carries a NEGATIVE LOOKAHEAD and it is not decoration: "call our
   // toll free number 600 54 0000" is a footer on ordinary purchase alerts from

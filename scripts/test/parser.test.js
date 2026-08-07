@@ -4012,5 +4012,31 @@ t('Mashreq hyphenated day-first date still reads',
   'Purchase of AED 40.00 with Card 1234 at LULU on 21-SEP-2023 11:10 PM',
   { date: '2023-09-21' });
 
+
+// ── Exchange houses are not shops ──
+//
+// From a real diagnostic: "LULU EXCHANGE" matched the `lulu` grocery keyword
+// and a remittance was filed as a grocery shop — which overstates consumption
+// for exactly the users who send money home every month.
+t('Lulu Exchange is not the hypermarket',
+  'Purchase of AED 500.00 with Debit Card ending 8783 at LULU EXCHANGE, DUBAI. Avl Balance is AED 1,000.00.',
+  { merchant: 'Lulu Exchange', category: 'other' });
+
+t('Lulu Hypermarket is still groceries',
+  'Purchase of AED 120.00 with Debit Card ending 8783 at LULU HYPERMARKET, SHARJAH. Avl Balance is AED 500.00.',
+  { category: 'groceries' });
+
+t('bare Lulu is still groceries',
+  'Purchase of AED 120.00 with Debit Card ending 8783 at LULU, SHARJAH. Avl Balance is AED 500.00.',
+  { category: 'groceries' });
+
+t('Al Ansari Exchange is not a shop',
+  'Funds Transfer of AED 258.00 has been made using your Debit Card ending 8783 at AL ANSARI EXCHANGE LLC. Your current balance is AED 14,319.86.',
+  { merchant: 'Al Ansari Exchange Llc', category: 'other' });
+
+t('Western Union is not a shop',
+  'Purchase of AED 300.00 with Debit Card ending 8783 at WESTERN UNION, DUBAI. Avl Balance is AED 500.00.',
+  { category: 'other' });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
