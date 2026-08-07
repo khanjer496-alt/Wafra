@@ -1,9 +1,8 @@
 /**
  * Settings.
  *
- * There is no appearance picker: `app.json` sets `userInterfaceStyle:
- * automatic` and the app follows the OS. Everything here either changes what
- * the app is allowed to read, or what a month means.
+ * Everything here either changes what the app is allowed to read, what it is
+ * allowed to send, or how it looks.
  */
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
@@ -37,7 +36,7 @@ import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { transactionsCsvAsync } from '@/lib/export-data';
 import { shareExistingFile, shareTextFile } from '@/lib/file-sharing';
-import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
+import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
@@ -52,15 +51,6 @@ import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
 
-/** The reporting month can start on any day that exists in February. */
-const MAX_START_DAY = 28;
-
-function ordinal(day: number): string {
-  const rem100 = day % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${day}th`;
-  return `${day}${['th', 'st', 'nd', 'rd'][day % 10] ?? 'th'}`;
-}
-
 export default function SettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -68,7 +58,6 @@ export default function SettingsScreen() {
     state,
     setAppLock,
     setPrivateMode,
-    setMonthStartDay,
     setPro,
     setMarket,
     setUiLanguage,
@@ -413,7 +402,7 @@ export default function SettingsScreen() {
 
   const chooseExpenseReportPeriod = () => {
     Alert.alert(t('expenseReportPeriod'), t('expenseReportPeriodBody'), [
-      { text: t('currentMoneyMonth'), onPress: () => void createExpenseReport('month') },
+      { text: t('currentMonth'), onPress: () => void createExpenseReport('month') },
       { text: t('allExpenses'), onPress: () => void createExpenseReport('all') },
       { text: t('cancel'), style: 'cancel' },
     ]);
@@ -516,7 +505,6 @@ export default function SettingsScreen() {
     </Row>
   );
 
-  const monthKeyNow = monthKey(new Date());
   const trial = trialDaysLeft(state);
 
   return (
@@ -556,72 +544,6 @@ export default function SettingsScreen() {
           </Section>
 
           <Section index={1}>
-            <SectionHeader title={t('moneyMonthHeader')} />
-            <Block>
-              <View style={styles.monthHead}>
-                <ThemedText type="small">
-                  {tf('moneyMonthStarts', {
-                    day:
-                      state.language === 'ar'
-                        ? state.monthStartDay
-                        : ordinal(state.monthStartDay),
-                  })}
-                </ThemedText>
-                <ThemedText type="small" tabular style={{ color: theme.primary }}>
-                  {state.monthStartDay}
-                </ThemedText>
-              </View>
-              {/* A picture of the month rather than a ± stepper: this is the
-                  setting that reshapes every other screen, so it should look
-                  like a month, not like a counter. */}
-              <View style={styles.dayGrid}>
-                {Array.from({ length: MAX_START_DAY }, (_, i) => i + 1).map((day) => {
-                  const chosen = day === state.monthStartDay;
-                  return (
-                    <Pressable
-                      key={day}
-                      accessibilityRole="button"
-                      accessibilityLabel={tf('moneyMonthDayA11y', { day })}
-                      accessibilityState={{ selected: chosen }}
-                      onPress={() => setMonthStartDay(day)}
-                      style={styles.dayCell}>
-                      <View
-                        style={[
-                          styles.dayChoice,
-                          {
-                            backgroundColor: chosen ? theme.primary : 'transparent',
-                            borderColor: chosen ? theme.primary : theme.cardBorder,
-                          },
-                        ]}>
-                        <ThemedText
-                          type="meta"
-                          tabular
-                          style={{ color: chosen ? theme.onPrimary : theme.textSecondary }}>
-                          {day}
-                        </ThemedText>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {tf('moneyMonthRange', {
-                  month: shortDate(monthStartISO(monthKeyNow)).split(' ')[1],
-                  from: shortDate(monthStartISO(monthKeyNow)),
-                  to: shortDate(monthEndISO(monthKeyNow)),
-                })}
-              </ThemedText>
-              {state.monthStartDay === 1 && (
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {tf('calendarMonthHint', {
-                    date: shortDate(monthStartISO(shiftMonthKey(monthKeyNow, 1))),
-                  })}
-                </ThemedText>
-              )}
-            </Block>
-          </Section>
-
-          <Section index={2}>
             <SectionHeader title={t('appearanceHeader')} />
             <Block>
               {/* The handoff said to follow the OS and offer no picker. That is
@@ -649,7 +571,7 @@ export default function SettingsScreen() {
             </Block>
           </Section>
 
-          <Section index={3}>
+          <Section index={2}>
             <SectionHeader title={t('privacyHeader')} />
             <Block style={styles.privacyCopy}>
               <Icon name="lock" size={16} color={theme.textTertiary} />
@@ -719,7 +641,7 @@ export default function SettingsScreen() {
             )}
           </Section>
 
-          <Section index={4}>
+          <Section index={3}>
             <SectionHeader title={t('regionHeader')} />
             {linkRow(
               t('countryPack'),
@@ -737,7 +659,7 @@ export default function SettingsScreen() {
             )}
           </Section>
 
-          <Section index={5}>
+          <Section index={4}>
             <SectionHeader title={t('dataHeader')} />
             {linkRow(
               t('backupJson'),
@@ -773,7 +695,7 @@ export default function SettingsScreen() {
             {linkRow(t('eraseAll'), null, confirmErase, true, true)}
           </Section>
 
-          <Section index={6} style={styles.about}>
+          <Section index={5} style={styles.about}>
             <Pressable accessibilityRole="button" accessibilityLabel="Wafra" onPress={onLogoTap}>
               <WafraMark size={34} />
             </Pressable>
@@ -816,32 +738,6 @@ const styles = StyleSheet.create({
   rowText: {
     flex: 1,
     gap: Spacing.half,
-  },
-  monthHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    paddingBottom: Spacing.three - 2,
-  },
-  dayGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -Spacing.half,
-    paddingBottom: Spacing.three - 2,
-  },
-  dayCell: {
-    width: '14.2857%',
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayChoice: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   about: {
     alignItems: 'flex-start',

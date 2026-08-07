@@ -33,7 +33,6 @@ import {
   buildOnboardingPlan,
   DEFAULT_ONBOARDING_ANSWERS,
   GOAL_PRESETS,
-  MONEY_MONTH_DAYS,
   type OnboardingAnswers,
   type OnboardingBudgetId,
   type OnboardingGoalId,
@@ -47,12 +46,11 @@ type Step =
   | 'market'
   | 'goals'
   | 'budget'
-  | 'month'
   | 'capture'
   | 'scanning'
   | 'complete';
 
-const QUESTION_STEPS: readonly Step[] = ['market', 'goals', 'budget', 'month', 'capture'];
+const QUESTION_STEPS: readonly Step[] = ['market', 'goals', 'budget', 'capture'];
 
 /** Onboarding is night mode regardless of the OS theme: the first screen sets
  * the tone, and the mark is at its strongest on charcoal. */
@@ -227,7 +225,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setOnboarded,
     loadDemoData,
     setMarket,
-    setMonthStartDay,
     upsertBudget,
     addGoal,
     deleteGoal,
@@ -299,7 +296,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     const presetTitles = new Set(allOnboardingGoalTitles());
     state.goals.filter((goal) => presetTitles.has(goal.title)).forEach((goal) => deleteGoal(goal.id));
     setMarket(plan.answers.marketId);
-    setMonthStartDay(plan.answers.monthStartDay);
     plan.budgets.forEach(upsertBudget);
     plan.goals.forEach(addGoal);
   };
@@ -562,39 +558,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       </View>
                       <Button
                         label={t('continueWord')}
-                        onPress={() => setStep('month')}
-                        labelColor={night.onPrimary}
-                        style={styles.primaryButton}
-                      />
-                    </>
-                  )}
-
-                  {activeStep === 'month' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardMoneyMonthTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>{t('onboardMoneyMonthBody')}</ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {MONEY_MONTH_DAYS.map((day) => (
-                          <SelectionRow
-                            key={day}
-                            title={day === 1 ? t('onboardCalendarMonth') : t('onboardSalaryDay')}
-                            detail={
-                              day === 1
-                                ? t('onboardCalendarMonthDetail')
-                                : tf('onboardDayNumber', { day })
-                            }
-                            icon="calendar"
-                            selected={answers.monthStartDay === day}
-                            onPress={() => updateAnswer('monthStartDay', day)}
-                          />
-                        ))}
-                      </View>
-                      <Button
-                        label={t('continueWord')}
                         onPress={finishQuestionnaire}
                         labelColor={night.onPrimary}
                         style={styles.primaryButton}
@@ -698,7 +661,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             goals: plan.goals.length,
                             s: plan.goals.length === 1 ? '' : 's',
                             budgets: plan.budgets.length,
-                            day: plan.answers.monthStartDay,
                           })}
                         </ThemedText>
                         {smsDenied && (
@@ -738,13 +700,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           <ThemedText style={styles.summaryTitle}>{t('onboardSummaryBudgets')}</ThemedText>
                           <ThemedText style={styles.summaryValue} tabular>
                             {tf('onboardSummaryActive', { count: plan.budgets.length })}
-                          </ThemedText>
-                        </View>
-                        <View style={styles.summaryRow}>
-                          <Icon name="calendar" size={19} color={night.primary} />
-                          <ThemedText style={styles.summaryTitle}>{t('onboardSummaryMonth')}</ThemedText>
-                          <ThemedText style={styles.summaryValue} tabular>
-                            {tf('onboardDayNumber', { day: plan.answers.monthStartDay })}
                           </ThemedText>
                         </View>
                       </View>

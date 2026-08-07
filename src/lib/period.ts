@@ -1,4 +1,4 @@
-import { getMonthStartDay, monthEndISO, monthKey, monthLabel, monthStartISO, shortDate, toISODate } from '@/lib/format';
+import { monthEndISO, monthKey, monthLabel, monthStartISO, shortDate, toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import type { Transaction } from '@/lib/types';
 
@@ -57,24 +57,6 @@ export function periodLabel(p: PeriodLike): string {
 }
 
 /**
- * The dates a period actually covers, when they are not the obvious ones.
- *
- * A "money month" runs from the user's salary day, so with a start day of 25
- * the period called "Jun 2026" is 25 June to 24 July. Every row inside it is
- * dated JULY, under a heading that says June — which reads as a bug even
- * though it is exactly what was asked for. A user looked at that screen and
- * concluded their July payments had gone missing.
- *
- * Returns '' for calendar months and for the modes that already state their
- * own dates, so nothing is repeated back at the user.
- */
-export function periodRange(p: PeriodLike): string {
-  const period = toPeriod(p);
-  if (period.mode !== 'month' || getMonthStartDay() === 1) return '';
-  return `${shortDate(monthStartISO(period.key))} – ${shortDate(monthEndISO(period.key))}`;
-}
-
-/**
  * The comparison window for "vs previous" insights: previous month, previous
  * year, or the equal-length range immediately before. 'all' has no previous.
  */
@@ -110,10 +92,6 @@ function dayOfYear(d: Date): number {
 /**
  * How long the period is in total, elapsed or not — the denominator for "how
  * far through it are we".
- *
- * Not `daysInMonth`: a money month that starts on the 25th spans two calendar
- * months, so its length is the gap between its own start and end, which is
- * what `monthStartISO`/`monthEndISO` already encode.
  */
 export function daysInPeriod(p: PeriodLike, today: Date): number {
   const period = toPeriod(p);

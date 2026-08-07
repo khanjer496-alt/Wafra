@@ -234,8 +234,6 @@ export interface AppState {
   onboarded: boolean;
   userName: string;
   appLock: boolean;
-  /** Day of month the reporting month begins (salary day). 1 = calendar months. */
-  monthStartDay: number;
   /** Wafra Pro entitlement (Play Billing purchase, or founder unlock on side-loads). */
   pro: boolean;
   /**

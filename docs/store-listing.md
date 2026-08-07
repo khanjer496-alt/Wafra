@@ -42,7 +42,6 @@ UNDERSTAND YOUR MONEY
 • Insights in plain language: "At today's pace you'll spend about AED 14,000
   this month"
 • Cashflow, category and weekday charts — with the numbers on them
-• Month can start on your salary day, not the 1st
 
 MADE FOR THE UAE
 • AED-first, with automatic conversion for USD/EUR charges

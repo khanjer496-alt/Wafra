@@ -36,11 +36,12 @@ Two things it learned the hard way:
   one the previous press left it in.
 
 And one thing to keep in mind when adding to it: pressing everything on
-Settings means pressing all 28 bars of the money-month picker, so the app is
-left reporting a month that starts on the 28th. `resetPreferences()` runs
-after that sweep for exactly this reason — without it the arithmetic
-assertions read an empty month and pass vacuously ("the hero equals In minus
-Out (0 − 0 = 0)").
+Settings leaves every setting wherever the last press put it, so
+`resetPreferences()` runs after that sweep and puts them back. It used to
+matter far more — Settings carried all 28 bars of the money-month picker, and
+without the reset the arithmetic assertions read an empty month and passed
+vacuously ("the hero equals In minus Out (0 − 0 = 0)"). That picker is gone,
+but the sweep still moves theme and language.
 
 Both expect the app on http://localhost:8126 and chromium at
 /opt/pw-browsers/chromium (set executablePath for other machines).

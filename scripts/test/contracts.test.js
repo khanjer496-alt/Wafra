@@ -746,20 +746,29 @@ for (const rel of ['src/app/cards.tsx', 'src/app/(tabs)/wallet.tsx']) {
 }
 
 // ---------------------------------------------------------------------------
-// The reporting period and the month start day.
+// The reporting period answers to the calendar and to nothing else.
 //
-// currentMonthPeriod() reads a module global that only receives its real value
-// during hydration, which is AFTER PeriodProvider first renders. A provider
-// that answers "which month is it" once and never again therefore opens on the
-// wrong month for every user whose month does not start on the 1st, and shows
-// them zeros over a full ledger.
+// currentMonthPeriod() used to read a module global that only got its real
+// value during hydration — AFTER PeriodProvider first rendered — so the app
+// opened on the wrong month for every user whose month did not start on the
+// 1st, and showed them zeros over a full ledger. That was patched with a
+// recompute effect; the setting has since been deleted, which removes the
+// cause rather than the symptom. These assert nobody reintroduces either half.
 const periodCtx = read('src/lib/period-context.tsx');
-ok('PeriodProvider re-answers which month it is once the start day is known',
-  /useEffect\(/.test(periodCtx) && /state\.monthStartDay/.test(periodCtx),
-  'without this it keeps the month it guessed before settings loaded');
-ok('a period the user picked is not overwritten by that recompute',
-  /chosenByUser/.test(periodCtx),
-  'resyncing unconditionally would yank them out of the month they opened');
+ok('PeriodProvider does not consult store state to decide which month it is',
+  !/monthStartDay/.test(periodCtx) && !/useStore/.test(periodCtx),
+  'the month is the calendar month; reading state to find it is the old bug');
+const formatSrc = read('src/lib/format.ts');
+ok('monthKey is a pure function of the date, with no module state behind it',
+  !/MONTH_START_DAY/.test(formatSrc) && !/setMonthStartDay/.test(formatSrc),
+  'a mutable month boundary makes two callers disagree across hydration');
+ok('no screen or library still reads a month start day',
+  !/state\.monthStartDay/.test(read('src/lib/store.tsx')) &&
+  !/monthStartDay/.test(read('src/lib/types.ts')),
+  'a half-removed setting strands a persisted value nothing honours');
+ok('and a ledger that still carries one has it dropped on the way in',
+  /delete \(parsed as \{ monthStartDay\?: number \}\)\.monthStartDay/.test(read('src/lib/store.tsx')),
+  'otherwise every save re-persists a dead setting that looks live');
 
 // ---------------------------------------------------------------------------
 // Direction and meaning are two questions; one flag cannot answer both.

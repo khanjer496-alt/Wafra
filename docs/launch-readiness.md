@@ -459,8 +459,8 @@ Simulator results and source inspection do not satisfy this gate.
   order, and localized accessibility labels.
 - [ ] Check cold launch, upgrade from the previous candidate, SQLCipher data
   persistence, offline use, backup/export/restore, erase while online/offline,
-  biometric changes, low storage, interrupted network calls, and time-zone/
-  salary-day boundaries.
+  biometric changes, low storage, interrupted network calls, and time-zone
+  and month boundaries.
 - [ ] Run purchase/restore/lapse tests from each store's own installed build.
 - [ ] Run a fresh independent blind review of pass-three native captures against
   the named reference apps and retain an explicit tie/win verdict. A reviewer

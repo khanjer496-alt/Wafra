@@ -15,7 +15,7 @@ import {
   mergeRenewedCard,
   repairCardPaymentAccounts,
 } from '@/lib/accounts';
-import { setMonthStartDay as applyMonthStartDay, toISODate } from '@/lib/format';
+import { shiftMonthKey, toISODate } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import { bankFromSender, bankIdentityForName, detectMarketId, setActiveMarket } from '@/lib/markets';
@@ -61,7 +61,6 @@ const EMPTY_STATE: AppState = {
   onboarded: false,
   userName: 'there',
   appLock: false,
-  monthStartDay: 1,
   themePreference: 'system',
   pro: false,
   privateMode: false,
@@ -137,6 +136,43 @@ export function migratePersistedState(
   // Bank inference below must use the market this ledger was created in, not
   // whichever market happened to be active before hydration began.
   if (parsed.marketId) setActiveMarket(parsed.marketId);
+  // ── Retire the money month ────────────────────────────────────────────
+  //
+  // Ledgers written before the setting was removed still carry a
+  // monthStartDay, sometimes 25 or 27, and one thing keyed to it survives the
+  // removal with its meaning silently changed: `Bill.paidMonths`.
+  //
+  // Under a start day of 25, the money month '2026-06' ran 25 Jun – 24 Jul,
+  // and a bill due on the 3rd fell due inside it on 3 JULY. So the entry
+  // '2026-06' meant "the instance due 3 July is paid". Read as a calendar
+  // month it now means June, and the July the user actually paid reverts to
+  // unpaid — on a bill they settled. Marking it paid early also dates the
+  // companion transaction to June, so auto-reconciliation does not rescue it.
+  //
+  // Remap before dropping the start day, because the start day IS the key to
+  // the remap: once this state persists without it, the old meaning is
+  // unrecoverable and no later migration can tell the two cases apart.
+  //
+  // Only a bill whose due day falls BEFORE the start day moved months; the
+  // rest kept theirs. Start day 1 is the default and a no-op throughout.
+  const legacyStartDay = (parsed as { monthStartDay?: number }).monthStartDay;
+  if (typeof legacyStartDay === 'number' && Number.isFinite(legacyStartDay) && parsed.bills) {
+    // The old setter clamped on the way in; a hand-edited backup might not have.
+    const start = Math.min(28, Math.max(1, Math.round(legacyStartDay)));
+    if (start > 1) {
+      parsed.bills = parsed.bills.map((bill) =>
+        bill.dueDay >= start || !bill.paidMonths?.length
+          ? bill
+          : {
+              ...bill,
+              // Dedupe: two money months can land on one calendar month at the
+              // edges, and a doubled entry is harmless but not worth keeping.
+              paidMonths: Array.from(new Set(bill.paidMonths.map((k) => shiftMonthKey(k, 1)))),
+            },
+      );
+    }
+  }
+  delete (parsed as { monthStartDay?: number }).monthStartDay;
   if (parsed.transactions) {
     const accountById = new Map((parsed.accounts ?? []).map((account) => [account.id, account]));
     parsed.transactions = parsed.transactions
@@ -350,7 +386,6 @@ type Action =
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
-  | { type: 'setMonthStartDay'; day: number }
   | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
   | { type: 'setMarket'; id: string }
@@ -368,9 +403,6 @@ function reducer(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
-      // Month grouping is computed all over the app; sync the global before
-      // anything renders against the hydrated state.
-      applyMonthStartDay(next.monthStartDay || 1);
       applyThemePreference(next.themePreference);
       // The free Pro trial clock starts the first time the app ever opens.
       if (!next.trialStartTs) next.trialStartTs = Date.now();
@@ -409,25 +441,6 @@ function reducer(state: AppState, action: Action): AppState {
       // same tick the setting is written rather than on the next launch.
       applyThemePreference(action.preference);
       return { ...state, themePreference: action.preference };
-    }
-    case 'setMonthStartDay': {
-      const day = Math.min(28, Math.max(1, Math.round(action.day) || 1));
-      if (day === state.monthStartDay) return state;
-      applyMonthStartDay(day);
-      // A new array identity for the transactions, deliberately.
-      //
-      // This setting reshapes every month boundary in the app, but it lives in
-      // a module-global that `monthKey` reads at call time — nothing about
-      // `state.transactions` changes when it moves. Every figure memoised on
-      // `[state.transactions, period]` therefore kept its old value: Home's
-      // hero still showed the calendar month's saving while Leaving soon,
-      // memoised on `[state]`, had already switched to the salary month. Two
-      // panels of one screen, two definitions of "this month", until a
-      // transaction was added or the app restarted.
-      //
-      // Copying the array is what tells those memos the world moved. It is
-      // O(n) once, on a setting the user changes approximately never.
-      return { ...state, monthStartDay: day, transactions: [...state.transactions] };
     }
     case 'addTransaction':
       return { ...state, transactions: sortTxs([action.transaction, ...state.transactions]) };
@@ -718,7 +731,6 @@ interface StoreValue {
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   applyFxUpdates: (updates: FxUpdate[]) => void;
-  setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
   setMarket: (id: string) => void;
@@ -1362,10 +1374,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setThemePreference', preference });
   }, []);
 
-  const setMonthStartDay = useCallback((day: number) => {
-    dispatch({ type: 'setMonthStartDay', day });
-  }, []);
-
   const setPro = useCallback((pro: boolean) => {
     dispatch({ type: 'setPro', pro });
   }, []);
@@ -1543,7 +1551,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAppLock,
       setPrivateMode,
       applyFxUpdates,
-      setMonthStartDay,
       setThemePreference,
       setPro,
       setMarket,
@@ -1588,7 +1595,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAppLock,
       setPrivateMode,
       applyFxUpdates,
-      setMonthStartDay,
       setThemePreference,
       setPro,
       setMarket,

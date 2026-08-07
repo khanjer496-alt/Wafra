@@ -65,27 +65,27 @@ eq('bill due-soon (5d)', bills.billsForMonth([mkBill(23)], [], today)[0].status,
 eq('bill upcoming', bills.billsForMonth([mkBill(30)], [], today)[0].status, 'upcoming');
 eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Date(2026, 5, 15))[0].daysLeft, 15);
 
-// A money month starting on a salary day spans two calendar months, so the
-// paid flag (keyed to the money month) and the countdown (calendar
-// arithmetic) were describing different months.
+// A bill's due date and its paid flag must describe the same month. They did
+// not when a month could start on a salary day: the flag was keyed to the
+// money month while the countdown was plain calendar arithmetic, so a bill due
+// on the 28th, paid 28 June and viewed on 20 July read "Paid" while counting
+// down eight days to 28 JULY. Months are calendar months now, which is what
+// closes that gap — these assert the two agree.
 {
-  fmt.setMonthStartDay(25);
-  // Money month '2026-06' runs 25 Jun – 24 Jul. Today 20 Jul is inside it.
-  const t = new Date(2026, 6, 20);
-  eq('money month: a day-28 bill belongs to the June money month',
+  eq('bill date: a day-28 bill falls on the 28th of its own month',
     bills.dueDateInMonth('2026-06', 28), '2026-06-28');
-  eq('money month: a day-3 bill falls in the second calendar month',
-    bills.dueDateInMonth('2026-06', 3), '2026-07-03');
-  eq('money month: day 31 clamps to a day that exists',
+  eq('bill date: a day-3 bill stays in the month it is asked about',
+    bills.dueDateInMonth('2026-06', 3), '2026-06-03');
+  eq('bill date: day 31 clamps to a day that exists',
     bills.dueDateInMonth('2026-01', 31), '2026-01-31');
-  // The bug: due 28th, paid 28 June, viewed 20 July. It read "Paid" (money
-  // month 2026-06) while counting down 8 days to 28 JULY, a different month.
-  const paidRow = bills.billsForMonth([mkBill(28, ['2026-06'])], [], t)[0];
-  ok('money month: a bill paid this money month stays paid', paidRow.status === 'paid');
-  eq('money month: and its date is the one it was paid on, not next month',
-    paidRow.dueISO, '2026-06-28');
-  ok('money month: its countdown agrees with that date', paidRow.daysLeft === -22);
-  fmt.setMonthStartDay(1);
+  eq('bill date: and clamps to the short end of February',
+    bills.dueDateInMonth('2026-02', 31), '2026-02-28');
+  // Due 28th, paid 28 June, viewed 20 July: paid for June, and the date it
+  // reports is the June one it was actually paid on.
+  const paidRow = bills.billsForMonth([mkBill(28, ['2026-06'])], [], new Date(2026, 5, 20))[0];
+  ok('bill date: a bill paid this month stays paid', paidRow.status === 'paid');
+  eq('bill date: and its date is the one it was paid on', paidRow.dueISO, '2026-06-28');
+  ok('bill date: its countdown agrees with that date', paidRow.daysLeft === 8);
 }
 ok('bills sorted most urgent first',
   bills.billsForMonth([mkBill(30), mkBill(5), mkBill(20)], [], today).map(r => r.status).join() === 'overdue,due-soon,upcoming');
@@ -607,37 +607,32 @@ ok('period: movers empty for all-time', an.categoryMovers(aTx, { mode: 'all' }).
 const rangeTop = an.topMerchants(aTx, { mode: 'range', from: '2026-07-01', to: '2026-07-05' });
 ok('period: range-scoped top merchants', rangeTop[0].totalFils === 50000 && rangeTop.length === 2);
 
-// ── salary-day month start (runs last: it mutates the global grouping) ──
-fmt.setMonthStartDay(25);
-ok('salary month: day before start belongs to previous month',
-  fmt.monthKey('2026-07-24') === '2026-06');
-ok('salary month: start day opens the new month', fmt.monthKey('2026-07-25') === '2026-07');
-ok('salary month: start ISO uses the start day', fmt.monthStartISO('2026-07') === '2026-07-25');
-ok('salary month: end is day before next start', fmt.monthEndISO('2026-06') === '2026-07-24');
-ok('salary month: inPeriod follows the shifted boundary',
-  per.inPeriod('2026-07-24', { mode: 'month', key: '2026-06' }) &&
-  !per.inPeriod('2026-07-24', { mode: 'month', key: '2026-07' }));
-ok('salary month: elapsed days counted from the start day',
-  per.elapsedDays({ mode: 'month', key: '2026-06' }, new Date(2026, 6, 24), []) === 30);
-ok('salary month: period end for a past month',
-  per.periodEndISO({ mode: 'month', key: '2026-05' }, new Date(2026, 6, 24)) === '2026-06-24');
-// The month-start bug the user hit: the reporting period is chosen on first
-// render, when the start day is still the default 1, and hydration then moves
-// every date into a DIFFERENT month key. Nothing recomputed the period, so the
-// app sat on a month that had not begun and showed zeros over a full ledger.
-// This asserts the two keys really do disagree, which is what makes recomputing
-// after hydration necessary rather than merely tidy.
-fmt.setMonthStartDay(1);
-const keyBeforeHydration = fmt.monthKey('2026-08-02');
-fmt.setMonthStartDay(27);
-const keyAfterHydration = fmt.monthKey('2026-08-02');
-ok('the month a date belongs to CHANGES when the start day loads',
-  keyBeforeHydration === '2026-08' && keyAfterHydration === '2026-07');
-ok('a period fixed before hydration would hold none of that day\'s spending',
-  keyBeforeHydration !== keyAfterHydration);
-
-fmt.setMonthStartDay(1);
-ok('calendar months restore cleanly', fmt.monthKey('2026-07-24') === '2026-07');
+// ── a month is the calendar month, and nothing can move it ──
+//
+// The money-month setting is gone. It is worth asserting the absence rather
+// than just deleting the old cases: the bug it caused was that `monthKey`
+// consulted mutable module state, so the same date answered differently
+// before and after hydration and Home showed AED 0 over a full ledger.
+ok('month: a date belongs to the month printed on it', fmt.monthKey('2026-07-24') === '2026-07');
+ok('month: the 1st opens the month', fmt.monthKey('2026-07-01') === '2026-07');
+ok('month: the last day still belongs to it', fmt.monthKey('2026-07-31') === '2026-07');
+ok('month: a month starts on the 1st', fmt.monthStartISO('2026-07') === '2026-07-01');
+ok('month: and ends on its own last day', fmt.monthEndISO('2026-06') === '2026-06-30');
+ok('month: February knows it is short', fmt.monthEndISO('2026-02') === '2026-02-28');
+ok('month: and knows about leap years', fmt.monthEndISO('2024-02') === '2024-02-29');
+ok('month: inPeriod follows the calendar boundary',
+  per.inPeriod('2026-07-24', { mode: 'month', key: '2026-07' }) &&
+  !per.inPeriod('2026-07-24', { mode: 'month', key: '2026-06' }));
+ok('month: elapsed days counted from the 1st',
+  per.elapsedDays({ mode: 'month', key: '2026-07' }, new Date(2026, 6, 24), []) === 24);
+ok('month: period end for a past month',
+  per.periodEndISO({ mode: 'month', key: '2026-05' }, new Date(2026, 6, 24)) === '2026-05-31');
+// The heart of it: monthKey is a pure function of the date. There is no
+// setter, no global, and therefore no window in which two callers disagree.
+ok('month: monthKey reads nothing but the date',
+  fmt.monthKey('2026-08-02') === fmt.monthKey('2026-08-02') && fmt.monthKey('2026-08-02') === '2026-08');
+ok('month: there is no start-day setter left to call',
+  fmt.setMonthStartDay === undefined && fmt.getMonthStartDay === undefined);
 
 // ── Pro trial: 3 free days, then the paywall ──
 const purch = require('./build/purchases');
@@ -963,7 +958,6 @@ const lsBase = {
   userName: 'there',
   appLock: false,
   remindersOn: true,
-  monthStartDay: 1,
   pro: true,
   trialStartTs: 0,
   marketId: 'AE',
@@ -2763,38 +2757,27 @@ ok('stale: a stale statement that gets paid leaves openDues',
     cardsLib.reissueSuggestions(declined, today).length === 0);
 }
 
-// ── a salary month must say which days it covers ──
+// ── a month heading means exactly what it says ──
 //
 // A user opened Transactions, saw "4 transactions · Jun 2026" above four rows
 // dated 2, 3, 10 and 13 JULY, and concluded their July payments had gone
-// missing. They had not: their month starts on the 25th, so "Jun 2026" runs
-// 25 Jun – 24 Jul and every one of those rows was correctly inside it. The
-// heading was right and unreadable at the same time.
+// missing. They had not: their money month started on the 25th, so "Jun 2026"
+// ran 25 Jun – 24 Jul and every row was correctly inside it. The heading was
+// right and unreadable at the same time. The fix was to delete the setting,
+// so the heading and the rows under it can no longer disagree.
 {
   const period = require('./build/period');
   const fmt = require('./build/format');
 
-  fmt.setMonthStartDay(1);
-  ok('period: a calendar month needs no explaining',
-    period.periodRange({ mode: 'month', key: '2026-06' }) === '',
-    period.periodRange({ mode: 'month', key: '2026-06' }));
-
-  fmt.setMonthStartDay(25);
-  const range = period.periodRange({ mode: 'month', key: '2026-06' });
-  ok('period: a salary month states its real dates', range.includes('25') && /Jul/.test(range), range);
-  ok('period: and it still calls itself June',
+  ok('period: a 3 July payment sits in July', fmt.monthKey('2026-07-03') === '2026-07');
+  ok('period: and a 27 July one sits in July too', fmt.monthKey('2026-07-27') === '2026-07');
+  ok('period: a month labels itself by the month it holds',
     period.periodLabel({ mode: 'month', key: '2026-06' }).startsWith('Jun'));
-
-  // The thing that confused the user, asserted directly: a payment made on
-  // 3 July belongs to the money-month called June.
-  ok('period: a 3 July payment sits in the June salary month',
-    fmt.monthKey('2026-07-03') === '2026-06', fmt.monthKey('2026-07-03'));
-  ok('period: and a 27 July one sits in July', fmt.monthKey('2026-07-27') === '2026-07');
-
-  // Other modes already state their own dates; do not repeat them.
-  ok('period: a year needs no range', period.periodRange({ mode: 'year', year: 2026 }) === '');
-  ok('period: all time needs no range', period.periodRange({ mode: 'all' }) === '');
-  fmt.setMonthStartDay(1);
+  ok('period: every row under a June heading is dated June',
+    per.inPeriod('2026-06-30', { mode: 'month', key: '2026-06' }) &&
+    !per.inPeriod('2026-07-01', { mode: 'month', key: '2026-06' }));
+  // Nothing left to explain, so there is no range caption to render.
+  ok('period: there is no range caption left to print', period.periodRange === undefined);
 }
 
 // ── moving your own money is not income ──
@@ -2956,10 +2939,6 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const ins = require('./build/insights');
   const an = require('./build/analytics');
   const fmt = require('./build/format');
-
-  // Blocks above move the month boundary and put it back. Say so here rather
-  // than inherit it, because every date below is built from monthKey(today).
-  fmt.setMonthStartDay(1);
 
   const accounts = [
     { id: 'a2', name: 'FAB •0002', kind: 'bank', openingFils: 0, color: '#000' },

@@ -344,7 +344,16 @@ function loadHydrationExports() {
       mergeRenewedCard: identityState,
       repairCardPaymentAccounts: identityState,
     },
-    '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
+    '@/lib/format': {
+      toISODate: () => '2026-08-03',
+      // Real arithmetic, not a stub: the paid-month remap below is asserted on
+      // its output, so a fake would only prove the fake works.
+      shiftMonthKey: (key, delta) => {
+        const [y, m] = key.split('-').map(Number);
+        const d = new Date(y, m - 1 + delta, 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      },
+    },
     '@/lib/theme-preference': { setThemePreference() {} },
     '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
     '@/lib/markets': {
@@ -1630,6 +1639,59 @@ if (!workflow) {
     /::error::[^\n]*useSQLCipher|::error::[^\n]*SQLCipher/.test(workflow) &&
       /useSQLCipher[\s\S]{0,400}?exit 1/.test(workflow),
     'a warning in a 15-minute build log is not a guard');
+}
+
+// ── the money month leaves, and takes its meaning of "paid" with it ──
+//
+// `Bill.paidMonths` holds month KEYS, and the removal of the money month
+// changed what a key means. Under a start day of 25 the key '2026-06' covered
+// 25 Jun – 24 Jul, so a bill due on the 3rd fell due inside it on 3 JULY.
+// Read as a calendar month that same key now says June, and the July the user
+// actually paid silently reverts to unpaid.
+//
+// The migration has exactly one chance to fix this: it is the last moment the
+// old start day still exists. These assert it takes that chance, and that it
+// does not "fix" the bills that never moved.
+{
+  const bill = (id, dueDay, paidMonths) => ({
+    id, title: id, category: 'other', amountFils: 10000, dueDay, paidMonths,
+  });
+
+  const migrated = hydration.migratePersistedState({
+    monthStartDay: 25,
+    bills: [
+      bill('due-before-start', 3, ['2026-06', '2026-07']),
+      bill('due-after-start', 28, ['2026-06']),
+      bill('never-paid', 3, []),
+    ],
+  });
+  const byId = new Map(migrated.bills.map((row) => [row.id, row]));
+
+  ok('a bill due before the old start day has its paid months moved forward',
+    JSON.stringify(byId.get('due-before-start').paidMonths) === JSON.stringify(['2026-07', '2026-08']),
+    JSON.stringify(byId.get('due-before-start').paidMonths));
+  ok('a bill due on or after it is left exactly alone',
+    JSON.stringify(byId.get('due-after-start').paidMonths) === JSON.stringify(['2026-06']));
+  ok('a bill that was never paid gains nothing',
+    byId.get('never-paid').paidMonths.length === 0);
+  ok('and the start day itself is gone once it has been used',
+    migrated.monthStartDay === undefined,
+    'leaving it would re-persist a dead setting that looks live');
+
+  // The default start day is 1, where every key already meant the calendar
+  // month. Touching those would corrupt the ledgers of everyone who never
+  // changed the setting — which is most of them.
+  const calendar = hydration.migratePersistedState({
+    monthStartDay: 1,
+    bills: [bill('untouched', 3, ['2026-06'])],
+  });
+  ok('a ledger that always used calendar months is not rewritten',
+    JSON.stringify(calendar.bills[0].paidMonths) === JSON.stringify(['2026-06']));
+
+  // A ledger written after the removal has no start day to read.
+  const modern = hydration.migratePersistedState({ bills: [bill('modern', 3, ['2026-06'])] });
+  ok('a ledger with no start day at all is left as it is',
+    JSON.stringify(modern.bills[0].paidMonths) === JSON.stringify(['2026-06']));
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

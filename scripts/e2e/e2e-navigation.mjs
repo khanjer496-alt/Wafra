@@ -347,18 +347,20 @@ await pressEverything('settings', async () => { await home(); await tapKey(page,
 /**
  * Put the settings back.
  *
- * Pressing everything on Settings means pressing all 28 bars of the money-month
- * picker, so the app is left reporting a month that starts on the 28th — under
- * which "Jul 2026" runs 28 Jun to 27 Jul and today is its last day. Every
- * arithmetic assertion below reads a different month than the one the seed was
- * written for, which is how a green sweep produced "the hero equals In minus
- * Out (0 − 0 = 0)".
+ * Pressing everything on Settings leaves the theme and language wherever the
+ * last button press landed, and later assertions read the screen as it is
+ * rendered. Reset them before asserting anything.
+ *
+ * This used to matter far more: Settings carried all 28 bars of the money-month
+ * picker, so the sweep left the app reporting a month that started on the 28th
+ * and every arithmetic assertion below read a different month than the seed was
+ * written for — which is how a green sweep once produced "the hero equals In
+ * minus Out (0 − 0 = 0)". That picker no longer exists.
  */
 const resetPreferences = async () => {
   await page.evaluate(() => {
     const K = 'wafra/state/v1';
     const meta = JSON.parse(localStorage.getItem(K) || '{}');
-    meta.monthStartDay = 1;
     meta.themePreference = 'system';
     meta.language = 'en';
     localStorage.setItem(K, JSON.stringify(meta));

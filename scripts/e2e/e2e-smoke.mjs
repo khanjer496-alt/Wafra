@@ -573,7 +573,7 @@ await tapLabel(page, 'Back', 1200);
 await tapLabel(page, 'Settings', 1400);
 ok('settings leads with Pro', !!(await visibleText(page, 'Wafra Pro')));
 ok('settings shows the trial state', !!(await visibleText(page, /Free trial · \d day/)));
-ok('settings pictures the money month', !!(await visibleText(page, /Starts on the/)));
+ok('settings no longer offers a money month', !(await visibleText(page, /Starts on the/)));
 ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
 
 /**

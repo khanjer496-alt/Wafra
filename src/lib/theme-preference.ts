@@ -8,9 +8,13 @@ export type ThemePreference = 'system' | 'light' | 'dark';
  *
  * Module-level rather than a React context because the root layout reads the
  * scheme *outside* `StoreProvider` — it needs a palette before the store has
- * hydrated, to build the navigation theme. Same shape as `setMonthStartDay` in
- * `format.ts`: the store pushes the persisted value in on hydrate, and
- * everything that renders a colour subscribes here.
+ * hydrated, to build the navigation theme. The store pushes the persisted
+ * value in on hydrate, and everything that renders a colour subscribes here.
+ *
+ * Note the listener set. `format.ts` once held a month start day this same
+ * way and had no way to announce a change, so callers that read it before
+ * hydration and callers that read it after silently disagreed about which
+ * month a date belonged to. That setting is gone; this one notifies.
  */
 let preference: ThemePreference = 'system';
 const listeners = new Set<() => void>();

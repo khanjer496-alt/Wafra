@@ -189,7 +189,7 @@ these three facts.
 - Model: 3-day free trial, then subscription required. Trial = everything
   unlocked from first launch. After trial, SMS/notification importing
   pauses until subscribed (viewing existing data and manual entry keep
-  working). Salary-day months and backup/restore are Pro-gated too.
+  working). Backup/restore is Pro-gated too.
 - Configure the same 3-day free trial on the Play subscription offers so
   the store purchase button reads "3 days free".
 - SKUs (create in Play Console → Monetize → Subscriptions):
@@ -213,5 +213,9 @@ these three facts.
   same privacy-minimizing relay. Raw MIME, HTML, attachments and PDF text are
   discarded after parsing; keep the Data safety and privacy disclosures in
   sync with that optional network path.
-- Salary-day month start (custom month boundary) — cheap, high-value in UAE.
+- ~~Salary-day month start (custom month boundary).~~ Built, shipped, then
+  removed. It read as a bug on every screen — rows dated July under a
+  heading saying June — and its start day lived in a module global that
+  hydration filled in late, which is what produced a Home screen showing
+  AED 0 over a full ledger. Do not rebuild it without solving both.
 - Multi-currency auto-conversion to AED (fixes USD-only subscription SMS gap).

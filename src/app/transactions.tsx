@@ -33,7 +33,7 @@ import {
   toISODate,
   wholeFilsAsShown,
 } from '@/lib/format';
-import { inPeriod, periodLabel, periodRange } from '@/lib/period';
+import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import {
   countsInTotals,
@@ -464,12 +464,7 @@ export default function TransactionsScreen() {
                 s: filtered.length === 1 ? '' : 's',
               })}
               {filters.datePreset === 'selected' && period.mode !== 'all'
-                ? // The dates too, when the month is not a calendar month. A
-                  // salary month called "Jun 2026" is 25 Jun – 24 Jul, so
-                  // every row under that heading is dated JULY. A user read
-                  // that screen and concluded their July payments had gone
-                  // missing; they were right there, correctly filed.
-                  ` · ${periodLabel(period)}${periodRange(period) ? ` (${periodRange(period)})` : ''}`
+                ? ` · ${periodLabel(period)}`
                 : ''}
               {activeFilterCount > 0
                 ? ` · ${trf('activeFiltersCount', {

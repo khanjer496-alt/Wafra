@@ -183,12 +183,12 @@ export default function FlowScreen() {
   // "out 11,375 of 5,400 in limits", which reads as a catastrophic overrun
   // when the truth is that rent simply has no limit set.
   const limitedSpend = limits.reduce((s, r) => s + r.spent, 0);
-  // How far through the MONEY month we are, not the calendar one. `getDate()`
-  // is the calendar day, so with a salary-day start of the 25th, 26 July —
-  // day two of a month running 25 Jul to 24 Aug — reported "84% of the month
-  // gone" and "5 days left". insights.ts already had this right via
-  // elapsedDays, so the same screen was carrying both answers, and the "faster
-  // than the month" verdict on every limit was driven off the wrong one.
+  // How far through the period we are — `daysInPeriod`, not `getDate()`,
+  // because the period is not always a month. A range or a year would report
+  // nonsense from the calendar day. insights.ts computes it the same way, and
+  // when this screen used `getDate()` instead the two carried different
+  // answers and the "faster than the month" verdict on every limit was driven
+  // off the wrong one.
   const monthDays = live ? Math.max(1, daysInPeriod(period, now)) : 1;
   const elapsed = live ? Math.max(1, elapsedDays(period, now, state.transactions)) : monthDays;
   const monthShare = live ? Math.min(1, elapsed / monthDays) : 1;

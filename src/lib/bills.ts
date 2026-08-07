@@ -1,25 +1,17 @@
-import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
+import { daysInMonth, monthKey, toISODate } from '@/lib/format';
 import { isSpending } from '@/lib/ledger';
 import type { Bill, Transaction } from '@/lib/types';
 
 /**
- * The calendar date a monthly bill falls due inside a given money month.
+ * The calendar date a monthly bill falls due in a given month.
  *
- * A money month starting on the 25th spans two calendar months, so "day 3"
- * belongs to the second of them and "day 28" to the first. Clamped to the
- * month's own end, so a bill on the 31st still lands on a day that exists.
+ * Clamped to the month's own end, so a bill on the 31st still lands on a day
+ * that exists: in February it falls due on the 28th, or the 29th in a leap
+ * year.
  */
 export function dueDateInMonth(key: string, dueDay: number): string {
-  const startISO = monthStartISO(key);
-  const endISO = monthEndISO(key);
-  const startDay = Number(startISO.slice(8, 10));
-  const base = dueDay >= startDay ? startISO : endISO;
-  const [y, m] = [Number(base.slice(0, 4)), Number(base.slice(5, 7))];
-  const lastOfThatMonth = new Date(y, m, 0).getDate();
-  const day = Math.min(dueDay, lastOfThatMonth);
-  const iso = `${base.slice(0, 7)}-${String(day).padStart(2, '0')}`;
-  // Never outside the month it is supposed to describe.
-  return iso < startISO ? startISO : iso > endISO ? endISO : iso;
+  const day = Math.min(Math.max(dueDay, 1), daysInMonth(key));
+  return `${key}-${String(day).padStart(2, '0')}`;
 }
 
 export type BillStatus = 'paid' | 'overdue' | 'due-soon' | 'upcoming';
@@ -29,7 +21,7 @@ export interface BillWithStatus {
   status: BillStatus;
   /** Days until due this month; negative when overdue. */
   daysLeft: number;
-  /** The actual calendar date this bill falls due, inside the money month. */
+  /** The actual calendar date this bill falls due this month. */
   dueISO: string;
   /** True when paid was inferred from an imported transaction, not marked manually. */
   autoReconciled?: boolean;
@@ -69,13 +61,11 @@ export function billsForMonth(
   const todayISO = toISODate(today);
 
   const rows = bills.map((bill) => {
-    // The paid flag is keyed to the MONEY month, so the date has to be found
-    // inside that same month. It was calendar arithmetic — `bill.dueDay -
-    // today.getDate()` — which describes a different month entirely once the
-    // month starts on a salary day. With a start of the 25th, a bill due on
-    // the 28th and paid on 28 June read "Paid" all through July while its
-    // countdown talked about 28 July, and the July payment stayed invisible
-    // until the 25th.
+    // The paid flag and the countdown must describe the SAME month, so the
+    // date is derived from the month key rather than from calendar arithmetic
+    // on today's date. The old `bill.dueDay - today.getDate()` form is what
+    // made a bill due on the 28th and paid on 28 June read "Paid" all through
+    // July while counting down to 28 July.
     const dueISO = dueDateInMonth(key, bill.dueDay);
     const daysLeft = Math.round(
       (new Date(`${dueISO}T12:00:00`).getTime() - new Date(`${todayISO}T12:00:00`).getTime()) /

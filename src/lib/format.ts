@@ -109,43 +109,37 @@ export function toISODate(d: Date): string {
 }
 
 /**
- * Salary-day month start. With startDay = 25, the "July" money month runs
- * 25 Jul – 24 Aug, matching when salaries actually land. 1 = calendar months.
- * Set once from persisted settings; every month grouping in the app follows.
+ * A month is the calendar month. Always.
+ *
+ * There used to be a configurable "money month" here — a salary-day start, so
+ * that with a start day of 25 the month called July ran 25 Jul – 24 Aug. It
+ * was removed on purpose. Every date in the app now belongs to the month
+ * printed on it, and the month key is the first seven characters of the ISO
+ * date with no state consulted to get there.
+ *
+ * The setting cost more than it bought. Rows dated August sat under a heading
+ * that said July, and a user read that as lost transactions. Worse, the start
+ * day lived in a module global filled in during hydration, which meant every
+ * caller that ran before hydration silently answered for a different month
+ * than every caller that ran after — that split is what produced a Home screen
+ * reporting AED 0 in, AED 0 out and AED 0 saved over a ledger of thirty-nine
+ * transactions. None of that class of bug is reachable anymore.
  */
-let MONTH_START_DAY = 1;
 
-export function setMonthStartDay(day: number): void {
-  const d = Math.round(day);
-  MONTH_START_DAY = Number.isFinite(d) ? Math.min(28, Math.max(1, d)) : 1;
-}
-
-export function getMonthStartDay(): number {
-  return MONTH_START_DAY;
-}
-
-/** "2026-07" key for a date or ISO string, honoring the month start day. */
+/** "2026-07" key for a date or ISO string. */
 export function monthKey(date: string | Date): string {
   const iso = typeof date === 'string' ? date : toISODate(date);
-  if (MONTH_START_DAY > 1 && Number(iso.slice(8, 10)) < MONTH_START_DAY) {
-    return shiftMonthKey(iso.slice(0, 7), -1);
-  }
   return iso.slice(0, 7);
 }
 
 /** First covered ISO date of a report month. */
 export function monthStartISO(key: string): string {
-  return `${key}-${String(MONTH_START_DAY).padStart(2, '0')}`;
+  return `${key}-01`;
 }
 
-/** Last covered ISO date of a report month (day before the next start). */
+/** Last covered ISO date of a report month. */
 export function monthEndISO(key: string): string {
-  if (MONTH_START_DAY === 1) {
-    return `${key}-${String(daysInMonth(key)).padStart(2, '0')}`;
-  }
-  const d = new Date(`${monthStartISO(shiftMonthKey(key, 1))}T12:00:00`);
-  d.setDate(d.getDate() - 1);
-  return toISODate(d);
+  return `${key}-${String(daysInMonth(key)).padStart(2, '0')}`;
 }
 
 export function monthLabel(key: string, short = false): string {

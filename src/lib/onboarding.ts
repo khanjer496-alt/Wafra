@@ -9,7 +9,6 @@ export interface OnboardingAnswers {
   marketId: OnboardingMarketId;
   goalIds: OnboardingGoalId[];
   budgetId: OnboardingBudgetId;
-  monthStartDay: number;
 }
 
 export interface GoalPreset {
@@ -116,13 +115,10 @@ export const BUDGET_PRESETS: readonly BudgetPreset[] = [
   },
 ] as const;
 
-export const MONEY_MONTH_DAYS = [1, 25, 27, 28] as const;
-
 export const DEFAULT_ONBOARDING_ANSWERS: OnboardingAnswers = {
   marketId: 'AE',
   goalIds: ['emergency'],
   budgetId: 'balanced',
-  monthStartDay: 1,
 };
 
 export function normalizeOnboardingAnswers(
@@ -135,16 +131,10 @@ export function normalizeOnboardingAnswers(
   const budgetId = BUDGET_PRESETS.some((preset) => preset.id === answers.budgetId)
     ? answers.budgetId!
     : 'balanced';
-  const requestedDay = Math.round(answers.monthStartDay ?? 1);
-  const monthStartDay = MONEY_MONTH_DAYS.includes(requestedDay as (typeof MONEY_MONTH_DAYS)[number])
-    ? requestedDay
-    : 1;
-
   return {
     marketId,
     goalIds: goalIds.length > 0 ? goalIds : ['emergency'],
     budgetId,
-    monthStartDay,
   };
 }
 

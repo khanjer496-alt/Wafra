@@ -25,7 +25,6 @@ import { useStore } from '@/lib/store';
 const FEATURES: { icon: IconName; titleKey: Parameters<typeof t>[0]; textKey: Parameters<typeof t>[0] }[] = [
   { icon: 'spark', titleKey: 'featAutoTracking', textKey: 'featAutoTrackingText' },
   { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
-  { icon: 'calendar', titleKey: 'featSalaryMonths', textKey: 'featSalaryMonthsText' },
   { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
 ];
 

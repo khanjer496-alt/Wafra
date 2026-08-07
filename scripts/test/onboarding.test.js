@@ -31,7 +31,6 @@ eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAn
   marketId: 'AE',
   goalIds: ['emergency'],
   budgetId: 'balanced',
-  monthStartDay: 1,
 });
 
 eq(
@@ -40,20 +39,17 @@ eq(
     marketId: 'SA',
     goalIds: ['travel', 'travel', 'home', 'emergency'],
     budgetId: 'flexible',
-    monthStartDay: 28,
   }),
   {
     marketId: 'SA',
     goalIds: ['travel', 'home'],
     budgetId: 'flexible',
-    monthStartDay: 28,
   },
 );
 
-eq(
-  'onboarding rejects unsupported month start days',
-  onboarding.normalizeOnboardingAnswers({ monthStartDay: 31 }).monthStartDay,
-  1,
+ok(
+  'onboarding no longer carries a month start day',
+  onboarding.normalizeOnboardingAnswers({ monthStartDay: 31 }).monthStartDay === undefined,
 );
 
 const saPlan = onboarding.buildOnboardingPlan(
@@ -61,7 +57,6 @@ const saPlan = onboarding.buildOnboardingPlan(
     marketId: 'SA',
     goalIds: ['emergency', 'home'],
     budgetId: 'flexible',
-    monthStartDay: 25,
   },
   'ar',
 );
@@ -91,7 +86,6 @@ ok(
   'questionnaire plan is wired to persistent store actions',
   [
     'setMarket(plan.answers.marketId)',
-    'setMonthStartDay(plan.answers.monthStartDay)',
     'plan.budgets.forEach(upsertBudget)',
     'plan.goals.forEach(addGoal)',
   ].every((needle) => gateSource.includes(needle)),
