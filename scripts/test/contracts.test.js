@@ -501,6 +501,45 @@ function ktSources(dir) {
     /commit: async \(\) => \{[\s\S]*clearBackgroundRelayRows/.test(read('src/lib/capture.ts')));
 }
 
+/* ── the policy states the retention the Worker actually performs ─────
+ *
+ * These two lived apart once and drifted. The Worker moved its queue sweep to
+ * 30 days; the privacy policy went on telling users "never more than 72
+ * hours", and the published page kept saying it for as long as nobody compared
+ * them by hand. Understating how long financial data is held by a factor of
+ * ten is the precise gap App Review reads privacy policies to find, and it is
+ * wrong to users whichever direction it points.
+ *
+ * Same shape as the PRO_SKU check above: the code is the source of truth and
+ * the document has to agree with it. Whoever changes the constant next is told
+ * which file to edit, in the same breath as being told they broke something.
+ */
+{
+  const worker = read('server/src/index.ts');
+  const sweep = /DELETE FROM queue WHERE created_at < unixepoch\(\) - (\d+)/.exec(worker);
+  ok('the Worker sweeps the relay queue on a schedule',
+    !!sweep,
+    'no `DELETE FROM queue WHERE created_at < unixepoch() - N` in server/src/index.ts — ' +
+      'if the sweep moved or changed shape, update this contract to match it');
+
+  if (sweep) {
+    const seconds = Number(sweep[1]);
+    const days = seconds / 86400;
+    const privacy = read('docs/privacy-policy.md');
+    const stated = [...privacy.matchAll(/\b(\d+)\s+days\b/g)].map((m) => Number(m[1]));
+    ok('the queue sweep is a whole number of days, as the policy has to say it',
+      Number.isInteger(days),
+      `server/src/index.ts sweeps at ${seconds}s = ${days} days, which no policy can state plainly`);
+    ok('the privacy policy states the retention the Worker enforces',
+      privacy.includes(`${days} days`),
+      `server/src/index.ts sweeps the relay queue at ${seconds}s = ${days} days, but ` +
+        `docs/privacy-policy.md never says "${days} days"` +
+        (stated.length ? ` — it says ${[...new Set(stated)].map((d) => `${d} days`).join(', ')}` : '') +
+        '. Update docs/privacy-policy.md, then re-run `npm run deploy:legal` so the ' +
+        'published page at wafra-legal.pages.dev stops making a promise the code does not keep.');
+  }
+}
+
 /* iOS Message automation forwards sender identity. */
 {
   const setup = read('src/app/ios-setup.tsx');
