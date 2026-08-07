@@ -974,14 +974,34 @@ const OFFER_RE =
  */
 const SCHEDULED_CLAUSE_RE =
   /\b(?:is|are|has\s+been|have\s+been|will\s+be)\s+scheduled\b(?:[^.\n]|\.\d)*/gi;
+// "apply"/"applies" is the INTRANSITIVE form of the same forecast, and it is
+// how a fee is announced rather than charged: "An overlimit fee of AED288.75
+// will apply for usage exceeding credit limit". Every other verb here is
+// listed twice, once as a participle ("will be charged") and once bare ("will
+// charge"); this one only ever appears bare, because a fee applies, it is not
+// applied by anyone. Without it six real overlimit WARNINGS booked AED 288.75
+// each — AED 1,732.50 of spending that never happened.
 const FUTURE_CLAUSE_RE =
-  /\b(?:will|shall|would|going\s+to)\s+(?:not\s+)?(?:be\s+)?(?:auto[\s-]?)?(?:debited|deducted|credited|charged|applied|paid|posted|processed|collected|taken|transferred|withdrawn|deduct|debit|charge|credit)\b(?:[^.\n]|\.\d)*|\bscheduled\s+(?:for|on|to\s+be)\b(?:[^.\n]|\.\d)*|سيتم\s+(?:خصم|اضافه|تحويل)(?:[^.\n]|\.\d)*/gi;
+  /\b(?:will|shall|would|going\s+to)\s+(?:not\s+)?(?:be\s+)?(?:auto[\s-]?)?(?:debited|deducted|credited|charged|applied|applicable|paid|posted|processed|collected|taken|transferred|withdrawn|deduct|debit|charge|credit|apply|applies)\b(?:[^.\n]|\.\d)*|\bscheduled\s+(?:for|on|to\s+be)\b(?:[^.\n]|\.\d)*|سيتم\s+(?:خصم|اضافه|تحويل)(?:[^.\n]|\.\d)*/gi;
 /**
  * Tense evidence that the money ALREADY moved. A future or scheduled clause
  * sitting beside one of these is a footer on a real posting, not a forecast.
  */
+// A PERCENTAGE IN FRONT OF "available limit" MAKES IT HEADROOM, NOT A FIGURE.
+//
+// "available balance"/"available limit" is in here because a bank quoting one
+// is quoting the state of the account AFTER a posting — it is a figure, and a
+// figure is proof the money moved. "Your Credit Card 9837 has less than 20%
+// available limit for further usage. An overlimit fee of AED288.75 will apply"
+// quotes no such figure: 20% is a PROPORTION of the limit, and the only
+// dirham amount in the message is the fee that has not been charged yet.
+// Reading that as settlement is what let the future-tense gate be beaten by a
+// message whose entire subject is the future.
+//
+// The lookbehind is the whole discriminator and it is deliberately narrow: no
+// posted alert has ever written "% available balance".
 const SETTLED_TENSE_RE =
-  /\b(?:has|have|had)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded|received|withdrawn|transferred|spent|blocked)\b|\bwas\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|spent|used|made|posted|processed|withdrawn|transferred|reversed|refunded)\b|\bwere\s+(?:debited|credited|charged|deducted)\b|\b(?:spent|debited|deducted|withdrawn|charged|purchased)\s+(?:at|from|on|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|\bavailable\s+(?:balance|limit|credit)\b|\bnew\s+bal(?:ance)?\b|تم خصم|تم الخصم|تم شراء|تم سحب/i;
+  /\b(?:has|have|had)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded|received|withdrawn|transferred|spent|blocked)\b|\bwas\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|spent|used|made|posted|processed|withdrawn|transferred|reversed|refunded)\b|\bwere\s+(?:debited|credited|charged|deducted)\b|\b(?:spent|debited|deducted|withdrawn|charged|purchased)\s+(?:at|from|on|via|using|with)\b|\bavl\.?\s*(?:bal|balance|cr|limit)\b|(?<!%\s)\bavailable\s+(?:balance|limit|credit)\b|\bnew\s+bal(?:ance)?\b|تم خصم|تم الخصم|تم شراء|تم سحب/i;
 /**
  * A returned, bounced or dishonoured cheque is money that did NOT leave the
  * account. It is stated in the perfect tense ("has been returned unpaid"), so
@@ -1406,6 +1426,44 @@ const MERCHANT_STOP =
   // bilingual alert, and with no Arabic stop token the English merchant match
   // simply failed and the row arrived titled "Account debit".
   String.raw`(?=\s*(?:[\u0600-\u06FF]|,|\.|;|\bon\b|\bwith\b|\busing\b|\bvia\b|\bending\b|\bcard\b|\ba\/c\b|\bacc(?:ount)?\b|\bref\b|\btxn\b|\bdated\b|\bavl\b|\bavail(?:able)?\b|\bbal(?:ance)?\b|\botp\b|\bfor\b|\bis\b|\bhas\b|\bhave\b|\bwas\b|\bwere\b|\bare\b|\bbeen\b|\bwill\b|\bdid\b|\bdoes\b|\bcould\b|\bwould\b|\bshould\b|\bas\b|\band the\b|\bbut the\b|\baed\b|\bdhs\b|\bsar\b|\busd\b|\beur\b|\bgbp\b|$))`;
+/**
+ * INTERIOR LABELS OF A HOST NAME: the ".shein" in "www.shein.com".
+ *
+ * The single-label tail already here kept "CAPITAL.COM" whole, and stopped
+ * there — so a two-label host still lost everything. The capture ends at the
+ * first position MERCHANT_STOP accepts, "." is one of those positions, and the
+ * candidate that came back was the bare "WWW", which extractMerchant rejects
+ * outright. Five real online purchases in this corpus arrived as "Card
+ * purchase" for that one reason: "www.shein.com,Dubai-AE" and
+ * "WWW.G2G.COM, SINGAPORE" among them.
+ *
+ * It is safe to add labels ONLY because the run still has to END in a known
+ * TLD. "at ACME LTD.Please do not share your PIN" cannot use this path —
+ * ".Please" leads nowhere that ends in .com — so it still stops at the full
+ * stop, which is the behaviour the stop token exists for. Widening the
+ * character class with a bare "." instead would have swallowed that whole
+ * sentence into the merchant name.
+ */
+const HOST_LABELS = String.raw`(?:\.[A-Za-z0-9-]{1,24})*?`;
+/**
+ * LEADING INITIALS AND HONORIFICS — a different shape from a sentence end.
+ *
+ * "M.H. ALSHAYA-AMERICA", "M.H.AL SHAYA FOOT LOCK" and "DR.VRANJES-D085-ALSHAY"
+ * are three real descriptors that each died on their FIRST character: the
+ * capture stopped at the dot after "M" or "DR", leaving one or two letters,
+ * which extractMerchant discards for having under three letters. All three
+ * imported as "Card purchase".
+ *
+ * Two shapes, both anchored to the START of the descriptor, where a full stop
+ * cannot be ending a sentence that has not begun:
+ *   - two or more single-letter initials ("M.H.", "A.B.C."). One is not
+ *     enough — "at A. Your balance is..." would qualify — and two in a row is
+ *     a shape prose does not have.
+ *   - a CLOSED list of honorifics. Not `[A-Za-z]{2,3}\.`, which would have
+ *     eaten the "ABC." out of "at ABC. Avl bal AED 100" and then read "Avl" as
+ *     the shop.
+ */
+const NAME_INITIALS = String.raw`(?:(?:(?:[A-Za-z]\.){2,}|\b(?:Dr|Mr|Mrs|Ms|Prof|St)\.)\s*)?`;
 // "%" leads a real brand ("% ARABICA"); "·•" appear inside acquirer terminal
 // IDs ("BLOOMFIELD TREAT-····5814"). Both used to break the match outright and
 // cost the whole merchant name.
@@ -1418,7 +1476,11 @@ const MERCHANT_RE = new RegExp(
   // a MERCHANT_STOP either — so "at SP TODD SNYDER +····0068 USA" and "at
   // Simplex_Elastum, s@simplex.com" named no merchant at all and arrived as
   // "Card purchase". cleanDescriptor strips the phone tail afterwards.
-  String.raw`(?:\bat|\bto|\bfrom|@)\s+([A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()+_]{1,40}?(?:\.(?:com|ae|net|org|io|co)\b)?)` +
+  String.raw`(?:\bat|\bto|\bfrom|@)\s+(` +
+    NAME_INITIALS +
+    String.raw`[A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()+_]{1,40}?(?:` +
+    HOST_LABELS +
+    String.raw`\.(?:com|ae|net|org|io|co)\b)?)` +
     MERCHANT_STOP,
   'gi',
 );
@@ -1697,7 +1759,17 @@ function cleanDescriptor(name: string): string {
   // "AL NIMAR AL ABYADHdSHARJAH" → the lone lowercase letter left behind by
   // the peel is acquirer corruption, not the end of the name.
   if (peeledPlace && /[A-Z][a-z]$/.test(out)) out = out.slice(0, -1).trim();
-  return out.replace(/(?:\s+COM|\.com)$/i, '').trim();
+  // A HOST NAME IS NOT A SHOP NAME. Now that MERCHANT_RE keeps a multi-label
+  // host whole (HOST_LABELS), "www.shein.com" arrives intact and the parts of
+  // it that identify the SHOP are the middle labels: the "www" is a
+  // convention and the TLD is a registry. Left on, the row read "Www.shein"
+  // and could never group with the same shop billed through any other
+  // descriptor.
+  //
+  // The TLD list is the same one MERCHANT_RE will accept, so this can only
+  // ever strip a suffix the merchant grammar itself put there.
+  out = out.replace(/^www\./i, '').trim();
+  return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co))$/i, '').trim();
 }
 
 function merchantFromLines(raw: string): string {
@@ -1909,7 +1981,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // have caught "DUBAI MEDIA C" — Dubai Media CITY, the free zone, which is the
   // CITY field on a real software purchase in this corpus, so the rule would
   // have filed a SaaS charge as a broadcaster.
-  [/playstation|\bpsn\b|xbox|steam|nintendo|app store|google play|itunes|apple\.com|you\s*tube|national park|cinema|vox\b|reel\b|novo\b|roxy\b|imax|netflix|spotify|anghami|shahid|osn\b|starz|game\b|gaming|arcade|bowling|magic planet|kidzania|global village|ferrari world|yas island|img world|wild wadi|aquaventure|dubai parks|adventure|entertainment|theme park|water ?park|pla[yi]?grou\w*|palygrou\w*|\bmalaeb\b|\bmalaieb\b|ball talent|alldebrid|real-?debrid|\bmuzz\b|pm connect|tod\.?\s?tv|abu ?dhabi ?media|museum|prison island|x ?strike|billiard|\bgolf\b|shooting|leisure|theentertainer|little fox|g2a\b|cdkeys|oculus|stadia|al futtaim cin|\bcin\b|bounce\b/i, 'entertainment'],
+  [/playstation|\bpsn\b|xbox|steam|nintendo|app store|google play|itunes|apple\.com|you\s*tube|national park|cinema|vox\b|reel\b|novo\b|roxy\b|imax|netflix|spotify|anghami|shahid|osn\b|starz|game\b|gaming|arcade|bowling|magic planet|kidzania|global village|ferrari world|yas island|img world|wild wadi|aquaventure|dubai parks|adventure|entertainment|theme park|water ?park|pla[yi]?grou\w*|palygrou\w*|\bmalaeb\b|\bmalaieb\b|ball talent|alldebrid|real-?debrid|\bmuzz\b|pm connect|tod\.?\s?tv|abu ?dhabi ?media|museum|prison island|x ?strike|billiard|snooker|\bgolf\b|shooting|leisure|theentertainer|little fox|g2a\b|cdkeys|oculus|stadia|al futtaim cin|\bcin\b|bounce\b/i, 'entertainment'],
   [/donat|charity|zakat|sadaqah|dubai cares|red crescent|beit al khair|dar al ber|gofundme/i, 'charity'],
   // Developer and AI tooling billed per seat. This rule already existed and
   // already carried a comment saying it was "a whole spending family the
@@ -2074,12 +2146,64 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // `airport companion` and now `airport lounge` are all claimed there first.
   // Hotel and shisha lounges, which is what is left by the time control
   // reaches this line, are meals.
-  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\blebanan\b|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b|\bfoo\b(?![^.\n]{0,20}\b(?:trading|tr\b|construction|contracting))|(?<!\b(?:tile|tiles|furniture|showroom|interior|interiors|carpet|kitchen|bath|sofa)\s)\blounge\b(?![^.\n]{0,20}\b(?:furniture|tile|tiles|showroom|trading|interiors?))/i, 'dining'],
+  [/\brest\b|\bres\b|\bresto\b|restur|caf[et]{2}eria|cafteria|cafet|coffe|caffeine|tea ?house|eater|diner\b|canteen|barbecu|\bbbq\b|burgr|\bgrill|charcoal|tacos?\b|shawerma|ice ?cre|icecre|frozen|chocolat|\bcandy\b|sweet ?shop|donuts?\b|waffle|crepe|creperie|smoothie|fruitpunch|fruit ?punch|thai ?food|\bsushi|noodl|\bwok\b|\bcocina\b|trattoria|pizzeria|steak|seafood|fish ?house|fish ?market|chinese|iranian|lebanese|libnan|\blebanan\b|portuguese|\bsoory\b|syrian|shamiah|lukmah|turkish|indian ?restaur|biriyani|kabsa|foodstuff ?tr\b|\bfoodco\b|\bcaf\b|\bfoo\b(?![^.\n]{0,20}\b(?:trading|tr\b|construction|contracting))|(?<!\b(?:tile|tiles|furniture|showroom|interior|interiors|carpet|kitchen|bath|sofa)\s)\blounge\b(?![^.\n]{0,20}\b(?:furniture|tile|tiles|showroom|trading|interiors?))/i, 'dining'],
   // "Centre" sits here, in the structural fallbacks, rather than with the
   // brands: a medical centre is health and a car centre is transport, and both
   // of those rules run earlier. By the time anything reaches this line, the
   // only centres left are the retail kind.
   [/trading|general trading|electronics|mobile(?:s| shop)|computer|stationery|bookshop|book ?store|gifts|accessories|garments|textile|readymade|footwear|shoes|optical shop|\bcent(?:er|re)\b|\bcentr[ei]\b|\bplaza\b|\bsouq\b|\bbazaar\b|garments?|ready ?made?|furniture|\bretail\b/i, 'shopping'],
+];
+
+/**
+ * WHAT THE ACQUIRER CUT OFF — read against the MERCHANT NAME, never the body.
+ *
+ * The descriptor field is fixed width, so the last word of a shop's name is
+ * routinely delivered as a stump: SUPERMARKET arrives as "SUP" or "SU",
+ * CENTRE as "CEN". One rule keyed on the stump is worth more than a hundred
+ * merchant entries — "AL BAIT ALHAMAWI SUP" alone is 33 rows in this corpus,
+ * "ATLAS TOWER GIFT CEN" another 20 — and the main table already works this
+ * way for the longer cuts (`\bsupe\w*\b`, `\bfoo\b`, CATERIN, GOVERNMEN).
+ *
+ * TWO THINGS MAKE THIS SAFE, AND NEITHER IS OPTIONAL.
+ *
+ * 1. It reads the MERCHANT, not the message. Every other table here is fed the
+ *    whole SMS, and a two-letter stump loose in a body would file rows by
+ *    whatever the bank happened to write in its footer. It is also the only
+ *    reason the plain English words below can be here at all: "discount" and
+ *    "gift" are promo-footer vocabulary — PROMO_RE matches both — so against a
+ *    body they would categorise by advertisement. Against a shop's own name
+ *    they say what the shop sells.
+ * 2. It runs LAST, after every keyword table has had its turn, so it can only
+ *    ever turn `other` into something. A rule here cannot take a category
+ *    away from a row that already had one.
+ *
+ * The short stumps are anchored to the END of the descriptor AND behind a
+ * word boundary, which is the only place a truncation can leave them. Nothing
+ * here reaches a category that unlocks the relaxed bill path in
+ * subscriptions.ts (utilities/telecom/rent/loan): a stump is a weak signal and
+ * must never be able to mint a recurring bill.
+ */
+const TRUNCATED_DESCRIPTOR_KEYWORDS: [RegExp, CategoryId][] = [
+  // SUPERMARKET. "AL BAIT ALHAMAWI SUP" (33x), "ABDULLA AND NASIR SU" (5x).
+  // The main table's `\bsupe\w*\b` already covers every cut from SUPE on;
+  // these are the two shorter ones, and end-anchoring is what keeps "SU" from
+  // matching the start of a hundred ordinary words.
+  [/\s(?:su|sup)$/i, 'groceries'],
+  // CENTRE. "ATLAS TOWER GIFT CEN" (20x). The main table has `cent(er|re)`
+  // and `centr[ei]`; CEN and CENT are the cuts it cannot see.
+  [/\s(?:cen|cent|centr|cente)$/i, 'shopping'],
+  // A gift shop and a discount store, both of them stated plainly in the
+  // name: "ATLAS TOWER GIFT CEN", "AL WAHDA DISCOUNTS C" (8x). Body-unsafe,
+  // merchant-safe — see (1) above.
+  [/\bgifts?\b|\bdiscounts?\b|\bstationer/i, 'shopping'],
+  // A shisha cafe is a meal out: "BAIT AL SHISHA SMOKI" (13x). CHICKEN is
+  // here for its truncations; the four-letter cut "CHIC" is deliberately NOT,
+  // because a boutique really is called chic and nothing in the descriptor
+  // tells the two apart.
+  [/\bshisha\b|\bsheesha\b|\bhookah?\b|\bchick\w*\b/i, 'dining'],
+  // Cotton On's stationery brand, whole-name anchored: "typo" is an English
+  // word, and only a descriptor that OPENS with it is the shop.
+  [/^typo\b/i, 'shopping'],
 ];
 
 /**
@@ -2162,6 +2286,15 @@ function categoryOf(
   // Market-local vocabulary wins over the global baseline.
   for (const [re, cat] of [...getActiveMarket().keywords, ...CATEGORY_KEYWORDS]) {
     if (re.test(text)) return { id: cat, deliberate: true };
+  }
+  // Last, and only against the shop's own name. A structural title is the
+  // parser's own words for "no payee here" — it is not a descriptor, and
+  // reading truncation stumps out of one would be reading them out of our own
+  // vocabulary.
+  if (merchant && !STRUCTURAL_TITLES.has(merchant.trim())) {
+    for (const [re, cat] of TRUNCATED_DESCRIPTOR_KEYWORDS) {
+      if (re.test(merchant)) return { id: cat, deliberate: true };
+    }
   }
   return { id: 'other', deliberate: false };
 }
@@ -2253,6 +2386,25 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/almed retail/i, 'Almed Retail'],
   [/arabian unigaz|\bunigaz\b/i, 'Arabian Unigaz'],
   [/little neighborhood/i, 'Little Neighborhood'],
+  [/\bshein\b/i, 'Shein'],
+  // ORDER IS THE WHOLE SAFETY ARGUMENT FOR THE THREE ALSHAYA LINES BELOW.
+  //
+  // Alshaya is the FRANCHISE OPERATOR, not the shop: it runs Foot Locker,
+  // Typo and Dr. Vranjes in the UAE, and its name is appended to their
+  // descriptors as an operator suffix ("DR.VRANJES-D085-ALSHAY", where -D085-
+  // is the acquirer's terminal id). So the brand rules have to be read FIRST,
+  // or every one of those shops collapses into a single merchant called
+  // Alshaya and no per-merchant total, override or subscription can tell them
+  // apart again.
+  //
+  // The operator rule that follows them is anchored to the START of the
+  // descriptor for the same reason: it may only claim a descriptor where
+  // Alshaya is the named party ("M.H. ALSHAYA-AMERICA"), never one where it is
+  // a suffix on somebody else's name.
+  [/vranjes/i, 'Dr. Vranjes'],
+  // `\b` is load-bearing: without it "BAREFOOT LOCKSMITH" contains "foot lock".
+  [/\bfoot\s?lock(?:er)?/i, 'Foot Locker'],
+  [/^m\.?\s?h\.?\s*al\s?shaya\b/i, 'M.H. Alshaya'],
   [/tgi\s*fridays?|\btgif\b/i, 'TGI Fridays'],
   [/caribou/i, 'Caribou Coffee'],
   [/caffe\s*nero/i, 'Caffe Nero'],
@@ -2332,6 +2484,13 @@ function titleCase(s: string): string {
     .split(/\s+/)
     .map((w) => {
       if (ACRONYMS.has(w.toUpperCase())) return w.toUpperCase();
+      // A DIGIT BETWEEN LETTERS is a brand's own spelling, not a word to
+      // re-case: "G2G", "H2O" and "A2Z" are all real shop names in this
+      // corpus's shape, and the round trip turned them into "G2g", "H2o" and
+      // "A2z". Letters on BOTH sides is the whole test — "SHOP24" and "7-11"
+      // do not qualify, so an ordinary name with a branch number on the end
+      // still title-cases as before.
+      if (/^[A-Z]+\d+[A-Z]+$/.test(w)) return w;
       const lower = w.toLowerCase();
       return lower ? lower[0].toUpperCase() + lower.slice(1) : lower;
     })
@@ -3034,8 +3193,32 @@ export function parseSms(
   // 7379.54 at ..."), and that purchase is already on the ledger from its own
   // alert. The alert itself says the money moved — "spent at", "was used",
   // "has been debited", or an available balance.
+  //
+  // THE PITCH ITSELF IS A MARKER, not only the product name. Emirates Islamic
+  // sends the same offer without ever writing "easy payment plan" in the body:
+  //
+  //   "Pay as low as AED 74.87 per month for the purchase of AED 2246.14 at
+  //    www.shein.com with credit card ending 7656 via clicking
+  //    https://www.emiratesislamic.ae/eng/epp/?ref=..."
+  //
+  // and it booked a AED 74.87 purchase — the INSTALMENT quote, not even the
+  // AED 2,246.14 it was pitching against, which is itself already on the
+  // ledger from its own alert. An offered monthly figure is money nobody has
+  // been charged.
+  //
+  // "purchase of AED" is NOT the marker and must never become one: it is the
+  // commonest posting clause in this corpus. What identifies the pitch is the
+  // MONTHLY QUOTE — a per-month figure offered ("as low as", "starting from",
+  // "only") — or the issuer's own /epp/ landing path.
   if (
     /\*?convert now\*?|converted into instalments?|converted into installments?|interest payment plan|easy payment plan/i.test(raw) &&
+    !(posted && SETTLED_TENSE_RE.test(raw))
+  ) {
+    return null;
+  }
+  if (
+    (/\b(?:as\s+low\s+as|starting\s+(?:from|at)|only)\b(?:[^.\n]|\.\d){0,60}?\bper\s+month\b/i.test(raw) ||
+      /https?:\/\/[^\s]*\/epp\//i.test(raw)) &&
     !(posted && SETTLED_TENSE_RE.test(raw))
   ) {
     return null;

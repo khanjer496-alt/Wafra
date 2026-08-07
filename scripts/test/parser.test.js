@@ -586,6 +586,44 @@ t('instalment conversion offer is skipped',
   '*Convert now* Pay as low as AED 226.8 per month for the purchase of AED 7379.54 at AL AIN AHLIA INS CO with credit card ending 9190 via clicking https://www.emiratesnbd.com/en/ipp/?ipp=5551144',
   null);
 
+// SECOND USER'S CORPUS. Emirates Islamic sends the same conversion offer as
+// the ENBD one above, and never writes "convert now" or "easy payment plan" in
+// it — so the whole rule missed, and the row it produced took the INSTALMENT
+// quote, not even the purchase it was pitching against: a AED 74.87 expense
+// against a AED 2,246.14 purchase that is already on the ledger from its own
+// alert. Nothing here was charged.
+t('a monthly instalment quote with no product name is still an offer',
+  'Pay as low as AED 74.87 per month for the purchase of AED 2246.14 at www.shein.com with credit card ending 4411 via clicking https://www.emiratesislamic.ae/eng/epp/?ref=00000',
+  null);
+// CONTROL, and the reason "purchase of AED" can never be the marker: the same
+// phrase is the commonest posting clause in the corpus.
+t('"purchase of AED" on its own is still a purchase',
+  'Purchase of AED 2,246.14 with Credit Card ending 4411 at www.shein.com,Dubai-AE. Avl Balance is AED 3,000.00.',
+  { merchant: 'Shein', amountFils: 224614 });
+// CONTROL: banks staple the EPP pitch UNDER a real purchase alert. The
+// settled tense in the alert has to keep the purchase.
+t('an instalment pitch stapled to a settled purchase keeps the purchase',
+  'AED 2,246.14 has been debited from your Credit Card 4411 at SHEIN. Avl Bal AED 3,000.00. Pay as low as AED 74.87 per month via https://www.emiratesislamic.ae/eng/epp/?ref=00000',
+  { amountFils: 224614 });
+
+// AN OVERLIMIT FEE THAT "WILL APPLY" HAS NOT BEEN CHARGED. Six copies of this
+// warning booked AED 288.75 each — AED 1,732.50 of spending that never
+// happened — because "will apply" is the one forecast written without "be",
+// and because the "20% available limit" in the first sentence was being read
+// as a settled balance figure. It is a proportion, not an amount.
+t('an overlimit fee that will apply has not been charged',
+  'Your Credit Card XXX0000 has less than 20% available limit for further usage. An overlimit fee of AED288.75 will apply for usage exceeding credit limit.',
+  null);
+// CONTROL: the same fee, actually charged, is a real expense.
+t('an overlimit fee that HAS been charged is a real expense',
+  'An overlimit fee of AED 288.75 has been charged to your Credit Card XXX0000. Avl Bal AED 1,200.00.',
+  { amountFils: 28875 });
+// CONTROL: a quoted available balance is still settlement evidence — the
+// percentage lookbehind must not have taken that away.
+t('a quoted available balance still proves the money moved',
+  'AED 89.50 spent at CARREFOUR with Credit Card XXX0000. Available balance AED 5,376.00. An overlimit fee of AED 288.75 will apply on further usage.',
+  { amountFils: 8950, merchant: 'Carrefour' });
+
 t('overdue nag is skipped',
   'Dear Customer AED 205.84 for A/C no XXXXXX7720 is overdue. Please pay immediately to avoid blockage on credit facility. Kindly ignore if paid.',
   null);
@@ -1107,6 +1145,35 @@ t('a sportswear retailer is still shopping', shop('SUN & SAND SPORTS', 'DUBAI'),
 t('majid al futtaim is retail', shop('MAJID AL FUTTAIM', 'DUBAI'), { category: 'shopping' });
 t('bioniq is supplements', shop('SP BIONIQ-GLOBAL', '+9715474'), { category: 'health' });
 t('a finance house instalment is a loan', shop('AAFAQ ISLAMIC FINANCE', 'DUBAI'), { category: 'loan' });
+
+// ── THE ACQUIRER'S TRUNCATION ──
+//
+// The descriptor is a fixed-width field, so the last word of a shop's name
+// arrives as a stump. These stumps are read against the MERCHANT NAME only,
+// and only after every keyword table has already had its turn, so a rule here
+// can only ever turn `other` into something.
+t('SUP is a cut SUPERMARKET', shop('AL BAIT ALHAMAWI SUP', 'AJMAN'), { category: 'groceries' });
+t('SU is a cut SUPERMARKET too', shop('ABDULLA AND NASIR SU', 'AJMAN'), { category: 'groceries' });
+t('CEN is a cut CENTRE', shop('ATLAS TOWER GIFT CEN', 'AJMAN'), { category: 'shopping' });
+// CONTROL: the stump is only a stump at the END of the descriptor. "SU" and
+// "CEN" loose inside a name are ordinary letters.
+t('a stump inside the name claims nothing', shop('SU CEN TRADERS FOR OIL', 'SHARJAH'),
+  { category: 'other', deliberate: false });
+// CONTROL: the stumps read the merchant, never the body — which is the only
+// reason "discount" and "gift" can be vocabulary at all. Both are promo-footer
+// words, and against a body they would categorise by advertisement.
+t('a promo footer cannot categorise the row it sits on',
+  'AED 2,476.89 has been debited from your Account XXX0000 to ETISALAT. Get a gift voucher and 10% discount on your next bill.',
+  { category: 'telecom' });
+t('a discount store is retail', shop('AL WAHDA DISCOUNTS C', 'AJMAN'), { category: 'shopping' });
+t('a shisha cafe is a meal out', shop('BAIT AL SHISHA SMOKI', 'AJMAN'), { category: 'dining' });
+t('a Portuguese chicken shop is dining', shop('OPORTO PORTUGUESE CHIC', 'DUBAI'), { category: 'dining' });
+t('a snooker hall is entertainment', shop('SNOOKER WORLD', 'AJMAN'), { category: 'entertainment' });
+t('Typo is stationery', shop('TYPO', 'DUBAI'), { category: 'shopping' });
+// CONTROL: "typo" is an English word. Only a descriptor that OPENS with it is
+// the shop.
+t('typo elsewhere in a name is not the shop', shop('AL TYPO GEN CONTRACTING', 'DUBAI'),
+  { category: 'other', deliberate: false });
 // CHANGED from 'entertainment' with the rest of the tooling rule. The claim
 // under test is the SUFFIX tolerance, which is untouched.
 t('fiverr matches even with a region suffix', shop('FiverrEU', 'Nicosia'), { category: 'software' });
@@ -3466,6 +3533,50 @@ t('Amazon Pay acting as the acquirer is still Amazon',
 t('a gateway DOMAIN before the star is not the merchant either',
   'Purchase of AED 0.10 with Debit Card ending 8783 at WWW.2C2P.COM*2C2P BOLT (M, BANGKOK. Avl Balance is AED 35,848.02.  Pls refer stmt for exact amt.',
   { merchant: 'Bolt', amountFils: 10, category: 'transport' });
+// ── A FULL STOP INSIDE THE DESCRIPTOR ──
+//
+// MERCHANT_STOP treats "." as a sentence end on purpose, and the single-label
+// domain tail only ever rescued "CAPITAL.COM". Everything with two labels, or
+// with initials in front, stopped on its first dot and came back as a
+// candidate too short to keep — six of the second user's seven "could not
+// read" cases, all of them titled "Card purchase".
+t('a two-label host is the shop, not a sentence',
+  'Purchase of AED 250.00 with Credit Card ending 4411 at www.shein.com,Dubai-AE. Avl Balance is AED 3,000.00.',
+  { merchant: 'Shein', amountFils: 25000 });
+// The host label is the brand's own spelling; title-casing it produced "G2g".
+t('a digit between letters keeps the brand spelling',
+  'Purchase of AED 50.00 with Credit Card ending 4411 at WWW.G2G.COM, SINGAPORE. Avl Balance is AED 3,000.00.',
+  { merchant: 'G2G', amountFils: 5000 });
+// Leading INITIALS, which is a different shape from a sentence-ending dot: the
+// capture used to stop after "M", one letter.
+t('leading initials survive the sentence-end stop',
+  'Purchase of AED 120.00 with Credit Card ending 4411 at M.H. ALSHAYA-AMERICA,DUBAI-AE. Avl Balance is AED 3,000.00.',
+  { merchant: 'M.H. Alshaya', amountFils: 12000 });
+// Alshaya is the FRANCHISE OPERATOR. Its name on the descriptor is noise on
+// the shop's; these two must not collapse into one merchant called Alshaya.
+t('the franchise operator does not swallow the shop it runs',
+  'Purchase of AED 300.00 with Credit Card ending 4411 at M.H.AL SHAYA FOOT LOCK, DUBAI. Avl Balance is AED 3,000.00.',
+  { merchant: 'Foot Locker', amountFils: 30000 });
+// CONTROL: the brand rules must not claim a shop whose name merely CONTAINS
+// their letters — "BAREFOOT LOCKSMITH" holds "foot lock".
+t('a locksmith is not Foot Locker',
+  'Purchase of AED 90.00 with Credit Card ending 4411 at BAREFOOT LOCKSMITH, DUBAI. Avl Balance is AED 3,000.00.',
+  { merchant: 'Barefoot Locksmith' });
+t('an honorific is a name prefix, and the operator suffix is not the name',
+  'Purchase of AED 400.00 with Credit Card ending 4411 at DR.VRANJES-D085-ALSHAY, DUBAI. Avl Balance is AED 3,000.00.',
+  { merchant: 'Dr. Vranjes', amountFils: 40000 });
+// CONTROL: the stop token still has to fire on a real sentence end, including
+// one with no space after it. A dot may only continue a descriptor into a
+// HOST that ends in a known TLD.
+t('a glued full stop still ends the merchant name',
+  'Purchase of AED 250.00 with Credit Card ending 4411 at ACME LTD.Please do not share your PIN with anyone.',
+  { merchant: 'Acme Ltd', amountFils: 25000 });
+// CONTROL: an honorific list, not `[A-Za-z]{2,3}\.` — that would have eaten
+// "ABC." here and read the balance label as the shop.
+t('a three-letter word before a full stop is the merchant, not a prefix',
+  'Purchase of AED 250.00 with Credit Card ending 4411 at ABC. Avl Bal is AED 100.00.',
+  { merchant: 'Abc', amountFils: 25000 });
+
 t('an underscore descriptor with an email tail resolves to the processor',
   'Purchase of AED 186.29 with Debit Card ending 8783 at Simplex_Elastum, s@simplex.com. Avl Balance is AED 883.43.',
   { merchant: 'Simplex', amountFils: 18629 });
