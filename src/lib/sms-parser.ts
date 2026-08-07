@@ -3004,8 +3004,13 @@ const MONTH_DATE_RE = /\b(?:on|by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(
  * Mashreq puts the day first and may remove every separator:
  * "on 22Jan18 09:35 AM" / "on 21-SEP-2023 11:10 PM".
  */
+// The trailing guard is `[^\d]` rather than `\s`, because a date is usually the
+// last thing in the sentence: "Payment due on 05-Aug-2026." failed on the full
+// stop alone, and import-plan.ts:457 drops a statement whose date is null — so
+// the punctuation did not degrade the reminder, it deleted it. Still refuses to
+// stop mid-number, since a digit is not `[^\d]`.
 const DAY_MONTH_DATE_RE =
-  /\b(?:on|by|before|is)\s+(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})(?=\s|$)/i;
+  /\b(?:on|by|before|is)\s+(\d{1,2})[-\s]?([A-Za-z]{3,9})[-\s]?(\d{2,4})(?=[^\d]|$)/i;
 
 /**
  * Dates a statement introduces with PAY-BY language, as opposed to the date it

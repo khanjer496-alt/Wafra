@@ -3990,5 +3990,27 @@ t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBA
     unpinned.categoryPinned === undefined, String(unpinned.categoryPinned));
 }
 
+
+// A statement date is usually the last thing in the sentence, and the day-first
+// guard used to demand whitespace after the year — so the full stop alone made
+// the date null, and import-plan.ts drops a due row with no date. The reminder
+// was not degraded by the punctuation, it was deleted by it.
+t('a day-first due date survives a trailing full stop',
+  'Your ENBD Credit Card ending 4821 statement. Total amount due AED 3,240.00. Payment due on 05-Aug-2026.',
+  { date: '2026-08-05' });
+
+t('the same date without punctuation is unchanged',
+  'Your ENBD Credit Card ending 4821 statement. Total amount due AED 3,240.00. Payment due on 05-Aug-2026',
+  { date: '2026-08-05' });
+
+// The two Mashreq shapes the guard exists for must not regress.
+t('Mashreq separator-less day-first date still reads',
+  'Purchase of AED 40.00 with Card 1234 at LULU on 22Jan18 09:35 AM',
+  { date: '2018-01-22' });
+
+t('Mashreq hyphenated day-first date still reads',
+  'Purchase of AED 40.00 with Card 1234 at LULU on 21-SEP-2023 11:10 PM',
+  { date: '2023-09-21' });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
