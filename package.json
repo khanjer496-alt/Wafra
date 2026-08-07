@@ -14,7 +14,9 @@
     "test:e2e": "bash scripts/e2e/run.sh",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server run typecheck && npm --prefix server test && npm --prefix server run build:check",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run check:server"
+    "check": "npm run typecheck && npm run lint && npm run test && npm run check:server",
+    "render:legal": "node scripts/render-legal.mjs",
+    "deploy:legal": "npm run render:legal && npx wrangler pages deploy dist-legal --project-name=wafra-legal --branch=main --commit-dirty=true"
   },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
