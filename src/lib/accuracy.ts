@@ -1,6 +1,7 @@
 import { netWorthFils, reliableBalanceFils } from '@/lib/balances';
 import { DORMANT_AFTER_DAYS } from '@/lib/cards';
 import { toISODate } from '@/lib/format';
+import { STRUCTURAL_TITLES } from '@/lib/sms-parser';
 import type { AppState, Transaction } from '@/lib/types';
 
 /**
@@ -340,4 +341,147 @@ export function noFormatsReason(opts: {
   if (opts.relayPlatform) return 'relay';
   if (opts.privateMode) return 'private';
   return 'none-found';
+}
+
+/* ═══════════════════ How well the parser read THIS ledger ═══════════════════
+ *
+ * Everything above this line answers "which formats can I report?", and it can
+ * only answer it where the source text survived. Nobody ever learns the parser
+ * is failing except by a user writing in: two have, and the third never will.
+ *
+ * The app already holds the answer. Every row it imported carries what the
+ * parser made of that message — a shop name or the generic fallback, a
+ * category or the neutral one — and those fields arrive on EVERY platform,
+ * including the relay, which strips only the message body. So the measurement
+ * below works on the phones where `unreadFormats` is structurally blind, which
+ * is exactly where the feedback was never reaching anyone.
+ *
+ * THE DENOMINATOR IS THE WHOLE PROBLEM. A metric that reads correct behaviour
+ * as failure gets dismissed the first time a user looks at it, and then it is
+ * worth less than nothing. So a row is measured only when there was something
+ * for the parser to get right:
+ *
+ *  - **Manual rows are not the parser's work.** `source !== 'sms'` (which
+ *    includes pre-v2 rows, where absent means manual) measures the user.
+ *  - **Transfers and card payments name no shop.** Money moving between the
+ *    user's own places has no merchant and no spending category; `isTransfer`
+ *    and `cardPaymentSide` are how the ledger already says so.
+ *  - **Structurally-titled rows are understood.** `STRUCTURAL_TITLES` is the
+ *    parser's own list of "I know exactly what this is, and no shop is named
+ *    in it" — ATM withdrawal, Bank fee, VAT fee, Cheque, Refund. Counting
+ *    those as misses is what buried the real ones in the 177-entry export.
+ *    'Card statement', 'Bill payment' and the 'Card •1234 payment' shape are
+ *    the same thing under different names; `namesNoMerchant()` in sms-parser
+ *    is the sibling of the check below.
+ *  - **Income is not a purchase.** `categoryOf` can only answer salary,
+ *    business, or a DELIBERATE other (a refund, a reversal, a chargeback,
+ *    cashback, bank interest). Its one non-deliberate income answer is
+ *    reserved for structural titles, which are already out. So every `other`
+ *    on a surviving credit is an answer, not a shrug, and including credits
+ *    would only ever count deliberate behaviour as failure. This also keeps
+ *    the measurement in step with `lowConfidence` in import-plan.ts, which
+ *    gates on `type === 'expense'` for the same reason.
+ *  - **A row the user corrected no longer reports on the parser.** Counting a
+ *    hand-typed shop name as a parser success is the vanity direction, and it
+ *    is the one that makes a number untrustworthy.
+ *  - **A category the user decided is decided.** `merchantOverrides` is the
+ *    stored half of `categoryDeliberate`: if the user pinned this merchant to
+ *    a category — `other` included — the parser is not being asked.
+ *
+ * WHAT IS STILL COUNTED PESSIMISTICALLY, on purpose. `categoryDeliberate` is
+ * computed during parsing and never written to the ledger, so the handful of
+ * expense rules that answer `other` DELIBERATELY (a card-verification
+ * `wallet temp` hold, the bank's own Liv. Prime fee, a bare PayPal
+ * verification) cannot be told apart here from a row that simply failed every
+ * rule, and they read as category misses. That is a few rows in a ledger of
+ * hundreds, and it errs toward reporting a miss that is not one rather than
+ * hiding one that is — the safe direction for a number whose entire job is to
+ * surface failure.
+ *
+ * Nothing here leaves the device. This is a measurement the user can read
+ * about their own phone, not telemetry.
+ */
+
+/** Titles the parser mints for rows that name no shop and never could. */
+const NO_MERCHANT_TITLES = new Set(['Card statement', 'Bill payment']);
+
+/** The 'Card •1234 payment' shape, minted per card so it cannot be a set. */
+const CARD_PAYMENT_TITLE_RE = /^Card •/;
+
+function namesNoMerchant(title: string): boolean {
+  const t = title.trim();
+  return STRUCTURAL_TITLES.has(t) || NO_MERCHANT_TITLES.has(t) || CARD_PAYMENT_TITLE_RE.test(t);
+}
+
+export interface ParserCoverage {
+  /** Ledger rows the parser itself wrote, from a bank message. */
+  imported: number;
+  /**
+   * Of `imported`, rows where there was nothing for the parser to get right —
+   * transfers, card payments, structural rows, credits, and rows the user has
+   * since corrected. Reported so the two figures below can be read against a
+   * denominator the user can see rather than one they have to trust.
+   */
+  skipped: number;
+  /** Purchases where a shop name was expected. Never a divisor without a guard. */
+  measured: number;
+  /** Of `measured`, rows carrying a real merchant rather than the fallback. */
+  named: number;
+  /** Of `measured`, rows whose category the parser was actually asked for. */
+  categoryMeasured: number;
+  /** Of `categoryMeasured`, rows filed under something other than `other`. */
+  categorised: number;
+}
+
+/**
+ * How much of this ledger the parser actually read — computed on the device,
+ * from the device's own rows. Pure: no clock, no platform, no I/O.
+ *
+ * See the block comment above for what is in the denominator and why. Both
+ * figures are returned as counts, never as a ratio: "492 of 505" is something
+ * a person can act on and check, and 97% is not.
+ */
+export function parserCoverage(state: {
+  transactions: Transaction[];
+  merchantOverrides?: AppState['merchantOverrides'];
+}): ParserCoverage {
+  const overrides = state.merchantOverrides ?? {};
+  const cov: ParserCoverage = {
+    imported: 0,
+    skipped: 0,
+    measured: 0,
+    named: 0,
+    categoryMeasured: 0,
+    categorised: 0,
+  };
+
+  for (const tx of state.transactions) {
+    // Absent `source` means manual — pre-v2 data, entered by hand. Either way
+    // the parser never saw it.
+    if (tx.source !== 'sms') continue;
+    cov.imported += 1;
+
+    if (
+      tx.isTransfer ||
+      tx.cardPaymentSide !== undefined ||
+      tx.type !== 'expense' ||
+      tx.userEdited ||
+      namesNoMerchant(tx.title)
+    ) {
+      cov.skipped += 1;
+      continue;
+    }
+
+    cov.measured += 1;
+    if (tx.title !== GENERIC_MERCHANT) cov.named += 1;
+
+    // The user's own pin on this merchant IS the decision, so there is no
+    // parser guess left to score. Same trim/lowercase key the parser reads
+    // overrides by, or the two would disagree about which rows are pinned.
+    if (overrides[tx.title.trim().toLowerCase()] !== undefined) continue;
+    cov.categoryMeasured += 1;
+    if (tx.category !== 'other') cov.categorised += 1;
+  }
+
+  return cov;
 }

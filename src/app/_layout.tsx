@@ -127,6 +127,10 @@ export default function RootLayout() {
                 on Unmatched Route. Deleting a screen file means deleting its
                 line here in the same change. */}
             <Stack.Screen name="cards" options={{ animation: 'slide_from_right' }} />
+            {/* Sort merchants. Declared for the push animation every other
+                pushed screen has; src/app/categorise.tsx is the file behind
+                it, per the rule above. */}
+            <Stack.Screen name="categorise" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="trusted-devices" options={{ animation: 'slide_from_right' }} />
             {/* The iOS setup wizard shipped under two filenames during the

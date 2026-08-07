@@ -37,6 +37,7 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
+import { uncategorisedMerchants, worthPrompting } from '@/lib/uncategorised';
 import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
@@ -491,6 +492,81 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
   );
 }
 
+/* ── Merchants with no category ───────────────────────────────────────── */
+
+/**
+ * The sibling of the row above, for the failure the row above cannot fix.
+ *
+ * `UnreadFormatsPrompt` collects messages the parser could not READ and sends
+ * them to the developer. This one is for messages it read perfectly: the shop
+ * name is right, and nothing shipped in an update will ever know what
+ * "AL BAIT ALHAMAWI SUP" sells. Only the person who shopped there knows, and
+ * one real ledger had 182 such entries sitting in Other.
+ *
+ * Same floor, same reasoning, and it is worth restating because this is the
+ * row most likely to become a nag: below `CATEGORISE_PROMPT_THRESHOLD`
+ * merchants it says nothing at all. One unrecognised shop is the normal
+ * steady state of a working parser, and a prompt that is permanently on the
+ * first screen of the app is a prompt the user learns to look past — which
+ * costs nothing today and costs the whole feature on the day the list is
+ * forty merchants deep.
+ *
+ * Dismissal is for this session only, exactly like the insight card below it.
+ * A permanent dismissal would need a store flag, and the honest answer is that
+ * the list grows: a user who dismissed it in March should be asked again once
+ * six new shops have piled up. Coming back next launch IS the right behaviour
+ * as long as the floor keeps it quiet the rest of the time.
+ */
+function CategorisePrompt({ state }: { state: AppState }) {
+  const theme = useTheme();
+  const router = useRouter();
+  const [dismissed, setDismissed] = useState(false);
+  const summary = useMemo(() => uncategorisedMerchants(state), [state]);
+  if (dismissed || !worthPrompting(summary)) return null;
+
+  const count = summary.merchants.length;
+  // The dismiss control is a sibling of the tappable area rather than a child
+  // of it. Nesting a button inside a button gives a screen reader one target
+  // with two actions and no way to say which is which, and the row has two
+  // genuinely different meanings — "take me there" and "not now".
+  return (
+    <View
+      style={[
+        styles.notice,
+        { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+      ]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={tf('categoriseMerchantsA11y', { count })}
+        onPress={() => {
+          tapped();
+          router.push('/categorise');
+        }}
+        style={({ pressed }) => [styles.noticeMain, pressed && { opacity: 0.6 }]}>
+        <Icon name="filter" size={17} color={theme.warning} />
+        <View style={styles.noticeText}>
+          <ThemedText type="small">
+            {tf('uncategorisedMerchantCount', { count, s: count === 1 ? '' : 's' })}
+          </ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">
+            {t('uncategorisedMerchantHint')}
+          </ThemedText>
+        </View>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('dismiss')}
+        hitSlop={10}
+        onPress={() => {
+          tapped();
+          setDismissed(true);
+        }}>
+        <Icon name="close" size={16} color={theme.textTertiary} />
+      </Pressable>
+    </View>
+  );
+}
+
 /* ── Screen ───────────────────────────────────────────────────────────── */
 
 export default function HomeScreen() {
@@ -745,6 +821,12 @@ export default function HomeScreen() {
               competing directly under the hero. */}
           <ForeignActivityPreview summary={foreignActivity} />
 
+          {/* Above the unread-format row on purpose. This one the user can
+              actually finish — one tap per merchant, and the entries move —
+              while that one asks them to send a list off and wait for a
+              release. The actionable ask goes first. */}
+          <CategorisePrompt state={state} />
+
           <UnreadFormatsPrompt state={state} />
 
           <Animated.View
@@ -900,6 +982,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   noticeText: { flex: 1, gap: 1 },
+  // The tappable part of a notice that also carries a dismiss, so the two
+  // controls stay separate targets. See CategorisePrompt.
+  noticeMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+  },
 
   leaveRow: {
     flexDirection: 'row',

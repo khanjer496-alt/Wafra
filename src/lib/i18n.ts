@@ -314,6 +314,93 @@ const S = {
     en: 'Private mode removed the retained message text and keeps new imports from storing any, so the app cannot tell you which formats it is misreading. An empty list here is not a clean bill of health. The card diagnostic below still works: it reports what the ledger did with every card row.',
     ar: 'أزال الوضع الخاص نصوص الرسائل المحفوظة ويمنع عمليات الاستيراد الجديدة من حفظ أي منها، لذا لا يستطيع التطبيق إخبارك بالصيغ التي يخطئ في قراءتها، وخلوّ هذه القائمة ليس دليلاً على سلامة القراءة. أما تشخيص البطاقات بالأسفل فيعمل: يعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
   },
+  // ── the phone measuring its own parser ──
+  //
+  // The only way anyone ever learned the parser was failing was a user writing
+  // in. Two did; a third never will. These are counts and not a percentage on
+  // purpose: "492 of 505" can be checked and acted on, "97% accurate" can only
+  // be believed or not. Every sentence names its own denominator, and
+  // `coverageSkipped` says out loud what was kept out of it — a metric that
+  // counts correct behaviour as failure gets dismissed once and is then worth
+  // less than nothing. See parserCoverage() in lib/accuracy.ts.
+  coverageHeading: {
+    en: 'How much of your bank this reads',
+    ar: 'ما تقرأه وفرة من رسائل بنكك',
+  },
+  coverageShops: {
+    en: 'Wafra read {imported} bank message{s} into this ledger, and named the shop in {named} of the {measured} purchases that should carry a name.',
+    ar: 'قرأت وفرة {imported} رسالة بنكية إلى هذا السجل، وتعرّفت على اسم المتجر في {named} من {measured} عملية شراء يُفترض أن تحمل اسماً.',
+  },
+  coverageNoShops: {
+    en: 'Wafra read {imported} bank message{s} into this ledger, and none of them is a purchase with a shop to name — they are all transfers, card payments and the like.',
+    ar: 'قرأت وفرة {imported} رسالة بنكية إلى هذا السجل، وليس بينها عملية شراء يُفترض أن تحمل اسم متجر — كلها تحويلات ودفعات بطاقات وما شابهها.',
+  },
+  coverageCategories: {
+    en: 'It filed {categorised} of those {categoryMeasured} purchases under a real category.',
+    ar: 'ووضعت {categorised} من تلك العمليات الـ {categoryMeasured} تحت تصنيف حقيقي.',
+  },
+  coverageSkipped: {
+    en: 'The other {skipped} are transfers, card payments, ATM withdrawals, fees and money coming in. None of those has a shop name or a spending category to get right, so they are left out of both counts rather than counted as failures.',
+    ar: 'أما العمليات الـ {skipped} الأخرى فهي تحويلات ودفعات بطاقات وسحوبات صراف ورسوم ومبالغ واردة. لا شيء فيها يحمل اسم متجر أو تصنيف إنفاق كي يُخطئ فيه، لذا تُستثنى من العدّين بدل أن تُحسب أخطاءً.',
+  },
+  coverageNoText: {
+    en: 'The misses are counted here, but the messages behind them were never kept on this phone, so they cannot be listed below or shared.',
+    ar: 'الأخطاء محسوبة هنا، لكن الرسائل التي وراءها لم تُحفظ على هذا الهاتف إطلاقاً، فلا يمكن عرضها بالأسفل ولا مشاركتها.',
+  },
+  coverageNothingYet: {
+    en: 'No bank message has been read into this ledger yet, so there is nothing to measure.',
+    ar: 'لم تُقرأ أي رسالة بنكية إلى هذا السجل بعد، فلا يوجد ما يُقاس.',
+  },
+  // Sort merchants — the other half of the accuracy problem, and the half the
+  // developer cannot fix from here. "Improve accuracy" above collects message
+  // FORMATS the parser could not read and mails them to us. This one is for
+  // rows the parser read perfectly: the shop's name is right, and no rule list
+  // will ever know what "AL BAIT ALHAMAWI SUP" sells. Only the user knows, so
+  // the app asks them once per shop instead of shipping another release.
+  categoriseMerchants: { en: 'Sort merchants', ar: 'تصنيف المتاجر' },
+  categoriseIntro: {
+    en: 'Wafra reads the shop name off your bank alert but cannot know what it sells. Choose once and every entry from that shop moves with it — the ones already in your ledger, and the ones still to come.',
+    ar: 'تقرأ وفرة اسم المتجر من تنبيه البنك لكنها لا تعرف ماذا يبيع. اختر التصنيف مرة واحدة وتنتقل معه كل عمليات هذا المتجر: الموجودة في سجلك والقادمة لاحقاً.',
+  },
+  categoriseRemaining: {
+    en: '{count} merchant{s} · {rows} entr{ending}',
+    ar: '{count} متجر · {rows} عملية',
+  },
+  categoriseEntries: {
+    en: '{count} entr{ending} · last {date}',
+    ar: '{count} عملية · آخرها {date}',
+  },
+  categoriseAssigned: {
+    en: '{count} entr{ending} moved to {category}',
+    ar: 'نُقلت {count} عملية إلى {category}',
+  },
+  categoriseChooseA11y: {
+    en: 'Choose a category for {merchant}',
+    ar: 'اختر تصنيفاً لـ {merchant}',
+  },
+  categoriseDone: { en: 'Every merchant is sorted', ar: 'تم تصنيف كل المتاجر' },
+  categoriseDoneBody: {
+    en: 'Nothing is sitting in Other with a shop name behind it. New shops turn up here as you spend at them.',
+    ar: 'لم يبق شيء في «أخرى» خلفه اسم متجر. ستظهر المتاجر الجديدة هنا عند الإنفاق فيها.',
+  },
+  categoriseDoneCount: {
+    en: 'You sorted {count} entr{ending} just now.',
+    ar: 'صنّفت {count} عملية للتو.',
+  },
+  // The Home prompt. Same floor and the same reasoning as the unread-formats
+  // row above it: below three merchants this says nothing at all.
+  uncategorisedMerchantCount: {
+    en: '{count} merchant{s} with no category',
+    ar: '{count} متجر بلا تصنيف',
+  },
+  uncategorisedMerchantHint: {
+    en: 'One tap files every entry from that shop, past and future.',
+    ar: 'ضغطة واحدة تصنّف كل عمليات المتجر، السابقة والقادمة.',
+  },
+  categoriseMerchantsA11y: {
+    en: 'Sort {count} merchants that have no category',
+    ar: 'تصنيف {count} متجر بلا تصنيف',
+  },
   spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
   cardSpentThisMonth: {
     en: 'AED {amount} spent this month',

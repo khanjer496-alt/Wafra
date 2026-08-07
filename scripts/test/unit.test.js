@@ -2237,6 +2237,179 @@ ok('stale: a stale statement that gets paid leaves openDues',
     accuracy.noFormatsReason({ relayPlatform: true, privateMode: true }) === 'relay');
 }
 
+// ── the ledger measures its own parser ──
+//
+// Nobody learns the parser is failing except by a user writing in. Two have,
+// and the third never will. Every imported row already carries what the parser
+// made of that message, so the phone can answer the question itself — but only
+// if the DENOMINATOR is right. A metric that reads correct behaviour as failure
+// gets dismissed the first time it is looked at, and is then worth less than
+// nothing. Each block below is one thing that must not drag the number down.
+{
+  const accuracy = require('./build/accuracy');
+  const parser = require('./build/sms-parser');
+
+  const row = (over) => ({
+    id: `t${Math.random()}`, type: 'expense', amountFils: 4500, category: 'groceries',
+    accountId: 'a', title: 'Carrefour', date: '2026-07-10', source: 'sms', ...over,
+  });
+  const cov = (transactions, merchantOverrides) =>
+    accuracy.parserCoverage({ transactions, merchantOverrides });
+
+  // ── an empty ledger is not 0%, it is nothing to divide by ──
+  eq('coverage: an empty ledger divides by nothing',
+    cov([]),
+    { imported: 0, skipped: 0, measured: 0, named: 0, categoryMeasured: 0, categorised: 0 });
+
+  // ── the plain case ──
+  {
+    const c = cov([
+      row({ title: 'Carrefour', category: 'groceries' }),
+      row({ title: 'Card purchase', category: 'other' }),
+      row({ title: 'Hutong', category: 'other' }),
+    ]);
+    eq('coverage: three purchases, one unnamed', [c.imported, c.measured, c.named], [3, 3, 2]);
+    eq('coverage: one of three carries a real category',
+      [c.categoryMeasured, c.categorised], [3, 1]);
+    ok('coverage: nothing was skipped', c.skipped === 0);
+  }
+
+  // ── a ledger of pure transfers must not read as 0% ──
+  //
+  // Both sides of an own-account move are deliberately uncategorised. Scoring
+  // them is scoring the parser for getting it RIGHT.
+  {
+    const c = cov([
+      row({ title: 'Outgoing transfer', category: 'other', isTransfer: true }),
+      row({ title: 'Card •4711 payment', category: 'other', isTransfer: true, cardPaymentSide: 'debit' }),
+      row({ title: 'Bank transfer', category: 'other' }),
+    ]);
+    eq('coverage: a ledger of pure transfers measures nothing rather than failing',
+      [c.imported, c.skipped, c.measured, c.categoryMeasured], [3, 3, 0, 0]);
+    ok('coverage: and it still reports how many rows it saw', c.imported === 3);
+  }
+
+  // ── every structural title the parser mints is out ──
+  //
+  // STRUCTURAL_TITLES is the parser's own list of "I know exactly what this is
+  // and no shop is named in it". Reporting these as misses is what buried the
+  // real ones in a 177-entry export.
+  {
+    const structural = [...parser.STRUCTURAL_TITLES].map((title) =>
+      row({ title, category: 'other' }));
+    const c = cov(structural);
+    ok('coverage: no structural title is ever a miss',
+      c.measured === 0 && c.skipped === structural.length, `${c.measured}/${c.skipped}`);
+    // The three the parser mints outside that set, for the same reason.
+    const minted = cov([
+      row({ title: 'Card statement', category: 'other' }),
+      row({ title: 'Bill payment', category: 'other' }),
+      row({ title: 'Card •1234 payment', category: 'other' }),
+    ]);
+    ok('coverage: the card/statement/bill titles are structural too',
+      minted.measured === 0 && minted.skipped === 3);
+  }
+
+  // ── a deliberately-`other` row does not count against the category figure ──
+  //
+  // `merchantOverrides` is the stored half of `categoryDeliberate`: the user
+  // pinned this merchant, so the parser is not being asked. Pinning it to
+  // `other` is still an answer.
+  {
+    const rows = [row({ title: 'eToro', category: 'other' }), row({ title: 'Carrefour' })];
+    const blind = cov(rows);
+    eq('coverage: without the pin, a deliberate other reads as a miss',
+      [blind.categoryMeasured, blind.categorised], [2, 1]);
+    const pinned = cov(rows, { etoro: 'other' });
+    eq('coverage: a merchant the user pinned to "other" leaves the category count',
+      [pinned.categoryMeasured, pinned.categorised], [1, 1]);
+    // Still a named shop — the pin says nothing about whether the shop was read.
+    ok('coverage: pinning a category does not remove the row from the shop count',
+      pinned.measured === 2 && pinned.named === 2);
+  }
+
+  // ── credits are not purchases ──
+  //
+  // categoryOf can only answer salary, business, or a DELIBERATE other for
+  // income (a refund, a reversal, cashback, bank interest). Its one
+  // non-deliberate income answer is reserved for structural titles, which are
+  // already out — so every surviving `other` on a credit is an answer.
+  {
+    const c = cov([
+      row({ type: 'income', title: 'ADCB Refund', category: 'other' }),
+      row({ type: 'income', title: 'Emirates NBD', category: 'salary' }),
+      row({ title: 'Carrefour' }),
+    ]);
+    eq('coverage: credits are left out of both counts',
+      [c.imported, c.skipped, c.measured, c.categoryMeasured], [3, 2, 1, 1]);
+  }
+
+  // ── rows the parser never wrote ──
+  {
+    const c = cov([
+      row({ source: 'manual', title: 'Lunch', category: 'other' }),
+      { id: 'old', type: 'expense', amountFils: 100, category: 'other', accountId: 'a',
+        title: 'Card purchase', date: '2026-01-01' },
+      row({ title: 'Carrefour' }),
+    ]);
+    eq('coverage: a manual entry, and a pre-v2 row with no source, measure the user',
+      [c.imported, c.measured, c.named], [1, 1, 1]);
+  }
+
+  // ── a row the user corrected no longer reports on the parser ──
+  //
+  // Counting a hand-typed shop name as a parser success is the vanity
+  // direction, and that is the one that makes a number untrustworthy.
+  {
+    const c = cov([
+      row({ title: 'Al Adil Trading', userEdited: true }),
+      row({ title: 'Card purchase', category: 'other', userEdited: true }),
+      row({ title: 'Carrefour' }),
+    ]);
+    eq('coverage: hand-corrected rows are excluded, both the good and the bad',
+      [c.imported, c.skipped, c.measured, c.named], [3, 2, 1, 1]);
+  }
+
+  // ── the two halves of the screen agree ──
+  //
+  // The list below the sentence is built from `unreadFormats`, which keys off
+  // the retained source text. Anything it calls 'unread' must be a row the
+  // coverage figure counts as un-named, or the screen contradicts itself: a
+  // sentence claiming every shop was named above a list of shops that were not.
+  {
+    const raws = [
+      { title: 'Card purchase', category: 'other', raw: 'AED 45.00 at SOME NEW SHOP' },
+      { title: 'Hutong', category: 'other', raw: 'AED 120.00 at HUTONG' },
+    ].map((o) => row(o));
+    const listed = accuracy.unreadFormats(raws, (id) => id);
+    const c = cov(raws);
+    const unread = listed.filter((r) => r.reason === 'unread').length;
+    const uncategorised = listed.filter((r) => r.reason === 'uncategorized').length;
+    ok('coverage: every reportable "could not read" row is an un-named row',
+      c.measured - c.named === unread, `${c.measured - c.named} vs ${unread}`);
+    ok('coverage: every reportable "no category" row is an uncategorised row',
+      c.categoryMeasured - c.categorised - unread === uncategorised,
+      `${c.categoryMeasured - c.categorised - unread} vs ${uncategorised}`);
+  }
+
+  // ── the figure survives a phone that keeps no message text ──
+  //
+  // This is the whole point of measuring rather than listing. The relay strips
+  // Message Content before sealing, so `unreadFormats` is structurally empty on
+  // every iPhone — but merchant and category ride along on the row, so coverage
+  // still answers. See noFormatsReason() above for what it CANNOT answer there.
+  {
+    const relayRows = [
+      row({ title: 'Carrefour' }),
+      row({ title: 'Card purchase', category: 'other' }),
+    ];
+    ok('coverage: the format list is blind without raw text',
+      accuracy.unreadFormats(relayRows, (id) => id).length === 0);
+    const c = cov(relayRows);
+    ok('coverage: the measurement is not', c.measured === 2 && c.named === 1);
+  }
+}
+
 // ── a confidently wrong category is healed, a merely-guessed one is not ──
 //
 // Grubtech sells a POS system to restaurants, matched a food rule, and 55
