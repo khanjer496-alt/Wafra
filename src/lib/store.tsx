@@ -25,6 +25,7 @@ import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@
 import { internalTransferIds } from '@/lib/ledger';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
+import { destroyBackgroundRelayInbox } from '@/lib/background-relay-storage';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import type { FxUpdate } from '@/lib/fx';
@@ -1450,10 +1451,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // only write the blank/new state, never resurrect the old ledger.
     dispatch({ type: 'clearAll' });
 
-    // All older encrypted writes finish before the cryptographic erase. The
-    // queue remains non-rejecting for future writes, while this caller keeps
-    // the real result so Settings cannot report success on failure.
-    const destroyOperation = writeQueue.current.then(() => stateStorage.destroy(STORAGE_KEY));
+    /**
+     * All older encrypted writes finish before the cryptographic erase. The
+     * queue remains non-rejecting for future writes, while this caller keeps
+     * the real result so Settings cannot report success on failure.
+     *
+     * BOTH encrypted stores, because the ledger was never the only place a
+     * transaction could be sitting. A silent push wakes the app, stages parsed
+     * rows in `wafra-relay-inbox.db` and acknowledges them — so the relay
+     * deletes its copy on the understanding that the phone now holds them — and
+     * StoreProvider folds them into the ledger at the next foreground import,
+     * whether or not a relay is still configured. Erasing only the ledger left
+     * those rows on the device, and the next launch imported them into the
+     * ledger the app had just told the user was blank. The in-app copy and the
+     * published privacy policy both promise the queue is deleted.
+     *
+     * `allSettled`, so an inbox failure cannot stop the ledger being erased and
+     * a ledger failure cannot stop the inbox being erased; then the first
+     * failure is rethrown. That is the whole integration: everything below —
+     * the latch staying closed, the previous state going back on screen, the
+     * recovery surface, Settings reporting the failure — already keys off this
+     * promise rejecting, so a half-erase is reported exactly like the failed
+     * erase it is, and is never reported as success.
+     */
+    const destroyOperation = writeQueue.current.then(async () => {
+      const outcomes = await Promise.allSettled([
+        stateStorage.destroy(STORAGE_KEY),
+        destroyBackgroundRelayInbox(),
+      ]);
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') throw outcome.reason;
+      }
+    });
     writeQueue.current = destroyOperation.then(
       () => undefined,
       () => undefined,

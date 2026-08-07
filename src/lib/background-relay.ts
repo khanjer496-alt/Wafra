@@ -27,6 +27,11 @@ import { backgroundRelayStorage } from '@/lib/background-relay-storage';
 
 const TASK_NAME = 'wafra-relay-background-sync-v1';
 const QUEUE_KEY = 'wafra/background-relay/v1';
+/**
+ * How full the staged inbox may get before a background wake stops draining
+ * the relay. A ceiling on what a wake is asked to read and rewrite — NOT a
+ * count of rows we are willing to throw away. See `syncRelayInBackground`.
+ */
 const MAX_LOCAL_ROWS = 1_000;
 
 interface WakePayload {
@@ -68,15 +73,19 @@ function parseQueue(raw: string | null): ScannedSms[] {
   }
 }
 
-/** Persist before ack: a killed background task causes a retry, never loss. */
+/**
+ * Persist before ack: a killed background task causes a retry, never loss.
+ *
+ * Nothing handed to this function is ever discarded. It used to keep the newest
+ * MAX_LOCAL_ROWS and drop the rest — see `syncRelayInBackground` for why that
+ * deleted the user's transactions from the relay and the phone at once.
+ */
 async function appendDurable(rows: ScannedSms[]): Promise<void> {
   if (rows.length === 0) return;
   const existing = parseQueue(await backgroundRelayStorage.getItem(QUEUE_KEY));
   const merged = new Map(existing.map((row) => [rowKey(row), row]));
   for (const row of rows) merged.set(rowKey(row), row);
-  const value = [...merged.values()]
-    .sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0))
-    .slice(-MAX_LOCAL_ROWS);
+  const value = [...merged.values()].sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
   await backgroundRelayStorage.setItem(QUEUE_KEY, JSON.stringify(value));
 }
 
@@ -89,9 +98,46 @@ export async function clearBackgroundRelayRows(): Promise<void> {
   await backgroundRelayStorage.removeItem(QUEUE_KEY);
 }
 
+/**
+ * The local inbox is bounded by not COLLECTING, never by discarding.
+ *
+ * What this used to do: `appendDurable` merged the incoming rows, kept the
+ * newest 1,000 and dropped the oldest, and then this function acknowledged
+ * every id the sync returned. An id acknowledged here is DELETED from the relay
+ * queue. So each row the slice discarded was gone from the device and gone from
+ * the server in the same wake — permanent, silent loss of the user's
+ * transactions, arriving exactly when there was a backlog to lose.
+ *
+ * Three repairs were available and two of them have holes:
+ *
+ *   - Remove the cap. The table then grows without limit, and every wake
+ *     re-reads, re-merges, re-serialises and rewrites the WHOLE blob through
+ *     SQLCipher inside iOS's hard background time budget. A wake killed
+ *     part-way through commits nothing, so past some size the inbox stops
+ *     making progress and stays stuck — with the battery cost of trying.
+ *   - Acknowledge only the rows that survived the merge. `syncRelay` returns
+ *     `parsed` sorted independently of `ids`, and `ids` also covers probe and
+ *     unreadable rows that produce no row at all, so there is no row→queue-id
+ *     map to filter by; building one would still leave rows dropped locally.
+ *   - Stop draining while the inbox is full. Chosen.
+ *
+ * A wake that finds a full inbox does not sync at all. It collects nothing, so
+ * it acknowledges nothing, so the rows stay in the relay queue under the
+ * server's own 30-day retention — the retention the privacy policy states — and
+ * the next foreground import empties the inbox and lets collection resume.
+ * "A row is never acknowledged unless it is durably stored" is then true by
+ * construction rather than by bookkeeping, and the work each wake does is
+ * bounded. The inbox can overshoot MAX_LOCAL_ROWS by at most the one sync page
+ * that was already in flight, which is the point: overshooting is cheap,
+ * dropping is not.
+ */
 export async function syncRelayInBackground(): Promise<number> {
   const cfg = await getBackgroundRelayConfig();
   if (!cfg || cfg.setupState === 'paired') return 0;
+  // Checked BEFORE the sync, not after it: a row this wake pulls down is a row
+  // the server is waiting to be told about, and the only way to be sure we
+  // never tell it about a row we did not keep is to not pull the row.
+  if ((await readBackgroundRelayRows()).length >= MAX_LOCAL_ROWS) return 0;
   const { parsed, ids, testIds } = await syncRelay(cfg);
   await appendDurable(parsed);
   // Email/PDF imports share this wake channel, but they prove nothing about

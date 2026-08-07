@@ -499,6 +499,31 @@ function ktSources(dir) {
       !/BackgroundRelayConfig = Pick<[\s\S]*'adminToken'[\s\S]*>;/.test(read('src/lib/relay.ts')));
   ok('the durable local inbox is cleared only by the UI import commit',
     /commit: async \(\) => \{[\s\S]*clearBackgroundRelayRows/.test(read('src/lib/capture.ts')));
+
+  /**
+   * "Erase everything" is a claim made in three places that have to agree: the
+   * iOS confirmation copy, the published privacy policy, and the code. The copy
+   * and the policy both named the relay queue while `clearAll` destroyed the
+   * ledger alone — so the staged rows survived the erase, and `capture.ts`
+   * imports staged rows on the next foreground pass whether or not a relay is
+   * still configured. The transactions came back into a ledger the app had just
+   * called blank.
+   */
+  const iosEraseCopy = read('src/lib/i18n.ts').match(
+    /eraseEverythingIosBody:\s*\{[\s\S]*?\n  \},/,
+  )?.[0] ?? '';
+  ok('the iOS erase promise names the relay queue',
+    /relay queue/i.test(iosEraseCopy),
+    'if this copy stops promising the queue is deleted, the privacy policy and the erase path ' +
+      'below need revisiting together rather than one at a time');
+  ok('erasing everything destroys the staged relay inbox, not just the ledger',
+    /destroyBackgroundRelayInbox/.test(read('src/lib/store.tsx')) &&
+      /export async function destroyBackgroundRelayInbox/.test(
+        read('src/lib/background-relay-storage.native.ts'),
+      ),
+    'the confirmation copy and https://wafra-legal.pages.dev/ios/privacy both say this queue is ' +
+      'deleted. wafra-relay-inbox.db is a second encrypted store holding already-acknowledged ' +
+      'transactions — the relay has dropped its copy by then, so nothing else erases them');
 }
 
 /* ── the policy states the retention the Worker actually performs ─────

@@ -267,35 +267,43 @@ ok('the storage layer reports its failures',
 const store = stripComments(read('src/lib/store.tsx'));
 
 /**
+ * Run a real module with its platform dependencies replaced by doubles.
+ *
+ * The PRODUCTION function bodies execute — nothing here is a restatement of
+ * them — and transpiling at test time means a focused `node db.test.js` never
+ * reads a stale build. `modules` is exhaustive on purpose: an unlisted import
+ * throws rather than resolving to the real thing, so a dependency added to a
+ * module under test is a visible failure instead of a silent one.
+ */
+function execute(rel, requireModule) {
+  const ts = require('typescript');
+  const filename = path.join(ROOT, rel);
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      jsx: ts.JsxEmit.ReactJSX,
+      esModuleInterop: true,
+    },
+    fileName: filename,
+  }).outputText;
+  const loaded = { exports: {} };
+  Function('require', 'module', 'exports', '__filename', '__dirname', output)(
+    requireModule,
+    loaded,
+    loaded.exports,
+    filename,
+    path.dirname(filename),
+  );
+  return loaded.exports;
+}
+
+/**
  * Load the pure hydration exports from store.tsx without mounting React
- * Native. The production functions themselves execute; only their platform
- * dependencies are replaced with deterministic test doubles. Transpiling at
- * test time means a focused `node db.test.js` never reads a stale build.
+ * Native. Only platform dependencies are replaced with deterministic test
+ * doubles.
  */
 function loadHydrationExports() {
-  const ts = require('typescript');
-  const execute = (rel, requireModule) => {
-    const filename = path.join(ROOT, rel);
-    const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-      compilerOptions: {
-        module: ts.ModuleKind.CommonJS,
-        target: ts.ScriptTarget.ES2022,
-        jsx: ts.JsxEmit.ReactJSX,
-        esModuleInterop: true,
-      },
-      fileName: filename,
-    }).outputText;
-    const loaded = { exports: {} };
-    Function('require', 'module', 'exports', '__filename', '__dirname', output)(
-      requireModule,
-      loaded,
-      loaded.exports,
-      filename,
-      path.dirname(filename),
-    );
-    return loaded.exports;
-  };
-
   const dedupe = execute('src/lib/dedupe.ts', (id) => {
     throw new Error(`unexpected dedupe dependency ${id}`);
   });
@@ -369,6 +377,7 @@ function loadHydrationExports() {
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
     '@/lib/dedupe': dedupe,
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
+    '@/lib/background-relay-storage': { destroyBackgroundRelayInbox: async () => {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     './balances': {},
   };
@@ -1017,6 +1026,7 @@ function compileClearAll() {
       'setStorageFailure',
       'authoritativeState',
       'recordStorageFailure',
+      'destroyBackgroundRelayInbox',
       `return (async () => {${clearAllBody}})();`,
     );
   } catch {
@@ -1028,8 +1038,10 @@ function compileClearAll() {
  * @param destroyFails  the erase throws with key and database both retained
  * @param latchedBefore true when hydration already failed — erase from the
  *                      recovery screen rather than from Settings
+ * @param inboxFails    the staged relay inbox could not be erased — its
+ *                      SQLCipher file or its Keychain key survived
  */
-async function runErase({ destroyFails, latchedBefore }) {
+async function runErase({ destroyFails, latchedBefore, inboxFails = false }) {
   const clearAll = compileClearAll();
   if (!clearAll) return null;
 
@@ -1056,6 +1068,14 @@ async function runErase({ destroyFails, latchedBefore }) {
     multiSet: async () => {
       calls.push('multiSet');
     },
+  };
+
+  // The second encrypted store: `wafra-relay-inbox.db` plus its Keychain key,
+  // where a headless push wake stages rows it has already acknowledged to the
+  // relay. Erasing one store and not the other is not an erase.
+  const destroyBackgroundRelayInbox = async () => {
+    calls.push('destroyInbox');
+    if (inboxFails) throw new Error('relay inbox database retained');
   };
 
   // persist(), reduced to the two properties this contract is about: it
@@ -1116,6 +1136,7 @@ async function runErase({ destroyFails, latchedBefore }) {
       setStorageFailure,
       authoritativeState,
       recordStorageFailure,
+      destroyBackgroundRelayInbox,
     );
   } catch {
     threw = true;
@@ -1214,8 +1235,442 @@ asyncSuites.push(
       'restoring the old state or leaving recovery flags set after a SUCCESSFUL erase would ' +
         `resurrect the just-cleared ledger or block the user for no reason. Dispatched: ` +
         `${JSON.stringify(succeeded?.dispatched.map((a) => a.type))}`);
+
+    // ── 2d. Erase means erase, and the relay inbox is part of "everything" ──
+    //
+    // The ledger was never the only encrypted store holding the user's
+    // transactions. A silent push wakes the app headless, stages parsed rows in
+    // `wafra-relay-inbox.db` and ACKNOWLEDGES them, which deletes the server's
+    // copy on the understanding that the phone now holds them. `capture.ts`
+    // folds staged rows into the ledger at the next foreground import whether
+    // or not a relay is still configured. So an erase that destroyed only
+    // `wafra-private.db` left the transactions on the device and let the next
+    // launch import them into the ledger it had just called blank — against the
+    // in-app promise and against the published privacy policy, which says this
+    // queue is deleted.
+
+    ok('a successful erase destroys the staged relay inbox as well as the ledger',
+      succeeded !== null &&
+        succeeded.calls.includes('destroyInbox') &&
+        succeeded.calls.includes('destroy'),
+      'erasing one encrypted store and not the other is not an erase — the rows a background ' +
+        `wake staged survive it and are imported on the next launch. Calls: ${JSON.stringify(succeeded?.calls)}`);
+
+    const inboxFailed = await runErase({
+      destroyFails: false,
+      latchedBefore: false,
+      inboxFails: true,
+    });
+    ok('an erase whose inbox wipe failed is NOT reported as success',
+      inboxFailed.threw === true,
+      'the ledger went, the staged relay rows did not, and those rows import themselves into ' +
+        'the fresh ledger on the next launch. Settings and the recovery screen both decide what ' +
+        'to tell the user from this throw; swallowing it is the app promising an erase it did ' +
+        'not perform');
+
+    ok('a failed inbox wipe takes the same latch, restore and recovery path as a failed ledger erase',
+      inboxFailed.blocked === true &&
+        !inboxFailed.calls.includes('multiSet') &&
+        inboxFailed.dispatched.some((a) => a.type === 'restore') &&
+        inboxFailed.hydrationFailed === true &&
+        !!inboxFailed.storageFailureRecorded,
+      'a half-erase is a failed erase. It must not get its own quieter handling — one code ' +
+        `path, or the second one rots. Calls: ${JSON.stringify(inboxFailed.calls)}`);
+
+    const ledgerFailed = await runErase({
+      destroyFails: true,
+      latchedBefore: false,
+      inboxFails: false,
+    });
+    ok('the inbox is still attempted when the ledger erase fails',
+      ledgerFailed.calls.includes('destroyInbox'),
+      'sequencing the two would leave the staged relay rows untouched whenever the ledger ' +
+        'erase threw first — the user asked for both to go, and both must be tried');
   })(),
 );
+
+// ---------------------------------------------------------------------------
+// 2e. The staged relay inbox — RUN, not read.
+//
+// The ledger is not the only encrypted store on the phone. A silent push wakes
+// the app headless, `syncRelayInBackground` decrypts the relay's rows into
+// `wafra-relay-inbox.db`, and then ACKNOWLEDGES them — which deletes the
+// server's copy, on the understanding that the phone now holds them.
+// `capture.ts` folds those staged rows into the ledger at the next foreground
+// import, whether or not a relay is still configured.
+//
+// Two ways that lost the user's transactions, both of them silent:
+//
+//   (a) "Erase all data" destroyed `wafra-private.db` and nothing else. The
+//       staged rows survived the erase and imported themselves into the ledger
+//       the app had just called blank — against the in-app copy and against the
+//       published privacy policy, which says this queue is deleted.
+//   (b) `appendDurable` kept the newest 1,000 rows and dropped the rest, and
+//       the caller acknowledged every id the sync returned. Each dropped row
+//       was gone from the device and gone from the relay in the same wake.
+//
+// Both real modules are executed with doubles for SecureStore, expo-sqlite and
+// the relay, because both properties are about what happens to the ROWS. Source
+// order cannot show either one.
+// ---------------------------------------------------------------------------
+
+const INBOX_DB = 'wafra-relay-inbox.db';
+const INBOX_KEY = 'wafra.relay.inbox.key.v1';
+
+/**
+ * expo-sqlite, reduced to the three facts this contract depends on: a database
+ * file exists or it does not, `deleteDatabaseAsync` REFUSES to delete one that
+ * is still open, and it THROWS when the file was never created. That last one
+ * is the trap — an inbox is only created by a real relay delivery, so on
+ * Android and on an iPhone whose Shortcut never fired there is nothing to
+ * delete, and an erase that treats it as a failure fails on every such device.
+ */
+function fakeSqlite({ failDelete = false } = {}) {
+  const files = new Map();
+  const openCount = new Map();
+  return {
+    files,
+    openCount,
+    async openDatabaseAsync(name) {
+      if (!files.has(name)) files.set(name, new Map());
+      const rows = files.get(name);
+      openCount.set(name, (openCount.get(name) ?? 0) + 1);
+      let closed = false;
+      return {
+        execAsync: async () => {},
+        getFirstAsync: async (_sql, key) => {
+          const value = rows.get(key);
+          return value === undefined ? null : { value };
+        },
+        runAsync: async (sql, ...args) => {
+          if (/^\s*DELETE/i.test(sql)) rows.delete(args[0]);
+          else rows.set(args[0], args[1]);
+        },
+        closeAsync: async () => {
+          if (closed) return;
+          closed = true;
+          openCount.set(name, (openCount.get(name) ?? 1) - 1);
+        },
+      };
+    },
+    async deleteDatabaseAsync(name) {
+      if ((openCount.get(name) ?? 0) > 0) throw new Error(`database ${name} is still open`);
+      if (!files.has(name)) throw new Error(`Database ${name} not found`);
+      if (failDelete) throw new Error(`Unable to delete the database file for ${name}`);
+      files.delete(name);
+    },
+  };
+}
+
+/** The real inbox storage module, over a fake Keychain and a fake filesystem. */
+function loadInbox(options = {}) {
+  const keychain = new Map();
+  const sqlite = fakeSqlite(options);
+  const recorded = [];
+  const modules = {
+    'expo-crypto': { getRandomBytesAsync: async (n) => new Uint8Array(n).fill(0xab) },
+    'expo-secure-store': {
+      AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 'after-first-unlock',
+      getItemAsync: async (key) => keychain.get(key) ?? null,
+      setItemAsync: async (key, value) => void keychain.set(key, value),
+      deleteItemAsync: async (key) => void keychain.delete(key),
+    },
+    'expo-sqlite': sqlite,
+    '@/lib/storage-diagnostics': {
+      recordStorageFailure: (op, error) => {
+        recorded.push(op);
+        return { op, category: 'unknown' };
+      },
+    },
+  };
+  const exports = execute('src/lib/background-relay-storage.native.ts', (id) => {
+    if (Object.hasOwn(modules, id)) return modules[id];
+    throw new Error(`unexpected inbox-storage dependency ${id}`);
+  });
+  return { exports, keychain, sqlite, recorded };
+}
+
+/** The real background-relay module, over that inbox and a fake relay. */
+function loadBackgroundRelay(inboxExports, relayDouble) {
+  const modules = {
+    'expo-constants': { easConfig: null, expoConfig: { extra: {} } },
+    'expo-notifications': {
+      BackgroundNotificationTaskResult: { NoData: 'no-data', NewData: 'new-data', Failed: 'failed' },
+      IosAuthorizationStatus: { PROVISIONAL: 3 },
+      getPermissionsAsync: async () => ({ granted: false }),
+      getExpoPushTokenAsync: async () => ({ data: 'token' }),
+      registerTaskAsync: async () => {},
+      unregisterTaskAsync: async () => {},
+    },
+    'expo-task-manager': { defineTask: () => {}, isTaskRegisteredAsync: async () => false },
+    'react-native': { Platform: { OS: 'ios' } },
+    '@/lib/relay': relayDouble,
+    '@/lib/background-relay-storage': inboxExports,
+  };
+  return execute('src/lib/background-relay.ts', (id) => {
+    if (Object.hasOwn(modules, id)) return modules[id];
+    throw new Error(`unexpected background-relay dependency ${id}`);
+  });
+}
+
+const relaySrc = readIfPresent('src/lib/background-relay.ts');
+const inboxSrc = readIfPresent('src/lib/background-relay-storage.native.ts');
+
+if (!relaySrc || !inboxSrc) {
+  ok('the staged relay inbox exists', false,
+    `missing: ${!relaySrc ? 'src/lib/background-relay.ts ' : ''}${
+      !inboxSrc ? 'src/lib/background-relay-storage.native.ts' : ''}`);
+} else {
+  const relay = stripComments(relaySrc);
+  const inbox = stripComments(inboxSrc);
+
+  const MAX_LOCAL_ROWS = Number(
+    ((relay.match(/const MAX_LOCAL_ROWS = ([\d_]+)/) ?? [])[1] ?? '').replace(/_/g, ''),
+  );
+  ok('MAX_LOCAL_ROWS is a real number read from the module',
+    Number.isInteger(MAX_LOCAL_ROWS) && MAX_LOCAL_ROWS > 0,
+    'the cap assertions below are meaningless if this is NaN');
+
+  const row = (ts) => ({
+    smsTs: ts,
+    amountFils: 1000 + ts,
+    type: 'expense',
+    merchant: `Merchant ${ts}`,
+    category: 'other',
+  });
+
+  /** A relay that behaves like the real one: an acknowledged row is deleted. */
+  function fakeRelay(pending) {
+    const queue = new Map(pending.map((r) => [`id-${r.smsTs}`, r]));
+    const acked = [];
+    let syncs = 0;
+    return {
+      queue,
+      acked,
+      get syncs() {
+        return syncs;
+      },
+      double: {
+        getBackgroundRelayConfig: async () => ({ setupState: 'verified' }),
+        getRelayConfig: async () => ({ setupState: 'verified' }),
+        registerRelayPush: async () => {},
+        unregisterRelayPush: async () => {},
+        recordRelayAutomationProof: async () => {},
+        syncRelay: async () => {
+          syncs += 1;
+          return {
+            parsed: [...queue.values()],
+            ids: [...queue.keys()],
+            unreadable: 0,
+            testReceived: 0,
+            testIds: [],
+          };
+        },
+        ackRelay: async (_cfg, ids) => {
+          for (const id of ids) {
+            acked.push(id);
+            queue.delete(id);
+          }
+        },
+      },
+    };
+  }
+
+  asyncSuites.push(
+    (async () => {
+      // ── (a) erase empties the inbox, so a relaunch imports nothing ──
+      {
+        const { exports, keychain, sqlite } = loadInbox();
+        const server = fakeRelay([row(1), row(2), row(3)]);
+        const bg = loadBackgroundRelay(exports, server.double);
+
+        await bg.syncRelayInBackground();
+        const staged = await bg.readBackgroundRelayRows();
+        const keyBefore = keychain.get(INBOX_KEY);
+
+        await exports.destroyBackgroundRelayInbox();
+
+        ok('erase removes the relay inbox database and the Keychain key that opens it',
+          staged.length === 3 &&
+            !!keyBefore &&
+            !keychain.has(INBOX_KEY) &&
+            !sqlite.files.has(INBOX_DB),
+          `${staged.length} rows staged; key ${keychain.has(INBOX_KEY) ? 'RETAINED' : 'gone'}, ` +
+            `database ${sqlite.files.has(INBOX_DB) ? 'RETAINED' : 'gone'}. Deleting one and not ` +
+            'the other is not an erase — and the key is the half that makes the erase ' +
+            'cryptographic, including for the -wal sidecar nothing unlinks');
+
+        // The relaunch. A fresh read is exactly what `capture.ts` does before
+        // handing rows to buildImportPlan(), and it must find nothing.
+        const afterErase = await bg.readBackgroundRelayRows();
+        ok('a relaunch after erase imports nothing from the staged inbox',
+          afterErase.length === 0,
+          `${afterErase.length} rows still readable. capture.ts returns staged rows on the next ` +
+            'foreground import even when no relay config exists, so anything surviving here is a ' +
+            'transaction reappearing in a ledger the app just told the user was blank');
+      }
+
+      // ── the erase must also succeed when there was never an inbox ──
+      {
+        const { exports, sqlite } = loadInbox();
+        let threw = false;
+        try {
+          await exports.destroyBackgroundRelayInbox();
+        } catch {
+          threw = true;
+        }
+        ok('erasing an inbox that was never created is a success, not a failure',
+          !threw && !sqlite.files.has(INBOX_DB),
+          'expo-sqlite throws DatabaseNotFoundException for a database that does not exist, and ' +
+            'this one is created only by a real relay delivery. Reporting that as a failed erase ' +
+            'breaks every Android device and every iPhone whose Shortcut has not fired');
+      }
+
+      // ── (b) a failed erase is a failure, and it fails closed ──
+      {
+        const { exports, keychain, sqlite, recorded } = loadInbox({ failDelete: true });
+        const server = fakeRelay([row(1)]);
+        const bg = loadBackgroundRelay(exports, server.double);
+        await bg.syncRelayInBackground();
+
+        let threw = false;
+        try {
+          await exports.destroyBackgroundRelayInbox();
+        } catch {
+          threw = true;
+        }
+        ok('an inbox erase that could not remove the database reports failure',
+          threw && recorded.includes('destroy'),
+          'clearAll turns this rejection into the failed-erase path — the latch stays closed, ' +
+            'the ledger goes back on screen and Settings says so. Swallowing it is the app ' +
+            'claiming an erase it did not perform');
+
+        ok('a failed inbox erase still leaves the file undecryptable',
+          !keychain.has(INBOX_KEY) && sqlite.files.has(INBOX_DB),
+          'the key is deleted before the file for exactly this case: what survives a failed ' +
+            'unlink has to be ciphertext whose only key has already left the Keychain');
+      }
+
+      // ── (c) nothing is acknowledged that was not durably stored ──
+      {
+        const { exports } = loadInbox();
+        const existing = Array.from({ length: MAX_LOCAL_ROWS }, (_, i) => row(i + 1));
+        const overflow = Array.from({ length: 200 }, (_, i) => row(MAX_LOCAL_ROWS + i + 1));
+
+        // Fill the inbox the way real wakes fill it, then offer more.
+        const filler = fakeRelay(existing);
+        const fillBg = loadBackgroundRelay(exports, filler.double);
+        await fillBg.syncRelayInBackground();
+
+        const server = fakeRelay(overflow);
+        const bg = loadBackgroundRelay(exports, server.double);
+        const collected = await bg.syncRelayInBackground();
+        const kept = await bg.readBackgroundRelayRows();
+
+        ok('a wake that finds a full inbox acknowledges nothing at all',
+          server.acked.length === 0 && server.queue.size === overflow.length,
+          `acknowledged ${server.acked.length} ids with the inbox already at ${MAX_LOCAL_ROWS} ` +
+            'rows. An acknowledged id is DELETED from the relay queue, so under the old cap every ' +
+            'one of those was a transaction that existed in neither place');
+
+        ok('a wake that finds a full inbox does not drain the relay at all',
+          server.syncs === 0 && collected === 0,
+          'the check has to come BEFORE the sync: a row already pulled down is a row the server ' +
+            'is waiting to be told about, and the only way to be certain we never tell it about a ' +
+            'row we did not keep is to not pull the row. The relay holds it for 30 days instead');
+
+        ok('a full inbox loses none of the rows it was already holding',
+          kept.length === MAX_LOCAL_ROWS && kept[0].smsTs === 1,
+          `${kept.length} rows survived of ${MAX_LOCAL_ROWS}, oldest smsTs ${kept[0]?.smsTs}. The ` +
+            'old merge kept the NEWEST 1,000 and dropped the oldest, so a backlog silently ate ' +
+            'the earliest transactions');
+      }
+
+      {
+        const { exports } = loadInbox();
+        const existing = Array.from({ length: MAX_LOCAL_ROWS - 5 }, (_, i) => row(i + 1));
+        const overflow = Array.from({ length: 200 }, (_, i) => row(MAX_LOCAL_ROWS + i + 1));
+
+        const filler = fakeRelay(existing);
+        await loadBackgroundRelay(exports, filler.double).syncRelayInBackground();
+
+        const server = fakeRelay(overflow);
+        const bg = loadBackgroundRelay(exports, server.double);
+        await bg.syncRelayInBackground();
+        const kept = await bg.readBackgroundRelayRows();
+        const kepts = new Set(kept.map((r) => `id-${r.smsTs}`));
+
+        ok('a wake below the cap stores every row it collected — the merge discards nothing',
+          kept.length === existing.length + overflow.length,
+          `${kept.length} rows kept from ${existing.length} existing plus ${overflow.length} ` +
+            'collected. Overshooting the cap by the one sync page already in flight is the ' +
+            'design: the cap decides when to stop COLLECTING, it is not a number of rows we are ' +
+            'willing to throw away');
+
+        ok('every id deleted server-side has its row on the device',
+          server.acked.length === overflow.length &&
+            server.acked.every((id) => kepts.has(id)),
+          `${server.acked.length} ids acknowledged, ` +
+            `${server.acked.filter((id) => !kepts.has(id)).length} of them with no row on the ` +
+            'device. Those two copies are the only two that exist');
+      }
+    })(),
+  );
+
+  // ── the shape of the erase, where behaviour cannot reach ──
+
+  const inboxDestroy = bodyOf(inbox, 'export async function destroyBackgroundRelayInbox');
+  ok('the relay inbox exports an erase at all',
+    !!inboxDestroy,
+    'without one nothing can remove wafra-relay-inbox.db or its Keychain key, and "Erase all ' +
+      'data" cannot be true');
+
+  ok('the whole inbox erase is inside the write queue',
+    !!inboxDestroy &&
+      inOrder(
+        inboxDestroy,
+        'serialiseWrite(',
+        'databasePromise = null',
+        'SecureStore.deleteItemAsync',
+        'SQLite.deleteDatabaseAsync',
+      ),
+    'this store is written from a HEADLESS push wake and erased from the UI, in the same process ' +
+      'on iOS. A wake landing between the close and the unlink reopens the database and recreates ' +
+      'the inbox the user just erased');
+
+  ok('the inbox erase deletes the Keychain key before the database file',
+    !!inboxDestroy &&
+      inboxDestroy.indexOf('SecureStore.deleteItemAsync') <
+        inboxDestroy.indexOf('SQLite.deleteDatabaseAsync'),
+    'fail closed, exactly as the ledger does: if the file cannot be removed, what is left — ' +
+      'including any -wal sidecar deleteDatabaseAsync never touches — must already be ' +
+      'undecryptable');
+
+  ok('the staged inbox is written through the same queue the erase takes',
+    /async setItem\([\s\S]{0,120}?serialiseWrite\(/.test(inbox) &&
+      /async removeItem\([\s\S]{0,120}?serialiseWrite\(/.test(inbox),
+    'a headless wake staging rows while the UI erases is the whole race; leaving writes outside ' +
+      'the queue leaves it open');
+
+  ok('the store erases both encrypted stores in one operation',
+    !!clearAllBody &&
+      /destroyBackgroundRelayInbox\(\)/.test(clearAllBody) &&
+      inOrder(
+        clearAllBody,
+        'Promise.allSettled',
+        'destroyBackgroundRelayInbox()',
+        'throw outcome.reason',
+        'await destroyOperation',
+      ),
+    'both have to be attempted whichever one fails, and the first failure has to reach the ' +
+      'existing destroyOperation rejection — that is what keeps the latch closed, puts the ledger ' +
+      'back on screen and stops Settings reporting success');
+
+  ok('appendDurable no longer discards rows to fit a cap',
+    !/\.slice\(-MAX_LOCAL_ROWS\)/.test(relay) && !/\.slice\(-1_?000\)/.test(relay),
+    'the discarded rows were acknowledged to the relay anyway, so each one was deleted from the ' +
+      'server and absent from the device in the same background wake');
+}
 
 // ---------------------------------------------------------------------------
 // 3. Diagnostics may never leak a key or a ledger row, and may never throw.
