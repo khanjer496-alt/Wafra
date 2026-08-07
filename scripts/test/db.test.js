@@ -1777,6 +1777,230 @@ if (!workflow) {
   ok('...but a rule the parser DID title a row with is re-keyed',
     moved.merchantOverrides.claude === 'dining',
     JSON.stringify(moved.merchantOverrides));
+
+  /* ── the guard has to be evidence about THE KEY ──────────────────────────
+   *
+   * The two fixtures above only ever exercise one half of it: in both, the
+   * canonical name appears nowhere in the ledger, so the rule was refused or
+   * allowed purely on whether a row carried the OLD key. Every case below
+   * carries a genuine, parser-owned row under the CANONICAL name for a reason
+   * that has nothing to do with the pin — which is not a coincidence, it is
+   * the normal state of any ledger that contains that merchant.
+   *
+   * The rule admitted exactly that. `!parserTitles.has(key) &&
+   * !parserTitles.has(canonicalKey)` refused only when NEITHER was present, so
+   * a real Claude subscription row was licence enough to move a pin the user
+   * had typed on a diner. The subscription was then silently re-filed,
+   * `isCandidate` dropped it as "already asked", every future charge took the
+   * pin, and `parserCoverage` reported the user had answered for a merchant
+   * they never named — the laundering c79a2d6 removed, through a new door.
+   */
+  const withUnrelatedCanonicalRow = (pinRow) => {
+    const s = onDisk();
+    s.transactions = [
+      pinRow,
+      // Entirely unrelated: the Anthropic subscription, read by the parser,
+      // never touched by the user, filed correctly as software.
+      {
+        id: 'sub', type: 'expense', amountFils: 7300, category: 'software',
+        accountId: 'main', title: 'Claude', date: '2026-07-05', source: 'sms',
+        raw: 'Purchase of AED 73.00 with card ending 1234 at ANTHROPIC on 05/07/2026',
+      },
+    ];
+    s.merchantOverrides = { 'claudes diner': 'dining' };
+    return s;
+  };
+
+  for (const [label, pinRow] of [
+    // The name is the user's: they retitled the row by hand.
+    ['a row the user retitled by hand', {
+      id: 'diner', type: 'expense', amountFils: 6000, category: 'dining',
+      accountId: 'main', title: 'Claudes Diner', date: '2026-07-03',
+      source: 'sms', userEdited: true, titleEdited: true,
+    }],
+    // `titleEdited` is a new field, so a row retitled before it existed
+    // carries only `userEdited`. The guard cannot lean on `titleEdited`.
+    ['a row retitled before titleEdited existed', {
+      id: 'diner', type: 'expense', amountFils: 6000, category: 'dining',
+      accountId: 'main', title: 'Claudes Diner', date: '2026-07-03',
+      source: 'sms', userEdited: true,
+    }],
+    // Not an SMS row at all — typed into the app by hand.
+    ['a hand-entered row', {
+      id: 'diner', type: 'expense', amountFils: 6000, category: 'dining',
+      accountId: 'main', title: 'Claudes Diner', date: '2026-07-03', source: 'manual',
+    }],
+  ]) {
+    const out = real.migratePersistedState(withUnrelatedCanonicalRow(pinRow));
+    const sub = out.transactions.find((t) => t.id === 'sub');
+    ok(`an unrelated row under the canonical name is not evidence about the key (${label})`,
+      out.merchantOverrides.claude === undefined,
+      JSON.stringify(out.merchantOverrides));
+    ok(`...so the subscription keeps the category the parser gave it (${label})`,
+      sub.category === 'software', sub.category);
+  }
+
+  // And the case neither fixture above could reach at all: the pinned key has
+  // NO rows left — the user deleted them, or an erase rebuilt the ledger from
+  // the SMS store — while a real Claude row sits alongside. There is nothing
+  // here connecting the two strings but a substring of SERVICE_NAMES.
+  const orphanKey = withUnrelatedCanonicalRow(null);
+  orphanKey.transactions = orphanKey.transactions.filter((t) => t !== null);
+  const orphaned = real.migratePersistedState(orphanKey);
+  ok('a key with no rows left is not re-keyed onto a merchant that happens to be there',
+    orphaned.merchantOverrides.claude === undefined,
+    JSON.stringify(orphaned.merchantOverrides));
+
+  /* ── the ONE thing that links an old key to a name already renamed ───────
+   *
+   * When an earlier launch already did the retitle, no row carries the old key
+   * any more and tier 1 is blind. The retained `raw` is the only surviving
+   * link: the old spelling is the descriptor the message actually carried, so
+   * a row now titled "Shein" whose raw still says WWW.SHEIN.COM connects the
+   * two. Co-presence does not.
+   */
+  const alreadyRenamed = (raw) => ({
+    marketId: 'AE',
+    merchantOverrides: { 'www.shein.com': 'groceries' },
+    transactions: [{
+      id: 'r', type: 'expense', amountFils: 12300, category: 'groceries',
+      accountId: 'main', title: 'Shein', date: '2026-07-01', source: 'sms',
+      ...(raw ? { raw } : {}),
+    }],
+  });
+  const linked = real.migratePersistedState(alreadyRenamed(SHEIN_SMS));
+  ok('a retained raw message carrying the old spelling IS the link, so the rule moves',
+    linked.merchantOverrides.shein === 'groceries',
+    JSON.stringify(linked.merchantOverrides));
+
+  // The honest half. Where the retitle already happened AND the raw is gone —
+  // never kept on iOS, or stripped by the same heal pass that refiled the row —
+  // the link is destroyed and nothing here can reconstruct it. Refusing costs
+  // the user a rule that stops reaching future rows; guessing costs them a rule
+  // they never set, applied silently and forever. Refusing is the lesser one,
+  // and it is a refusal, not a repair — do not describe it as one.
+  const unlinked = real.migratePersistedState(alreadyRenamed(null));
+  ok('without that link the rule is left where it is, not guessed onto the new name',
+    unlinked.merchantOverrides.shein === undefined &&
+      unlinked.merchantOverrides['www.shein.com'] === 'groceries',
+    JSON.stringify(unlinked.merchantOverrides));
+
+  /* ── two spellings, one shop, two answers ────────────────────────────────
+   *
+   * "One shop pinned under six spellings" is the PREMISE of this whole block,
+   * so two keys canonicalising onto one name is expected input. Iterating
+   * `Object.entries` and taking the first writer let JSON key order decide it
+   * — which is the order they were first pinned, so the OLDER answer won and
+   * the newer one was dropped. There is no timestamp on an override, and a
+   * row's `date` is when the shop was visited rather than when the user
+   * answered, so nothing here can order two answers. It must not pick.
+   */
+  const twoSpellings = (overrides) => ({
+    marketId: 'AE',
+    merchantOverrides: overrides,
+    transactions: [
+      { id: 'a', type: 'expense', amountFils: 100, category: 'groceries', accountId: 'main',
+        title: 'Www.shein.com', date: '2026-06-01', source: 'sms' },
+      { id: 'b', type: 'expense', amountFils: 100, category: 'shopping', accountId: 'main',
+        title: 'Shein Wholesale', date: '2026-07-01', source: 'sms' },
+    ],
+  });
+  for (const order of [
+    { 'www.shein.com': 'groceries', 'shein wholesale': 'shopping' },
+    { 'shein wholesale': 'shopping', 'www.shein.com': 'groceries' },
+  ]) {
+    const out = real.migratePersistedState(twoSpellings(order));
+    ok('two spellings disagreeing does not silently promote whichever was stored first',
+      out.merchantOverrides.shein === undefined, JSON.stringify(out.merchantOverrides));
+    ok('...and both old keys go on working, so no answer is lost',
+      out.merchantOverrides['www.shein.com'] === 'groceries' &&
+        out.merchantOverrides['shein wholesale'] === 'shopping',
+      JSON.stringify(out.merchantOverrides));
+  }
+
+  // Agreement is not a conflict: there is only one answer to move.
+  const agree = real.migratePersistedState(
+    twoSpellings({ 'www.shein.com': 'shopping', 'shein wholesale': 'shopping' }),
+  );
+  ok('two spellings that agree still move the answer they share',
+    agree.merchantOverrides.shein === 'shopping', JSON.stringify(agree.merchantOverrides));
+
+  // A competing key with nothing left behind it has not been RULED OUT, it is
+  // one nothing is known about. Dropping it from the vote for lack of evidence
+  // hands the canonical name to whichever key still has rows — which is the
+  // same "older answer wins" defect, wearing a smaller coat.
+  const oneSideDeleted = twoSpellings({
+    'www.shein.com': 'groceries', 'shein wholesale': 'shopping',
+  });
+  oneSideDeleted.transactions = oneSideDeleted.transactions.filter((t) => t.id === 'a');
+  const partial = real.migratePersistedState(oneSideDeleted);
+  ok('a competing answer whose rows are gone still blocks the other from taking the name',
+    partial.merchantOverrides.shein === undefined,
+    JSON.stringify(partial.merchantOverrides));
+
+  // And the same when the competitor is a name the user typed. It gets no
+  // evidence — the refusal above sees to that — but it still votes, because a
+  // refusal costs one question and an invented rule costs every future charge.
+  const typedCompetitor = {
+    marketId: 'AE',
+    merchantOverrides: { 'claudes diner': 'dining', 'anthropic claude': 'software' },
+    transactions: [
+      { id: 'diner', type: 'expense', amountFils: 6000, category: 'dining', accountId: 'main',
+        title: 'Claudes Diner', date: '2026-07-03', source: 'sms', userEdited: true,
+        titleEdited: true },
+      { id: 'sub', type: 'expense', amountFils: 7300, category: 'software', accountId: 'main',
+        title: 'Anthropic Claude', date: '2026-07-05', source: 'sms' },
+    ],
+  };
+  const contested = real.migratePersistedState(typedCompetitor);
+  ok('a hand-typed name competing for the same canonical key blocks the move too',
+    contested.merchantOverrides.claude === undefined,
+    JSON.stringify(contested.merchantOverrides));
+}
+
+/* ── an income pin is not an answer about an expense row ───────────────────
+ *
+ * `overrideFitsDirection` reached `categoryOf` and `applyMerchantOverride` and
+ * stopped there. `parserCoverage` keyed `decided` on the pin's bare PRESENCE,
+ * so an income pin — reachable by correcting a credit and tapping Remember —
+ * moved that merchant's EXPENSE rows out of `categoryMeasured`, reporting "the
+ * user already answered for this" about rows the rule can never touch. Those
+ * rows are simultaneously struck off the categorise list by the same bare
+ * check in `isCandidate`, so they are never asked about either: uncounted and
+ * unaskable at once.
+ */
+{
+  const { parserCoverage } = require('./build/accuracy');
+  const { uncategorisedMerchants } = require('./build/uncategorised');
+
+  const ledger = {
+    accounts: [{ id: 'm', name: 'Main', kind: 'account' }],
+    transactions: [
+      { id: '1', type: 'expense', amountFils: 5000, category: 'other', accountId: 'm',
+        title: 'Acme', date: '2026-07-01', source: 'sms' },
+      { id: '2', type: 'expense', amountFils: 7000, category: 'other', accountId: 'm',
+        title: 'Acme', date: '2026-07-02', source: 'sms' },
+    ],
+  };
+  const withPin = (merchantOverrides) => ({ ...ledger, merchantOverrides });
+
+  const income = parserCoverage(withPin({ acme: 'salary' }));
+  ok('an income pin does not count a merchant\'s expense rows as answered',
+    income.decided === 0 && income.categoryMeasured === 2,
+    JSON.stringify(income));
+  ok('...and those rows are still asked about on the categorise screen',
+    uncategorisedMerchants(withPin({ acme: 'salary' })).merchants.some((m) => m.key === 'acme'),
+    JSON.stringify(uncategorisedMerchants(withPin({ acme: 'salary' })).merchants.map((m) => m.key)));
+
+  // The pin that CAN reach them still does both things, so this is a direction
+  // check and not a way of ignoring merchantOverrides.
+  const expense = parserCoverage(withPin({ acme: 'shopping' }));
+  ok('an expense pin on expense rows is still the user\'s answer',
+    expense.decided === 2 && expense.categoryMeasured === 0,
+    JSON.stringify(expense));
+  ok('...and stops the screen asking again',
+    uncategorisedMerchants(withPin({ acme: 'shopping' })).merchants.length === 0,
+    JSON.stringify(uncategorisedMerchants(withPin({ acme: 'shopping' })).merchants));
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

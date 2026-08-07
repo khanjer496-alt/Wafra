@@ -2416,6 +2416,29 @@ ok('stale: a stale statement that gets paid leaves openDues',
     eq('coverage: a pin and a hand-filed row are both decided', c.decided, 2);
   }
 
+  // ── a pin only decides a row it can reach ──
+  //
+  // Everything `measured` gets here is an expense — non-expense rows were
+  // skipped above — and `overrideFitsDirection` says an income category may not
+  // decide an expense row. `decided` keyed on the pin's bare PRESENCE, so an
+  // income pin (correct a credit, tap Remember) moved that merchant's expense
+  // rows out of `categoryMeasured` and reported "you already answered for this"
+  // about rows the rule can never touch. `isCandidate` makes the same bare
+  // check, so those rows were struck off the categorise screen at the same
+  // time: uncounted and unaskable at once.
+  {
+    const rows = [row({ title: 'Acme', category: 'other' }), row({ title: 'Acme', category: 'other' })];
+    const income = cov(rows, { acme: 'salary' });
+    eq('coverage: an income pin does not decide a merchant\'s expense rows',
+      [income.decided, income.categoryMeasured], [0, 2]);
+    const expense = cov(rows, { acme: 'shopping' });
+    eq('coverage: an expense pin on those same rows still does',
+      [expense.decided, expense.categoryMeasured], [2, 0]);
+    ok('coverage: and measured still closes either way',
+      income.measured === income.decided + income.categoryMeasured &&
+        expense.measured === expense.decided + expense.categoryMeasured);
+  }
+
   // ── the two halves of the screen agree ──
   //
   // The list below the sentence is built from `unreadFormats`, which keys off

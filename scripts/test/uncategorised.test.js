@@ -266,6 +266,29 @@ ok('nothing on an empty list is worth prompting for', !worthPrompting(uncategori
     names(state([tx({ title: 'KNOWN SHOP' })], { merchantOverrides: { 'known shop': 'shopping' } })),
     [],
   );
+  // "Already answered" only holds if the answer can REACH this row. Everything
+  // on this list is an expense, and an income category may not decide an
+  // expense row — `overrideFitsDirection` is that rule. An income pin is
+  // reachable: correct a credit to Salary in the entry sheet and tap Remember.
+  // On bare presence that pin struck the merchant's expense rows off the list
+  // on the strength of a rule that can never apply to them, and they sat in
+  // `other` forever, never asked about again.
+  eq(
+    'an income pin is not an answer about this merchant\'s expense rows',
+    names(state([tx({ title: 'Known Shop' })], { merchantOverrides: { 'known shop': 'salary' } })),
+    ['Known Shop'],
+  );
+  eq(
+    'and the same is true of the other income category',
+    names(state([tx({ title: 'Known Shop' })], { merchantOverrides: { 'known shop': 'business' } })),
+    ['Known Shop'],
+  );
+  // `other` is in neither set on the income side, so it still answers here.
+  eq(
+    'an expense-side pin of "other" is still an answer',
+    names(state([tx({ title: 'Known Shop' })], { merchantOverrides: { 'known shop': 'other' } })),
+    [],
+  );
   eq(
     'a row the user edited by hand is a decision, not a gap',
     names(state([tx({ title: 'Deliberate Shop', userEdited: true })])),

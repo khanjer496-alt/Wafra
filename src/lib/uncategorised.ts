@@ -24,7 +24,7 @@
  * module is not.
  */
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import { STRUCTURAL_TITLES } from '@/lib/sms-parser';
+import { overrideFitsDirection, STRUCTURAL_TITLES } from '@/lib/sms-parser';
 import type { AppState, Transaction } from '@/lib/types';
 
 /**
@@ -245,7 +245,7 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
  */
 function isCandidate(
   t: Transaction,
-  overrides: Record<string, unknown>,
+  overrides: AppState['merchantOverrides'],
   live: Set<string>,
   internal: Set<string>,
 ): boolean {
@@ -264,7 +264,15 @@ function isCandidate(
   if (title.length < 3) return false;
   if (title === GENERIC_MERCHANT) return false;
   if (STRUCTURAL_TITLES.has(title)) return false;
-  if (overrides[title.toLowerCase()] !== undefined) return false;
+  // "The user already answered for this merchant" — but only if the answer can
+  // reach this row. Every row that gets here is an expense (checked above), and
+  // `overrideFitsDirection` is what says an income category may not decide one.
+  // Bare presence was the test, so an income pin — reachable by correcting a
+  // credit and tapping Remember in the entry sheet — struck that merchant's
+  // EXPENSE rows off the list on the strength of a rule that can never apply to
+  // them. Those rows sit in `other` forever and are never asked about again.
+  const pinned = overrides[title.toLowerCase()];
+  if (pinned !== undefined && overrideFitsDirection(pinned, 'expense')) return false;
   return true;
 }
 

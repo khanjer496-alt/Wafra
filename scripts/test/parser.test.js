@@ -3920,14 +3920,48 @@ t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBA
   // branch decided its direction from the message and its category from a
   // hardcoded 'expense', so the credit was filed `utilities` — the same
   // off-list harm with no override involved at all.
-  const utilityBody = 'AED 412.00 has been credited to your account no. 095-XXX11XXX-01 SEWA NO.-8765';
-  for (const [label, overrides] of [['on its own', undefined], ['with SEWA pinned', { sewa: 'utilities' }]]) {
-    const row = parseSms(utilityBody, overrides);
-    ok(`a credited utility row is not filed under an expense category (${label})`,
-      row !== null && row.type === 'income' &&
-        ['salary', 'business', 'other'].includes(row.categoryGuess),
-      JSON.stringify(row && { type: row.type, cat: row.categoryGuess }));
+  //
+  // THE ASSERTION HAS TO NAME THE CATEGORY. This read
+  // `['salary','business','other'].includes(...)` over a fixture with no refund
+  // word in it, which is two failures at once: it passes on `business`, and its
+  // fixture could not have told `business` from the right answer anyway. The
+  // direction was fixed and the category was still wrong, because `categoryOf`
+  // was handed the PAYEE ("SEWA") and its refund/reversal vocabulary is looking
+  // for words that only ever appear in the MESSAGE. Asked about "SEWA" alone it
+  // finds a named payer and returns `business` — a refunded utility deposit, a
+  // four-figure sum in this market, booked as business REVENUE, which
+  // `categoryOf`'s own comment forbids in as many words.
+  const CREDITED = 'AED 412.00 has been credited to your account no. 095-XXX11XXX-01 SEWA NO.-8765';
+  for (const [label, body, expected] of [
+    // Says refund: an OFFSET against an earlier expense, not revenue. `other`.
+    ['a stated refund', `Dear Customer, refund of ${CREDITED} on 03/08/2026`, 'other'],
+    ['a stated reversal', `Dear Customer, reversal of ${CREDITED} on 03/08/2026`, 'other'],
+    // Says nothing but names a payer: the parser's documented answer for a
+    // credit with an identified originator. Pinned rather than range-checked so
+    // a future edit that changes it has to say so out loud.
+    ['an unexplained credit', CREDITED, 'business'],
+  ]) {
+    for (const [pinLabel, overrides] of [
+      ['on its own', undefined],
+      // An expense pin on SEWA must not reach the credit either way.
+      ['with SEWA pinned to an expense category', { sewa: 'utilities' }],
+    ]) {
+      const row = parseSms(body, overrides);
+      ok(`a credited utility row is filed ${expected} (${label}, ${pinLabel})`,
+        row !== null && row.type === 'income' && row.categoryGuess === expected,
+        JSON.stringify(row && { type: row.type, cat: row.categoryGuess }));
+    }
   }
+
+  // The expense side legitimately wants the PAYEE and not the message: the
+  // biller's own name is the whole point of this branch, and handing it the raw
+  // text would let bank boilerplate decide the category of a utility bill.
+  const debit = parseSms(
+    'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.',
+  );
+  ok('and a debited utility bill is still read from the payee, not the boilerplate',
+    debit.type === 'expense' && debit.merchant === 'SEWA' && debit.categoryGuess === 'utilities',
+    JSON.stringify({ type: debit.type, merchant: debit.merchant, cat: debit.categoryGuess }));
 
   // The predicate and the chip lists are two spellings of one fact, and they
   // live in different files because sms-parser.ts is bundled into the Worker

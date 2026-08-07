@@ -1,7 +1,7 @@
 import { netWorthFils, reliableBalanceFils } from '@/lib/balances';
 import { DORMANT_AFTER_DAYS } from '@/lib/cards';
 import { toISODate } from '@/lib/format';
-import { STRUCTURAL_TITLES } from '@/lib/sms-parser';
+import { overrideFitsDirection, STRUCTURAL_TITLES } from '@/lib/sms-parser';
 import type { AppState, Transaction } from '@/lib/types';
 
 /**
@@ -512,7 +512,16 @@ export function parserCoverage(state: {
     // lowercase key the parser reads overrides by, or the two would disagree
     // about which rows are pinned. Counted rather than dropped, so the two
     // sentences on screen add up to `measured`.
-    if (tx.userEdited || overrides[tx.title.trim().toLowerCase()] !== undefined) {
+    //
+    // The pin only counts if it can REACH this row. Everything counted here is
+    // an expense (non-expense rows were skipped above), and an income category
+    // may not decide an expense row — `overrideFitsDirection` is that rule. On
+    // bare presence, an income pin (correct a credit, tap Remember) moved that
+    // merchant's expense rows into `decided`, reporting "you already answered
+    // for this" about rows the rule can never touch, which is the same
+    // laundering by a different route.
+    const pinned = overrides[tx.title.trim().toLowerCase()];
+    if (tx.userEdited || (pinned !== undefined && overrideFitsDirection(pinned, 'expense'))) {
       cov.decided += 1;
       continue;
     }

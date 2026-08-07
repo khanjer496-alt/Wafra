@@ -1048,6 +1048,22 @@ ok('the spoken label agrees with the sign on screen',
   ok('the entry sheet counts the same rows the store will move',
     /overrideAppliesTo\(t, key\)/.test(sheet),
     'the "also update N entries" prompt is the only warning before the rewrite');
+
+  // THE DIRECTION RULE ON THE PATH THAT WRITES. `overrideAppliesTo` is
+  // expense-only, so an income category reaches no row through it — and the
+  // reducer applied `action.category` to every row the predicate named without
+  // ever asking whether the category could be there in the first place.
+  // Correcting a credit to Salary and tapping "yes, update all" therefore
+  // stamped `salary` onto every EXPENSE row carrying that merchant: exactly the
+  // crossing `overrideFitsDirection` was written to stop, on the one path that
+  // rewrites the ledger rather than reading it. Neither module is compiled by
+  // any suite, so this is the only place it can be asserted.
+  ok('a merchant rule is not applied across the direction it was chosen under',
+    /overrideFitsDirection\(action\.category, 'expense'\)/.test(branch),
+    'an income category cannot decide an expense row, and applyToExisting only moves expense rows');
+  ok('the entry sheet asks that same question before printing a count',
+    /overrideFitsDirection\(category, 'expense'\)/.test(sheet),
+    'a prompt offering "also update 5 entries" over a rule that moves none of them');
   ok('the count on the categorise list is the override predicate, not candidacy',
     /if \(!overrideAppliesTo\(t, key\)\) continue;/.test(uncat) &&
       /if \(t\.userEdited\) return false;/.test(uncat));

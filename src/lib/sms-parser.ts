@@ -3464,7 +3464,29 @@ export function parseSms(
       // Business with neither selected. The direction is decided once and
       // both the row and its category are asked the same question.
       const type = CREDIT_WORDS.test(raw) && !DEBIT_WORDS.test(raw) ? 'income' : 'expense';
-      const cat = categoryOf(payee, type, overrides, merchant);
+      // WHICH TEXT `categoryOf` IS ASKED ABOUT DEPENDS ON THE DIRECTION, and
+      // getting that wrong survived the fix above. The two branches of
+      // `categoryOf` read their argument for opposite things.
+      //
+      // On an EXPENSE it is a merchant-vocabulary lookup, and `payee` is the
+      // shop's own name — the whole point of this branch. Handing it the raw
+      // message instead would let bank boilerplate ("your ADCB CARD", "AVAILABLE
+      // BALANCE") decide the category of a utility bill.
+      //
+      // On INCOME it is the salary/refund/reversal vocabulary, and those words
+      // are never in the payee — they are in the message. Asked about "SEWA"
+      // alone, `categoryOf` finds no refund word, falls through to its
+      // named-payer branch and returns `business`: a refunded utility deposit,
+      // four figures in this market, booked as business REVENUE. Its own
+      // comment forbids exactly that ("calling a chargeback 'business income'
+      // is a claim about the user's tax position that nothing in the message
+      // supports"), and the branch could not see the words that would have
+      // stopped it.
+      //
+      // `raw` rather than `payee + raw`: `payee` is a capture group OUT of
+      // `raw`, so the message already contains it and concatenating adds
+      // nothing but a second copy for the regexes to scan.
+      const cat = categoryOf(type === 'income' ? raw : payee, type, overrides, merchant);
       return {
         kind: 'transaction',
         type,

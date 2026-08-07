@@ -13,6 +13,7 @@ import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } fro
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { getActiveMarket } from '@/lib/markets';
+import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import type { CategoryId, Transaction } from '@/lib/types';
@@ -82,10 +83,16 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     if (!transaction) return 0;
     const key = title.trim().toLowerCase();
     if (key.length < 3) return 0;
+    // 3. An income category moves nothing. `overrideAppliesTo` is expense-only
+    //    and `overrideFitsDirection` says an income category may not decide an
+    //    expense row, so the reducer now declines the bulk rewrite outright.
+    //    Without this the sheet offered "also update 5 entries" over a rule
+    //    that reaches none of them.
+    if (!overrideFitsDirection(category, 'expense')) return 0;
     return state.transactions.filter(
       (t) => t.id !== transaction.id && overrideAppliesTo(t, key),
     ).length;
-  }, [transaction, title, state.transactions]);
+  }, [transaction, title, category, state.transactions]);
 
   if (!transaction) return null;
 

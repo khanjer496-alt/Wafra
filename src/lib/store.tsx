@@ -28,7 +28,13 @@ import {
   SEED_BUDGETS,
 } from '@/lib/seed';
 import { applyHealPatch, healPatch } from '@/lib/heal';
-import { guessCategory, normalizeServiceName, parseSms, PARSER_VERSION } from '@/lib/sms-parser';
+import {
+  guessCategory,
+  normalizeServiceName,
+  overrideFitsDirection,
+  parseSms,
+  PARSER_VERSION,
+} from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
@@ -180,40 +186,122 @@ export function migratePersistedState(
   // transforms below because the retitle, the re-file and the reparse all read
   // this map.
   //
-  // AND IT MOVES ONLY ON EVIDENCE. `SERVICE_NAMES` matches on substrings, by
-  // design — that is how one shop stops arriving under six spellings — so
-  // "Shein Wholesale" canonicalises to Shein and "Anthropic Consulting" to
-  // Claude. Run over a TITLE that is exactly what happens today, one row at a
-  // time, and the row is what the user is looking at. Run over a RULE it would
-  // be silently deciding the category of every future row from a merchant the
-  // user never named: a hand-typed "Claudes Diner" pinned to Dining would
-  // quietly file their Claude subscription as Dining forever. Hand-typed
-  // titles are the gap, because `editTransaction` marks that row `userEdited`
-  // and the retitle map skips it, so the parser's canonicalisation never ran
-  // on the string this key came from.
+  // AND IT MOVES ONLY ON EVIDENCE ABOUT THIS KEY. `SERVICE_NAMES` matches on
+  // substrings, by design — that is how one shop stops arriving under six
+  // spellings — so "Shein Wholesale" canonicalises to Shein and "Claudes
+  // Diner" to Claude. Run over a TITLE that is what already happens, one row
+  // at a time, and the row is in front of the user. Run over a RULE it decides
+  // the category of every future row from a merchant the user never named.
   //
-  // So the rule only moves where the LEDGER shows the parser producing that
-  // merchant: some parser-owned row is titled with the old key (it is about to
-  // be renamed below) or already carries the canonical name (it was renamed by
-  // an earlier launch, which is the state a damaged ledger is in). Both are the
-  // cases this exists for; a key with neither is a name only the user has ever
-  // written, and nothing licenses moving it.
+  // THE EVIDENCE HAS TO BE ABOUT THE KEY, WHICH IS THE MISTAKE THIS BLOCK MADE
+  // ONCE. It used to accept "some parser-owned row is titled with the CANONICAL
+  // name" as licence to move `key` there. That is not evidence about `key` at
+  // all — it says a genuine Claude row exists, which is the normal case, not a
+  // coincidence. So any hand-typed key containing a `SERVICE_NAMES` substring
+  // was re-keyed onto the canonical name as soon as the ledger held a real row
+  // under it: "claudes diner" → Dining silently re-filed the Claude
+  // subscription, removed it from the categorise screen ("already asked"),
+  // took every future charge, and had `parserCoverage` report the user had
+  // answered for a merchant they never pinned.
+  //
+  // Two kinds of evidence connect `key` to the canonical name, and nothing
+  // else does:
+  //
+  //  1. A parser-owned row is titled `key` RIGHT NOW. The parser produced that
+  //     string, and the retitle below is about to rename it. Direct.
+  //  2. The rename already happened in an earlier launch, and a parser-owned
+  //     row titled with the canonical name still carries a `raw` message
+  //     containing `key`. The message is where the old descriptor came from,
+  //     so this links the two strings rather than merely observing both.
+  //
+  // And a refusal that overrides both: if ANY row carrying `key` is not the
+  // parser's — hand-entered, `userEdited`, `titleEdited` — the key is a name
+  // the user has written and nothing licenses moving it. `titleEdited` alone
+  // cannot carry this: it is a new field, so a row retitled by hand before it
+  // existed carries only `userEdited`, which is exactly the shape of the case
+  // this refuses.
+  //
+  // WHAT IS STILL NOT REPAIRED, stated because the last version of this
+  // comment claimed more than it did. A ledger already retitled by a release
+  // between a2838e4 and this one, whose rows heal then stripped of `raw` (or
+  // that never had `raw`, on iOS), has no surviving link between the old key
+  // and the new title. Tier 2 finds nothing and the pin stays orphaned: the
+  // row keeps whatever category it has and future rows from that shop miss the
+  // rule. That is a real loss, and it is the lesser one — the alternative is a
+  // rule the user never set, applied silently and permanently to every future
+  // charge. A refusal degrades to "the app asks again", which is visible; an
+  // invented pin is not. Nothing sound can be reconstructed from a link that
+  // two earlier passes destroyed, and a breadcrumb written from here forward
+  // cannot reach backwards into it — see the report on 04d6d22.
+  //
+  // ONE CANONICAL NAME, TWO SPELLINGS, TWO ANSWERS. "One shop pinned under six
+  // spellings" is the premise of this whole block, so two keys landing on the
+  // same canonical name is expected input, not a corner. Iterating and taking
+  // the first writer let JSON key order decide it, which is the order they were
+  // first pinned — the OLDER answer winning. There is no timestamp on an
+  // override to order by, and a row's `date` is when the shop was visited, not
+  // when the user answered, so it cannot stand in for one. So: if the competing
+  // keys agree, move the agreed category; if they disagree, move nothing and
+  // leave both old keys working. The merchant then has no rule under its new
+  // name, reappears on the categorise screen, and the user is asked once —
+  // which is the only thing here that actually knows which answer they meant.
   if (parsed.merchantOverrides) {
-    const parserTitles = new Set(
-      (parsed.transactions ?? [])
-        .filter((t) => t.source === 'sms' && !t.userEdited)
-        .map((t) => t.title.trim().toLowerCase()),
-    );
-    const rekeyed = { ...parsed.merchantOverrides };
+    const rows = parsed.transactions ?? [];
+    const titleOf = (t: Transaction) => t.title.trim().toLowerCase();
+    const parserOwned = (t: Transaction) =>
+      t.source === 'sms' && !t.userEdited && !t.titleEdited;
+
+    // EVERY key that would land on this canonical name votes, whether or not
+    // the ledger has evidence for it. A key with no rows left behind it is not
+    // a key that has been ruled out — it is one nothing is known about, and
+    // dropping it from the vote for lack of evidence hands the canonical name
+    // to whichever competing key still has rows, which is "the older answer
+    // wins" again in a narrower form. Evidence decides whether the group moves
+    // AT ALL; agreement decides what it moves.
+    const claims = new Map<string, { categories: Set<CategoryId>; evidenced: boolean }>();
     for (const [key, category] of Object.entries(parsed.merchantOverrides)) {
       const canonical = normalizeServiceName(key);
       if (!canonical) continue;
       const canonicalKey = canonical.trim().toLowerCase();
-      if (canonicalKey === key || rekeyed[canonicalKey] !== undefined) continue;
-      if (!parserTitles.has(key) && !parserTitles.has(canonicalKey)) continue;
-      rekeyed[canonicalKey] = category;
+      if (canonicalKey === key) continue;
+      // An answer the user gave under the canonical name themselves is the
+      // most recent thing they said about it, and outranks any re-key.
+      if (parsed.merchantOverrides[canonicalKey] !== undefined) continue;
+
+      const under = rows.filter((t) => titleOf(t) === key);
+      const evidenced =
+        // The user has written this name, so it is theirs however it
+        // canonicalises. Not evidence — and it still votes, because refusing
+        // is cheap and a rule the user never set is not.
+        !under.some((t) => !parserOwned(t)) &&
+        (under.length > 0 ||
+          rows.some(
+            (t) =>
+              parserOwned(t) &&
+              titleOf(t) === canonicalKey &&
+              typeof t.raw === 'string' &&
+              t.raw.toLowerCase().includes(key),
+          ));
+
+      const claim = claims.get(canonicalKey);
+      if (claim) {
+        claim.categories.add(category);
+        claim.evidenced ||= evidenced;
+      } else {
+        claims.set(canonicalKey, { categories: new Set([category]), evidenced });
+      }
     }
-    parsed.merchantOverrides = rekeyed;
+
+    const settled = [...claims]
+      .filter(([, c]) => c.evidenced && c.categories.size === 1)
+      .map(([canonicalKey, c]) => [canonicalKey, c.categories] as const);
+    if (settled.length > 0) {
+      const rekeyed = { ...parsed.merchantOverrides };
+      for (const [canonicalKey, cats] of settled) {
+        rekeyed[canonicalKey] = [...cats][0];
+      }
+      parsed.merchantOverrides = rekeyed;
+    }
   }
 
   if (parsed.transactions) {
@@ -643,7 +731,17 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setMerchantOverride': {
       const key = action.merchant.trim().toLowerCase();
       const merchantOverrides = { ...state.merchantOverrides, [key]: action.category };
-      const transactions = action.applyToExisting
+      // `overrideAppliesTo` is expense-only, and an income category cannot
+      // decide an expense row — so an income rule moves nothing, and saying so
+      // here is what stops it moving everything. Correcting a credit to Salary
+      // and tapping "yes, update all" wrote `salary` onto every EXPENSE row
+      // carrying that merchant: the mirror of the crossing `overrideFitsDirection`
+      // was added to stop, on the one path that writes rather than reads.
+      // `sameMerchantCount` in entry-detail-sheet.tsx makes the same check, so
+      // the number on the button and the rows this moves stay the same set.
+      const reaches = overrideFitsDirection(action.category, 'expense');
+      const transactions =
+        action.applyToExisting && reaches
         ? state.transactions.map((t) =>
             // `overrideAppliesTo` is the ONE definition of this rule's blast
             // radius. The screen that offers the tap prints a count computed
