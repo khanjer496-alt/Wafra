@@ -23,10 +23,15 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
   for (const a of state.accounts) {
     // Unknown bank is not a shared bank. Two unattributed rows with the same
     // four digits could belong to entirely different institutions.
-    if (a.kind !== 'card' || !a.last4 || !a.bankName) continue;
+    //
+    // Bank accounts group too, keyed apart from cards. They were excluded
+    // outright, so a duplicated "FAB Account •0004" survived every pass — and
+    // netWorthFils sums each non-archived account's snapshot, so one duplicated
+    // balance was counted twice in the headline figure on Wallet.
+    if ((a.kind !== 'card' && a.kind !== 'bank') || !a.last4 || !a.bankName) continue;
     const bankIdentity = bankIdentityForName(a.bankName);
     if (!bankIdentity) continue;
-    const key = `${bankIdentity}|${a.last4}`;
+    const key = `${a.kind}|${bankIdentity}|${a.last4}`;
     groups.set(key, [...(groups.get(key) ?? []), a]);
   }
   const dupes = [...groups.values()].filter((g) => g.length > 1);
@@ -77,16 +82,62 @@ export function mergeDuplicateAccounts(state: AppState): AppState {
   /** old account id → surviving account id */
   const remap = new Map<string, string>();
   const dropped = new Set<string>();
+  /**
+   * Identity a real card or account cannot share with a different one: same
+   * bank, same last four, same kind, same card type, same displayed name.
+   * Two distinct cards collide on last4 only by accident, and even then they
+   * would carry different names — so rows agreeing on every one of these are
+   * the same product recorded twice, not two products.
+   */
+  const identityOf = (a: Account): string =>
+    [a.kind, a.cardType ?? '-', a.last4 ?? '-', a.bankName ?? '-', a.name.trim()].join('|');
+
   for (const group of dupes) {
     const substantive = group.filter((a) => !isEmptyArtifact(a));
-    // More than one real row is ambiguous. Nothing in a four-digit suffix can
-    // choose between them safely, including where a third empty row's hint
-    // should point, so leave the entire group alone.
-    if (substantive.length !== 1) continue;
-    const keep = substantive[0];
+
+    // The ordinary case: one real row, the rest are empty artifacts.
+    if (substantive.length === 1) {
+      const keep = substantive[0];
+      for (const artifact of group) {
+        if (artifact.id === keep.id || !isEmptyArtifact(artifact)) continue;
+        remap.set(artifact.id, keep.id);
+        dropped.add(artifact.id);
+      }
+      continue;
+    }
+
+    // Several rows look real. That is normally ambiguous and left alone — but
+    // an account list can be duplicated wholesale, and then BOTH copies carry
+    // a balance snapshot, so neither is an empty artifact and the group was
+    // skipped forever. One user's Wallet showed "FAB Account •0004  AED
+    // 423,545" twice and a net worth inflated by the second copy.
+    //
+    // Rows identical on every identifying field are folded together. The
+    // survivor is the one the bank spoke to most recently, so the newest
+    // quoted balance is the one that stands.
+    const byIdentity = new Map<string, Account[]>();
+    for (const a of substantive) {
+      const key = identityOf(a);
+      byIdentity.set(key, [...(byIdentity.get(key) ?? []), a]);
+    }
+    for (const clones of byIdentity.values()) {
+      if (clones.length < 2) continue;
+      const keep = [...clones].sort(
+        (a, b) => (b.snapshotTs ?? 0) - (a.snapshotTs ?? 0) || a.id.localeCompare(b.id),
+      )[0];
+      for (const clone of clones) {
+        if (clone.id === keep.id) continue;
+        remap.set(clone.id, keep.id);
+        dropped.add(clone.id);
+      }
+    }
+    // Empty artifacts alongside an unambiguous survivor still fold in.
+    const survivors = substantive.filter((a) => !dropped.has(a.id));
+    if (survivors.length !== 1) continue;
     for (const artifact of group) {
-      if (artifact.id === keep.id || !isEmptyArtifact(artifact)) continue;
-      remap.set(artifact.id, keep.id);
+      if (artifact.id === survivors[0].id || dropped.has(artifact.id)) continue;
+      if (!isEmptyArtifact(artifact)) continue;
+      remap.set(artifact.id, survivors[0].id);
       dropped.add(artifact.id);
     }
   }

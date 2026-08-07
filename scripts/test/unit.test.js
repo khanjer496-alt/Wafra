@@ -1384,6 +1384,63 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const twice = acc.mergeDuplicateAccounts(merged);
   ok('artifact cleanup: running it again changes nothing', twice === merged);
 
+  // ── A duplicated account list ──
+  //
+  // From a real diagnostic: 72 card rows, 47 distinct, 25 exact duplicates —
+  // and the Wallet showed "FAB Account •0004  AED 423,545" twice, with net
+  // worth inflated by the second copy. Both copies carried a balance
+  // snapshot, so neither was an empty artifact and the group was skipped.
+  const clone = (over) => ({
+    id: 'x', name: 'FAB Account •0004', kind: 'bank', last4: '0004',
+    bankName: 'FAB', openingFils: 0, color: '#111',
+    snapshotFils: 42354500, snapshotKind: 'balance', snapshotTs: 1000, ...over,
+  });
+  const dupBank = {
+    accounts: [clone({ id: 'bank-old' }), clone({ id: 'bank-new', snapshotTs: 2000 })],
+    transactions: [
+      { id: 't1', accountId: 'bank-old', date: '2026-08-01', amountFils: 100,
+        type: 'expense', category: 'other', title: 'x' },
+    ],
+    cardDues: [], bills: [], accountHints: { '0004': 'bank-old' },
+  };
+  const bankMerged = acc.mergeDuplicateAccounts(dupBank);
+  ok('duplicate bank accounts are merged (they were skipped entirely before)',
+    bankMerged.accounts.length === 1, bankMerged.accounts);
+  ok('the survivor is the one the bank spoke to most recently',
+    bankMerged.accounts[0].id === 'bank-new', bankMerged.accounts[0]);
+  ok('a duplicated balance is no longer counted twice',
+    bankMerged.accounts.reduce((n, a) => n + (a.snapshotFils ?? 0), 0) === 42354500);
+  ok('transactions follow the survivor rather than dangling',
+    bankMerged.transactions[0].accountId === 'bank-new');
+  ok('hints follow the survivor too', bankMerged.accountHints['0004'] === 'bank-new');
+  ok('merging a duplicated list is idempotent',
+    acc.mergeDuplicateAccounts(bankMerged) === bankMerged);
+
+  // Same shape for cards, where both copies are substantive.
+  const cardClone = (over) => ({
+    id: 'c', name: 'Liv Debit Card •8783', kind: 'card', cardType: 'debit',
+    last4: '8783', bankName: 'Liv', openingFils: 0, color: '#222',
+    snapshotFils: 900000, snapshotKind: 'balance', snapshotTs: 5, ...over,
+  });
+  const dupCard = {
+    accounts: [cardClone({ id: 'card-a' }), cardClone({ id: 'card-b', snapshotTs: 9 })],
+    transactions: [], cardDues: [], bills: [], accountHints: {},
+  };
+  ok('an exactly duplicated card is folded together as well',
+    acc.mergeDuplicateAccounts(dupCard).accounts.length === 1);
+
+  // The safety rule this must NOT break: two genuinely different cards that
+  // merely collide on bank + last four stay separate.
+  const twoReal = {
+    accounts: [
+      cardClone({ id: 'real-a', name: 'Liv Debit Card •8783' }),
+      cardClone({ id: 'real-b', name: 'Liv Salary Card', cardType: 'credit' }),
+    ],
+    transactions: [], cardDues: [], bills: [], accountHints: {},
+  };
+  ok('two genuinely different cards sharing a suffix are still left alone',
+    acc.mergeDuplicateAccounts(twoReal).accounts.length === 2);
+
   const meaningfulVariants = [
     { openingFils: 1 },
     { creditLimitFils: 1 },
