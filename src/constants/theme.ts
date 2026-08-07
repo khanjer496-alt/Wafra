@@ -30,9 +30,20 @@ export const Colors = {
     primarySoft: '#E4EDE8',
     primaryBorder: '#C3D8CD',
     onPrimary: '#F7FBF8',
-    income: '#2E8A63',
-    expense: '#B4503C', // clay red, not pink
-    warning: '#A07B2A',
+    // These three carry meaning as TEXT — "+2,400", "over by AED 431", "3 days
+    // late" — so they are held to WCAG AA (4.5:1) on paper, not the 3:1 that
+    // would be enough for a bar or a dot. The lighter values they replaced
+    // measured 3.77, 4.48 and 3.47:1 respectively.
+    income: '#1E7355', // 5.12:1 on paper
+    expense: '#A3402D', // 5.59:1 — clay red, not pink
+    warning: '#7E5F14', // 5.27:1
+    // …and these are the same three as INK: bars, dots, chart fills. WCAG asks
+    // 3:1 of a graphic rather than 4.5:1, and the text-grade values go muddy
+    // at bar size — a near-limit bar in #7E5F14 reads as olive sludge. These
+    // are the pre-AA values, which measure 3.77, 4.48 and 3.47:1.
+    incomeGraphic: '#2E8A63',
+    expenseGraphic: '#B4503C',
+    warningGraphic: '#A07B2A',
     track: '#E3DED2',
     expenseSoftBg: '#FBF3F0',
     expenseSoftBorder: '#E7D3CD',
@@ -44,21 +55,26 @@ export const Colors = {
   dark: {
     text: '#F2EFE8',
     textSecondary: '#A9A29A', // 7.41:1
-    textTertiary: '#8C857A', // 5.12:1 on bg
+    textTertiary: '#9B948A',
     background: '#14120F', // warm charcoal. never #070D0B
     backgroundElement: '#1C1A16',
     backgroundSelected: '#232019',
     card: '#1C1A16',
-    cardBorder: '#302C25',
-    cardBorderStrong: '#3A352E',
+    cardBorder: '#3B362E',
+    cardBorderStrong: '#4A443A',
     primary: '#57B894',
     primarySoft: '#1E3A31',
-    primaryBorder: '#302C25',
+    primaryBorder: '#3B362E',
     onPrimary: '#0F2C23',
     income: '#6BC79E',
     expense: '#E0836B',
     warning: '#D9AE62',
-    track: '#302C25',
+    // Dark mode already clears AA as text (9.16, 6.79 and 9.06:1), so the
+    // graphic pair is the same colour — the split exists for light mode.
+    incomeGraphic: '#6BC79E',
+    expenseGraphic: '#E0836B',
+    warningGraphic: '#D9AE62',
+    track: '#3B362E',
     expenseSoftBg: '#2A1D18',
     expenseSoftBorder: '#4A322A',
     /** @deprecated */

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, FadeOutDown, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -46,6 +46,20 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     if (timer.current) clearTimeout(timer.current);
     setToast({ message, actions });
     timer.current = setTimeout(() => setToast(null), durationMs);
+
+    // A toast carrying Undo is a deadline. Six seconds is comfortable when you
+    // can see it land; it is not enough to hear it read out, swipe to the
+    // button and press it. Extend the deadline once we know a screen reader is
+    // on — the check is async, so the timer above starts immediately and is
+    // replaced rather than waited for.
+    AccessibilityInfo.isScreenReaderEnabled()
+      .then((on) => {
+        AccessibilityInfo.announceForAccessibility(message);
+        if (!on) return;
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setToast(null), durationMs * 3);
+      })
+      .catch(() => {});
   }, []);
 
   const dismiss = useCallback(() => {
@@ -62,8 +76,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           exiting={FadeOutDown.duration(200)}
           // Clears the floating tab bar rather than sitting under it.
           style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) + 84 }]}
+          accessibilityLiveRegion="polite"
           pointerEvents="box-none">
-          <View style={styles.toast}>
+          {/* The fill is a near-black by design, which in the dark theme is
+              also the page. Floating over a list it read as loose text lying on
+              top of a row rather than a surface above it, so it carries its own
+              hairline and a heavier shadow — the two things that say "this is
+              in front" when the fill cannot. */}
+          <View
+            style={[
+              styles.toast,
+              { borderColor: theme.cardBorderStrong, shadowColor: '#000' },
+            ]}>
             <Icon name="check" size={16} color={theme.primary} strokeWidth={2.1} />
             <ThemedText type="small" style={styles.message} numberOfLines={2}>
               {toast.message}
@@ -104,13 +128,13 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.three,
     backgroundColor: '#16130F',
     borderRadius: 13,
+    borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three - 2,
-    shadowColor: '#16130F',
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 8,
+    shadowOpacity: 0.4,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
   message: {
     flexShrink: 1,

@@ -9,6 +9,10 @@ export type CategoryId =
   | 'rent'
   | 'shopping'
   | 'health'
+  /** Salons, barbers, spa, nails, laundry — spend on yourself, not on a shop. */
+  | 'personal-care'
+  /** Cleaning, maintenance, the maid, moving, pest control — work on the home. */
+  | 'home-services'
   | 'education'
   | 'travel'
   | 'entertainment'
@@ -16,6 +20,8 @@ export type CategoryId =
   | 'government'
   /** Loan and finance instalments, usually paid by direct debit to a bank. */
   | 'loan'
+  /** Money returned for an earlier purchase: an offset, never revenue. */
+  | 'refund'
   | 'salary'
   | 'business'
   | 'other';
@@ -50,6 +56,16 @@ export interface Account {
   snapshotTs?: number;
   /** Hidden from lists (expired/unused card). Data stays; a new charge keeps it hidden until unhidden. */
   archived?: boolean;
+  /**
+   * The account id this card replaced, when the bank reissued it with new
+   * digits. Set once the user confirms the link, so the app stops asking and
+   * can still show where the history came from.
+   *
+   * Also set to the row's OWN id to mean "asked and answered — these are
+   * different cards", which is the only way to stop offering a merge the
+   * user has already declined.
+   */
+  renewedFrom?: string;
 }
 
 export interface Transaction {
@@ -57,12 +73,34 @@ export interface Transaction {
   type: TransactionType;
   /** Amount in fils, always positive. */
   amountFils: number;
+  /** Original bank-alert amount when the charge was denominated outside AED. */
+  originalAmountMinor?: number;
+  /** ISO 4217 code for `originalAmountMinor` (for example USD or EUR). */
+  originalCurrency?: string;
+  /** AED units per one unit of the original currency. */
+  fxRate?: number;
+  /** Effective date of a fetched reference rate. */
+  fxRateDate?: string;
+  /**
+   * `bank`: the alert included its own AED equivalent; `reference`: a dated
+   * public rate was fetched; `fallback`: parser used its offline approximation.
+   */
+  fxSource?: 'bank' | 'reference' | 'fallback';
   category: CategoryId;
   accountId: string;
   title: string;
   note?: string;
   /** ISO date string, e.g. 2026-07-18 */
   date: string;
+  /**
+   * When the bank said it happened, to the minute (epoch ms).
+   *
+   * `date` alone cannot answer "which of these two coffees was this?", and a
+   * bank SMS always carries a clock. Optional because rows imported before
+   * this existed have none — `transactionTime` recovers those from the SMS
+   * fingerprint, which has always had the timestamp baked into it.
+   */
+  ts?: number;
   /** Where this entry came from. Undefined = manual (pre-v2 data). */
   source?: 'sms' | 'manual';
   /**
@@ -70,6 +108,21 @@ export interface Transaction {
    * titles/accounts, so re-scans dedupe on this instead of parsed fields.
    */
   smsKey?: string;
+  /**
+   * Captured from a bank app's push notification rather than an SMS.
+   *
+   * A notification and the SMS about the same charge are a race, and the
+   * notification is the poorer read — different wording, often truncated. The
+   * flag lets the SMS replace this row when it arrives instead of landing
+   * beside it as a second charge.
+   */
+  viaPush?: boolean;
+  /**
+   * A card settlement can generate two bank alerts: money leaving the current
+   * account and the card acknowledging receipt. Keeping the side lets import
+   * collapse that pair without collapsing two genuine equal payments.
+   */
+  cardPaymentSide?: 'debit' | 'receipt';
   /** Credit-card payments etc — excluded from spending/income analytics. */
   isTransfer?: boolean;
   /**
@@ -85,6 +138,24 @@ export interface Transaction {
    * Settings → Improve accuracy. Never leaves the device unless shared.
    */
   raw?: string;
+  /**
+   * One charge that belongs to several categories — the Carrefour receipt that
+   * is mostly groceries and partly a phone charger. The parts must sum to
+   * amountFils exactly; see src/lib/splits.ts, which owns that invariant and
+   * is the only thing analytics should read categories through.
+   *
+   * `category` stays populated on a split row and holds the largest part, so
+   * every reader that has not been taught about splits still shows something
+   * defensible rather than nothing.
+   */
+  splits?: TransactionSplit[];
+}
+
+export interface TransactionSplit {
+  category: CategoryId;
+  /** Fils, always positive. The parts sum to the parent's amountFils. */
+  amountFils: number;
+  note?: string;
 }
 
 export interface Budget {
@@ -114,6 +185,12 @@ export interface CardDue {
   accountId: string;
   totalDueFils: number;
   minDueFils: number;
+  /**
+   * True when no minimum was stated in the SMS and `minDueFils` is a fallback
+   * estimate. The bank's terms decide the real minimum; without one quoted,
+   * the app must not tell the user it knows what theirs is.
+   */
+  minDueEstimated?: boolean;
   /** ISO date the payment is due by. */
   dueDate: string;
   /** Fils paid toward this due so far. */
@@ -146,18 +223,100 @@ export interface AppState {
   notSubscriptions: string[];
   /** Epoch ms of the newest SMS already scanned. */
   lastScanTs: number;
+  /**
+   * The parser version the stored rows were read with. When it falls behind
+   * `PARSER_VERSION` the next scan re-reads the whole inbox so the improvements
+   * reach data already imported. Absent on states written before this existed,
+   * which correctly reads as "older than any version".
+   */
+  parserVersion?: number;
   /** Whether the first-run onboarding has completed. */
   onboarded: boolean;
   userName: string;
   appLock: boolean;
-  /** Day of month the reporting month begins (salary day). 1 = calendar months. */
-  monthStartDay: number;
   /** Wafra Pro entitlement (Play Billing purchase, or founder unlock on side-loads). */
   pro: boolean;
+  /**
+   * Strict local-only posture. Enabling it removes every retained diagnostic
+   * message body and prevents future imports from keeping raw text.
+   *
+   * Android capture is already local. On iOS the settings flow also disconnects
+   * the Shortcuts relay, because an HTTP Shortcut cannot be called "local-only".
+   */
+  privateMode: boolean;
   /** Epoch ms when the free Pro trial started (first launch). */
   trialStartTs: number;
   /** Market pack id (country). Auto-detected on first launch; user-changeable. */
   marketId: string;
   /** UI language ('en' | 'ar'). Auto-detected on first launch. */
   language: string;
+  /** Palette choice: 'system' follows the OS, 'light'/'dark' pin it. */
+  themePreference: string;
+}
+
+/**
+ * A correction a rescan makes to a row already imported. Only the fields that
+ * genuinely changed are present; an absent field is left alone.
+ */
+export interface TxHealUpdate {
+  id: string;
+  title?: string;
+  category?: CategoryId;
+  /**
+   * The DIRECTION, when a rescan proves the old one wrong.
+   *
+   * A card payment imported before the parser recognized its wording landed as
+   * an expense carrying a transfer hint. Healing set the hint and stopped
+   * there, so the row stayed an expense — and `allocatePayments` credits
+   * income-side transfers only, which meant a card the user had actually paid
+   * stayed open forever. The message can never be re-imported either, because
+   * its fingerprint is already known. Only a direction correction reaches it.
+   */
+  type?: TransactionType;
+  isTransfer?: boolean;
+  /** Authoritative account/card learned from the fuller SMS after a push. */
+  accountId?: string;
+  /** Replace the push clock/fingerprint with the bank SMS identity. */
+  ts?: number;
+  smsKey?: string;
+  viaPush?: boolean;
+  cardPaymentSide?: 'debit' | 'receipt';
+  /**
+   * The stored source text, or `null` to CLEAR it.
+   *
+   * Clearing matters as much as setting. Source text is kept only so the
+   * accuracy report can show formats the parser cannot read; once a rescan
+   * reads one properly, leaving the text behind means the report goes on
+   * listing a format that now works. Without a clear, that count can only ever
+   * grow, and every parser improvement makes the report look worse.
+   */
+  raw?: string | null;
+  /** The message no longer parses as a transaction (e.g. it's a statement reminder) — drop the row. */
+  remove?: boolean;
+}
+
+/**
+ * One import scan, as a single applyable batch.
+ *
+ * Lives here rather than in store.tsx because the code that BUILDS it must be
+ * testable, and store.tsx is a React module the test harness cannot transpile.
+ */
+export interface ImportBatchInput {
+  transactions: Omit<Transaction, 'id'>[];
+  newAccounts: Omit<Account, 'id'>[];
+  /** last4 → index into newAccounts OR existing accountId. */
+  newHints: Record<string, string>;
+  newDues: Omit<CardDue, 'id'>[];
+  /** accountRef → newest bank-quoted balance/limit figure from the scan. */
+  snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
+  /** accountRef → bank name learned from the SMS sender (backfill only). */
+  bankNames: Record<string, string>;
+  /**
+   * accountRef → strongest card type learned in this scan.
+   * Credit is monotonic: a statement/payment can upgrade the parser's debit
+   * fallback, while a later debit-worded purchase never downgrades it.
+   */
+  cardTypes?: Record<string, 'credit' | 'debit'>;
+  lastScanTs: number;
+  updates?: TxHealUpdate[];
 }

@@ -5,13 +5,19 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { daysInMonth, formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
+import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
+import { formatAED, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
-import { inPeriod } from '@/lib/period';
+import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
+import { alignEnd, t, tf } from '@/lib/i18n';
+
+/** How many merchants the sheet names before pooling the rest. */
+const MERCHANT_ROWS = 4;
 
 interface LimitSheetProps {
   /** The category being edited, or null to create a new limit. */
@@ -32,6 +38,7 @@ interface LimitSheetProps {
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const theme = useTheme();
+  const keyboardHeight = useKeyboardHeight();
   const { state, upsertBudget, deleteBudget } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
@@ -49,27 +56,73 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, category]);
 
-  const spent = useMemo(
-    () => (picked ? spentInMonthForCategory(state.transactions, key, picked) : 0),
-    [state.transactions, key, picked],
+  /**
+   * The same two exclusions Flow's budget bar applies.
+   *
+   * Without them this sheet answered a different question from the screen that
+   * opened it: Flow's bar drops hidden accounts and both halves of a move
+   * between the user's own accounts, and this sheet counted them. One AED
+   * 200,000 sweep between two of their own accounts is a category that reads
+   * "0 spent" on Flow and "200,000 spent, limit exceeded" in the editor for
+   * that very limit — and the three-month average it then suggests is built
+   * from the same inflated months.
+   */
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
   );
 
-  /** What this category has cost over the three months ending in `key`. */
+  const spent = useMemo(
+    () =>
+      picked
+        ? spentInMonthForCategory(state.transactions, key, picked, liveAccounts, internal)
+        : 0,
+    [state.transactions, key, picked, liveAccounts, internal],
+  );
+
+  /**
+   * What this category has cost over the three COMPLETE months before `key`.
+   *
+   * It used to average the current month in and still divide by three. On the
+   * 2nd of the month that is two days of spending dragging a three-month
+   * average down by a third: dining steady at AED 2,000 a month suggested a
+   * limit of 1,400, and the chip that says "your 3-month average" was offering
+   * a number the user had never once spent under.
+   */
   const threeMonthAverage = useMemo(() => {
     if (!picked) return 0;
     let total = 0;
-    for (let i = 0; i < 3; i++) {
-      total += spentInMonthForCategory(state.transactions, shiftMonthKey(key, -i), picked);
+    for (let i = 1; i <= 3; i++) {
+      total += spentInMonthForCategory(
+        state.transactions,
+        shiftMonthKey(key, -i),
+        picked,
+        liveAccounts,
+        internal,
+      );
     }
     return Math.round(total / 3);
-  }, [state.transactions, key, picked]);
+  }, [state.transactions, key, picked, liveAccounts, internal]);
 
-  /** Who the money went to, so the number has something behind it. */
-  const merchants = useMemo(() => {
-    if (!picked) return [];
+  /**
+   * Who the money went to, so the number has something behind it.
+   *
+   * Four rows, plus the remainder. The four biggest were shown on their own
+   * under a "Spent this month" figure that covers every merchant in the
+   * category, so with a fifth grocer the column simply did not add up: AED
+   * 2,289 spent, four rows totalling 2,074, and nothing anywhere to say where
+   * the other 215 went. Home's "leaving soon" list had the identical bug and
+   * takes the identical cure — keep the total honest and state the rest.
+   */
+  const { merchants, restFils, restCount } = useMemo(() => {
+    if (!picked) return { merchants: [], restFils: 0, restCount: 0 };
     const map = new Map<string, { title: string; totalFils: number; count: number }>();
     for (const t of state.transactions) {
-      if (t.type !== 'expense' || t.isTransfer) continue;
+      // Same filter as `spent` above, or the rows listed here do not add up to
+      // the total printed over them — the exact defect the comment above this
+      // block describes, reintroduced through a different door.
+      if (!isSpending(t, liveAccounts, internal)) continue;
       if (t.category !== picked || !inPeriod(t.date, key)) continue;
       const k = t.title.trim().toLowerCase();
       const cur = map.get(k);
@@ -80,27 +133,47 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
         map.set(k, { title: t.title, totalFils: t.amountFils, count: 1 });
       }
     }
-    return [...map.values()].sort((a, b) => b.totalFils - a.totalFils).slice(0, 4);
-  }, [state.transactions, key, picked]);
+    const all = [...map.values()].sort((a, b) => b.totalFils - a.totalFils);
+    const shown = all.slice(0, MERCHANT_ROWS);
+    const rest = all.slice(MERCHANT_ROWS);
+    return {
+      merchants: shown,
+      restFils: rest.reduce((s, m) => s + m.totalFils, 0),
+      restCount: rest.length,
+    };
+  }, [state.transactions, key, picked, liveAccounts, internal]);
 
   const limitFils = parseAmountToFils(text);
   const ratio = limitFils ? spent / limitFils : 0;
   const over = ratio >= 1;
-  const daysLeft = Math.max(0, daysInMonth(key) - new Date().getDate());
+  // Only a live month has days left. `key` is whatever month Flow was
+  // showing, so on a March period in July this counted down inside a month
+  // that ended four months ago — "AED 400 left with 5 days still to go."
+  const now = useMemo(() => new Date(), []);
+  const live = isCurrentMonth({ mode: 'month', key }, now);
+  const daysLeft = live
+    ? Math.max(0, daysInPeriod({ mode: 'month', key }, now) - elapsedDays({ mode: 'month', key }, now, state.transactions))
+    : 0;
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];
     if (threeMonthAverage > 0) {
       out.push({
         fils: roundToHundred(threeMonthAverage),
-        note: 'your 3-month average',
+        note: t('threeMonthAverageNote'),
         highlight: true,
       });
     }
-    if (spent > 0) out.push({ fils: roundToHundred(spent * 0.9), note: '10% under this month', highlight: false });
-    for (const fils of [50_000, 100_000, 200_000]) {
-      if (!out.some((s) => s.fils === fils)) out.push({ fils, note: '', highlight: false });
-    }
+    // The fixed suggestions were de-duplicated against the computed ones and
+    // the computed ones were not de-duplicated against each other, so a month
+    // running close to its own three-month average offered "AED 2,100 · your
+    // 3-month average" beside "AED 2,100 · 10% under this month" — the same
+    // number twice, under two explanations that cannot both be the reason.
+    const add = (fils: number, note: string, highlight = false) => {
+      if (!out.some((s) => s.fils === fils)) out.push({ fils, note, highlight });
+    };
+    if (spent > 0) add(roundToHundred(spent * 0.9), t('tenPercentUnderMonth'));
+    for (const fils of [50_000, 100_000, 200_000]) add(fils, '');
     return out.slice(0, 4);
   }, [threeMonthAverage, spent]);
 
@@ -122,15 +195,20 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             styles.sheet,
             Elevation,
             { backgroundColor: theme.card, borderColor: theme.cardBorder },
+            // Its own Modal, so the same rule applies: nothing resizes it for
+            // the keyboard, and the limit amount is typed at the bottom.
+            { marginBottom: keyboardHeight },
           ]}
           onPress={() => {}}>
           <View style={styles.header}>
             <ThemedText type="micro" themeColor="textTertiary">
-              {picked ? `${getCategory(picked).label} limit` : 'New limit'}
+              {picked
+                ? tf('categoryLimit', { category: categoryLabel(getCategory(picked)) })
+                : t('newLimitTitle')}
             </ThemedText>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Close"
+              accessibilityLabel={t('close')}
               onPress={onClose}
               hitSlop={10}>
               <Icon name="close" size={18} color={theme.textSecondary} />
@@ -158,7 +236,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                         },
                       ]}>
                       <ThemedText type="meta" style={{ color: on ? theme.background : theme.text }}>
-                        {c.label}
+                        {categoryLabel(c)}
                       </ThemedText>
                     </Pressable>
                   );
@@ -170,7 +248,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
               <View style={styles.current}>
                 <View style={styles.currentTop}>
                   <ThemedText type="meta" themeColor="textSecondary">
-                    Spent this month
+                    {t('spentThisMonth')}
                   </ThemedText>
                   <ThemedText
                     type="smallBold"
@@ -188,23 +266,23 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     style={{
                       width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
                       height: '100%',
-                      backgroundColor: over ? theme.expense : theme.primary,
+                      backgroundColor: over ? theme.expenseGraphic : theme.primary,
                       borderRadius: 4,
                     }}
                   />
                 </View>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {over
-                    ? `Over by ${formatAED(spent - limitFils, { decimals: false })}`
-                    : `${formatAED(limitFils - spent, { decimals: false })} left`}
-                  {daysLeft > 0 ? ` with ${daysLeft} day${daysLeft === 1 ? '' : 's'} still to go.` : '.'}
+                    ? tf('limitOverBy', { amount: formatAED(spent - limitFils, { decimals: false }) })
+                    : tf('limitAmountLeft', { amount: formatAED(limitFils - spent, { decimals: false }) })}
+                  {daysLeft > 0 ? tf('timeStillToGo', { days: daysLeft, s: daysLeft === 1 ? '' : 's' }) : '.'}
                 </ThemedText>
               </View>
             )}
 
             <View style={styles.amountBlock}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Monthly limit
+                {t('monthlyLimit')}
               </ThemedText>
               <View style={[styles.amountRow, { borderBottomColor: theme.text }]}>
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
@@ -250,7 +328,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
 
             {merchants.length > 0 && (
               <View style={styles.where}>
-                <SectionHeader title="Where it went" />
+                <SectionHeader title={t('whereItWent')} />
                 {merchants.map((m, i) => (
                   <View
                     key={m.title}
@@ -267,11 +345,25 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {m.count}×
                     </ThemedText>
-                    <ThemedText type="smallBold" tabular style={styles.whereFigure}>
+                    <ThemedText type="smallBold" tabular style={[styles.whereFigure, { textAlign: alignEnd() }]}>
                       {formatAED(m.totalFils, { decimals: false })}
                     </ThemedText>
                   </View>
                 ))}
+                {restCount > 0 && (
+                  <View
+                    style={[
+                      styles.whereRow,
+                      { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+                    ]}>
+                    <ThemedText type="small" themeColor="textSecondary" style={styles.whereName}>
+                      {tf('moreMerchants', { count: restCount, s: restCount === 1 ? '' : 's' })}
+                    </ThemedText>
+                    <ThemedText type="smallBold" tabular themeColor="textSecondary" style={[styles.whereFigure, { textAlign: alignEnd() }]}>
+                      {formatAED(restFils, { decimals: false })}
+                    </ThemedText>
+                  </View>
+                )}
               </View>
             )}
           </ScrollView>
@@ -285,7 +377,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 }}
                 style={[styles.btn, { borderWidth: 1, borderColor: theme.expenseSoftBorder }]}>
                 <ThemedText type="micro" style={{ color: theme.expense }}>
-                  Remove
+                  {t('remove')}
                 </ThemedText>
               </Pressable>
             )}
@@ -298,7 +390,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 { backgroundColor: theme.primary, opacity: !picked || !limitFils ? 0.45 : 1 },
               ]}>
               <ThemedText type="micro" style={{ color: theme.onPrimary }}>
-                Save limit
+                {t('saveLimit')}
               </ThemedText>
             </Pressable>
           </View>
@@ -372,7 +464,7 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
   },
   whereName: { flex: 1 },
-  whereFigure: { minWidth: 62, textAlign: 'right' },
+  whereFigure: { minWidth: 62 },
   actions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three },
   btn: {
     borderRadius: Radius.control,

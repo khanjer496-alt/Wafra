@@ -1,18 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button, Chip, Toggle } from '@/components/ui/controls';
+import { CategoryChips } from '@/components/ui/category-chips';
+import { Button, Toggle } from '@/components/ui/controls';
+import { Icon } from '@/components/ui/icon';
 import { Block, LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
-import { CategoryTile } from '@/components/ui/tile';
+import { AccountTile, CategoryTile } from '@/components/ui/tile';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
-import { formatAmount, friendlyDate, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { formatOriginalCurrency } from '@/lib/fx';
+import { getActiveMarket } from '@/lib/markets';
+import { isUnassignedAccountRef } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 interface EntryDetailSheetProps {
   /** The entry to show, or null to keep the sheet closed. */
@@ -43,7 +49,13 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     if (!transaction) return;
     setEditing(false);
     setTitle(transaction.title);
-    setAmountText(formatAmount(transaction.amountFils, { decimals: false }).replace(/,/g, ''));
+    // The FULL amount, fils included. Seeding the field from the display
+    // string — which hides the fils — meant opening an entry and saving any
+    // other change rewrote its amount: AED 76.99 came back as 77, and the row
+    // was stamped userEdited, so no re-parse could ever heal it. Below a
+    // dirham it was worse; 0.49 seeded "0", which fails validation, and the
+    // entry could not be saved at all.
+    setAmountText(formatAmount(transaction.amountFils, { decimals: true }).replace(/,/g, ''));
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
@@ -59,6 +71,38 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     ).length;
   }, [transaction, state.transactions]);
 
+  const accountChoices = useMemo(() => {
+    const currentId = transaction?.accountId;
+    const accounts = state.accounts.filter((candidate) => !candidate.archived || candidate.id === currentId);
+    const duplicateNames = new Map<string, number>();
+    for (const candidate of accounts) {
+      const key = candidate.name.trim().toLocaleLowerCase();
+      duplicateNames.set(key, (duplicateNames.get(key) ?? 0) + 1);
+    }
+    const duplicatePosition = new Map<string, number>();
+    const activity = new Map<string, { rows: number; latest: Transaction | null }>();
+    for (const row of state.transactions) {
+      const current = activity.get(row.accountId) ?? { rows: 0, latest: null };
+      const rowTime = row.ts ?? Date.parse(`${row.date}T12:00:00`);
+      const latestTime = current.latest
+        ? current.latest.ts ?? Date.parse(`${current.latest.date}T12:00:00`)
+        : Number.NEGATIVE_INFINITY;
+      activity.set(row.accountId, {
+        rows: current.rows + 1,
+        latest: rowTime > latestTime ? row : current.latest,
+      });
+    }
+
+    return accounts.map((candidate) => {
+      const stats = activity.get(candidate.id) ?? { rows: 0, latest: null };
+      const key = candidate.name.trim().toLocaleLowerCase();
+      const duplicateCount = duplicateNames.get(key) ?? 1;
+      const position = (duplicatePosition.get(key) ?? 0) + 1;
+      duplicatePosition.set(key, position);
+      return { account: candidate, ...stats, duplicateCount, position };
+    });
+  }, [state.accounts, state.transactions, transaction?.accountId]);
+
   if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
@@ -68,7 +112,10 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
   const amountFils = parseAmountToFils(amountText);
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
-  const canSave = !!amountFils && !!title.trim() && dateValid;
+  const stamp = transaction ? fullDateTime(transaction) : '';
+  const hasRealAccount =
+    !isUnassignedAccountRef(accountId) && state.accounts.some((candidate) => candidate.id === accountId);
+  const canSave = !!amountFils && !!title.trim() && dateValid && hasRealAccount;
 
   const save = () => {
     if (!canSave || !amountFils) return;
@@ -84,19 +131,23 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     const merchant = title.trim();
     if (categoryChanged && merchant.length > 2) {
       Alert.alert(
-        `Remember for ${merchant}?`,
+        tf('rememberForMerchant', { merchant }),
         sameMerchantCount > 0
-          ? `Future imports from ${merchant} will use this category. Also update ${sameMerchantCount} existing entr${sameMerchantCount === 1 ? 'y' : 'ies'}?`
-          : `Future imports from ${merchant} will use this category.`,
+          ? tf('merchantRuleAlso', {
+              merchant,
+              n: sameMerchantCount,
+              entries: sameMerchantCount === 1 ? 'entry' : 'entries',
+            })
+          : tf('merchantRuleOnly', { merchant }),
         sameMerchantCount > 0
           ? [
-              { text: 'No', style: 'cancel' },
-              { text: 'Just future', onPress: () => setMerchantOverride(merchant, category, false) },
-              { text: 'Yes, update all', onPress: () => setMerchantOverride(merchant, category, true) },
+              { text: t('no'), style: 'cancel' },
+              { text: t('justFuture'), onPress: () => setMerchantOverride(merchant, category, false) },
+              { text: t('yesUpdateAll'), onPress: () => setMerchantOverride(merchant, category, true) },
             ]
           : [
-              { text: 'No', style: 'cancel' },
-              { text: 'Remember', onPress: () => setMerchantOverride(merchant, category, false) },
+              { text: t('no'), style: 'cancel' },
+              { text: t('remember'), onPress: () => setMerchantOverride(merchant, category, false) },
             ],
       );
     }
@@ -104,10 +155,10 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   };
 
   const remove = () => {
-    Alert.alert('Delete this entry?', `${transaction.title} · ${formatAmount(transaction.amountFils)}`, [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert(t('deleteThisEntry'), `${transaction.title} · ${formatAmount(transaction.amountFils)}`, [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Delete',
+        text: t('delete'),
         style: 'destructive',
         onPress: () => {
           deleteTransaction(transaction.id);
@@ -117,10 +168,16 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     ]);
   };
 
-  const sourceLabel = transaction.source === 'sms' ? 'Bank SMS' : 'Added by hand';
+  const sourceLabel = transaction.source === 'sms' ? t('bankSmsSource') : t('addedByHand');
+  const fxSourceLabel =
+    transaction.fxSource === 'bank'
+      ? t('bankQuotedRate')
+      : transaction.fxSource === 'reference' && transaction.fxRateDate
+        ? tf('datedReferenceRate', { date: shortDate(transaction.fxRateDate) })
+        : t('offlineFxEstimate');
 
   return (
-    <BottomSheet visible onClose={onClose} title={editing ? 'Edit entry' : 'Entry detail'}>
+    <BottomSheet visible onClose={onClose} title={editing ? t('editEntry') : t('entryDetail')}>
       <View style={styles.head}>
         <CategoryTile category={transaction.category} size={46} />
         <View style={styles.headText}>
@@ -131,11 +188,15 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             {friendlyDate(transaction.date, toISODate(new Date()))}
           </ThemedText>
         </View>
+        {/* Decimals on. This sheet exists to answer "what exactly was this",
+            and it sat above an edit field showing 72.73 while itself reading
+            −73. Lists round; the place you go to check does not. */}
         <Money
           fils={transaction.amountFils}
           type="sheetAmount"
           sign={income ? 'plus' : 'minus'}
           prefix={false}
+          decimals
           color={income ? theme.income : theme.text}
           style={styles.headAmount}
         />
@@ -145,25 +206,25 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
         <>
           <View style={styles.field}>
             <ThemedText type="micro" themeColor="textTertiary">
-              Description
+              {t('description')}
             </ThemedText>
             <TextInput
-              accessibilityLabel="Description"
+              accessibilityLabel={t('description')}
               value={title}
               onChangeText={setTitle}
               placeholderTextColor={theme.textTertiary}
               selectionColor={theme.primary}
-              style={[styles.input, { borderColor: theme.cardBorder, color: theme.text }]}
+              style={[styles.input, { borderColor: theme.cardBorder, color: theme.text, textAlign: state.language === 'ar' ? 'right' : 'left' }]}
             />
           </View>
 
           <View style={styles.pairRow}>
             <View style={[styles.field, styles.flex]}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Amount
+                {t('amount')}
               </ThemedText>
               <TextInput
-                accessibilityLabel="Amount"
+                accessibilityLabel={t('amount')}
                 value={amountText}
                 onChangeText={setAmountText}
                 keyboardType="decimal-pad"
@@ -177,10 +238,14 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             </View>
             <View style={[styles.field, styles.flex]}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Date
+                {/* The field edits the DAY, so it stays YYYY-MM-DD. The label
+                    carries the full stamp — year included, and the clock the
+                    bank sent — because that is the part the row cannot show
+                    and the part that answers "which charge was this?". */}
+                {t('date')} · {stamp}
               </ThemedText>
               <TextInput
-                accessibilityLabel="Date"
+                accessibilityLabel={t('date')}
                 value={dateText}
                 onChangeText={setDateText}
                 placeholder="YYYY-MM-DD"
@@ -199,60 +264,109 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
               has no spending category and is excluded from every total. */}
           {isTransfer ? (
             <ThemedText type="default" themeColor="textSecondary">
-              Transfers have no category — this moves money between your own accounts rather than
-              spending it.
+              {t('transfersNoCategory')}
             </ThemedText>
           ) : (
             <View style={styles.field}>
               <ThemedText type="micro" themeColor="textTertiary">
-                Category
+                {t('category')}
               </ThemedText>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {categories.map((c) => (
-                  <Chip
-                    key={c.id}
-                    label={c.label}
-                    active={category === c.id}
-                    onPress={() => setCategory(c.id)}
-                  />
-                ))}
-              </ScrollView>
+              <CategoryChips
+                categories={categories}
+                selected={category}
+                onToggle={setCategory}
+              />
             </View>
           )}
 
           <View style={styles.field}>
             <ThemedText type="micro" themeColor="textTertiary">
-              Account
+              {t('account')}
             </ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              {state.accounts.map((a) => (
-                <Chip
-                  key={a.id}
-                  label={a.name}
-                  active={accountId === a.id}
-                  onPress={() => setAccountId(a.id)}
-                />
-              ))}
-            </ScrollView>
+            <View style={styles.accountList}>
+              {accountChoices.map(({ account: choice, rows, latest, duplicateCount, position }) => {
+                const selected = accountId === choice.id;
+                const identity = [
+                  choice.bankName,
+                  choice.cardType === 'credit'
+                    ? t('credit')
+                    : choice.cardType === 'debit'
+                      ? t('debit')
+                      : undefined,
+                  choice.last4 ? `·· ${choice.last4}` : undefined,
+                ].filter(Boolean).join(' · ');
+                const history = latest
+                  ? tf('accountChoiceHistory', {
+                      count: rows,
+                      merchant: latest.title,
+                      date: shortDate(latest.date),
+                    })
+                  : t('accountChoiceNoHistory');
+                return (
+                  <Pressable
+                    key={choice.id}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${choice.name}. ${identity}. ${history}`}
+                    accessibilityState={{ checked: selected }}
+                    onPress={() => setAccountId(choice.id)}
+                    style={({ pressed }) => [
+                      styles.accountChoice,
+                      {
+                        backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
+                        borderColor: selected ? theme.primaryBorder : theme.cardBorder,
+                        opacity: pressed ? 0.78 : 1,
+                      },
+                    ]}>
+                    <AccountTile account={choice} size={38} />
+                    <View style={styles.accountChoiceText}>
+                      <View style={styles.accountChoiceTitle}>
+                        <ThemedText type="smallBold" numberOfLines={1} style={styles.flex}>
+                          {choice.name}
+                        </ThemedText>
+                        {duplicateCount > 1 && (
+                          <ThemedText type="nano" themeColor="textTertiary">
+                            {tf('duplicateAccountOrdinal', { position, count: duplicateCount })}
+                          </ThemedText>
+                        )}
+                      </View>
+                      {identity && (
+                        <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                          {identity}
+                        </ThemedText>
+                      )}
+                      <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
+                        {history}
+                      </ThemedText>
+                    </View>
+                    {selected && <Icon name="check" size={17} color={theme.primary} />}
+                  </Pressable>
+                );
+              })}
+            </View>
+            {!hasRealAccount && (
+              <ThemedText type="meta" style={{ color: theme.expense }}>
+                {t('chooseAccountBeforeSave')}
+              </ThemedText>
+            )}
           </View>
 
           <View style={styles.transferRow}>
             <View style={styles.flex}>
-              <ThemedText type="small">Transfer between my accounts</ThemedText>
+              <ThemedText type="small">{t('transferBetweenMine')}</ThemedText>
               <ThemedText type="meta" themeColor="textTertiary">
-                Kept in balances, excluded from income and spending
+                {t('transferExplainer')}
               </ThemedText>
             </View>
             <Toggle
               value={isTransfer}
               onChange={setIsTransfer}
-              label="Transfer between my accounts"
+              label={t('transferBetweenMine')}
             />
           </View>
 
           <View style={styles.actions}>
-            <Button inline label="Save changes" onPress={save} disabled={!canSave} />
-            <Button inline variant="outline" label="Cancel" onPress={() => setEditing(false)} />
+            <Button inline label={t('saveChanges')} onPress={save} disabled={!canSave} />
+            <Button inline variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
           </View>
         </>
       ) : (
@@ -260,36 +374,67 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           <LabelTable
             rows={[
               {
-                label: 'Category',
+                label: t('category'),
                 value: transaction.isTransfer ? (
-                  <ThemedText type="small">Transfer</ThemedText>
+                  <ThemedText type="small">{t('transferLabel')}</ThemedText>
                 ) : (
                   <ThemedText
                     type="small"
                     accessibilityRole="button"
                     onPress={() => setEditing(true)}
                     style={{ color: theme.primary }}>
-                    {meta.label}
+                    {categoryLabel(meta)}
                   </ThemedText>
                 ),
               },
               {
-                label: 'Account',
-                value: <ThemedText type="small">{account?.name ?? 'Unassigned'}</ThemedText>,
+                label: t('account'),
+                value: <ThemedText type="small">{account?.name ?? t('unassigned')}</ThemedText>,
               },
               {
-                label: 'Source',
+                label: t('source'),
                 value: (
                   <ThemedText type="small">
                     {sourceLabel}
-                    {transaction.source === 'sms' ? ` · filed ${shortDate(transaction.date)}` : ''}
+                    {transaction.source === 'sms' ? ` · ${tf('filedOn', { date: shortDate(transaction.date) })}` : ''}
                   </ThemedText>
                 ),
               },
+              ...(transaction.originalCurrency &&
+              transaction.originalAmountMinor !== undefined &&
+              transaction.fxRate !== undefined
+                ? [
+                    {
+                      label: t('originalAmount'),
+                      value: (
+                        <ThemedText type="small" tabular>
+                          {formatOriginalCurrency(
+                            transaction.originalAmountMinor,
+                            transaction.originalCurrency,
+                            state.language === 'ar' ? 'ar' : 'en',
+                          )}
+                        </ThemedText>
+                      ),
+                    },
+                    {
+                      label: t('exchangeRate'),
+                      value: (
+                        <ThemedText type="small" themeColor="textSecondary">
+                          {tf('fxRateValue', {
+                            from: transaction.originalCurrency,
+                            to: getActiveMarket().currency.code,
+                            rate: transaction.fxRate.toFixed(4),
+                            source: fxSourceLabel,
+                          })}
+                        </ThemedText>
+                      ),
+                    },
+                  ]
+                : []),
               ...(transaction.raw
                 ? [
                     {
-                      label: 'Original',
+                      label: t('retainedBankMessage'),
                       value: (
                         <ThemedText type="default" themeColor="textSecondary" style={styles.raw}>
                           “{transaction.raw}”
@@ -306,16 +451,19 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           {!transaction.isTransfer && sameMerchantCount > 0 && (
             <Block>
               <ThemedText type="default" themeColor="textSecondary">
-                This merchant is always {meta.label} — change it once and the other{' '}
-                {sameMerchantCount} {transaction.title} charge{sameMerchantCount === 1 ? '' : 's'}{' '}
-                follow.
+                {tf('merchantCategoryRule', {
+                  category: categoryLabel(meta),
+                  count: sameMerchantCount,
+                  merchant: transaction.title,
+                  s: sameMerchantCount === 1 ? '' : 's',
+                })}
               </ThemedText>
             </Block>
           )}
 
           <View style={styles.actions}>
-            <Button inline label="Edit entry" onPress={() => setEditing(true)} />
-            <Button inline variant="danger" label="Delete" onPress={remove} />
+            <Button inline label={t('editEntry')} onPress={() => setEditing(true)} />
+            <Button inline variant="danger" label={t('delete')} onPress={remove} />
           </View>
         </>
       )}
@@ -356,9 +504,28 @@ const styles = StyleSheet.create({
   mono: {
     fontVariant: ['tabular-nums'],
   },
-  chipRow: {
+  accountList: {
     gap: Spacing.two,
-    paddingRight: Spacing.three,
+  },
+  accountChoice: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three - 4,
+    paddingVertical: Spacing.two,
+  },
+  accountChoiceText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  accountChoiceTitle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   transferRow: {
     flexDirection: 'row',

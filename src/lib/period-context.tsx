@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import { currentMonthPeriod, type Period } from '@/lib/period';
 
@@ -16,15 +16,31 @@ const PeriodContext = createContext<PeriodContextValue | null>(null);
  * current month, which is what a fresh glance should show.
  */
 export function PeriodProvider({ children }: { children: React.ReactNode }) {
-  const [period, setPeriod] = useState<Period>(() => currentMonthPeriod());
+  const [period, setPeriodState] = useState<Period>(() => currentMonthPeriod());
+
+  const setPeriod = useCallback((p: Period) => {
+    setPeriodState(p);
+  }, []);
+
+  const resetPeriod = useCallback(() => {
+    setPeriodState(currentMonthPeriod());
+  }, []);
+
+  /**
+   * There is deliberately no effect re-answering "which month is it" after
+   * hydration.
+   *
+   * There used to be one, and it was load-bearing: `currentMonthPeriod` read
+   * the money-month start day out of a module global that hydration filled in,
+   * so the initialiser above ran with the wrong start day and had to be
+   * corrected a render later. Now `monthKey` is the first seven characters of
+   * the ISO date and consults nothing, so the initialiser is already right and
+   * a correction pass would only be a chance to get it wrong.
+   */
 
   const value = useMemo(
-    () => ({
-      period,
-      setPeriod,
-      resetPeriod: () => setPeriod(currentMonthPeriod()),
-    }),
-    [period],
+    () => ({ period, setPeriod, resetPeriod }),
+    [period, setPeriod, resetPeriod],
   );
 
   return <PeriodContext.Provider value={value}>{children}</PeriodContext.Provider>;

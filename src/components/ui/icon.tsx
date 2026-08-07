@@ -1,6 +1,8 @@
 import React from 'react';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
+import { useLanguage } from '@/hooks/use-language';
+
 export type IconName =
   | 'home'
   | 'chart'
@@ -43,6 +45,8 @@ export type IconName =
   | 'diamond'
   | 'sun'
   | 'leaf'
+  | 'scissors'
+  | 'tools'
   | 'download'
   | 'upload'
   | 'fingerprint';
@@ -62,10 +66,27 @@ interface IconProps {
  * place it goes up is an active tab (2.1), where weight is doing the work that
  * a filled tile used to do.
  */
-export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
+/**
+ * Icons that point along the reading direction rather than at a fixed side.
+ *
+ * A chevron means "onward" and a back arrow means "whence you came"; in a
+ * mirrored layout both of those are the other way round. Every other icon —
+ * a house, a trash can, a chart — means the same thing in both directions and
+ * would look wrong reversed.
+ */
+const DIRECTIONAL = new Set<IconName>(['chevron-right', 'chevron-left', 'arrow-up-right', 'arrow-down-right']);
+
+function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' } as const;
+  const language = useLanguage();
+  const flip = language === 'ar' && DIRECTIONAL.has(name);
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
+    <Svg
+      aria-hidden
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      style={flip ? { transform: [{ scaleX: -1 }] } : undefined}>
       {name === 'home' && (
         <>
           <Path {...p} d="M4 10.5 12 3.5 20 10.5" />
@@ -325,6 +346,26 @@ export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: Ico
           <Path {...p} d="M6 19.5 C9 14 13 10 17.5 7" />
         </>
       )}
+      {/* Personal care: a pair of scissors. Grooming is the one spend the
+          whole category is recognized by. */}
+      {name === 'scissors' && (
+        <>
+          <Circle {...p} cx={6.5} cy={17.5} r={2.5} />
+          <Circle {...p} cx={6.5} cy={6.5} r={2.5} />
+          <Line {...p} x1={8.6} y1={8} x2={19} y2={19.5} />
+          <Line {...p} x1={8.6} y1={16} x2={19} y2={4.5} />
+        </>
+      )}
+      {/* Home services: a spanner. Cleaning, repairs, the maid — work done to
+          the home rather than rent paid for it. */}
+      {name === 'tools' && (
+        <>
+          <Path
+            {...p}
+            d="M15.2 3.6 a5 5 0 0 0 -5.6 7.4 L3.6 17 a2 2 0 0 0 2.8 2.8 l6-6 a5 5 0 0 0 7.4 -5.6 l-3.1 3.1 -2.9 -0.6 -0.6 -2.9 Z"
+          />
+        </>
+      )}
       {name === 'download' && (
         <>
           <Line {...p} x1={12} y1={4} x2={12} y2={14} />
@@ -352,3 +393,10 @@ export function Icon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: Ico
     </Svg>
   );
 }
+
+/**
+ * Memoised. Every glyph walks the whole `name === ...` chain and builds an
+ * `<Svg>` tree, and a list screen holds dozens of them — all with primitive
+ * props that rarely change, which is exactly the case a shallow compare wins.
+ */
+export const Icon = React.memo(IconInner);

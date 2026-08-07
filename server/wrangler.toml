@@ -10,16 +10,30 @@ command = ""
 [[d1_databases]]
 binding = "DB"
 database_name = "wafra"
-# Written by `npm run setup`, which find-or-creates the database by name. Safe
-# to commit: this identifies a database, it does not grant access to one.
+# Created by `npm run setup`. This names a database; it does not open one, so
+# it is not a credential and is safe in the repo.
 database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
-# Nightly sweep of expired queue rows and long-dead devices.
+# Not a secret: this is the same project id `eas init` wrote into app.json, and
+# it is embedded in every build anyway. It is here because /v1/push compares the
+# projectId a device claims against this one and rejects the registration if
+# they differ — so a mismatch does not fail loudly, it just means wake pushes
+# stop arriving. Keep it equal to expo.extra.eas.projectId in app.json.
+[vars]
+EXPO_PROJECT_ID = "fa920e7b-c661-4517-917d-26e8b4878721"
+
+# Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]
-crons = ["17 3 * * *"]
+crons = ["*/30 * * * *"]
 
 [observability]
 enabled = true
 # Message text is never logged, but keeping sampling explicit means nobody
 # later assumes logs are a place to debug parsing from.
 head_sampling_rate = 0.1
+
+# Required production secrets/config (never commit values):
+#   npx wrangler secret put PUSH_TOKEN_KEY    # base64 of 32 random bytes
+#   npx wrangler secret put EXPO_ACCESS_TOKEN # EAS enhanced push security
+# Set EXPO_PROJECT_ID and EMAIL_DOMAIN as non-secret production variables.
+# Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.

@@ -5,11 +5,24 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Motion, Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { t } from '@/lib/i18n';
 
 /**
- * Section enter: translateY 10 → 0 over 320ms, staggered 40ms per section.
+ * Section enter: fade and rise over 320ms, staggered 40ms per section.
  * `index` is the section's position on the screen, not a delay in ms.
+ *
+ * No `.withInitialValues()`. It was here to shorten the rise to 10px, and on
+ * the web renderer it left the view at `position: absolute` and never returned
+ * it to flow when the component re-rendered mid-animation. Every section of
+ * the SMS import screen then stacked at the same offset: the parse result was
+ * painted directly over the paste box, the instructions and both buttons, all
+ * unreadable. This was the only `withInitialValues` in the app, and every
+ * screen using a plain `FadeInDown` was unaffected — so Section now uses the
+ * same plain form as the rest. A slightly longer rise is not worth a screen
+ * that cannot be read.
  */
 export function Section({
   index = 0,
@@ -17,11 +30,14 @@ export function Section({
   children,
   ...rest
 }: ViewProps & { index?: number }) {
+  const reducedMotion = useReducedMotion();
   return (
     <Animated.View
-      entering={FadeInDown.delay(index * Motion.sectionStagger)
-        .duration(Motion.sectionEnter)
-        .withInitialValues({ transform: [{ translateY: 10 }] })}
+      entering={
+        reducedMotion
+          ? undefined
+          : FadeInDown.delay(index * Motion.sectionStagger).duration(Motion.sectionEnter)
+      }
       style={style}
       {...rest}>
       {children}
@@ -175,10 +191,21 @@ export function LabelTable({ rows }: { rows: { label: string; value: React.React
 /** Back chevron + caps title, the header on every pushed screen. */
 export function ScreenHeader({ title, onBack }: { title: string; onBack: () => void }) {
   const theme = useTheme();
+  const language = useLanguage();
   return (
     <View style={styles.screenHeader}>
-      <Pressable accessibilityRole="button" accessibilityLabel="Back" hitSlop={10} onPress={onBack}>
-        <Icon name="chevron-left" size={20} color={theme.text} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('back', language)}
+        onPress={onBack}
+        style={styles.backButton}>
+        <Icon
+          // Icon mirrors directional glyphs for Arabic. Supplying the Arabic
+          // direction here as well mirrored it twice and pointed Back forward.
+          name="chevron-left"
+          size={20}
+          color={theme.text}
+        />
       </Pressable>
       <ThemedText type="micro" themeColor="textTertiary">
         {title}
@@ -225,5 +252,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three - 4,
     paddingVertical: Spacing.two + 2,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: -12,
   },
 });

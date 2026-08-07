@@ -1,23 +1,23 @@
 /**
  * Settings.
  *
- * There is no appearance picker: `app.json` sets `userInterfaceStyle:
- * automatic` and the app follows the OS. Everything here either changes what
- * the app is allowed to read, or what a month means.
+ * Everything here either changes what the app is allowed to read, what it is
+ * allowed to send, or how it looks.
  */
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   I18nManager,
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -25,30 +25,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Toggle } from '@/components/ui/controls';
+import { Segmented, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { WafraMark } from '@/components/wafra-logo';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { unreadFormatCount } from '@/lib/accuracy';
+import { requestNotificationPermission } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
-import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { transactionsCsvAsync } from '@/lib/export-data';
+import { shareExistingFile, shareTextFile } from '@/lib/file-sharing';
+import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
+import { isBillingAvailable } from '@/lib/billing';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
-import { getPairing } from '@/lib/relay';
+import { getRelayConfig, unpairDevice } from '@/lib/relay';
+import {
+  buildExpenseReportHtml,
+  reportExpenses,
+} from '@/lib/reimbursement-report';
 import { useStore } from '@/lib/store';
+import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
-
-/** The reporting month can start on any day that exists in February. */
-const MAX_START_DAY = 28;
-
-function ordinal(day: number): string {
-  const rem100 = day % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${day}th`;
-  return `${day}${['th', 'st', 'nd', 'rd'][day % 10] ?? 'th'}`;
-}
+import SmsReader from '../../modules/sms-reader';
+import { t, tf } from '@/lib/i18n';
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -56,40 +58,49 @@ export default function SettingsScreen() {
   const {
     state,
     setAppLock,
-    setMonthStartDay,
+    setPrivateMode,
     setPro,
     setMarket,
     setUiLanguage,
     exportBackup,
     restoreBackup,
     clearAll,
+    setThemePreference,
   } = useStore();
+
+  const themeChoice: ThemePreference =
+    state.themePreference === 'light' || state.themePreference === 'dark'
+      ? state.themePreference
+      : 'system';
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
   const [smsGranted, setSmsGranted] = useState(false);
-  const [relayPaired, setRelayPaired] = useState(false);
+  const [exportBusy, setExportBusy] = useState<'backup' | 'transactions' | 'sms' | null>(null);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   const version = Constants.expoConfig?.version ?? '1.0.0';
+
+  const [instantAlerts, setInstantAlerts] = useState(false);
+  // Only builds carrying the delivery receiver can post at delivery time.
+  const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
 
   useEffect(() => {
     if (!isSmsScanningAvailable()) return;
     hasSmsPermission().then(setSmsGranted).catch(() => {});
+    // The native side owns this one — the receiver reads it from
+    // SharedPreferences long after this screen is gone.
+    try {
+      setInstantAlerts(SmsReader?.getInstantAlerts?.() ?? false);
+    } catch {
+      // An older build without the function: leave it off.
+    }
   }, []);
-
-  // Re-read on focus rather than on mount: the pairing screen is where this
-  // changes, and the user comes straight back here afterwards.
-  useFocusEffect(
-    useCallback(() => {
-      getPairing()
-        .then((p) => setRelayPaired(p != null))
-        .catch(() => {});
-    }, []),
-  );
 
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
   const gated = (fn: () => void) => () => {
-    if (isProActive(state)) fn();
+    // Same rule as Home: a build with no billing key cannot sell Pro, so it
+    // must not withhold it either. See isProActive.
+    if (isProActive(state, Date.now(), isBillingAvailable())) fn();
     else router.push('/pro');
   };
 
@@ -106,8 +117,8 @@ export default function SettingsScreen() {
       const next = !state.pro;
       setPro(next);
       Alert.alert(
-        next ? 'Founder mode' : 'Founder mode off',
-        next ? 'Wafra Pro unlocked on this device.' : 'Wafra Pro disabled on this device.',
+        next ? t('founderMode') : t('founderModeOff'),
+        next ? t('founderOn') : t('founderOff'),
       );
     }
   };
@@ -120,22 +131,51 @@ export default function SettingsScreen() {
       return;
     }
     if (Platform.OS === 'web') {
-      Alert.alert('Not available', 'App lock works on the phone app only.');
+      Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
       return;
     }
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!hasHardware || !enrolled) {
       Alert.alert(
-        'No screen lock set up',
-        'Set up a fingerprint, face unlock, or PIN in your phone settings first.',
+        t('noScreenLock'),
+        t('noScreenLockBody'),
       );
       return;
     }
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Confirm to enable app lock',
+      promptMessage: t('confirmAppLock'),
     });
     if (result.success) setAppLock(true);
+  };
+
+  const enablePrivateMode = async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        const relay = await getRelayConfig();
+        if (relay) await unpairDevice(relay);
+      }
+      await setPrivateMode(true);
+    } catch {
+      Alert.alert(t('privateModeFailed'));
+    }
+  };
+
+  const togglePrivateMode = (enabled: boolean) => {
+    if (!enabled) {
+      void setPrivateMode(false).catch(() => {
+        Alert.alert(t('privateModeFailed'));
+      });
+      return;
+    }
+    if (Platform.OS !== 'ios') {
+      void enablePrivateMode();
+      return;
+    }
+    Alert.alert(t('privateModeEnableTitle'), t('privateModeEnableIosBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('privateModeEnable'), onPress: () => void enablePrivateMode() },
+    ]);
   };
 
   const toggleSms = async (enabled: boolean) => {
@@ -143,8 +183,8 @@ export default function SettingsScreen() {
       // Android grants permissions but never takes them back on request; the
       // only honest "off" is the one in the system settings.
       Alert.alert(
-        'Turn SMS reading off',
-        'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.',
+        t('turnSmsReadingOff'),
+        t('smsRevokeHint'),
       );
       return;
     }
@@ -152,22 +192,42 @@ export default function SettingsScreen() {
     setSmsGranted(granted);
   };
 
+  const toggleInstantAlerts = async (enabled: boolean) => {
+    if (enabled) {
+      // Android 13 needs the notification permission before anything can be
+      // posted. Asking here rather than at delivery time means the failure is
+      // visible now, instead of as banners that silently never arrive.
+      const allowed = await requestNotificationPermission();
+      if (!allowed) {
+        Alert.alert(
+          t('notificationsOff'),
+          t('notificationsOffBody'),
+        );
+        return;
+      }
+    }
+    try {
+      SmsReader?.setInstantAlerts?.(enabled);
+      setInstantAlerts(enabled);
+    } catch {
+      // Nothing to recover: the toggle stays where it was.
+    }
+  };
+
   const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
   const notifEnabled = notifAvailable && NotificationReader != null && NotificationReader.isEnabled();
   const onNotificationAccess = () => {
     if (!notifAvailable || !NotificationReader) {
-      Alert.alert('Not available', 'Bank app notifications work on the phone app only.');
+      Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
     Alert.alert(
-      'Bank app notifications',
-      'Some banks send push notifications instead of SMS. Grant Wafra notification access and ' +
-        'money alerts import automatically. Only alerts that mention an amount are kept, and ' +
-        'they never leave this phone.',
+      t('bankAppNotifsTitle'),
+      t('notifAccessFull'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: notifEnabled ? 'Open settings' : 'Enable',
+          text: notifEnabled ? t('openSettings') : t('enableAction'),
           onPress: () => NotificationReader?.openSettings(),
         },
       ],
@@ -183,29 +243,172 @@ export default function SettingsScreen() {
 
   const cycleLanguage = () => {
     const next = state.language === 'ar' ? 'en' : 'ar';
+    // No alert, and nothing to restart. The strings re-render from this and
+    // the layout mirrors from the `direction` style on the root — see the
+    // Direction component in app/_layout.tsx for why I18nManager could never
+    // do it live.
     setUiLanguage(next);
-    // RTL flips on next app start — a React Native constraint, so say so.
+    // Still set, for react-navigation's own gesture and animation direction,
+    // which reads I18nManager rather than the layout. That part is the only
+    // thing left waiting for a restart.
     if (Platform.OS !== 'web') {
       I18nManager.allowRTL(next === 'ar');
       I18nManager.forceRTL(next === 'ar');
-      Alert.alert(t('language'), t('restartForLanguage'));
     }
   };
 
   /* ── Data ───────────────────────────────────────────────────────────── */
 
+  const runExport = async (
+    kind: 'backup' | 'transactions' | 'sms',
+    task: () => Promise<void>,
+  ) => {
+    if (exportBusy) return;
+    setExportBusy(kind);
+    try {
+      await task();
+    } catch {
+      Alert.alert(t('exportFailedTitle'), t('exportFailedBody'));
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
   const exportCsv = () => {
-    const header = 'date,type,amount_aed,category,title,account,transfer';
-    const lines = state.transactions.map((tx) => {
-      const account = state.accounts.find((a) => a.id === tx.accountId)?.name ?? '';
-      const title = `"${tx.title.replace(/"/g, '""')}"`;
-      return `${tx.date},${tx.type},${(tx.amountFils / 100).toFixed(2)},${tx.category},${title},"${account}",${tx.isTransfer ? 1 : 0}`;
+    if (state.transactions.length === 0) {
+      Alert.alert(t('nothingToExport'));
+      return;
+    }
+    void runExport('transactions', async () => {
+      const contents = await transactionsCsvAsync(
+        state.transactions,
+        state.accounts,
+        market.currency.code,
+      );
+      await shareTextFile({
+        filename: 'wafra-transactions.csv',
+        contents,
+        dialogTitle: t('exportCsv'),
+        mimeType: 'text/csv',
+      });
     });
-    Share.share({ title: 'wafra-export.csv', message: [header, ...lines].join('\n') }).catch(() => {});
   };
 
   const backupJson = () => {
-    Share.share({ title: 'wafra-backup.json', message: exportBackup() }).catch(() => {});
+    void runExport('backup', () =>
+      shareTextFile({
+        filename: 'wafra-backup.json',
+        contents: exportBackup(),
+        dialogTitle: t('backupJson'),
+        mimeType: 'application/json',
+      }),
+    );
+  };
+
+  const exportSms = () => {
+    void runExport('sms', async () => {
+      if (Platform.OS !== 'android' || !SmsReader?.exportInboxSms) {
+        Alert.alert(t('smsExportAndroidOnlyTitle'), t('smsExportAndroidOnlyBody'));
+        return;
+      }
+      let granted = await hasSmsPermission();
+      if (!granted) granted = await requestSmsPermission();
+      setSmsGranted(granted);
+      if (!granted) {
+        Alert.alert(t('smsAccessOff'), t('smsPermissionPath'));
+        return;
+      }
+      const result = await SmsReader.exportInboxSms();
+      if (!result.uri || result.count === 0) {
+        if (result.uri) {
+          await FileSystem.deleteAsync(result.uri, { idempotent: true }).catch(() => {});
+        }
+        Alert.alert(t('noSmsToExport'));
+        return;
+      }
+      await shareExistingFile({
+        uri: result.uri,
+        dialogTitle: tf('shareSmsExportCount', { count: result.count }),
+        mimeType: 'application/x-ndjson',
+        deleteAfter: true,
+      });
+    });
+  };
+
+  const chooseSmsExport = () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert(t('smsExportAndroidOnlyTitle'), t('smsExportAndroidOnlyBody'));
+      return;
+    }
+    Alert.alert(t('exportSmsDiagnostic'), t('exportSmsDiagnosticBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('exportFinancialSmsAction'), onPress: exportSms },
+    ]);
+  };
+
+  const createExpenseReport = async (scope: 'month' | 'all') => {
+    // Same rule every other total in the app applies: real spending, on an
+    // account still in play, neither leg of a move between the user's own
+    // accounts. Without it, a legacy own-account sweep (no transfer flag,
+    // caught only by internalTransferIds' structural title match) could both
+    // stretch an "all time" report back to its date and print on it as a
+    // reimbursable expense.
+    const liveAccounts = liveAccountIds(state.accounts);
+    const internal = internalTransferIds(state.transactions, liveAccounts);
+    const expenses = state.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
+    const currentMonth = monthKey(new Date());
+    const from =
+      scope === 'month'
+        ? monthStartISO(currentMonth)
+        : expenses.reduce((earliest, tx) => (tx.date < earliest ? tx.date : earliest), '9999-12-31');
+    const to =
+      scope === 'month'
+        ? monthEndISO(currentMonth)
+        : expenses.reduce((latest, tx) => (tx.date > latest ? tx.date : latest), '0000-01-01');
+
+    if (expenses.length === 0 || reportExpenses(expenses, from, to, liveAccounts, internal).length === 0) {
+      Alert.alert(t('noExpensesToExport'));
+      return;
+    }
+
+    try {
+      const html = buildExpenseReportHtml({
+        transactions: state.transactions,
+        accounts: state.accounts,
+        currency: market.currency.code,
+        language: state.language === 'ar' ? 'ar' : 'en',
+        from,
+        to,
+      });
+      const { uri } = await Print.printToFileAsync({
+        html,
+        width: 595,
+        height: 842,
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+      // Expo Print opens the browser print dialog itself on web. Local URI
+      // sharing is deliberately unsupported there.
+      if (Platform.OS === 'web') return;
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert(t('reportShareUnavailable'));
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        dialogTitle: t('exportExpensePdf'),
+        mimeType: 'application/pdf',
+        UTI: 'com.adobe.pdf',
+      });
+    } catch {
+      Alert.alert(t('reportExportFailed'));
+    }
+  };
+
+  const chooseExpenseReportPeriod = () => {
+    Alert.alert(t('expenseReportPeriod'), t('expenseReportPeriodBody'), [
+      { text: t('currentMonth'), onPress: () => void createExpenseReport('month') },
+      { text: t('allExpenses'), onPress: () => void createExpenseReport('all') },
+      { text: t('cancel'), style: 'cancel' },
+    ]);
   };
 
   const restoreFromFile = async () => {
@@ -216,30 +419,45 @@ export default function SettingsScreen() {
       });
       if (picked.canceled || !picked.assets?.[0]) return;
       const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
-      Alert.alert('Restore backup?', 'This replaces everything currently in the app.', [
-        { text: 'Cancel', style: 'cancel' },
+      Alert.alert(t('restoreBackupQ'), t('restoreReplacesAll'), [
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Restore',
+          text: t('restoreAction'),
           style: 'destructive',
           onPress: () => {
             if (!restoreBackup(content)) {
-              Alert.alert('Invalid file', 'That does not look like a Wafra backup.');
+              Alert.alert(t('invalidFile'), t('notAWafraBackup'));
             }
           },
         },
       ]);
     } catch {
-      Alert.alert('Could not read file', 'Try exporting a fresh backup and restoring that.');
+      Alert.alert(t('couldNotReadFile'), t('couldNotReadFileBody'));
+    }
+  };
+
+  const eraseAllData = async () => {
+    try {
+      const relay = await getRelayConfig();
+      if (relay) await unpairDevice(relay);
+      await clearAll();
+    } catch {
+      Alert.alert(
+        t('eraseRelayFailedTitle'),
+        t('eraseRelayFailedBody'),
+      );
     }
   };
 
   const confirmErase = () => {
     Alert.alert(
-      'Erase everything on this phone?',
-      'All accounts, entries, bills, and goals will be permanently deleted.',
+      t('eraseEverythingQ'),
+      Platform.OS === 'ios'
+        ? t('eraseEverythingIosBody')
+        : t('eraseEverythingBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Erase', style: 'destructive', onPress: clearAll },
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('eraseAction'), style: 'destructive', onPress: () => void eraseAllData() },
       ],
     );
   };
@@ -264,7 +482,11 @@ export default function SettingsScreen() {
           </ThemedText>
         )}
       </View>
-      <Icon name="chevron-right" size={15} color={danger ? theme.expense : theme.textTertiary} />
+      <Icon
+        name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+        size={15}
+        color={danger ? theme.expense : theme.textTertiary}
+      />
     </Row>
   );
 
@@ -286,7 +508,6 @@ export default function SettingsScreen() {
     </Row>
   );
 
-  const monthKeyNow = monthKey(new Date());
   const trial = trialDaysLeft(state);
 
   return (
@@ -302,140 +523,179 @@ export default function SettingsScreen() {
               <View style={styles.proRow}>
                 <Icon name="diamond" size={19} color={theme.warning} />
                 <View style={styles.rowText}>
-                  <ThemedText type="small">Wafra Pro</ThemedText>
+                  <ThemedText type="small">{t('wafraPro')}</ThemedText>
                   <ThemedText
                     type="meta"
                     style={{ color: state.pro ? theme.textTertiary : theme.warning }}>
                     {state.pro
-                      ? 'Active on this device'
+                      ? t('activeOnThisDevice')
                       : trial > 0
-                        ? `Free trial · ${trial} day${trial === 1 ? '' : 's'} left`
-                        : 'Trial ended · tracking paused'}
+                        ? tf('settingsTrialDays', {
+                            count: trial,
+                            s: trial === 1 ? '' : 's',
+                          })
+                        : t('trialEndedBanner')}
                   </ThemedText>
                 </View>
-                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                <Icon
+                  name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+                  size={15}
+                  color={theme.textTertiary}
+                />
               </View>
             </Block>
           </Section>
 
           <Section index={1}>
-            <SectionHeader title="Money month" />
+            <SectionHeader title={t('appearanceHeader')} />
             <Block>
-              <View style={styles.monthHead}>
-                <ThemedText type="small">Starts on the {ordinal(state.monthStartDay)}</ThemedText>
-                <ThemedText type="small" tabular style={{ color: theme.primary }}>
-                  {state.monthStartDay}
-                </ThemedText>
-              </View>
-              {/* A picture of the month rather than a ± stepper: this is the
-                  setting that reshapes every other screen, so it should look
-                  like a month, not like a counter. */}
-              <View style={styles.dayBars}>
-                {Array.from({ length: MAX_START_DAY }, (_, i) => i + 1).map((day) => {
-                  const chosen = day === state.monthStartDay;
-                  return (
-                    <Pressable
-                      key={day}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Month starts on day ${day}`}
-                      accessibilityState={{ selected: chosen }}
-                      hitSlop={{ top: 10, bottom: 10 }}
-                      onPress={() => setMonthStartDay(day)}
-                      style={styles.dayBarHit}>
-                      <View
-                        style={[
-                          styles.dayBar,
-                          {
-                            height: chosen ? 34 : day % 7 === 1 ? 16 : 11,
-                            backgroundColor: chosen ? theme.primary : theme.track,
-                          },
-                        ]}
-                      />
-                    </Pressable>
-                  );
-                })}
-              </View>
+              {/* The handoff said to follow the OS and offer no picker. That is
+                  the right default and it stays the default — but "follow the
+                  OS" is not a choice a user can make, it is the absence of one,
+                  and a money app gets read in bed and in sunlight on the same
+                  day. System stays first and stays selected until it is
+                  changed. */}
+              <Segmented
+                segments={[
+                  { value: 'system', label: t('themeSystem') },
+                  { value: 'light', label: t('themeLight') },
+                  { value: 'dark', label: t('themeDark') },
+                ]}
+                value={themeChoice}
+                onChange={setThemePreference}
+              />
               <ThemedText type="meta" themeColor="textTertiary">
-                Your {shortDate(monthStartISO(monthKeyNow)).split(' ')[1]} month runs{' '}
-                {shortDate(monthStartISO(monthKeyNow))} – {shortDate(monthEndISO(monthKeyNow))}, so
-                salary and rent land in the same month.
+                {themeChoice === 'system'
+                  ? t('followingPhone')
+                  : tf('pinnedTheme', {
+                      theme: t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
+                    })}
               </ThemedText>
-              {state.monthStartDay === 1 && (
-                <ThemedText type="meta" themeColor="textTertiary">
-                  Day 1 means plain calendar months. Next month starts{' '}
-                  {shortDate(monthStartISO(shiftMonthKey(monthKeyNow, 1)))}.
-                </ThemedText>
-              )}
             </Block>
           </Section>
 
           <Section index={2}>
-            <SectionHeader title="Privacy" />
+            <SectionHeader title={t('privacyHeader')} />
+            <Block style={styles.privacyCopy}>
+              <Icon name="lock" size={16} color={theme.textTertiary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
+                {t('privacyRetentionExact')}
+              </ThemedText>
+            </Block>
             {switchRow(
-              'App lock',
-              'Fingerprint, face unlock, or your phone PIN',
+              t('privateMode'),
+              t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
+              state.privateMode,
+              togglePrivateMode,
+            )}
+            {switchRow(
+              t('appLockTitle'),
+              t('appLockDetail'),
               state.appLock,
               toggleAppLock,
             )}
             {isSmsScanningAvailable() &&
               switchRow(
-                'Read bank SMS',
-                smsGranted ? 'Granted · nothing is uploaded' : 'Off · nothing can import',
+                t('readBankSms'),
+                t(smsGranted ? 'smsGrantedLocal' : 'smsOffNoImport'),
                 smsGranted,
                 toggleSms,
               )}
-            {/* iOS has no SMS access at all, so the row above can never appear
-                there. This is the only route to automatic capture on iPhone. */}
-            {Platform.OS === 'ios' &&
-              linkRow(
-                'Automatic capture',
-                relayPaired ? 'On · set up in Shortcuts' : 'Off · iPhone needs a Shortcut to send messages',
-                gated(() => router.push('/ios-capture')),
-                true,
+            {instantAvailable &&
+              switchRow(
+                t('alertEveryCharge'),
+                smsGranted
+                  ? instantAlerts
+                    ? t('instantAlertsOn')
+                    : t('instantAlertsOff')
+                  : t('instantAlertsNeedSms'),
+                instantAlerts && smsGranted,
+                (next) => {
+                  if (!smsGranted) {
+                    Alert.alert(
+                      t('turnOnSmsFirst'),
+                      t('turnOnSmsFirstBody'),
+                    );
+                    return;
+                  }
+                  void toggleInstantAlerts(next);
+                },
               )}
-            {notifAvailable && (
-              <Row onPress={gated(onNotificationAccess)} last accessibilityLabel="Bank app notifications">
-                <View style={styles.rowText}>
-                  <ThemedText type="small">Bank app notifications</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {notifEnabled
-                      ? 'On · push alerts import automatically'
-                      : 'Off · for banks that push instead of SMS'}
-                  </ThemedText>
-                </View>
-                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-              </Row>
+            <Row
+              onPress={gated(onNotificationAccess)}
+              accessibilityLabel={t('bankAppNotifsTitle')}>
+              <View style={styles.rowText}>
+                <ThemedText type="small">{t('bankAppNotifsTitle')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t(notifEnabled ? 'bankPushOn' : 'bankPushOff')}
+                </ThemedText>
+              </View>
+              <Icon
+                name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+                size={15}
+                color={theme.textTertiary}
+              />
+            </Row>
+            {linkRow(
+              t('trustedSettingsRow'),
+              t('trustedSettingsDetail'),
+              () => router.push('/trusted-devices'),
+              true,
             )}
           </Section>
 
           <Section index={3}>
-            <SectionHeader title="Region" />
+            <SectionHeader title={t('regionHeader')} />
             {linkRow(
-              'Country pack',
-              `${market.name} · ${market.currency.display} · banks and merchants`,
+              t('countryPack'),
+              tf('countryPackDetail', {
+                country: t(market.id === 'SA' ? 'saudiName' : 'uaeName'),
+                currency: market.currency.display,
+              }),
               cycleMarket,
             )}
             {linkRow(
-              'Language',
-              state.language === 'ar' ? 'العربية · English restarts the app' : 'English · العربية restarts the app',
+              t('language'),
+              t('languageSettingDetail'),
               cycleLanguage,
               true,
             )}
           </Section>
 
           <Section index={4}>
-            <SectionHeader title="Data" />
-            {linkRow('Back up as JSON', null, gated(backupJson))}
-            {linkRow('Restore from a backup file', null, gated(restoreFromFile))}
-            {linkRow('Export transactions as CSV', null, exportCsv)}
+            <SectionHeader title={t('dataHeader')} />
             {linkRow(
-              'Improve accuracy',
+              t('backupJson'),
+              exportBusy === 'backup' ? t('preparingExport') : null,
+              gated(backupJson),
+            )}
+            {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
+            {linkRow(
+              t('exportCsv'),
+              exportBusy === 'transactions' ? t('preparingExport') : null,
+              exportCsv,
+            )}
+            {linkRow(
+              t('exportSmsDiagnostic'),
+              exportBusy === 'sms'
+                ? t('preparingExport')
+                : Platform.OS === 'android'
+                  ? t('exportSmsDiagnosticDetail')
+                  : t('smsExportAndroidOnlyDetail'),
+              chooseSmsExport,
+            )}
+            {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod)}
+            {linkRow(
+              t('improveAccuracy'),
               formats > 0
-                ? `${formats} unread message format${formats === 1 ? '' : 's'} · digits masked`
-                : 'Everything reads clean',
+                ? tf('unreadFormatsCount', {
+                    count: formats,
+                    s: formats === 1 ? '' : 's',
+                  })
+                : t('noUnrecognized'),
               () => router.push('/accuracy'),
             )}
-            {linkRow('Erase everything on this phone', null, confirmErase, true, true)}
+            {linkRow(t('eraseAll'), null, confirmErase, true, true)}
           </Section>
 
           <Section index={5} style={styles.about}>
@@ -443,7 +703,7 @@ export default function SettingsScreen() {
               <WafraMark size={34} />
             </Pressable>
             <ThemedText type="default" themeColor="textSecondary">
-              Know where it goes. Watch it grow. All data stays on this device.
+              {t('settingsTagline')}
             </ThemedText>
             <ThemedText type="nano" themeColor="textTertiary">
               Wafra {version}
@@ -482,32 +742,18 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing.half,
   },
-  monthHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    paddingBottom: Spacing.three - 2,
-  },
-  dayBars: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    height: 34,
-    paddingBottom: Spacing.three - 2,
-  },
-  dayBarHit: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    height: 34,
-  },
-  dayBar: {
-    width: 4,
-    borderRadius: Radius.chip / 2,
-  },
   about: {
     alignItems: 'flex-start',
     gap: Spacing.two + 2,
     paddingTop: Spacing.two,
+  },
+  privacyCopy: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+  },
+  privacyCopyText: {
+    flex: 1,
+    lineHeight: 18,
   },
 });

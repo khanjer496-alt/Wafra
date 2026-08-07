@@ -2,6 +2,7 @@
   "expo": {
     "name": "Wafra",
     "slug": "wafra",
+    "owner": "nnnkk",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,13 +10,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/images/icon.png",
-      "bundleIdentifier": "app.wafra.ios",
-      "buildNumber": "1",
-      "supportsTablet": false,
-      "infoPlist": {
-        "NSFaceIDUsageDescription": "Wafra uses Face ID to unlock the app so your spending stays private if someone else picks up your phone.",
-        "ITSAppUsesNonExemptEncryption": false
-      }
+      "bundleIdentifier": "app.wafra.ios"
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +20,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "allowBackup": false,
       "permissions": [
         "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS"
@@ -64,18 +60,46 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true,
+          "enableFTS": true
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow Wafra to use Face ID to unlock your private ledger."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Wafra to use Face ID to unlock your private ledger."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#31D7AF",
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
+      "revenueCatAndroidKey": "",
+      "revenueCatIosKey": "",
       "router": {},
       "eas": {
         "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
       }
-    },
-    "owner": "nnnkk"
+    }
   }
 }

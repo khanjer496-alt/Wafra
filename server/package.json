@@ -2,16 +2,27 @@
   "name": "wafra-relay",
   "private": true,
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
-    "setup": "node scripts/setup.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "migrate": "wrangler d1 execute wafra --remote --file=./schema.sql"
+    "deploy": "node scripts/check-deploy-config.mjs && wrangler deploy",
+    "types": "wrangler types",
+    "types:check": "wrangler types --check",
+    "typecheck": "npm run types:check && tsc --noEmit -p tsconfig.json",
+    "build:check": "wrangler deploy --dry-run",
+    "test": "rm -rf .test-build && tsc src/push.ts --module commonjs --target es2022 --lib es2022,dom --outDir .test-build --skipLibCheck && esbuild src/imports.ts --bundle --platform=node --format=cjs --outfile=.test-build/imports.cjs && node test/push.test.cjs && node test/imports.test.cjs && node test/schema.test.cjs",
+    "migrate": "node scripts/check-deploy-config.mjs && wrangler d1 execute wafra --remote --file=./schema.sql"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260801.1",
-    "typescript": "^5.9.2",
-    "wrangler": "^4.20.0"
+    "esbuild": "0.28.1",
+    "typescript": "5.9.2",
+    "wrangler": "4.116.0"
+  },
+  "packageManager": "npm@11.12.1",
+  "dependencies": {
+    "postal-mime": "2.7.5",
+    "unpdf": "1.8.0"
   }
 }

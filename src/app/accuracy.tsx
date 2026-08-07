@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
-import { ScrollView, Share, StyleSheet, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -11,10 +11,11 @@ import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { unreadFormats } from '@/lib/accuracy';
-import { getCategory } from '@/lib/categories';
-import { t } from '@/lib/i18n';
+import { cardDiagnostics, unreadFormats } from '@/lib/accuracy';
+import { categoryLabel } from '@/lib/categories';
+import { shareTextFile } from '@/lib/file-sharing';
 import { useStore } from '@/lib/store';
+import { t, tf } from '@/lib/i18n';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
 function maskDigits(s: string): string {
@@ -30,19 +31,70 @@ export default function AccuracyScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { state } = useStore();
+  const [sharing, setSharing] = useState<'formats' | 'cards' | null>(null);
 
   const rows = useMemo(
-    () => unreadFormats(state.transactions, (id) => getCategory(id).label),
-    [state.transactions],
+    () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
+    [state.transactions, state.language],
   );
 
-  const shareAll = () => {
-    const body = rows
-      .map((r, i) => `#${i + 1} (seen ${r.count}x, read as "${r.title}" / ${r.category}):\n${maskDigits(r.raw)}`)
-      .join('\n\n');
-    Share.share({
-      message: `Wafra — bank SMS formats the parser could not fully read:\n\n${body}`,
-    }).catch(() => {});
+  const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
+  const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
+
+  // Two headings, not one. The old export called every row "could not read",
+  // which was wrong about most of them — the merchant was read fine, it just
+  // had no category — and that made a long list look like a broken parser.
+  const shareAll = async () => {
+    const section = (label: string, list: typeof rows) =>
+      list.length === 0
+        ? ''
+        : `\n\n${label} (${list.length}):\n\n` +
+          list
+            .map(
+              (r, i) =>
+                tf('accuracyShareRow', {
+                  index: i + 1,
+                  count: r.count,
+                  title: r.title,
+                  category: r.category,
+                  raw: maskDigits(r.raw),
+                }),
+            )
+            .join('\n\n');
+    if (sharing) return;
+    setSharing('formats');
+    try {
+      await shareTextFile({
+        filename: 'wafra-unrecognized-sms.txt',
+        contents:
+          t('accuracyShareTitle') +
+          section(t('accuracyShareUnread'), unread) +
+          section(t('accuracyShareUncategorized'), uncategorized),
+        dialogTitle: t('shareUnrecognized'),
+        mimeType: 'text/plain',
+      });
+    } catch {
+      Alert.alert(t('exportFailedTitle'), t('exportFailedBody'));
+    } finally {
+      setSharing(null);
+    }
+  };
+
+  const shareCards = async () => {
+    if (sharing) return;
+    setSharing('cards');
+    try {
+      await shareTextFile({
+        filename: 'wafra-card-diagnostic.txt',
+        contents: cardDiagnostics(state),
+        dialogTitle: t('shareCardDiagnostic'),
+        mimeType: 'text/plain',
+      });
+    } catch {
+      Alert.alert(t('exportFailedTitle'), t('exportFailedBody'));
+    } finally {
+      setSharing(null);
+    }
   };
 
   return (
@@ -59,31 +111,58 @@ export default function AccuracyScreen() {
             </ThemedText>
             {rows.length > 0 && (
               <Button
-                label={`${t('shareUnrecognized')} · ${rows.length}`}
+                label={sharing === 'formats' ? t('preparingExport') : `${t('shareUnrecognized')} · ${rows.length}`}
                 icon="upload"
-                onPress={shareAll}
+                disabled={sharing !== null}
+                onPress={() => void shareAll()}
               />
             )}
+            {/* Always offered, even when nothing is unread: the card bugs this
+                answers — a payment counted twice, a statement filed against the
+                wrong account — happen to messages the parser read CONFIDENTLY,
+                so they never appear in the list above. */}
+            <Button
+              label={sharing === 'cards' ? t('preparingExport') : t('shareCardDiagnostic')}
+              icon="upload"
+              variant="outline"
+              disabled={sharing !== null}
+              onPress={() => void shareCards()}
+            />
+            <ThemedText type="meta" themeColor="textTertiary">
+              {t('shareCardDiagnosticHint')}
+            </ThemedText>
           </Section>
 
-          {rows.map((r, i) => (
-            <Row key={i} last={i === rows.length - 1} style={styles.formatRow}>
-              <View style={styles.formatInner}>
-                <View style={styles.formatTop}>
-                  <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
-                    {r.title}
-                  </ThemedText>
-                  <Money fils={r.amountFils} prefix={false} />
-                </View>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('readAs')} {r.category} · seen {r.count}×
+          {([
+            [t('couldNotRead'), unread] as const,
+            [t('noCategoryYet'), uncategorized] as const,
+          ]).map(([heading, list]) =>
+            list.length === 0 ? null : (
+              <View key={heading}>
+                <ThemedText type="meta" themeColor="textTertiary" style={styles.groupHeading}>
+                  {heading} · {list.length}
                 </ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
-                  {maskDigits(r.raw)}
-                </ThemedText>
+                {list.map((r, i) => (
+                  <Row key={`${heading}-${i}`} last={i === list.length - 1} style={styles.formatRow}>
+                    <View style={styles.formatInner}>
+                      <View style={styles.formatTop}>
+                        <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
+                          {r.title}
+                        </ThemedText>
+                        <Money fils={r.amountFils} prefix={false} />
+                      </View>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        {t('readAs')} {r.category} · {tf('seenCount', { count: r.count })}
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
+                        {maskDigits(r.raw)}
+                      </ThemedText>
+                    </View>
+                  </Row>
+                ))}
               </View>
-            </Row>
-          ))}
+            ),
+          )}
 
           {rows.length === 0 && (
             <Section index={1} style={styles.empty}>
@@ -120,6 +199,12 @@ const styles = StyleSheet.create({
   intro: {
     gap: Spacing.three - 2,
     paddingBottom: Spacing.four,
+  },
+  groupHeading: {
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.two - 2,
   },
   formatRow: {
     paddingVertical: Spacing.three - 2,

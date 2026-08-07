@@ -1,6 +1,6 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -18,10 +18,14 @@ import { WafraMark } from '@/components/wafra-logo';
 import { EASE, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useStore } from '@/lib/store';
+import { t } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
 type BiometricState = 'prompting' | 'failed' | 'unavailable';
+
+/** Short trips out of the app — a permission sheet, the share card — do not re-lock. */
+const RELOCK_GRACE_MS = 20_000;
 
 /** The breathing ring around the sensor target: scale 1 → 1.4, opacity .85 → .3. */
 function SensorRing({ color }: { color: string }) {
@@ -69,7 +73,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         return;
       }
       setBiometric('prompting');
-      const result = await LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock Wafra' });
+      const result = await LocalAuthentication.authenticateAsync({ promptMessage: t('unlockWafra') });
       if (result.success) setUnlocked(true);
       else setBiometric('failed');
     } catch {
@@ -83,21 +87,63 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     if (lockRequired && !attempted) tryUnlock();
   }, [lockRequired, attempted, tryUnlock]);
 
+  /**
+   * Re-lock when the app leaves the foreground. Without this the gate is a
+   * launch-time formality: unlock once and the process stays unlocked until
+   * iOS or Android kills it, so handing someone your unlocked phone hands
+   * them your ledger — which is the exact thing App Lock is for.
+   *
+   * The grace period exists because iOS backgrounds the app for its OWN
+   * permission and share dialogs. Re-locking on those would make the setting
+   * unusable rather than secure.
+   */
+  useEffect(() => {
+    if (!state.appLock || Platform.OS === 'web') return;
+    let leftAt = 0;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' || next === 'inactive') {
+        leftAt = leftAt || Date.now();
+        return;
+      }
+      if (next === 'active' && leftAt) {
+        const away = Date.now() - leftAt;
+        leftAt = 0;
+        if (away > RELOCK_GRACE_MS) {
+          setUnlocked(false);
+          setAttempted(false);
+          setBiometric('prompting');
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [state.appLock]);
+
   if (!lockRequired) return <>{children}</>;
 
   return (
     <View style={styles.container}>
-      {/* The router's Stack stays mounted; the lock paints over it. */}
-      <View style={styles.hidden}>{children}</View>
-      <ThemedView style={[StyleSheet.absoluteFillObject, styles.root]}>
+      {/*
+        The router's Stack stays mounted; the lock paints over it. Opacity
+        alone only hides it from EYES — VoiceOver and TalkBack still walk the
+        tree underneath and will happily read out every balance on the locked
+        screen, so the subtree has to be removed from the accessibility tree
+        explicitly (each platform has its own prop) and made untappable.
+      */}
+      <View
+        style={styles.hidden}
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants">
+        {children}
+      </View>
+      <ThemedView accessibilityViewIsModal style={[StyleSheet.absoluteFillObject, styles.root]}>
         <View style={styles.centre}>
           <WafraMark size={46} />
           <ThemedText type="micro" themeColor="textTertiary">
-            Locked
+            {t('locked')}
           </ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
-            Your balances are hidden until the phone says it&apos;s you. Nothing left the phone while
-            it was closed.
+            {t('lockedPrivacyBody')}
           </ThemedText>
         </View>
 
@@ -112,12 +158,12 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               },
             ]}>
             <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
-            <ThemedText type="small">This phone has no screen lock</ThemedText>
+            <ThemedText type="small">{t('phoneHasNoLock')}</ThemedText>
             <ThemedText type="meta" themeColor="textTertiary" style={styles.centreText}>
-              Set up a fingerprint, face unlock, or a PIN and Wafra can use it.
+              {t('setPhoneLockBody')}
             </ThemedText>
             <Button
-              label="Open phone settings"
+              label={t('openPhoneSettings')}
               variant="outline"
               onPress={() => Linking.openSettings().catch(() => {})}
               style={styles.fullButton}
@@ -136,7 +182,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
             <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Unlock with your fingerprint"
+              accessibilityLabel={t('unlockFingerprintA11y')}
               onPress={tryUnlock}
               style={[
                 styles.sensor,
@@ -146,13 +192,13 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               <Icon name="fingerprint" size={38} color={theme.text} />
             </Pressable>
             <ThemedText type="small">
-              {biometric === 'failed' ? 'Try the sensor again' : 'Touch the sensor to unlock'}
+              {biometric === 'failed' ? t('trySensorAgain') : t('touchSensor')}
             </ThemedText>
             <ThemedText type="meta" themeColor="textTertiary">
-              Fingerprint, face unlock, or your phone PIN
+              {t('biometricOrPin')}
             </ThemedText>
             <Button
-              label="Use PIN instead"
+              label={t('usePinInstead')}
               variant="outline"
               onPress={tryUnlock}
               style={styles.fullButton}

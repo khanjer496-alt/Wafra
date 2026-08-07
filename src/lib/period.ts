@@ -1,4 +1,5 @@
 import { monthEndISO, monthKey, monthLabel, monthStartISO, shortDate, toISODate } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import type { Transaction } from '@/lib/types';
 
 /**
@@ -51,7 +52,7 @@ export function periodLabel(p: PeriodLike): string {
     case 'range':
       return `${shortDate(period.from)} – ${shortDate(period.to)}`;
     case 'all':
-      return 'All time';
+      return t('allTimeTitle');
   }
 }
 
@@ -86,6 +87,39 @@ export function previousPeriod(p: PeriodLike): Period | null {
 
 function dayOfYear(d: Date): number {
   return Math.floor((d.getTime() - new Date(d.getFullYear(), 0, 0).getTime()) / 86400000);
+}
+
+/**
+ * How long the period is in total, elapsed or not — the denominator for "how
+ * far through it are we".
+ */
+export function daysInPeriod(p: PeriodLike, today: Date): number {
+  const period = toPeriod(p);
+  switch (period.mode) {
+    case 'month':
+      return (
+        Math.round(
+          (new Date(`${monthEndISO(period.key)}T12:00:00`).getTime() -
+            new Date(`${monthStartISO(period.key)}T12:00:00`).getTime()) /
+            86400000,
+        ) + 1
+      );
+    case 'year': {
+      const y = period.year;
+      return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 366 : 365;
+    }
+    case 'range':
+      return (
+        Math.round(
+          (new Date(`${period.to}T12:00:00`).getTime() -
+            new Date(`${period.from}T12:00:00`).getTime()) /
+            86400000,
+        ) + 1
+      );
+    default:
+      // 'all' has no fixed length; its elapsed span is its length.
+      return Math.max(1, elapsedDays(period, today, []));
+  }
 }
 
 /**

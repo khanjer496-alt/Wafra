@@ -3,7 +3,9 @@ import { Platform } from 'react-native';
 
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
-import { formatAED, monthKey } from '@/lib/format';
+import { formatAED } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { detectSubscriptions, daysUntilNext } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
@@ -35,6 +37,31 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return asked.granted;
 }
 
+/**
+ * iOS can grant provisional notification authorization without asking for
+ * banners, sounds, or badges. Silent relay wakes need notification delivery,
+ * not an attention-grabbing permission sheet during finance setup.
+ */
+export async function requestSilentCapturePermission(): Promise<boolean> {
+  if (Platform.OS !== 'ios') return requestNotificationPermission();
+  const allowed = (status: Notifications.NotificationPermissionsStatus) =>
+    status.granted ||
+    status.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED ||
+    status.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+  const current = await Notifications.getPermissionsAsync();
+  if (allowed(current)) return true;
+  if (current.ios?.status === Notifications.IosAuthorizationStatus.DENIED) return false;
+  const asked = await Notifications.requestPermissionsAsync({
+    ios: {
+      allowAlert: false,
+      allowBadge: false,
+      allowSound: false,
+      allowProvisional: true,
+    },
+  });
+  return allowed(asked);
+}
+
 interface PendingNotification {
   date: Date;
   title: string;
@@ -54,7 +81,7 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-      name: 'Payment reminders',
+      name: t('notificationChannelPayments'),
       importance: Notifications.AndroidImportance.DEFAULT,
     });
   }
@@ -70,43 +97,66 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
   };
 
   // Bills: 1 day before + day-of for this month's unpaid reminders.
-  const key = monthKey(now);
   const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
   for (const { bill, status } of billsForMonth(state.bills, state.transactions, now)) {
     if (status === 'paid') continue;
-    const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    for (const [offset, label] of [[-1, 'tomorrow'], [0, 'today']] as const) {
+    // Clamp to the month, exactly as billsForMonth does. `new Date(y, m, 31)`
+    // in February rolls over into March, so a rent bill on the 31st scheduled
+    // "due today" for 3 March while the Bills tab said 28 February — the
+    // reminder arrived three days after the app's own deadline.
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const due = new Date(now.getFullYear(), now.getMonth(), Math.min(bill.dueDay, lastDay));
+    for (const [offset, label] of [[-1, t('tomorrow')], [0, t('today').toLocaleLowerCase()]] as const) {
       const when = at9(new Date(due.getFullYear(), due.getMonth(), due.getDate() + offset));
       if (when <= now) continue;
       pending.push({
         date: when,
-        title: `${bill.title} due ${label}`,
-        body: `${formatAED(bill.amountFils, { decimals: false })} · mark it paid in Wafra once done.`,
+        title: tf('notificationBillDue', { name: bill.title, when: label }),
+        body: tf('notificationBillBody', {
+          amount: formatAED(bill.amountFils, { decimals: false }),
+        }),
       });
     }
-    if (bill.paidMonths.includes(key)) continue;
   }
 
   // Card dues: 3 days before + day-of.
-  for (const { due, remainingFils } of openDues(state, now)) {
+  for (const { due, remainingFils, minimumKnown } of openDues(state, now)) {
     const account = state.accounts.find((a) => a.id === due.accountId);
-    const name = account?.name ?? 'Credit card';
+    const name = account?.name ?? t('creditCard');
     const dueDate = new Date(`${due.dueDate}T09:00:00`);
-    for (const [offset, label] of [[-3, 'in 3 days'], [0, 'today']] as const) {
+    for (const [offset, label] of [[-3, tf('inDaysPhrase', { days: 3 })], [0, t('today').toLocaleLowerCase()]] as const) {
       const when = new Date(dueDate);
       when.setDate(when.getDate() + offset);
       if (when <= now) continue;
       pending.push({
         date: when,
-        title: `${name} payment due ${label}`,
-        body: `${formatAED(remainingFils, { decimals: false })} outstanding · minimum ${formatAED(due.minDueFils, { decimals: false })}.`,
+        title: tf('notificationCardDue', { name, when: label }),
+        // Only quote a minimum the bank actually stated. When none was, the
+        // stored figure is a 5% placeholder, and a push notification is the
+        // last place to hand someone a number the app made up.
+        body: minimumKnown
+          ? tf('notificationOutstandingMinimum', {
+              amount: formatAED(remainingFils, { decimals: false }),
+              minimum: formatAED(due.minDueFils, { decimals: false }),
+            })
+          : tf('notificationOutstanding', {
+              amount: formatAED(remainingFils, { decimals: false }),
+            }),
       });
     }
   }
 
   // Subscriptions: 1 day before the next expected charge. Merchants already
   // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(state.transactions, state.notSubscriptions)) {
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internal = internalTransferIds(state.transactions, liveAccounts);
+  for (const sub of detectSubscriptions(
+    state.transactions,
+    state.notSubscriptions,
+    now,
+    liveAccounts,
+    internal,
+  )) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
     if (billTitles.has(sub.title.toLowerCase())) continue;
     const days = daysUntilNext(sub, now);
@@ -115,8 +165,10 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
     if (when <= now) continue;
     pending.push({
       date: when,
-      title: `${sub.title} renews tomorrow`,
-      body: `Around ${formatAED(sub.avgAmountFils, { decimals: false })} will be charged.`,
+      title: tf('notificationRenewsTomorrow', { name: sub.title }),
+      body: tf('notificationRenewalBody', {
+        amount: formatAED(sub.avgAmountFils, { decimals: false }),
+      }),
     });
   }
 

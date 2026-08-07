@@ -1,4 +1,5 @@
 import { toISODate } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import type { CategoryId, Transaction } from '@/lib/types';
 
 export type Cadence = 'weekly' | 'monthly' | 'yearly';
@@ -25,6 +26,14 @@ export interface Subscription {
   chargeCount: number;
   /** Latest charge is >10% above the average of prior charges. */
   priceIncreased: boolean;
+  /**
+   * What the prior charges typically were — the figure `priceIncreased` was
+   * decided against, and therefore the only honest thing to show beside the
+   * new price. `avgAmountFils` includes the latest charge, so quoting THAT
+   * produced "Last charge AED 386 vs the usual AED 386": a rise announced
+   * against a number that had already absorbed it.
+   */
+  priorTypicalFils: number;
   /** Monthly-equivalent cost for totals (yearly/12, weekly*4.33). */
   monthlyEquivalentFils: number;
 }
@@ -76,16 +85,52 @@ const SUBSCRIPTION_CATEGORIES = new Set<CategoryId>(['entertainment', 'shopping'
  * Real subscription detection: per-merchant charge cadence with amount
  * stability, boosted by a known-subscription merchant list. Merchants the
  * user marked "not a subscription" are skipped entirely.
+ *
+ * `liveAccounts`/`internalTransfers` are optional so callers working from a
+ * bare transaction list (tests) still get the base transfer-flag rule, but
+ * every screen with the accounts to hand should pass both — otherwise a
+ * recurring own-account sweep that predates the transfer flag (caught only by
+ * `internalTransferIds`' structural title match) reads as a monthly
+ * commitment instead of the user's own money moving pockets.
  */
+/** Materially different — the same threshold the rise test uses. */
+function differs(a: number, b: number): boolean {
+  return Math.abs(a - b) > Math.min(a, b) * 0.1;
+}
+
+/**
+ * The contiguous run of charges, ending just before the current price began,
+ * that were charged at a different price. Empty when the price never changed.
+ *
+ * amounts is oldest-first, so this walks backwards past every charge at the
+ * current price, then collects the run of the price before it.
+ */
+function previousPriceRun(amounts: number[]): number[] {
+  if (amounts.length < 2) return [];
+  const current = amounts[amounts.length - 1];
+  let i = amounts.length - 1;
+  while (i >= 0 && !differs(amounts[i], current)) i -= 1;
+  if (i < 0) return []; // never anything else
+  const previous = amounts[i];
+  const run: number[] = [];
+  while (i >= 0 && !differs(amounts[i], previous)) {
+    run.unshift(amounts[i]);
+    i -= 1;
+  }
+  return run;
+}
+
 export function detectSubscriptions(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
   today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
 ): Subscription[] {
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
   const groups = new Map<string, Transaction[]>();
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer) continue;
+    if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const k = t.title.trim().toLowerCase();
     if (!k || dismissed.has(k)) continue;
     const list = groups.get(k) ?? [];
@@ -123,7 +168,17 @@ export function detectSubscriptions(
     const mid = median(amounts);
     if (mid <= 0) continue;
     const stable = amounts.every((a) => a >= mid * 0.85 && a <= mid * 1.15);
-    if (!stable && !known && !billLike) continue;
+    // A bill varies, but it varies like a bill. Waiving the ±15% gate for
+    // anything the parser called a utility waived it entirely, so a merchant
+    // that happened to be charged twice a month apart became a standing
+    // monthly commitment at whatever the larger charge was — one shop was
+    // listed at AED 20,918/mo on two unrelated payments.
+    //
+    // Same band the outlier guard below already uses: a third to triple the
+    // median. SEWA at 280 one month and 450 the next passes; two payments that
+    // have nothing to do with each other do not.
+    const billShaped = amounts.every((a) => a >= mid / 3 && a <= mid * 3);
+    if (!stable && !known && !(billLike && billShaped)) continue;
 
     // Known merchants skip the stability gate, which let a single misparsed
     // charge set the price: one bad row put Canva on the list at AED 18,313 a
@@ -162,11 +217,25 @@ export function detectSubscriptions(
     // least two of them. A mean over one prorated first charge made every
     // steady subscription look like a price rise — Google One was flagged
     // "price up" in a month its price went down.
-    // The latest charge against the MEDIAN of every charge before it. Median
-    // rather than mean so one bad parse cannot move the bar, and unfiltered so
-    // a real upgrade is not hidden by the outlier guard — a tier change and a
-    // misparse look identical to that guard, and it silently prefers the past.
-    const priorAmounts = amounts.slice(0, -1);
+    // The latest charge against THE PRICE IT WAS BEFORE — the most recent
+    // run of charges that differed from what is being paid now.
+    //
+    // Neither obvious window works. A lifetime median answers the wrong
+    // question: Google One ran at AED 7.99 for a year, went to 76.99 on a
+    // tier change, then down to 37, and the median of all sixteen prior
+    // charges is still the 7.99 era — so a price that had just HALVED wore a
+    // "price up" badge. A fixed window of the last three is no better: it
+    // hides a rise that happened three charges ago, which is a rise the user
+    // has been paying ever since.
+    //
+    // Walking back to the previous distinct price answers what was actually
+    // asked. 37 after a run of 77 is a fall. 76.99 after a run of 7.99 is a
+    // rise, however long ago it started. And a steady price has no previous
+    // run at all, so there is nothing to announce.
+    //
+    // The run is taken whole rather than a single charge, so one bad parse
+    // cannot masquerade as the old price.
+    const priorAmounts = previousPriceRun(amounts);
     const priorTypical = priorAmounts.length ? median(priorAmounts) : last.amountFils;
     // What it costs NOW, not what it averaged over its life. A lifetime average
     // reports a price the user no longer pays: Google One went from AED 7.99
@@ -211,6 +280,7 @@ export function detectSubscriptions(
       nextExpectedISO: addDays(last.date, window.typicalDays),
       chargeCount: charges.length,
       priceIncreased: priorAmounts.length >= 2 && last.amountFils > priorTypical * 1.1,
+      priorTypicalFils: priorTypical,
       monthlyEquivalentFils,
     });
   }
@@ -246,6 +316,26 @@ export function stoppedSubscriptions(subs: Subscription[]): Subscription[] {
 /** Rent + utilities/telecom recurring commitments. */
 export function fixedCommitments(subs: Subscription[]): Subscription[] {
   return subs.filter((s) => s.group !== 'subscription');
+}
+
+/**
+ * The bills proper: rent, utilities, telecom, loans. What a "fixed bills"
+ * heading promises.
+ */
+export function billCommitments(subs: Subscription[]): Subscription[] {
+  return subs.filter(
+    (s) => s.group === 'utility' || s.group === 'housing' || s.category === 'loan',
+  );
+}
+
+/**
+ * Everything else that recurs: a supplier, a school, a shop visited on a
+ * cycle, a standing transfer to a person. Real, worth listing, and not a
+ * utility — filing a grocer under "Utilities & fixed bills" reads as a bug
+ * even when the recurrence is genuine.
+ */
+export function otherCommitments(subs: Subscription[]): Subscription[] {
+  return subs.filter((s) => s.group === 'commitment' && s.category !== 'loan');
 }
 
 /** Days until the next expected charge; negative if the date passed. */

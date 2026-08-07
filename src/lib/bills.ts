@@ -1,5 +1,18 @@
-import { daysInMonth, monthKey } from '@/lib/format';
+import { daysInMonth, monthKey, toISODate } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import type { Bill, Transaction } from '@/lib/types';
+
+/**
+ * The calendar date a monthly bill falls due in a given month.
+ *
+ * Clamped to the month's own end, so a bill on the 31st still lands on a day
+ * that exists: in February it falls due on the 28th, or the 29th in a leap
+ * year.
+ */
+export function dueDateInMonth(key: string, dueDay: number): string {
+  const day = Math.min(Math.max(dueDay, 1), daysInMonth(key));
+  return `${key}-${String(day).padStart(2, '0')}`;
+}
 
 export type BillStatus = 'paid' | 'overdue' | 'due-soon' | 'upcoming';
 
@@ -8,6 +21,8 @@ export interface BillWithStatus {
   status: BillStatus;
   /** Days until due this month; negative when overdue. */
   daysLeft: number;
+  /** The actual calendar date this bill falls due this month. */
+  dueISO: string;
   /** True when paid was inferred from an imported transaction, not marked manually. */
   autoReconciled?: boolean;
 }
@@ -25,7 +40,7 @@ function paidByTransaction(bill: Bill, transactions: Transaction[], key: string)
   const billTitle = normalize(bill.title);
   if (!billTitle) return false;
   for (const t of transactions) {
-    if (t.type !== 'expense' || t.isTransfer || monthKey(t.date) !== key) continue;
+    if (!isSpending(t) || monthKey(t.date) !== key) continue;
     if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
     const txTitle = normalize(t.title);
     // Every string contains "", so a title that normalizes to nothing (a row
@@ -43,11 +58,19 @@ export function billsForMonth(
   today: Date,
 ): BillWithStatus[] {
   const key = monthKey(today);
-  const lastDay = daysInMonth(key);
+  const todayISO = toISODate(today);
 
   const rows = bills.map((bill) => {
-    const dueDay = Math.min(bill.dueDay, lastDay);
-    const daysLeft = dueDay - today.getDate();
+    // The paid flag and the countdown must describe the SAME month, so the
+    // date is derived from the month key rather than from calendar arithmetic
+    // on today's date. The old `bill.dueDay - today.getDate()` form is what
+    // made a bill due on the 28th and paid on 28 June read "Paid" all through
+    // July while counting down to 28 July.
+    const dueISO = dueDateInMonth(key, bill.dueDay);
+    const daysLeft = Math.round(
+      (new Date(`${dueISO}T12:00:00`).getTime() - new Date(`${todayISO}T12:00:00`).getTime()) /
+        86400000,
+    );
     const manuallyPaid = bill.paidMonths.includes(key);
     const autoReconciled = !manuallyPaid && paidByTransaction(bill, transactions, key);
     let status: BillStatus;
@@ -55,7 +78,7 @@ export function billsForMonth(
     else if (daysLeft < 0) status = 'overdue';
     else if (daysLeft <= 5) status = 'due-soon';
     else status = 'upcoming';
-    return { bill, status, daysLeft, autoReconciled };
+    return { bill, status, daysLeft, dueISO, autoReconciled };
   });
 
   const rank: Record<BillStatus, number> = { overdue: 0, 'due-soon': 1, upcoming: 2, paid: 3 };

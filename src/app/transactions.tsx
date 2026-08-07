@@ -1,8 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Modal,
+  Platform,
   Pressable,
   ScrollView,
   SectionList,
@@ -16,20 +16,40 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { TransactionRow } from '@/components/transaction-row';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { Button, Chip } from '@/components/ui/controls';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
-import { CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
+import { categoryLabel, CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
+import {
+  formatAED,
+  friendlyDate,
+  monthKey,
+  shiftMonthKey,
+  shortDate,
+  toISODate,
+  wholeFilsAsShown,
+} from '@/lib/format';
 import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
+import {
+  countsInTotals,
+  internalTransferIds,
+  isTransfer,
+  isUnassignedAccountRef,
+  liveAccountIds,
+} from '@/lib/ledger';
+import { tapped } from '@/lib/haptics';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
+import { t, tf, type StringKey } from '@/lib/i18n';
 
 type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 type SortMode = 'newest' | 'oldest' | 'largest';
+const UNASSIGNED_FILTER = '__wafra-filter-unassigned__';
 
 interface Filters {
   type: TransactionType | null;
@@ -60,8 +80,16 @@ interface DaySection {
   data: Transaction[];
 }
 
+const transactionKey = (transaction: Transaction) => transaction.id;
+
 export default function TransactionsScreen() {
   const theme = useTheme();
+  const language = useLanguage();
+  const tr = useCallback((key: StringKey) => t(key, language), [language]);
+  const trf = useCallback(
+    (key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language),
+    [language],
+  );
   const router = useRouter();
   const { state } = useStore();
   const { period } = usePeriod();
@@ -70,15 +98,35 @@ export default function TransactionsScreen() {
     type: typeParam,
     category: categoryParam,
     merchant: merchantParam,
+    review: reviewParam,
   } = useLocalSearchParams<{
     source?: string;
     type?: string;
     category?: string;
     merchant?: string;
+    review?: string;
   }>();
-  const deepCategory = CATEGORIES.find((c) => c.id === categoryParam)?.id ?? null;
+  // One category, or several — Flow's pooled "N more" slice hands over every
+  // category behind it, so the drill-down covers exactly what the row totalled.
+  const deepCategories = (categoryParam ?? '')
+    .split(',')
+    .map((c) => CATEGORIES.find((x) => x.id === c.trim())?.id)
+    .filter((c): c is CategoryId => !!c);
 
   const [query, setQuery] = useState('');
+  /**
+   * The field updates on every keystroke; the FILTER lags it by a beat.
+   *
+   * Every character was re-running the predicate over the entire ledger and
+   * rebuilding every section, so typing a merchant name did that work once per
+   * letter. 140ms is under the threshold where a search feels like it is
+   * thinking, and it collapses a nine-letter word into one pass.
+   */
+  const [appliedQuery, setAppliedQuery] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setAppliedQuery(query), 140);
+    return () => clearTimeout(id);
+  }, [query]);
   // Insights merchant rows deep-link here scoped to that exact merchant.
   const [merchantFilter, setMerchantFilter] = useState<string | null>(
     typeof merchantParam === 'string' && merchantParam.trim() ? merchantParam.trim() : null,
@@ -86,12 +134,20 @@ export default function TransactionsScreen() {
   const [filters, setFilters] = useState<Filters>(() => ({
     ...DEFAULT_FILTERS,
     // Insights category drill-down deep-links here pre-filtered
-    categories: deepCategory ? new Set<CategoryId>([deepCategory]) : new Set(),
-    // reviewing an SMS import (or a drill-down asking for ALL rows) must show
-    // everything even if the app is scoped to a past period, so start unscoped
-    datePreset: source === 'sms' || deepCategory || merchantParam ? 'all' : 'selected',
+    categories: new Set<CategoryId>(deepCategories),
+    // Reviewing an SMS import, or drilling into one merchant, must show
+    // everything even if the app is scoped to a past period.
+    //
+    // A category drill-down is the opposite: it comes from a row on Flow that
+    // reads "Groceries · 16% · 1,774" FOR THE SELECTED PERIOD. Landing on
+    // all-time rows would show a list that cannot add up to the figure that
+    // was tapped, which is the whole class of bug this app has been fixing.
+    datePreset: source === 'sms' || merchantParam || reviewParam === 'unassigned' ? 'all' : 'selected',
     // Home's In/Out figures deep-link here pre-filtered by type
     type: typeParam === 'income' || typeParam === 'expense' ? typeParam : null,
+    // Home's review warning is not a generic Activity link: it must land on
+    // every unresolved row, including one outside the selected month.
+    accountId: reviewParam === 'unassigned' ? UNASSIGNED_FILTER : null,
   }));
   const [sheetVisible, setSheetVisible] = useState(false);
   /** Which end of the custom range is currently open in the native picker. */
@@ -109,8 +165,13 @@ export default function TransactionsScreen() {
     (filters.minFils ? 1 : 0) +
     (merchantFilter ? 1 : 0);
 
+  const unassignedCount = useMemo(
+    () => state.transactions.filter((transaction) => isUnassignedAccountRef(transaction.accountId)).length,
+    [state.transactions],
+  );
+
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = appliedQuery.trim().toLowerCase();
     const lastKey = shiftMonthKey(currentKey, -1);
     const threeKey = shiftMonthKey(currentKey, -2);
     const merchantKey = merchantFilter?.toLowerCase();
@@ -118,7 +179,11 @@ export default function TransactionsScreen() {
       if (source === 'sms' && t.source !== 'sms') return false;
       if (merchantKey && t.title.trim().toLowerCase() !== merchantKey) return false;
       if (filters.type && t.type !== filters.type) return false;
-      if (filters.accountId && t.accountId !== filters.accountId) return false;
+      if (
+        filters.accountId === UNASSIGNED_FILTER
+          ? !isUnassignedAccountRef(t.accountId)
+          : filters.accountId && t.accountId !== filters.accountId
+      ) return false;
       if (filters.categories.size > 0 && !filters.categories.has(t.category)) return false;
       if (filters.minFils && t.amountFils < filters.minFils) return false;
       const k = monthKey(t.date);
@@ -135,7 +200,8 @@ export default function TransactionsScreen() {
       if (!q) return true;
       return (
         t.title.toLowerCase().includes(q) ||
-        getCategory(t.category).label.toLowerCase().includes(q)
+        getCategory(t.category).label.toLowerCase().includes(q) ||
+        categoryLabel(t.category, language).toLowerCase().includes(q)
       );
     });
     if (filters.sort === 'largest') {
@@ -144,20 +210,100 @@ export default function TransactionsScreen() {
       list = [...list].reverse();
     }
     return list;
-  }, [state.transactions, query, filters, source, merchantFilter, currentKey, period]);
+  }, [
+    state.transactions,
+    appliedQuery,
+    filters,
+    source,
+    merchantFilter,
+    currentKey,
+    period,
+    language,
+  ]);
+
+  // Both legs of a move between the user's own accounts, so the arriving one
+  // is not painted as income it never was.
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+
+  const accountById = useMemo(
+    () => new Map(state.accounts.map((a) => [a.id, a] as const)),
+    [state.accounts],
+  );
+  // One stable handler for the whole list. An inline `() => setEditing(item)`
+  // is a new function per row per render, which defeats TransactionRow's memo
+  // and re-renders every visible row on each keystroke in the search field.
+  const openEntry = useCallback((tx: Transaction) => setEditing(tx), []);
+  const renderRow = useCallback(
+    ({ item, index }: { item: Transaction; index: number }) => (
+      <View
+        style={index > 0 ? [styles.rowDivider, { borderTopColor: theme.cardBorder }] : undefined}>
+        <TransactionRow
+          transaction={item}
+          account={accountById.get(item.accountId)}
+          onPress={openEntry}
+          internal={internal.has(item.id)}
+        />
+      </View>
+    ),
+    [accountById, openEntry, theme.cardBorder, internal],
+  );
+
+  /**
+   * A row that moves money in or out of the user's world, as opposed to
+   * around inside it.
+   *
+   * `isTransfer` alone is not enough and this screen learned that the hard
+   * way: only the LEAVING side of an own-account move carries the flag, so
+   * the arriving side — worded by the bank exactly like being paid — was
+   * added to the total while its twin was skipped. Moving AED 20,000 between
+   * two of your own accounts read as AED 20,000 earned.
+   */
+  const counts = useCallback(
+    (t: Transaction) => countsInTotals(t, liveAccounts, internal),
+    [internal, liveAccounts],
+  );
 
   const totalShown = useMemo(
     () =>
       filtered.reduce(
-        (s, t) => (t.isTransfer ? s : s + (t.type === 'expense' ? -t.amountFils : t.amountFils)),
+        (sum, transaction) =>
+          counts(transaction)
+            ? sum + wholeFilsAsShown(
+                transaction.type === 'expense' ? -transaction.amountFils : transaction.amountFils,
+              )
+            : sum,
         0,
       ),
-    [filtered],
+    [filtered, counts],
   );
+
+  // Excluded rows are still listed — they are real records and the user wants
+  // to find and fix them — but the reason each one is absent from the total
+  // must be stated accurately. The two were silently disagreeing: Home's
+  // "In AED 25,000" links here, a AED 3,000 card payment is an income-side
+  // transfer, and the header read 25,000 above rows summing to 28,000. The
+  // rule is stated now rather than left for the user to work out. Unassigned
+  // parser rows and archived accounts get their own labels instead of being
+  // falsely called transfers.
+  const excludedShown = useMemo(() => {
+    let transfers = 0;
+    let unassigned = 0;
+    let archived = 0;
+    for (const transaction of filtered) {
+      if (isTransfer(transaction) || internal.has(transaction.id)) transfers += 1;
+      else if (isUnassignedAccountRef(transaction.accountId)) unassigned += 1;
+      else if (!liveAccounts.has(transaction.accountId)) archived += 1;
+    }
+    return { transfers, unassigned, archived };
+  }, [filtered, internal, liveAccounts]);
 
   const sections = useMemo<DaySection[]>(() => {
     if (filters.sort === 'largest') {
-      return [{ title: 'Largest first', totalFils: totalShown, data: filtered }];
+      return [{ title: tr('largestFirst'), totalFils: totalShown, data: filtered }];
     }
     const byDay = new Map<string, Transaction[]>();
     for (const t of filtered) {
@@ -168,18 +314,25 @@ export default function TransactionsScreen() {
     return [...byDay.entries()].map(([date, data]) => ({
       title: friendlyDate(date, todayISO),
       totalFils: data.reduce(
-        (s, t) => (t.isTransfer ? s : s + (t.type === 'expense' ? -t.amountFils : t.amountFils)),
+        (sum, transaction) =>
+          counts(transaction)
+            ? sum + wholeFilsAsShown(
+                transaction.type === 'expense' ? -transaction.amountFils : transaction.amountFils,
+              )
+            : sum,
         0,
       ),
       data,
     }));
-  }, [filtered, filters.sort, todayISO, totalShown]);
+  }, [filtered, filters.sort, todayISO, totalShown, counts, tr]);
 
   const toggleCategory = (id: CategoryId) => {
-    const next = new Set(filters.categories);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setFilters({ ...filters, categories: next });
+    setFilters((current) => {
+      const next = new Set(current.categories);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { ...current, categories: next };
+    });
   };
 
   const clearFilters = () => {
@@ -187,13 +340,26 @@ export default function TransactionsScreen() {
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
   };
 
+  const reviewUnassigned = () => {
+    tapped();
+    setQuery('');
+    setMerchantFilter(null);
+    setFilters({
+      ...DEFAULT_FILTERS,
+      accountId: UNASSIGNED_FILTER,
+      categories: new Set(),
+      datePreset: 'all',
+    });
+    setSheetVisible(false);
+  };
+
   const presetLabel: Record<DatePreset, string> = {
-    selected: period.mode === 'all' ? 'Selected period' : periodLabel(period),
-    all: 'All time',
-    month: 'This month',
-    lastMonth: 'Last month',
-    '3months': 'Last 3 months',
-    custom: 'Date range',
+    selected: period.mode === 'all' ? tr('selectedPeriod') : periodLabel(period),
+    all: tr('allTime'),
+    month: tr('thisMonth'),
+    lastMonth: tr('lastMonth'),
+    '3months': tr('lastThreeMonths'),
+    custom: tr('dateRange'),
   };
 
   return (
@@ -202,24 +368,44 @@ export default function TransactionsScreen() {
         <View style={styles.header}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Back"
+            accessibilityLabel={tr('back')}
+            hitSlop={6}
             onPress={() => router.back()}
             style={[styles.backBtn, { backgroundColor: theme.backgroundSelected }]}>
             <Icon name="chevron-left" size={18} color={theme.text} />
           </Pressable>
-          <ThemedText type="heading">{t('transactionsTitle')}</ThemedText>
-          <Pressable
-            onPress={() => setSheetVisible(true)}
-            style={[
-              styles.backBtn,
-              { backgroundColor: activeFilterCount > 0 ? theme.primary : theme.backgroundSelected },
-            ]}>
-            <Icon
-              name="chart"
-              size={17}
-              color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-            />
-          </Pressable>
+          <ThemedText type="heading" accessibilityRole="header" style={styles.headerTitle}>
+            {tr('transactionsTitle')}
+          </ThemedText>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tr('addCashEntry')}
+              hitSlop={6}
+              onPress={() => {
+                tapped();
+                router.push('/add-transaction');
+              }}
+              style={[styles.backBtn, { backgroundColor: theme.backgroundElement }]}>
+              <Icon name="plus" size={17} color={theme.textSecondary} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tr('filtersButton')}
+              accessibilityState={{ selected: activeFilterCount > 0 }}
+              hitSlop={6}
+              onPress={() => setSheetVisible(true)}
+              style={[
+                styles.backBtn,
+                { backgroundColor: activeFilterCount > 0 ? theme.primary : theme.backgroundSelected },
+              ]}>
+              <Icon
+                name="chart"
+                size={17}
+                color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
+              />
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.controls}>
@@ -230,14 +416,23 @@ export default function TransactionsScreen() {
             ]}>
             <Icon name="search" size={17} color={theme.textSecondary} />
             <TextInput
+              accessibilityLabel={tr('searchMerchants')}
               value={query}
               onChangeText={setQuery}
-              placeholder="Search merchants or categories"
+              returnKeyType="search"
+              placeholder={tr('searchMerchants')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.searchInput, { color: theme.text }]}
+              style={[
+                styles.searchInput,
+                { color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' },
+              ]}
             />
             {query.length > 0 && (
-              <Pressable onPress={() => setQuery('')}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={tr('clearSearch')}
+                hitSlop={12}
+                onPress={() => setQuery('')}>
                 <Icon name="close" size={16} color={theme.textSecondary} />
               </Pressable>
             )}
@@ -246,6 +441,8 @@ export default function TransactionsScreen() {
           {merchantFilter && (
             <View style={styles.chipRow}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
                 onPress={() => setMerchantFilter(null)}
                 style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
                 <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
@@ -257,12 +454,42 @@ export default function TransactionsScreen() {
           )}
 
           <View style={styles.summaryRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              {filtered.length} transaction{filtered.length === 1 ? '' : 's'}
+            {/* Takes the space that is left, and no more. Without a flex
+                constraint this line expanded to whatever it needed, wrapped
+                to two lines, and shoved the total clean off the right edge of
+                the screen — the user saw "+A" and nothing else. */}
+            <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
+              {trf('transactionsCount', {
+                count: filtered.length,
+                s: filtered.length === 1 ? '' : 's',
+              })}
               {filters.datePreset === 'selected' && period.mode !== 'all'
                 ? ` · ${periodLabel(period)}`
                 : ''}
-              {activeFilterCount > 0 ? ` · ${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'}` : ''}
+              {activeFilterCount > 0
+                ? ` · ${trf('activeFiltersCount', {
+                    count: activeFilterCount,
+                    s: activeFilterCount === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excludedShown.transfers > 0
+                ? ` · ${trf('transfersExcluded', {
+                    count: excludedShown.transfers,
+                    s: excludedShown.transfers === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excludedShown.unassigned > 0
+                ? ` · ${trf('unassignedExcluded', {
+                    count: excludedShown.unassigned,
+                    s: excludedShown.unassigned === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excludedShown.archived > 0
+                ? ` · ${trf('archivedExcluded', {
+                    count: excludedShown.archived,
+                    s: excludedShown.archived === 1 ? '' : 's',
+                  })}`
+                : ''}
             </ThemedText>
             <View style={styles.summaryRight}>
               <ThemedText
@@ -273,23 +500,62 @@ export default function TransactionsScreen() {
                 {formatAED(Math.abs(totalShown), { decimals: false })}
               </ThemedText>
               {activeFilterCount > 0 && (
-                <Pressable onPress={clearFilters}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={tr('clearAllFilters')}
+                  hitSlop={8}
+                  onPress={clearFilters}>
                   <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                    Clear
+                    {tr('clearFilter')}
                   </ThemedText>
                 </Pressable>
               )}
             </View>
           </View>
+
+          {unassignedCount > 0 && filters.accountId !== UNASSIGNED_FILTER && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={trf('reviewUnassignedCount', {
+                count: unassignedCount,
+                s: unassignedCount === 1 ? '' : 's',
+              })}
+              onPress={reviewUnassigned}
+              style={[
+                styles.reviewBanner,
+                { backgroundColor: `${theme.warning}14`, borderColor: `${theme.warning}55` },
+              ]}>
+              <View style={[styles.reviewIcon, { backgroundColor: `${theme.warning}22` }]}>
+                <Icon name="alert" size={17} color={theme.warning} />
+              </View>
+              <View style={styles.reviewCopy}>
+                <ThemedText type="smallBold">
+                  {trf('reviewUnassignedCount', {
+                    count: unassignedCount,
+                    s: unassignedCount === 1 ? '' : 's',
+                  })}
+                </ThemedText>
+                <ThemedText type="micro" themeColor="textSecondary">
+                  {tr('reviewUnassignedBody')}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+            </Pressable>
+          )}
         </View>
 
         <SectionList
           sections={sections}
-          keyExtractor={(t) => t.id}
+          keyExtractor={transactionKey}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={styles.listContent}
           initialNumToRender={14}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={32}
           windowSize={9}
+          removeClippedSubviews={Platform.OS === 'android'}
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          keyboardShouldPersistTaps="handled"
           renderSectionHeader={({ section }) => (
             <View style={styles.sectionHeader}>
               <ThemedText type="micro" themeColor="textSecondary">
@@ -304,27 +570,14 @@ export default function TransactionsScreen() {
               </ThemedText>
             </View>
           )}
-          renderItem={({ item, index, section }) => (
-            <View
-              style={
-                index < section.data.length && index > 0
-                  ? [styles.rowDivider, { borderTopColor: theme.cardBorder }]
-                  : undefined
-              }>
-              <TransactionRow
-                transaction={item}
-                account={state.accounts.find((a) => a.id === item.accountId)}
-                onPress={() => setEditing(item)}
-              />
-            </View>
-          )}
+          renderItem={renderRow}
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
                 <Icon name="search" size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
-                Nothing matches. Adjust search or filters.
+                {tr('nothingMatches')}
               </ThemedText>
             </View>
           }
@@ -332,224 +585,227 @@ export default function TransactionsScreen() {
       </SafeAreaView>
 
       {/* Filter sheet */}
-      <Modal
+      <BottomSheet
         visible={sheetVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSheetVisible(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setSheetVisible(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}
-            onPress={() => {}}>
-            <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
-            <View style={styles.sheetHeader}>
-              <ThemedText type="heading">Filters</ThemedText>
-              <Pressable onPress={() => setSheetVisible(false)}>
-                <Icon name="close" size={20} color={theme.textSecondary} />
-              </Pressable>
-            </View>
+        title={tr('filtersTitle')}
+        onClose={() => setSheetVisible(false)}>
+        <View style={styles.filterGroup}>
+          <ThemedText type="micro" themeColor="textSecondary">
+            {tr('typeFilter')}
+          </ThemedText>
+          <View style={styles.chipRow}>
+            {([null, 'expense', 'income'] as (TransactionType | null)[]).map((type) => {
+              const label =
+                type === null
+                  ? tr('allWord')
+                  : type === 'expense'
+                    ? `− ${tr('expenseLabel')}`
+                    : `+ ${tr('incomeLabel')}`;
+              return (
+                <Chip
+                  key={String(type)}
+                  label={label}
+                  active={filters.type === type}
+                  onPress={() => setFilters((current) => ({ ...current, type }))}
+                />
+              );
+            })}
+          </View>
+        </View>
 
-            <ThemedText type="micro" themeColor="textSecondary">Type</ThemedText>
-            <View style={styles.chipRow}>
-              {([null, 'expense', 'income'] as (TransactionType | null)[]).map((t) => (
-                <Pressable
-                  key={String(t)}
-                  onPress={() => setFilters({ ...filters, type: t })}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor:
-                        filters.type === t ? `${theme.primary}22` : theme.backgroundSelected,
-                      borderColor: filters.type === t ? theme.primary : 'transparent',
-                    },
-                  ]}>
-                  <ThemedText type="small">
-                    {t === null ? 'All' : t === 'expense' ? '− Expenses' : '+ Income'}
-                  </ThemedText>
-                </Pressable>
-              ))}
-            </View>
+        <View style={styles.filterGroup}>
+          <ThemedText type="micro" themeColor="textSecondary">
+            {tr('periodFilter')}
+          </ThemedText>
+          <View style={styles.chipRow}>
+            {(Object.keys(presetLabel) as DatePreset[]).map((preset) => (
+              <Chip
+                key={preset}
+                label={presetLabel[preset]}
+                active={filters.datePreset === preset}
+                onPress={() =>
+                  setFilters((current) => ({ ...current, datePreset: preset }))
+                }
+              />
+            ))}
+          </View>
 
-            <ThemedText type="micro" themeColor="textSecondary">Period</ThemedText>
-            <View style={styles.chipRow}>
-              {(Object.keys(presetLabel) as DatePreset[]).map((p) => (
-                <Pressable
-                  key={p}
-                  onPress={() => setFilters({ ...filters, datePreset: p })}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor:
-                        filters.datePreset === p ? `${theme.primary}22` : theme.backgroundSelected,
-                      borderColor: filters.datePreset === p ? theme.primary : 'transparent',
-                    },
-                  ]}>
-                  <ThemedText type="small">{presetLabel[p]}</ThemedText>
-                </Pressable>
-              ))}
-            </View>
-
-            {filters.datePreset === 'custom' && (
-              <View style={styles.rangeRow}>
-                {(['dateFrom', 'dateTo'] as const).map((field) => (
-                  <View key={field} style={{ flex: 1, gap: 4 }}>
+          {filters.datePreset === 'custom' && (
+            <View style={styles.rangeRow}>
+              {(['dateFrom', 'dateTo'] as const).map((field) => {
+                const label = field === 'dateFrom' ? tr('fromLabel') : tr('toLabel');
+                return (
+                  <View key={field} style={styles.rangeColumn}>
                     <ThemedText type="micro" themeColor="textSecondary">
-                      {field === 'dateFrom' ? 'From' : 'To'}
+                      {label}
                     </ThemedText>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${label}: ${
+                        filters[field] ? shortDate(filters[field]!) : tr('anyLabel')
+                      }`}
                       onPress={() => setPicking(field)}
                       style={[styles.rangeInput, { backgroundColor: theme.backgroundSelected }]}>
                       <ThemedText
                         type="small"
                         themeColor={filters[field] ? 'text' : 'textSecondary'}>
-                        {filters[field] ? shortDate(filters[field]!) : 'Any'}
+                        {filters[field] ? shortDate(filters[field]!) : tr('anyLabel')}
                       </ThemedText>
                     </Pressable>
                   </View>
-                ))}
-                {filters.dateFrom || filters.dateTo ? (
-                  <Pressable
-                    onPress={() => setFilters({ ...filters, dateFrom: null, dateTo: null })}
-                    style={{ justifyContent: 'flex-end', paddingBottom: Spacing.two }}
-                    hitSlop={8}>
-                    <ThemedText type="small" style={{ color: theme.primary }}>
-                      Clear
-                    </ThemedText>
-                  </Pressable>
-                ) : null}
-              </View>
-            )}
-            {picking !== null && (
-              <DateTimePicker
-                mode="date"
-                display="calendar"
-                // Opening on the value already chosen, or today when unset, so
-                // the wheel never starts in 1970.
-                value={
-                  filters[picking] ? new Date(`${filters[picking]}T12:00:00`) : new Date()
-                }
-                // Bounds keep the range coherent from the picker itself: the
-                // start cannot be after the end, and neither can be in the
-                // future, because no transaction ever is.
-                minimumDate={
-                  picking === 'dateTo' && filters.dateFrom
-                    ? new Date(`${filters.dateFrom}T12:00:00`)
-                    : undefined
-                }
-                maximumDate={
-                  picking === 'dateFrom' && filters.dateTo
-                    ? new Date(`${filters.dateTo}T12:00:00`)
-                    : new Date()
-                }
-                onChange={(event, picked) => {
-                  const field = picking;
-                  setPicking(null);
-                  if (event.type !== 'set' || !picked || !field) return;
-                  setFilters((f) => ({ ...f, [field]: toISODate(picked) }));
+                );
+              })}
+              {filters.dateFrom || filters.dateTo ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={tr('clearFilter')}
+                  onPress={() =>
+                    setFilters((current) => ({
+                      ...current,
+                      dateFrom: null,
+                      dateTo: null,
+                    }))
+                  }
+                  style={styles.rangeClear}
+                  hitSlop={8}>
+                  <ThemedText type="small" style={{ color: theme.primary }}>
+                    {tr('clearFilter')}
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+          {picking !== null && (
+            <DateTimePicker
+              mode="date"
+              display="calendar"
+              value={filters[picking] ? new Date(`${filters[picking]}T12:00:00`) : new Date()}
+              minimumDate={
+                picking === 'dateTo' && filters.dateFrom
+                  ? new Date(`${filters.dateFrom}T12:00:00`)
+                  : undefined
+              }
+              maximumDate={
+                picking === 'dateFrom' && filters.dateTo
+                  ? new Date(`${filters.dateTo}T12:00:00`)
+                  : new Date()
+              }
+              onChange={(event, picked) => {
+                const field = picking;
+                setPicking(null);
+                if (event.type !== 'set' || !picked || !field) return;
+                setFilters((current) => ({ ...current, [field]: toISODate(picked) }));
+              }}
+            />
+          )}
+        </View>
+
+        <View style={styles.filterGroup}>
+          <ThemedText type="micro" themeColor="textSecondary">
+            {tr('accountFilter')}
+          </ThemedText>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRowScroll}>
+            <Chip
+              label={tr('allWord')}
+              active={!filters.accountId}
+              onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
+            />
+            {unassignedCount > 0 && (
+              <Chip
+                label={`${tr('unassigned')} (${unassignedCount})`}
+                active={filters.accountId === UNASSIGNED_FILTER}
+                onPress={() => {
+                  if (filters.accountId === UNASSIGNED_FILTER) {
+                    setFilters((current) => ({ ...current, accountId: null }));
+                  } else {
+                    reviewUnassigned();
+                  }
                 }}
               />
             )}
+            {state.accounts.map((account) => (
+              <Chip
+                key={account.id}
+                label={account.name}
+                active={filters.accountId === account.id}
+                onPress={() =>
+                  setFilters((current) => ({
+                    ...current,
+                    accountId: current.accountId === account.id ? null : account.id,
+                  }))
+                }
+              />
+            ))}
+          </ScrollView>
+        </View>
 
-            <ThemedText type="micro" themeColor="textSecondary">Account</ThemedText>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowScroll}>
-              <Pressable
-                onPress={() => setFilters({ ...filters, accountId: null })}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: !filters.accountId ? `${theme.primary}22` : theme.backgroundSelected,
-                    borderColor: !filters.accountId ? theme.primary : 'transparent',
-                  },
-                ]}>
-                <ThemedText type="small">All</ThemedText>
-              </Pressable>
-              {state.accounts.map((a) => (
-                <Pressable
-                  key={a.id}
-                  onPress={() =>
-                    setFilters({ ...filters, accountId: filters.accountId === a.id ? null : a.id })
-                  }
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor:
-                        filters.accountId === a.id ? `${a.color}26` : theme.backgroundSelected,
-                      borderColor: filters.accountId === a.id ? a.color : 'transparent',
-                    },
-                  ]}>
-                  <ThemedText type="small">{a.name}</ThemedText>
-                </Pressable>
-              ))}
-            </ScrollView>
+        <View style={styles.filterGroup}>
+          <ThemedText type="micro" themeColor="textSecondary">
+            {tr('categoriesFilter')}
+          </ThemedText>
+          <CategoryChips
+            categories={EXPENSE_CATEGORIES}
+            selected={filters.categories}
+            onToggle={toggleCategory}
+            layout="wrap"
+          />
+        </View>
 
-            <ThemedText type="micro" themeColor="textSecondary">Categories</ThemedText>
-            <CategoryChips
-              categories={EXPENSE_CATEGORIES}
-              selected={filters.categories}
-              onToggle={toggleCategory}
-            />
+        <View style={styles.filterGroup}>
+          <ThemedText type="micro" themeColor="textSecondary">
+            {tr('minimumAmountFilter')}
+          </ThemedText>
+          <View style={styles.chipRow}>
+            {[null, 10000, 50000, 100000].map((value) => (
+              <Chip
+                key={String(value)}
+                label={value === null ? tr('anyLabel') : `${value / 100}+`}
+                active={filters.minFils === value}
+                onPress={() =>
+                  setFilters((current) => ({ ...current, minFils: value }))
+                }
+              />
+            ))}
+          </View>
+        </View>
 
-            <View style={styles.sheetSplit}>
-              <View style={styles.sheetCol}>
-                <ThemedText type="micro" themeColor="textSecondary">Min amount</ThemedText>
-                <View style={styles.chipRow}>
-                  {[null, 10000, 50000, 100000].map((v) => (
-                    <Pressable
-                      key={String(v)}
-                      onPress={() => setFilters({ ...filters, minFils: v })}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor:
-                            filters.minFils === v ? `${theme.primary}22` : theme.backgroundSelected,
-                          borderColor: filters.minFils === v ? theme.primary : 'transparent',
-                        },
-                      ]}>
-                      <ThemedText type="small">{v === null ? 'Any' : `${v / 100}+`}</ThemedText>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            </View>
+        <View style={styles.filterGroup}>
+          <ThemedText type="micro" themeColor="textSecondary">
+            {tr('sortFilter')}
+          </ThemedText>
+          <View style={styles.chipRow}>
+            {(['newest', 'oldest', 'largest'] as SortMode[]).map((sort) => (
+              <Chip
+                key={sort}
+                label={
+                  sort === 'newest'
+                    ? tr('newest')
+                    : sort === 'oldest'
+                      ? tr('oldest')
+                      : tr('largest')
+                }
+                active={filters.sort === sort}
+                onPress={() => setFilters((current) => ({ ...current, sort }))}
+              />
+            ))}
+          </View>
+        </View>
 
-            <ThemedText type="micro" themeColor="textSecondary">Sort</ThemedText>
-            <View style={styles.chipRow}>
-              {(['newest', 'oldest', 'largest'] as SortMode[]).map((s) => (
-                <Pressable
-                  key={s}
-                  onPress={() => setFilters({ ...filters, sort: s })}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor:
-                        filters.sort === s ? `${theme.primary}22` : theme.backgroundSelected,
-                      borderColor: filters.sort === s ? theme.primary : 'transparent',
-                    },
-                  ]}>
-                  <ThemedText type="small">
-                    {s === 'newest' ? 'Newest' : s === 'oldest' ? 'Oldest' : 'Largest'}
-                  </ThemedText>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={styles.sheetActions}>
-              <Pressable
-                onPress={clearFilters}
-                style={[styles.resetBtn, { backgroundColor: theme.backgroundSelected }]}>
-                <ThemedText type="smallBold">Reset</ThemedText>
-              </Pressable>
-              <Pressable
-                onPress={() => setSheetVisible(false)}
-                style={[styles.applyBtn, { backgroundColor: theme.primary }]}>
-                <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-                  Show {filtered.length} result{filtered.length === 1 ? '' : 's'}
-                </ThemedText>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        <View style={styles.sheetActions}>
+          <Button inline variant="outline" label={tr('reset')} onPress={clearFilters} />
+          <Button
+            inline
+            label={trf('showResults', {
+              count: filtered.length,
+              s: filtered.length === 1 ? '' : 's',
+            })}
+            onPress={() => setSheetVisible(false)}
+          />
+        </View>
+      </BottomSheet>
 
       <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
     </ThemedView>
@@ -573,10 +829,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
   },
+  headerTitle: { flex: 1 },
+  headerActions: { flexDirection: 'row', gap: Spacing.one },
   backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -594,6 +852,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    minHeight: 44,
     paddingVertical: Spacing.two + 4,
     fontSize: 14,
     fontWeight: '500',
@@ -602,10 +861,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  summaryText: {
+    flexShrink: 1,
   },
   merchantChip: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 44,
     gap: 6,
     paddingHorizontal: Spacing.two + 2,
     paddingVertical: Spacing.one + 1,
@@ -615,6 +879,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
+    // The figure is the point of the row; it never gives up space.
+    flexShrink: 0,
+  },
+  reviewBanner: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.two + 2,
+    paddingVertical: Spacing.two,
+  },
+  reviewIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewCopy: {
+    flex: 1,
+    gap: 2,
   },
   listContent: {
     paddingHorizontal: Spacing.three,
@@ -642,81 +929,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(7, 15, 12, 0.6)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: Spacing.four,
-    paddingBottom: Spacing.five,
+  filterGroup: {
     gap: Spacing.two,
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    marginTop: -Spacing.two,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.one,
   },
   rangeRow: {
     flexDirection: 'row',
+    alignItems: 'stretch',
     gap: Spacing.two,
-    marginBottom: Spacing.one,
+  },
+  rangeColumn: {
+    flex: 1,
+    gap: Spacing.one,
   },
   rangeInput: {
+    minHeight: 44,
     borderRadius: Radius.sm,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.two + 2,
     justifyContent: 'center',
   },
+  rangeClear: {
+    minHeight: 44,
+    justifyContent: 'flex-end',
+    paddingBottom: Spacing.two,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
-    marginBottom: Spacing.one,
   },
   chipRowScroll: {
     gap: Spacing.two,
     paddingBottom: Spacing.one,
   },
-  chip: {
-    paddingHorizontal: Spacing.two + 4,
-    paddingVertical: Spacing.one + 3,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-  },
-  sheetSplit: {
-    flexDirection: 'row',
-  },
-  sheetCol: {
-    flex: 1,
-    gap: Spacing.two,
-  },
   sheetActions: {
     flexDirection: 'row',
     gap: Spacing.two,
     marginTop: Spacing.one,
-  },
-  resetBtn: {
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.three,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-  },
-  applyBtn: {
-    flex: 1,
-    borderRadius: Radius.md,
-    paddingVertical: Spacing.three,
-    alignItems: 'center',
   },
 });

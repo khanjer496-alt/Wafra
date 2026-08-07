@@ -1,4 +1,4 @@
-# Wafra for iPhone — Terms of Use
+# Wafra Terms of Use
 
 _Last updated: 7 August 2026_
 
@@ -9,7 +9,7 @@ _Last updated: 7 August 2026_
 > app actually behaves today; if the app changes, this changes with it.
 
 These terms govern your use of **Wafra** ("the app"), a personal money manager
-for iPhone published by Naser Khanjar ("we", "us").
+for Android and iOS published by Naser Khanjar ("we", "us").
 
 By installing or using the app you accept these terms. If you do not accept
 them, do not use the app.
@@ -17,8 +17,10 @@ them, do not use the app.
 ## What the app does
 
 Wafra records your personal money movements — expenses, income, transfers,
-card statements, bills and subscriptions — mainly by reading bank alert
-messages on your device, and presents them as balances, budgets and reports.
+card statements, bills and subscriptions — and presents them as balances,
+budgets and reports. Android can parse bank alerts on the device. On iPhone,
+a personal Shortcut can send alerts from bank senders you select to Wafra's
+privacy-minimising relay for parsing and sealed delivery back to your devices.
 
 It is an organiser for information your bank already sent you. It is not a
 bank, not a payment service, and it does not connect to your bank accounts or
@@ -52,13 +54,12 @@ attempt to defeat its licensing or subscription controls.
 
 ## Your data
 
-Your financial data stays on your device, apart from the one path the iPhone
-version needs: if you choose to set up automatic capture, bank messages are
-forwarded by a Shortcut you build to a relay that parses them, discards the
-text, and holds the encrypted result until your phone collects it. What the app
-and that relay read, keep and discard is set out in full in the
-[Privacy Policy](https://wafra-legal.pages.dev/ios/privacy), which forms part of
-these terms.
+Your main ledger stays in encrypted storage on your device. If you enable
+iPhone automatic capture, the relay transiently receives the selected alert
+and may hold only a sealed structured transaction until acknowledgement or
+expiry. Optional forwarded email, PDF import and trusted-device sharing also
+use the relay. What the app reads, stores and transmits is set out in the
+[Privacy Policy](./privacy-policy.md), which forms part of these terms.
 
 Backups and exports you create are files you control. Once you move one off
 your device, its security is in your hands, and these terms stop protecting it.
@@ -69,21 +70,19 @@ Some features require **Wafra Pro**. Every feature is free for the first
 **3 days** after first launch. When the trial ends, Pro features require a
 subscription.
 
-Subscriptions are sold and processed by the **Apple App Store**, in the plans offered
-in the app (currently a monthly and a yearly plan). We never see or handle
-your payment details.
+Subscriptions are sold and processed by **Apple's App Store or Google Play**,
+depending on your device, in the plans offered in the app (currently a monthly
+and a yearly plan). We never see or handle your payment details.
 
 - Billing, renewal, price changes, cancellation and refunds are governed by
-  Apple's terms and your Apple account settings.
-- Subscriptions **renew automatically** until cancelled. Cancel in your Apple
-  subscription settings.
+  the applicable store's terms and your store-account settings.
+- Subscriptions **renew automatically** until cancelled in the applicable store.
 - Cancelling stops future renewals. It does not refund the current period.
 - Prices shown in the app may vary by region and may change; a change never
   affects a period you have already paid for.
 
-App Store billing only functions for installs from the App Store or TestFlight.
-A copy installed another way cannot purchase Pro — that is an Apple
-restriction, not a fault in the app.
+Store billing only functions for installs distributed by that store. A copy
+installed another way may not be able to purchase Pro.
 
 Your data is never held hostage to a subscription: if Pro lapses, everything
 already recorded stays readable and exportable.
