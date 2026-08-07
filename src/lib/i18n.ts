@@ -352,13 +352,19 @@ const S = {
   // Without this line the screen loses rows between two sentences: "named the
   // shop in 100 of 100" followed by "of the 60 it was asked about" reads as a
   // typo, and the 40 pinned merchants are never accounted for anywhere.
+  //
+  // It cannot say "the other" — `coverageSkipped` below already does, and once
+  // every measured row is decided the categories line is hidden, leaving this
+  // one to claim "the other 60" of a 60 it was never counting against. Two
+  // sentences saying "the other N" about different sets is how 60 + 60 + 40
+  // came to be read against 100 messages.
   coverageDecided: {
-    en: 'The category on the other {decided} is yours: you pinned the shop or filed the entry by hand, so Wafra is not scored on those.',
-    ar: 'أما تصنيف العمليات الـ {decided} الأخرى فهو من عندك: ثبّتّ المتجر أو صنّفت العملية بنفسك، فلا تُحاسَب وفرة عليها.',
+    en: 'You have already answered for {decided} of them yourself — a shop you pinned, or an entry you filed by hand — so Wafra is not scored on those.',
+    ar: 'وقد أجبت بنفسك عن {decided} منها — متجر ثبّتّه أو عملية صنّفتها بيدك — فلا تُحاسَب وفرة عليها.',
   },
   coverageSkipped: {
-    en: 'The other {skipped} are transfers, card payments, ATM withdrawals, fees and money coming in. None of those has a shop name or a spending category to get right, so they are left out of both counts rather than counted as failures.',
-    ar: 'أما العمليات الـ {skipped} الأخرى فهي تحويلات ودفعات بطاقات وسحوبات صراف ورسوم ومبالغ واردة. لا شيء فيها يحمل اسم متجر أو تصنيف إنفاق كي يُخطئ فيه، لذا تُستثنى من العدّين بدل أن تُحسب أخطاءً.',
+    en: 'A further {skipped} messages are transfers, card payments, ATM withdrawals, fees and money coming in. None of those has a shop name or a spending category to get right, so they are left out of both counts rather than counted as failures.',
+    ar: 'وهناك {skipped} رسالة أخرى هي تحويلات ودفعات بطاقات وسحوبات صراف ورسوم ومبالغ واردة. لا شيء فيها يحمل اسم متجر أو تصنيف إنفاق كي يُخطئ فيه، لذا تُستثنى من العدّين بدل أن تُحسب أخطاءً.',
   },
   coverageNoText: {
     en: 'The misses are counted here, but the messages behind them were never kept on this phone, so they cannot be listed below or shared.',
