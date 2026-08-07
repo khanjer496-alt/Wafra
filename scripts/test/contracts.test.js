@@ -530,8 +530,12 @@ function ktSources(dir) {
     ok('the queue sweep is a whole number of days, as the policy has to say it',
       Number.isInteger(days),
       `server/src/index.ts sweeps at ${seconds}s = ${days} days, which no policy can state plainly`);
+    // `stated` rather than a substring test: includes('30 days') is also true
+    // of "130 days", so a document claiming ten times the real retention
+    // passed this check green. The word-boundary parse above already had the
+    // right answer; the assertion just was not using it.
     ok('the privacy policy states the retention the Worker enforces',
-      privacy.includes(`${days} days`),
+      stated.includes(days),
       `server/src/index.ts sweeps the relay queue at ${seconds}s = ${days} days, but ` +
         `docs/privacy-policy.md never says "${days} days"` +
         (stated.length ? ` — it says ${[...new Set(stated)].map((d) => `${d} days`).join(', ')}` : '') +

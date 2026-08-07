@@ -236,11 +236,16 @@ if (!Number.isFinite(seconds)) {
   process.exit(1);
 }
 const days = seconds / 86400;
-if (!privacy.includes(`${days} days`)) {
+// Word-boundary rather than a substring test: includes('30 days') is also true
+// of "130 days", so a policy claiming ten times the real retention published
+// green. Same fix as the matching contract in scripts/test/contracts.test.js.
+const stated = [...privacy.matchAll(/\b(\d+)\s+days\b/g)].map((m) => Number(m[1]));
+if (!stated.includes(days)) {
   console.error(
     `\nserver/src/index.ts sweeps the queue at ${seconds}s (${days} days), but ` +
-      `docs/privacy-policy.md never says "${days} days".\n` +
-      'Fix the markdown before publishing — the published policy is a promise.',
+      `docs/privacy-policy.md never says "${days} days"` +
+      (stated.length ? ` — it says ${[...new Set(stated)].map((d) => `${d} days`).join(', ')}` : '') +
+      '.\nFix the markdown before publishing — the published policy is a promise.',
   );
   process.exit(1);
 }
