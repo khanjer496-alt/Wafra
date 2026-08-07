@@ -278,10 +278,16 @@ const chq = parseSms('Cheque no. 000123 for 5,000.00 AED has been debited from y
 if (chq && chq.merchant === 'Cheque' && chq.type === 'expense') { pass++; console.log('✓ cheque debit titled Cheque'); }
 else { fail++; console.log('✗ cheque debit titled Cheque', JSON.stringify(chq && chq.merchant)); }
 
+// An arrival is INTERNAL only when it pairs with an outgoing transfer of the
+// same amount from another of the user's own accounts, and only the ledger can
+// see that — the parser reads one message at a time. It used to guess
+// "transfer" here, which internalTransferIds() then had to honour (it skips
+// rows already flagged), so a remittance could never be recovered as income:
+// one real ledger showed IN 0 for a month holding AED 12,168 of arrivals.
 const remit = parseSms('Inward remittance of 5,000.00 AED has been credited to your account XX0002.');
-if (remit && remit.type === 'income' && remit.transferHint === true && remit.merchant === 'Inward remittance') {
-  pass++; console.log('✓ inward remittance is a transfer, not income');
-} else { fail++; console.log('✗ inward remittance is a transfer, not income', JSON.stringify(remit && { t: remit.type, h: remit.transferHint, m: remit.merchant })); }
+if (remit && remit.type === 'income' && !remit.transferHint && remit.merchant === 'Inward remittance') {
+  pass++; console.log('✓ an inward remittance arrives as income, for the ledger to pair or keep');
+} else { fail++; console.log('✗ an inward remittance arrives as income, for the ledger to pair or keep', JSON.stringify(remit && { t: remit.type, h: remit.transferHint, m: remit.merchant })); }
 
 // ── balance/limit snapshots captured from alerts ──
 const snapLimit = parseSms('Purchase of AED 250.00 with Credit Card ending 4821 at IKEA. Avl Limit AED 5,939.00');

@@ -352,13 +352,18 @@ export function migratePersistedState(
       })
       // Older imports marked every inward remittance as a transfer. An
       // unpaired arrival is real income; only ledger pairing can prove it
-      // moved between the user's own accounts. Raw-bearing rows can reparse,
-      // so migrate only the exact stranded legacy shape.
+      // moved between the user's own accounts.
+      //
+      // This used to skip raw-bearing rows, on the reasoning that they could
+      // reparse their way out. They could not: healing only ever ADDS the
+      // transfer flag (`if (p.transferHint && !prior.isTransfer)`) and never
+      // clears it, so those rows stayed stranded no matter how often they were
+      // re-read. The parser no longer sets the flag at all, so every stored
+      // row of this exact shape is now safe to release.
       .map((t) => {
         if (
           t.userEdited ||
           t.source !== 'sms' ||
-          t.raw !== undefined ||
           t.type !== 'income' ||
           t.title !== 'Inward remittance' ||
           t.isTransfer !== true

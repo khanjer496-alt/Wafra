@@ -765,9 +765,16 @@ const tx = (id, extra = {}) => ({
   const editedBefore = JSON.stringify(edited);
   const migrated = hydration.migratePersistedState({ transactions: [stale, ...neighbours] });
   const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
-  ok('hydration clears only the stale rawless SMS inward-remittance transfer flag',
+  // A raw-bearing row used to be left alone here, on the reasoning that it
+  // could reparse its way out. It could not: healing only ever ADDS the
+  // transfer flag and never clears it, so those rows stayed stranded and their
+  // income never counted. The parser no longer flags a remittance at all — the
+  // ledger pairs it or keeps it as income — so every SMS row of this shape is
+  // released. What must still be protected is unchanged: a row the user edited,
+  // a manual entry, and a differently-titled "Incoming transfer".
+  ok('hydration clears the stale SMS inward-remittance transfer flag, raw or not',
     byId.has(stale.id) && !('isTransfer' in byId.get(stale.id)) &&
-      byId.get('raw-remittance')?.isTransfer === true &&
+      !('isTransfer' in byId.get('raw-remittance')) &&
       byId.get('manual-remittance')?.isTransfer === true &&
       byId.get('incoming-transfer')?.isTransfer === true);
   ok('the inward-remittance migration keeps userEdited rows byte-for-byte',

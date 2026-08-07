@@ -1857,7 +1857,7 @@ const OUTGOING_MOVE_RE =
 // have to carry the hint, because it is the pair of them sharing a dedupe key
 // that stops one payment landing on the ledger twice.
 const TRANSFER_HINT_RE =
-  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
+  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Exchange houses move money; they do not sell anything. There is no
