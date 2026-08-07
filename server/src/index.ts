@@ -108,7 +108,7 @@ export default {
 
       const raw = await req.text();
       if (raw.length > MAX_BODY_BYTES) return json({ error: 'too_large' }, 413);
-      const body = ((): { text?: string; receivedAt?: string } | null => {
+      const body = ((): { text?: string; receivedAt?: string; sender?: string } | null => {
         try {
           return JSON.parse(raw);
         } catch {
@@ -130,8 +130,15 @@ export default {
       // server-side would turn this database into a readable archive of the
       // user's bank messages — the thing this design exists to avoid.
       const { raw: _discard, ...row } = parsed;
+      // The sender ID is what tells the app which bank a new card belongs to,
+      // so an auto-created account reads "ADCB Credit ~1234" rather than just
+      // "Credit ~1234". It is a bank short-code, not a personal identifier,
+      // and it is sealed with everything else. Truncated because it is the one
+      // field here the Shortcut fills in freely.
+      const sender = typeof body?.sender === 'string' ? body.sender.slice(0, 64) : undefined;
       const sealed = await seal(device.public_key, {
         ...row,
+        sender,
         receivedAt: body?.receivedAt ?? new Date().toISOString(),
       });
       await env.DB.prepare(

@@ -42,6 +42,7 @@ import {
   isSmsScanningAvailable,
   requestSmsPermission,
   scanInbox,
+  type ScannedSms,
 } from '@/lib/auto-import';
 import { daysPhrase, leavingSoon, outgoingTotalFils, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate } from '@/lib/format';
@@ -51,6 +52,7 @@ import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notif
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
+import { ackRelay, getPairing, isRelayAvailable, pullRelay } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
@@ -266,6 +268,7 @@ export default function HomeScreen() {
   const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
+  const [needsPairing, setNeedsPairing] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
@@ -315,22 +318,61 @@ export default function HomeScreen() {
         if (interactive) router.push('/pro');
         return;
       }
-      if (!isSmsScanningAvailable()) return;
-      let granted = await hasSmsPermission();
-      if (!granted && interactive) granted = await requestSmsPermission();
-      if (!granted) {
-        setNeedsPermission(true);
-        return;
+      // Two sources, one import path. Android reads the inbox on-device;
+      // iOS has no such access and collects what the user's Shortcut sent to
+      // the relay. Everything after this point is identical for both.
+      let parsed: ScannedSms[];
+      let newestTs: number;
+      let relayIds: string[] = [];
+
+      if (isRelayAvailable()) {
+        // Unpaired is the iOS equivalent of an ungranted SMS permission: there
+        // is nothing to collect and nothing to report, only a setup to finish.
+        if (!(await getPairing())) {
+          setNeedsPairing(true);
+          if (interactive) router.push('/ios-capture');
+          return;
+        }
+        setNeedsPairing(false);
+        try {
+          const pull = await pullRelay(state.merchantOverrides);
+          parsed = pull.parsed;
+          relayIds = pull.ids;
+          // Relay rows carry their own timestamps, so the inbox watermark is
+          // meaningless here and must be left where it is.
+          newestTs = state.lastScanTs;
+        } catch {
+          if (interactive) toast.show('Could not reach the relay. Try again in a moment.');
+          return;
+        }
+      } else {
+        if (!isSmsScanningAvailable()) return;
+        let granted = await hasSmsPermission();
+        if (!granted && interactive) granted = await requestSmsPermission();
+        if (!granted) {
+          setNeedsPermission(true);
+          return;
+        }
+        setNeedsPermission(false);
+        const sinceMs = state.lastScanTs > 0 ? state.lastScanTs + 1 : 0;
+        const scan = await scanInbox(sinceMs, state.merchantOverrides);
+        parsed = scan.parsed;
+        newestTs = scan.newestTs;
       }
-      setNeedsPermission(false);
-      const sinceMs = state.lastScanTs > 0 ? state.lastScanTs + 1 : 0;
-      const { parsed, newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
+
       const plan = buildImportPlan(parsed, state, newestTs);
       if (plan.txCount === 0 && plan.dueCount === 0) {
+        // Rows that deduped against transactions already in the ledger still
+        // have to be acknowledged, or the queue never drains and every sync
+        // re-downloads them.
+        await ackRelay(relayIds).catch(() => {});
         if (interactive) toast.show('Up to date. No new bank messages.');
         return;
       }
       const ids = importBatch(plan.batch);
+      // Acknowledged only now that the rows are committed. A crash between the
+      // sync and this line costs a duplicate download, not a lost transaction.
+      await ackRelay(relayIds).catch(() => {});
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
@@ -424,6 +466,24 @@ export default function HomeScreen() {
                 <ThemedText type="small">{t('turnOnTracking')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('trackingPrivacy')}
+                </ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            </Pressable>
+          )}
+
+          {/* The iOS counterpart. Without it an iPhone user is never told the
+              feature exists — there is no permission prompt to discover it
+              through, only a Shortcut nobody would think to build. */}
+          {needsPairing && isProActive(state) && (
+            <Pressable
+              onPress={() => router.push('/ios-capture')}
+              style={[styles.notice, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
+              <Icon name="spark" size={17} color={theme.primary} />
+              <View style={styles.noticeText}>
+                <ThemedText type="small">{t('setUpCapture')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('setUpCaptureHint')}
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />

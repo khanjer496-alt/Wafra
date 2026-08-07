@@ -9,8 +9,8 @@ import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   I18nManager,
@@ -37,6 +37,7 @@ import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '
 import { t } from '@/lib/i18n';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
+import { getPairing } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
 
@@ -66,6 +67,7 @@ export default function SettingsScreen() {
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
   const [smsGranted, setSmsGranted] = useState(false);
+  const [relayPaired, setRelayPaired] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -73,6 +75,16 @@ export default function SettingsScreen() {
     if (!isSmsScanningAvailable()) return;
     hasSmsPermission().then(setSmsGranted).catch(() => {});
   }, []);
+
+  // Re-read on focus rather than on mount: the pairing screen is where this
+  // changes, and the user comes straight back here afterwards.
+  useFocusEffect(
+    useCallback(() => {
+      getPairing()
+        .then((p) => setRelayPaired(p != null))
+        .catch(() => {});
+    }, []),
+  );
 
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
@@ -372,17 +384,28 @@ export default function SettingsScreen() {
                 smsGranted,
                 toggleSms,
               )}
-            <Row onPress={gated(onNotificationAccess)} last accessibilityLabel="Bank app notifications">
-              <View style={styles.rowText}>
-                <ThemedText type="small">Bank app notifications</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {notifEnabled
-                    ? 'On · push alerts import automatically'
-                    : 'Off · for banks that push instead of SMS'}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-            </Row>
+            {/* iOS has no SMS access at all, so the row above can never appear
+                there. This is the only route to automatic capture on iPhone. */}
+            {Platform.OS === 'ios' &&
+              linkRow(
+                'Automatic capture',
+                relayPaired ? 'On · set up in Shortcuts' : 'Off · iPhone needs a Shortcut to send messages',
+                gated(() => router.push('/ios-capture')),
+                true,
+              )}
+            {notifAvailable && (
+              <Row onPress={gated(onNotificationAccess)} last accessibilityLabel="Bank app notifications">
+                <View style={styles.rowText}>
+                  <ThemedText type="small">Bank app notifications</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {notifEnabled
+                      ? 'On · push alerts import automatically'
+                      : 'Off · for banks that push instead of SMS'}
+                  </ThemedText>
+                </View>
+                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+              </Row>
+            )}
           </Section>
 
           <Section index={3}>

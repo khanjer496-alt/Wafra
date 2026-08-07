@@ -74,6 +74,7 @@ export default function RootLayout() {
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="ios-capture" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="bills" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="cards" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
