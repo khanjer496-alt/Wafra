@@ -1,0 +1,823 @@
+name: Deploy relay
+
+# The Cloudflare Worker in server/ is the whole iOS capture path, and until it
+# is deployed iOS cannot ship. server/DEPLOY.md is the canonical sequence, but
+# it assumes a terminal with Node, wrangler and a browser for `wrangler login`.
+# This workflow is the same sequence for someone holding only a phone: open the
+# Actions tab, press "Run workflow", read the summary.
+#
+# It is deliberately NOT triggered by push. A deploy is a decision.
+#
+# What it will not do:
+#   - it will not commit to the branch (the D1 id is yours to review and commit);
+#   - it will not deploy while server/wrangler.toml still has the placeholder id;
+#   - it will not touch a D1 database the configured id does not actually name;
+#   - it will not run a schema file containing a destructive statement.
+#
+# Everything here was worked out against wrangler 4.116.0's own command
+# definitions in server/node_modules. Nothing in it has been run against a real
+# Cloudflare account — see docs/deploy-from-github.md, "What is not verified".
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'deploy = deploy the Worker. create-database = first-run only: create the D1 database and print the id to commit.'
+        type: choice
+        options:
+          - deploy
+          - create-database
+        default: deploy
+      apply_schema:
+        description: 'Re-apply server/schema.sql before deploying. Safe: every statement is CREATE TABLE IF NOT EXISTS.'
+        type: boolean
+        default: true
+      relay_url:
+        description: 'Optional. Only needed if the job cannot work out the deployed URL by itself, e.g. https://wafra-relay.yourname.workers.dev'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# Two deploys at once would race on the same Worker and the same database.
+# Never cancel one in flight: a half-cancelled deploy is worse than a queue.
+concurrency:
+  group: deploy-relay
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # First run only. Creates (or finds) the "wafra" D1 database, applies the
+  # schema, and then FAILS on purpose with the id you have to commit.
+  #
+  # Why fail rather than push the change: a deploy job that can write to the
+  # branch needs `contents: write`, and the one thing it would ever write is a
+  # line of configuration that decides which database every future deploy talks
+  # to. That is a line a human should read. A red run with the id in the summary
+  # costs one commit; a job that can silently rewrite wrangler.toml costs a
+  # class of accident that is very hard to notice afterwards.
+  #
+  # This mirrors `npm --prefix server run setup` (server/scripts/d1.mjs) but
+  # calls wrangler directly, because that script's first act is a
+  # `wrangler whoami` login probe written for an interactive OAuth login. With
+  # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID set there is nothing for it
+  # to check, and whoami reads /user and /memberships, which a minimally scoped
+  # token may not be allowed to see. The commands below are the same ones the
+  # script runs: `d1 list`, then `d1 create`, then `d1 execute --file`.
+  # ---------------------------------------------------------------------------
+  create-database:
+    if: inputs.action == 'create-database'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Check the two Cloudflare secrets exist
+        run: |
+          missing=()
+          [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || missing+=("CLOUDFLARE_API_TOKEN")
+          [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || missing+=("CLOUDFLARE_ACCOUNT_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            {
+              echo "## Cannot start: repository secrets are missing"
+              echo
+              for name in "${missing[@]}"; do echo "- \`$name\` is not set"; done
+              echo
+              echo "Add them under **Settings → Secrets and variables → Actions → New repository secret**."
+              echo "docs/deploy-from-github.md has the click-by-click."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Install relay dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Read the configured database id
+        id: config
+        run: |
+          toml=server/wrangler.toml
+          db_name=$(sed -n 's/^[[:space:]]*database_name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1)
+          db_id=$(sed -n 's/^[[:space:]]*database_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1)
+          [ -n "$db_name" ] || { echo "no database_name in $toml"; exit 1; }
+          echo "db_name=$db_name" >> "$GITHUB_OUTPUT"
+          echo "db_id=$db_id" >> "$GITHUB_OUTPUT"
+          # The same strict uuid shape server/scripts/d1.mjs uses: version and
+          # variant nibbles included, so a hand-typed or truncated string does
+          # not pass as configuration.
+          if printf '%s' "$db_id" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'; then
+            echo "already_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already_configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Nothing to do — the id is already committed
+        if: steps.config.outputs.already_configured == 'true'
+        run: |
+          {
+            echo "## Nothing to do"
+            echo
+            echo "\`server/wrangler.toml\` already has a real database id:"
+            echo
+            echo '```'
+            echo "database_id = \"${{ steps.config.outputs.db_id }}\""
+            echo '```'
+            echo
+            echo "Run this workflow again with **action = deploy**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Find or create the D1 database
+        if: steps.config.outputs.already_configured == 'false'
+        id: d1
+        working-directory: server
+        env:
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+        run: |
+          set -o pipefail
+          uuid_re='[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}'
+
+          # `d1 list` does not consult wrangler.toml, so it works while the
+          # placeholder is still in the file. `d1 info` does not — it resolves
+          # the name through the config first and would ask the API about a
+          # database literally called REPLACE_WITH_D1_DATABASE_ID.
+          npx --no-install wrangler d1 list --json > list.json 2> list.err || {
+            {
+              echo "## Could not list D1 databases"
+              echo
+              echo "The API token reached Cloudflare but the D1 listing failed. The usual cause is a token"
+              echo "without **D1 → Edit**, or a \`CLOUDFLARE_ACCOUNT_ID\` that is not the account the token covers."
+              echo
+              echo '```'
+              tail -20 list.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+
+          # Wrangler prints banners around its JSON (update notices, proxy
+          # warnings), and at least one of them contains a literal "[" — so
+          # "parse from the first bracket" is not safe. Try each bracket in turn
+          # and keep the first slice that actually parses.
+          existing=$(node -e '
+            const fs = require("node:fs");
+            const raw = fs.readFileSync("list.json", "utf8");
+            let rows = null;
+            const ends = [raw.lastIndexOf("]"), raw.length - 1];
+            for (let i = raw.indexOf("["); i >= 0 && !rows; i = raw.indexOf("[", i + 1)) {
+              for (const e of ends) {
+                if (e < i) continue;
+                try {
+                  const v = JSON.parse(raw.slice(i, e + 1));
+                  if (Array.isArray(v)) { rows = v; break; }
+                } catch {}
+              }
+            }
+            const hit = (rows || []).find((r) => r && r.name === process.env.DB_NAME);
+            if (hit) process.stdout.write(String(hit.uuid ?? hit.database_id ?? ""));
+          ')
+
+          if [ -n "$existing" ]; then
+            echo "Found an existing \"$DB_NAME\" database."
+            id="$existing"
+            created=false
+          else
+            echo "No \"$DB_NAME\" database on this account — creating one."
+            npx --no-install wrangler d1 create "$DB_NAME" | tee create.out
+            # `d1 create` takes no --json (wrangler's parser is strict and would
+            # reject it before creating anything), so the uuid is read out of
+            # the config snippet it prints. Same approach as scripts/d1.mjs.
+            id=$(grep -oiE "$uuid_re" create.out | head -1 || true)
+            created=true
+          fi
+
+          if ! printf '%s' "$id" | grep -qiE "^$uuid_re$"; then
+            {
+              echo "## Could not determine the database id"
+              echo
+              echo "The database may or may not have been created. Check **Cloudflare dashboard → Storage & Databases → D1**"
+              echo "before re-running, so you do not end up with two databases called \`$DB_NAME\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "created=$created" >> "$GITHUB_OUTPUT"
+
+      - name: Apply the schema
+        if: steps.config.outputs.already_configured == 'false'
+        working-directory: server
+        env:
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+          DB_ID: ${{ steps.d1.outputs.id }}
+        run: |
+          # `d1 execute <name>` resolves the name through wrangler.toml, so the
+          # id has to be in the file before the schema can be applied. This edit
+          # lives only in the runner's checkout and is never committed — the
+          # whole point of the next step is that you commit it yourself.
+          node -e '
+            const fs = require("node:fs");
+            const p = "wrangler.toml";
+            const before = fs.readFileSync(p, "utf8");
+            const after = before.replace(/^(\s*database_id\s*=\s*)"[^"]*"/m, `$1"${process.env.DB_ID}"`);
+            if (after === before) { console.error("no database_id line to write into"); process.exit(1); }
+            fs.writeFileSync(p, after);
+          '
+          # --yes answers the "this may take some time, ok to proceed?" prompt,
+          # which would otherwise hang a non-interactive run.
+          npx --no-install wrangler d1 execute "$DB_NAME" --remote --file=./schema.sql --yes
+
+      - name: Report the id and stop
+        if: steps.config.outputs.already_configured == 'false'
+        env:
+          DB_ID: ${{ steps.d1.outputs.id }}
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+          CREATED: ${{ steps.d1.outputs.created }}
+        run: |
+          {
+            echo "# ⚠️ Action required — one line to commit"
+            echo
+            if [ "$CREATED" = "true" ]; then
+              echo "The D1 database \`$DB_NAME\` was **created** and \`server/schema.sql\` was applied to it."
+            else
+              echo "A D1 database called \`$DB_NAME\` **already existed** on this account, and \`server/schema.sql\` was applied to it."
+            fi
+            echo
+            echo "Its id is:"
+            echo
+            echo '```'
+            echo "$DB_ID"
+            echo '```'
+            echo
+            echo "## Do this next (works from a phone browser)"
+            echo
+            echo "1. Open [\`server/wrangler.toml\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/server/wrangler.toml) and tap the pencil icon."
+            echo "2. Find the line \`database_id = \"REPLACE_WITH_D1_DATABASE_ID\"\` and replace the text between the quotes with the id above."
+            echo "3. Commit."
+            echo "4. Run this workflow again with **action = deploy**."
+            echo
+            echo "This job stops red on purpose. Nothing is broken: the database exists and has its schema."
+            echo "The id decides which database every future deploy talks to, so it is committed by a human, not by CI."
+            echo
+            echo "The id is not a secret. It is useless without credentials for the account that owns it."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # The deploy.
+  # ---------------------------------------------------------------------------
+  deploy:
+    if: inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Check the two Cloudflare secrets exist
+        run: |
+          missing=()
+          [ -n "${CLOUDFLARE_API_TOKEN:-}" ] || missing+=("CLOUDFLARE_API_TOKEN")
+          [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || missing+=("CLOUDFLARE_ACCOUNT_ID")
+          if [ ${#missing[@]} -gt 0 ]; then
+            {
+              echo "## Cannot start: repository secrets are missing"
+              echo
+              for name in "${missing[@]}"; do echo "- \`$name\` is not set"; done
+              echo
+              echo "Add them under **Settings → Secrets and variables → Actions → New repository secret**."
+              echo "docs/deploy-from-github.md has the click-by-click."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # ---- Guard 1: the config must name a real database, not the placeholder.
+      - name: Refuse to deploy an unconfigured relay
+        id: config
+        run: |
+          toml=server/wrangler.toml
+          worker=$(sed -n 's/^[[:space:]]*name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1)
+          db_name=$(sed -n 's/^[[:space:]]*database_name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1)
+          db_id=$(sed -n 's/^[[:space:]]*database_id[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1)
+          if ! printf '%s' "$db_id" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'; then
+            {
+              echo "# Not deployed — no D1 database is configured"
+              echo
+              echo "\`server/wrangler.toml\` still has:"
+              echo
+              echo '```'
+              echo "database_id = \"${db_id:-<missing>}\""
+              echo '```'
+              echo
+              echo "Run this workflow again with **action = create-database**. It will create the database,"
+              echo "apply the schema and print the id for you to commit, and then this deploy will work."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "worker=$worker" >> "$GITHUB_OUTPUT"
+          echo "db_name=$db_name" >> "$GITHUB_OUTPUT"
+          echo "db_id=$db_id" >> "$GITHUB_OUTPUT"
+          echo "Deploying Worker \"$worker\" against D1 \"$db_name\" ($db_id)."
+
+      # ---- Guard 2: nothing destructive may reach a live database.
+      - name: Refuse a schema file that could destroy data
+        if: inputs.apply_schema
+        run: |
+          if grep -inE '^[[:space:]]*(DROP|DELETE|TRUNCATE)[[:space:]]' server/schema.sql; then
+            {
+              echo "# Not deployed — server/schema.sql contains a destructive statement"
+              echo
+              echo "This workflow applies \`schema.sql\` to the live database, so it only accepts a file that is"
+              echo "additive. The lines above are DROP/DELETE/TRUNCATE."
+              echo
+              echo "A real migration is a deliberate act with a backup taken first"
+              echo "(\`wrangler d1 export\`) — see server/DEPLOY.md. Re-run with **apply_schema = false**"
+              echo "to deploy the Worker code without touching the schema."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if grep -inE '^[[:space:]]*(ALTER|UPDATE|INSERT|REPLACE)[[:space:]]' server/schema.sql; then
+            echo "::warning::schema.sql contains statements that are not CREATE ... IF NOT EXISTS. Re-run is still safe only if they are idempotent."
+          fi
+          if grep -inE '^[[:space:]]*CREATE[[:space:]]' server/schema.sql | grep -viE 'IF[[:space:]]+NOT[[:space:]]+EXISTS'; then
+            echo "::warning::the CREATE statements above have no IF NOT EXISTS, so re-running this workflow will fail on them."
+          fi
+
+      - name: Install relay dependencies
+        working-directory: server
+        run: npm ci
+
+      # ---- Preflight: prove the token works, and learn the workers.dev
+      #      subdomain. This is also the only place the "no subdomain yet"
+      #      condition can be reported usefully: on an account that has never
+      #      registered one, wrangler's deploy asks "Would you like to register
+      #      a workers.dev subdomain now?" and, with no terminal to answer it,
+      #      takes the default of no and fails. Better to say so up front.
+      - name: Preflight — check the token and find the workers.dev subdomain
+        id: preflight
+        run: |
+          set -o pipefail
+          # curl's %{http_code} is 000 when it never connected, and it writes
+          # that itself — so `|| true` here, not `|| echo 000`, which would
+          # concatenate two codes into one nonsense number.
+          code=$(curl -sS -o cf.json -w '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/subdomain" || true)
+          code=${code:-000}
+
+          subdomain=$(node -e '
+            const fs = require("node:fs");
+            let body;
+            try { body = JSON.parse(fs.readFileSync("cf.json", "utf8")); } catch { process.exit(0); }
+            const s = body && body.result && body.result.subdomain;
+            if (typeof s === "string") process.stdout.write(s);
+          ' || true)
+
+          err_codes=$(node -e '
+            const fs = require("node:fs");
+            let body;
+            try { body = JSON.parse(fs.readFileSync("cf.json", "utf8")); } catch { process.exit(0); }
+            const errs = (body && body.errors) || [];
+            process.stdout.write(errs.map((e) => String(e && e.code)).join(","));
+          ' || true)
+
+          echo "HTTP $code, error codes: ${err_codes:-none}"
+
+          # 10007 is the sentinel wrangler itself keys on for "this account has
+          # no workers.dev subdomain yet". CI cannot answer the registration
+          # prompt that follows, so stop here with the link instead.
+          if printf '%s' "$err_codes" | grep -q '10007'; then
+            {
+              echo "# Not deployed — this Cloudflare account has no workers.dev subdomain yet"
+              echo
+              echo "The Worker has no route configured, so it is published to \`<name>.<subdomain>.workers.dev\`."
+              echo "Wrangler would normally ask you to pick that subdomain interactively; a GitHub runner has"
+              echo "no terminal to answer, so it would fail mid-deploy."
+              echo
+              echo "Register one once, then re-run this workflow:"
+              echo
+              echo "1. Open <https://dash.cloudflare.com> and pick your account."
+              echo "2. Tap **Compute (Workers)** in the left menu and choose a subdomain when asked."
+              echo
+              echo "(The direct page is \`/<your account id>/workers/onboarding\` under that host. The id is"
+              echo "not spelled out here because it is stored as a repository secret and would be masked."
+              echo "docs/deploy-from-github.md, step 1, has the same instructions.)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if [ "$code" != "200" ] || [ -z "$subdomain" ]; then
+            # Not fatal. This endpoint may need a permission the deploy itself
+            # does not, and the URL can still be read out of wrangler's output
+            # after the deploy. Say so rather than blocking a working deploy.
+            echo "::warning::Could not read the account's workers.dev subdomain (HTTP $code). Continuing; the URL will be taken from wrangler's own output. If the deploy also fails on authentication, check the API token permissions in docs/deploy-from-github.md."
+            echo "subdomain=" >> "$GITHUB_OUTPUT"
+          else
+            echo "subdomain=$subdomain" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ---- Guard 3: the id in the file must be a database this account really
+      #      has, under the name the file expects. This is what stops a deploy
+      #      binding a live Worker to somebody else's database, or to a stale id
+      #      left over from a different account.
+      - name: Refuse a database this account does not have
+        working-directory: server
+        env:
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+          DB_ID: ${{ steps.config.outputs.db_id }}
+        run: |
+          set -o pipefail
+          npx --no-install wrangler d1 list --json > list.json 2> list.err || {
+            {
+              echo "# Not deployed — could not list this account's D1 databases"
+              echo
+              echo "Most likely the API token lacks **D1 → Edit**, or \`CLOUDFLARE_ACCOUNT_ID\` is the wrong account."
+              echo
+              echo '```'
+              tail -20 list.err
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
+          verdict=$(node -e '
+            const fs = require("node:fs");
+            const raw = fs.readFileSync("list.json", "utf8");
+            let rows = null;
+            const ends = [raw.lastIndexOf("]"), raw.length - 1];
+            for (let i = raw.indexOf("["); i >= 0 && !rows; i = raw.indexOf("[", i + 1)) {
+              for (const e of ends) {
+                if (e < i) continue;
+                try {
+                  const v = JSON.parse(raw.slice(i, e + 1));
+                  if (Array.isArray(v)) { rows = v; break; }
+                } catch {}
+              }
+            }
+            const want = process.env.DB_ID.toLowerCase();
+            const byId = (rows || []).find(
+              (r) => String(r && (r.uuid ?? r.database_id ?? "")).toLowerCase() === want,
+            );
+            if (!byId) {
+              process.stdout.write("missing");
+            } else if (byId.name !== process.env.DB_NAME) {
+              process.stdout.write("renamed:" + byId.name);
+            } else {
+              process.stdout.write("ok");
+            }
+          ')
+          case "$verdict" in
+            ok)
+              echo "D1 \"$DB_NAME\" ($DB_ID) is on this account."
+              ;;
+            missing)
+              {
+                echo "# Not deployed — the configured database is not on this account"
+                echo
+                echo "\`server/wrangler.toml\` points at:"
+                echo
+                echo '```'
+                echo "database_id = \"$DB_ID\""
+                echo '```'
+                echo
+                echo "but no D1 database with that id exists under \`CLOUDFLARE_ACCOUNT_ID\`."
+                echo
+                echo "Either the account secret is the wrong account, or the id was committed from a different"
+                echo "Cloudflare account. Deploying anyway would bind the live Worker to a database that is not there,"
+                echo "so this stops instead. Run **action = create-database** to get the right id for this account."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+            renamed:*)
+              {
+                echo "# Not deployed — that database id has a different name"
+                echo
+                echo "The id in \`server/wrangler.toml\` belongs to a database called \`${verdict#renamed:}\`, but the file"
+                echo "expects \`$DB_NAME\`. Something has been renamed or the wrong id was pasted."
+                echo
+                echo "Nothing was changed. Reconcile the two before deploying."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+              ;;
+            *)
+              echo "unexpected verdict: $verdict"
+              exit 1
+              ;;
+          esac
+
+      - name: Apply the schema
+        if: inputs.apply_schema
+        working-directory: server
+        env:
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+        run: |
+          # Idempotent by construction — checked two steps above — so this runs
+          # on every deploy rather than being a thing to remember.
+          npx --no-install wrangler d1 execute "$DB_NAME" --remote --file=./schema.sql --yes
+
+      # ---- The deploy itself. `npm run deploy` and not `wrangler deploy`,
+      #      because the npm script has a `predeploy` that re-runs the
+      #      placeholder guard; running wrangler directly would bypass it.
+      - name: Deploy the Worker
+        id: deploy
+        working-directory: server
+        run: |
+          set -o pipefail
+          npm run deploy 2>&1 | tee deploy.out
+          url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' deploy.out | head -1 || true)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # ---- Work out the URL from the three things that might know it. This
+      #      runs before the secret steps so that a rejected secret still
+      #      leaves the URL on screen — it is the one value the owner came for.
+      - name: Work out the deployed URL
+        id: url
+        env:
+          FROM_INPUT: ${{ inputs.relay_url }}
+          FROM_DEPLOY: ${{ steps.deploy.outputs.url }}
+          SUBDOMAIN: ${{ steps.preflight.outputs.subdomain }}
+          WORKER: ${{ steps.config.outputs.worker }}
+        run: |
+          url=""
+          source=""
+          if [ -n "$FROM_INPUT" ]; then
+            url="${FROM_INPUT%/}"; source="the relay_url input"
+          elif [ -n "$FROM_DEPLOY" ]; then
+            url="$FROM_DEPLOY"; source="wrangler's own output"
+          elif [ -n "$SUBDOMAIN" ]; then
+            url="https://${WORKER}.${SUBDOMAIN}.workers.dev"; source="the account's workers.dev subdomain"
+          fi
+          if ! printf '%s' "$url" | grep -qE '^https://[A-Za-z0-9.-]+$'; then
+            echo "url=" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not work out the deployed URL, so the health check cannot run."
+            exit 0
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+          echo "Deployed URL ($source): $url"
+
+      # ---- Worker secrets, after the deploy rather than before.
+      #
+      #      `wrangler secret put` reads the value from stdin whenever stdin is
+      #      not a TTY (verified in wrangler 4.116.0: it branches on
+      #      process.stdin.isTTY and otherwise calls readFromStdin, then trims
+      #      trailing whitespace), so a pipe is the non-interactive form.
+      #
+      #      After, not before, because on a first run `secret put` against a
+      #      Worker that does not exist yet creates an empty draft Worker — in
+      #      CI it takes the default answer "yes" without asking. If the deploy
+      #      then failed, the URL would answer with a stub. Deploying first
+      #      means the worst case is a live, working relay that simply has no
+      #      push key yet, which server/DEPLOY.md documents as a supported
+      #      configuration rather than a broken one.
+      - name: Set PUSH_TOKEN_KEY
+        id: push_key
+        working-directory: server
+        env:
+          PUSH_TOKEN_KEY: ${{ secrets.PUSH_TOKEN_KEY }}
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          value=$(printf '%s' "${PUSH_TOKEN_KEY:-}" | tr -d '[:space:]')
+          if [ -z "$value" ]; then
+            echo "set=absent" >> "$GITHUB_OUTPUT"
+            echo "No PUSH_TOKEN_KEY secret — skipping. The relay will refuse push registration and send no wakes."
+            exit 0
+          fi
+          # server/src/push.ts requires standard base64 decoding to exactly 32
+          # bytes, which is 44 characters ending in '='. A wrong key is not a
+          # deploy failure — it is silent: registration throws at runtime and
+          # wakes simply never arrive. Catch it here.
+          if ! printf '%s' "$value" | grep -qE '^[A-Za-z0-9+/]{43}=$'; then
+            {
+              echo "## PUSH_TOKEN_KEY was rejected before it was uploaded"
+              echo
+              echo "It must be standard base64 of exactly 32 random bytes — 44 characters ending in \`=\`,"
+              echo "as produced by \`openssl rand -base64 32\`. The value in the repository secret is"
+              echo "${#value} characters after whitespace was stripped."
+              echo
+              echo
+              echo "**The Worker was already deployed** and is live at:"
+              echo
+              echo '```'
+              echo "${URL:-(could not determine the URL — see the log)}"
+              echo '```'
+              echo
+              echo "Fix the secret and re-run; nothing else needs redoing."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          printf '%s' "$value" | npx --no-install wrangler secret put PUSH_TOKEN_KEY
+          echo "set=set" >> "$GITHUB_OUTPUT"
+
+      - name: Set EXPO_ACCESS_TOKEN
+        id: expo_token
+        working-directory: server
+        env:
+          EXPO_ACCESS_TOKEN: ${{ secrets.EXPO_ACCESS_TOKEN }}
+        run: |
+          value=$(printf '%s' "${EXPO_ACCESS_TOKEN:-}" | tr -d '[:space:]')
+          if [ -z "$value" ]; then
+            echo "set=absent" >> "$GITHUB_OUTPUT"
+            echo "No EXPO_ACCESS_TOKEN secret — skipping. Only needed if EAS enhanced push security is on."
+            exit 0
+          fi
+          printf '%s' "$value" | npx --no-install wrangler secret put EXPO_ACCESS_TOKEN
+          echo "set=set" >> "$GITHUB_OUTPUT"
+
+      # ---- Verification. A deploy that is not checked is a rumour.
+      - name: Health check
+        id: health
+        env:
+          URL: ${{ steps.url.outputs.url }}
+        run: |
+          if [ -z "$URL" ]; then
+            {
+              echo "# Deployed, but not verified"
+              echo
+              echo "\`wrangler deploy\` succeeded. This job could not work out the URL it was published to,"
+              echo "so it could not check the health endpoint."
+              echo
+              echo "Find the URL under **Cloudflare dashboard → Compute (Workers) → wafra-relay**, then re-run this"
+              echo "workflow with that URL in the **relay_url** input to get a verified green run."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # A workers.dev subdomain registered moments ago needs its DNS to
+          # propagate — wrangler says "it may take a few minutes" — so this
+          # retries rather than failing on the first attempt.
+          body=""
+          code=""
+          for attempt in 1 2 3 4 5 6; do
+            code=$(curl -sS -m 20 -o body.txt -w '%{http_code}' "$URL/v1/health" || true)
+            code=${code:-000}
+            body=$(cat body.txt 2>/dev/null || true)
+            echo "attempt $attempt: HTTP $code $body"
+            if [ "$code" = "200" ] && printf '%s' "$body" | grep -qE '"ok"[[:space:]]*:[[:space:]]*true'; then
+              echo "ok=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            # Written as an `if` rather than `[ … ] && sleep`: under `set -e` a
+            # false AND-list on the last iteration would exit the step here and
+            # the failure summary below would never be written.
+            if [ "$attempt" -lt 6 ]; then sleep 15; fi
+          done
+
+          {
+            echo "# Deployed, but the health check failed"
+            echo
+            echo "\`GET $URL/v1/health\` should answer \`200\` with \`{\"ok\":true}\`. After six tries over 75 seconds it answered:"
+            echo
+            echo '```'
+            echo "HTTP $code"
+            echo "$body"
+            echo '```'
+            echo
+            echo "If this is the first ever deploy, the workers.dev DNS record may still be propagating — re-running"
+            echo "this workflow in a few minutes is safe and is the first thing to try."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # ---- /v1/health returns a constant and never touches D1, so a green
+      #      health check proves the code is live and nothing about the
+      #      database. This reads the remote catalogue instead. It is still not
+      #      proof that the *Worker's binding* resolves — only a real pair call
+      #      is (server/DEPLOY.md has it) — but it is read-only, so it is the
+      #      strongest check that changes nothing.
+      - name: Check the schema really landed
+        id: tables
+        continue-on-error: true
+        working-directory: server
+        env:
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+        run: |
+          set -o pipefail
+          npx --no-install wrangler d1 execute "$DB_NAME" --remote --json --yes \
+            --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" > tables.json
+          node -e '
+            const fs = require("node:fs");
+            const raw = fs.readFileSync("tables.json", "utf8");
+            let parsed = null;
+            const opens = [];
+            for (let i = 0; i < raw.length; i++) {
+              if (raw[i] === "[" || raw[i] === "{") opens.push(i);
+            }
+            const ends = [raw.lastIndexOf("]"), raw.lastIndexOf("}"), raw.length - 1];
+            outer: for (const i of opens) {
+              for (const e of ends) {
+                if (e < i) continue;
+                try { parsed = JSON.parse(raw.slice(i, e + 1)); break outer; } catch {}
+              }
+            }
+            if (!parsed) { console.log("could not parse the table list"); process.exit(1); }
+            const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap((r) => (r && r.results) || []);
+            // D1 keeps internal tables (_cf_KV and friends) in the same
+            // catalogue, so anything underscore-prefixed is expected noise.
+            const names = rows.map((r) => r.name).filter((n) => !String(n).startsWith("_"));
+            // Expected tables are read out of schema.sql rather than listed
+            // here, so adding a table to the schema does not quietly stop
+            // being checked.
+            const want = [
+              ...fs.readFileSync("schema.sql", "utf8")
+                .matchAll(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+"?([A-Za-z0-9_]+)"?/gi),
+            ].map((m) => m[1]);
+            const missing = want.filter((t) => !names.includes(t));
+            console.log("expected " + want.length + " tables from schema.sql");
+            console.log("found: " + names.join(", "));
+            if (!want.length) { console.log("could not read any table names out of schema.sql"); process.exit(1); }
+            if (missing.length) { console.log("MISSING: " + missing.join(", ")); process.exit(1); }
+          '
+
+      # ---- The summary is the whole product for someone on a phone: it is the
+      #      one screen they will read. `if: always()` so a failure earlier
+      #      still leaves its own explanation in place.
+      - name: Summary
+        if: always()
+        env:
+          URL: ${{ steps.url.outputs.url }}
+          URL_SOURCE: ${{ steps.url.outputs.source }}
+          HEALTH: ${{ steps.health.outputs.ok }}
+          TABLES: ${{ steps.tables.outcome }}
+          PUSH_KEY: ${{ steps.push_key.outputs.set }}
+          EXPO_TOKEN: ${{ steps.expo_token.outputs.set }}
+          WORKER: ${{ steps.config.outputs.worker }}
+          DB_NAME: ${{ steps.config.outputs.db_name }}
+          DB_ID: ${{ steps.config.outputs.db_id }}
+          SCHEMA_APPLIED: ${{ inputs.apply_schema }}
+        run: |
+          if [ "$HEALTH" != "true" ]; then
+            # Whichever step failed has already written the explanation.
+            exit 0
+          fi
+          {
+            echo "# ✅ Relay is live"
+            echo
+            echo "## $URL"
+            echo
+            echo '```'
+            echo "$URL"
+            echo '```'
+            echo
+            echo "\`GET $URL/v1/health\` answered \`200 {\"ok\":true}\`. (URL taken from $URL_SOURCE.)"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Worker | \`$WORKER\` |"
+            echo "| D1 database | \`$DB_NAME\` · \`$DB_ID\` |"
+            if [ "$SCHEMA_APPLIED" = "true" ]; then
+              echo "| Schema | re-applied (additive, idempotent) |"
+            else
+              echo "| Schema | not touched this run |"
+            fi
+            case "$TABLES" in
+              success) echo "| Tables in D1 | every table in \`schema.sql\` is present |" ;;
+              failure) echo "| Tables in D1 | ⚠️ check the \"Check the schema really landed\" step |" ;;
+              *)       echo "| Tables in D1 | not checked |" ;;
+            esac
+            case "$PUSH_KEY" in
+              set)    echo "| \`PUSH_TOKEN_KEY\` | set |" ;;
+              absent) echo "| \`PUSH_TOKEN_KEY\` | **not set** — no push wakes |" ;;
+              *)      echo "| \`PUSH_TOKEN_KEY\` | not reached |" ;;
+            esac
+            case "$EXPO_TOKEN" in
+              set)    echo "| \`EXPO_ACCESS_TOKEN\` | set |" ;;
+              absent) echo "| \`EXPO_ACCESS_TOKEN\` | not set (only needed for EAS enhanced push security) |" ;;
+              *)      echo "| \`EXPO_ACCESS_TOKEN\` | not reached |" ;;
+            esac
+            echo
+            if [ "$PUSH_KEY" = "absent" ]; then
+              echo "> Without \`PUSH_TOKEN_KEY\` the relay registers no push tokens and sends no wakes. Capture still"
+              echo "> works on foreground and background sync, just later. server/DEPLOY.md calls this a supported"
+              echo "> configuration, not a broken deploy."
+              echo
+            fi
+            echo "## Next"
+            echo
+            echo "1. Put the URL above into \`EXPO_PUBLIC_WAFRA_RELAY_URL\` for the app build. Expo inlines it at"
+            echo "   build time, so this needs a **new build**, not a config push."
+            echo "2. Uncomment \`EXPO_PROJECT_ID\` in \`server/wrangler.toml\` if push wakes are wanted, and re-run this workflow."
+            echo "3. The strongest check — pairing a throwaway device and deleting it — is in server/DEPLOY.md."
+            echo "   \`/v1/health\` never touches D1, so it cannot prove the binding resolves."
+            echo
+            echo "Re-running this workflow is safe at any time."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -13,6 +13,7 @@ import { formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import type { CardDue } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 interface CardPaymentSheetProps {
   /** The statement to settle, or null to keep the sheet closed. */
@@ -67,12 +68,15 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
   const markPaid = () => {
     const name = account?.name ?? 'Card';
     Alert.alert(
-      'Mark this statement paid?',
-      `Files a ${formatAmount(status.remainingFils)} payment to ${name} today.`,
+      t('markStatementPaid'),
+      tf('fileCardPaymentBody', {
+        amount: formatAmount(status.remainingFils),
+        name,
+      }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Mark paid',
+          text: t('markPaid'),
           onPress: () => {
             payCardDue(
               due.id,
@@ -100,25 +104,32 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     const granted = await requestNotificationPermission();
     if (!granted) {
       Alert.alert(
-        'Notifications are off',
-        'Wafra needs notification permission to remind you before a payment is due.',
+        t('notifsAreOff'),
+        t('notifsForCardDue'),
       );
       return;
     }
     await syncPaymentReminders(state);
-    Alert.alert('Reminder set', `You'll hear about this two days before ${shortDate(due.dueDate)}.`);
+    // The scheduler puts card dues at three days out and again on the day
+    // (notifications.ts). Promising two days was a number nothing produced.
+    Alert.alert(
+      t('reminderSet'),
+      tf('cardReminderBody', { date: shortDate(due.dueDate) }),
+    );
   };
 
   return (
-    <BottomSheet visible onClose={onClose} title="Card payment due">
+    <BottomSheet visible onClose={onClose} title={t('cardPaymentDue')}>
       <View style={styles.card}>
         <View style={styles.cardHead}>
           <ThemedText type="micro" style={{ color: '#8C857A' }}>
-            Still owed
+            {t('stillOwed')}
           </ThemedText>
           <ThemedText type="nano" style={{ color: theme.expense }}>
-            Due {shortDate(due.dueDate)} ·{' '}
-            {status.daysLeft < 0 ? `${-status.daysLeft}d late` : `${status.daysLeft}d`}
+            {tf('dueDate', { date: shortDate(due.dueDate) })} ·{' '}
+            {status.daysLeft < 0
+              ? tf('lateDays', { days: -status.daysLeft })
+              : tf('daysShort', { days: status.daysLeft })}
           </ThemedText>
         </View>
         <Money
@@ -136,13 +147,19 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
           />
         </View>
         <ThemedText type="nano" style={{ color: '#8C857A' }}>
-          Paid {formatAmount(paid, { decimals: false })} / of{' '}
-          {formatAmount(due.totalDueFils, { decimals: false })} · Min{' '}
-          {formatAmount(due.minDueFils, { decimals: false })}
+          {tf('paidOfTotal', {
+            paid: formatAmount(paid, { decimals: false }),
+            total: formatAmount(due.totalDueFils, { decimals: false }),
+          })}
+          {/* Only the bank knows the minimum. When it never stated one, say
+              nothing rather than quote the app's own 5% guess back as "Min". */}
+          {status.minimumKnown
+            ? ` · ${tf('minimumShort', { amount: formatAmount(due.minDueFils, { decimals: false }) })}`
+            : ''}
         </ThemedText>
         {status.belowMinimum && (
           <ThemedText type="meta" style={{ color: theme.expense }}>
-            Still under the minimum due.
+            {t('underMinimumDue')}
           </ThemedText>
         )}
       </View>
@@ -150,25 +167,31 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       <LabelTable
         rows={[
           {
-            label: 'Card',
-            value: <ThemedText type="small">{account?.name ?? 'Card'}</ThemedText>,
+            label: t('card'),
+            value: <ThemedText type="small">{account?.name ?? t('card')}</ThemedText>,
           },
           {
-            label: 'This month',
+            label: t('thisMonth'),
             value: (
               <ThemedText type="small" tabular>
-                {formatAmount(monthFils, { decimals: false })} across {charges} charge
-                {charges === 1 ? '' : 's'}
+                {tf('chargesAcross', {
+                  amount: formatAmount(monthFils, { decimals: false }),
+                  count: charges,
+                  s: charges === 1 ? '' : 's',
+                })}
               </ThemedText>
             ),
           },
           {
-            label: 'Matched',
+            label: t('matched'),
             value: (
               <ThemedText type="default" themeColor="textSecondary">
                 {payments === 0
-                  ? 'No payment to this card has been detected yet.'
-                  : `${payments} payment${payments === 1 ? '' : 's'} on this card, walked oldest-first into the oldest statement each could belong to. An overpayment spills onto the next one.`}
+                  ? t('noCardPaymentYet')
+                  : tf('matchedPayments', {
+                      count: payments,
+                      s: payments === 1 ? '' : 's',
+                    })}
               </ThemedText>
             ),
           },
@@ -176,8 +199,8 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       />
 
       <View style={styles.actions}>
-        <Button inline label="Mark paid" onPress={markPaid} />
-        <Button inline variant="outline" label="Remind me" onPress={remindMe} />
+        <Button inline label={t('markPaid')} onPress={markPaid} />
+        <Button inline variant="outline" label={t('remindMe')} onPress={remindMe} />
       </View>
     </BottomSheet>
   );

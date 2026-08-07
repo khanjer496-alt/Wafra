@@ -1,0 +1,407 @@
+# Repository-supplied second redacted accuracy export. The app masks long
+# digit runs before export, so this fixture must carry no full account/card
+# numbers, names, or other directly identifying customer data.
+#
+# The headline is NOT that these could not be read. Look at the "read as"
+# values: the merchant is almost always right. What they have in common is
+# landing in "other", and the accuracy report flags an uncategorized row as an
+# unread format. Some of those are deliberate (brokerages and crypto on-ramps
+# are mapped to "other" on purpose); the rest are genuine category misses.
+
+#1 (seen 12x, read as "Bfinity Bitfi Technolo" / Other):
+Purchase of AED 5,278.19 with Debit Card ending 1354 at BFINITY BITFI TECHNOLO, DIPLOMATIC AR. Avl Balance is AED 25,168.85.  Pls refer stmt for exact amt.
+
+#2 (seen 8x, read as "Payment to •2543" / Other):
+Dear Customer, Your payment to the account number ····2543 has been processed.
+Amount Due: AED 408.45 
+Amount Paid: AED 408.45 
+Remaining Balance: AED 0 
+Transaction Date: 2022-03-11 
+Transaction Time: 11:34:49 
+Payment Channel: Bank Website 
+Card Number: NA 
+Mode of Payment : Credit/Debit 
+
+#4 (seen 6x, read as "Capital.com" / Other):
+Purchase of AED 1,513.34 with Debit Card ending 8783 at CAPITAL.COM, s@capital.com. Avl Bal is AED 4,490.57. Pls refer stmt for exact amt
+
+#5 (seen 6x, read as "On Technologies Fz Llc" / Other):
+Purchase of AED 13.00 with Debit Card ending 9417 at ON TECHNOLOGIES FZ LLC, DUBAI. Avl Balance is AED 2,024.14.
+
+#6 (seen 4x, read as "Etoro Me Ltd Etoro" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 3000.00 
+eToro ME LTD etoro ARE 
+24/12/25 22:48 
+Available Balance AED 5409.02
+Your December statement payment due date is 26/12/2025
+0% instalments up to 12 months, NO fees on international purchases. bit.ly/4nR8uHP Conditions apply.
+
+#7 (seen 4x, read as "Transfer to Mohammad Nazem" / Other):
+Dear Naser Naze, AED 750.00 has been debited from your Saving Bank Account ending with 2501 for a FastPay transfer to Mohammad Nazem. If this is not you; contact us immediately via Call or WhatsApp on +····1212 to report fraud.
+
+#10 (seen 4x, read as "Xpowerplus" / Other):
+Purchase of AED 1.00 with Debit Card ending 8783 at XPOWERPLUS, DUBAI. Avl Balance is AED 7,097.56.
+
+#11 (seen 4x, read as "Dubai Families" / Other):
+Purchase of AED 5.00 with Debit Card ending 8783 at DUBAI FAMILIES, SHARJAH. Avl Balance is AED 22,452.28.
+
+#12 (seen 4x, read as "Bloomfield Treat" / Other):
+Purchase of AED 86.10 with Debit Card ending 8783 at BLOOMFIELD TREAT-····5814, JLT DUBAI. Avl Balance is AED 8,946.97.
+
+#13 (seen 2x, read as "Al Kabayel Prime Tra" / Other):
+Your Cr.Card XXX2518 was used for AED799.18 on 19/07/2026 17:23:00 at AL KABAYEL PRIME TRA,DUBAI-AE. Avl. Cr.limit is AED····1390.27
+
+#14 (seen 2x, read as "Off Price General Trad" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 267.00 
+OFF PRICE GENERAL TRAD SHARJAH ARE 
+11/07/26 19:38 
+Avl Bal AED ····9235.93
+July statement due on 27/07/2026
+
+#15 (seen 2x, read as "Yamm.com Brussels" / Other):
+Credit Card Purchase 
+Card No XXXX3644 
+USD 50.00 
+YAMM.COM BRUSSELS BEL 
+07/07/26 14:53 
+Avl Bal AED 7806.31
+
+#16 (seen 2x, read as "Shathi Al Madeenah Tr" / Other):
+Purchase of AED 460.00 with Credit Card ending 8917 at SHATHI AL MADEENAH TR, SHARJAH. Avl Cr. Limit is AED 22,329.27
+
+#17 (seen 2x, read as "Point Seven Specialit" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 22.00 
+POINT SEVEN SPECIALIT SHARJAH ARE 
+14/06/26 15:05 
+Avl Bal AED ····7169.01
+June statement due on 26/06/2026
+
+#20 (seen 2x, read as "Qasr Al Zain M" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 250.00 
+Ziina  *qasr al zain m Sharjah ARE 
+29/05/26 12:39 
+Avl Bal AED ····4861.46
+
+#21 (seen 2x, read as "Al Baar Wa Al Bahr Roa" / Other):
+Purchase of AED 214.00 with Credit Card ending 8917 at AL BAAR WA AL BAHR ROA, SHARJAH. Avl Cr. Limit is AED 21,018.26
+
+#22 (seen 2x, read as "Etoro Me Ltd Etoro" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED ····0000.00 
+eToro ME LTD etoro ARE 
+26/01/26 10:58 
+Avl Bal AED 3582.39
+
+#23 (seen 2x, read as "Aneeq" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 366.45 
+Mamo*aneeq Dubai ARE 
+24/01/26 11:47 
+Avl Bal AED ····3696.56
+January statement due on 26/01/2026
+
+#24 (seen 2x, read as "Loop DXB Llc 1" / Other):
+Purchase of AED 100.00 with Debit Card ending 1354 at Loop DXB LLC 1, Dubai. Avl Balance is AED 25,928.01.
+
+#26 (seen 2x, read as "Vibed" / Other):
+Purchase of USD 59.00 with Debit Card ending 1354 at VIBED.INC, +····3707. Avl Balance is AED 23,889.48.  Pls refer stmt for exact amt.
+
+#27 (seen 2x, read as "Wallet Temp" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 4.00 
+GOOGLE*WALLET TEMP G.CO/HELPPAY# USA 
+26/11/25 22:56 
+Available Balance AED ····0995.02
+0% instalments up to 12 months, NO fees on international purchases. bit.ly/4nR8uHP Conditions apply.
+
+#28 (seen 2x, read as "Al Bahar Al Mutawasit" / Other):
+Purchase of AED 75.00 with Debit Card ending 1354 at AL BAHAR AL MUTAWASIT, SHARJAH. Avl Balance is AED 28,374.68.
+
+#29 (seen 2x, read as "Veda Inc Investment L" / Other):
+Purchase of AED 74.00 with Debit Card ending 1354 at VEDA INC INVESTMENT L., DUBAI MEDIA C. Avl Balance is AED 16,430.80.
+
+#30 (seen 2x, read as "Nextuaeaedecomic1" / Other):
+Purchase of AED 272.00 with Debit Card ending 1354 at NEXTUAEAEDECOMIC1, DUBAI. Avl Balance is AED 16,536.80.
+
+#31 (seen 2x, read as "Al Khabeer Al Awal Ph" / Other):
+Purchase of AED 13.00 with Debit Card ending 1354 at AL KHABEER AL AWAL PH, SHARJAH. Avl Balance is AED 27,163.52.
+
+#32 (seen 2x, read as "Al Nujom Al Thabeiah S" / Other):
+Purchase of AED 80.00 with Debit Card ending 1354 at AL NUJOM AL THABEIAH S, Sharjah. Avl Balance is AED 28,555.22.
+
+#33 (seen 2x, read as "Db267 Fo Sharjah Corni" / Other):
+Purchase of AED 263.00 with Credit Card ending 8917 at DB267 FO SHARJAH CORNI, SHARJAH. Avl Cr. Limit is AED 21,435.27
+
+#34 (seen 2x, read as "Fariq Al Awaiel Auto S" / Other):
+Purchase of AED 35.00 with Debit Card ending 1354 at FARIQ AL AWAIEL AUTO S, SHARJAH. Avl Balance is AED 19,629.22.
+
+#35 (seen 2x, read as "Exinity Me Ltd" / Other):
+Debit Card Purchase 
+Debit Account XXXX0002 
+Card XXXX8421 
+USD 200.00 
+EXINITY ME LTD        Dubai           AE 
+06/10/25 17:51 
+Available Balance AED ····4209.61
+
+#36 (seen 2x, read as "Candle Couple" / Other):
+Purchase of AED 49.99 with Debit Card ending 1354 at GOOGLE*CANDLE COUPLE, G.CO/HELPPAY#. Avl Balance is AED 30,417.54.  Pls refer stmt for exact amt.
+
+#37 (seen 2x, read as "Dalma Ready Made Gar T" / Other):
+Purchase of AED 80.00 with Debit Card ending 1354 at DALMA READY MADE GAR T, SHARJAH. Avl Balance is AED 30,990.07.
+
+#38 (seen 2x, read as "The Box" / Other):
+Purchase of AED 98.00 with Credit Card ending 8917 at THE BOX, SHARJAH. Avl Cr. Limit is AED 18,354.23
+
+#39 (seen 2x, read as "Salim Al Shamsi Elect" / Other):
+Purchase of AED 89.00 with Debit Card ending 1354 at SALIM AL SHAMSI ELECT, SHARJAH. Avl Balance is AED 9,013.02.
+
+#41 (seen 2x, read as "Qdf Concourse A Doha" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+QAR 34.00 
+QDF CONCOURSE A DOHA QAT 
+28/06/25 06:58 
+Available Balance AED ····0394.86
+Enjoy 0% instalment plans on flights and stay with no processing fee. bit.ly/4jThACG. T&C apply.
+
+#42 (seen 2x, read as "Fat*the Viole" / Other):
+Purchase of AED 290.00 with Debit Card ending 1354 at FAT*THE VIOLE, Dubai. Avl Balance is AED 45,506.98.
+
+#43 (seen 2x, read as "Sheetwa" / Other):
+Purchase of AED 30.00 with Credit Card ending 8917 at SHEETWA, +····4074. Avl Cr. Limit is AED 20,677.34. Pls refer stmt for exact amt
+
+#44 (seen 2x, read as "Google Vpn Proton Fas" / Other):
+Purchase of AED 0.99 with Debit Card ending 1354 at Google VPN Proton Fas, 650-····0000. Avl Balance is AED 42,988.36.  Pls refer stmt for exact amt.
+
+#45 (seen 2x, read as "Fariq Al Awaiel Auto Se" / Other):
+Purchase of AED 30.00 with Credit Card ending 8575 at FARIQ AL AWAIEL AUTO SE, SHARJAH. Avl Cr. Limit is AED 15,097.68
+
+#46 (seen 2x, read as "Al Mazoon Studio Br 1" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 25.00 
+AL MAZOON STUDIO BR 1 SHARJAH ARE 
+13/05/25 20:28 
+Available Balance AED ····0524.10
+Your May statement payment due date is 26/05/2025
+
+#47 (seen 2x, read as "Golden City Ras Al Khaima" / Other):
+Credit Card Purchase 
+Card No XXXX3749 
+AED 78.80 
+GOLDEN CITY RAS AL KHAIMA ARE 
+10/05/25 11:57 
+Available Balance AED ····1474.55
+Your May statement payment due date is 26/05/2025
+
+#48 (seen 2x, read as "Daypassapp" / Other):
+Purchase of AED 22.86 with Credit Card ending 8917 at DAYPASSAPP.COM, +····3594. Avl Cr. Limit is AED 21,752.68. Pls refer stmt for exact amt
+
+#49 (seen 2x, read as "Hutong" / Other):
+Purchase of AED 768.00 with Credit Card ending 8575 at HUTONG, DUBAI. Avl Cr. Limit is AED 13,669.03
+
+#50 (seen 2x, read as "Wassagy Ebooks Maaheko-accra" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+USD 300.00 
+WASSAGY EBOOKS MAAHEKO-ACCRA GHA 
+03/04/25 16:29 
+Available Balance AED ····1242.83
+Your April statement payment due date is 26/04/2025
+
+#51 (seen 2x, read as "United Fidelity Insura" / Other):
+Purchase of AED 841.05 with Credit Card ending 8917 at UNITED FIDELITY INSURA, DUBAI. Avl Cr. Limit is AED 19,344.09
+
+#52 (seen 2x, read as "G O A T" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+AED 107.00 
+G O A T DUBAI ARE 
+16/03/25 01:47 
+Available Balance AED 6889.07
+Your March statement payment due date is 26/03/2025
+
+#53 (seen 2x, read as "Al Saad Furniture Est" / Other):
+Purchase of AED 157.00 with Credit Card ending 8917 at AL SAAD FURNITURE EST, SHARJAH. Avl Cr. Limit is AED 21,441.61
+
+#54 (seen 2x, read as "Pm Connect Portal" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+AED 1.00 
+PM CONNECT PORTAL dubai ARE 
+09/03/25 17:31 
+Available Balance AED 8102.30 Your March statement payment due date is 26/03/2025
+
+#55 (seen 2x, read as "Zbooni.com/marketplace" / Other):
+Debit Card Purchase 
+Debit 
+Account XXXX0002 
+Card XXXX8335
+AED 1.00
+zbooni.com/marketplaceDubai           AE 
+08/03/25 12:58 
+Available Balance AED ····2633.19
+
+#56 (seen 2x, read as "Mena Mobility Llc" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+AED 1000.00 
+MENA MOBILITY LLC Dubai ARE 
+01/03/25 22:15 
+Available Balance AED ····0840.22
+
+#57 (seen 2x, read as "Leto" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+AED 88.20 
+LETO DUBAI ARE 
+27/02/25 16:16 
+Available Balance AED ····1985.47
+
+#58 (seen 2x, read as "Muzz Ltd" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+AED 132.99 
+MUZZ LTD +····1111 GBR 
+21/02/25 20:17 
+Available Balance AED ····2866.24 Your February statement payment due date is 26/02/2025
+
+#59 (seen 2x, read as "Sp Yzy Sply" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+AED 150.00 
+SP YZY SPLY +····6250 USA 
+02/02/25 12:55 
+Available Balance AED 4737.10
+
+#61 (seen 2x, read as "Serrurier" / Other):
+Credit Card Purchase 
+Card No XXXX9960 
+GBP 59.99 
+SERRURIER +····6738 FRA 
+05/01/25 19:52 
+Available Balance AED 2720.45 Your January statement payment due date is 27/01/2025
+
+#62 (seen 2x, read as "Thai Corner General Tr" / Other):
+Purchase of AED 19.00 with Debit Card ending 1354 at THAI CORNER GENERAL TR, DUBAI. Avl Balance is AED 34,400.32.
+
+#63 (seen 2x, read as "Brand Folio Llc" / Other):
+Purchase of AED 379.00 with Credit Card ending 9190 at BRAND FOLIO LLC, SHARJAH. Avl Cr. Limit is AED 14,504.04
+
+#64 (seen 2x, read as "National Bonds" / Other):
+Purchase of AED 100.00 with Debit Card ending 1354 at NATIONAL BONDS, ····2222. Avl Balance is AED 38,163.01.
+
+#66 (seen 2x, read as "Dubai Refreshment" / Other):
+Your Cr.Card XXX7720 was used for AED1.00 on 18/08/2024 16:43:59 at Dubai Refreshment,Dubai-AE. Avl. Cr.limit is AED2396.52
+
+#67 (seen 2x, read as "Mailtrack.io" / Other):
+Debit Card Purchase 
+Debit 
+Account XXXX0002 
+Card XXXX8335
+USD 35.00
+MAILTRACK.IO          +····2314    ES 
+13/07/24 12:12 
+Available Balance AED ····8163.14
+
+#69 (seen 2x, read as "Banxa Trustwallet 1447amsterdam Nl" / Other):
+Debit Card Purchase 
+Debit 
+Account XXXX0002 
+Card XXXX8335
+USD 3400.00
+BANXA TRUSTWALLET 1447AMSTERDAM       NL 
+13/07/24 19:37 
+Available Balance AED ····5298.03
+
+#70 (seen 2x, read as "Al Habtoor Motors Co L" / Other):
+Purchase of AED 1,667.40 with Debit Card ending 1354 at AL HABTOOR MOTORS CO L, SHARJAH. Avl Balance is AED 39,378.05.
+
+#71 (seen 2x, read as "Shabab Al Khan Auto Ac" / Other):
+Purchase of AED 80.00 with Debit Card ending 1354 at SHABAB AL KHAN AUTO AC, SHARJAH. Avl Balance is AED 39,298.05.
+
+#73 (seen 2x, read as "Prkn-mtpa" / Other):
+Credit Card Purchase 
+Card No XXXX3644 
+AED 10.00 
+PRKN-MTPA Dubai ARE 
+01/07/24 20:19 
+Available Balance AED 9696.39
+
+#74 (seen 2x, read as "Paypal" / Other):
+Your Cr.Card XXX7720 was used for USD1.00 on 15/06/2024 17:49:15 at PAYPAL,····7733-LU. Avl. Cr.limit is AED4417.96
+
+#75 (seen 2x, read as "Farhanausma" / Other):
+Your Cr.Card XXX7720 was used for AED99.18 (plus foreign transaction fee of 2.1%) on 15/06/2024 17:49:27 at PAYPAL *FARHANAUSMA,····9001-GB. Avl. Cr.limit is AED4322.45
+
+#78 (seen 2x, read as "Crypto.com" / Other):
+Purchase of AED 2,062.26 with Debit Card ending 8783 at CRYPTO.COM, SAN GILJAN. Avl Balance is AED 37,091.01.  Pls refer stmt for exact amt.
+
+#79 (seen 2x, read as "Abo Alo" / Other):
+Your Cr.Card XXX7720 was used for AED12.00 on 20/04/2024 19:58:59 at ABO ALO,SHARJAH-AE. Avl. Cr.limit is AED3572.61
+
+#80 (seen 2x, read as "Sp All-charms" / Other):
+Purchase of AED 189.12 with Debit Card ending 8783 at SP ALL-CHARMS, ····7501. Avl Balance is AED 36,826.25.  Pls refer stmt for exact amt.
+
+#82 (seen 2x, read as "Sp Luetti" / Other):
+Purchase of AED 389.00 with Debit Card ending 8783 at SP LUETTI 1980, +····0586. Avl Balance is AED 35,786.45.  Pls refer stmt for exact amt.
+
+#83 (seen 2x, read as "Waqt Al Khafayef Caf" / Other):
+Your Cr.Card XXX7720 was used for AED18.00 on 30/03/2024 00:35:08 at WAQT AL KHAFAYEF CAF,SHARJAH-AE. Avl. Cr.limit is AED4529.66
+
+#85 (seen 2x, read as "Phuket Delight" / Other):
+Purchase of AED 1,004.82 with Debit Card ending 8783 at PHUKET DELIGHT, PHUKET. Avl Balance is AED 37,897.71.  Pls refer stmt for exact amt.
+
+#86 (seen 2x, read as "A025-aiiz-jungceylon Phuk" / Other):
+Purchase of AED 136.44 with Debit Card ending 8783 at A025-AIIZ-JUNGCEYLON PHUK, PHUKET. Avl Balance is AED 36,293.91.  Pls refer stmt for exact amt.
+
+#87 (seen 2x, read as "Aromaya" / Other):
+Purchase of AED 20.63 with Debit Card ending 8783 at AROMAYA, PHUKET. Avl Balance is AED 36,272.69.  Pls refer stmt for exact amt.
+
+#88 (seen 2x, read as "Tops-patong" / Other):
+Purchase of AED 80.81 with Debit Card ending 8783 at TOPS-PATONG, PHUKET. Avl Balance is AED 36,123.26.  Pls refer stmt for exact amt.
+
+#89 (seen 2x, read as "Prasert" / Other):
+Purchase of AED 250.57 with Debit Card ending 8783 at PRASERT ON-PUTTHA, PHUKET. Avl Balance is AED 35,865.43.  Pls refer stmt for exact amt.
+
+#90 (seen 2x, read as "Card purchase" / Transport):
+Purchase of AED 0.10 with Debit Card ending 8783 at WWW.2C2P.COM*2C2P BOLT (M, BANGKOK. Avl Balance is AED 35,848.02.  Pls refer stmt for exact amt.
+
+#91 (seen 2x, read as "Pzd131 Central Phuket" / Other):
+Purchase of AED 68.38 with Debit Card ending 8783 at PZD131 CENTRAL PHUKET, PHUKET. Avl Balance is AED 37,488.79.  Pls refer stmt for exact amt.
+
+#92 (seen 2x, read as "Crc Sports-phuket 4" / Other):
+Purchase of AED 454.43 with Debit Card ending 8783 at CRC SPORTS-PHUKET 4, PHUKET. Avl Balance is AED 37,021.19.  Pls refer stmt for exact amt.
+
+#93 (seen 2x, read as "Under Armour-c" / Other):
+Purchase of AED 1,019.94 with Debit Card ending 8783 at UNDER ARMOUR-C.PHUKET FES, PHUKET. Avl Balance is AED 35,971.68.  Pls refer stmt for exact amt.
+
+#94 (seen 2x, read as "Nikorn Marine" / Other):
+Purchase of AED 609.58 with Debit Card ending 8783 at NIKORN MARINE, PHUKET. Avl Balance is AED 34,006.93.  Pls refer stmt for exact amt.
+
+#96 (seen 2x, read as "At Twenty Two House" / Other):
+Purchase of AED 56.55 with Debit Card ending 8783 at AT TWENTY TWO HOUSE, PHUKET. Avl Balance is AED 35,599.53.  Pls refer stmt for exact amt.
+
+#98 (seen 2x, read as "Phoneinn" / Other):
+Purchase of AED 111.77 with Debit Card ending 8783 at PHONEINN, PHUKET. Avl Balance is AED 36,084.60.
+
+#99 (seen 2x, read as "Tier Ae Ride" / Other):
+Purchase of AED 20.00 with Debit Card ending 8783 at TIER AE RIDE, Berlin. Avl Balance is AED 31,254.65.
+
+#100 (seen 2x, read as "Pull And Bear" / Other):
+Purchase of AED 180.00 with Debit Card ending 8783 at PULL AND BEAR, DUBAI. Avl Balance is AED 35,997.24.
+
+#101 (seen 2x, read as "Dubai Retail Assets" / Other):
+Purchase of AED 30.00 with Debit Card ending 8783 at DUBAI RETAIL ASSETS, DUBAI. Avl Balance is AED 28,164.02.

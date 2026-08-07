@@ -1,0 +1,930 @@
+/**
+ * iOS capture setup.
+ *
+ * This is the flow the whole iOS product rests on, which is why it is a
+ * first-class screen rather than a row in Settings. Android asks for one
+ * permission and starts working; iOS cannot, so all of the friction lives
+ * here. Once the Shortcut and Message automation exist, the relay can receive
+ * while Wafra is closed; the ledger catches up when iOS next lets the app sync.
+ *
+ * Four steps, with a final proof that the installed Shortcut, relay,
+ * encryption and sync path work together. Apple's Message sender trigger
+ * cannot be simulated by an app; the flow says plainly that only the next
+ * genuine bank alert verifies that last link.
+ *
+ * Three rules this screen is built around, each one paid for by a dead end
+ * that shipped:
+ *
+ * 1. EVERY step renders `errorBlock`. Failures used to be assigned to `error`
+ *    on steps that never rendered it, so a failed install-page open and a
+ *    failed disconnect both looked exactly like a button that did nothing.
+ * 2. EVERY step past the first can walk BACKWARDS. Once the automation was
+ *    confirmed, `setupState` became 'configured', re-entry landed on the test
+ *    step, and a user whose test never arrived had no route back to the setup
+ *    code the failure message told them to check.
+ * 3. Silent delivery is registered on the way OUT of the automation step, not
+ *    only by the button that opens Shortcuts. Confirming the automation
+ *    without tapping that button used to finish setup with push unregistered
+ *    — capture that works only while the app is open, and says nothing.
+ */
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  AppState,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { Button } from '@/components/ui/controls';
+import { Icon } from '@/components/ui/icon';
+import { Block, Row, ScreenHeader, SectionHeader } from '@/components/ui/layout';
+import { PulseDot } from '@/components/ui/states';
+import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { buildImportPlan } from '@/lib/auto-import';
+import {
+  disableRelayBackgroundSync,
+  enableRelayBackgroundSync,
+} from '@/lib/background-relay';
+import { t, tf, type StringKey } from '@/lib/i18n';
+import { getActiveMarket } from '@/lib/markets';
+import { requestSilentCapturePermission } from '@/lib/notifications';
+import {
+  ackRelay,
+  DEFAULT_RELAY_URL,
+  DEFAULT_SHORTCUT_URL,
+  getRelayConfig,
+  markRelayConfigured,
+  markRelayVerified,
+  pairDevice,
+  syncRelay,
+  unpairDevice,
+  type RelayConfig,
+} from '@/lib/relay';
+import { shortcutSetupCode, shortcutTestUrl } from '@/lib/relay-protocol';
+import { useStore } from '@/lib/store';
+
+/** Step names as keys, so the progress bar reads in the user's language. */
+const STEPS: readonly StringKey[] = [
+  'iosStepConnect',
+  'iosStepShortcut',
+  'iosStepAutomation',
+  'iosStepTest',
+] as const;
+type Step = 0 | 1 | 2 | 3;
+
+/**
+ * What the user can DO about a failure, rather than only what went wrong.
+ * `null` means the message is its own instruction and the step's own buttons
+ * are the recovery.
+ */
+type Recovery = 'settings' | 'shortcut' | null;
+
+/** How long the test step waits for a message before offering help. */
+const TEST_TIMEOUT_MS = 120_000;
+const POLL_MS = 2_500;
+
+export default function IosSetupScreen() {
+  const theme = useTheme();
+  const router = useRouter();
+  const params = useLocalSearchParams<{ fromOnboarding?: string }>();
+  const { state, importBatch, ensureDurable, setOnboarded, setPrivateMode } = useStore();
+
+  const [step, setStep] = useState<Step>(0);
+  const [cfg, setCfg] = useState<RelayConfig | null>(null);
+  const [pairing, setPairing] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recovery, setRecovery] = useState<Recovery>(null);
+  // Most people should not have to tap eight banks before setup can begin.
+  // Start with every supported UAE sender and let privacy-conscious users
+  // narrow the list; the Shortcuts trigger remains editable later.
+  const [banks, setBanks] = useState<string[]>(() =>
+    getActiveMarket().banks.map((bank) => bank.name),
+  );
+  const [copied, setCopied] = useState<string | null>(null);
+
+  // Test step
+  const [listening, setListening] = useState(false);
+  const [captured, setCaptured] = useState<{ merchant: string; isTest: boolean } | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedAt = useRef(0);
+  // The polling loop closes over state; a ref keeps it reading the live one.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  // Armed only by a successful hand-off to the install page, and disarmed by
+  // the return it is waiting for. See the AppState effect below.
+  const leftForInstall = useRef(false);
+  const sawBackground = useRef(false);
+
+  /** The relay has answered at least once, so capture is live, not proposed. */
+  const captureOn = cfg?.setupState === 'verified';
+
+  const fail = useCallback((message: string, how: Recovery = null) => {
+    setError(message);
+    setRecovery(how);
+  }, []);
+
+  const clearError = useCallback(() => {
+    setError(null);
+    setRecovery(null);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const existing = await getRelayConfig();
+      if (existing) {
+        setCfg(existing);
+        setStep(existing.setupState === 'paired' ? 1 : 3);
+      }
+    })();
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    },
+    [],
+  );
+
+  /**
+   * Returning from the install page IS the confirmation.
+   *
+   * "I have installed it" asked the user to tell the app something the app can
+   * already observe: it handed iOS a URL, iOS put another app in front, and
+   * that app came back. Advancing on that costs one tap less and one decision
+   * less at the point in the flow where people are most likely to give up.
+   *
+   * 'background' rather than 'inactive' is the discriminator on purpose — a
+   * permission sheet or the app switcher makes an app inactive without ever
+   * leaving it, and advancing on that would skip a step nobody performed.
+   *
+   * The pasteboard is deliberately NOT cleared on this path: someone who
+   * bounced back to Wafra mid-install still needs the code to paste, and step
+   * 2 can walk back to it. Explicit confirmation still clears it, and so does
+   * leaving the automation step.
+   */
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background') {
+        sawBackground.current = true;
+        return;
+      }
+      if (next !== 'active') return;
+      if (!leftForInstall.current || !sawBackground.current) return;
+      leftForInstall.current = false;
+      sawBackground.current = false;
+      setCopied(null);
+      setStep((current) => (current === 1 ? 2 : current));
+    });
+    return () => sub.remove();
+  }, []);
+
+  /**
+   * Move within the wizard. Anything in flight on the step being left has to
+   * stop, or a poll started on the test step keeps running behind the
+   * automation instructions and lands a success on a screen that never asked.
+   */
+  const goToStep = useCallback(
+    (next: Step) => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      pollTimer.current = null;
+      leftForInstall.current = false;
+      sawBackground.current = false;
+      setListening(false);
+      setTimedOut(false);
+      setCaptured(null);
+      clearError();
+      setStep(next);
+    },
+    [clearError],
+  );
+
+  const performConnect = useCallback(async () => {
+    if (!DEFAULT_RELAY_URL) {
+      fail(t('iosRelayUnavailable'));
+      return;
+    }
+    setPairing(true);
+    clearError();
+    try {
+      const paired = await pairDevice(DEFAULT_RELAY_URL);
+      setCfg(paired);
+      setStep(1);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
+    } catch (e) {
+      fail(e instanceof Error ? e.message : t('iosConnectFailed'));
+    } finally {
+      setPairing(false);
+    }
+  }, [clearError, fail]);
+
+  const connect = useCallback(() => {
+    if (!state.privateMode) {
+      void performConnect();
+      return;
+    }
+    Alert.alert(t('iosPrivateModeTitle'), t('iosPrivateModeBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      {
+        text: t('iosTurnOffPrivateMode'),
+        onPress: () => {
+          void (async () => {
+            try {
+              await setPrivateMode(false);
+              await performConnect();
+            } catch {
+              fail(t('iosConnectFailed'));
+            }
+          })();
+        },
+      },
+    ]);
+  }, [fail, performConnect, setPrivateMode, state.privateMode]);
+
+  const finish = useCallback(() => {
+    if (params.fromOnboarding === '1') {
+      // Return to the personalised onboarding summary. The query makes this
+      // resilient even if Expo Router remounted the gate while Shortcuts was
+      // in front of the app.
+      router.replace('/?onboarding=complete');
+      return;
+    }
+    setOnboarded();
+    router.replace('/');
+  }, [params.fromOnboarding, router, setOnboarded]);
+
+  /**
+   * The header back button leaves the screen; the in-flow ghost buttons move
+   * between steps. `router.back()` alone is a no-op when this screen is the
+   * only entry in the stack — a cold launch straight into it left the user
+   * with a header chevron that did nothing and no way out but finishing.
+   */
+  const leave = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+    finish();
+  }, [finish, router]);
+
+  const disconnect = useCallback(async () => {
+    if (!cfg) return;
+    setDisconnecting(true);
+    clearError();
+    try {
+      await disableRelayBackgroundSync();
+      await unpairDevice(cfg);
+      setCfg(null);
+      setBanks(getActiveMarket().banks.map((bank) => bank.name));
+      goToStep(0);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
+    } catch {
+      fail(t('iosDisconnectFailed'));
+    } finally {
+      setDisconnecting(false);
+    }
+  }, [cfg, clearError, fail, goToStep]);
+
+  const copy = useCallback(async (label: string, value: string) => {
+    await Clipboard.setStringAsync(value);
+    setCopied(label);
+    if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+    setTimeout(() => setCopied((c) => (c === label ? null : c)), 2000);
+  }, []);
+
+  /**
+   * The setup code carries the ingest bearer token. Take it off the pasteboard
+   * once it cannot still be needed, but never overwrite unrelated clipboard
+   * content the user put there themselves.
+   */
+  const clearSetupCodeFromPasteboard = useCallback(async () => {
+    if (!cfg) return;
+    try {
+      const current = await Clipboard.getStringAsync();
+      if (current === shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken)) {
+        await Clipboard.setStringAsync('');
+      }
+    } catch {
+      // Pasteboard cleanup is best-effort; the token also remains in Shortcut.
+    }
+  }, [cfg]);
+
+  const installShortcut = useCallback(async () => {
+    if (!cfg) return;
+    const code = shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken);
+    try {
+      await Clipboard.setStringAsync(code);
+      setCopied('setup');
+      if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+      await Linking.openURL(DEFAULT_SHORTCUT_URL ?? 'shortcuts://');
+      clearError();
+      leftForInstall.current = true;
+      sawBackground.current = false;
+    } catch {
+      leftForInstall.current = false;
+      fail(t('iosShortcutInstallFailed'));
+    }
+  }, [cfg, clearError, fail]);
+
+  const shortcutInstalled = useCallback(async () => {
+    await clearSetupCodeFromPasteboard();
+    setCopied(null);
+    goToStep(2);
+  }, [clearSetupCodeFromPasteboard, goToStep]);
+
+  /**
+   * Register the silent wake. This is what lets a bank alert file itself while
+   * Wafra is closed, so nothing may leave the automation step without it — and
+   * a denial has to point at the one place that can undo it, iPhone Settings.
+   */
+  const ensureSilentDelivery = useCallback(
+    async (active: RelayConfig): Promise<boolean> => {
+      const notificationAllowed = await requestSilentCapturePermission();
+      if (!notificationAllowed) {
+        fail(t('iosPushPermissionRequired'), 'settings');
+        return false;
+      }
+      const backgroundReady = await enableRelayBackgroundSync(active);
+      if (!backgroundReady) {
+        fail(t('iosPushSetupFailed'));
+        return false;
+      }
+      clearError();
+      return true;
+    },
+    [clearError, fail],
+  );
+
+  const openAutomation = useCallback(async () => {
+    if (!cfg) return;
+    if (!(await ensureSilentDelivery(cfg))) return;
+    try {
+      await Linking.openURL('shortcuts://');
+    } catch {
+      fail(t('iosShortcutsOpenFailed'));
+    }
+  }, [cfg, ensureSilentDelivery, fail]);
+
+  /**
+   * Poll the relay until the user's test message shows up, then file it for
+   * real — the transaction they see at the end of setup is a genuine one, not
+   * a mock. Any message works; most people just forward one they already have.
+   *
+   * The config is an argument rather than a closure read: the step that starts
+   * this test also writes a new config in the same tick, and a `cfg` read here
+   * was either stale or, once, null — which returned before scheduling the
+   * next tick and left the "Waiting for the Shortcut…" pulse running forever
+   * with no timeout and no way back.
+   */
+  const poll = useCallback(
+    async (active: RelayConfig) => {
+      try {
+        const { parsed, ids, testReceived } = await syncRelay(active);
+        if (parsed.length > 0 || testReceived > 0) {
+          const newestTs = parsed.reduce((m, p) => Math.max(m, p.smsTs ?? 0), 0);
+          // A redelivered row can dedupe against an import that reached React
+          // state but whose first SQLCipher write failed. Flush that state when
+          // the delivery makes no new changes; otherwise use the batch's own
+          // durability receipt.
+          let durable = Promise.resolve();
+          if (parsed.length > 0) {
+            const plan = buildImportPlan(parsed, stateRef.current, newestTs);
+            if (plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0) {
+              durable = importBatch(plan.batch).durable;
+            } else {
+              durable = ensureDurable();
+            }
+          }
+          await durable;
+          await ackRelay(active, ids);
+          const verified = await markRelayVerified(active);
+          setCfg(verified);
+          setCaptured({
+            merchant: testReceived > 0 ? 'Wafra Capture' : parsed[0].merchant,
+            isTest: testReceived > 0,
+          });
+          setListening(false);
+          if (Platform.OS !== 'web') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          }
+          return;
+        }
+        // Corrupt/unreadable queue rows are unrecoverable and should not block a
+        // future valid test until their 30-day queue retention ends.
+        if (ids.length > 0) await ackRelay(active, ids);
+      } catch {
+        // Keep listening. A flaky minute on mobile data should not end the step.
+      }
+      if (Date.now() - startedAt.current > TEST_TIMEOUT_MS) {
+        setListening(false);
+        setTimedOut(true);
+        return;
+      }
+      pollTimer.current = setTimeout(() => void poll(active), POLL_MS);
+    },
+    [ensureDurable, importBatch],
+  );
+
+  const startTest = useCallback(
+    (active: RelayConfig) => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      clearError();
+      setCaptured(null);
+      setTimedOut(false);
+      setListening(true);
+      startedAt.current = Date.now();
+      void poll(active);
+      if (Platform.OS !== 'web') {
+        // A rejected run URL means the Shortcut is gone or renamed. That is a
+        // different problem from "nothing arrived", and it has a different
+        // fix, so it must not wait out a two-minute timeout to say so.
+        Linking.openURL(shortcutTestUrl()).catch(() => {
+          if (pollTimer.current) clearTimeout(pollTimer.current);
+          pollTimer.current = null;
+          setListening(false);
+          fail(t('iosShortcutRunFailed'), 'shortcut');
+        });
+      }
+    },
+    [clearError, fail, poll],
+  );
+
+  /**
+   * Confirming the automation and running the proof are one action.
+   *
+   * They were two buttons, and the first of them did nothing the user could
+   * see: it wrote 'configured' and advanced to a screen whose only content was
+   * another button. Merging them removes a tap without removing a decision —
+   * the decision is "I built the automation", and the test is what answers it.
+   */
+  const automationReady = useCallback(async () => {
+    if (!cfg) return;
+    if (!(await ensureSilentDelivery(cfg))) return;
+    await clearSetupCodeFromPasteboard();
+    const configured = await markRelayConfigured(cfg);
+    setCfg(configured);
+    setStep(3);
+    startTest(configured);
+  }, [cfg, clearSetupCodeFromPasteboard, ensureSilentDelivery, startTest]);
+
+  const errorBlock = error ? (
+    <View accessibilityLiveRegion="polite">
+      <Block style={styles.note}>
+        <Icon name="alert" size={16} color={theme.expense} />
+        <ThemedText type="meta" style={[styles.noteText, { color: theme.expense }]}>
+          {error}
+        </ThemedText>
+      </Block>
+      {recovery === 'settings' && (
+        <Button
+          label={t('openSettings')}
+          variant="outline"
+          onPress={() => {
+            Linking.openSettings().catch(() => {});
+          }}
+          style={styles.ctaSecondary}
+        />
+      )}
+    </View>
+  ) : null;
+
+  return (
+    <ThemedView style={styles.root}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <ScreenHeader title={t('iosSetupTitle')} onBack={leave} />
+
+        <ThemedText type="meta" themeColor="textSecondary" style={styles.progressLabel}>
+          {tf('iosStepProgress', { n: step + 1, total: STEPS.length, name: t(STEPS[step]) })}
+        </ThemedText>
+        <View
+          style={styles.progress}
+          accessibilityRole="progressbar"
+          accessibilityLabel={tf('iosStepProgress', {
+            n: step + 1,
+            total: STEPS.length,
+            name: t(STEPS[step]),
+          })}>
+          {STEPS.map((key, i) => (
+            <View
+              key={key}
+              style={[
+                styles.progressBar,
+                { backgroundColor: i <= step ? theme.primary : theme.track },
+              ]}
+            />
+          ))}
+        </View>
+
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {step === 0 && (
+            <Animated.View entering={FadeInDown.duration(240)}>
+              <ThemedText type="title" accessibilityRole="header">
+                {t('iosIntroTitle')}
+              </ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.body}>
+                {t('iosIntroBody1')}
+              </ThemedText>
+              <ThemedText type="micro" themeColor="textTertiary" style={styles.previewTime}>
+                {t('iosPreviewTime')}
+              </ThemedText>
+
+              <View style={[styles.preview, { borderColor: theme.cardBorder }]}>
+                {([
+                  ['upload', 'iosPreviewInstall', 'iosPreviewInstallBody'],
+                  ['spark', 'iosPreviewAutomation', 'iosPreviewAutomationBody'],
+                  ['check', 'iosPreviewProof', 'iosPreviewProofBody'],
+                ] as const).map(([icon, title, body], index) => (
+                  <View
+                    key={title}
+                    style={[
+                      styles.previewRow,
+                      index > 0 && {
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                        borderTopColor: theme.cardBorder,
+                      },
+                    ]}>
+                    <View style={[styles.previewIcon, { backgroundColor: theme.primarySoft }]}>
+                      <Icon name={icon} size={16} color={theme.primary} />
+                    </View>
+                    <View style={styles.previewCopy}>
+                      <ThemedText type="smallBold">{t(title)}</ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary">
+                        {t(body)}
+                      </ThemedText>
+                    </View>
+                  </View>
+                ))}
+              </View>
+
+              <Block style={styles.note}>
+                <Icon name="lock" size={16} color={theme.textSecondary} />
+                <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
+                  {t('iosPrivacyNote')}
+                </ThemedText>
+              </Block>
+
+              {/* A build with no relay can never pair. Saying so before the
+                  tap beats a disabled button with no explanation, and beats a
+                  button that fails identically every time it is pressed. */}
+              {!DEFAULT_RELAY_URL && (
+                <Block style={styles.note}>
+                  <Icon name="alert" size={16} color={theme.warning} />
+                  <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
+                    {t('iosRelayUnavailable')}
+                  </ThemedText>
+                </Block>
+              )}
+
+              {errorBlock}
+
+              <Button
+                label={pairing ? t('iosConnecting') : t('iosConnectCta')}
+                disabled={pairing || !DEFAULT_RELAY_URL}
+                onPress={connect}
+                style={styles.cta}
+              />
+              <Button
+                label={t('iosContinueManual')}
+                variant="ghost"
+                onPress={finish}
+                style={styles.ctaSecondary}
+              />
+            </Animated.View>
+          )}
+
+          {step === 1 && cfg && (
+            <Animated.View entering={FadeInDown.duration(240)}>
+              <ThemedText type="title" accessibilityRole="header">
+                {t('iosShortcutTitle')}
+              </ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.body}>
+                {t('iosShortcutBody')}
+              </ThemedText>
+
+              {DEFAULT_SHORTCUT_URL ? (
+                <>
+                  <SectionHeader title={t('iosSetupCode')} />
+                  <Row
+                    last
+                    onPress={() => copy('setup', shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken))}
+                    accessibilityLabel={t('iosCopySetupCode')}>
+                    <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
+                      WAFRA ··· {cfg.ingestToken.slice(-6)}
+                    </ThemedText>
+                    <ThemedText type="nano" style={{ color: theme.primary }}>
+                      {copied === 'setup' ? t('iosCopied') : t('iosCopy')}
+                    </ThemedText>
+                  </Row>
+                </>
+              ) : (
+                <>
+                  <Block style={styles.note}>
+                    <Icon name="alert" size={16} color={theme.warning} />
+                    <ThemedText type="nano" themeColor="textSecondary" style={styles.noteText}>
+                      {t('iosShortcutMissing')}
+                    </ThemedText>
+                  </Block>
+                  <SectionHeader title={t('iosYourAddress')} />
+                  <Row
+                    onPress={() => copy('url', cfg.ingestUrl)}
+                    accessibilityLabel={t('iosCopyAddress')}>
+                    <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
+                      {cfg.ingestUrl}
+                    </ThemedText>
+                    <ThemedText type="nano" style={{ color: theme.primary }}>
+                      {copied === 'url' ? t('iosCopied') : t('iosCopy')}
+                    </ThemedText>
+                  </Row>
+                  <Row
+                    last
+                    onPress={() => copy('token', cfg.ingestToken)}
+                    accessibilityLabel={t('iosCopyToken')}>
+                    <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
+                      {cfg.ingestToken.slice(0, 10)}···{cfg.ingestToken.slice(-6)}
+                    </ThemedText>
+                    <ThemedText type="nano" style={{ color: theme.primary }}>
+                      {copied === 'token' ? t('iosCopied') : t('iosCopy')}
+                    </ThemedText>
+                  </Row>
+                </>
+              )}
+
+              {banks.length > 0 && (
+                <>
+                  <SectionHeader title={t('iosRunFor')} />
+                  <Block>
+                    <ThemedText type="nano" themeColor="textSecondary">
+                      {banks.join(' · ')}
+                    </ThemedText>
+                  </Block>
+                </>
+              )}
+
+              <Block style={styles.note}>
+                <Icon name="alert" size={16} color={theme.warning} />
+                <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
+                  {t('iosSenderCaveat')}
+                </ThemedText>
+              </Block>
+
+              {errorBlock}
+
+              <Button
+                label={DEFAULT_SHORTCUT_URL ? t('iosOpenShortcut') : t('iosOpenShortcutsApp')}
+                icon="upload"
+                onPress={() => void installShortcut()}
+                style={styles.cta}
+              />
+              <Button
+                label={t('iosInstalledIt')}
+                variant="ghost"
+                onPress={() => void shortcutInstalled()}
+                style={styles.ctaSecondary}
+              />
+              <Button
+                label={disconnecting ? t('iosConnecting') : t('iosDisconnect')}
+                variant="ghost"
+                disabled={disconnecting}
+                onPress={() => void disconnect()}
+                style={styles.ctaSecondary}
+              />
+            </Animated.View>
+          )}
+
+          {step === 2 && (
+            <Animated.View entering={FadeInDown.duration(240)}>
+              <ThemedText type="title" accessibilityRole="header">
+                {t('iosAutomationTitle')}
+              </ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.body}>
+                {t('iosAutomationBody')}
+              </ThemedText>
+
+              <Block style={styles.automationSteps}>
+                <ThemedText type="nano">{t('iosAutomationTrigger')}</ThemedText>
+                <ThemedText type="nano">{t('iosAutomationSenders')}</ThemedText>
+                <ThemedText type="nano">{t('iosAutomationImmediate')}</ThemedText>
+                <ThemedText type="nano">{t('iosAutomationAction')}</ThemedText>
+                <ThemedText type="nano">{t('iosAutomationInput')}</ThemedText>
+              </Block>
+
+              {banks.length > 0 && (
+                <>
+                  <SectionHeader title={t('iosRunFor')} />
+                  <Block>
+                    <ThemedText type="nano" themeColor="textSecondary">
+                      {banks.join(' · ')}
+                    </ThemedText>
+                  </Block>
+                </>
+              )}
+
+              {errorBlock}
+
+              <Button
+                label={t('iosOpenShortcutsApp')}
+                icon="upload"
+                onPress={() => void openAutomation()}
+                style={styles.cta}
+              />
+              <Button
+                label={t('iosAutomationReadyTest')}
+                variant="ghost"
+                onPress={() => void automationReady()}
+                style={styles.ctaSecondary}
+              />
+              <Button
+                label={t('iosBackToShortcut')}
+                variant="ghost"
+                onPress={() => goToStep(1)}
+                style={styles.ctaSecondary}
+              />
+            </Animated.View>
+          )}
+
+          {step === 3 && (
+            <Animated.View entering={FadeInDown.duration(240)}>
+              <ThemedText type="title" accessibilityRole="header">
+                {captureOn ? t('iosAlreadyWorkingTitle') : t('iosTestTitle')}
+              </ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.body}>
+                {captureOn ? t('iosAlreadyWorkingBody') : t('iosTestBody')}
+              </ThemedText>
+              {captureOn && (
+                <ThemedText type="nano" themeColor="textTertiary" style={styles.body}>
+                  {t('iosIntroBody2')}
+                </ThemedText>
+              )}
+              <ThemedText type="nano" themeColor="textTertiary" style={styles.body}>
+                {t('iosTestLimit')}
+              </ThemedText>
+
+              {captured && (
+                <Animated.View entering={FadeIn.duration(300)}>
+                  <Block style={[styles.caught, { borderColor: theme.primaryBorder }]}>
+                    <Icon name="check" size={20} color={theme.primary} />
+                    <View style={styles.caughtText}>
+                      <ThemedText>{captured.merchant}</ThemedText>
+                      <ThemedText type="nano" themeColor="textSecondary">
+                        {captured.isTest ? t('iosTestCaught') : t('iosCaught')}
+                      </ThemedText>
+                    </View>
+                  </Block>
+                </Animated.View>
+              )}
+
+              {listening && (
+                <View accessibilityLiveRegion="polite" accessibilityLabel={t('iosWaitingLabel')}>
+                  <Block style={styles.listening}>
+                    <PulseDot color={theme.primary} />
+                    <ThemedText type="nano" themeColor="textSecondary" style={styles.noteText}>
+                      {t('iosListening')}
+                    </ThemedText>
+                  </Block>
+                </View>
+              )}
+
+              {timedOut && (
+                <Block style={styles.note}>
+                  <Icon name="alert" size={16} color={theme.warning} />
+                  <ThemedText type="nano" themeColor="textSecondary" style={styles.noteText}>
+                    {t('iosTimedOut')}
+                  </ThemedText>
+                </Block>
+              )}
+
+              {errorBlock}
+
+              {captured ? (
+                <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
+              ) : captureOn && !listening ? (
+                <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
+              ) : !listening && cfg ? (
+                <Button
+                  label={timedOut ? t('iosTryAgain') : t('iosStartListening')}
+                  onPress={() => startTest(cfg)}
+                  style={styles.cta}
+                />
+              ) : null}
+
+              {captureOn && !captured && !listening && cfg && (
+                <Button
+                  label={t('iosRunTestAgain')}
+                  variant="ghost"
+                  onPress={() => startTest(cfg)}
+                  style={styles.ctaSecondary}
+                />
+              )}
+
+              {(timedOut || recovery === 'shortcut') && (
+                <Button
+                  label={t('iosReinstallShortcut')}
+                  variant="ghost"
+                  onPress={() => goToStep(1)}
+                  style={styles.ctaSecondary}
+                />
+              )}
+
+              <Button
+                label={t('iosBackToAutomation')}
+                variant="ghost"
+                onPress={() => goToStep(2)}
+                style={styles.ctaSecondary}
+              />
+
+              {!captured && !captureOn && (
+                <Button
+                  label={t('iosSkipForNow')}
+                  variant="ghost"
+                  onPress={finish}
+                  style={styles.ctaSecondary}
+                />
+              )}
+            </Animated.View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </ThemedView>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  safe: { flex: 1 },
+  progress: {
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: ScreenPadding,
+    paddingBottom: Spacing.three,
+  },
+  progressLabel: { paddingHorizontal: ScreenPadding, paddingBottom: Spacing.two },
+  progressBar: { flex: 1, height: 3, borderRadius: 2 },
+  previewTime: { marginTop: Spacing.three },
+  preview: {
+    marginTop: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    overflow: 'hidden',
+  },
+  previewRow: {
+    minHeight: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingHorizontal: Spacing.three,
+  },
+  previewIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCopy: { flex: 1, minWidth: 0, gap: 2 },
+  content: {
+    paddingHorizontal: ScreenPadding,
+    paddingBottom: Spacing.six,
+    maxWidth: MaxContentWidth,
+    width: '100%',
+    alignSelf: 'center',
+  },
+  body: { marginTop: Spacing.two, lineHeight: 21 },
+  note: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    alignItems: 'flex-start',
+    marginTop: Spacing.four,
+  },
+  noteText: { flex: 1, lineHeight: 18 },
+  listening: { flexDirection: 'row', gap: Spacing.two, alignItems: 'center', marginTop: Spacing.four },
+  caught: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    alignItems: 'center',
+    marginTop: Spacing.four,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+  },
+  caughtText: { flex: 1, gap: 2 },
+  automationSteps: { marginTop: Spacing.four, gap: Spacing.three },
+  cta: { marginTop: Spacing.five },
+  ctaSecondary: { marginTop: Spacing.two },
+  mono: { flex: 1, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+});

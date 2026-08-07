@@ -9,15 +9,18 @@ import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+
+import { shareText } from '@/lib/share-text';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   I18nManager,
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   View,
 } from 'react-native';
@@ -25,30 +28,52 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Toggle } from '@/components/ui/controls';
+import { Segmented, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { WafraMark } from '@/components/wafra-logo';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { unreadFormatCount } from '@/lib/accuracy';
+import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
+import { uncategorisedMerchants } from '@/lib/uncategorised';
+import {
+  clearBackgroundRelayRows,
+  getChargeAlertPreference,
+  setChargeAlertsEnabled,
+} from '@/lib/background-relay';
+import {
+  cancelDailySummary,
+  requestNotificationPermission,
+  syncDailySummary,
+} from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
-import { monthEndISO, monthKey, monthStartISO, shiftMonthKey, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
-import { getPairing } from '@/lib/relay';
+// Deliberately this branch's relay client, not the other one's isRelaySupported/
+// unpairRelay/stopRelayWake trio: the two relay clients speak incompatible wire
+// contracts (four scoped tokens here vs one there), and mixing their entry
+// points compiles on a good day and 401s on the device.
+import {
+  getRelayConfig,
+  isRelayPlatform,
+  RelayError,
+  unpairDevice,
+  type RelayConfig,
+} from '@/lib/relay';
+import { promptDeleteShortcut, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
+import {
+  buildExpenseReportHtml,
+  reportExpenses,
+} from '@/lib/reimbursement-report';
 import { useStore } from '@/lib/store';
+import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
+import SmsReader from '../../modules/sms-reader';
+import { t, tf } from '@/lib/i18n';
 
 /** The reporting month can start on any day that exists in February. */
-const MAX_START_DAY = 28;
-
-function ordinal(day: number): string {
-  const rem100 = day % 100;
-  if (rem100 >= 11 && rem100 <= 13) return `${day}th`;
-  return `${day}${['th', 'st', 'nd', 'rd'][day % 10] ?? 'th'}`;
-}
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -56,35 +81,73 @@ export default function SettingsScreen() {
   const {
     state,
     setAppLock,
-    setMonthStartDay,
+    setDailySummary,
+    setPrivateMode,
     setPro,
     setMarket,
     setUiLanguage,
     exportBackup,
     restoreBackup,
     clearAll,
+    setThemePreference,
   } = useStore();
 
+  const themeChoice: ThemePreference =
+    state.themePreference === 'light' || state.themePreference === 'dark'
+      ? state.themePreference
+      : 'system';
+
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
+  // `undefined` is "not read yet" and `null` is "read, and there is no pairing".
+  // Collapsing the two would print "not connected" for a frame to a user whose
+  // capture is in fact running, on the screen where they came to check.
+  const [relay, setRelay] = useState<RelayConfig | null | undefined>(
+    isRelayPlatform() ? undefined : null,
+  );
   const [smsGranted, setSmsGranted] = useState(false);
-  const [relayPaired, setRelayPaired] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
+  // Home only offers the categorise prompt above a floor, so a user who sorts
+  // their way down to two merchants loses the only route to the screen with
+  // the job half done. This row is the permanent way in, and it stays visible
+  // at zero to say so.
+  const unsorted = useMemo(() => uncategorisedMerchants(state), [state]);
+  // A count of 0 is not a verdict on every device — see noFormatsReason().
+  const noFormats = noFormatsReason({
+    relayPlatform: isRelayPlatform(),
+    privateMode: state.privateMode,
+  });
   const version = Constants.expoConfig?.version ?? '1.0.0';
+
+  const [instantAlerts, setInstantAlerts] = useState(false);
+  // Only builds carrying the delivery receiver can post at delivery time.
+  const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
+
+  useEffect(() => {
+    if (!isRelayPlatform()) return;
+    let live = true;
+    getRelayConfig()
+      .then((cfg) => {
+        if (live) setRelay(cfg);
+      })
+      .catch(() => {
+        if (live) setRelay(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSmsScanningAvailable()) return;
     hasSmsPermission().then(setSmsGranted).catch(() => {});
+    // The native side owns this one — the receiver reads it from
+    // SharedPreferences long after this screen is gone.
+    try {
+      setInstantAlerts(SmsReader?.getInstantAlerts?.() ?? false);
+    } catch {
+      // An older build without the function: leave it off.
+    }
   }, []);
-
-  // Re-read on focus rather than on mount: the pairing screen is where this
-  // changes, and the user comes straight back here afterwards.
-  useFocusEffect(
-    useCallback(() => {
-      getPairing()
-        .then((p) => setRelayPaired(p != null))
-        .catch(() => {});
-    }, []),
-  );
 
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
@@ -106,8 +169,8 @@ export default function SettingsScreen() {
       const next = !state.pro;
       setPro(next);
       Alert.alert(
-        next ? 'Founder mode' : 'Founder mode off',
-        next ? 'Wafra Pro unlocked on this device.' : 'Wafra Pro disabled on this device.',
+        next ? t('founderMode') : t('founderModeOff'),
+        next ? t('founderOn') : t('founderOff'),
       );
     }
   };
@@ -120,22 +183,51 @@ export default function SettingsScreen() {
       return;
     }
     if (Platform.OS === 'web') {
-      Alert.alert('Not available', 'App lock works on the phone app only.');
+      Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
       return;
     }
     const hasHardware = await LocalAuthentication.hasHardwareAsync();
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     if (!hasHardware || !enrolled) {
       Alert.alert(
-        'No screen lock set up',
-        'Set up a fingerprint, face unlock, or PIN in your phone settings first.',
+        t('noScreenLock'),
+        t('noScreenLockBody'),
       );
       return;
     }
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Confirm to enable app lock',
+      promptMessage: t('confirmAppLock'),
     });
     if (result.success) setAppLock(true);
+  };
+
+  const enablePrivateMode = async () => {
+    try {
+      if (Platform.OS === 'ios') {
+        const relay = await getRelayConfig();
+        if (relay) await unpairDevice(relay);
+      }
+      await setPrivateMode(true);
+    } catch {
+      Alert.alert(t('privateModeFailed'));
+    }
+  };
+
+  const togglePrivateMode = (enabled: boolean) => {
+    if (!enabled) {
+      void setPrivateMode(false).catch(() => {
+        Alert.alert(t('privateModeFailed'));
+      });
+      return;
+    }
+    if (Platform.OS !== 'ios') {
+      void enablePrivateMode();
+      return;
+    }
+    Alert.alert(t('privateModeEnableTitle'), t('privateModeEnableIosBody'), [
+      { text: t('cancel'), style: 'cancel' },
+      { text: t('privateModeEnable'), onPress: () => void enablePrivateMode() },
+    ]);
   };
 
   const toggleSms = async (enabled: boolean) => {
@@ -143,8 +235,8 @@ export default function SettingsScreen() {
       // Android grants permissions but never takes them back on request; the
       // only honest "off" is the one in the system settings.
       Alert.alert(
-        'Turn SMS reading off',
-        'Android only revokes this in its own settings: Settings → Apps → Wafra → Permissions → SMS.',
+        t('turnSmsReadingOff'),
+        t('smsRevokeHint'),
       );
       return;
     }
@@ -152,22 +244,99 @@ export default function SettingsScreen() {
     setSmsGranted(granted);
   };
 
+  const toggleInstantAlerts = async (enabled: boolean) => {
+    if (enabled) {
+      // Android 13 needs the notification permission before anything can be
+      // posted. Asking here rather than at delivery time means the failure is
+      // visible now, instead of as banners that silently never arrive.
+      const allowed = await requestNotificationPermission();
+      if (!allowed) {
+        Alert.alert(
+          t('notificationsOff'),
+          t('notificationsOffBody'),
+        );
+        return;
+      }
+    }
+    try {
+      SmsReader?.setInstantAlerts?.(enabled);
+      setInstantAlerts(enabled);
+    } catch {
+      // Nothing to recover: the toggle stays where it was.
+    }
+  };
+
+  /**
+   * Turning it on needs notification permission — and asking for it here, at
+   * the moment the user says yes to a notification, is the only place the ask
+   * makes sense. Launch never prompts.
+   */
+  const toggleDailySummary = async (enabled: boolean) => {
+    if (!enabled) {
+      setDailySummary(false);
+      await cancelDailySummary();
+      return;
+    }
+    const granted = await requestNotificationPermission();
+    if (!granted) {
+      Alert.alert(t('notificationsOff'), t('notificationsOffBody'));
+      return;
+    }
+    setDailySummary(true);
+    // Schedule from the state we are about to have, not the one in this
+    // closure: the dispatch above has not re-rendered yet, and syncDailySummary
+    // returns early on a false flag.
+    await syncDailySummary({ ...state, dailySummary: true });
+  };
+
+  /**
+   * Defaults ON, unlike Android's per-charge banner, and the asymmetry is
+   * deliberate: Android's is a heads-up over whatever is on screen, while this
+   * one is posted passively on a device that iOS setup only asked provisional
+   * authorization for — it lands quietly in Notification Center. Only an
+   * explicit stored `false` turns it off, so a user who never opens this screen
+   * still gets the alerts the relay was set up to deliver.
+   */
+  const [chargeAlerts, setChargeAlerts] = useState(true);
+  useEffect(() => {
+    let current = true;
+    void getChargeAlertPreference()
+      .then((p) => {
+        if (current) setChargeAlerts(p.enabled);
+      })
+      .catch(() => {
+        // The stored preference is unreadable; the switch stays at its default
+        // rather than claiming the feature is off.
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+  const toggleChargeAlerts = async (enabled: boolean) => {
+    setChargeAlerts(enabled);
+    try {
+      await setChargeAlertsEnabled(enabled);
+    } catch {
+      // Put the switch back where it was rather than showing a state the
+      // device did not actually store.
+      setChargeAlerts(!enabled);
+    }
+  };
+
   const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
   const notifEnabled = notifAvailable && NotificationReader != null && NotificationReader.isEnabled();
   const onNotificationAccess = () => {
     if (!notifAvailable || !NotificationReader) {
-      Alert.alert('Not available', 'Bank app notifications work on the phone app only.');
+      Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
     Alert.alert(
-      'Bank app notifications',
-      'Some banks send push notifications instead of SMS. Grant Wafra notification access and ' +
-        'money alerts import automatically. Only alerts that mention an amount are kept, and ' +
-        'they never leave this phone.',
+      t('bankAppNotifsTitle'),
+      t('notifAccessFull'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: notifEnabled ? 'Open settings' : 'Enable',
+          text: notifEnabled ? t('openSettings') : t('enableAction'),
           onPress: () => NotificationReader?.openSettings(),
         },
       ],
@@ -183,12 +352,17 @@ export default function SettingsScreen() {
 
   const cycleLanguage = () => {
     const next = state.language === 'ar' ? 'en' : 'ar';
+    // No alert, and nothing to restart. The strings re-render from this and
+    // the layout mirrors from the `direction` style on the root — see the
+    // Direction component in app/_layout.tsx for why I18nManager could never
+    // do it live.
     setUiLanguage(next);
-    // RTL flips on next app start — a React Native constraint, so say so.
+    // Still set, for react-navigation's own gesture and animation direction,
+    // which reads I18nManager rather than the layout. That part is the only
+    // thing left waiting for a restart.
     if (Platform.OS !== 'web') {
       I18nManager.allowRTL(next === 'ar');
       I18nManager.forceRTL(next === 'ar');
-      Alert.alert(t('language'), t('restartForLanguage'));
     }
   };
 
@@ -201,11 +375,81 @@ export default function SettingsScreen() {
       const title = `"${tx.title.replace(/"/g, '""')}"`;
       return `${tx.date},${tx.type},${(tx.amountFils / 100).toFixed(2)},${tx.category},${title},"${account}",${tx.isTransfer ? 1 : 0}`;
     });
-    Share.share({ title: 'wafra-export.csv', message: [header, ...lines].join('\n') }).catch(() => {});
+    // A whole ledger is far past the intent-payload ceiling; share the file.
+    shareText('wafra-export.csv', [header, ...lines].join('\n'), {
+      mimeType: 'text/csv',
+    }).catch(() => {});
   };
 
   const backupJson = () => {
-    Share.share({ title: 'wafra-backup.json', message: exportBackup() }).catch(() => {});
+    shareText('wafra-backup.json', exportBackup(), {
+      mimeType: 'application/json',
+    }).catch(() => {});
+  };
+
+  const createExpenseReport = async (scope: 'month' | 'all') => {
+    // Same rule every other total in the app applies: real spending, on an
+    // account still in play, neither leg of a move between the user's own
+    // accounts. Without it, a legacy own-account sweep (no transfer flag,
+    // caught only by internalTransferIds' structural title match) could both
+    // stretch an "all time" report back to its date and print on it as a
+    // reimbursable expense.
+    const liveAccounts = liveAccountIds(state.accounts);
+    const internal = internalTransferIds(state.transactions, liveAccounts);
+    const expenses = state.transactions.filter((tx) => isSpending(tx, liveAccounts, internal));
+    const currentMonth = monthKey(new Date());
+    const from =
+      scope === 'month'
+        ? monthStartISO(currentMonth)
+        : expenses.reduce((earliest, tx) => (tx.date < earliest ? tx.date : earliest), '9999-12-31');
+    const to =
+      scope === 'month'
+        ? monthEndISO(currentMonth)
+        : expenses.reduce((latest, tx) => (tx.date > latest ? tx.date : latest), '0000-01-01');
+
+    if (expenses.length === 0 || reportExpenses(expenses, from, to, liveAccounts, internal).length === 0) {
+      Alert.alert(t('noExpensesToExport'));
+      return;
+    }
+
+    try {
+      const html = buildExpenseReportHtml({
+        transactions: state.transactions,
+        accounts: state.accounts,
+        currency: market.currency.code,
+        language: state.language === 'ar' ? 'ar' : 'en',
+        from,
+        to,
+      });
+      const { uri } = await Print.printToFileAsync({
+        html,
+        width: 595,
+        height: 842,
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      });
+      // Expo Print opens the browser print dialog itself on web. Local URI
+      // sharing is deliberately unsupported there.
+      if (Platform.OS === 'web') return;
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert(t('reportShareUnavailable'));
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        dialogTitle: t('exportExpensePdf'),
+        mimeType: 'application/pdf',
+        UTI: 'com.adobe.pdf',
+      });
+    } catch {
+      Alert.alert(t('reportExportFailed'));
+    }
+  };
+
+  const chooseExpenseReportPeriod = () => {
+    Alert.alert(t('expenseReportPeriod'), t('expenseReportPeriodBody'), [
+      { text: t('currentMoneyMonth'), onPress: () => void createExpenseReport('month') },
+      { text: t('allExpenses'), onPress: () => void createExpenseReport('all') },
+      { text: t('cancel'), style: 'cancel' },
+    ]);
   };
 
   const restoreFromFile = async () => {
@@ -216,30 +460,159 @@ export default function SettingsScreen() {
       });
       if (picked.canceled || !picked.assets?.[0]) return;
       const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
-      Alert.alert('Restore backup?', 'This replaces everything currently in the app.', [
-        { text: 'Cancel', style: 'cancel' },
+      Alert.alert(t('restoreBackupQ'), t('restoreReplacesAll'), [
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Restore',
+          text: t('restoreAction'),
           style: 'destructive',
           onPress: () => {
             if (!restoreBackup(content)) {
-              Alert.alert('Invalid file', 'That does not look like a Wafra backup.');
+              Alert.alert(t('invalidFile'), t('notAWafraBackup'));
             }
           },
         },
       ]);
     } catch {
-      Alert.alert('Could not read file', 'Try exporting a fresh backup and restoring that.');
+      Alert.alert(t('couldNotReadFile'), t('couldNotReadFileBody'));
     }
   };
 
+  const eraseAllData = async () => {
+    // Re-read rather than using the `relay` state: this is the destructive
+    // path, and a pairing created since this screen mounted must still be
+    // torn down.
+    let cfg: RelayConfig | null = null;
+    try {
+      cfg = await getRelayConfig();
+    } catch {
+      // Defensive: getRelayConfig() swallows its own Keychain errors and
+      // answers null today. If that ever changes, wiping locally on the way
+      // past would leave a live device row and a live ingest token behind
+      // while telling the user everything is gone. Stop instead.
+      //
+      // The null it returns for a Keychain it could not read is still
+      // indistinguishable from "never paired" — see the note in relay.ts.
+      Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
+      return;
+    }
+
+    if (cfg) {
+      try {
+        await unpairDevice(cfg);
+      } catch (error) {
+        // Three failures, three different truths. The old single catch told
+        // every one of them "connect to the internet and try again", which for
+        // an owner whose vault still has other devices is advice that can
+        // never work: the relay answers 409 `last_owner` forever, and the
+        // ledger was silently left intact behind a message about the network.
+        if (error instanceof RelayError && error.code === 'last_owner') {
+          Alert.alert(t('eraseVaultOwnerTitle'), t('eraseVaultOwnerBody'), [
+            { text: t('cancel'), style: 'cancel' },
+            {
+              text: t('trustedSettingsRow'),
+              onPress: () => router.push('/trusted-devices'),
+            },
+          ]);
+          return;
+        }
+        Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
+        return;
+      }
+    }
+
+    try {
+      await clearAll();
+    } catch {
+      // The relay half really did succeed — the device row, its queue and its
+      // tokens are gone — and only the local ledger survived. Repeating the
+      // relay message here would claim the opposite.
+      Alert.alert(t('eraseLocalFailedTitle'), t('eraseLocalFailedBody'));
+      return;
+    }
+
+    /**
+     * The ledger is not the only bank data on this phone.
+     *
+     * A headless push wake parses relay rows and writes them to their OWN
+     * encrypted database — `wafra-relay-inbox.db`, under its own key — where
+     * they wait until a foreground import folds them into the ledger. Nothing
+     * above touches it: `stateStorage.destroy` erases `wafra-private.db`, and
+     * `unpairDevice` erases the relay credentials. Neither knows that file
+     * exists. So the sentence this screen shows before erasing — "this
+     * iPhone's relay queue will be permanently deleted" — was true of the
+     * copy on the relay and false of the copy on the phone, and already-parsed
+     * bank messages survived Erase Everything.
+     *
+     * After the ledger, not before: a failure here must never destroy staged
+     * rows that the RESTORED ledger has not imported, which is the state a
+     * failed erase leaves behind. And best-effort, because the alternative to
+     * a retained row here is not a lie — the next scan folds it into the fresh
+     * ledger, where the user can see it and delete it.
+     */
+    if (isRelayPlatform()) {
+      await clearBackgroundRelayRows().catch(() => {
+        // Staged rows outliving the erase is visible in the ledger a moment
+        // later; an alert about a queue the user has never heard of is not.
+      });
+    }
+
+    // Both halves are gone, and this is the moment the user believes nothing
+    // is left. On iOS that is not yet true: the Shortcut they built is still
+    // installed and still puts bank-message text on the network on every
+    // matching alert. The relay refuses it now, but refusing is not the same
+    // as not sending, and no API in existence lets this app delete it.
+    if (shortcutCleanupApplies(cfg !== null)) {
+      promptDeleteShortcut(t('shortcutCleanupErased'));
+    }
+  };
+
+  /**
+   * Erasing has to reach the relay too.
+   *
+   * The ledger is only half of what this phone has: if iPhone capture is on,
+   * there is also a device row and a sealed queue on the relay, a key in the
+   * keychain (which on iOS outlives app deletion), and a push token that tells
+   * the relay where to knock. "Erase everything" that left all of that behind
+   * would be false on the one screen where a privacy claim has to be exact.
+   *
+   * `eraseAllData` above is what carries this out: it unpairs the device on the
+   * relay BEFORE wiping locally, because unpairing needs the admin token that
+   * the wipe is about to destroy. It surfaces a failure instead of swallowing
+   * it, so a user offline at that moment is not told their relay copy is gone
+   * when it is not — and it now distinguishes WHICH half failed, because
+   * "connect to the internet and try again" was being shown for a 409 that no
+   * amount of connectivity will change.
+   *
+   * What it still cannot reach is the Shortcut itself: the bearer token lives
+   * inside it and no API can edit it, so the automation keeps POSTing into a
+   * device row that no longer exists. The relay rejects those at the auth
+   * check, before it reads the body — but the message still leaves the phone,
+   * which is the part a privacy claim has to own. So the confirmation says up
+   * front that Wafra cannot delete the Shortcut, and a successful erase ends
+   * with `promptDeleteShortcut`, which names the exact steps and opens the
+   * Shortcuts app. See `src/lib/shortcut-cleanup.ts`.
+   */
   const confirmErase = () => {
+    // The Shortcut sentence is true only where a Shortcut can exist. An iPhone
+    // that never paired has no automation to hunt for, and a warning that
+    // cries wolf on that phone is a warning ignored on the one where it counts.
+    // `undefined` is "not read yet", and on iOS the cautious reading is that a
+    // pairing exists.
+    const mentionsShortcut = Platform.OS === 'ios' && relay !== null;
     Alert.alert(
-      'Erase everything on this phone?',
-      'All accounts, entries, bills, and goals will be permanently deleted.',
+      t('eraseEverythingQ'),
+      mentionsShortcut
+        ? t('eraseEverythingIosBody')
+        : // A phone that reads its own inbox rebuilds the entries on the next
+          // scan. Promising they are "permanently deleted" and then handing
+          // them straight back is the kind of thing that costs a user their
+          // trust in every other privacy claim on this screen.
+          isSmsScanningAvailable()
+          ? t('eraseEverythingSmsBody')
+          : t('eraseEverythingBody'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Erase', style: 'destructive', onPress: clearAll },
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('eraseAction'), style: 'destructive', onPress: () => void eraseAllData() },
       ],
     );
   };
@@ -264,7 +637,11 @@ export default function SettingsScreen() {
           </ThemedText>
         )}
       </View>
-      <Icon name="chevron-right" size={15} color={danger ? theme.expense : theme.textTertiary} />
+      <Icon
+        name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+        size={15}
+        color={danger ? theme.expense : theme.textTertiary}
+      />
     </Row>
   );
 
@@ -285,8 +662,6 @@ export default function SettingsScreen() {
       <Toggle value={value} onChange={onChange} label={title} />
     </Row>
   );
-
-  const monthKeyNow = monthKey(new Date());
   const trial = trialDaysLeft(state);
 
   return (
@@ -302,140 +677,229 @@ export default function SettingsScreen() {
               <View style={styles.proRow}>
                 <Icon name="diamond" size={19} color={theme.warning} />
                 <View style={styles.rowText}>
-                  <ThemedText type="small">Wafra Pro</ThemedText>
+                  <ThemedText type="small">{t('wafraPro')}</ThemedText>
                   <ThemedText
                     type="meta"
                     style={{ color: state.pro ? theme.textTertiary : theme.warning }}>
                     {state.pro
-                      ? 'Active on this device'
+                      ? t('activeOnThisDevice')
                       : trial > 0
-                        ? `Free trial · ${trial} day${trial === 1 ? '' : 's'} left`
-                        : 'Trial ended · tracking paused'}
+                        ? tf('settingsTrialDays', {
+                            count: trial,
+                            s: trial === 1 ? '' : 's',
+                          })
+                        : t('trialEndedBanner')}
                   </ThemedText>
                 </View>
-                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                <Icon
+                  name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+                  size={15}
+                  color={theme.textTertiary}
+                />
               </View>
             </Block>
           </Section>
 
           <Section index={1}>
-            <SectionHeader title="Money month" />
+            <SectionHeader title={t('appearanceHeader')} />
             <Block>
-              <View style={styles.monthHead}>
-                <ThemedText type="small">Starts on the {ordinal(state.monthStartDay)}</ThemedText>
-                <ThemedText type="small" tabular style={{ color: theme.primary }}>
-                  {state.monthStartDay}
-                </ThemedText>
-              </View>
-              {/* A picture of the month rather than a ± stepper: this is the
-                  setting that reshapes every other screen, so it should look
-                  like a month, not like a counter. */}
-              <View style={styles.dayBars}>
-                {Array.from({ length: MAX_START_DAY }, (_, i) => i + 1).map((day) => {
-                  const chosen = day === state.monthStartDay;
-                  return (
-                    <Pressable
-                      key={day}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Month starts on day ${day}`}
-                      accessibilityState={{ selected: chosen }}
-                      hitSlop={{ top: 10, bottom: 10 }}
-                      onPress={() => setMonthStartDay(day)}
-                      style={styles.dayBarHit}>
-                      <View
-                        style={[
-                          styles.dayBar,
-                          {
-                            height: chosen ? 34 : day % 7 === 1 ? 16 : 11,
-                            backgroundColor: chosen ? theme.primary : theme.track,
-                          },
-                        ]}
-                      />
-                    </Pressable>
-                  );
-                })}
-              </View>
+              {/* The handoff said to follow the OS and offer no picker. That is
+                  the right default and it stays the default — but "follow the
+                  OS" is not a choice a user can make, it is the absence of one,
+                  and a money app gets read in bed and in sunlight on the same
+                  day. System stays first and stays selected until it is
+                  changed. */}
+              <Segmented
+                segments={[
+                  { value: 'system', label: t('themeSystem') },
+                  { value: 'light', label: t('themeLight') },
+                  { value: 'dark', label: t('themeDark') },
+                ]}
+                value={themeChoice}
+                onChange={setThemePreference}
+              />
               <ThemedText type="meta" themeColor="textTertiary">
-                Your {shortDate(monthStartISO(monthKeyNow)).split(' ')[1]} month runs{' '}
-                {shortDate(monthStartISO(monthKeyNow))} – {shortDate(monthEndISO(monthKeyNow))}, so
-                salary and rent land in the same month.
+                {themeChoice === 'system'
+                  ? t('followingPhone')
+                  : tf('pinnedTheme', {
+                      theme: t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
+                    })}
               </ThemedText>
-              {state.monthStartDay === 1 && (
-                <ThemedText type="meta" themeColor="textTertiary">
-                  Day 1 means plain calendar months. Next month starts{' '}
-                  {shortDate(monthStartISO(shiftMonthKey(monthKeyNow, 1)))}.
-                </ThemedText>
-              )}
             </Block>
           </Section>
 
           <Section index={2}>
-            <SectionHeader title="Privacy" />
+            <SectionHeader title={t('privacyHeader')} />
+            <Block style={styles.privacyCopy}>
+              <Icon name="lock" size={16} color={theme.textTertiary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
+                {t('privacyRetentionExact')}
+              </ThemedText>
+            </Block>
             {switchRow(
-              'App lock',
-              'Fingerprint, face unlock, or your phone PIN',
+              t('privateMode'),
+              t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
+              state.privateMode,
+              togglePrivateMode,
+            )}
+            {switchRow(
+              t('appLockTitle'),
+              t('appLockDetail'),
               state.appLock,
               toggleAppLock,
             )}
             {isSmsScanningAvailable() &&
               switchRow(
-                'Read bank SMS',
-                smsGranted ? 'Granted · nothing is uploaded' : 'Off · nothing can import',
+                t('readBankSms'),
+                t(smsGranted ? 'smsGrantedLocal' : 'smsOffNoImport'),
                 smsGranted,
                 toggleSms,
               )}
-            {/* iOS has no SMS access at all, so the row above can never appear
-                there. This is the only route to automatic capture on iPhone. */}
-            {Platform.OS === 'ios' &&
-              linkRow(
-                'Automatic capture',
-                relayPaired ? 'On · set up in Shortcuts' : 'Off · iPhone needs a Shortcut to send messages',
-                gated(() => router.push('/ios-capture')),
-                true,
+            {instantAvailable &&
+              switchRow(
+                t('alertEveryCharge'),
+                smsGranted
+                  ? instantAlerts
+                    ? t('instantAlertsOn')
+                    : t('instantAlertsOff')
+                  : t('instantAlertsNeedSms'),
+                instantAlerts && smsGranted,
+                (next) => {
+                  if (!smsGranted) {
+                    Alert.alert(
+                      t('turnOnSmsFirst'),
+                      t('turnOnSmsFirstBody'),
+                    );
+                    return;
+                  }
+                  void toggleInstantAlerts(next);
+                },
               )}
+            {/* The nightly digest. Separate from the per-charge banner on
+                purpose: one is an interruption at the moment money moves, the
+                other is a summary you read when the day is over, and a user
+                who wants the second rarely wants the first. */}
+            {switchRow(
+              t('dailySummarySetting'),
+              state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
+              state.dailySummary,
+              (next) => void toggleDailySummary(next),
+            )}
+            {/* iOS's answer to Android's "Alert every charge". Separate row
+                rather than a shared one because the two are not the same
+                promise: Android's fires from the SMS broadcast the instant the
+                message lands, while this one fires when the relay wake
+                delivers, which can be a moment later or a batch at once. */}
+            {isRelayPlatform() &&
+              switchRow(
+                t('chargeAlertsSetting'),
+                chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
+                chargeAlerts,
+                (next) => void toggleChargeAlerts(next),
+              )}
+            {/* iPhone capture is a privacy setting as much as a feature: the
+                relay is the ONE path in the whole app where anything derived
+                from a message leaves the phone. It belongs in this section,
+                stated plainly, rather than filed under convenience — and this
+                row is also the only way into (and back out of) that setup from
+                Settings, which the base branch had no entry point for at all. */}
+            {isRelayPlatform() &&
+              linkRow(
+                t('automaticCapture'),
+                relay === undefined
+                  ? t('captureChecking')
+                  : relay === null
+                    ? t('captureIosOff')
+                    : relay.setupState === 'verified'
+                      ? t('captureIosOn')
+                      : t('captureIosNeedsTest'),
+                () => router.push('/ios-setup'),
+              )}
+            {/* Gated like every other capture row above it. Rendering this
+                unconditionally made it the one dead end in the section on
+                iOS: it read "Off · for banks that push instead of SMS", sent a
+                non-Pro user to the paywall first because of gated(), and only
+                then said notification access "works on the phone app only" —
+                to someone holding a phone. There is no iOS equivalent to
+                offer, so the row is not shown rather than shown broken. */}
             {notifAvailable && (
-              <Row onPress={gated(onNotificationAccess)} last accessibilityLabel="Bank app notifications">
+              <Row
+                onPress={gated(onNotificationAccess)}
+                accessibilityLabel={t('bankAppNotifsTitle')}>
                 <View style={styles.rowText}>
-                  <ThemedText type="small">Bank app notifications</ThemedText>
+                  <ThemedText type="small">{t('bankAppNotifsTitle')}</ThemedText>
                   <ThemedText type="meta" themeColor="textTertiary">
-                    {notifEnabled
-                      ? 'On · push alerts import automatically'
-                      : 'Off · for banks that push instead of SMS'}
+                    {t(notifEnabled ? 'bankPushOn' : 'bankPushOff')}
                   </ThemedText>
                 </View>
-                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                <Icon
+                  name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
+                  size={15}
+                  color={theme.textTertiary}
+                />
               </Row>
+            )}
+            {linkRow(
+              t('trustedSettingsRow'),
+              t('trustedSettingsDetail'),
+              () => router.push('/trusted-devices'),
+              true,
             )}
           </Section>
 
           <Section index={3}>
-            <SectionHeader title="Region" />
+            <SectionHeader title={t('regionHeader')} />
             {linkRow(
-              'Country pack',
-              `${market.name} · ${market.currency.display} · banks and merchants`,
+              t('countryPack'),
+              tf('countryPackDetail', {
+                country: t(market.id === 'SA' ? 'saudiName' : 'uaeName'),
+                currency: market.currency.display,
+              }),
               cycleMarket,
             )}
             {linkRow(
-              'Language',
-              state.language === 'ar' ? 'العربية · English restarts the app' : 'English · العربية restarts the app',
+              t('language'),
+              t('languageSettingDetail'),
               cycleLanguage,
               true,
             )}
           </Section>
 
           <Section index={4}>
-            <SectionHeader title="Data" />
-            {linkRow('Back up as JSON', null, gated(backupJson))}
-            {linkRow('Restore from a backup file', null, gated(restoreFromFile))}
-            {linkRow('Export transactions as CSV', null, exportCsv)}
+            <SectionHeader title={t('dataHeader')} />
+            {linkRow(t('backupJson'), null, gated(backupJson))}
+            {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
+            {linkRow(t('exportCsv'), null, exportCsv)}
+            {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod)}
+            {/* "No unrecognized formats" is a claim about message text this
+                phone may never have had. On iOS the relay discards it before
+                the row arrives and private mode deletes it on purpose, so the
+                count is 0 either way — see noFormatsReason(). The row still
+                leads somewhere on those devices: the card diagnostic is built
+                from the ledger, not from raw, and works everywhere. */}
             {linkRow(
-              'Improve accuracy',
+              t('improveAccuracy'),
               formats > 0
-                ? `${formats} unread message format${formats === 1 ? '' : 's'} · digits masked`
-                : 'Everything reads clean',
+                ? tf('unreadFormatsCount', {
+                    count: formats,
+                    s: formats === 1 ? '' : 's',
+                  })
+                : noFormats === 'none-found'
+                  ? t('noUnrecognized')
+                  : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
             )}
-            {linkRow('Erase everything on this phone', null, confirmErase, true, true)}
+            {linkRow(
+              t('sortShops'),
+              unsorted.merchants.length > 0
+                ? tf('sortShopsCount', {
+                    count: unsorted.merchants.length,
+                    s: unsorted.merchants.length === 1 ? '' : 's',
+                  })
+                : t('sortShopsNone'),
+              () => router.push('/categorise'),
+            )}
+            {linkRow(t('eraseAll'), null, confirmErase, true, true)}
           </Section>
 
           <Section index={5} style={styles.about}>
@@ -443,7 +907,7 @@ export default function SettingsScreen() {
               <WafraMark size={34} />
             </Pressable>
             <ThemedText type="default" themeColor="textSecondary">
-              Know where it goes. Watch it grow. All data stays on this device.
+              {t('settingsTagline')}
             </ThemedText>
             <ThemedText type="nano" themeColor="textTertiary">
               Wafra {version}
@@ -488,26 +952,38 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: Spacing.three - 2,
   },
-  dayBars: {
+  dayGrid: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    height: 34,
+    flexWrap: 'wrap',
+    marginHorizontal: -Spacing.half,
     paddingBottom: Spacing.three - 2,
   },
-  dayBarHit: {
-    flex: 1,
+  dayCell: {
+    width: '14.2857%',
+    height: 44,
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    height: 34,
+    justifyContent: 'center',
   },
-  dayBar: {
-    width: 4,
-    borderRadius: Radius.chip / 2,
+  dayChoice: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   about: {
     alignItems: 'flex-start',
     gap: Spacing.two + 2,
     paddingTop: Spacing.two,
+  },
+  privacyCopy: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+  },
+  privacyCopyText: {
+    flex: 1,
+    lineHeight: 18,
   },
 });

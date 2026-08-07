@@ -14,8 +14,10 @@ import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { EASE, Fonts, Motion, Radius, Spacing } from '@/constants/theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { getActiveMarket } from '@/lib/markets';
+import { t, tf } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -27,20 +29,36 @@ const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
  * a skeleton says what is about to appear.
  */
 export function SkeletonRows({ count = 4, height = 38 }: { count?: number; height?: number }) {
+  const reducedMotion = useReducedMotion();
   return (
-    <View style={styles.skeletonList}>
+    <View
+      accessible={false}
+      importantForAccessibility="no-hide-descendants"
+      style={styles.skeletonList}>
       {Array.from({ length: count }, (_, i) => (
-        <SkeletonRow key={i} index={i} height={height} />
+        <SkeletonRow key={i} index={i} height={height} reducedMotion={reducedMotion} />
       ))}
     </View>
   );
 }
 
-function SkeletonRow({ index, height }: { index: number; height: number }) {
+function SkeletonRow({
+  index,
+  height,
+  reducedMotion,
+}: {
+  index: number;
+  height: number;
+  reducedMotion: boolean;
+}) {
   const theme = useTheme();
   const shimmer = useSharedValue(0.55);
 
   useEffect(() => {
+    if (reducedMotion) {
+      shimmer.value = 0.72;
+      return;
+    }
     // 150ms down the list, so the sweep reads as one motion rather than a
     // row of independently blinking bars.
     shimmer.value = withDelay(
@@ -54,7 +72,7 @@ function SkeletonRow({ index, height }: { index: number; height: number }) {
         false,
       ),
     );
-  }, [shimmer, index]);
+  }, [shimmer, index, reducedMotion]);
 
   const style = useAnimatedStyle(() => ({ opacity: shimmer.value }));
 
@@ -73,15 +91,20 @@ function SkeletonRow({ index, height }: { index: number; height: number }) {
 
 /** 7px dot with a 2.8s breath: scale 1 → 1.4, opacity .85 → .3. */
 export function PulseDot({ color, size = 7 }: { color: string; size?: number }) {
+  const reducedMotion = useReducedMotion();
   const progress = useSharedValue(0);
 
   useEffect(() => {
+    if (reducedMotion) {
+      progress.value = 0;
+      return;
+    }
     progress.value = withRepeat(
       withTiming(1, { duration: Motion.pulse / 2, easing: EASING }),
       -1,
       true,
     );
-  }, [progress]);
+  }, [progress, reducedMotion]);
 
   const style = useAnimatedStyle(() => ({
     transform: [{ scale: 1 + progress.value * 0.4 }],
@@ -90,6 +113,7 @@ export function PulseDot({ color, size = 7 }: { color: string; size?: number }) 
 
   return (
     <Animated.View
+      accessible={false}
       style={[{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }, style]}
     />
   );
@@ -115,14 +139,13 @@ export function EmptyMonth({
         </ThemedText>
         <ThemedText type="amount">0</ThemedText>
       </View>
-      <ThemedText type="small">No entries in {monthName} yet</ThemedText>
+      <ThemedText type="small">{tf('noEntriesInMonth', { month: monthName })}</ThemedText>
       <ThemedText type="default" themeColor="textSecondary">
-        Pull down to read your inbox, or add the last thing you paid for — one entry is enough to
-        start the month.
+        {t('emptyMonthHelp')}
       </ThemedText>
       <View style={styles.actions}>
-        {onReadInbox && <Button inline label="Read inbox" onPress={onReadInbox} />}
-        <Button inline variant="outline" label="Add manually" onPress={onAddManually} />
+        {onReadInbox && <Button inline label={t('readInbox')} onPress={onReadInbox} />}
+        <Button inline variant="outline" label={t('addManually')} onPress={onAddManually} />
       </View>
     </View>
   );
@@ -147,15 +170,15 @@ export function PermissionDenied({
       <View style={styles.deniedHead}>
         <Icon name="alert" size={17} color={theme.expense} />
         <ThemedText type="small" style={{ color: theme.expense }}>
-          SMS access is off, so nothing can import
+          {t('smsAccessOff')}
         </ThemedText>
       </View>
       <ThemedText type="default" themeColor="textSecondary">
-        Turn it back on at Settings → Apps → Wafra → Permissions → SMS.
+        {t('smsPermissionPath')}
       </ThemedText>
       <View style={styles.actions}>
-        <Button inline label="Open settings" onPress={onOpenSettings} />
-        {onKeepManual && <Button inline variant="outline" label="Keep manual" onPress={onKeepManual} />}
+        <Button inline label={t('openSettings')} onPress={onOpenSettings} />
+        {onKeepManual && <Button inline variant="outline" label={t('keepManual')} onPress={onKeepManual} />}
       </View>
     </View>
   );

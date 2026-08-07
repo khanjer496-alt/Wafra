@@ -14,7 +14,6 @@
  * dues, bills, and subscriptions. The user does not think of those as three
  * kinds of thing. They are all money that leaves on a date.
  */
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
@@ -31,37 +30,216 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { CountUpAmount } from '@/components/ui/count-up';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
-import { useToast } from '@/components/ui/toast';
+import { SkeletonRows } from '@/components/ui/states';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import {
-  buildImportPlan,
-  hasSmsPermission,
-  isSmsScanningAvailable,
-  requestSmsPermission,
-  scanInbox,
-  type ScannedSms,
-} from '@/lib/auto-import';
-import { daysPhrase, leavingSoon, outgoingTotalFils, type Outgoing } from '@/lib/leaving-soon';
-import { formatAED, formatAmount, formatCompactAED, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
-import { buildInsights, summarizeMonth } from '@/lib/insights';
-import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
+import { uncategorisedMerchants, worthPrompting } from '@/lib/uncategorised';
+import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
+import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
+import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
+import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
+import { tapped } from '@/lib/haptics';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
+import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { ackRelay, getPairing, isRelayAvailable, pullRelay } from '@/lib/relay';
+import { getActiveMarket } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
-
-// Once per app session: auto-import + notification sync.
-let autoImportRan = false;
+import { t, tf } from '@/lib/i18n';
 
 /** How far ahead "leaving soon" looks. Beyond this it is not soon. */
 const HORIZON_DAYS = 9;
+
+/**
+ * The product promise, above the fold. This is deliberately a live status and
+ * an action rather than marketing copy: it says whether capture is actually
+ * connected on this platform, and tapping it either syncs now or finishes the
+ * platform-specific setup.
+ */
+function AutomaticCapture({
+  status,
+  lastCaptureDate,
+  onPress,
+}: {
+  status: CaptureSurfaceState;
+  lastCaptureDate?: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const enter = useScreenEntering();
+  const active = status === 'active';
+  const title =
+    status === 'paused'
+      ? t('trialEndedBanner')
+      : status === 'checking'
+      ? t('captureChecking')
+      : status === 'unsupported'
+        ? t('capturePhoneOnly')
+        : Platform.OS === 'ios'
+          ? active
+            ? t('captureIosOn')
+            // Ahead of every other iOS branch: a device the relay cut off has
+            // a config that still looks finished, and reading it as merely
+            // "off" would send the user back through setup with no idea that
+            // the phone they are holding was removed on purpose.
+            : status === 'revoked'
+              ? t('captureIosRevoked')
+            : status === 'pipe-ready'
+              ? t('captureIosPipeReady')
+            : status === 'needs-test'
+              ? t('captureIosNeedsTest')
+              : t('captureIosOff')
+          : active
+            ? t('captureAndroidOn')
+            : t('turnOnTracking');
+  // `unsupported` is deliberately absent here. Its title is already
+  // t('capturePhoneOnly'), and this branch used to return the same key — so the
+  // card printed one identical sentence twice, one line under the other, on the
+  // first screen of the app. There is nothing more to say in that state, so the
+  // detail line is dropped rather than padded, and the render below skips it.
+  const detail: string | null = status === 'paused'
+    ? t('trialEndedBannerSub')
+    : status === 'unsupported'
+    ? null
+    : status === 'checking'
+    ? t('capturePhoneOnly')
+    : active
+    ? lastCaptureDate
+      ? tf('captureLatest', { date: shortDate(lastCaptureDate) })
+      : Platform.OS === 'ios'
+        ? t('captureSyncNow')
+        : t('captureAndroidPrivate')
+    : status === 'revoked'
+      ? t('captureIosRevokedDetail')
+    : status === 'pipe-ready'
+      ? t('iosTestLimit')
+    : Platform.OS === 'android'
+      ? t('trackingPrivacy')
+      : t('captureIosSetupDetail');
+  const badge = status === 'paused'
+    ? t('pausedBadge')
+    : active
+    ? t('captureReady')
+    : status === 'pipe-ready'
+      ? t('captureVerify')
+    : status === 'needs-test'
+      ? t('captureFinish')
+      : status === 'checking' || status === 'unsupported'
+        ? null
+        : t('captureEnable');
+
+  return (
+    <Animated.View entering={enter(FadeInDown.duration(280))}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={[t('automaticCapture'), title, detail].filter(Boolean).join('. ')}
+        disabled={status === 'checking' || status === 'unsupported'}
+        onPress={() => {
+          tapped();
+          onPress();
+        }}
+        style={({ pressed }) => [
+          styles.capture,
+          {
+            backgroundColor: active ? theme.primarySoft : theme.backgroundElement,
+            borderColor: active ? theme.primaryBorder : theme.cardBorder,
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
+        ]}>
+        <View
+          style={[
+            styles.captureIcon,
+            { backgroundColor: active ? theme.primary : theme.backgroundSelected },
+          ]}>
+          <Icon name="spark" size={18} color={active ? theme.onPrimary : theme.textSecondary} />
+        </View>
+        <View style={styles.captureText}>
+          <View style={styles.captureTitleRow}>
+            {active && <View style={[styles.liveDot, { backgroundColor: theme.primary }]} />}
+            <ThemedText type="smallBold" numberOfLines={2} style={styles.captureTitle}>
+              {title}
+            </ThemedText>
+          </View>
+          {detail ? (
+            <ThemedText type="meta" themeColor="textTertiary">
+              {detail}
+            </ThemedText>
+          ) : null}
+        </View>
+        {badge ? (
+          <ThemedText type="nano" style={{ color: active ? theme.primary : theme.warning }}>
+            {badge}
+          </ThemedText>
+        ) : null}
+        {status !== 'checking' && status !== 'unsupported' ? (
+          <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+        ) : null}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }) {
+  const theme = useTheme();
+  const router = useRouter();
+  const language = useStore().state.language === 'ar' ? 'ar' : 'en';
+  if (summary.groups.length === 0) return null;
+  const top = summary.groups.slice(0, 2);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${t('foreignActivity')}, ${formatAED(summary.totalLocalFils)}`}
+      onPress={() => {
+        tapped();
+        router.push('/currency');
+      }}
+      style={({ pressed }) => [
+        styles.currencyPreview,
+        {
+          backgroundColor: theme.backgroundElement,
+          borderColor: theme.cardBorder,
+          transform: [{ scale: pressed ? 0.985 : 1 }],
+        },
+      ]}>
+      <View style={styles.currencyPreviewTop}>
+        <View style={styles.currencyPreviewHeading}>
+          <Icon name="plane" size={17} color={theme.primary} />
+          <ThemedText type="micro" themeColor="textTertiary">
+            {t('foreignActivity')}
+          </ThemedText>
+        </View>
+        <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+      </View>
+      <ThemedText type="heading" tabular>
+        {formatAED(summary.totalLocalFils, { decimals: false })}
+      </ThemedText>
+      <View style={styles.currencyRows}>
+        {top.map((group) => (
+          <View key={group.currency} style={styles.currencyRow}>
+            <ThemedText type="smallBold" tabular style={{ color: theme.primary }}>
+              {group.currency}
+            </ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1} style={styles.currencyOriginal}>
+              {formatOriginalCurrency(group.originalMinor, group.currency, language)}
+            </ThemedText>
+            <ThemedText type="small" tabular>
+              {formatAED(group.localFils, { decimals: false })}
+            </ThemedText>
+          </View>
+        ))}
+      </View>
+    </Pressable>
+  );
+}
 
 
 /* ── Hero ─────────────────────────────────────────────────────────────── */
@@ -81,6 +259,7 @@ function Hero({
 }) {
   const theme = useTheme();
   const router = useRouter();
+  const enter = useScreenEntering();
 
   const caption =
     (netFils >= 0 ? t('saved') : t('overspent')) +
@@ -89,12 +268,16 @@ function Hero({
       ? t('soFarThisMonth')
       : period.mode === 'all'
         ? t('allTime')
-        : `${t('inWord')} ${periodLabel(period)}`) +
-    ` · ${t('inMinusOut')}`;
+        : `${t('inWord')} ${periodLabel(period)}`);
 
   return (
-    <Animated.View entering={FadeInDown.duration(320)}>
-      <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
+    // No shell. This carried a bordered card filled with a three-stop
+    // LinearGradient, directly above a comment saying "no card, no background"
+    // and against theme.ts's own doctrine that grouping is done with 1px
+    // dividers rather than boxes. The gradient also hard-coded six hexes that
+    // exist in neither theme, so it did not move with the palette.
+    <Animated.View entering={enter(FadeInDown.duration(320))}>
+      <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
 
@@ -121,17 +304,22 @@ function Hero({
       <View style={styles.split}>
         {(
           [
-            ['In', incomeFils, theme.income, '/transactions?type=income'],
-            ['Out', expenseFils, theme.expense, '/transactions?type=expense'],
+            [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
+            [t('outLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
         ).map(([label, fils, color, href], i) => (
           <Pressable
             key={label}
-            onPress={() => router.push(href)}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
+            onPress={() => {
+              tapped();
+              router.push(href);
+            }}
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
-              i === 1 && { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.cardBorder },
+              i === 1 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
             ]}>
             <View style={styles.splitTop}>
               <View style={[styles.dot, { backgroundColor: color }]} />
@@ -169,16 +357,37 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
+  const enter = useScreenEntering();
+  const [expanded, setExpanded] = useState(false);
   const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
 
-  const shown = items.slice(0, 3);
+  // The heading used to say "Leaving in 9 days" over the total of everything
+  // in the list — including statements 28 days overdue, which have not been
+  // leaving in nine days for a month. And only three rows were ever drawn, so
+  // AED 70,976 sat above rows adding to 15,785 with nothing to say where the
+  // rest of it was.
+  //
+  // The total still covers the whole list, because "what is about to leave my
+  // account" is the useful number and truncating it to three rows would be a
+  // different lie. Two things make it legible instead: the heading admits the
+  // overdue items are in there, and the remainder is stated below the rows so
+  // the column reconciles.
+  const shown = expanded ? items : items.slice(0, 3);
+  const late = items.filter((x) => x.overdue).length;
+  const hidden = items.length - shown.length;
 
   return (
-    <Animated.View entering={FadeInDown.delay(80).duration(320)} style={styles.section}>
+    <Animated.View
+      entering={enter(FadeInDown.delay(80).duration(320))}
+      style={styles.section}>
       <SectionHeader
-        title={`Leaving in ${HORIZON_DAYS} days`}
-        right={formatAED(outgoingTotalFils(items), { decimals: false })}
+        title={
+          late > 0
+            ? tf('overdueAndLeaving', { days: HORIZON_DAYS })
+            : tf('leavingInDays', { days: HORIZON_DAYS })
+        }
+        right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
       />
       {shown.map((x, i) => {
         const alarming = x.overdue || x.urgent;
@@ -210,6 +419,35 @@ function LeavingSoon({
           </Pressable>
         );
       })}
+      {hidden > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={tf('seeUpcomingPaymentsA11y', { count: items.length })}
+          // Expand in place. This used to push to Bills, which opens on its
+          // Cards segment — so tapping "3 more" under three card rows showed
+          // the SAME three cards, and the three items actually being counted
+          // (bills, not cards) were never reachable at all.
+          onPress={() => {
+            tapped();
+            setExpanded(true);
+          }}
+          style={[
+            styles.leaveRow,
+            { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          ]}>
+          <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+          <View style={styles.leaveText}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {tf('moreItems', { count: hidden })}
+            </ThemedText>
+          </View>
+          <ThemedText type="small" tabular themeColor="textSecondary">
+            {formatAmount(totalAsShown(items.slice(3).map((x) => x.amountFils)), {
+              decimals: false,
+            })}
+          </ThemedText>
+        </Pressable>
+      )}
     </Animated.View>
   );
 }
@@ -231,7 +469,7 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Report ${formats} unrecognised bank message formats`}
+      accessibilityLabel={tf('reportUnreadFormatsA11y', { count: formats })}
       onPress={() => router.push('/accuracy')}
       style={({ pressed }) => [
         styles.notice,
@@ -243,10 +481,10 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
       <Icon name="search" size={17} color={theme.warning} />
       <View style={styles.noticeText}>
         <ThemedText type="small">
-          {formats} message {formats === 1 ? 'format' : 'formats'} we couldn&apos;t read
+          {tf('unreadFormatCount', { count: formats, s: formats === 1 ? '' : 's' })}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary">
-          Send them over and they get recognised next release. Digits are masked.
+          {t('unreadMessageHint')}
         </ThemedText>
       </View>
       <Icon name="chevron-right" size={16} color={theme.textTertiary} />
@@ -254,27 +492,115 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
   );
 }
 
+/* ── Merchants with no category ───────────────────────────────────────── */
+
+/**
+ * The sibling of the row above, for the failure the row above cannot fix.
+ *
+ * `UnreadFormatsPrompt` collects messages the parser could not READ and sends
+ * them to the developer. This one is for messages it read perfectly: the shop
+ * name is right, and nothing shipped in an update will ever know what
+ * "AL BAIT ALHAMAWI SUP" sells. Only the person who shopped there knows, and
+ * one real ledger had 182 such entries sitting in Other.
+ *
+ * Same floor, same reasoning, and it is worth restating because this is the
+ * row most likely to become a nag: below `CATEGORISE_PROMPT_THRESHOLD`
+ * merchants it says nothing at all. One unrecognised shop is the normal
+ * steady state of a working parser, and a prompt that is permanently on the
+ * first screen of the app is a prompt the user learns to look past — which
+ * costs nothing today and costs the whole feature on the day the list is
+ * forty merchants deep.
+ *
+ * Dismissal is for this session only, exactly like the insight card below it.
+ * A permanent dismissal would need a store flag, and the honest answer is that
+ * the list grows: a user who dismissed it in March should be asked again once
+ * six new shops have piled up. Coming back next launch IS the right behaviour
+ * as long as the floor keeps it quiet the rest of the time.
+ */
+function CategorisePrompt({ state }: { state: AppState }) {
+  const theme = useTheme();
+  const router = useRouter();
+  const [dismissed, setDismissed] = useState(false);
+  const summary = useMemo(() => uncategorisedMerchants(state), [state]);
+  if (dismissed || !worthPrompting(summary)) return null;
+
+  const count = summary.merchants.length;
+  // The dismiss control is a sibling of the tappable area rather than a child
+  // of it. Nesting a button inside a button gives a screen reader one target
+  // with two actions and no way to say which is which, and the row has two
+  // genuinely different meanings — "take me there" and "not now".
+  return (
+    <View
+      style={[
+        styles.notice,
+        { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+      ]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={tf('categoriseMerchantsA11y', { count })}
+        onPress={() => {
+          tapped();
+          router.push('/categorise');
+        }}
+        style={({ pressed }) => [styles.noticeMain, pressed && { opacity: 0.6 }]}>
+        <Icon name="filter" size={17} color={theme.warning} />
+        <View style={styles.noticeText}>
+          <ThemedText type="small">
+            {tf('uncategorisedMerchantCount', { count, s: count === 1 ? '' : 's' })}
+          </ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">
+            {t('uncategorisedMerchantHint')}
+          </ThemedText>
+        </View>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t('dismiss')}
+        hitSlop={10}
+        onPress={() => {
+          tapped();
+          setDismissed(true);
+        }}>
+        <Icon name="close" size={16} color={theme.textTertiary} />
+      </Pressable>
+    </View>
+  );
+}
+
 /* ── Screen ───────────────────────────────────────────────────────────── */
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const router = useRouter();
-  const toast = useToast();
-  const { state, importBatch, undoBatch } = useStore();
+  const { state, applyFxUpdates } = useStore();
   const { period } = usePeriod();
+  // `true`: Home is the screen that scans on mount and on foreground resume.
+  // The other tabs take the same hook without that flag — they get the shared
+  // scan for pull-to-refresh and leave the watching to Home.
+  const { runAutoImport, needsPermission, captureState } = useAutoImport(true);
+  // One value for what the card SAYS and what tapping it DOES. They used to be
+  // written out separately and drifted: the tap handler branched on the
+  // platform alone, so a fully verified iOS user — card reading "Shortcut
+  // connected", live dot, ON badge — tapped it and was dropped back into the
+  // four-step setup they had finished weeks earlier, with no way to sync from
+  // the surface whose whole job is syncing.
+  const captureStatus: CaptureSurfaceState = !isProActive(state)
+    ? 'paused'
+    : needsPermission
+      ? 'off'
+      : captureState;
 
   const now = useMemo(() => new Date(), []);
   const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
-  const [needsPermission, setNeedsPermission] = useState(false);
-  const [needsPairing, setNeedsPairing] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
-
+  const lastFxAttempt = React.useRef('');
   /** A dated outgoing opens the sheet for whatever kind of thing it is. */
   const openOutgoing = useCallback(
     (item: Outgoing) => {
@@ -289,12 +615,34 @@ export default function HomeScreen() {
     [state.cardDues, router],
   );
 
+  // Archiving an account used to remove its balance from Wallet and its
+  // history from net worth, while its spending went on counting here. Hiding
+  // a card now hides what it spent too.
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  // Both halves of a move between the user's own accounts. Without this the
+  // arriving half reads exactly like being paid.
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+
   const summary = useMemo(
-    () => summarizeMonth(state.transactions, period),
-    [state.transactions, period],
+    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
   );
 
   // One insight, not five. The rest are on Flow.
+  /**
+   * The hero's three figures, reconciled. Rounding each of in and out to whole
+   * dirhams first and subtracting those is the only way the caption under them
+   * can be checked by eye — which is the entire point of showing all three.
+   */
+  const hero = useMemo(() => {
+    const expenseFils = composition(summary).totalFils;
+    const incomeFils = Math.round(summary.incomeFils / 100) * 100;
+    return { incomeFils, expenseFils, netFils: incomeFils - expenseFils };
+  }, [summary]);
+
   const insight = useMemo(() => {
     const all = buildInsights(
       state.transactions,
@@ -302,106 +650,58 @@ export default function HomeScreen() {
       period,
       now,
       state.notSubscriptions,
+      liveAccounts,
+      internal,
     );
     return all.find((i) => i.id !== dismissedInsight) ?? null;
-  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, dismissedInsight]);
+  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, dismissedInsight]);
 
   const today = useMemo(
-    () => state.transactions.filter((t) => !t.isTransfer && inPeriod(t.date, period)).slice(0, 6),
+    () =>
+      state.transactions
+        .filter(
+          (transaction) =>
+            !transaction.isTransfer &&
+            !internal.has(transaction.id) &&
+            liveAccounts.has(transaction.accountId) &&
+            inPeriod(transaction.date, period),
+        )
+        .slice(0, 6),
+    [state.transactions, period, internal, liveAccounts],
+  );
+
+  const foreignActivity = useMemo(
+    () => summarizeForeignActivity(state.transactions, (tx) => inPeriod(tx.date, period)),
     [state.transactions, period],
   );
 
-  const runAutoImport = useCallback(
-    async (interactive: boolean) => {
-      // Hard paywall: tracking pauses when the trial ends without Pro.
-      if (!isProActive(state)) {
-        if (interactive) router.push('/pro');
-        return;
-      }
-      // Two sources, one import path. Android reads the inbox on-device;
-      // iOS has no such access and collects what the user's Shortcut sent to
-      // the relay. Everything after this point is identical for both.
-      let parsed: ScannedSms[];
-      let newestTs: number;
-      let relayIds: string[] = [];
-
-      if (isRelayAvailable()) {
-        // Unpaired is the iOS equivalent of an ungranted SMS permission: there
-        // is nothing to collect and nothing to report, only a setup to finish.
-        if (!(await getPairing())) {
-          setNeedsPairing(true);
-          if (interactive) router.push('/ios-capture');
-          return;
-        }
-        setNeedsPairing(false);
-        try {
-          const pull = await pullRelay(state.merchantOverrides);
-          parsed = pull.parsed;
-          relayIds = pull.ids;
-          // Relay rows carry their own timestamps, so the inbox watermark is
-          // meaningless here and must be left where it is.
-          newestTs = state.lastScanTs;
-        } catch {
-          if (interactive) toast.show('Could not reach the relay. Try again in a moment.');
-          return;
-        }
-      } else {
-        if (!isSmsScanningAvailable()) return;
-        let granted = await hasSmsPermission();
-        if (!granted && interactive) granted = await requestSmsPermission();
-        if (!granted) {
-          setNeedsPermission(true);
-          return;
-        }
-        setNeedsPermission(false);
-        const sinceMs = state.lastScanTs > 0 ? state.lastScanTs + 1 : 0;
-        const scan = await scanInbox(sinceMs, state.merchantOverrides);
-        parsed = scan.parsed;
-        newestTs = scan.newestTs;
-      }
-
-      const plan = buildImportPlan(parsed, state, newestTs);
-      if (plan.txCount === 0 && plan.dueCount === 0) {
-        // Rows that deduped against transactions already in the ledger still
-        // have to be acknowledged, or the queue never drains and every sync
-        // re-downloads them.
-        await ackRelay(relayIds).catch(() => {});
-        if (interactive) toast.show('Up to date. No new bank messages.');
-        return;
-      }
-      const ids = importBatch(plan.batch);
-      // Acknowledged only now that the rows are committed. A crash between the
-      // sync and this line costs a duplicate download, not a lost transaction.
-      await ackRelay(relayIds).catch(() => {});
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      }
-      toast.show(
-        `Imported ${plan.txCount} transaction${plan.txCount === 1 ? '' : 's'}${plan.newAccountCount > 0 ? ` · ${plan.newAccountCount} new card${plan.newAccountCount === 1 ? '' : 's'}` : ''}`,
-        [
-          { label: 'Undo', onPress: () => undoBatch(ids) },
-          { label: 'Review', onPress: () => router.push('/transactions?source=sms') },
-        ],
-      );
-    },
-    [state, importBatch, undoBatch, toast, router],
+  const lastAutomatic = useMemo(
+    () => state.transactions.find((tx) => tx.source === 'sms'),
+    [state.transactions],
   );
 
-  // Silent auto-import + reminder sync, once per session.
+  // Foreign-only alerts arrive with an offline estimate so capture never
+  // blocks on a network. Once the ledger is visible, replace only those
+  // estimates with a dated public reference rate. A bank-quoted AED
+  // equivalent is authoritative and Private Mode makes no request at all.
   useEffect(() => {
-    if (!state.hydrated || autoImportRan) return;
-    autoImportRan = true;
-    (async () => {
-      try {
-        await runAutoImport(false);
-        await requestNotificationPermission();
-        await syncPaymentReminders(state);
-      } catch {
-        // Best-effort; manual import still available.
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.hydrated]);
+    if (!state.hydrated || state.privateMode) return;
+    const pending = state.transactions
+      .filter((tx) => tx.fxSource === 'fallback')
+      .slice(0, 16);
+    if (pending.length === 0) return;
+    const signature = pending
+      .map((tx) => `${tx.id}:${tx.originalCurrency}:${tx.date}`)
+      .join('|');
+    if (signature === lastFxAttempt.current) return;
+    lastFxAttempt.current = signature;
+    void buildReferenceFxUpdates(
+      pending,
+      getActiveMarket().currency.code,
+    ).then((updates) => {
+      if (updates.length > 0) applyFxUpdates(updates);
+    });
+  }, [state.hydrated, state.privateMode, state.transactions, applyFxUpdates]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -430,71 +730,51 @@ export default function HomeScreen() {
                 label={t('seeAll')}
                 onPress={() => router.push('/transactions')}
               />
-              <IconButton name="sliders" label="Settings" onPress={() => router.push('/settings')} />
+              <IconButton name="sliders" label={t('settingsTitle')} onPress={() => router.push('/settings')} />
             </View>
           </View>
 
           <Hero
             period={period}
             live={live}
-            netFils={summary.incomeFils - summary.expenseFils}
-            incomeFils={summary.incomeFils}
-            expenseFils={summary.expenseFils}
+            // All three figures from one arithmetic, so the hero equals its
+            // own two cells. It read "63,039 in, 8,815 out, saved 54,223" —
+            // a subtraction that is off by one, in 40px type, at the top of
+            // the screen. Each cell was rounded on its own while the net was
+            // computed from the raw fils and rounded once more.
+            //
+            // Out is the composition total, which Flow prints above the
+            // category split; in is rounded the same way; and the net is the
+            // difference between those two, not a third measurement.
+            netFils={hero.netFils}
+            incomeFils={hero.incomeFils}
+            expenseFils={hero.expenseFils}
           />
 
-          {!isProActive(state) && (
-            <Pressable
-              onPress={() => router.push('/pro')}
-              style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-              <Icon name="diamond" size={17} color={theme.warning} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('trialEndedBanner')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('trialEndedBannerSub')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
-
-          {needsPermission && isProActive(state) && (
-            <Pressable
-              onPress={() => runAutoImport(true)}
-              style={[styles.notice, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-              <Icon name="spark" size={17} color={theme.primary} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('turnOnTracking')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('trackingPrivacy')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
-
-          {/* The iOS counterpart. Without it an iPhone user is never told the
-              feature exists — there is no permission prompt to discover it
-              through, only a Shortcut nobody would think to build. */}
-          {needsPairing && isProActive(state) && (
-            <Pressable
-              onPress={() => router.push('/ios-capture')}
-              style={[styles.notice, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-              <Icon name="spark" size={17} color={theme.primary} />
-              <View style={styles.noticeText}>
-                <ThemedText type="small">{t('setUpCapture')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('setUpCaptureHint')}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
+          <AutomaticCapture
+            status={captureStatus}
+            lastCaptureDate={lastAutomatic?.date}
+            onPress={() => {
+              if (captureStatus === 'paused') router.push('/pro');
+              // Only iOS states that still owe the user setup go to the
+              // wizard: 'off' (no relay config), 'needs-test' (paired but
+              // unverified), 'pipe-ready' (verified pipe, automation not yet
+              // proven) and 'revoked' (the relay cut this device off, so the
+              // way back is a new pairing) each have something left to finish
+              // there — and 'revoked' is why this stayed a !== test. 'active'
+              // does not — its own detail line is "tap to sync now" — so it
+              // gets the sync, exactly as Android does.
+              else if (Platform.OS === 'ios' && captureStatus !== 'active') {
+                router.push('/ios-setup');
+              } else void runAutoImport(true);
+            }}
+          />
 
           {/* One sentence, with somewhere to go. A carousel of five of these
               was five things to skim and nothing to act on. */}
           {insight && (
             <Animated.View
-              entering={FadeInDown.delay(40).duration(320)}
+              entering={enter(FadeInDown.delay(40).duration(320))}
               style={[
                 styles.insight,
                 { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
@@ -508,17 +788,25 @@ export default function HomeScreen() {
               </ThemedText>
               <View style={styles.insightActions}>
                 <Pressable
-                  onPress={() => router.push(insight.href ?? '/flow')}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tapped();
+                    router.push(insight.href ?? '/flow');
+                  }}
                   style={[styles.btn, { backgroundColor: theme.primary }]}>
                   <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                    See the breakdown
+                    {t('seeBreakdown')}
                   </ThemedText>
                 </Pressable>
                 <Pressable
-                  onPress={() => setDismissedInsight(insight.id)}
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tapped();
+                    setDismissedInsight(insight.id);
+                  }}
                   style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
                   <ThemedText type="nano" themeColor="textSecondary">
-                    Dismiss
+                    {t('dismiss')}
                   </ThemedText>
                 </Pressable>
               </View>
@@ -527,12 +815,26 @@ export default function HomeScreen() {
 
           <LeavingSoon state={state} now={now} onOpen={openOutgoing} />
 
+          {/* Foreign-currency detail is useful but secondary on Home (and has
+              a full destination in Wallet). Keeping it below the month's one
+              insight and upcoming outgoings prevents four peer cards from
+              competing directly under the hero. */}
+          <ForeignActivityPreview summary={foreignActivity} />
+
+          {/* Above the unread-format row on purpose. This one the user can
+              actually finish — one tap per merchant, and the entries move —
+              while that one asks them to send a list off and wait for a
+              release. The actionable ask goes first. */}
+          <CategorisePrompt state={state} />
+
           <UnreadFormatsPrompt state={state} />
 
-          <Animated.View entering={FadeInDown.delay(120).duration(320)} style={styles.section}>
+          <Animated.View
+            entering={enter(FadeInDown.delay(120).duration(320))}
+            style={styles.section}>
             <SectionHeader
               title={live ? t('recentActivity') : periodLabel(period)}
-              right="ALL ACTIVITY"
+              right={t('allActivity')}
               onPressRight={() => router.push('/transactions')}
             />
             {today.map((tx, i) => (
@@ -546,19 +848,26 @@ export default function HomeScreen() {
                 <TransactionRow
                   transaction={tx}
                   account={state.accounts.find((a) => a.id === tx.accountId)}
-                  onPress={() => setEntry(tx)}
+                  onPress={setEntry}
+                  internal={internal.has(tx.id)}
                 />
               </View>
             ))}
-            {today.length === 0 && (
+            {/* Reading the ledger back off disk takes long enough to paint,
+                and an unhydrated store is indistinguishable from an empty one.
+                The screen was announcing t('noEntriesPeriod') over
+                AED 0 and then replacing it with a real month — telling the user
+                their data was gone, every cold start. Skeletons until the store
+                says it has looked. */}
+            {!state.hydrated && today.length === 0 && <SkeletonRows count={4} height={44} />}
+            {state.hydrated && today.length === 0 && (
               <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
                 <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
                   AED 0
                 </ThemedText>
-                <ThemedText type="small">No entries in this period yet</ThemedText>
+                <ThemedText type="small">{t('noEntriesPeriod')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>
-                  Pull down to read your inbox, or add the last thing you paid for — one entry is
-                  enough to start the month.
+                  {t('emptyPeriodBody')}
                 </ThemedText>
               </View>
             )}
@@ -582,9 +891,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.four,
+    marginBottom: Spacing.three,
   },
   topActions: { flexDirection: 'row', gap: Spacing.two },
+
+  capture: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 11,
+    marginTop: Spacing.four,
+  },
+  captureIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  captureText: { flex: 1, gap: 2 },
+  captureTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  captureTitle: { flexShrink: 1 },
+  liveDot: { width: 6, height: 6, borderRadius: 3 },
 
   heroLabel: { marginBottom: Spacing.two },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
@@ -595,13 +926,30 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 11,
     paddingBottom: Spacing.two,
-    paddingRight: Spacing.three,
-    paddingLeft: 0,
+    paddingEnd: Spacing.three,
+    paddingStart: 0,
     gap: 5,
   },
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   splitFigure: { fontSize: 17, lineHeight: 22 },
   dot: { width: 5, height: 5, borderRadius: 3 },
+
+  currencyPreview: {
+    marginTop: Spacing.four,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  currencyPreviewTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  currencyPreviewHeading: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  currencyRows: { gap: 5, marginTop: Spacing.one },
+  currencyRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  currencyOriginal: { flex: 1 },
 
   section: { marginTop: Spacing.five },
 
@@ -617,6 +965,7 @@ const styles = StyleSheet.create({
   insightActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
   btn: {
     borderRadius: Radius.tile,
+    minHeight: 44,
     paddingVertical: 9,
     paddingHorizontal: 14,
     alignItems: 'center',
@@ -633,6 +982,14 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   noticeText: { flex: 1, gap: 1 },
+  // The tappable part of a notice that also carries a dismiss, so the two
+  // controls stay separate targets. See CategorisePrompt.
+  noticeMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+  },
 
   leaveRow: {
     flexDirection: 'row',

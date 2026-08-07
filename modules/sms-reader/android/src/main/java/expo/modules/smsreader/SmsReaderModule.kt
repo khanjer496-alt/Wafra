@@ -86,5 +86,24 @@ class SmsReaderModule : Module() {
       }
       messages.sortedBy { it["date"] as Double }
     }
+
+    /**
+     * Turn the delivery-time banner on or off.
+     *
+     * It has to live in SharedPreferences rather than in the app's own state,
+     * because the receiver that reads it runs with no JavaScript engine and
+     * cannot see AsyncStorage. JS owns the setting; this is how it reaches
+     * the only code that can act on it.
+     */
+    Function("setInstantAlerts") { enabled: Boolean ->
+      val context = appContext.reactContext ?: return@Function false
+      InstantAlert.setEnabled(context, enabled)
+      true
+    }
+
+    Function("getInstantAlerts") {
+      val context = appContext.reactContext ?: return@Function false
+      InstantAlert.isEnabled(context)
+    }
   }
 }

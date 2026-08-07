@@ -1,14 +1,28 @@
+/**
+ * The OS half of reminders: permissions, the Android channel, and handing a
+ * list of dates to expo-notifications.
+ *
+ * Deliberately thin. Everything that can actually be WRONG — which day a bill
+ * falls on, whether a minimum may be quoted, which obligations deserve a push
+ * at all — lives in reminders.ts, which imports no native module and is
+ * therefore reachable from the test harness. This file imports
+ * expo-notifications, so nothing in it can be tested; the rule is that nothing
+ * in it should need to be.
+ */
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
-import { billsForMonth } from '@/lib/bills';
-import { openDues } from '@/lib/cards';
-import { formatAED, monthKey } from '@/lib/format';
-import { detectSubscriptions, daysUntilNext } from '@/lib/subscriptions';
+import { buildDailySummary } from '@/lib/daily-summary';
+import { toISODate } from '@/lib/format';
+import { t } from '@/lib/i18n';
+import { buildPaymentReminders, MAX_REMINDERS } from '@/lib/reminders';
 import type { AppState } from '@/lib/types';
 
 const CHANNEL_ID = 'payment-reminders';
-const MAX_SCHEDULED = 24;
+/** A separate channel so muting the nightly digest never mutes a bill due. */
+const SUMMARY_CHANNEL_ID = 'daily-summary';
+/** One id, so re-scheduling replaces tonight's rather than stacking another. */
+const SUMMARY_ID = 'wafra-daily-summary';
 
 let handlerConfigured = false;
 
@@ -26,102 +40,111 @@ function configureHandler() {
   });
 }
 
+/** The same handler, for callers outside this file (the iOS relay wake). */
+export function ensureNotificationHandler(): void {
+  configureHandler();
+}
+
+/**
+ * Will the OS deliver a notification we schedule?
+ *
+ * `status.granted` is NOT that question on iOS, and the difference silently
+ * disabled two features. iOS setup asks for PROVISIONAL authorization on
+ * purpose — a quiet Notification Center entry needs no permission sheet in the
+ * middle of finance setup — and expo-notifications maps `.provisional` onto
+ * `EXPermissionStatusUndetermined`, so `granted` comes back FALSE for a device
+ * that will happily deliver everything we schedule. Both sync functions below
+ * guarded on `granted`, which meant that after iOS setup the payment reminders
+ * and the nightly summary were never scheduled at all, on a screen that
+ * promises Wafra "warns before money leaves".
+ *
+ * Provisional notifications DO deliver. They arrive quietly, straight to
+ * Notification Center, with no banner and no sound — which for a bill due
+ * tomorrow is a worse presentation than a banner and an infinitely better one
+ * than nothing.
+ *
+ * EPHEMERAL is deliberately absent: that is an App Clip's temporary grant, and
+ * this app is not one.
+ */
+export function notificationsAllowed(status: Notifications.NotificationPermissionsStatus): boolean {
+  return (
+    status.granted ||
+    status.ios?.status === Notifications.IosAuthorizationStatus.AUTHORIZED ||
+    status.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+  );
+}
+
+/**
+ * Ask for full notification permission, unless delivery already works.
+ *
+ * The early return is `notificationsAllowed`, not `granted`, and the
+ * difference is not cosmetic. On a provisionally-authorized iPhone `granted`
+ * is false, so every "Remind me" and the daily-summary switch would put the
+ * standard iOS permission sheet in front of a user whose reminders were
+ * already going to arrive. Tapping "Don't Allow" there sets the status to
+ * DENIED — which REVOKES the provisional grant and takes down the reminders,
+ * the nightly summary and the charge banner in one go. The user would be
+ * strictly worse off for having asked to be reminded.
+ */
 export async function requestNotificationPermission(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   configureHandler();
   const current = await Notifications.getPermissionsAsync();
-  if (current.granted) return true;
+  if (notificationsAllowed(current)) return true;
   const asked = await Notifications.requestPermissionsAsync();
-  return asked.granted;
+  return notificationsAllowed(asked);
 }
 
-interface PendingNotification {
-  date: Date;
-  title: string;
-  body: string;
+/**
+ * iOS can grant provisional notification authorization without asking for
+ * banners, sounds, or badges. Silent relay wakes need notification delivery,
+ * not an attention-grabbing permission sheet during finance setup.
+ */
+export async function requestSilentCapturePermission(): Promise<boolean> {
+  if (Platform.OS !== 'ios') return requestNotificationPermission();
+  const current = await Notifications.getPermissionsAsync();
+  if (notificationsAllowed(current)) return true;
+  if (current.ios?.status === Notifications.IosAuthorizationStatus.DENIED) return false;
+  const asked = await Notifications.requestPermissionsAsync({
+    ios: {
+      allowAlert: false,
+      allowBadge: false,
+      allowSound: false,
+      allowProvisional: true,
+    },
+  });
+  return notificationsAllowed(asked);
 }
 
 /**
  * Rebuilds all scheduled payment reminders from current state. Idempotent:
  * cancels everything and re-schedules the next ~30 days of bill due dates,
  * card pay-by dates, and subscription renewals.
+ *
+ * The plan — dates, titles, bodies, ordering and the cap — comes from
+ * `buildPaymentReminders`. This loop only speaks to the OS.
  */
-export async function syncPaymentReminders(state: AppState): Promise<void> {
+export async function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
   if (Platform.OS === 'web') return;
   configureHandler();
-  const perms = await Notifications.getPermissionsAsync();
-  if (!perms.granted) return;
+  // Not `perms.granted` — see notificationsAllowed. An iOS device that went
+  // through setup is provisionally authorized, which reads as "undetermined"
+  // and would skip every reminder below.
+  if (!notificationsAllowed(await Notifications.getPermissionsAsync())) return;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-      name: 'Payment reminders',
+      // The channel name is what Android shows in system settings, so it is a
+      // user-facing string like any other. CHANNEL_ID itself has to match
+      // app.json's notification `defaultChannel`.
+      name: t('notificationChannelPayments'),
       importance: Notifications.AndroidImportance.DEFAULT,
     });
   }
 
   await Notifications.cancelAllScheduledNotificationsAsync();
 
-  const now = new Date();
-  const pending: PendingNotification[] = [];
-  const at9 = (d: Date) => {
-    const copy = new Date(d);
-    copy.setHours(9, 0, 0, 0);
-    return copy;
-  };
-
-  // Bills: 1 day before + day-of for this month's unpaid reminders.
-  const key = monthKey(now);
-  const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
-  for (const { bill, status } of billsForMonth(state.bills, state.transactions, now)) {
-    if (status === 'paid') continue;
-    const due = new Date(now.getFullYear(), now.getMonth(), bill.dueDay);
-    for (const [offset, label] of [[-1, 'tomorrow'], [0, 'today']] as const) {
-      const when = at9(new Date(due.getFullYear(), due.getMonth(), due.getDate() + offset));
-      if (when <= now) continue;
-      pending.push({
-        date: when,
-        title: `${bill.title} due ${label}`,
-        body: `${formatAED(bill.amountFils, { decimals: false })} · mark it paid in Wafra once done.`,
-      });
-    }
-    if (bill.paidMonths.includes(key)) continue;
-  }
-
-  // Card dues: 3 days before + day-of.
-  for (const { due, remainingFils } of openDues(state, now)) {
-    const account = state.accounts.find((a) => a.id === due.accountId);
-    const name = account?.name ?? 'Credit card';
-    const dueDate = new Date(`${due.dueDate}T09:00:00`);
-    for (const [offset, label] of [[-3, 'in 3 days'], [0, 'today']] as const) {
-      const when = new Date(dueDate);
-      when.setDate(when.getDate() + offset);
-      if (when <= now) continue;
-      pending.push({
-        date: when,
-        title: `${name} payment due ${label}`,
-        body: `${formatAED(remainingFils, { decimals: false })} outstanding · minimum ${formatAED(due.minDueFils, { decimals: false })}.`,
-      });
-    }
-  }
-
-  // Subscriptions: 1 day before the next expected charge. Merchants already
-  // tracked as bill reminders are skipped — one reminder per obligation.
-  for (const sub of detectSubscriptions(state.transactions, state.notSubscriptions)) {
-    if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
-    if (billTitles.has(sub.title.toLowerCase())) continue;
-    const days = daysUntilNext(sub, now);
-    if (days < 1 || days > 30) continue;
-    const when = at9(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days - 1));
-    if (when <= now) continue;
-    pending.push({
-      date: when,
-      title: `${sub.title} renews tomorrow`,
-      body: `Around ${formatAED(sub.avgAmountFils, { decimals: false })} will be charged.`,
-    });
-  }
-
-  pending.sort((a, b) => a.date.getTime() - b.date.getTime());
-  for (const n of pending.slice(0, MAX_SCHEDULED)) {
+  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS)) {
     await Notifications.scheduleNotificationAsync({
       content: { title: n.title, body: n.body },
       trigger: {
@@ -131,4 +154,66 @@ export async function syncPaymentReminders(state: AppState): Promise<void> {
       },
     });
   }
+
+  await syncDailySummary(state, now);
+}
+
+/** The hour the day's summary is posted. Late enough to be the whole day. */
+export const SUMMARY_HOUR = 21;
+
+/**
+ * Re-schedule tonight's spend summary from the ledger as it stands now.
+ *
+ * A repeating daily trigger cannot carry today's figures — a local
+ * notification's content is fixed when it is scheduled, and no OS recomputes
+ * it at fire time. So this schedules ONE dated notification for tonight and
+ * replaces it every time the ledger changes, which on Android is every scan.
+ * The consequence is worth stating plainly: the summary is accurate as of the
+ * last time the app ran an import, so a charge that arrives after the last
+ * scan of the day is in tomorrow's summary, not tonight's.
+ *
+ * Cancelled and rebuilt rather than updated, for the same reason
+ * `syncPaymentReminders` does it: there is no way to ask expo-notifications
+ * whether a given notification is still pending and still says the right
+ * thing, and two summaries for one evening is a worse failure than one that is
+ * a few minutes stale.
+ */
+export async function syncDailySummary(state: AppState, now: Date = new Date()): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (!state.dailySummary) return;
+  configureHandler();
+  if (!notificationsAllowed(await Notifications.getPermissionsAsync())) return;
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(SUMMARY_CHANNEL_ID, {
+      name: t('notificationChannelSummary'),
+      importance: Notifications.AndroidImportance.LOW,
+    });
+  }
+
+  const at = new Date(now);
+  at.setHours(SUMMARY_HOUR, 0, 0, 0);
+  // Past nine already: there is nothing left to schedule for today, and
+  // scheduling tomorrow with today's figures would post yesterday's numbers
+  // under the word "today".
+  if (at.getTime() <= now.getTime()) return;
+
+  const summary = buildDailySummary(state, toISODate(now));
+  if (!summary) return;
+
+  await Notifications.scheduleNotificationAsync({
+    identifier: SUMMARY_ID,
+    content: { title: summary.title, body: summary.body },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.DATE,
+      date: at,
+      channelId: Platform.OS === 'android' ? SUMMARY_CHANNEL_ID : undefined,
+    },
+  });
+}
+
+/** Drop tonight's summary — the toggle going off has to take effect now. */
+export async function cancelDailySummary(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  await Notifications.cancelScheduledNotificationAsync(SUMMARY_ID).catch(() => {});
 }

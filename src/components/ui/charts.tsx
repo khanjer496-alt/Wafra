@@ -1,11 +1,14 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
+import { formatAED } from '@/lib/format';
+import { isRTL, t, tf } from '@/lib/i18n';
 
 /**
  * One hue at five lightnesses. Composition is a question of proportion, not
@@ -19,11 +22,13 @@ export function useRamp(): string[] {
   return scheme === 'dark' ? RAMP_DARK : RAMP_LIGHT;
 }
 
-/** The neutral half of the in/out pair: out, when it isn't this month. */
-export function useOutBarColor(): string {
-  const scheme = useColorScheme();
-  return scheme === 'dark' ? '#4A3A34' : '#DCC9C2';
-}
+// There is deliberately no `useOutBarColor` here any more. It returned a muted
+// brown for the out bar in every month except the selected one, which made one
+// colour mean two things at once — series AND recency — and left the legend's
+// clay "Out" swatch sitting above five brown bars and one clay one. PairedBars
+// marks "now" positionally instead, so the hook had no caller left (checked
+// across src/ before deleting). Do not bring it back to dim a bar: dimming a
+// bar changes what the bar says it measures.
 
 /* ── Progress ────────────────────────────────────────────────────────── */
 
@@ -34,16 +39,37 @@ interface ProgressBarProps {
   height?: number;
   /** Overrides the track on surfaces that ignore the OS theme. */
   trackColor?: string;
+  accessibilityLabel?: string;
 }
 
-export function ProgressBar({ ratio, color, height = 6, trackColor }: ProgressBarProps) {
+export function ProgressBar({
+  ratio,
+  color,
+  height = 6,
+  trackColor,
+  accessibilityLabel,
+}: ProgressBarProps) {
   const theme = useTheme();
-  const clamped = Math.max(0.02, Math.min(ratio, 1));
+  // Clamped at 0, not at 0.02. The old floor drew a sliver of fill for a
+  // category that had not been spent on at all, so an untouched budget read as
+  // already started.
+  const clamped = Math.max(0, Math.min(ratio, 1));
   return (
     <View
-      style={[styles.track, { backgroundColor: trackColor ?? theme.track, height, borderRadius: height / 2 }]}>
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(clamped * 100) }}
+      style={[
+        styles.track,
+        { backgroundColor: trackColor ?? theme.track, height, borderRadius: height / 2 },
+      ]}>
       <View
-        style={{ width: `${clamped * 100}%`, height: '100%', backgroundColor: color, borderRadius: height / 2 }}
+        style={{
+          width: `${clamped * 100}%`,
+          height: '100%',
+          backgroundColor: color,
+          borderRadius: height / 2,
+        }}
       />
     </View>
   );
@@ -75,10 +101,26 @@ export function CompositionBar({
   const ramp = useRamp();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
-    return <View style={[styles.track, { backgroundColor: theme.track, height, borderRadius: height / 2 }]} />;
+    return (
+      <View
+        accessibilityRole="image"
+        accessibilityLabel={t('noSpendingComposition')}
+        style={[styles.track, { backgroundColor: theme.track, height, borderRadius: height / 2 }]}
+      />
+    );
   }
   return (
     <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={segments
+        .map((s) =>
+          tf('compositionPercent', {
+            label: s.label,
+            percent: Math.round((s.value / total) * 100),
+          }),
+        )
+        .join('. ')}
       style={[
         styles.track,
         styles.composition,
@@ -87,16 +129,18 @@ export function CompositionBar({
       {segments.map((s, i) => (
         <Animated.View
           key={s.key}
+          accessible={false}
           entering={FadeIn.delay(i * 60).duration(Motion.sectionEnter)}
-          accessibilityLabel={`${s.label} ${Math.round((s.value / total) * 100)} percent`}
           style={{
             flexGrow: s.value,
             flexBasis: 0,
             backgroundColor: s.neutral ? theme.cardBorderStrong : ramp[i % ramp.length],
             // Segments are separated by a background-coloured gap, not a
-            // border: a border would eat into the smallest slices.
-            borderRightWidth: i === segments.length - 1 ? 0 : 1,
-            borderRightColor: theme.background,
+            // border: a border would eat into the smallest slices. `End` and
+            // not `Right`, so under RTL the gap stays on the trailing edge
+            // instead of doubling up on the leading one.
+            borderEndWidth: i === segments.length - 1 ? 0 : 1,
+            borderEndColor: theme.background,
           }}
         />
       ))}
@@ -113,54 +157,205 @@ export interface MonthPair {
   current?: boolean;
 }
 
+/** A colour and what it means. Two bars per column need saying out loud. */
+function LegendKey({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={styles.legendKey}>
+      <View style={[styles.swatch, { backgroundColor: color }]} />
+      <ThemedText type="nano" themeColor="textTertiary">
+        {label}
+      </ThemedText>
+    </View>
+  );
+}
+
+/**
+ * In and out, side by side, one pair per month.
+ *
+ * This is the only in/out chart in the app. Flow used to draw its own copy
+ * inline with a second set of bar widths, so the same six months rendered two
+ * different ways depending on which screen you were standing on.
+ *
+ * Colour here means SERIES and nothing else: accent is in, clay is out, in
+ * every month. It used to mean two things at once — out was clay in the
+ * selected month and a muted brown everywhere else — so the legend's clay
+ * "Out" swatch sat under five brown bars and one clay one, and the muting read
+ * as "these five months are a different quantity" rather than "this one is
+ * now". "Now" is a position on a time axis, not a third quantity, so it is
+ * marked positionally: the current column keeps its label in full ink and
+ * carries a tick beneath it.
+ *
+ * The two colours are read into locals that both the bars AND the legend
+ * swatches use. That is what stops the legend from describing a bar it does
+ * not match again — the defect above was only possible because the swatch held
+ * a colour literal of its own.
+ */
 export function PairedBars({
   months,
   height = 118,
+  legend = true,
   onPressMonth,
 }: {
   months: MonthPair[];
   height?: number;
+  /** Off only where a caption above already names the two series. */
+  legend?: boolean;
   onPressMonth?: (index: number) => void;
 }) {
   const theme = useTheme();
-  const outColor = useOutBarColor();
+  // The graphic clay, not the text clay: theme.ts holds `expense` to WCAG AA
+  // because it carries meaning as TEXT, and keeps `expenseGraphic` for bars and
+  // dots, where 3:1 is the bar and the AA value goes muddy at this size.
+  const inColor = theme.primary;
+  const outColor = theme.expenseGraphic;
   const max = Math.max(1, ...months.flatMap((m) => [m.inFils, m.outFils]));
 
   return (
-    <View style={styles.pairRow}>
-      {months.map((m, i) => (
-        <Pressable
-          key={m.label + i}
-          accessibilityRole={onPressMonth ? 'button' : undefined}
-          accessibilityLabel={`${m.label}`}
-          disabled={!onPressMonth}
-          onPress={() => onPressMonth?.(i)}
-          style={styles.pairColumn}>
-          <View style={[styles.pairBars, { height }]}>
-            <Animated.View
-              entering={FadeIn.delay(i * 50).duration(Motion.sectionEnter)}
-              style={[
-                styles.bar,
-                { height: Math.max(3, (m.inFils / max) * height), backgroundColor: theme.primary },
-              ]}
+    <View style={styles.pairWrap}>
+      <View style={styles.pairRow}>
+        {months.map((m, i) => (
+          <Pressable
+            key={m.label + i}
+            accessibilityRole={onPressMonth ? 'button' : undefined}
+            accessibilityLabel={tf('monthCashflowA11y', {
+              month: m.label,
+              income: formatAED(m.inFils),
+              spending: formatAED(m.outFils),
+            })}
+            disabled={!onPressMonth}
+            onPress={() => onPressMonth?.(i)}
+            style={styles.pairColumn}>
+            <View style={[styles.pairBars, { height }]}>
+              <Animated.View
+                entering={FadeIn.delay(i * 50).duration(Motion.sectionEnter)}
+                style={[
+                  styles.pairBar,
+                  { height: Math.max(3, (m.inFils / max) * height), backgroundColor: inColor },
+                ]}
+              />
+              <Animated.View
+                entering={FadeIn.delay(i * 50 + 30).duration(Motion.sectionEnter)}
+                style={[
+                  styles.pairBar,
+                  { height: Math.max(3, (m.outFils / max) * height), backgroundColor: outColor },
+                ]}
+              />
+            </View>
+            <ThemedText type="nano" themeColor={m.current ? 'text' : 'textTertiary'}>
+              {m.label}
+            </ThemedText>
+            {/* The "you are here" tick. Ink, not a hue: it marks a position on
+                the axis, and every hue in this chart is already spoken for. */}
+            <View
+              style={[styles.nowTick, { backgroundColor: m.current ? theme.text : 'transparent' }]}
             />
-            <Animated.View
-              entering={FadeIn.delay(i * 50 + 30).duration(Motion.sectionEnter)}
-              style={[
-                styles.bar,
-                {
-                  height: Math.max(3, (m.outFils / max) * height),
-                  backgroundColor: m.current ? theme.expense : outColor,
-                },
-              ]}
-            />
-          </View>
-          <ThemedText type="nano" themeColor={m.current ? 'text' : 'textTertiary'}>
-            {m.label}
-          </ThemedText>
-        </Pressable>
-      ))}
+          </Pressable>
+        ))}
+      </View>
+
+      {legend && (
+        <View style={styles.legend}>
+          <LegendKey color={inColor} label={t('inLabel')} />
+          <LegendKey color={outColor} label={t('outLabel')} />
+        </View>
+      )}
     </View>
+  );
+}
+
+/* ── Curve ───────────────────────────────────────────────────────────── */
+
+/** Only the value: the axis labels belong to the caller, under the chart. */
+export interface CurvePoint {
+  fils: number;
+}
+
+/**
+ * A continuous quantity over time — net worth, and nothing else so far.
+ *
+ * Bars would be wrong here: a bar chart says "these are six separate amounts",
+ * and a balance is one amount that never stopped existing between the months.
+ * The baseline is drawn at zero when the series crosses it, so "underwater"
+ * reads instantly rather than having to be worked out from the axis labels.
+ */
+export function TrendCurve({
+  points,
+  height = 132,
+  width = 320,
+}: {
+  points: CurvePoint[];
+  height?: number;
+  /** Measured width of the container; the path is drawn to it. */
+  width?: number;
+}) {
+  const theme = useTheme();
+  if (points.length < 2) return null;
+
+  const values = points.map((p) => p.fils);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  // Scaled to the DATA, not anchored at zero. A net-worth series that lives at
+  // AED 300k and moves 58k of it is a straight line on a zero-anchored axis —
+  // the movement, which is the only reason to draw a curve rather than print
+  // the figure, disappears. The absolute amount is stated above the chart in
+  // full; this is here for the shape. Zero still enters the range, and gets
+  // its dashed baseline, the moment the series goes underwater.
+  // A series that never moves is centred rather than pinned to the floor.
+  const flat = max === min;
+  const lo = flat ? min - 1 : min;
+  const hi = flat ? max + 1 : max;
+  const span = hi - lo;
+  const crossesZero = lo < 0 && hi > 0;
+  // A little air top and bottom so the last point never sits on the edge.
+  const pad = Spacing.two;
+  const plot = height - pad * 2;
+  // Under RTL the month axis is mirrored by the layout — أغسطس (newest) on the
+  // left through مارس (oldest) on the right — but an SVG path is drawn in its
+  // own coordinate space and `direction: rtl` does not touch it. With only the
+  // labels flipped, a rising series ran UPHILL TOWARDS THE OLDEST MONTH, so an
+  // Arabic reader saw their net worth falling while the caption directly under
+  // the chart said "+40,470 since March". Mirror the plot with the axis.
+  const rtl = isRTL();
+  const x = (i: number) => {
+    const at = (i / (points.length - 1)) * width;
+    return rtl ? width - at : at;
+  };
+  const y = (fils: number) => pad + (1 - (fils - lo) / span) * plot;
+
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i)},${y(p.fils)}`).join(' ');
+  const area = `${line} L${width},${y(lo)} L0,${y(lo)} Z`;
+  const last = points[points.length - 1];
+  const rising = last.fils >= points[0].fils;
+  // Falling takes the graphic clay for the same reason the bars do: this is a
+  // 2px stroke and a wash, which theme.ts holds to 3:1 rather than to AA.
+  const stroke = rising ? theme.primary : theme.expenseGraphic;
+
+  return (
+    <Svg width={width} height={height}>
+      {/* The fill is the same hue at a whisper — it gives the line a body
+          without becoming a second colour in the system. */}
+      <Path d={area} fill={stroke} opacity={0.09} />
+      {crossesZero && (
+        <Line
+          x1={0}
+          y1={y(0)}
+          x2={width}
+          y2={y(0)}
+          stroke={theme.cardBorderStrong}
+          strokeWidth={1}
+          strokeDasharray="3 3"
+        />
+      )}
+      <Path
+        d={line}
+        fill="none"
+        stroke={stroke}
+        strokeWidth={2}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <Circle cx={x(points.length - 1)} cy={y(last.fils)} r={3.5} fill={stroke} />
+    </Svg>
   );
 }
 
@@ -182,7 +377,15 @@ export function HistoryStrip({
   return (
     <View style={styles.pairRow}>
       {months.map((m, i) => (
-        <View key={m.label + i} style={styles.pairColumn}>
+        <View
+          key={m.label + i}
+          accessible
+          accessibilityRole="image"
+          // A month and an amount, with no English connective between them, so
+          // the label reads the same under Arabic — formatAED already localises
+          // the figure.
+          accessibilityLabel={`${m.label}, ${formatAED(m.fils)}`}
+          style={styles.pairColumn}>
           <View style={[styles.historyBarWrap, { height }]}>
             <View
               style={[
@@ -213,6 +416,9 @@ const styles = StyleSheet.create({
   composition: {
     flexDirection: 'row',
   },
+  pairWrap: {
+    gap: Spacing.three,
+  },
   pairRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -224,13 +430,43 @@ const styles = StyleSheet.create({
     gap: Spacing.two - 2,
   },
   pairBars: {
+    // Stretch, not shrink-to-fit: the column centres its children, so without
+    // this the row collapses to the width of two flex-basis-0 bars — which is
+    // nothing, and the chart renders empty.
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'center',
     gap: 3,
   },
+  /** Bars share the column and cap out, so six months and twelve both fit. */
+  pairBar: {
+    flex: 1,
+    maxWidth: 14,
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+  },
+  nowTick: {
+    width: 14,
+    height: 2,
+    borderRadius: 1,
+    marginTop: 1,
+  },
+  legend: {
+    flexDirection: 'row',
+    gap: Spacing.three,
+  },
+  legendKey: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two - 2,
+  },
+  swatch: {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+  },
   bar: {
-    width: 11,
     borderTopLeftRadius: 3,
     borderTopRightRadius: 3,
   },

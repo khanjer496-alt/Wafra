@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
@@ -17,15 +16,19 @@ import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { parseAmountToFils, toISODate } from '@/lib/format';
+import { committed } from '@/lib/haptics';
+import { t as tUi } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
 export default function AddTransactionScreen() {
   const theme = useTheme();
   const router = useRouter();
+  const keyboardHeight = useKeyboardHeight();
   const { state, addTransaction } = useStore();
 
   const [type, setType] = useState<TransactionType>('expense');
@@ -52,15 +55,13 @@ export default function AddTransactionScreen() {
 
   const save = () => {
     if (!amountFils || !accountId) return;
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    }
+    committed();
     addTransaction({
       type,
       amountFils,
       category,
       accountId,
-      title: title.trim() || getCategory(category).label,
+      title: title.trim() || categoryLabel(getCategory(category)),
       date,
       source: 'manual',
     });
@@ -70,23 +71,30 @@ export default function AddTransactionScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        {/* behavior was undefined on Android, which makes this component a
+            no-op — the platform this app ships to had no keyboard handling at
+            all, and the amount, merchant, date, account and Save button were
+            all under the keys. The measured height below is what actually
+            moves them. */}
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.header}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tUi('close')}
               onPress={() => router.back()}
               style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>
               <Icon name="close" size={18} color={theme.text} />
             </Pressable>
-            <ThemedText type="smallBold" style={styles.headerTitle}>
-              New transaction
+            <ThemedText type="smallBold" accessibilityRole="header" style={styles.headerTitle}>
+              {tUi('newTransaction')}
             </ThemedText>
             <View style={styles.closeBtn} />
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             {/* Type switch */}
@@ -97,6 +105,9 @@ export default function AddTransactionScreen() {
                 return (
                   <Pressable
                     key={t}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    accessibilityLabel={t === 'expense' ? tUi('expenseLabel') : tUi('incomeLabel')}
                     onPress={() => switchType(t)}
                     style={[
                       styles.segmentItem,
@@ -105,7 +116,7 @@ export default function AddTransactionScreen() {
                     <ThemedText
                       type="smallBold"
                       style={{ color: active ? color : theme.textSecondary }}>
-                      {t === 'expense' ? '− Expense' : '+ Income'}
+                      {t === 'expense' ? `− ${tUi('expenseLabel')}` : `+ ${tUi('incomeLabel')}`}
                     </ThemedText>
                   </Pressable>
                 );
@@ -122,6 +133,7 @@ export default function AddTransactionScreen() {
                 onChangeText={setAmountText}
                 keyboardType="decimal-pad"
                 placeholder="0"
+                accessibilityLabel={tUi('amountInDirhams')}
                 autoFocus
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
@@ -130,7 +142,7 @@ export default function AddTransactionScreen() {
 
             {/* Category grid */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">Category</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('category')}</ThemedText>
               <CategoryChips
                 categories={categories}
                 selected={category}
@@ -141,13 +153,24 @@ export default function AddTransactionScreen() {
 
             {/* Account */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">Account</ThemedText>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.accountRow}>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('account')}</ThemedText>
+              {/* Bleeds to both screen edges. Inset inside the page padding, a
+                  chip that overflowed was sliced 16px short of the edge — it
+                  read as a clipped label ("Casl"), not as a row that scrolls.
+                  Cut at the edge itself, it reads as more to come. */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.accountScroll}
+                contentContainerStyle={styles.accountRow}>
                 {state.accounts.map((a) => {
                   const active = accountId === a.id;
                   return (
                     <Pressable
                       key={a.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={a.name}
+                      accessibilityState={{ selected: active }}
                       onPress={() => setAccountId(a.id)}
                       style={[
                         styles.accountChip,
@@ -166,18 +189,21 @@ export default function AddTransactionScreen() {
 
             {/* Date quick-pick */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">When</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
               <View style={styles.dateRow}>
                 {[
-                  { label: 'Today', offset: 0 },
-                  { label: 'Yesterday', offset: 1 },
-                  { label: '2 days ago', offset: 2 },
-                  { label: '3 days ago', offset: 3 },
+                  { label: tUi('today'), offset: 0 },
+                  { label: tUi('yesterday'), offset: 1 },
+                  { label: tUi('twoDaysAgo'), offset: 2 },
+                  { label: tUi('threeDaysAgo'), offset: 3 },
                 ].map((d) => {
                   const active = dayOffset === d.offset;
                   return (
                     <Pressable
                       key={d.offset}
+                      accessibilityRole="button"
+                      accessibilityLabel={d.label}
+                      accessibilityState={{ selected: active }}
                       onPress={() => setDayOffset(d.offset)}
                       style={[
                         styles.dateChip,
@@ -195,11 +221,12 @@ export default function AddTransactionScreen() {
 
             {/* Title */}
             <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">Description (optional)</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{tUi('descriptionOptional')}</ThemedText>
               <TextInput
                 value={title}
                 onChangeText={setTitle}
-                placeholder={`e.g. ${type === 'expense' ? 'Carrefour weekly shop' : 'July salary'}`}
+                accessibilityLabel={tUi('descriptionOptionalA11y')}
+                placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
                 placeholderTextColor={theme.textSecondary}
                 style={[
                   styles.titleInput,
@@ -207,14 +234,27 @@ export default function AddTransactionScreen() {
                     backgroundColor: theme.backgroundElement,
                     borderColor: theme.cardBorder,
                     color: theme.text,
+                    textAlign: state.language === 'ar' ? 'right' : 'left',
                   },
                 ]}
               />
             </View>
           </ScrollView>
 
-          <View style={styles.footer}>
+          {/* A docked bar, and it has to read as one. Undivided, the solid
+              green block simply began part-way down the description field and
+              looked like it was sitting on top of it. The rule says where the
+              scroll ends; the content padding above keeps the last field clear
+              of it once you reach the bottom. */}
+          <View
+            style={[
+              styles.footer,
+              { borderTopColor: theme.cardBorder, backgroundColor: theme.background },
+            ]}>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tUi('saveTransaction')}
+              accessibilityState={{ disabled: !canSave }}
               onPress={save}
               disabled={!canSave}
               style={[
@@ -223,7 +263,7 @@ export default function AddTransactionScreen() {
               ]}>
               <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
               <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                Save transaction
+                {tUi('saveTransaction')}
               </ThemedText>
             </Pressable>
           </View>
@@ -265,7 +305,8 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: Spacing.three,
-    gap: Spacing.four,
+    paddingBottom: Spacing.four,
+    gap: Spacing.three + 4,
   },
   segment: {
     flexDirection: 'row',
@@ -311,8 +352,12 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 1.5,
   },
+  accountScroll: {
+    marginHorizontal: -Spacing.three,
+  },
   accountRow: {
     gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
   },
   accountChip: {
     flexDirection: 'row',
@@ -349,6 +394,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   saveBtn: {
     flexDirection: 'row',

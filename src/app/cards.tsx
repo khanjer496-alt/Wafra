@@ -13,11 +13,12 @@ import { AmountField, Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
-import { monthKey, parseAmountToFils, shortDate } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 /**
  * Every card as a row: bank, last four, and the one figure that is actually
@@ -59,15 +60,36 @@ export default function CardsScreen() {
     [cards, state, now],
   );
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+  /**
+   * This month's spend per card.
+   *
+   * Both halves of a move between the user's own accounts are excluded, the
+   * same as on Home and Flow: a legacy sweep is stored with a structural title
+   * and no transfer flag, so `isSpending` alone let AED 19,000 of the user's
+   * own money read as a month's spending on the card it left.
+   *
+   * The live-account set is deliberately NOT applied. Every other total in the
+   * app is a single figure that a hidden account must not contribute to; this
+   * is a per-card figure printed on the card's own row, and this screen shows
+   * hidden cards on purpose in the drawer below. Filtering by account here
+   * would print "AED 0 this month" beside a card that plainly spent money —
+   * hiding a card must stop it counting in the headline, not rewrite its own
+   * history. Nothing sums this map, so no total can disagree with Home.
+   */
   const monthSpend = useMemo(() => {
     const key = monthKey(now);
     const map = new Map<string, number>();
     for (const tx of state.transactions) {
-      if (tx.type !== 'expense' || tx.isTransfer || monthKey(tx.date) !== key) continue;
+      if (!isSpending(tx, undefined, internal) || monthKey(tx.date) !== key) continue;
       map.set(tx.accountId, (map.get(tx.accountId) ?? 0) + tx.amountFils);
     }
     return map;
-  }, [state.transactions, now]);
+  }, [state.transactions, now, internal]);
 
   const askCreditLimit = (card: Account) => {
     setLimitText(card.creditLimitFils ? String(Math.round(card.creditLimitFils / 100)) : '');
@@ -81,24 +103,24 @@ export default function CardsScreen() {
   };
 
   const cardOptions = (card: Account) => {
-    Alert.alert(card.name, card.archived ? 'Hidden from lists.' : undefined, [
+    Alert.alert(card.name, card.archived ? t('hiddenFromLists') : undefined, [
       ...(card.cardType === 'credit'
-        ? [{ text: 'Set credit limit', onPress: () => askCreditLimit(card) }]
+        ? [{ text: t('setCreditLimit'), onPress: () => askCreditLimit(card) }]
         : []),
       {
-        text: card.archived ? 'Unhide' : 'Hide card',
+        text: card.archived ? t('unhide') : t('hideCard'),
         onPress: () => editAccount(card.id, { archived: !card.archived }),
       },
       {
-        text: 'Delete card and its entries',
+        text: t('deleteCardAndEntries'),
         style: 'destructive' as const,
         onPress: () =>
-          Alert.alert('Delete card?', `"${card.name}" and all its entries will be removed.`, [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Delete', style: 'destructive', onPress: () => deleteAccount(card.id) },
+          Alert.alert(t('deleteCardTitle'), tf('deleteCardBody', { name: card.name }), [
+            { text: t('cancel'), style: 'cancel' },
+            { text: t('delete'), style: 'destructive', onPress: () => deleteAccount(card.id) },
           ]),
       },
-      { text: 'Cancel', style: 'cancel' as const },
+      { text: t('cancel'), style: 'cancel' as const },
     ]);
   };
 
@@ -126,42 +148,53 @@ export default function CardsScreen() {
         onPress={() => setDetail(card)}
         onLongPress={() => cardOptions(card)}
         last={i === list.length - 1}
-        accessibilityLabel={`${card.name}, open statements and payments`}
+        accessibilityLabel={tf('cardOpenHistoryA11y', { name: card.name })}
         style={inactive ? styles.inactiveRow : undefined}>
         <AccountTile account={card} />
         <View style={styles.rowText}>
           <ThemedText type="small" numberOfLines={1}>
             {card.bankName ??
-              (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || 'Card')}
+              (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || t('card'))}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
-            {isCredit ? 'Credit' : 'Debit'} ·· {card.last4 ?? '????'}
+            {isCredit ? t('credit') : t('debit')} ·· {card.last4 ?? '????'}
             {due
-              ? ` · due ${shortDate(due.due.dueDate)}`
+              ? ` · ${tf('dueOn', { date: shortDate(due.due.dueDate) })}`
               : lastUsed
                 ? ` · ${t('lastUsed').toLowerCase()} ${shortDate(lastUsed)}`
                 : ''}
           </ThemedText>
         </View>
-        <View style={styles.rowFigure}>
+        <View style={[styles.rowFigure, { alignItems: state.language === 'ar' ? 'flex-start' : 'flex-end' }]}>
           <Money
             fils={outstanding ?? spent}
             prefix={false}
             color={due && (due.status === 'overdue' || due.status === 'urgent') ? theme.expense : theme.text}
           />
-          {limitLeft !== null ? (
-            <ThemedText type="nano" themeColor="textTertiary">
-              {Math.round(limitLeft / 100).toLocaleString()} left
-            </ThemedText>
-          ) : (
-            <ThemedText
-              type="nano"
-              themeColor="textTertiary"
-              onPress={isCredit ? () => askCreditLimit(card) : undefined}
-              style={isCredit ? { color: theme.primary } : undefined}>
-              {outstanding !== null ? 'Outstanding' : isCredit ? 'Set limit' : 'This month'}
-            </ThemedText>
-          )}
+          {/* The caption has to name the figure ABOVE it, and those are two
+              independent facts: the bank may quote headroom without ever
+              quoting an outstanding balance. When it does, the big figure
+              falls back to this month's spend — and captioning that
+              "15,000 left" read as a balance of 3,200 against an 18,200
+              limit. The caption says which figure it is first, and headroom
+              rides along after it.
+
+              The invitation to set a limit rides along too, for the same
+              reason: on its own, "Set limit" under AED 5,353 reads as the
+              limit BEING 5,353, while Wallet captions the identical figure
+              "spent this month" one tap away. */}
+          <ThemedText
+            type="nano"
+            themeColor="textTertiary"
+            onPress={isCredit && limitLeft === null ? () => askCreditLimit(card) : undefined}
+            style={isCredit && limitLeft === null ? { color: theme.primary } : undefined}>
+            {outstanding !== null ? t('outstandingTitle') : t('thisMonth')}
+            {limitLeft !== null
+              ? ` · ${tf('creditLeft', { amount: formatAmount(limitLeft, { decimals: false }) })}`
+              : isCredit
+                ? ` · ${t('setLimit')}`
+                : ''}
+          </ThemedText>
         </View>
       </Row>
     );
@@ -179,7 +212,7 @@ export default function CardsScreen() {
             {activeCards.map((c, i) => renderCard(c, i, activeCards, false))}
             {activeCards.length === 0 && (
               <ThemedText type="default" themeColor="textSecondary">
-                No cards yet. One appears here as soon as a bank message names a card number.
+                {t('noCardsYet')}
               </ThemedText>
             )}
           </Section>
@@ -188,7 +221,7 @@ export default function CardsScreen() {
             <Section index={1}>
               <SectionHeader
                 title={`${t('inactiveCards')} · ${inactiveCards.length}`}
-                action={showInactive ? 'Hide' : 'Show'}
+                action={showInactive ? t('hide') : t('show')}
                 onAction={() => setShowInactive(!showInactive)}
               />
               {showInactive && inactiveCards.map((c, i) => renderCard(c, i, inactiveCards, true))}
@@ -203,13 +236,12 @@ export default function CardsScreen() {
 
       <CardDetailSheet account={detail} onClose={() => setDetail(null)} />
 
-      <BottomSheet visible={limitFor !== null} onClose={() => setLimitFor(null)} title="Credit limit">
+      <BottomSheet visible={limitFor !== null} onClose={() => setLimitFor(null)} title={t('creditLimitTitle')}>
         <ThemedText type="default" themeColor="textSecondary">
-          Banks quote the headroom left, never the limit itself. Enter it once and every masked
-          balance on {limitFor?.name ?? 'this card'} turns into a real figure.
+          {tf('creditLimitBody', { name: limitFor?.name ?? t('card') })}
         </ThemedText>
-        <AmountField label="Total credit limit" value={limitText} onChangeText={setLimitText} fontSize={34} />
-        <Button label="Save limit" onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
+        <AmountField label={t('totalCreditLimit')} value={limitText} onChangeText={setLimitText} fontSize={34} />
+        <Button label={t('saveLimit')} onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
       </BottomSheet>
     </ThemedView>
   );

@@ -1,5 +1,5 @@
-import { t } from '@/lib/i18n';
 import { getActiveMarket } from '@/lib/markets';
+import { getLanguage, t } from '@/lib/i18n';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -7,20 +7,72 @@ const MONTHS = [
 ];
 const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+const MONTHS_SHORT_AR = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+];
+const DAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
 function groupThousands(n: number): string {
   return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-/** Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234". */
+/**
+ * Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234".
+ *
+ * When the decimals are hidden the whole part is ROUNDED, not truncated.
+ * Truncating showed a AED 76.99 subscription as "AED 76", and — worse — made
+ * lists stop adding up: four rows each losing up to a dirham sat under a total
+ * that had rounded once, so Bills printed AED 1,025/mo above rows totalling
+ * 1,022. Rounding each row leaves at most half a dirham of drift per row
+ * instead of a whole one, and in the common case none at all.
+ */
 export function formatAmount(fils: number, opts?: { decimals?: boolean }): string {
   const abs = Math.abs(Math.round(fils));
-  const whole = Math.floor(abs / 100);
   const cents = abs % 100;
   const showDecimals = opts?.decimals ?? cents !== 0;
-  const sign = fils < 0 ? '-' : '';
+  const whole = showDecimals ? Math.floor(abs / 100) : Math.round(abs / 100);
+  // Take the sign from what is actually printed, not from the input. A net of
+  // −20 fils rounds to zero at whole-dirham precision, and "AED -0" under
+  // "Overspent so far this month" is not a number anyone recognizes — the
+  // hero sweeps through it every time the month crosses breakeven.
+  const sign = fils < 0 && (whole > 0 || (showDecimals && cents > 0)) ? '-' : '';
   const base = `${sign}${groupThousands(whole)}`;
   return showDecimals ? `${base}.${String(cents).padStart(2, '0')}` : base;
+}
+
+/**
+ * Total of a set of amounts as a reader would add them up on screen.
+ *
+ * A total printed above a list has to equal that list. Summing the raw fils
+ * and rounding once does not: each row is rounded on its own, so the total
+ * lands up to half a dirham per row away from what the rows say. Rounding each
+ * row first — the same rounding `formatAmount` will apply to it — makes the
+ * column add up, which is the only property a heading like "AED 1,025/mo"
+ * above four rows is actually claiming.
+ *
+ * For arithmetic, not display: keep using the raw fils.
+ */
+export function totalAsShown(values: number[]): number {
+  return values.reduce((sum, v) => sum + toWholeDirhamFils(v), 0);
+}
+
+/**
+ * `fils` snapped to the whole dirham it will be DISPLAYED as.
+ *
+ * Sum these, never the raw fils, when a figure sits above the rows it totals.
+ * This is the primitive; `totalAsShown` is the reducer over it. Both exist on
+ * purpose: balances.ts needs to snap one account at a time as it walks the
+ * list (some accounts contribute nothing), and insights' composition needs the
+ * reducer. Collapsing either into the other put the two callers back on
+ * different arithmetic, which is the defect they were written to close.
+ */
+export function toWholeDirhamFils(fils: number): number {
+  return Math.round(fils / 100) * 100;
 }
 
 /** "AED 1,234.56" — currency symbol follows the active market. */
@@ -99,7 +151,11 @@ export function monthEndISO(key: string): string {
 
 export function monthLabel(key: string, short = false): string {
   const [y, m] = key.split('-').map(Number);
-  const name = (short ? MONTHS_SHORT : MONTHS)[(m ?? 1) - 1];
+  const arabic = getLanguage() === 'ar';
+  const names = arabic
+    ? (short ? MONTHS_SHORT_AR : MONTHS_AR)
+    : (short ? MONTHS_SHORT : MONTHS);
+  const name = names[(m ?? 1) - 1];
   return `${name} ${y}`;
 }
 
@@ -109,25 +165,75 @@ export function shiftMonthKey(key: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Days a report month covers. With MONTH_START_DAY = 1 that is the calendar
+ * length; with a salary-day start it still is, because the window
+ * [day D of month M, day D-1 of month M+1] holds exactly as many days as M.
+ */
 export function daysInMonth(key: string): number {
   const [y, m] = key.split('-').map(Number);
   return new Date(y, m, 0).getDate();
+}
+
+/**
+ * Whole days from `fromISO` to `toISO`; negative once `toISO` has passed.
+ * Both ends are anchored at noon so a clock change can never round to ±1 day.
+ *
+ * Lives here rather than in each module that needs it: date arithmetic
+ * re-implemented per module is how the app ended up with two different answers
+ * for "when is this due".
+ */
+export function daysBetweenISO(fromISO: string, toISO: string): number {
+  const from = new Date(`${fromISO}T12:00:00`).getTime();
+  const to = new Date(`${toISO}T12:00:00`).getTime();
+  return Math.round((to - from) / 86_400_000);
+}
+
+/** `iso` moved by `days`, staying a valid date across month and year ends. */
+export function shiftISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return toISODate(d);
 }
 
 /** "17 Jul" from an ISO date. */
 export function shortDate(iso: string): string {
   const d = Number(iso.slice(8, 10));
   const m = Number(iso.slice(5, 7));
-  return `${d} ${MONTHS_SHORT[m - 1] ?? ''}`;
+  const months = getLanguage() === 'ar' ? MONTHS_SHORT_AR : MONTHS_SHORT;
+  return `${d} ${months[m - 1] ?? ''}`;
 }
 
 /** "Today", "Yesterday", or "Friday, 18 Jul". */
 export function friendlyDate(iso: string, todayISO: string): string {
   if (iso === todayISO) return t('today');
+  if (daysBetweenISO(iso, todayISO) === 1) return t('yesterday');
   const d = new Date(`${iso}T12:00:00`);
-  const t2 = new Date(`${todayISO}T12:00:00`);
-  if (Math.round((t2.getTime() - d.getTime()) / 86400000) === 1) return t('yesterday');
-  return `${DAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  const arabic = getLanguage() === 'ar';
+  const days = arabic ? DAYS_AR : DAYS;
+  const months = arabic ? MONTHS_SHORT_AR : MONTHS_SHORT;
+  return `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]}`;
+}
+
+/**
+ * Weekday names by index, Sunday-first — the order `dayOfWeekSpend` buckets
+ * into and the order the UAE week runs in.
+ *
+ * These live here rather than in the screen that draws the weekday chart
+ * because the translated arrays are already here, feeding `friendlyDate`. A
+ * screen-local `const WEEKDAYS = ['Sun', ...]` is invisible to the Arabic
+ * gate — it is an array of one-word strings, so nothing flags it — and the
+ * chart under an otherwise fully-Arabic screen stays in English forever.
+ */
+export function weekdayName(index: number): string {
+  const days = getLanguage() === 'ar' ? DAYS_AR : DAYS;
+  return days[index] ?? '';
+}
+
+/** The same name, abbreviated for an axis label. Arabic is not abbreviated. */
+export function weekdayShort(index: number): string {
+  if (getLanguage() === 'ar') return DAYS_AR[index] ?? '';
+  return (DAYS[index] ?? '').slice(0, 3);
 }
 
 /**
@@ -146,4 +252,42 @@ export function greetingForHour(hour: number): string {
   if (hour < 12) return t('goodMorning');
   if (hour < 17) return t('goodAfternoon');
   return t('goodEvening');
+}
+
+
+/**
+ * When a transaction happened, to the minute, or null if unknown.
+ *
+ * Rows imported before `ts` existed still know: the SMS fingerprint is
+ * `s{timestamp}-{amount}`, and that timestamp has been in every SMS row since
+ * the first version. Reading it back is free and needs no migration.
+ */
+export function transactionTime(tx: { ts?: number; smsKey?: string }): Date | null {
+  if (tx.ts) return new Date(tx.ts);
+  const m = tx.smsKey?.match(/^s(\d{10,})-/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** "18 Jul 2026, 14:32" — the full stamp, for a detail view. */
+export function fullDateTime(tx: { date: string; ts?: number; smsKey?: string }): string {
+  const day = new Date(`${tx.date}T12:00:00`);
+  const stamp = day.toLocaleDateString(getLanguage() === 'ar' ? 'ar-AE' : 'en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+  const at = transactionTime(tx);
+  if (!at) return stamp;
+  const hh = String(at.getHours()).padStart(2, '0');
+  const mm = String(at.getMinutes()).padStart(2, '0');
+  return `${stamp}, ${hh}:${mm}`;
+}
+
+/** "14:32", or empty when the row carries no clock. */
+export function clockTime(tx: { ts?: number; smsKey?: string }): string {
+  const at = transactionTime(tx);
+  if (!at) return '';
+  return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }

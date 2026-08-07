@@ -1,0 +1,732 @@
+name: iOS build (TestFlight)
+
+# The owner has an Android phone and no Mac. EAS Build compiles iOS on Expo's
+# own macOS workers, so "no Mac" is not the blocker — "no terminal" is. This
+# workflow is the terminal: open the Actions tab, press "Run workflow", read
+# the summary. docs/testflight.md is the click-by-click.
+#
+# It is deliberately NOT triggered by push. An iOS build costs EAS build
+# minutes and, when submitting, puts a binary in front of Apple. That is a
+# decision, not a side effect of committing.
+#
+# THE ONE THING THIS WORKFLOW CANNOT DO FOR YOU
+#
+#   Expo's own CI guide says, verbatim: "Run `eas build -p [all|android|ios]`
+#   from your local terminal for each platform you want to support on CI, so
+#   the eas build command can prompt for any additional configuration it
+#   needs. That configuration will then be available for future
+#   non-interactive runs."
+#   (https://docs.expo.dev/build/building-on-ci/)
+#
+#   For iOS that configuration is the Apple distribution certificate and the
+#   App Store provisioning profile, and EAS CLI generates them by signing you
+#   in to Apple interactively — including 2FA. An App Store Connect API key
+#   does NOT replace that first sign-in: Expo documents the ASC key for the
+#   case where "your iOS credentials need to be repaired", and for federated
+#   Apple accounts that cannot log in interactively at all. There is no
+#   documented flag that generates a store distribution certificate from
+#   nothing in non-interactive mode. When they are absent, EAS CLI stops with
+#   "Credentials are not set up. Please run this command again in interactive
+#   mode."
+#
+#   So: one interactive run, once, ever. docs/testflight.md, step 4, walks
+#   through doing it from a phone in a GitHub Codespace (a browser terminal —
+#   still no Mac needed). After that, every build is this button.
+#
+#   This workflow detects that error and says so in the summary rather than
+#   leaving you with a stack trace.
+#
+# Nothing here has been run against a real Apple Developer account or a real
+# EAS project — see docs/testflight.md, "What is not verified".
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'production = App Store signing, the only kind TestFlight accepts. preview = ad-hoc, installs only on UDIDs registered with eas device:create (see docs/ios-device-install.md).'
+        type: choice
+        options:
+          - production
+          - preview
+        default: production
+      submit:
+        description: 'Also send the finished build to TestFlight. Requires profile = production.'
+        type: boolean
+        default: false
+      wait:
+        description: 'Keep this job running until the EAS build finishes, so the summary can carry the artifact link. Costs ~20-40 GitHub minutes. Off = the job ends in ~3 minutes and the summary links to the EAS build page instead, which shows the same thing live.'
+        type: boolean
+        default: false
+      what_to_test:
+        description: 'Optional. The "What to Test" note testers see in TestFlight. Only used when submit is on.'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# Two iOS builds at once would both bump the remote build number and race on
+# the same credentials. Never cancel one in flight: EAS has already started
+# billing for it, and cancelling the runner does not cancel the EAS build.
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Generous because `wait = true` sits through the EAS queue plus a ~20
+    # minute iOS compile. The `wait = false` path exits in about three minutes
+    # regardless.
+    timeout-minutes: 90
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # playwright is a devDependency for the e2e scripts; nothing here
+      # launches a browser, so skip the download during npm ci.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # -----------------------------------------------------------------
+      # Everything below this comment and above "Install dependencies" runs
+      # in well under a minute and costs nothing. An iOS build costs real EAS
+      # build minutes and up to forty minutes of waiting. So every condition
+      # that can be known in advance is checked in advance.
+      # -----------------------------------------------------------------
+
+      - name: Check the Expo token exists
+        run: |
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            {
+              echo "# Cannot start — \`EXPO_TOKEN\` is not set"
+              echo
+              echo "Every EAS command in this workflow authenticates with it. Without it the very first"
+              echo "command would fail, so nothing is attempted."
+              echo
+              echo "Create it at <https://expo.dev/settings/access-tokens> → **Create token**, then add it under"
+              echo "**Settings → Secrets and variables → Actions → New repository secret** with the name \`EXPO_TOKEN\`."
+              echo
+              echo "docs/testflight.md, step 3, has the click-by-click."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # ---- The combination guard. The two inputs are not independent.
+      #
+      #      TestFlight only accepts a binary signed with an App Store
+      #      distribution profile. The `preview` profile in eas.json is
+      #      `"distribution": "internal"`, which is ad-hoc: the profile embeds
+      #      an allow-list of device UDIDs, and Apple will not take it. It also
+      #      has no `autoIncrement`, so every preview build would carry
+      #      buildNumber 1 and App Store Connect rejects a build number it has
+      #      already seen. And eas.json has no `submit.preview` profile for
+      #      --auto-submit-with-profile to name.
+      #
+      #      Three independent reasons, all of which surface as a confusing
+      #      failure thirty minutes in. Stop now instead.
+      - name: Refuse a combination that cannot reach TestFlight
+        if: inputs.submit && inputs.profile != 'production'
+        run: |
+          {
+            echo "# Not started — \`preview\` builds cannot go to TestFlight"
+            echo
+            echo "You chose **profile = \`${{ inputs.profile }}\`** with **submit = true**. That cannot work, for three"
+            echo "separate reasons:"
+            echo
+            echo "1. \`preview\` is \`\"distribution\": \"internal\"\` in \`eas.json\` — an **ad-hoc** build. Its provisioning"
+            echo "   profile carries an allow-list of device UDIDs. Apple does not accept ad-hoc binaries for TestFlight."
+            echo "2. \`preview\` has no \`autoIncrement\`, so it would build \`buildNumber\` 1 every time, and App Store"
+            echo "   Connect refuses a build number it has already seen."
+            echo "3. \`eas.json\` has no \`submit.preview\` profile, so there is nothing for the submission to use."
+            echo
+            echo "## What you probably want"
+            echo
+            echo "| Goal | profile | submit |"
+            echo "| --- | --- | --- |"
+            echo "| Get it on your iPhone via TestFlight | \`production\` | on |"
+            echo "| Check that it compiles, send nothing to Apple | \`production\` | off |"
+            echo "| Side-load onto one registered device without Apple review | \`preview\` | off — see \`docs/ios-device-install.md\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # ---- The config guard.
+      #
+      #      `expo.extra.eas.projectId` is the single value that links this
+      #      checkout to a project on EAS servers. EAS CLI reads it from the
+      #      app config and there is no documented environment variable that
+      #      substitutes for it, so without it `eas build --non-interactive`
+      #      cannot resolve which project to build and stops.
+      #
+      #      It is also load-bearing well beyond this workflow, which is why
+      #      the error below spells that out: push notifications on BOTH
+      #      platforms are keyed to it (the relay's EXPO_PROJECT_ID var, and
+      #      scripts/check-release-config.mjs blocks a release without it).
+      - name: Read and check the app config
+        id: config
+        env:
+          PROFILE: ${{ inputs.profile }}
+          WANT_SUBMIT: ${{ inputs.submit }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo ?? {};
+            const eas = JSON.parse(fs.readFileSync("eas.json", "utf8"));
+            const profile = process.env.PROFILE;
+            const wantSubmit = process.env.WANT_SUBMIT === "true";
+            const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            const out = [];
+            const fail = [];
+
+            const projectId = app.extra?.eas?.projectId ?? "";
+            if (!uuid.test(projectId)) fail.push("projectId");
+
+            const bundleId = app.ios?.bundleIdentifier ?? "";
+            if (!bundleId) fail.push("bundleId");
+
+            if (!eas.build?.[profile]) fail.push("buildProfile");
+            if (wantSubmit && !eas.submit?.[profile]) fail.push("submitProfile");
+
+            out.push("fail=" + fail.join(","));
+            out.push("bundle_id=" + bundleId);
+            out.push("slug=" + (app.slug ?? ""));
+            out.push("version=" + (app.version ?? ""));
+            out.push("project_id=" + projectId);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n");
+          '
+
+      - name: Stop — the app config is not ready for an EAS build
+        if: steps.config.outputs.fail != ''
+        env:
+          FAIL: ${{ steps.config.outputs.fail }}
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          {
+            echo "# Not started — the app is not linked to an EAS project"
+            echo
+            case ",$FAIL," in
+              *,projectId,*)
+                echo "## \`expo.extra.eas.projectId\` is missing from \`app.json\`"
+                echo
+                echo "This is the UUID that ties this checkout to a project on EAS servers. \`eas build\` has no"
+                echo "other way to work out what it is building, and there is no environment variable that"
+                echo "substitutes for it — so this run stops before spending a build minute."
+                echo
+                echo "**It blocks more than this workflow.** The same UUID is what push notifications are keyed to"
+                echo "on *both* platforms: \`EXPO_PROJECT_ID\` in \`server/wrangler.toml\` is the relay's copy of it, and"
+                echo "\`scripts/check-release-config.mjs\` refuses a release build without it. Nothing pushes until"
+                echo "this exists."
+                echo
+                echo "### How to get it"
+                echo
+                echo "It is created by \`eas init\`, which is part of the one interactive session described in"
+                echo "**docs/testflight.md, step 4**. That session writes the UUID into \`app.json\` for you; commit"
+                echo "the change and this workflow will run."
+                echo
+                echo "You can also read it off <https://expo.dev> → your project → **Project settings**, and paste it"
+                echo "in by hand:"
+                echo
+                echo '```json'
+                echo '  "extra": {'
+                echo '    "eas": { "projectId": "00000000-0000-0000-0000-000000000000" },'
+                echo '    "revenueCatAndroidKey": "",'
+                echo '    "revenueCatIosKey": ""'
+                echo '  }'
+                echo '```'
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,bundleId,*)
+                echo "## \`expo.ios.bundleIdentifier\` is missing from \`app.json\`"
+                echo
+                echo "It should be \`app.wafra.ios\`. Apple identifies the app by this string and it cannot be changed"
+                echo "after the first submission."
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,buildProfile,*)
+                echo "## \`eas.json\` has no \`build.$PROFILE\` profile"
+                echo
+                echo "Pick a profile that exists, or add it to \`eas.json\`."
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,submitProfile,*)
+                echo "## \`eas.json\` has no \`submit.$PROFILE\` profile"
+                echo
+                echo "Submission needs one with the same name as the build profile, because this workflow uses"
+                echo "\`--auto-submit-with-profile $PROFILE\`. Re-run with **submit = false** to build only."
+                echo
+                ;;
+            esac
+            echo "Nothing was built and nothing was sent to Apple."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # ---- The Apple credentials.
+      #
+      #      An App Store Connect API key is three things: a .p8 private key
+      #      FILE, a key id, and an issuer id. Expo reads them from
+      #      EXPO_ASC_API_KEY_PATH / EXPO_ASC_KEY_ID / EXPO_ASC_ISSUER_ID
+      #      (https://docs.expo.dev/build/building-on-ci/).
+      #
+      #      The file is the awkward one: GitHub secrets hold strings, not
+      #      files. So the secret holds the .p8's *contents* and this step
+      #      writes them back out to a file in the runner's temp directory,
+      #      mode 600, outside the workspace so no later step can archive it.
+      #
+      #      A .p8 is PEM — plain text between BEGIN/END lines — so the secret
+      #      can just be a copy-paste of the file. Getting plain text out of a
+      #      .p8 on a phone is fiddly though, so base64 is accepted too and
+      #      detected automatically. Either form works; neither is preferred.
+      #
+      #      All of this is OPTIONAL. If the key is not here, EAS falls back to
+      #      whatever is stored against the project on Expo's servers, which is
+      #      where the one interactive session will have put it. Absent is a
+      #      supported configuration, not a broken one — so this step warns and
+      #      carries on rather than failing.
+      - name: Prepare the App Store Connect API key
+        id: asc
+        env:
+          ASC_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.EXPO_APPLE_TEAM_ID }}
+          APPLE_TEAM_TYPE: ${{ secrets.EXPO_APPLE_TEAM_TYPE }}
+        run: |
+          set -o pipefail
+          present=0
+          for v in "${ASC_KEY_P8:-}" "${ASC_KEY_ID:-}" "${ASC_ISSUER_ID:-}"; do
+            if [ -n "$v" ]; then present=$((present + 1)); fi
+          done
+
+          if [ "$present" = "0" ]; then
+            echo "state=absent" >> "$GITHUB_OUTPUT"
+            echo "No App Store Connect API key in secrets. EAS will use whatever is stored against the project on its own servers."
+            exit 0
+          fi
+
+          # Two of three is the dangerous case: it looks configured and is not.
+          if [ "$present" != "3" ]; then
+            {
+              echo "# Not started — the App Store Connect API key is half configured"
+              echo
+              echo "An ASC API key is three secrets and they only work together:"
+              echo
+              echo "| Secret | Set? |"
+              echo "| --- | --- |"
+              echo "| \`EXPO_ASC_API_KEY_P8\` | $([ -n "${ASC_KEY_P8:-}" ] && echo 'yes' || echo '**no**') |"
+              echo "| \`EXPO_ASC_KEY_ID\` | $([ -n "${ASC_KEY_ID:-}" ] && echo 'yes' || echo '**no**') |"
+              echo "| \`EXPO_ASC_ISSUER_ID\` | $([ -n "${ASC_ISSUER_ID:-}" ] && echo 'yes' || echo '**no**') |"
+              echo
+              echo "Add the missing one, or delete all three and let EAS use the key stored on its servers."
+              echo "docs/testflight.md, step 3, says where each value comes from."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          key_file="$RUNNER_TEMP/asc-api-key.p8"
+          umask 077
+
+          # Accept the raw PEM or a base64 blob of it. Deciding by content and
+          # not by a flag means there is one fewer thing to get wrong.
+          if printf '%s' "$ASC_KEY_P8" | grep -q 'BEGIN PRIVATE KEY'; then
+            printf '%s\n' "$ASC_KEY_P8" > "$key_file"
+            form="PEM text"
+          else
+            if ! printf '%s' "$ASC_KEY_P8" | tr -d '[:space:]' | base64 -d > "$key_file" 2>/dev/null; then
+              {
+                echo "# Not started — \`EXPO_ASC_API_KEY_P8\` is neither PEM nor base64"
+                echo
+                echo "The secret must be **either**:"
+                echo
+                echo "- the literal contents of the \`AuthKey_XXXXXXXXXX.p8\` file Apple gave you — it starts with"
+                echo "  \`-----BEGIN PRIVATE KEY-----\` — pasted in as-is, newlines and all; **or**"
+                echo "- that same file base64-encoded (\`base64 -w0 AuthKey_XXXXXXXXXX.p8\`)."
+                echo
+                echo "It is currently neither. Nothing was built."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            form="base64"
+          fi
+
+          if ! grep -q 'BEGIN PRIVATE KEY' "$key_file"; then
+            {
+              echo "# Not started — \`EXPO_ASC_API_KEY_P8\` does not contain a private key"
+              echo
+              echo "After decoding, the value has no \`-----BEGIN PRIVATE KEY-----\` line. Apple's \`.p8\` download is a"
+              echo "PEM file that starts with exactly that. Re-copy it from the file Apple gave you."
+              echo
+              echo "(Apple lets you download a key **once**. If the file is gone, revoke the key in App Store Connect"
+              echo "and generate a new one — see docs/testflight.md, step 3.)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # Shape checks on the two ids. Both fail at Apple's API rather than
+          # in EAS, which means they fail *after* the build has been paid for.
+          bad=()
+          printf '%s' "$ASC_KEY_ID" | grep -qE '^[A-Z0-9]{10}$' || bad+=("\`EXPO_ASC_KEY_ID\` should be 10 uppercase letters/digits, e.g. \`ABC123DEF4\`")
+          printf '%s' "$ASC_ISSUER_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' || bad+=("\`EXPO_ASC_ISSUER_ID\` should be a UUID, e.g. \`69a6de70-1234-47e3-e053-5b8c7c11a4d1\`")
+          if [ -n "${APPLE_TEAM_ID:-}" ]; then
+            printf '%s' "$APPLE_TEAM_ID" | grep -qE '^[A-Z0-9]{10}$' || bad+=("\`EXPO_APPLE_TEAM_ID\` should be 10 uppercase letters/digits")
+          fi
+          if [ -n "${APPLE_TEAM_TYPE:-}" ]; then
+            case "$APPLE_TEAM_TYPE" in
+              IN_HOUSE|COMPANY_OR_ORGANIZATION|INDIVIDUAL) ;;
+              *) bad+=("\`EXPO_APPLE_TEAM_TYPE\` must be \`INDIVIDUAL\`, \`COMPANY_OR_ORGANIZATION\` or \`IN_HOUSE\`") ;;
+            esac
+          fi
+
+          if [ ${#bad[@]} -gt 0 ]; then
+            {
+              echo "# Not started — an App Store Connect value has the wrong shape"
+              echo
+              for line in "${bad[@]}"; do echo "- $line"; done
+              echo
+              echo "These are checked here because Apple rejects them at *submission* time, which is after the"
+              echo "build has already been paid for and waited on."
+              echo
+              echo "Both ids are on the same App Store Connect page as the key: **Users and Access → Integrations →"
+              echo "App Store Connect API**. The issuer id is above the table; the key id is the row."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          {
+            echo "EXPO_ASC_API_KEY_PATH=$key_file"
+            echo "EXPO_ASC_KEY_ID=$ASC_KEY_ID"
+            echo "EXPO_ASC_ISSUER_ID=$ASC_ISSUER_ID"
+          } >> "$GITHUB_ENV"
+          # Written as `if` and not `[ … ] && echo`: an AND-list whose test is
+          # false is the last thing that ran in more than one earlier version
+          # of this file, and under `set -e` that ends the step.
+          if [ -n "${APPLE_TEAM_ID:-}" ]; then echo "EXPO_APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"; fi
+          if [ -n "${APPLE_TEAM_TYPE:-}" ]; then echo "EXPO_APPLE_TEAM_TYPE=$APPLE_TEAM_TYPE" >> "$GITHUB_ENV"; fi
+
+          echo "state=present" >> "$GITHUB_OUTPUT"
+          echo "ASC API key written to \$RUNNER_TEMP as $form; key id and issuer id exported."
+
+      - name: Install dependencies
+        run: npm ci
+
+      # eas-cli is not a dependency of this project and should not become one —
+      # it is a tool, not a library, and pinning it in package.json would mean
+      # a Dependabot PR every week for something only CI runs.
+      #
+      # 19.1.0 is the floor: --refresh-ad-hoc-provisioning-profile arrived
+      # there, and it is the version Expo's internal-distribution docs name for
+      # non-interactive iOS. Latest is used so that Apple-side changes (which
+      # Apple ships without notice) arrive without a commit here.
+      - name: Install EAS CLI
+        run: |
+          npm install -g eas-cli@latest
+          eas --version
+
+      # ---- Prove the token before the build, not during it. `eas whoami` is
+      #      one API call. A revoked or mistyped token otherwise surfaces as an
+      #      authentication failure inside `eas build`, which reads like a
+      #      credentials problem and sends you looking in the wrong place.
+      - name: Check the Expo token actually works
+        id: whoami
+        run: |
+          if ! account=$(eas whoami 2>whoami.err); then
+            {
+              echo "# Not started — \`EXPO_TOKEN\` was rejected by Expo"
+              echo
+              echo "The secret is set, but it does not authenticate. Either it was revoked, or it was copied"
+              echo "with a character missing."
+              echo
+              echo '```'
+              tail -10 whoami.err
+              echo '```'
+              echo
+              echo "Make a new one at <https://expo.dev/settings/access-tokens> and replace the \`EXPO_TOKEN\` secret."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          account=$(printf '%s' "$account" | tr -d '\r' | tail -1)
+          echo "account=$account" >> "$GITHUB_OUTPUT"
+          echo "Authenticated to EAS as $account."
+
+      # -----------------------------------------------------------------
+      # The build.
+      # -----------------------------------------------------------------
+      #
+      # --no-wait by default, on purpose. An iOS build is 20-40 minutes of
+      # queue plus compile on Expo's macOS workers. Sitting in a GitHub runner
+      # watching it burns GitHub minutes to learn nothing the EAS build page
+      # would not have told you — and this repo has run out of GitHub minutes
+      # before (see the note at the top of build-apk.yml).
+      #
+      # --auto-submit-with-profile hands the submission to EAS as well, so it
+      # happens on their infrastructure after the build finishes. That is what
+      # makes "build and ship to TestFlight" possible in a three-minute job.
+      - name: Start the iOS build
+        id: build
+        env:
+          PROFILE: ${{ inputs.profile }}
+          WANT_SUBMIT: ${{ inputs.submit }}
+          WAIT: ${{ inputs.wait }}
+          WHAT_TO_TEST: ${{ inputs.what_to_test }}
+          ACCOUNT: ${{ steps.whoami.outputs.account }}
+          SLUG: ${{ steps.config.outputs.slug }}
+        run: |
+          set -o pipefail
+          args=(build --platform ios --profile "$PROFILE" --non-interactive --json)
+
+          if [ "$WAIT" = "true" ]; then args+=(--wait); else args+=(--no-wait); fi
+
+          if [ "$WANT_SUBMIT" = "true" ]; then
+            args+=(--auto-submit-with-profile "$PROFILE")
+            if [ -n "$WHAT_TO_TEST" ]; then args+=(--what-to-test "$WHAT_TO_TEST"); fi
+          fi
+
+          args+=(--message "GitHub Actions run ${GITHUB_RUN_NUMBER} (${GITHUB_REF_NAME})")
+
+          echo "eas ${args[*]}"
+
+          # --json puts the machine-readable result on stdout and everything
+          # else — including the "Build details: https://expo.dev/..." line —
+          # on stderr. Both are kept: the JSON for the ids, the stderr for the
+          # URL and for recognising the credentials error below.
+          set +e
+          eas "${args[@]}" > build.json 2> build.err
+          status=$?
+          set -e
+
+          # Echo stderr into the log so the run is debuggable without
+          # downloading anything.
+          cat build.err
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+          # The EAS build page URL, taken from wherever it appears. Restricted
+          # to expo.dev so a URL in an unrelated warning cannot be mistaken
+          # for it.
+          page=$(grep -ohE 'https://expo\.dev/[A-Za-z0-9/._%-]+' build.err build.json 2>/dev/null | grep -E '/builds/' | head -1 || true)
+
+          # Tolerant JSON reader: --no-wait returns an array of build objects,
+          # --wait returns the finished ones, and the artifact key has had more
+          # than one name. Take whatever is there and never throw.
+          node -e '
+            const fs = require("node:fs");
+            const out = [];
+            let raw = "";
+            try { raw = fs.readFileSync("build.json", "utf8"); } catch {}
+            let parsed = null;
+            try { parsed = JSON.parse(raw); } catch {}
+            const builds = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? [parsed] : [];
+            const b = builds[0] || {};
+            const artifacts = b.artifacts || {};
+            out.push("build_id=" + (b.id ?? ""));
+            out.push("build_status=" + (b.status ?? ""));
+            out.push(
+              "artifact_url=" +
+                (artifacts.applicationArchiveUrl ?? artifacts.buildUrl ?? b.applicationArchiveUrl ?? ""),
+            );
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n");
+          '
+
+          # If EAS did not print the URL, reconstruct it from the documented
+          # shape. Flagged as reconstructed in the summary, because the account
+          # segment is the *token owner* and a project owned by an organisation
+          # lives under the organisation's name instead — in which case the
+          # link 404s and the summary says where to look by hand.
+          page_guessed=false
+          if [ -z "$page" ]; then
+            id=$(sed -n 's/^build_id=//p' "$GITHUB_OUTPUT" | tail -1)
+            if [ -n "$id" ] && [ -n "${ACCOUNT:-}" ] && [ -n "${SLUG:-}" ]; then
+              page="https://expo.dev/accounts/${ACCOUNT}/projects/${SLUG}/builds/${id}"
+              page_guessed=true
+            fi
+          fi
+          echo "build_page=$page" >> "$GITHUB_OUTPUT"
+          echo "page_guessed=$page_guessed" >> "$GITHUB_OUTPUT"
+
+          # The one failure that is not a bug in the setup but a documented
+          # limitation of non-interactive EAS. Name it precisely; the generic
+          # "build failed" summary would send someone hunting through secrets.
+          if [ "$status" != "0" ] && grep -qiE 'credentials are not set up|run this command again in interactive mode' build.err; then
+            echo "needs_interactive=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_interactive=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          exit "$status"
+
+      # ---- The summary. Written with always() so a failed build still leaves
+      #      the build page link on screen — that link is the one thing worth
+      #      having, and on a phone it is the difference between "read the log"
+      #      and "tap here".
+      - name: Write the summary
+        if: always()
+        env:
+          PROFILE: ${{ inputs.profile }}
+          WANT_SUBMIT: ${{ inputs.submit }}
+          WAIT: ${{ inputs.wait }}
+          BUILD_PAGE: ${{ steps.build.outputs.build_page }}
+          PAGE_GUESSED: ${{ steps.build.outputs.page_guessed }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+          SLUG: ${{ steps.config.outputs.slug }}
+          BUILD_STATUS: ${{ steps.build.outputs.build_status }}
+          ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
+          NEEDS_INTERACTIVE: ${{ steps.build.outputs.needs_interactive }}
+          EAS_STATUS: ${{ steps.build.outputs.status }}
+          ASC_STATE: ${{ steps.asc.outputs.state }}
+          ACCOUNT: ${{ steps.whoami.outputs.account }}
+          BUNDLE_ID: ${{ steps.config.outputs.bundle_id }}
+          VERSION: ${{ steps.config.outputs.version }}
+        run: |
+          # Steps that stopped earlier wrote their own summary and there is
+          # nothing to add.
+          if [ -z "${EAS_STATUS:-}" ]; then exit 0; fi
+
+          if [ "$NEEDS_INTERACTIVE" = "true" ]; then
+            {
+              echo "# ⚠️ iOS credentials do not exist yet — one interactive run is needed"
+              echo
+              echo "This is the known, documented gap, and it is not something a secret can fix."
+              echo
+              echo "EAS signs iOS builds with an Apple **distribution certificate** and an **App Store provisioning"
+              echo "profile**. It creates them by signing in to your Apple account and walking you through 2FA."
+              echo "A GitHub runner has no terminal to type a 2FA code into, so EAS stops rather than guess."
+              echo "An App Store Connect API key does not substitute: Expo documents it for *repairing* existing"
+              echo "credentials, not for creating the first set."
+              echo
+              echo "## Do this once, ever"
+              echo
+              echo "**docs/testflight.md, step 4** has the click-by-click. In short: open this repository on"
+              echo "github.com, tap **Code → Codespaces → Create codespace**. That is a real terminal in a browser"
+              echo "tab and it works on a phone. In it:"
+              echo
+              echo '```'
+              echo "npm install -g eas-cli"
+              echo "eas login"
+              echo "npx testflight"
+              echo '```'
+              echo
+              echo "\`npx testflight\` does the whole first run: links the project, signs you in to Apple, generates"
+              echo "the certificate and profile, builds, and submits to TestFlight. Answer its prompts on the phone;"
+              echo "the 2FA code arrives on the same phone."
+              echo
+              echo "Commit whatever it writes into \`app.json\` (the \`extra.eas.projectId\` line). After that this"
+              echo "workflow works, and you never need a terminal again."
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$EAS_STATUS" = "0" ]; then
+            if [ "$WAIT" = "true" ]; then
+              echo "# ✅ iOS build finished" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "# 🚀 iOS build started on EAS" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "# ❌ The EAS build command failed"
+              echo
+              echo "The full output is in the **Start the iOS build** step of this run. If it mentions Apple, start"
+              echo "with docs/testflight.md, \"When something goes wrong\"."
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          {
+            if [ -n "$BUILD_PAGE" ]; then
+              echo "## Watch it here"
+              echo
+              echo "<$BUILD_PAGE>"
+              echo
+              echo "That page updates live, shows the log, and — when the build finishes — carries the **Install**"
+              echo "button. Open it on the iPhone."
+              echo
+              if [ "$PAGE_GUESSED" = "true" ]; then
+                echo "_EAS did not print that link, so it was reconstructed from your account name and the app slug._"
+                echo "_If it 404s, the project belongs to an organisation rather than to you personally — open_"
+                echo "_<https://expo.dev> → **Projects** → \`$SLUG\` → **Builds** and take the top entry instead._"
+                echo
+              fi
+            fi
+
+            if [ -n "$ARTIFACT_URL" ]; then
+              echo "## The build itself"
+              echo
+              echo "<$ARTIFACT_URL>"
+              echo
+            elif [ "$WAIT" != "true" ] && [ "$EAS_STATUS" = "0" ]; then
+              echo "_No artifact link yet: this run used **wait = false**, so it handed the build to EAS and exited._"
+              echo "_The link appears on the build page above when the build finishes, in roughly 20-40 minutes._"
+              echo
+            fi
+
+            echo "## This run"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Profile | \`$PROFILE\` |"
+            echo "| Bundle id | \`$BUNDLE_ID\` |"
+            echo "| Version | \`$VERSION\` |"
+            if [ -n "$BUILD_ID" ]; then echo "| EAS build id | \`$BUILD_ID\` |"; fi
+            if [ -n "$BUILD_STATUS" ]; then echo "| Build status at exit | \`$BUILD_STATUS\` |"; fi
+            if [ -n "$ACCOUNT" ]; then echo "| EAS account | \`$ACCOUNT\` |"; fi
+            if [ "$ASC_STATE" = "present" ]; then
+              echo "| App Store Connect key | from repository secrets |"
+            else
+              echo "| App Store Connect key | none in secrets — using the one stored on EAS |"
+            fi
+            echo
+
+            if [ "$WANT_SUBMIT" = "true" ] && [ "$EAS_STATUS" = "0" ]; then
+              echo "## TestFlight"
+              echo
+              echo "Submission was **queued on EAS** with \`--auto-submit-with-profile $PROFILE\`. It runs on Expo's"
+              echo "servers when the build finishes, so it is not affected by this job ending."
+              echo
+              echo "What happens next, and roughly when:"
+              echo
+              echo "| Phase | Where to look | Typical |"
+              echo "| --- | --- | --- |"
+              echo "| Build | the EAS build page above | 20-40 min |"
+              echo "| Upload to App Store Connect | the **Submissions** tab on <https://expo.dev> | 2-5 min |"
+              echo "| Apple processing | App Store Connect → your app → **TestFlight** | 10-15 min |"
+              echo "| Installable | the TestFlight app on the iPhone | immediately after processing, for **internal** testers |"
+              echo
+              echo "**Internal testers need no Beta App Review.** Add yourself as an internal tester once"
+              echo "(App Store Connect → **Users and Access**, then the app's **TestFlight → Internal Testing** group)"
+              echo "and every future build is installable the moment Apple finishes processing it. Only *external*"
+              echo "testing goes through review. docs/testflight.md, step 6."
+              echo
+            elif [ "$EAS_STATUS" = "0" ]; then
+              echo "## TestFlight"
+              echo
+              echo "**Nothing was sent to Apple** — this run had **submit = false**. Re-run with **submit = true**"
+              echo "when you want it on TestFlight."
+              echo
+            fi
+
+            echo "## What will not work in this build"
+            echo
+            echo "Read docs/testflight.md, \"What this build cannot do yet\", before concluding something is broken."
+            echo "In short: automatic bank capture on iOS needs the relay deployed *and* the Wafra Capture Shortcut"
+            echo "published, and \`EXPO_PUBLIC_WAFRA_SHORTCUT_URL\` is not set in \`eas.json\`, so the setup flow has no"
+            echo "Shortcut to install. In-app purchases are also inert until a RevenueCat Apple key exists."
+            echo "Manual entry, import, and the whole ledger work normally."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The key is in RUNNER_TEMP, which GitHub clears anyway, but a private
+      # key on disk for no reason is a habit worth not having.
+      - name: Shred the API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/asc-api-key.p8"

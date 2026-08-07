@@ -2,7 +2,9 @@ import type { IconName } from '@/components/ui/icon';
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { getCategory } from '@/lib/categories';
-import { toISODate } from '@/lib/format';
+import { t, tf } from '@/lib/i18n';
+import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+
 import {
   activeSubscriptions,
   daysUntilNext,
@@ -26,16 +28,16 @@ export interface Outgoing {
   overdue: boolean;
   /** Due within three days — worth colouring, not yet worth alarming about. */
   urgent: boolean;
+  /**
+   * A statement long past its date that no later statement replaced. It is
+   * still owed — that is why it is here — but it is not "leaving in 9 days",
+   * and a heading that totals it with this week's bills says it is.
+   */
+  stale: boolean;
   /** Present for card dues, so a row can open the right payment sheet. */
   dueId?: string;
   subscription?: Subscription;
   billId?: string;
-}
-
-function shiftISO(iso: string, days: number): string {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return toISODate(d);
 }
 
 /**
@@ -53,29 +55,33 @@ export function leavingSoon(
 ): Outgoing[] {
   const withinDays = opts.withinDays ?? 9;
   const kinds = new Set<OutgoingKind>(opts.kinds ?? ['card', 'bill', 'subscription']);
-  const todayISO = toISODate(today);
   const items: Outgoing[] = [];
 
   if (kinds.has('card')) {
-    for (const { due, daysLeft, remainingFils } of openDues(state, today)) {
+    for (const { due, daysLeft, remainingFils, stale } of openDues(state, today)) {
       const account = state.accounts.find((a) => a.id === due.accountId);
       items.push({
         id: `card-${due.id}`,
         kind: 'card',
-        title: account?.name ?? 'Card payment',
+        title: account?.name ?? t('cardPaymentDue'),
         icon: 'wallet',
         amountFils: remainingFils,
         dateISO: due.dueDate,
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,
+        stale,
         dueId: due.id,
       });
     }
   }
 
   if (kinds.has('bill')) {
-    for (const { bill, status, daysLeft } of billsForMonth(state.bills, state.transactions, today)) {
+    for (const { bill, status, daysLeft, dueISO } of billsForMonth(
+      state.bills,
+      state.transactions,
+      today,
+    )) {
       if (status === 'paid') continue;
       items.push({
         id: `bill-${bill.id}`,
@@ -83,17 +89,26 @@ export function leavingSoon(
         title: bill.title,
         icon: getCategory(bill.category).icon,
         amountFils: bill.amountFils,
-        dateISO: shiftISO(todayISO, daysLeft),
+        // The real date, not one reconstructed from a day count. This used to
+        // be `today + daysLeft`, which printed a date derived from calendar
+        // arithmetic done against a money month — a figure and a date that
+        // disagreed about which month they were describing.
+        dateISO: dueISO,
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,
+        stale: false,
         billId: bill.id,
       });
     }
   }
 
   if (kinds.has('subscription')) {
-    const subs = activeSubscriptions(detectSubscriptions(state.transactions, state.notSubscriptions, today));
+    const liveAccounts = liveAccountIds(state.accounts);
+    const internal = internalTransferIds(state.transactions, liveAccounts);
+    const subs = activeSubscriptions(
+      detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
+    );
     for (const sub of subs) {
       // A bill and a detected subscription can describe the same debit; the
       // bill wins, because the user set it up by hand.
@@ -110,6 +125,7 @@ export function leavingSoon(
         daysLeft,
         overdue: daysLeft < 0,
         urgent: daysLeft >= 0 && daysLeft <= 3,
+        stale: false,
         subscription: sub,
       });
     }
@@ -126,8 +142,8 @@ export function outgoingTotalFils(items: Outgoing[]): number {
 
 /** "in 5 days", "today", "3 days late" — the phrase a row's meta line ends with. */
 export function daysPhrase(daysLeft: number): string {
-  if (daysLeft < 0) return `${-daysLeft} day${daysLeft === -1 ? '' : 's'} late`;
-  if (daysLeft === 0) return 'today';
-  if (daysLeft === 1) return 'tomorrow';
-  return `in ${daysLeft} days`;
+  if (daysLeft < 0) return tf('daysLatePhrase', { days: -daysLeft, s: daysLeft === -1 ? '' : 's' });
+  if (daysLeft === 0) return t('today').toLocaleLowerCase();
+  if (daysLeft === 1) return t('tomorrow');
+  return tf('inDaysPhrase', { days: daysLeft });
 }

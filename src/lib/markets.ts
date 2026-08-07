@@ -33,11 +33,83 @@ export interface MarketPack {
   keywords: [RegExp, CategoryId][];
 }
 
+/**
+ * Category vocabulary in Arabic, shared by both Gulf packs.
+ *
+ * A merchant named in Arabic matched nothing at all — every Arabic charge
+ * landed in `other`, which is the category that makes the whole app look
+ * broken, because it is the one the user sees and cannot explain.
+ *
+ * Two kinds of entry, both facts rather than guesses: the common noun for a
+ * kind of shop (مطعم is "restaurant", صيدليه is "pharmacy"), and the Arabic
+ * spelling of a chain the English list already knows (كارفور is Carrefour,
+ * نون is noon). Nothing here is a transliteration invented for the purpose.
+ *
+ * EVERY LITERAL BELOW IS WRITTEN POST-FOLD, and that is not a style choice.
+ * `guessCategory` normalises its input through `foldOrthography` before it
+ * reaches this table — آ أ إ ٱ collapse to ا, ى to ي, ة to ه, ؤ to و, ئ to ي —
+ * so a rule spelled the natural way can NEVER fire. It does not throw, it does
+ * not warn, and the list still reads like coverage: مقهى, قهوة, صيدلية, تأمين,
+ * إيجار, أوبر, أدنوك, أمازون and الإمارات were all dead on arrival, which is
+ * eleven of these twenty-four rules matching nothing at all while the file
+ * claimed a full Arabic vocabulary.
+ *
+ * Folding also collapses pairs that used to be written out twice (بقالة/بقاله,
+ * إيجار/ايجار, أدنوك/ادنوك): post-fold they are the same string, so only one
+ * survives. That is the point — one spelling, matched once.
+ *
+ * parser.test.js asserts that `foldOrthography` is the identity on every source
+ * string in this table, so a rule added in natural spelling fails the suite
+ * instead of quietly matching nothing.
+ */
+const ARABIC_KEYWORDS: [RegExp, CategoryId][] = [
+  // shop kinds — the noun does the work
+  [/مطعم|مطاعم|كافيه|مقهي|قهوه/, 'dining'],
+  [/سوبرماركت|بقاله|تموين|هايبر|جمعيه/, 'groceries'],
+  // "طبي" is BOUNDED, and the boundary is load-bearing: Arabic letters are not
+  // `\w`, so `\b` cannot express it and an unanchored طبي matches inside
+  // تطبيق — "application". Etisalat's Arabic payment receipt says it was paid
+  // through "تطبيق إتصالات" (the Etisalat app), and 29 real telecom bills in
+  // the accuracy corpus were filed as HEALTH by that one substring. This table
+  // is consulted BEFORE the parser's own, so fixing only that copy changed
+  // nothing. The article and the endings are spelled out so الطبية and طبيب
+  // still match.
+  [/صيدليه|مستشفي|مستوصف|عياده|(?:^|[^ء-ي])(?:ال)?طبي(?:ه|ات|ب|به|بات|ين)?(?![ء-ي])|مختبر/, 'health'],
+  [/محطه|وقود|بنزين|مواقف|موقف/, 'transport'],
+  [/كهرباء|مياه|ماء|غاز/, 'utilities'],
+  [/اتصالات|جوال|هاتف|انترنت/, 'telecom'],
+  [/مدرسه|جامعه|رسوم\s*دراسيه/, 'education'],
+  [/فندق|طيران|تذكره\s*سفر|سياحه|سفر/, 'travel'],
+  [/تامين/, 'health'],
+  [/ايجار/, 'rent'],
+  [/صالون|حلاق|تجميل|مشغل/, 'personal-care'],
+  // chains the English vocabulary already knows, in their Arabic spelling
+  [/كارفور/, 'groceries'],
+  [/لولو/, 'groceries'],
+  [/العثيم|اسواق\s*عبدالله/, 'groceries'],
+  [/التميمي|بنده|الدانوب|نستو/, 'groceries'],
+  [/نون(?!\s*يه)/, 'shopping'],
+  [/طلبات|كريم\s*ناو|هنقرستيشن|جاهز/, 'dining'],
+  [/كريم|اوبر/, 'transport'],
+  [/ادنوك|اينوك|ارامكو/, 'transport'],
+  [/سالك|درب/, 'transport'],
+  [/امازون|نمشي|شي\s*ان/, 'shopping'],
+  [/نتفلكس|نتفليكس|سبوتيفاي|شاهد|ستارزبلاي/, 'entertainment'],
+  [/دو\b|اتصالات\s*الامارات|موبايلي|زين|اس\s*تي\s*سي/, 'telecom'],
+];
+
 const AE: MarketPack = {
   id: 'AE',
   name: 'United Arab Emirates',
   flag: '🇦🇪',
-  currency: { code: 'AED', display: 'AED', aliases: ['AED', 'Dhs?\\.?', 'د\\.إ'] },
+  // The spelled-out forms matter as much as the symbol: an Arabic-locale
+  // handset renders the same alert as "50.00 درهم", and without the word the
+  // parser saw no currency at all and dropped the transaction. The plural
+  // "دراهم" must precede the singular, or "درهم" matches first and leaves a
+  // stray letter behind. The parser folds these aliases through the same
+  // orthography normalisation it applies to the message, so writing "د.إ"
+  // here (rather than the folded "د.ا") is correct and intentional.
+  currency: { code: 'AED', display: 'AED', aliases: ['AED', 'Dhs?\\.?', 'د\\.?إ\\.?', 'دراهم', 'درهم'] },
   banks: [
     { re: /enbd|emirates\s*nbd/i, name: 'Emirates NBD', color: '#2B4C9B', domain: 'emiratesnbd.com' },
     { re: /\bfab\b|first\s*abu\s*dhabi/i, name: 'FAB', color: '#00A3E0', domain: 'bankfab.com' },
@@ -56,7 +128,7 @@ const AE: MarketPack = {
     { re: /\bajman\s*bank/i, name: 'Ajman Bank', color: '#00747A', domain: 'ajmanbank.ae' },
     { re: /\bcbi\b/i, name: 'CBI', color: '#7A2048', domain: 'cbi.ae' },
   ],
-  keywords: [], // the UAE vocabulary is the current global baseline
+  keywords: ARABIC_KEYWORDS, // the UAE vocabulary is the current global baseline
 };
 
 const SA: MarketPack = {
@@ -85,6 +157,7 @@ const SA: MarketPack = {
     [/panda|tamimi|danube|othaim|bindawood|lulu/i, 'groceries'],
     [/petromin|sasco|aldrees|naft/i, 'transport'],
     [/\bsadad\b/i, 'utilities'],
+    ...ARABIC_KEYWORDS,
   ],
 };
 
@@ -136,6 +209,24 @@ export function bankBrandForName(
     }
   }
   return null;
+}
+
+/**
+ * Stable identity key for a displayed bank name.
+ *
+ * Known brands collapse their aliases first. Unknown names remain distinct
+ * in every script: stripping to ASCII made all Arabic-only banks normalize to
+ * the same empty marker, which is unsafe anywhere last4 is only a weak hint.
+ */
+export function bankIdentityForName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const branded = bankBrandForName(name)?.name ?? name;
+  const normalized = branded
+    .normalize('NFKC')
+    .toLocaleLowerCase('en-US')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+  return normalized || undefined;
 }
 
 /** Logo domain for a bank NAME shown in the UI (any market's pack). */

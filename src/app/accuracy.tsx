@@ -11,10 +11,12 @@ import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { unreadFormats } from '@/lib/accuracy';
-import { getCategory } from '@/lib/categories';
-import { t } from '@/lib/i18n';
+import { cardDiagnostics, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { shareText } from '@/lib/share-text';
+import { categoryLabel } from '@/lib/categories';
+import { isRelayPlatform } from '@/lib/relay';
 import { useStore } from '@/lib/store';
+import { t, tf } from '@/lib/i18n';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
 function maskDigits(s: string): string {
@@ -32,17 +34,68 @@ export default function AccuracyScreen() {
   const { state } = useStore();
 
   const rows = useMemo(
-    () => unreadFormats(state.transactions, (id) => getCategory(id).label),
-    [state.transactions],
+    () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
+    [state.transactions, state.language],
   );
 
+  const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
+  const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
+
+  // An empty list is a finding on Android with retention on, and no finding at
+  // all on a phone that never keeps the message text. This screen used to show
+  // the same green check for both — see noFormatsReason() in lib/accuracy.ts.
+  const noFormats = noFormatsReason({
+    relayPlatform: isRelayPlatform(),
+    privateMode: state.privateMode,
+  });
+
+  // What the parser made of THIS ledger, measured on the phone. The list below
+  // needs the source text to exist and so cannot speak at all on an iPhone or
+  // in private mode; merchant and category ride along on every row, on every
+  // platform, so this can. See parserCoverage() for the denominator.
+  const coverage = useMemo(
+    () => parserCoverage({
+      transactions: state.transactions,
+      merchantOverrides: state.merchantOverrides,
+    }),
+    [state.transactions, state.merchantOverrides],
+  );
+  const misses =
+    coverage.measured - coverage.named + (coverage.categoryMeasured - coverage.categorised);
+
+  // Two headings, not one. The old export called every row "could not read",
+  // which was wrong about most of them — the merchant was read fine, it just
+  // had no category — and that made a long list look like a broken parser.
   const shareAll = () => {
-    const body = rows
-      .map((r, i) => `#${i + 1} (seen ${r.count}x, read as "${r.title}" / ${r.category}):\n${maskDigits(r.raw)}`)
-      .join('\n\n');
+    const section = (label: string, list: typeof rows) =>
+      list.length === 0
+        ? ''
+        : `\n\n${label} (${list.length}):\n\n` +
+          list
+            .map(
+              (r, i) =>
+                tf('accuracyShareRow', {
+                  index: i + 1,
+                  count: r.count,
+                  title: r.title,
+                  category: r.category,
+                  raw: maskDigits(r.raw),
+                }),
+            )
+            .join('\n\n');
     Share.share({
-      message: `Wafra — bank SMS formats the parser could not fully read:\n\n${body}`,
+      message:
+        t('accuracyShareTitle') +
+        section(t('accuracyShareUnread'), unread) +
+        section(t('accuracyShareUncategorized'), uncategorized),
     }).catch(() => {});
+  };
+
+  const shareCards = () => {
+    // As a FILE. This one prints every card row with its raw bank message, and
+    // pushing that through the share sheet as an intent payload crossed
+    // Android's Binder limit and killed the app outright — see share-text.ts.
+    shareText('wafra-card-diagnostic.txt', cardDiagnostics(state)).catch(() => {});
   };
 
   return (
@@ -53,9 +106,81 @@ export default function AccuracyScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Section index={0} style={styles.intro}>
+          {/* Counts, never a percentage. "492 of 505" is something a person can
+              check and act on; "97% accurate" is a claim they can only take or
+              leave. Every figure names its own denominator, and the last line
+              says out loud what was left out of it — a metric that reads
+              correct behaviour as failure gets dismissed once and then never
+              read again. */}
+          <Section index={0} style={styles.coverage}>
+            <ThemedText type="meta" themeColor="textTertiary" style={styles.coverageHeading}>
+              {t('coverageHeading')}
+            </ThemedText>
+            {coverage.imported === 0 ? (
+              <ThemedText type="default" themeColor="textSecondary">
+                {t('coverageNothingYet')}
+              </ThemedText>
+            ) : (
+              <>
+                <ThemedText type="default">
+                  {coverage.measured === 0
+                    ? tf('coverageNoShops', {
+                        imported: coverage.imported,
+                        s: coverage.imported === 1 ? '' : 's',
+                      })
+                    : tf('coverageShops', {
+                        imported: coverage.imported,
+                        s: coverage.imported === 1 ? '' : 's',
+                        measured: coverage.measured,
+                        named: coverage.named,
+                      })}
+                </ThemedText>
+                {coverage.categoryMeasured > 0 && (
+                  <ThemedText type="default">
+                    {tf('coverageCategories', {
+                      categorised: coverage.categorised,
+                      categoryMeasured: coverage.categoryMeasured,
+                    })}
+                  </ThemedText>
+                )}
+                {/* `measured === categoryMeasured + decided`. Without this the
+                    two sentences above show 100 purchases and then 60, with
+                    nothing on screen saying where the other 40 went. */}
+                {coverage.decided > 0 && (
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {tf('coverageDecided', { decided: coverage.decided })}
+                  </ThemedText>
+                )}
+                {/* Only where there is something for it to be "the other" than.
+                    A ledger with no purchases in it has already been told, in
+                    the line above, that all of it is transfers. */}
+                {coverage.skipped > 0 && coverage.measured > 0 && (
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {tf('coverageSkipped', { skipped: coverage.skipped })}
+                  </ThemedText>
+                )}
+                {/* The count of misses is honest on every phone. WHICH messages
+                    they were is not: without the source text there is nothing
+                    to list below and nothing to share. Saying so here stops the
+                    figure from reading as a complete answer. */}
+                {misses > 0 && noFormats !== 'none-found' && (
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {t('coverageNoText')}
+                  </ThemedText>
+                )}
+              </>
+            )}
+          </Section>
+
+          <Section index={1} style={styles.intro}>
             <ThemedText type="default" themeColor="textSecondary">
-              {t('improveAccuracyHint')}
+              {t(
+                noFormats === 'relay'
+                  ? 'formatsNotKeptRelay'
+                  : noFormats === 'private'
+                    ? 'formatsNotKeptPrivate'
+                    : 'improveAccuracyHint',
+              )}
             </ThemedText>
             {rows.length > 0 && (
               <Button
@@ -64,29 +189,58 @@ export default function AccuracyScreen() {
                 onPress={shareAll}
               />
             )}
+            {/* Always offered, even when nothing is unread: the card bugs this
+                answers — a payment counted twice, a statement filed against the
+                wrong account — happen to messages the parser read CONFIDENTLY,
+                so they never appear in the list above. */}
+            <Button
+              label={t('shareCardDiagnostic')}
+              icon="upload"
+              variant="outline"
+              onPress={shareCards}
+            />
+            <ThemedText type="meta" themeColor="textTertiary">
+              {t('shareCardDiagnosticHint')}
+            </ThemedText>
           </Section>
 
-          {rows.map((r, i) => (
-            <Row key={i} last={i === rows.length - 1} style={styles.formatRow}>
-              <View style={styles.formatInner}>
-                <View style={styles.formatTop}>
-                  <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
-                    {r.title}
-                  </ThemedText>
-                  <Money fils={r.amountFils} prefix={false} />
-                </View>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('readAs')} {r.category} · seen {r.count}×
+          {([
+            [t('couldNotRead'), unread] as const,
+            [t('noCategoryYet'), uncategorized] as const,
+          ]).map(([heading, list]) =>
+            list.length === 0 ? null : (
+              <View key={heading}>
+                <ThemedText type="meta" themeColor="textTertiary" style={styles.groupHeading}>
+                  {heading} · {list.length}
                 </ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
-                  {maskDigits(r.raw)}
-                </ThemedText>
+                {list.map((r, i) => (
+                  <Row key={`${heading}-${i}`} last={i === list.length - 1} style={styles.formatRow}>
+                    <View style={styles.formatInner}>
+                      <View style={styles.formatTop}>
+                        <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
+                          {r.title}
+                        </ThemedText>
+                        <Money fils={r.amountFils} prefix={false} />
+                      </View>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        {t('readAs')} {r.category} · {tf('seenCount', { count: r.count })}
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
+                        {maskDigits(r.raw)}
+                      </ThemedText>
+                    </View>
+                  </Row>
+                ))}
               </View>
-            </Row>
-          ))}
+            ),
+          )}
 
-          {rows.length === 0 && (
-            <Section index={1} style={styles.empty}>
+          {/* The green tick is a VERDICT — "the parser read everything you
+              have" — and it can only be earned where the source text was kept
+              to check against. Where it was not, the explanation above is the
+              whole answer and this block would only contradict it. */}
+          {rows.length === 0 && noFormats === 'none-found' && (
+            <Section index={2} style={styles.empty}>
               <Icon name="check" size={26} color={theme.income} strokeWidth={2.1} />
               <ThemedText type="small">{t('noUnrecognized')}</ThemedText>
               <ThemedText type="default" themeColor="textSecondary">
@@ -117,9 +271,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.six,
   },
+  coverage: {
+    gap: Spacing.two,
+    paddingBottom: Spacing.four,
+  },
+  coverageHeading: {
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingBottom: Spacing.two - 4,
+  },
   intro: {
     gap: Spacing.three - 2,
     paddingBottom: Spacing.four,
+  },
+  groupHeading: {
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.two - 2,
   },
   formatRow: {
     paddingVertical: Spacing.three - 2,

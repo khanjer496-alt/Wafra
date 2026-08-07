@@ -11,29 +11,53 @@ import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 import {
-  isBillingAvailable,
+  autoCaptureMethod,
   PRO_PRICES,
-  purchasePro,
-  restorePro,
   TRIAL_DAYS,
   trialDaysLeft,
+  yearlySavingMonths,
   type ProPlan,
 } from '@/lib/purchases';
+import { isBillingAvailable, purchasePro, restorePro } from '@/lib/billing';
 import { useStore } from '@/lib/store';
 
-const FEATURES: { icon: IconName; titleKey: Parameters<typeof t>[0]; textKey: Parameters<typeof t>[0] }[] = [
-  { icon: 'spark', titleKey: 'featAutoTracking', textKey: 'featAutoTrackingText' },
-  { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
-  { icon: 'calendar', titleKey: 'featSalaryMonths', textKey: 'featSalaryMonthsText' },
-  { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
-];
+type FeatureRow = {
+  icon: IconName;
+  titleKey: Parameters<typeof t>[0];
+  textKey: Parameters<typeof t>[0];
+};
 
 /**
- * Wafra Pro paywall. Purchases run through Google Play Billing on the Play
- * build; side-load builds explain that and stay functional via the founder
- * unlock in Settings.
+ * The list is built per platform, because the same feature is delivered two
+ * different ways and describing the iPhone one as "reads your bank SMS" would
+ * promise something Apple forbids. A paywall that oversells is the most
+ * expensive copy in an app: the refund happens on the App Store review page.
+ */
+function features(): FeatureRow[] {
+  return [
+    {
+      icon: 'spark',
+      titleKey: 'featAutoTracking',
+      textKey:
+        autoCaptureMethod() === 'relayCapture' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
+    },
+    { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
+    { icon: 'calendar', titleKey: 'featSalaryMonths', textKey: 'featSalaryMonthsText' },
+    { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
+  ];
+}
+
+/**
+ * Wafra Pro paywall. Purchases run through the platform's own billing on a
+ * store build — Play Billing on Android, StoreKit on iPhone; side-load builds
+ * explain that and stay functional via the founder unlock in Settings.
+ *
+ * The screen also states what is NOT behind this wall. Wafra sells the work it
+ * does on its own; handing it a message yourself stays free on both platforms,
+ * and saying so here is what keeps the wall from reading as a hostage note to
+ * an iPhone user who cannot use the automatic path yet.
  */
 export default function ProScreen() {
   const theme = useTheme();
@@ -41,14 +65,16 @@ export default function ProScreen() {
   const { state, setPro } = useStore();
   const [plan, setPlan] = useState<ProPlan>('yearly');
   const trial = trialDaysLeft(state);
+  const rows = features();
 
   const buy = async () => {
     if (!isBillingAvailable()) {
-      Alert.alert(
-        'Available with the Play Store release',
-        'Purchases go through Google Play billing, which only works when Wafra is installed ' +
-          'from the Play Store. This build has every Pro feature unlockable from Settings.',
-      );
+      // Store-name copy stays in i18n rather than being assembled from
+      // billingStore(): contracts.test.js fails any English sentence written
+      // into a screen, and a template literal is still an English sentence.
+      // These keys read "Play Store", which is correct for this Android
+      // milestone; the App Store wording needs its own keys before iOS ships.
+      Alert.alert(t('playOnlyTitle'), t('playOnlyBody'));
       return;
     }
     if (await purchasePro(plan)) setPro(true);
@@ -56,43 +82,39 @@ export default function ProScreen() {
 
   const restore = async () => {
     if (!isBillingAvailable()) {
-      Alert.alert('Nothing to restore', 'Purchases arrive with the Play Store release.');
+      Alert.alert(t('nothingToRestore'), t('nothingToRestoreBody'));
       return;
     }
     if (await restorePro()) setPro(true);
-    else Alert.alert('No purchase found', 'No previous Wafra Pro purchase on this Google account.');
+    else Alert.alert(t('noPurchaseFound'), t('noPurchaseFoundBody'));
   };
 
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
-          <ScreenHeader title="Wafra Pro" onBack={() => router.back()} />
+          <ScreenHeader title={t('wafraPro')} onBack={() => router.back()} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Section index={0} style={styles.hero}>
-            {/* Founder unlock: long-press the mark (side-load builds). */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Wafra Pro"
-              delayLongPress={700}
-              onLongPress={() => {
-                const next = !state.pro;
-                setPro(next);
-                Alert.alert(
-                  next ? 'Founder mode' : 'Founder mode off',
-                  next ? 'Wafra Pro unlocked on this device.' : 'Wafra Pro disabled on this device.',
-                );
-              }}>
-              <Icon name="diamond" size={30} color={theme.warning} />
-            </Pressable>
-            <ThemedText type="title">Wafra Pro</ThemedText>
+            {/* No founder unlock here. There was one — a single long-press on
+                this icon toggled Pro — which put a free unlock on the most
+                discoverable surface in the app, the screen that sells it.
+                Long-pressing something is an ordinary thing to try. The
+                deliberate unlock is seven taps on the version row in
+                Settings, which nobody reaches by accident. */}
+            <Icon name="diamond" size={30} color={theme.warning} />
+            <ThemedText type="title">{t('wafraPro')}</ThemedText>
             <ThemedText type="default" themeColor="textSecondary">
               {state.pro
                 ? t('proActiveThanks')
                 : trial > 0
-                  ? `Everything is free for your first ${TRIAL_DAYS} days — ${trial} day${trial === 1 ? '' : 's'} left. Keep it going:`
+                  ? tf('trialDaysLeftPaywall', {
+                      total: TRIAL_DAYS,
+                      left: trial,
+                      s: trial === 1 ? '' : 's',
+                    })
                   : t('trialEndedPaywall')}
             </ThemedText>
             {!state.pro && trial > 0 && (
@@ -103,8 +125,8 @@ export default function ProScreen() {
           </Section>
 
           <Section index={1}>
-            {FEATURES.map((f, i) => (
-              <Row key={f.titleKey} last={i === FEATURES.length - 1}>
+            {rows.map((f, i) => (
+              <Row key={f.titleKey} last={i === rows.length - 1}>
                 <View style={styles.featureIcon}>
                   <Icon name={f.icon} size={19} color={theme.textSecondary} />
                 </View>
@@ -118,8 +140,38 @@ export default function ProScreen() {
             ))}
           </Section>
 
+          {/* What the wall does NOT hold back. It belongs on the paywall rather
+              than only in a help page: the trial ends on the day this screen
+              matters most, and a user who thinks Wafra has stopped working
+              deletes it instead of pasting one message. */}
+          <Section index={2}>
+            <View
+              style={[
+                styles.freeNote,
+                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+              ]}>
+              <View style={styles.featureIcon}>
+                <Icon name="check" size={19} color={theme.income} />
+              </View>
+              <View style={styles.featureText}>
+                <ThemedText type="small">{t('featPasteFree')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {t('featPasteFreeText')}
+                </ThemedText>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push('/import-sms')}
+                  hitSlop={8}>
+                  <ThemedText type="micro" style={{ color: theme.primary }}>
+                    {t('pasteBankMessage')}
+                  </ThemedText>
+                </Pressable>
+              </View>
+            </View>
+          </Section>
+
           {!state.pro && (
-            <Section index={2} style={styles.buy}>
+            <Section index={3} style={styles.buy}>
               <View style={styles.plans}>
                 {(['yearly', 'monthly'] as ProPlan[]).map((p) => {
                   const selected = plan === p;
@@ -141,7 +193,9 @@ export default function ProScreen() {
                       </ThemedText>
                       <Money fils={PRO_PRICES[p].fils} type="subtitle" decimals />
                       <ThemedText type="meta" themeColor="textTertiary">
-                        {p === 'yearly' ? t('perYear') : t('perMonth')}
+                        {p === 'yearly'
+                          ? `${t('perYear')} ${tf('monthsFreeSuffix', { months: yearlySavingMonths() })}`
+                          : t('perMonth')}
                       </ThemedText>
                     </Pressable>
                   );
@@ -190,6 +244,14 @@ const styles = StyleSheet.create({
   },
   buy: {
     gap: Spacing.two + 2,
+  },
+  freeNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
   },
   plans: {
     flexDirection: 'row',

@@ -14,6 +14,38 @@
 
 const enc = new TextEncoder();
 
+/* ─────────────────── Typing WebCrypto in two dialects ───────────────────
+ *
+ * This file is compiled twice: once against @cloudflare/workers-types (the
+ * real deployment target) and once against the DOM lib (scripts/test/run.sh
+ * transpiles it so the round-trip can be asserted under Node). The two
+ * describe the SAME runtime API with different types, so the parameter types
+ * are read off `SubtleCrypto` itself rather than named. That is what lets the
+ * Worker join the typecheck gate at all — it is why `server/` was excluded
+ * from it before.
+ */
+type KeyData = Parameters<SubtleCrypto['importKey']>[1];
+type BinaryData = Parameters<SubtleCrypto['digest']>[1];
+type DeriveAlgorithm = Parameters<SubtleCrypto['deriveBits']>[0];
+
+/**
+ * ECDH against a peer's public key.
+ *
+ * workerd's type generator renames the `public` field to `$public` because
+ * `public` is a TypeScript modifier keyword. The property the RUNTIME reads is
+ * `public`, in Workers and in browsers alike — so the object below is correct
+ * as written and the cast exists to reconcile two type definitions, not to
+ * paper over a wrong shape.
+ */
+function ecdh(publicKey: CryptoKey): DeriveAlgorithm {
+  return { name: 'X25519', public: publicKey } as unknown as DeriveAlgorithm;
+}
+
+/** `exportKey('raw', …)` always yields bytes; only the JWK overload does not. */
+async function exportRaw(key: CryptoKey): Promise<ArrayBuffer> {
+  return (await crypto.subtle.exportKey('raw', key)) as ArrayBuffer;
+}
+
 export interface SealedBlob {
   /** Ephemeral X25519 public key, base64. */
   epk: string;
@@ -30,42 +62,57 @@ export function b64encode(bytes: ArrayBuffer | Uint8Array): string {
   return btoa(s);
 }
 
-export function b64decode(s: string): Uint8Array {
+/**
+ * Strict base64 in, bytes out.
+ *
+ * The shape is checked before `atob` rather than trusted after it, because
+ * `atob` is lenient: it accepts non-canonical input and returns bytes for it.
+ * The caller that matters is the pairing public key — "returns bytes" there
+ * means a device enrolled with a key nothing can ever seal to, and a sync that
+ * is silently empty forever afterwards.
+ *
+ * The `<ArrayBuffer>` is load-bearing, not decoration: a bare `Uint8Array` is
+ * `Uint8Array<ArrayBufferLike>`, which WebCrypto's `BufferSource` does not
+ * accept when this file is compiled against the DOM lib for the Node test run.
+ */
+export function b64decode(s: string): Uint8Array<ArrayBuffer> {
+  if (
+    s.length === 0 ||
+    s.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(s)
+  ) {
+    throw new Error('Invalid base64');
+  }
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
 
+/** Base64url, unpadded — safe in a header, a URL, or a JSON string. */
+export function b64url(bytes: ArrayBuffer | Uint8Array): string {
+  return b64encode(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
 /** Seal a JSON payload to a device's X25519 public key. */
 export async function seal(recipientPublicKeyB64: string, payload: unknown): Promise<SealedBlob> {
   const recipient = await crypto.subtle.importKey(
     'raw',
-    b64decode(recipientPublicKeyB64) as BufferSource,
+    b64decode(recipientPublicKeyB64) as KeyData,
     { name: 'X25519' },
     false,
     [],
   );
   // generateKey is typed as CryptoKey | CryptoKeyPair; X25519 always yields a
-  // pair, but the DOM lib cannot narrow it from the algorithm name.
+  // pair, but neither type dialect can narrow it from the algorithm name.
   const ephemeral = (await crypto.subtle.generateKey({ name: 'X25519' }, true, [
     'deriveBits',
   ])) as CryptoKeyPair;
-  const shared = await crypto.subtle.deriveBits(
-    // The field is `public` at runtime, in Workers and in Node alike.
-    // @cloudflare/workers-types generates it as `$public` because its codegen
-    // escapes TypeScript reserved words, so the name is asserted here rather
-    // than changed — renaming it to satisfy the types would silently break the
-    // key agreement, which is the one failure this file cannot afford.
-    { name: 'X25519', public: recipient } as Parameters<SubtleCrypto['deriveBits']>[0],
-    ephemeral.privateKey,
-    256,
-  );
+  const shared = await crypto.subtle.deriveBits(ecdh(recipient), ephemeral.privateKey, 256);
   // HKDF over the ECDH output — the raw shared secret is not uniformly random
   // and must never be used as a key directly.
-  const ikm = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
-  // 'raw' always yields bytes; the signature is widened by the 'jwk' overload.
-  const epkRaw = (await crypto.subtle.exportKey('raw', ephemeral.publicKey)) as ArrayBuffer;
+  const ikm = await crypto.subtle.importKey('raw', shared as KeyData, 'HKDF', false, ['deriveKey']);
+  const epkRaw = await exportRaw(ephemeral.publicKey);
   const aes = await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(epkRaw), info: enc.encode('wafra/v1/seal') },
     ikm,
@@ -77,7 +124,7 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
   const ct = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     aes,
-    enc.encode(JSON.stringify(payload)),
+    enc.encode(JSON.stringify(payload)) as BinaryData,
   );
   return { epk: b64encode(epkRaw), iv: b64encode(iv), ct: b64encode(ct) };
 }
@@ -87,14 +134,27 @@ export async function seal(recipientPublicKeyB64: string, payload: unknown): Pro
  * cannot be used to impersonate a device or push rows into someone's queue.
  */
 export async function hashToken(token: string): Promise<string> {
-  return b64encode(await crypto.subtle.digest('SHA-256', enc.encode(token)));
+  return b64encode(await crypto.subtle.digest('SHA-256', enc.encode(token) as BinaryData));
+}
+
+/**
+ * A keyed, one-way replay identifier. Unlike a plain message hash, a D1 dump
+ * cannot be searched against a guessed bank alert without the ingest token,
+ * and that token is never stored by the Worker.
+ */
+export async function keyedFingerprint(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret) as KeyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return b64encode(await crypto.subtle.sign('HMAC', key, enc.encode(value) as BinaryData));
 }
 
 export function randomToken(): string {
-  return b64encode(crypto.getRandomValues(new Uint8Array(32)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return b64url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 /** Constant-time compare, so token lookup cannot be timed character by character. */

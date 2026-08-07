@@ -1,10 +1,12 @@
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   TextInput,
@@ -17,34 +19,40 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { TrendCurve } from '@/components/ui/charts';
 import { AccountTile } from '@/components/ui/tile';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useLanguage } from '@/hooks/use-language';
+import { usePullToRefresh } from '@/hooks/use-auto-import';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { isInactiveAccount, openDues } from '@/lib/cards';
+import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { tapped } from '@/lib/haptics';
 import { netWorthSeries } from '@/lib/analytics';
+import { summarizeForeignActivity } from '@/lib/fx-summary';
 import {
-  cardTitle,
   formatAED,
   formatAmount,
   monthKey,
   monthLabel,
   parseAmountToFils,
-  shortDate,
-  toISODate,
+  totalAsShown,
 } from '@/lib/format';
 import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
+import { t, tf, type StringKey } from '@/lib/i18n';
 
 
-const KIND_META: Record<AccountKind, { label: string; icon: import('@/components/ui/icon').IconName }> = {
-  bank: { label: 'Bank', icon: 'bank' },
-  card: { label: 'Card', icon: 'wallet' },
-  cash: { label: 'Cash', icon: 'cash' },
+const KIND_META: Record<AccountKind, { labelKey: StringKey; icon: import('@/components/ui/icon').IconName }> = {
+  bank: { labelKey: 'accountKindBank', icon: 'bank' },
+  card: { labelKey: 'accountKindCard', icon: 'wallet' },
+  cash: { labelKey: 'accountKindCash', icon: 'cash' },
 };
 
 const ACCOUNT_COLORS = ['#2DD4A8', '#60A5FA', '#E3B54A', '#F472B6', '#A78BFA', '#FB923C'];
@@ -57,23 +65,36 @@ const isIconName = (v: string): v is (typeof GOAL_ICONS)[number] =>
 /** "4 minutes ago", "yesterday" — a timestamp nobody has to decode. */
 function relativeSince(ts: number, now: Date): string {
   const mins = Math.max(0, Math.round((now.getTime() - ts) / 60_000));
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  if (mins < 1) return t('justNow');
+  if (mins < 60) return tf('minutesAgo', { count: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  if (hours < 24) return tf('hoursAgo', { count: hours });
   const days = Math.round(hours / 24);
-  return days === 1 ? 'yesterday' : `${days} days ago`;
+  return days === 1 ? t('yesterday') : tf('daysAgo', { count: days });
 }
 
 export default function WalletScreen() {
   const theme = useTheme();
+  const dark = useColorScheme() === 'dark';
+  const language = useLanguage();
+  const enter = useScreenEntering();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
-  const { state, addAccount, editAccount, deleteAccount, payCardDue, addGoal, editGoal, deleteGoal } =
-    useStore();
+  const {
+    state,
+    addAccount,
+    editAccount,
+    deleteAccount,
+    addGoal,
+    editGoal,
+    deleteGoal,
+    mergeRenewedCard,
+    markCardsDistinct,
+  } = useStore();
+  // Every tab that shows money the inbox produces can now go and refresh it.
+  const { refreshing, onRefresh } = usePullToRefresh();
 
   const now = useMemo(() => new Date(), []);
-  const todayISO = toISODate(now);
 
   const [adderVisible, setAdderVisible] = useState(false);
   const [name, setName] = useState('');
@@ -86,6 +107,11 @@ export default function WalletScreen() {
   const [goalTarget, setGoalTarget] = useState('');
   const [goalIcon, setGoalIcon] = useState(GOAL_ICONS[0]);
 
+  // The curve is an SVG, so it needs a pixel width rather than a percentage.
+  // Measured once from the row it sits in, which is what keeps it correct on a
+  // tablet and under RTL.
+  const [curveWidth, setCurveWidth] = useState(0);
+
   // Scans every transaction once per account, so it is kept off the render path.
   const total = useMemo(() => netWorthFils(state), [state]);
 
@@ -93,15 +119,27 @@ export default function WalletScreen() {
    * Movement since the start of the six-month window. A single figure with no
    * direction is a number; with a direction it is an answer.
    */
+  const worthSeries = useMemo(() => netWorthSeries(state).slice(-6), [state]);
   const worthChange = useMemo(() => {
-    const series = netWorthSeries(state);
+    const series = worthSeries;
     if (series.length < 2) return null;
     const first = series[0];
-    return { fils: total - first.fils, since: monthLabel(first.key, true) };
-  }, [state, total]);
+    // Both ends come from the series. Subtracting the headline `total` from
+    // it was subtracting two different definitions of net worth: the headline
+    // counts only bank-quoted balances on live accounts, the series counts
+    // opening balances plus every transaction. The difference between them is
+    // not a movement — it is the gap between two ways of measuring.
+    const last = series[series.length - 1];
+    return { fils: last.fils - first.fils, since: monthLabel(first.key, true) };
+  }, [worthSeries]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  const reissues = useMemo(() => reissueSuggestions(state, now), [state, now]);
+  // Totalled AS SHOWN, because this figure is printed directly above the
+  // rows it covers. Summing the exact fils and rounding once gives a heading
+  // that can differ from its own list by a dirham — the same defect that put
+  // "AED 1,025/mo" over rows adding to 1,022 on Bills.
   const duesTotalFils = useMemo(
-    () => dues.reduce((sum, d) => sum + d.remainingFils, 0),
+    () => totalAsShown(dues.map((d) => d.remainingFils)),
     [dues],
   );
 
@@ -115,6 +153,11 @@ export default function WalletScreen() {
       ),
     [state, now],
   );
+  const cardGroups = useMemo(() => groupCardsByBank(cards), [cards]);
+  // One physical-feeling object gives Wallet an immediate anchor. The same
+  // account is omitted from the compact rows below, so this is hierarchy —
+  // not duplicated financial information.
+  const featuredCard = cards[0] ?? null;
   const nonCardAccounts = useMemo(
     () =>
       state.accounts.filter(
@@ -132,15 +175,41 @@ export default function WalletScreen() {
     [state.transactions],
   );
 
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
+  );
+  /**
+   * Both halves of a move between the user's own accounts are excluded, as
+   * they are on Home and Flow — otherwise the second line under a card reads
+   * back the sweep that left it as money spent.
+   *
+   * The live-account set is deliberately not applied, for the reason spelled
+   * out over the same map on the Cards screen: this is a per-account figure
+   * shown on that account's own row, and no total is built from it.
+   */
   const monthSpendByAccount = useMemo(() => {
     const key = monthKey(now);
     const map = new Map<string, number>();
     for (const t of state.transactions) {
-      if (t.type !== 'expense' || t.isTransfer || monthKey(t.date) !== key) continue;
+      if (!isSpending(t, undefined, internal) || monthKey(t.date) !== key) continue;
       map.set(t.accountId, (map.get(t.accountId) ?? 0) + t.amountFils);
     }
     return map;
+  }, [state.transactions, now, internal]);
+
+  const currencies = useMemo(() => {
+    const key = monthKey(now);
+    return summarizeForeignActivity(
+      state.transactions,
+      (transaction) => monthKey(transaction.date) === key,
+    ).groups;
   }, [state.transactions, now]);
+  const currenciesTotalFils = useMemo(
+    () => totalAsShown(currencies.map((group) => group.localFils)),
+    [currencies],
+  );
 
   const saveAccount = () => {
     if (!name.trim()) return;
@@ -167,8 +236,8 @@ export default function WalletScreen() {
   const addToGoal = (goalId: string, goalTitle2: string) => {
     if (Platform.OS === 'web') return;
     Alert.prompt?.(
-      `Add to ${goalTitle2}`,
-      'Amount in AED',
+      tf('addToGoal', { goal: goalTitle2 }),
+      t('amountInAed'),
       (text) => {
         const fils = parseAmountToFils(text ?? '');
         const goal = state.goals.find((g) => g.id === goalId);
@@ -187,74 +256,50 @@ export default function WalletScreen() {
 
   const confirmDeleteAccount = (id: string, accName: string) => {
     Alert.alert(
-      'Remove account?',
-      `"${accName}" and all its transactions will be deleted. This cannot be undone.`,
+      t('removeAccountTitle'),
+      tf('removeAccountBody', { name: accName }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteAccount(id) },
+        { text: t('cancel'), style: 'cancel' },
+        { text: t('delete'), style: 'destructive', onPress: () => deleteAccount(id) },
       ],
     );
   };
 
   const accountOptions = (account: Account) => {
-    Alert.alert(account.name, account.archived ? 'Hidden from lists.' : undefined, [
+    Alert.alert(account.name, account.archived ? t('hiddenFromLists') : undefined, [
       {
-        text: account.archived ? 'Unhide' : 'Hide from lists',
+        text: account.archived ? t('unhide') : t('hideFromLists'),
         onPress: () => editAccount(account.id, { archived: !account.archived }),
       },
       {
-        text: 'Delete',
+        text: t('delete'),
         style: 'destructive',
         onPress: () => confirmDeleteAccount(account.id, account.name),
       },
-      { text: 'Cancel', style: 'cancel' },
+      { text: t('cancel'), style: 'cancel' },
     ]);
-  };
-
-  const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
-    Alert.alert(
-      `Pay ${accName}?`,
-      `Marks ${formatAED(remainingFils, { decimals: false })} as paid and records the transfer.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark paid',
-          onPress: () =>
-            payCardDue(
-              dueId,
-              remainingFils,
-              {
-                type: 'income',
-                amountFils: remainingFils,
-                category: 'other',
-                accountId,
-                title: `${accName} payment`,
-                date: todayISO,
-                source: 'manual',
-                isTransfer: true,
-              },
-              true,
-            ),
-        },
-      ],
-    );
   };
 
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          contentContainerStyle={[styles.content, { paddingBottom: tabBarClearance }]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+          }
+          showsVerticalScrollIndicator={false}>
           <View style={styles.headerRow}>
             <ThemedText type="title">{t('walletTitle')}</ThemedText>
             <View style={styles.headerActions}>
               <IconButton
                 name="sliders"
-                label="Settings"
+                label={t('settingsTitle')}
                 onPress={() => router.push('/settings')}
               />
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="New account"
+                accessibilityLabel={t('newAccount')}
                 onPress={() => setAdderVisible(true)}
                 style={[styles.addBtn, { backgroundColor: theme.primary }]}>
                 <Icon name="plus" size={19} color={theme.onPrimary} strokeWidth={2.2} />
@@ -262,7 +307,9 @@ export default function WalletScreen() {
             </View>
           </View>
 
-          {/* The one figure this screen exists to show. */}
+          {/* The one figure this screen exists to show. No card and no
+              gradient behind it: theme.ts asks for dividers over boxes, and the
+              three hard-coded hexes the fill used exist in neither palette. */}
           <View style={styles.worth}>
             <ThemedText type="micro" themeColor="textTertiary">
               {t('netWorth')}
@@ -275,93 +322,128 @@ export default function WalletScreen() {
                 {formatAmount(total, { decimals: false })}
               </ThemedText>
             </View>
-            {worthChange && (
-              <ThemedText
-                type="meta"
-                tabular
-                style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
-                {worthChange.fils >= 0 ? '+' : '−'}
-                {formatAmount(Math.abs(worthChange.fils), { decimals: false })} since{' '}
-                {worthChange.since}
-              </ThemedText>
-            )}
           </View>
+
+          {/* The shape behind that figure — a line, not bars.
+              This was six columns scaled 10–40px across the window's own
+              min/max, so five of the six months rendered as near-identical
+              stubs beside one tall block and the card read as "you had nothing
+              until August". Bars are also the wrong mark: a bar says "these are
+              six separate amounts", and a balance is one amount that never
+              stopped existing between the months. TrendCurve is the shared
+              primitive for exactly that. */}
+          {worthSeries.length > 1 && (
+            <Animated.View
+              entering={enter(FadeInDown.duration(320))}
+              style={styles.section}>
+              <SectionHeader title={t('netWorth6mo')} />
+              <View
+                accessible
+                accessibilityLabel={t('netWorth6mo')}
+                onLayout={(e) => setCurveWidth(e.nativeEvent.layout.width)}>
+                {curveWidth > 0 && (
+                  <TrendCurve points={worthSeries} width={curveWidth} height={104} />
+                )}
+              </View>
+              {/* Every month named. Printing only the first and last left the
+                  four in between unlabelled on a chart whose whole subject is
+                  when things moved. */}
+              <View style={styles.axis}>
+                {worthSeries.map((point, index) => (
+                  <ThemedText
+                    key={point.key}
+                    type="nano"
+                    themeColor={index === worthSeries.length - 1 ? 'text' : 'textTertiary'}>
+                    {monthLabel(point.key, true).split(' ')[0]}
+                  </ThemedText>
+                ))}
+              </View>
+              {worthChange && (
+                <ThemedText
+                  type="meta"
+                  tabular
+                  style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
+                  {tf('walletChangeSince', {
+                    amount: `${worthChange.fils >= 0 ? '+' : '−'}${formatAmount(
+                      Math.abs(worthChange.fils),
+                      { decimals: false },
+                    )}`,
+                    date: worthChange.since,
+                  })}
+                </ThemedText>
+              )}
+            </Animated.View>
+          )}
+
+          {currencies.length > 0 && (
+            <View style={styles.section}>
+              <SectionHeader
+                title={t('walletCurrencies')}
+                right={t('review')}
+                onPressRight={() => router.push('/currency')}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('walletCurrencies')}
+                onPress={() => {
+                  tapped();
+                  router.push('/currency');
+                }}
+                style={({ pressed }) => [
+                  styles.summaryLink,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                  },
+                ]}>
+                <View style={[styles.summaryIcon, { backgroundColor: theme.primarySoft }]}>
+                  <Icon name="plane" size={17} color={theme.primary} />
+                </View>
+                <View style={styles.summaryCopy}>
+                  <ThemedText type="smallBold">{t('currencyActivityTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                    {currencies.slice(0, 3).map((group) => group.currency).join(' · ')}
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                  {formatAED(currenciesTotalFils, { decimals: false })}
+                </ThemedText>
+                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+              </Pressable>
+            </View>
+          )}
 
           {/* Card dues */}
           {dues.length > 0 && (
             <View style={styles.section}>
-              <SectionHeader
-                title={t('cardPaymentsDue')}
-                right={`${formatAED(duesTotalFils, { decimals: false })} total`}
-              />
-              {dues.map(({ due, status, daysLeft, remainingFils, belowMinimum }, i) => {
-                const account = state.accounts.find((a) => a.id === due.accountId);
-                const urgent = status === 'urgent' || status === 'overdue';
-                // Only the most pressing due is shouted in the alert color. A
-                // column of identical red rows reads as one alarm and hides
-                // which card actually needs paying first.
-                const leading = i === 0 && urgent;
-                return (
-                  <Animated.View key={due.id} entering={FadeInDown.duration(300)}>
-                    <View
-                      style={[
-                        styles.dueRow,
-                        i > 0 && {
-                          borderTopWidth: StyleSheet.hairlineWidth,
-                          borderTopColor: theme.cardBorder,
-                        },
-                      ]}>
-                      <View
-                        style={[
-                          styles.dueMarker,
-                          { backgroundColor: leading ? theme.expense : urgent ? `${theme.expense}55` : theme.track },
-                        ]}
-                      />
-                      <View style={styles.dueInfo}>
-                        <ThemedText type="default" numberOfLines={1}>
-                          {cardTitle(account?.name ?? 'Card')}
-                        </ThemedText>
-                        <ThemedText
-                          type="small"
-                          themeColor={leading ? undefined : 'textSecondary'}
-                          style={leading ? { color: theme.expense } : undefined}>
-                          {status === 'overdue'
-                            ? `${-daysLeft}d overdue`
-                            : `Pay by ${shortDate(due.dueDate)} · ${daysLeft}d left`}
-                          {belowMinimum ? ` · min ${formatAED(due.minDueFils, { decimals: false })}` : ''}
-                        </ThemedText>
-                      </View>
-                      <View style={styles.dueRight}>
-                        <ThemedText
-                          type="heading"
-                          tabular
-                          style={leading ? { color: theme.expense } : undefined}>
-                          {formatAED(remainingFils, { decimals: false })}
-                        </ThemedText>
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={`Mark ${account?.name ?? 'card'} as paid`}
-                          onPress={() =>
-                            onPayDue(due.id, remainingFils, due.accountId, account?.name ?? 'Card')
-                          }
-                          hitSlop={8}
-                          style={({ pressed }) => [
-                            styles.payBtn,
-                            {
-                              backgroundColor: pressed ? `${theme.primary}2e` : `${theme.primary}17`,
-                              borderColor: `${theme.primary}44`,
-                              transform: [{ scale: pressed ? 0.97 : 1 }],
-                            },
-                          ]}>
-                          <ThemedText type="nano" style={{ color: theme.primary }}>
-                            Mark paid
-                          </ThemedText>
-                        </Pressable>
-                      </View>
-                    </View>
-                  </Animated.View>
-                );
-              })}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('cardPaymentsDue')}
+                onPress={() => {
+                  tapped();
+                  router.push('/bills');
+                }}
+                style={({ pressed }) => [
+                  styles.summaryLink,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+                  },
+                ]}>
+                <View style={[styles.summaryIcon, { backgroundColor: theme.expenseSoftBg }]}>
+                  <Icon name="wallet" size={17} color={theme.expense} />
+                </View>
+                <View style={styles.summaryCopy}>
+                  <ThemedText type="smallBold">{t('cardPaymentsDue')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {tf('itemsTracked', { count: dues.length })}
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                  {formatAED(duesTotalFils, { decimals: false })}
+                </ThemedText>
+                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+              </Pressable>
             </View>
           )}
 
@@ -373,58 +455,227 @@ export default function WalletScreen() {
                 right={t('seeAll')}
                 onPressRight={() => router.push('/cards')}
               />
-              <View>
-                {cards.map((account, i) => {
-                  const isCredit = account.cardType === 'credit';
-                  // Only figures the bank itself quoted (balance/outstanding
-                  // SMS) are shown as balances. Partial SMS history can't
-                  // reconstruct one, so without a quote we show month spend.
-                  const reliable = reliableBalanceFils(state, account);
-                  const display = reliable !== null ? Math.abs(reliable) : null;
-                  const spent = monthSpendByAccount.get(account.id) ?? 0;
-                  return (
-                    <Pressable
-                      key={account.id}
-                      onLongPress={() => accountOptions(account)}
-                      style={[
-                        styles.accountRow,
-                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-                      ]}>
-                      <AccountTile account={account} />
-                      <View style={styles.accountInfo}>
-                        <ThemedText type="default" numberOfLines={1}>
-                          {cardTitle(account.name)}
+              {/* A card that has a statement but has never been spent on is
+                  almost certainly a reissue: the bank kept the account and
+                  changed the digits, so the history is on the old number and
+                  the bill arrived on the new one. Offered, never done — a
+                  brand-new card looks identical, and merging two real cards
+                  is a corruption the user cannot see. */}
+              {reissues.map((r) => {
+                const fresh = state.accounts.find((a) => a.id === r.newAccountId);
+                const prior = state.accounts.find((a) => a.id === r.candidateIds[0]);
+                if (!fresh || !prior) return null;
+                return (
+                  <View
+                    key={r.newAccountId}
+                    style={[styles.reissue, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+                    <ThemedText type="small">{t('sameCardRenewed')}</ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {tf('renewedCardDetected', { last4: fresh.last4 ?? '••••', name: prior.name })}
+                    </ThemedText>
+                    <View style={styles.reissueActions}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={tf('linkCardsA11y', {
+                          old: prior.last4 ?? '••••',
+                          next: fresh.last4 ?? '••••',
+                        })}
+                        onPress={() => {
+                          tapped();
+                          mergeRenewedCard(prior.id, fresh.id);
+                        }}
+                        style={[styles.reissueBtn, { backgroundColor: theme.primary }]}>
+                        <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                          {tf('sameAsCard', { last4: prior.last4 ?? '••••' })}
                         </ThemedText>
-                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                          {isCredit ? 'Credit' : 'Debit'}
-                          {account.last4 ? ` ·· ${account.last4}` : ''}
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={tf('keepCardSeparateA11y', { last4: fresh.last4 ?? '••••' })}
+                        onPress={() => {
+                          tapped();
+                          markCardsDistinct(fresh.id);
+                        }}
+                        style={[styles.reissueBtn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
+                        <ThemedText type="nano" themeColor="textSecondary">
+                          {t('differentCard')}
+                        </ThemedText>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })}
+              {featuredCard && (() => {
+                const figure = cardFigure(state, featuredCard, now);
+                const spent = monthSpendByAccount.get(featuredCard.id) ?? 0;
+                const issuer =
+                  cardGroups.find((group) =>
+                    group.accounts.some((account) => account.id === featuredCard.id),
+                  )?.bank ?? featuredCard.name;
+                return (
+                  <Pressable
+                    accessibilityLabel={`${featuredCard.name} ${featuredCard.last4 ?? ''}`}
+                    onLongPress={() => accountOptions(featuredCard)}
+                    style={({ pressed }) => [
+                      styles.featuredCard,
+                      {
+                        borderColor: dark ? '#4C7A69' : '#285D4C',
+                        transform: [{ scale: pressed ? 0.985 : 1 }],
+                      },
+                    ]}>
+                    <LinearGradient
+                      pointerEvents="none"
+                      colors={dark ? ['#285D4C', '#183C31', '#152820'] : ['#2D725A', '#1D503F', '#193A30']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
+                    <View pointerEvents="none" style={styles.featuredOrbLarge} />
+                    <View pointerEvents="none" style={styles.featuredOrbSmall} />
+
+                    <View style={styles.featuredTop}>
+                      <View style={styles.featuredIssuer}>
+                        <View style={styles.featuredMark}>
+                          <Icon name="bank" size={15} color="#F7FBF8" strokeWidth={1.9} />
+                        </View>
+                        <ThemedText type="smallBold" numberOfLines={1} style={styles.featuredText}>
+                          {issuer}
                         </ThemedText>
                       </View>
-                      <View style={styles.accountRight}>
-                        <ThemedText
-                          type="smallBold"
-                          tabular
-                          style={{
-                            color:
-                              isCredit && display !== null && display > 0
-                                ? theme.expense
-                                : theme.text,
-                            fontSize: 15,
-                          }}>
-                          {formatAED(display ?? spent, { decimals: false })}
+                      <ThemedText type="micro" style={styles.featuredMuted}>
+                        {featuredCard.cardType === 'credit' ? t('credit') : t('debit')}
+                      </ThemedText>
+                    </View>
+
+                    <View style={styles.featuredChip}>
+                      <View style={styles.featuredChipLine} />
+                      <View style={styles.featuredChipLine} />
+                    </View>
+
+                    <View style={styles.featuredBalanceRow}>
+                      <View style={styles.featuredBalanceCopy}>
+                        <ThemedText type="micro" style={styles.featuredMuted}>
+                          {figure.kind === 'owed'
+                            ? t('owed')
+                            : figure.kind === 'balance'
+                              ? t('perBankSms')
+                              : t('noBalanceYet')}
                         </ThemedText>
-                        <ThemedText type="micro" themeColor="textSecondary">
-                          {display !== null
-                            ? isCredit
-                              ? t('outstanding')
-                              : t('perBankSms')
-                            : t('spentThisMonthCaption')}
+                        <View style={styles.featuredMoney}>
+                          <ThemedText type="micro" style={styles.featuredMuted}>AED</ThemedText>
+                          <ThemedText type="heading" tabular style={styles.featuredText}>
+                            {figure.fils === null
+                              ? '—'
+                              : formatAmount(Math.abs(figure.fils), { decimals: false })}
+                          </ThemedText>
+                        </View>
+                      </View>
+                      <ThemedText type="small" tabular style={styles.featuredText}>
+                        •••• {featuredCard.last4 ?? '••••'}
+                      </ThemedText>
+                    </View>
+
+                    <View style={styles.featuredFooter}>
+                      <ThemedText type="meta" numberOfLines={1} style={styles.featuredMuted}>
+                        {featuredCard.name}
+                      </ThemedText>
+                      <View style={styles.featuredSpend}>
+                        <ThemedText type="nano" style={styles.featuredMuted}>
+                          {t('thisMonth')}
+                        </ThemedText>
+                        <ThemedText type="smallBold" tabular numberOfLines={1} style={styles.featuredText}>
+                          {spent > 0
+                            ? formatAED(spent, { decimals: false })
+                            : t('nothingSpentThisMonth')}
                         </ThemedText>
                       </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                    </View>
+                  </Pressable>
+                );
+              })()}
+              {/* Grouped under the bank that issued them. Eleven flat rows,
+                  six of them called "FAB Credit Card", told the user nothing
+                  about whether that was six cards or one card the app had
+                  failed to recognise. Under a FAB heading it is obviously
+                  six FAB cards — and if that is wrong, it is obviously
+                  wrong. */}
+              {cardGroups.map((group) => {
+                const compactAccounts = group.accounts.filter(
+                  (account) => account.id !== featuredCard?.id,
+                );
+                if (compactAccounts.length === 0) return null;
+                return (
+                <View key={group.bank} style={styles.bankGroup}>
+                  <ThemedText type="micro" themeColor="textTertiary" style={styles.bankName}>
+                    {group.bank}
+                    {compactAccounts.length > 1 ? ` · ${compactAccounts.length}` : ''}
+                  </ThemedText>
+                  {compactAccounts.map((account, i) => {
+                    const isCredit = account.cardType === 'credit';
+                    // One meaning per row: what you owe, or what you have.
+                    // Spending moves to the second line, where it reads as
+                    // context rather than as money.
+                    const figure = cardFigure(state, account, now);
+                    const spent = monthSpendByAccount.get(account.id) ?? 0;
+                    return (
+                      <Pressable
+                        key={account.id}
+                        onLongPress={() => accountOptions(account)}
+                        accessibilityLabel={`${account.name} ${account.last4 ?? ''}`}
+                        style={[
+                          styles.accountRow,
+                          i > 0 && {
+                            borderTopWidth: StyleSheet.hairlineWidth,
+                            borderTopColor: theme.cardBorder,
+                          },
+                        ]}>
+                        <AccountTile account={account} />
+                        <View style={styles.accountInfo}>
+                          <ThemedText type="default" numberOfLines={1}>
+                            {isCredit ? t('credit') : t('debit')}
+                            {account.last4 ? ` ·· ${account.last4}` : ''}
+                          </ThemedText>
+                          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                            {spent > 0
+                              ? tf('cardSpentThisMonth', {
+                                  amount: formatAmount(spent, { decimals: false }),
+                                })
+                              : t('nothingSpentThisMonth')}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.accountRight}>
+                          <View style={styles.compactMoney}>
+                            <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                            <ThemedText
+                              type="smallBold"
+                              tabular
+                              numberOfLines={1}
+                            style={{
+                              color:
+                                figure.kind === 'owed' && (figure.fils ?? 0) > 0
+                                  ? theme.expense
+                                  : theme.text,
+                              fontSize: 15,
+                            }}>
+                              {figure.fils === null
+                                ? '—'
+                                : formatAmount(Math.abs(figure.fils), { decimals: false })}
+                            </ThemedText>
+                          </View>
+                          <ThemedText type="micro" themeColor="textSecondary">
+                            {figure.kind === 'owed'
+                              ? t('owed')
+                              : figure.kind === 'balance'
+                                ? t('perBankSms')
+                                : t('noBalanceYet')}
+                          </ThemedText>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                );
+              })}
             </View>
           )}
 
@@ -450,14 +701,17 @@ export default function WalletScreen() {
                         {account.name}
                       </ThemedText>
                       <ThemedText type="small" themeColor="textSecondary">
-                        {meta.label}
+                        {t(meta.labelKey)}
                         {account.last4 ? ` ·· ${account.last4}` : ''}
                       </ThemedText>
                     </View>
                     <View style={styles.accountRight}>
-                      <ThemedText type="smallBold" tabular style={{ fontSize: 15 }}>
-                        {balance !== null ? formatAED(balance, { decimals: false }) : '—'}
-                      </ThemedText>
+                      <View style={styles.compactMoney}>
+                        <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                        <ThemedText type="smallBold" tabular numberOfLines={1} style={{ fontSize: 15 }}>
+                          {balance !== null ? formatAmount(balance, { decimals: false }) : '—'}
+                        </ThemedText>
+                      </View>
                       {fromBank ? (
                         <ThemedText type="micro" themeColor="textSecondary">
                           {t('perBankSms')}
@@ -473,7 +727,7 @@ export default function WalletScreen() {
               })}
               {nonCardAccounts.length === 0 && (
                 <ThemedText type="small" themeColor="textSecondary">
-                  No bank or cash accounts yet.
+                  {t('noAccountsYet')}
                 </ThemedText>
               )}
             </View>
@@ -509,13 +763,13 @@ export default function WalletScreen() {
                           {account.name}
                         </ThemedText>
                         <ThemedText type="small" themeColor="textSecondary">
-                          {account.archived ? 'Hidden' : 'No activity for 90+ days'}
+                          {account.archived ? t('hidden') : t('noActivity90')}
                         </ThemedText>
                       </View>
                     </Pressable>
                   ))}
                   <ThemedText type="micro" themeColor="textSecondary" style={styles.hint}>
-                    Long-press to unhide or delete
+                    {t('longPressInactive')}
                   </ThemedText>
                 </View>
               )}
@@ -536,9 +790,9 @@ export default function WalletScreen() {
                   key={goal.id}
                   onPress={() => addToGoal(goal.id, goal.title)}
                   onLongPress={() =>
-                    Alert.alert('Delete goal?', goal.title, [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Delete', style: 'destructive', onPress: () => deleteGoal(goal.id) },
+                    Alert.alert(t('deleteGoalTitle'), goal.title, [
+                      { text: t('cancel'), style: 'cancel' },
+                      { text: t('delete'), style: 'destructive', onPress: () => deleteGoal(goal.id) },
                     ])
                   }
                   style={styles.goalRow}>
@@ -578,9 +832,9 @@ export default function WalletScreen() {
                   <Icon name="target" size={17} color={theme.primary} strokeWidth={1.8} />
                 </View>
                 <View style={styles.accountInfo}>
-                  <ThemedText type="smallBold">Set a savings goal</ThemedText>
+                  <ThemedText type="smallBold">{t('setSavingsGoal')}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">
-                    Umrah, a car, a rainy-day fund — track it here.
+                    {t('savingsGoalHint')}
                   </ThemedText>
                 </View>
                 <Icon name="chevron-right" size={16} color={theme.textSecondary} />
@@ -610,16 +864,23 @@ export default function WalletScreen() {
               <Icon name="mail" size={17} color={theme.textSecondary} />
               <View style={styles.scanText}>
                 <ThemedText type="small">
-                  {!isSmsScanningAvailable()
-                    ? 'Paste a bank message'
+                  {Platform.OS === 'ios'
+                    ? t('importBankActivity')
+                    : !isSmsScanningAvailable()
+                    ? t('pasteBankMessage')
                     : state.lastScanTs > 0
-                      ? `Inbox scanned ${relativeSince(state.lastScanTs, now)}`
-                      : 'Inbox not read yet'}
+                      ? tf('inboxScannedAgo', { time: relativeSince(state.lastScanTs, now) })
+                      : t('inboxNotRead')}
                 </ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary" tabular>
-                  {!isSmsScanningAvailable()
-                    ? 'Reading the inbox needs the Android app; pasting works anywhere'
-                    : `${smsCount} entr${smsCount === 1 ? 'y' : 'ies'} read on this device · nothing uploaded`}
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {Platform.OS === 'ios'
+                    ? t('importBankActivityIosDetail')
+                    : !isSmsScanningAvailable()
+                    ? t('inboxNeedsAndroid')
+                    : tf('entriesReadLocally', {
+                        count: smsCount,
+                        ending: smsCount === 1 ? 'y' : 'ies',
+                      })}
                 </ThemedText>
               </View>
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />
@@ -636,8 +897,8 @@ export default function WalletScreen() {
             onPress={() => {}}>
             <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
             <View style={styles.sheetHeader}>
-              <ThemedText type="heading">New account</ThemedText>
-              <Pressable onPress={() => setAdderVisible(false)}>
+              <ThemedText type="heading">{t('newAccount')}</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('close')} onPress={() => setAdderVisible(false)}>
                 <Icon name="close" size={20} color={theme.textSecondary} />
               </Pressable>
             </View>
@@ -645,9 +906,9 @@ export default function WalletScreen() {
             <TextInput
               value={name}
               onChangeText={setName}
-              placeholder="Account name (e.g. ADCB Savings)"
+              placeholder={t('accountNamePlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
             />
 
             <View style={styles.kindRow}>
@@ -664,7 +925,7 @@ export default function WalletScreen() {
                   ]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                     <Icon name={KIND_META[k].icon} size={13} color={theme.text} />
-                    <ThemedText type="small">{KIND_META[k].label}</ThemedText>
+                    <ThemedText type="small">{t(KIND_META[k].labelKey)}</ThemedText>
                   </View>
                 </Pressable>
               ))}
@@ -676,7 +937,7 @@ export default function WalletScreen() {
                 value={openingText}
                 onChangeText={setOpeningText}
                 keyboardType="numeric"
-                placeholder="Opening balance (optional)"
+                placeholder={t('openingBalanceOptional')}
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
               />
@@ -699,7 +960,7 @@ export default function WalletScreen() {
               onPress={saveAccount}
               disabled={!name.trim()}
               style={[styles.saveBtn, { backgroundColor: theme.primary, opacity: name.trim() ? 1 : 0.45 }]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Add account</ThemedText>
+              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('addAccount')}</ThemedText>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -713,8 +974,8 @@ export default function WalletScreen() {
             onPress={() => {}}>
             <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
             <View style={styles.sheetHeader}>
-              <ThemedText type="heading">New goal</ThemedText>
-              <Pressable onPress={() => setGoalVisible(false)}>
+              <ThemedText type="heading">{t('newGoalTitle')}</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('close')} onPress={() => setGoalVisible(false)}>
                 <Icon name="close" size={20} color={theme.textSecondary} />
               </Pressable>
             </View>
@@ -722,9 +983,9 @@ export default function WalletScreen() {
             <TextInput
               value={goalTitle}
               onChangeText={setGoalTitle}
-              placeholder="Goal (e.g. Umrah trip, new car)"
+              placeholder={t('goalPlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
             />
 
             <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
@@ -733,7 +994,7 @@ export default function WalletScreen() {
                 value={goalTarget}
                 onChangeText={setGoalTarget}
                 keyboardType="numeric"
-                placeholder="Target amount"
+                placeholder={t('targetAmount')}
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}
               />
@@ -766,7 +1027,7 @@ export default function WalletScreen() {
                   opacity: !goalTitle.trim() || !parseAmountToFils(goalTarget) ? 0.45 : 1,
                 },
               ]}>
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>Create goal</ThemedText>
+              <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('createGoal')}</ThemedText>
             </Pressable>
           </Pressable>
         </Pressable>
@@ -776,6 +1037,116 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
+  featuredCard: {
+    minHeight: 184,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.bottomSheet,
+    padding: Spacing.four,
+    overflow: 'hidden',
+    justifyContent: 'space-between',
+    // A floor on the separation between the four blocks. `space-between` alone
+    // distributes only the SLACK, and there was almost none: 48 of padding plus
+    // ~125 of content inside a 184 minimum left about 3px per gap, so the gold
+    // chip sat directly on top of the OWED label — visible on the first card on
+    // Wallet. With a gap the card grows to fit instead of packing.
+    gap: Spacing.three,
+  },
+  featuredOrbLarge: {
+    position: 'absolute',
+    width: 190,
+    height: 190,
+    borderRadius: 95,
+    borderWidth: 32,
+    borderColor: 'rgba(255,255,255,0.055)',
+    top: -92,
+    right: -58,
+  },
+  featuredOrbSmall: {
+    position: 'absolute',
+    width: 92,
+    height: 92,
+    borderRadius: 46,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    bottom: -52,
+    left: 52,
+  },
+  featuredTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  featuredIssuer: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  featuredMark: {
+    width: 30,
+    height: 30,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  featuredChip: {
+    width: 30,
+    height: 23,
+    borderRadius: 6,
+    paddingVertical: 5,
+    justifyContent: 'space-around',
+    backgroundColor: '#D8B873',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.42)',
+  },
+  featuredChipLine: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(72,55,24,0.55)',
+  },
+  featuredBalanceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  featuredBalanceCopy: { gap: 1 },
+  featuredMoney: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
+  featuredFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  featuredSpend: { flexShrink: 0, alignItems: 'flex-end', gap: 1 },
+  featuredText: { color: '#F7FBF8' },
+  featuredMuted: { color: 'rgba(247,251,248,0.72)' },
+  bankGroup: {
+    paddingTop: Spacing.two,
+  },
+  bankName: {
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    paddingBottom: Spacing.two - 4,
+  },
+  reissue: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.tile,
+    padding: Spacing.three,
+    gap: Spacing.two - 2,
+    marginBottom: Spacing.two,
+  },
+  reissueActions: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+    paddingTop: Spacing.two - 2,
+  },
+  reissueBtn: {
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two - 2,
+    borderRadius: Radius.full,
+  },
   root: {
     flex: 1,
     alignItems: 'center',
@@ -793,6 +1164,9 @@ const styles = StyleSheet.create({
   worth: { gap: Spacing.two, marginTop: -Spacing.two },
   worthRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
+  // One label per point, spread to the same width the curve is drawn to, so a
+  // month name sits under the part of the line it belongs to.
+  axis: { flexDirection: 'row', justifyContent: 'space-between' },
   scan: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -821,6 +1195,22 @@ const styles = StyleSheet.create({
   section: {
     gap: Spacing.two,
   },
+  summaryLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.two + 2,
+  },
+  summaryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  summaryCopy: { flex: 1, minWidth: 0, gap: 1 },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -839,12 +1229,16 @@ const styles = StyleSheet.create({
   },
   dueInfo: {
     flex: 1,
+    minWidth: 0,
     gap: 1,
   },
   dueRight: {
+    flexShrink: 0,
+    maxWidth: '42%',
     alignItems: 'flex-end',
     gap: Spacing.one + 2,
   },
+  compactMoney: { flexDirection: 'row', alignItems: 'baseline', gap: 4, flexShrink: 0 },
   payBtn: {
     paddingHorizontal: Spacing.two + 2,
     paddingVertical: Spacing.one + 3,
@@ -869,10 +1263,13 @@ const styles = StyleSheet.create({
   },
   accountInfo: {
     flex: 1,
+    minWidth: 0,
     gap: 1,
   },
   accountRight: {
+    flexShrink: 0,
     alignItems: 'flex-end',
+    marginStart: Spacing.two,
   },
   hint: {
     opacity: 0.8,
@@ -904,6 +1301,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: Spacing.three,
   },
   settingRow: {
     flexDirection: 'row',

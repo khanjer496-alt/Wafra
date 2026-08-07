@@ -9,9 +9,11 @@ import { Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { cardStatementView } from '@/lib/cards';
 import { shortDate } from '@/lib/format';
 import { useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
+import { t, tf } from '@/lib/i18n';
 
 interface CardDetailSheetProps {
   /** The card to show, or null to keep the sheet closed. */
@@ -29,30 +31,24 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
   const theme = useTheme();
   const { state } = useStore();
 
-  const data = useMemo(() => {
-    if (!account) return null;
-    const statements = state.cardDues
-      .filter((d) => d.accountId === account.id)
-      .slice()
-      .sort((a, b) => b.dueDate.localeCompare(a.dueDate));
-    // Every transfer on a credit card is a payment INTO it — you cannot spend
-    // out of a card by transfer.
-    const payments = state.transactions
-      .filter((t) => t.accountId === account.id && t.isTransfer)
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-    const paidTotal = payments.reduce((s, t) => s + t.amountFils, 0);
-    const open = statements.filter((d) => !d.settledAt && d.paidFils < d.totalDueFils);
-    const outstanding = open.reduce((s, d) => s + Math.max(0, d.totalDueFils - d.paidFils), 0);
-    const billed = open.reduce((s, d) => s + d.totalDueFils, 0);
-    return { statements, payments, paidTotal, outstanding, billed, openCount: open.length };
-  }, [account, state.cardDues, state.transactions]);
+  // Every rule about what a card owes lives in cards.ts, next to `openDues`
+  // and `allocatePayments` — and, unlike a .tsx, under test. This sheet got
+  // each of those rules wrong at some point precisely because it held its own
+  // copy of them.
+  const data = useMemo(
+    () => (account ? cardStatementView(state, account.id) : null),
+    [account, state],
+  );
 
   if (!account || !data) return null;
 
-  const settledShare = data.billed > 0 ? Math.min(1, (data.billed - data.outstanding) / data.billed) : 0;
+  const settledShare =
+    data.billedFils > 0
+      ? Math.min(1, (data.billedFils - data.outstandingFils) / data.billedFils)
+      : 0;
 
   return (
-    <BottomSheet visible onClose={onClose} title="Card detail">
+    <BottomSheet visible onClose={onClose} title={t('cardDetail')}>
       <View style={styles.head}>
         <AccountTile account={account} size={46} />
         <View style={styles.headText}>
@@ -60,24 +56,32 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
             {account.bankName ?? account.name}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
-            {account.cardType === 'credit' ? 'Credit' : 'Debit'}
+            {account.cardType === 'credit' ? t('credit') : t('debit')}
             {account.last4 ? ` ·· ${account.last4}` : ''}
           </ThemedText>
         </View>
       </View>
 
       {/* The one figure the user opened this for, before any list. */}
-      {data.openCount > 0 && (
+      {data.open.length > 0 && (
         <View style={styles.summary}>
           <View style={styles.summaryRow}>
             <ThemedText type="micro" themeColor="textTertiary">
-              Still owed
+              {t('stillOwed')}
             </ThemedText>
             <ThemedText type="nano" themeColor="textTertiary">
-              {data.openCount} open statement{data.openCount === 1 ? '' : 's'}
+              {tf('openStatements', {
+                count: data.open.length,
+                s: data.open.length === 1 ? '' : 's',
+              })}
             </ThemedText>
           </View>
-          <Money fils={data.outstanding} type="sheetAmount" prefix={false} color={theme.expense} />
+          <Money
+            fils={data.outstandingFils}
+            type="sheetAmount"
+            prefix={false}
+            color={theme.expense}
+          />
           {/* Progress is only honest once something has been paid; a
               full-width empty track reads as a bug. */}
           {settledShare > 0 && <ProgressBar ratio={settledShare} color={theme.income} height={5} />}
@@ -85,23 +89,30 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       )}
 
       <View>
-        <SectionHeader title="Statements" />
+        <SectionHeader title={t('statements')} />
         {data.statements.length === 0 ? (
           <ThemedText type="default" themeColor="textSecondary">
-            No statement message has arrived for this card yet.
+            {t('noStatementYet')}
           </ThemedText>
         ) : (
           data.statements.map((d, i) => {
-            const settled = !!d.settledAt || d.paidFils >= d.totalDueFils;
+            const paid = data.paidByDueId.get(d.id) ?? 0;
+            const settled = !!d.settledAt || paid >= d.totalDueFils;
             return (
               <Row key={d.id} last={i === data.statements.length - 1}>
                 <View
                   style={[styles.dot, { backgroundColor: settled ? theme.income : theme.expense }]}
                 />
                 <View style={styles.rowText}>
-                  <ThemedText type="small">Due {shortDate(d.dueDate)}</ThemedText>
+                  <ThemedText type="small">
+                    {tf('dueDate', { date: shortDate(d.dueDate) })}
+                  </ThemedText>
                   <ThemedText type="meta" themeColor="textTertiary" tabular>
-                    {settled ? 'Settled' : `${Math.round((d.paidFils / d.totalDueFils) * 100)}% paid`}
+                    {settled
+                      ? t('settled')
+                      : tf('percentPaid', {
+                          percent: Math.round((paid / d.totalDueFils) * 100),
+                        })}
                   </ThemedText>
                 </View>
                 <Money fils={d.totalDueFils} prefix={false} />
@@ -113,12 +124,12 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
 
       <View>
         <SectionHeader
-          title="Payments made"
-          trailing={<Money fils={data.paidTotal} prefix={false} type="nano" />}
+          title={t('paymentsMade')}
+          trailing={<Money fils={data.paidTotalFils} prefix={false} type="nano" />}
         />
         {data.payments.length === 0 ? (
           <ThemedText type="default" themeColor="textSecondary">
-            No payment to this card has been detected yet.
+            {t('noCardPaymentYet')}
           </ThemedText>
         ) : (
           data.payments.slice(0, 24).map((p, i) => (

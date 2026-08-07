@@ -13,8 +13,11 @@
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Wafra uses Face ID to unlock the app so your spending stays private if someone else picks up your phone.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "remote-notification",
+          "processing"
+        ]
       }
     },
     "android": {
@@ -25,6 +28,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "allowBackup": false,
       "permissions": [
         "android.permission.READ_SMS",
         "android.permission.RECEIVE_SMS"
@@ -64,18 +68,43 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-secure-store"
+      [
+        "expo-sqlite",
+        {
+          "useSQLCipher": true,
+          "enableFTS": true
+        }
+      ],
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow Wafra to use Face ID to unlock your private ledger."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Wafra to use Face ID to unlock your private ledger."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#57B894",
+          "defaultChannel": "payment-reminders",
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
     "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
-      }
-    },
-    "owner": "nnnkk"
+      "revenueCatAndroidKey": "",
+      "revenueCatIosKey": ""
+    }
   }
 }

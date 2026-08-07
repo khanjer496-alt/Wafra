@@ -9,20 +9,20 @@ import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { CategoryTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
-import { getCategory } from '@/lib/categories';
+import { isSpending } from '@/lib/ledger';
+import { categoryLabel, getCategory } from '@/lib/categories';
 import { formatAmount, monthKey, monthLabel, shiftMonthKey, shortDate } from '@/lib/format';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import { daysPhrase } from '@/lib/leaving-soon';
 import { daysUntilNext, type Subscription } from '@/lib/subscriptions';
+import { t, tf } from '@/lib/i18n';
 
 interface BillDetailSheetProps {
   /** The recurring charge to show, or null to keep the sheet closed. */
   subscription: Subscription | null;
   onClose: () => void;
 }
-
-const CADENCE_LABEL = { weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' } as const;
 
 /**
  * One recurring charge, and whether it is behaving.
@@ -33,6 +33,18 @@ const CADENCE_LABEL = { weekly: 'Weekly', monthly: 'Monthly', yearly: 'Yearly' }
 export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps) {
   const { state, setNotSubscription } = useStore();
   const now = useMemo(() => new Date(), []);
+  const cadenceLabel = (cadence: Subscription['cadence']): string =>
+    cadence === 'weekly'
+      ? t('cadenceWeekly')
+      : cadence === 'monthly'
+        ? t('cadenceMonthly')
+        : t('cadenceYearly');
+  const cadencePeriod = (cadence: Subscription['cadence']): string =>
+    cadence === 'weekly'
+      ? t('cadencePeriodWeek')
+      : cadence === 'monthly'
+        ? t('cadencePeriodMonth')
+        : t('cadencePeriodYear');
 
   const data = useMemo(() => {
     if (!subscription) return null;
@@ -43,7 +55,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
     const history = months.map((m) => {
       let fils = 0;
       for (const t of state.transactions) {
-        if (t.type !== 'expense' || t.isTransfer) continue;
+        if (!isSpending(t)) continue;
         if (t.title.trim().toLowerCase() !== key) continue;
         if (monthKey(t.date) !== m) continue;
         fils += t.amountFils;
@@ -70,35 +82,43 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
   const stable = !subscription.priceIncreased;
 
   const verdict = stable
-    ? `${formatAmount(subscription.avgAmountFils, { decimals: false })} every ${
-        subscription.cadence === 'monthly' ? 'month' : subscription.cadence === 'weekly' ? 'week' : 'year'
-      }, ${data.chargedMonths} ${data.chargedMonths === 1 ? 'month' : 'months'} running — nothing to watch here.`
-    : `The last charge was ${formatAmount(subscription.lastAmountFils, { decimals: false })} against a usual ${formatAmount(
-        subscription.avgAmountFils,
-        { decimals: false },
-      )}. The price went up.`;
+    ? tf('recurringStableVerdict', {
+        amount: formatAmount(subscription.avgAmountFils, { decimals: false }),
+        period: cadencePeriod(subscription.cadence),
+        count: data.chargedMonths,
+        s: data.chargedMonths === 1 ? '' : 's',
+      })
+    : tf('recurringPriceUpVerdict', {
+        last: formatAmount(subscription.lastAmountFils, { decimals: false }),
+        usual: formatAmount(subscription.avgAmountFils, { decimals: false }),
+      });
 
   const remindMe = async () => {
     const granted = await requestNotificationPermission();
     if (!granted) {
       Alert.alert(
-        'Notifications are off',
-        'Wafra needs notification permission to warn you before a charge lands.',
+        t('notifsAreOff'),
+        t('notifsForBill'),
       );
       return;
     }
     await syncPaymentReminders(state);
-    Alert.alert('Reminder set', `You'll hear about this two days before ${shortDate(subscription.nextExpectedISO)}.`);
+    // Subscriptions are scheduled one day out, with the body "renews
+    // tomorrow". Two days was never scheduled by anything.
+    Alert.alert(
+      t('reminderSet'),
+      tf('reminderDayBeforeBody', { date: shortDate(subscription.nextExpectedISO) }),
+    );
   };
 
   const notRecurring = () => {
     Alert.alert(
-      'Not a recurring charge?',
-      `${subscription.title} will stop being tracked as one, and stops counting toward your monthly commitments.`,
+      t('notRecurringQ'),
+      tf('stopRecurringBody', { title: subscription.title }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('cancel'), style: 'cancel' },
         {
-          text: 'Not recurring',
+          text: t('notRecurring'),
           onPress: () => {
             setNotSubscription(subscription.title, true);
             onClose();
@@ -109,7 +129,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
   };
 
   return (
-    <BottomSheet visible onClose={onClose} title="Recurring · detected">
+    <BottomSheet visible onClose={onClose} title={t('recurringDetected')}>
       <View style={styles.head}>
         <CategoryTile category={subscription.category} size={46} />
         <View style={styles.headText}>
@@ -117,8 +137,11 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
             {subscription.title}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
-            {CADENCE_LABEL[subscription.cadence]} · next {shortDate(subscription.nextExpectedISO)} ·{' '}
-            {daysPhrase(daysLeft)}
+            {tf('recurringMeta', {
+              cadence: cadenceLabel(subscription.cadence),
+              date: shortDate(subscription.nextExpectedISO),
+              when: daysPhrase(daysLeft),
+            })}
           </ThemedText>
         </View>
         <Money fils={subscription.lastAmountFils} type="sheetAmount" prefix={false} style={styles.headAmount} />
@@ -134,16 +157,16 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
       <LabelTable
         rows={[
           {
-            label: 'Paid from',
-            value: <ThemedText type="small">{data.account?.name ?? 'Unknown account'}</ThemedText>,
+            label: t('paidFrom'),
+            value: <ThemedText type="small">{data.account?.name ?? t('unknownAccount')}</ThemedText>,
           },
-          { label: 'Category', value: <ThemedText type="small">{meta.label}</ThemedText> },
+          { label: t('category'), value: <ThemedText type="small">{categoryLabel(meta)}</ThemedText> },
         ]}
       />
 
       <View style={styles.actions}>
-        <Button inline label="Remind me 2d before" onPress={remindMe} />
-        <Button inline variant="outline" label="Not recurring" onPress={notRecurring} />
+        <Button inline label={t('remindDayBefore')} onPress={remindMe} />
+        <Button inline variant="outline" label={t('notRecurring')} onPress={notRecurring} />
       </View>
     </BottomSheet>
   );
