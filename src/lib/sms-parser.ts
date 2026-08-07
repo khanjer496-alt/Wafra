@@ -2510,6 +2510,21 @@ const SERVICE_NAMES: [RegExp, string][] = [
   // word boundary never happens there and the rule could not fire on the one
   // descriptor it exists for.
   [/(?:^|[^A-Za-z])simplex(?![A-Za-z])/i, 'Simplex'],
+
+  // ── Electricity and water billers ──
+  //
+  // A biller that arrives under several descriptors can never be recognised as
+  // recurring: the FIXED tab needs two charges from the SAME merchant, and one
+  // real ledger carried Sharjah's electricity authority as "Shj Elec Water
+  // Auth", "Sharjah Elect And Water" AND "Sharjah Electricity & Water" — three
+  // merchants of one charge each, so the utility never appeared at all.
+  [/\bsewa\b|shj\s*elec|sharjah\s*elec(?:t|tricity)?(?:\s*(?:and|&)\s*water)?|sharjah\s*electricity\s*(?:and|&)\s*water/i, 'SEWA'],
+  [/\bfewa\b|federal\s*electricity(?:\s*(?:and|&)\s*water)?|federal\s*elec/i, 'FEWA'],
+  [/\bdewa\b|dubai\s*electricity(?:\s*(?:and|&)\s*water)?/i, 'DEWA'],
+  [/\baadc\b|\baddc\b|al\s*ain\s*distribution|abu\s*dhabi\s*distribution/i, 'ADDC'],
+  [/\betihad\s*water|\bewe\b/i, 'Etihad Water & Electricity'],
+  [/\bempower\b|emirates\s*central\s*cooling/i, 'Empower'],
+  [/\btabreed\b/i, 'Tabreed'],
 ];
 
 /**

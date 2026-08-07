@@ -4038,5 +4038,32 @@ t('Western Union is not a shop',
   'Purchase of AED 300.00 with Debit Card ending 8783 at WESTERN UNION, DUBAI. Avl Balance is AED 500.00.',
   { category: 'other' });
 
+
+// ── One biller, one name ──
+//
+// From a real ledger: Sharjah's electricity authority arrived as "Shj Elec
+// Water Auth", "Sharjah Elect And Water" and "Sharjah Electricity & Water" —
+// three merchants of one charge each. Recurrence needs two charges from the
+// SAME merchant, so the utility never appeared in Bills at all, and the user
+// reported their electricity bill as missing when it had been captured every
+// month.
+{
+  const { normalizeServiceName } = require('./build/sms-parser');
+  const same = (name, from, want) => {
+    const got = normalizeServiceName(from);
+    if (got === want) { pass++; console.log(`\u2713 ${name}`); }
+    else { fail++; console.log(`\u2717 ${name}\n    got ${got} != ${want}`); }
+  };
+  same('SEWA: the abbreviated descriptor', 'Shj Elec Water Auth', 'SEWA');
+  same('SEWA: the spelled-out descriptor', 'Sharjah Elect And Water', 'SEWA');
+  same('SEWA: the ampersand form', 'Sharjah Electricity & Water', 'SEWA');
+  same('FEWA: the truncated federal descriptor', 'Federal Electricity An', 'FEWA');
+  same('DEWA keeps its name', 'DEWA', 'DEWA');
+  same('district cooling is its own biller', 'Empower', 'Empower');
+  // Must NOT over-reach: these are pinned by other tests.
+  same('a shop is not a utility', 'Carrefour', null);
+  same('telecom descriptors are left alone', 'Etisalat Gsm', null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
