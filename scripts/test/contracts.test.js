@@ -720,6 +720,74 @@ function ktSources(dir) {
   ok('Home is the screen that watches the foreground', /useAutoImport\(true\)/.test(home));
 }
 
+/* ── an erased ledger rebuilds itself from the inbox ─────────────────── */
+//
+// "Erase everything", then nothing. Home sat empty for the rest of the
+// session and no amount of leaving and returning to the app changed it. Three
+// separate things had to be true for the app to be that stuck, and each one
+// is a line below:
+//
+//   1. the reducer resets the watermark to 0, which is what makes a scan
+//      re-read the whole inbox rather than only what arrived since;
+//   2. the watch effect re-runs when that watermark moves, because Home is a
+//      tab — it never unmounts while the user is in Settings, so a wipe
+//      changed neither of the two deps the effect used to have;
+//   3. that re-run ignores the 30s freshness throttle, which an erase does
+//      not reset and which is the last thing standing between a blank ledger
+//      and the messages that would refill it.
+//
+// The fourth line is the one that would have made the other three look fixed
+// while the app stayed empty: the resume listener has to read the CURRENT
+// scan, not the one it closed over when it subscribed. That closure holds
+// `state`, so a listener registered before the erase deduped every message
+// against a ledger that no longer existed and reported "up to date".
+{
+  const hook = read('src/hooks/use-auto-import.ts');
+  const store = read('src/lib/store.tsx');
+  const empty = store.match(/const EMPTY_STATE: AppState = \{([\s\S]*?)\n\};/)?.[1] || '';
+  const clear = store.match(/case 'clearAll':([\s\S]*?)(?=\n    (?:case |default:))/)?.[1] || '';
+
+  ok('erasing resets the scan watermark to nothing',
+    /lastScanTs: 0,/.test(empty) &&
+      /\.\.\.EMPTY_STATE,/.test(clear) &&
+      !/lastScanTs/.test(clear));
+  // The other half of the same contract, in capture.ts: a zero watermark is
+  // what turns the next scan into a full-history re-read.
+  ok('a zero watermark reads the whole inbox, not just what is new',
+    /state\.lastScanTs <= 0 \? 0 : state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
+  ok('the foreground watch re-runs when the ledger is wiped',
+    /\}, \[state\.hydrated, state\.lastScanTs, watchForeground\]\);/.test(hook));
+  ok('the rebuild scan is not refused by the freshness throttle',
+    /const scan = \(force = false\) => \{/.test(hook) &&
+      /if \(!force && Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS\) return;/.test(hook) &&
+      /\n    scan\(state\.lastScanTs <= 0\);/.test(hook));
+  // Silent, not interactive. An interactive scan on an iPhone whose relay the
+  // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
+  // who has just erased everything and is being shown the Shortcut cleanup
+  // prompt at the same moment.
+  ok('the rebuild scan asks for nothing and redirects nowhere',
+    /void latestScan\.current\(false\)/.test(hook));
+  ok('the resume listener scans the current ledger, not the one it subscribed with',
+    !/void runAutoImport\(false\)/.test(code(hook)) &&
+      hook.indexOf('latestScan.current = runAutoImport') <
+        hook.indexOf('const scan = (force = false)'));
+
+  // Everything the erase claims to delete, in the two places it actually
+  // lives. The ledger is one encrypted database; the rows a headless push
+  // wake has already parsed are in a SECOND one, with its own key, that
+  // `stateStorage.destroy` has never heard of. The iOS confirmation says
+  // "this iPhone's relay queue will be permanently deleted" — so it has to be.
+  const settings = read('src/app/settings.tsx');
+  const staged = read('src/lib/background-relay-storage.native.ts');
+  const ledger = read('src/lib/state-storage.native.ts');
+  const nameOf = (src) => src.match(/const DATABASE_NAME = '([^']+)'/)?.[1];
+  ok('the staged relay inbox is a different database from the ledger',
+    !!nameOf(staged) && nameOf(staged) !== nameOf(ledger));
+  ok('erasing empties the staged relay inbox too',
+    /clearBackgroundRelayRows/.test(settings) &&
+      settings.indexOf('await clearAll()') < settings.indexOf('clearBackgroundRelayRows()'));
+}
+
 /* ── the budget editor answers the same question as the budget bar ──── */
 //
 // Flow's budget row excludes hidden accounts and both halves of a move

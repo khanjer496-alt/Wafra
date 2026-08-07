@@ -36,7 +36,11 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { uncategorisedMerchants } from '@/lib/uncategorised';
-import { getChargeAlertPreference, setChargeAlertsEnabled } from '@/lib/background-relay';
+import {
+  clearBackgroundRelayRows,
+  getChargeAlertPreference,
+  setChargeAlertsEnabled,
+} from '@/lib/background-relay';
 import {
   cancelDailySummary,
   requestNotificationPermission,
@@ -526,6 +530,32 @@ export default function SettingsScreen() {
       return;
     }
 
+    /**
+     * The ledger is not the only bank data on this phone.
+     *
+     * A headless push wake parses relay rows and writes them to their OWN
+     * encrypted database — `wafra-relay-inbox.db`, under its own key — where
+     * they wait until a foreground import folds them into the ledger. Nothing
+     * above touches it: `stateStorage.destroy` erases `wafra-private.db`, and
+     * `unpairDevice` erases the relay credentials. Neither knows that file
+     * exists. So the sentence this screen shows before erasing — "this
+     * iPhone's relay queue will be permanently deleted" — was true of the
+     * copy on the relay and false of the copy on the phone, and already-parsed
+     * bank messages survived Erase Everything.
+     *
+     * After the ledger, not before: a failure here must never destroy staged
+     * rows that the RESTORED ledger has not imported, which is the state a
+     * failed erase leaves behind. And best-effort, because the alternative to
+     * a retained row here is not a lie — the next scan folds it into the fresh
+     * ledger, where the user can see it and delete it.
+     */
+    if (isRelayPlatform()) {
+      await clearBackgroundRelayRows().catch(() => {
+        // Staged rows outliving the erase is visible in the ledger a moment
+        // later; an alert about a queue the user has never heard of is not.
+      });
+    }
+
     // Both halves are gone, and this is the moment the user believes nothing
     // is left. On iOS that is not yet true: the Shortcut they built is still
     // installed and still puts bank-message text on the network on every
@@ -573,7 +603,13 @@ export default function SettingsScreen() {
       t('eraseEverythingQ'),
       mentionsShortcut
         ? t('eraseEverythingIosBody')
-        : t('eraseEverythingBody'),
+        : // A phone that reads its own inbox rebuilds the entries on the next
+          // scan. Promising they are "permanently deleted" and then handing
+          // them straight back is the kind of thing that costs a user their
+          // trust in every other privacy claim on this screen.
+          isSmsScanningAvailable()
+          ? t('eraseEverythingSmsBody')
+          : t('eraseEverythingBody'),
       [
         { text: t('cancel'), style: 'cancel' },
         { text: t('eraseAction'), style: 'destructive', onPress: () => void eraseAllData() },

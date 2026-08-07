@@ -201,7 +201,17 @@ export async function readBackgroundRelayRows(): Promise<ScannedSms[]> {
   return parseQueue(await backgroundRelayStorage.getItem(QUEUE_KEY));
 }
 
-/** Call only after StoreProvider has durably written the imported ledger. */
+/**
+ * Drop the whole staged queue, unconditionally.
+ *
+ * Two callers are legitimate and no third one is. Erase Everything calls it,
+ * because these rows are bank messages on this phone and the erase promises
+ * they are gone. An import commit must NOT: the gap between reading the queue
+ * and committing is long enough for a wake to append and acknowledge rows,
+ * which this would then delete from the phone and the relay at once. That
+ * path uses capture.ts's compare-and-swap clear instead, and
+ * contracts.test.js asserts the name does not appear there.
+ */
 export async function clearBackgroundRelayRows(): Promise<void> {
   await backgroundRelayStorage.removeItem(QUEUE_KEY);
 }

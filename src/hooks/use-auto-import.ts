@@ -300,6 +300,33 @@ export function useAutoImport(watchForeground = false): AutoImport {
     [startAutoImport],
   );
 
+  /**
+   * The current scan, for the foreground listener to call.
+   *
+   * `runAutoImport` closes over `state`, and the effect below deliberately
+   * does not list it: re-subscribing on every state change would also re-run
+   * `scan()` on every state change, which on Android puts a full inbox parse
+   * on the interaction path. The price of that omission was a listener frozen
+   * with whatever `state` existed when it was registered — the hydration-time
+   * ledger, for the rest of the session.
+   *
+   * Erase Everything is where a frozen listener stops being merely wasteful.
+   * The blank ledger is the whole point of the erase, and a resume scan
+   * holding the pre-erase state read from the OLD watermark and deduped every
+   * message against rows that no longer exist: "up to date", over an empty
+   * app, forever. A ref keeps the listener cheap and honest at once.
+   *
+   * Declared BEFORE the effect that reads it. React fires one commit's
+   * effects in declaration order, so by the time that effect's body calls
+   * `scan()` this assignment has already landed — which is what makes the
+   * post-erase scan use the post-erase ledger rather than the one that
+   * happened to be current when the listener was registered.
+   */
+  const latestScan = React.useRef(runAutoImport);
+  useEffect(() => {
+    latestScan.current = runAutoImport;
+  }, [runAutoImport]);
+
   // Silent auto-import on open, and again every time the app comes back to
   // the foreground.
   //
@@ -314,15 +341,41 @@ export function useAutoImport(watchForeground = false): AutoImport {
     if (!watchForeground) return;
     if (!state.hydrated) return;
 
-    const scan = () => {
-      if (Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
+    /**
+     * @param force ignore the freshness throttle. Only the call below passes
+     * it, and only for a ledger with no watermark at all.
+     */
+    const scan = (force = false) => {
+      if (!force && Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
       lastScanAt = Date.now();
-      void runAutoImport(false).catch(() => {
+      void latestScan.current(false).catch(() => {
         // Best-effort; manual import still available.
       });
     };
 
-    scan();
+    /**
+     * `state.lastScanTs` is in this effect's deps, and both halves of that
+     * are Erase Everything.
+     *
+     * Erasing resets the ledger to EMPTY_STATE, whose watermark is 0, and the
+     * inbox is the source of truth — a reinstall rebuilds from it, so an
+     * erase has to as well. But nothing was making that rebuild happen. Home
+     * is a tab, so it stays mounted while the user is in Settings and never
+     * remounts; the effect's old deps (`hydrated`, `watchForeground`) do not
+     * move when a ledger is wiped, so it never re-ran; and the one remaining
+     * trigger, the resume listener, hit the 30s throttle that an erase does
+     * not clear. The user came back to a permanently empty Home.
+     *
+     * The watermark going to 0 is the honest signal that there is nothing to
+     * be fresh ABOUT, so it both re-runs this effect and forces past the
+     * throttle. It cannot storm: the effect re-runs on a CHANGE to
+     * `lastScanTs`, so a ledger sitting at 0 (a phone with no parseable bank
+     * messages) forces exactly once and is then only reachable through the
+     * throttled resume path, and a rebuild that does import moves the
+     * watermark off 0 — which re-runs this effect once more into a throttle
+     * that was just stamped.
+     */
+    scan(state.lastScanTs <= 0);
 
     if (!sessionSetupRan) {
       sessionSetupRan = true;
@@ -360,7 +413,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.hydrated, watchForeground]);
+  }, [state.hydrated, state.lastScanTs, watchForeground]);
 
   /**
    * Tonight's summary follows the ledger, not the launch.

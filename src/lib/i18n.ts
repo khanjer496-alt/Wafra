@@ -802,6 +802,16 @@ const S = {
     en: 'All accounts, entries, bills, and goals will be permanently deleted.',
     ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً.',
   },
+  // Android rebuilds its ledger from the inbox on the next scan, so the plain
+  // sentence above is FALSE there: the entries come back, while the budgets,
+  // bills, goals, categorisations and hand-edits do not. This is the one screen
+  // where a privacy claim has to be exact, so the phone that rebuilds says so.
+  // Not shown on iOS, where the relay is unpaired and the staged queue cleared
+  // and nothing rebuilds — there the sentence would be a lie the other way.
+  eraseEverythingSmsBody: {
+    en: 'All accounts, entries, bills, and goals will be permanently deleted. Your bank messages stay in your phone’s inbox — Wafra cannot delete those — so the entries will be read in again the next time it scans. What you taught it will not come back.',
+    ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً. أما رسائل بنكك فتبقى في صندوق رسائل هاتفك — ولا تستطيع وفرة حذفها — لذا ستُقرأ العمليات من جديد عند الفحص التالي. أما ما علّمته لوفرة فلن يعود.',
+  },
   eraseEverythingIosBody: {
     en: 'All accounts, entries, bills, goals, and this iPhone’s relay queue will be permanently deleted. Wafra cannot delete your Capture Shortcut — Apple gives no app that power — so it will show you how to remove it yourself straight afterwards.',
     ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف وصف انتظار الترحيل لهذا الآيفون نهائياً. لا تستطيع وفرة حذف اختصار الالتقاط — لا تمنح آبل أي تطبيق هذه الصلاحية — لذا ستوضّح لك بعد ذلك مباشرةً كيف تحذفه بنفسك.',
