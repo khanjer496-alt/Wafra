@@ -26,6 +26,15 @@
  * looking at one row and might mean only that row. On this screen the row IS
  * the merchant, the count of entries behind it is printed on it, and moving 33
  * entries with one tap is the entire reason to be here.
+ *
+ * WHICH MAKES THE PRINTED COUNT LOAD-BEARING. It is the only warning the user
+ * gets before a bulk rewrite, so it has to be the number of rows the reducer
+ * actually moves — not the number of rows that put this merchant on the list.
+ * `uncategorised.ts` keeps those two questions apart deliberately, and every
+ * number on this screen (`categoriseEntries` on the row, `categoriseAssigned`
+ * in the toast, `categoriseRemaining` in the header, and the `sortedRows`
+ * tally at the end) reads `count`/`rowCount`, which are computed with
+ * `overrideAppliesTo` — the same predicate `setMerchantOverride` applies.
  */
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';

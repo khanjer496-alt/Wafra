@@ -48,12 +48,16 @@ export interface UncategorisedMerchant {
    * The key `setMerchantOverride` stores rules under — the title trimmed and
    * lowercased. Grouping on this rather than on the displayed spelling is what
    * makes the count on the row equal the number of rows the tap will actually
-   * change: the reducer matches `t.title.trim().toLowerCase() === key`.
+   * change: the reducer matches on this key through `overrideAppliesTo`.
    */
   key: string;
   /** What to put on screen: the spelling these rows most often arrive with. */
   merchant: string;
-  /** How many rows carry this merchant. One tap moves all of them. */
+  /**
+   * How many rows this merchant's tap MOVES — `overrideAppliesTo`, not
+   * candidacy. See that predicate for why the two are different questions and
+   * why this number is the one printed on the row.
+   */
   count: number;
   /** What those rows add up to, in fils. */
   totalFils: number;
@@ -143,11 +147,33 @@ export const CATEGORISE_PROMPT_THRESHOLD = 3;
  *  - **Titles under three characters**, which is the same floor
  *    `entry-detail-sheet.tsx` puts on offering to remember a merchant. A
  *    one-letter override key would match far too much.
+ *
+ * TWO QUESTIONS, TWO PREDICATES, AND THEY ARE NOT THE SAME QUESTION. The list
+ * above answers "should we put this merchant in front of the user at all".
+ * `count`, `totalFils` and `lastDate` answer something else: "what does this
+ * tap MOVE". `isCandidate` decides the first, `overrideAppliesTo` decides the
+ * second, and the rows are gathered in two passes accordingly — candidacy
+ * picks the keys, the override predicate fills in the numbers printed beside
+ * them. Conflating them is what shipped a screen that said "TALABAT · 2
+ * entries" over a tap that rewrote five.
  */
 export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
   const live = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, live);
 
+  // Pass 1 — WHICH MERCHANTS ARE WORTH ASKING ABOUT. Candidacy only; nothing
+  // here is counted or totalled, because a candidate row is evidence that the
+  // merchant needs a category, not a measure of what answering costs.
+  const asked = new Set<string>();
+  for (const t of state.transactions) {
+    if (isCandidate(t, state.merchantOverrides, live, internal)) {
+      asked.add(t.title.trim().toLowerCase());
+    }
+  }
+
+  // Pass 2 — WHAT EACH TAP MOVES. Exactly the rows `setMerchantOverride`
+  // rewrites, by the same predicate the reducer uses.
+  //
   // Spelling counts are kept per group so the displayed name is the one the
   // user has actually seen most, not whichever arrived first. Banks send the
   // same shop as "CARREFOUR HYPER" and "Carrefour Hyper Dubai" often enough
@@ -158,9 +184,10 @@ export function uncategorisedMerchants(state: AppState): UncategorisedSummary {
   const groups = new Map<string, Group>();
 
   for (const t of state.transactions) {
-    if (!isCandidate(t, state.merchantOverrides, live, internal)) continue;
     const title = t.title.trim();
     const key = title.toLowerCase();
+    if (!asked.has(key)) continue;
+    if (!overrideAppliesTo(t, key)) continue;
     let g = groups.get(key);
     if (!g) {
       g = {
@@ -225,6 +252,11 @@ function isCandidate(
   if (t.category !== 'other') return false;
   if (t.type !== 'expense') return false;
   if (!isSpending(t, live, internal)) return false;
+  // Named explicitly even though a card-payment leg is normally flagged
+  // `isTransfer` too, so that candidacy stays a strict subset of
+  // `overrideAppliesTo`. A merchant on the list whose tap moves nothing would
+  // be an unanswerable question printed as "0 entries".
+  if (t.cardPaymentSide !== undefined) return false;
   if (t.userEdited) return false;
   if (t.splits && t.splits.length > 0) return false;
 
@@ -233,6 +265,68 @@ function isCandidate(
   if (title === GENERIC_MERCHANT) return false;
   if (STRUCTURAL_TITLES.has(title)) return false;
   if (overrides[title.toLowerCase()] !== undefined) return false;
+  return true;
+}
+
+/**
+ * Does the merchant rule stored under `key` rewrite THIS row?
+ *
+ * ONE DEFINITION, THREE CALLERS. The `setMerchantOverride` reducer in
+ * store.tsx, `sameMerchantCount` in entry-detail-sheet.tsx and `count` above
+ * all have to agree, because two of them PRINT a number and the third acts on
+ * it. They did not: the reducer matched the bare key and rewrote everything
+ * that carried it, while the screen counted through `isCandidate`, which drops
+ * rows on purpose. Five rows titled TALABAT — two plain `other` expenses, one
+ * hand-filed under `dining`, one income refund, one on an archived card —
+ * printed "2 entries" over a tap that rewrote all five, reverting the hand
+ * filing and stamping an expense category onto income. `key` is already
+ * trimmed and lower-cased by the caller, exactly as the store stores it.
+ *
+ * WHAT IS EXCLUDED, and why the reducer must not touch it:
+ *
+ *  - **`userEdited` rows.** store.tsx states the invariant out loud — every
+ *    transaction transform treats `userEdited` as immutable — and every other
+ *    transform in that file honours it. A user who hand-filed one TALABAT
+ *    charge under `dining` answered this question already; a merchant rule is
+ *    a default, and a default does not get to overrule an answer. This is also
+ *    the exact exclusion `isCandidate` makes ("a decision, not a gap"), so
+ *    honouring it there and ignoring it here meant the screen refused to ask
+ *    about a row it then went and rewrote.
+ *  - **Anything that is not an expense.** `EXPENSE_CATEGORIES` and
+ *    `INCOME_CATEGORIES` are disjoint sets. Stamping `shopping` on a TALABAT
+ *    refund does not merely mis-file it, it puts the row off-list: reopen it
+ *    and the sheet renders the income chips, none of them selected, so the
+ *    category it actually holds is invisible to the person trying to fix it.
+ *  - **Transfers and card-payment legs.** Neither is spending, so "what kind
+ *    of shop was this" has no answer to apply.
+ *  - **Split rows.** Their parts were allocated by hand, and `category` on a
+ *    split row is not a free-standing label — types.ts pins it to the largest
+ *    part. Overwriting it desynchronises the row from its own splits.
+ *
+ * WHAT IS DELIBERATELY INCLUDED, and where that makes this WIDER than
+ * candidacy — which is correct, not a leak:
+ *
+ *  - **Rows already carrying a non-`other` category.** An override means "this
+ *    merchant is Shopping", full stop. Re-filing a row the parser guessed into
+ *    `dining` is the feature working, not a misfire; the user is overruling a
+ *    guess, which is precisely what they came to the screen to do.
+ *  - **Rows on archived accounts.** The merchant → category mapping is global
+ *    and those rows still render everywhere they always did. `isCandidate`
+ *    excludes them from the LIST so that hiding a card stops it generating
+ *    chores, and that is a different decision from letting a rule the user did
+ *    set skip half its rows.
+ *
+ * So `count` is legitimately larger than the number of candidate rows behind
+ * a merchant. That is the point: candidacy answers "should we nag about this
+ * merchant", `count` answers "what does this tap move".
+ */
+export function overrideAppliesTo(t: Transaction, key: string): boolean {
+  if (t.title.trim().toLowerCase() !== key) return false;
+  if (t.userEdited) return false;
+  if (t.type !== 'expense') return false;
+  if (t.isTransfer) return false;
+  if (t.cardPaymentSide !== undefined) return false;
+  if (t.splits && t.splits.length > 0) return false;
   return true;
 }
 

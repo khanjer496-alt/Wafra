@@ -2259,7 +2259,8 @@ ok('stale: a stale statement that gets paid leaves openDues',
   // ── an empty ledger is not 0%, it is nothing to divide by ──
   eq('coverage: an empty ledger divides by nothing',
     cov([]),
-    { imported: 0, skipped: 0, measured: 0, named: 0, categoryMeasured: 0, categorised: 0 });
+    { imported: 0, skipped: 0, measured: 0, named: 0, decided: 0, categoryMeasured: 0,
+      categorised: 0 });
 
   // ── the plain case ──
   {
@@ -2356,18 +2357,63 @@ ok('stale: a stale statement that gets paid leaves openDues',
       [c.imported, c.measured, c.named], [1, 1, 1]);
   }
 
-  // ── a row the user corrected no longer reports on the parser ──
+  // ── a hand-typed NAME is not a parser success; a hand-edited row is still
+  //    a measurement ──
   //
-  // Counting a hand-typed shop name as a parser success is the vanity
-  // direction, and that is the one that makes a number untrustworthy.
+  // An earlier cut dropped every `userEdited` row out of `measured`. That
+  // laundered real misses: `setMerchantOverride` stamps `userEdited` on every
+  // row it moves, so sorting shops silently shrank the denominator and the
+  // parser looked better the more of their ledger a user sorted.
   {
     const c = cov([
-      row({ title: 'Al Adil Trading', userEdited: true }),
+      // The user retyped this one, so the name is theirs and not a hit.
+      row({ title: 'Al Adil Trading', userEdited: true, titleEdited: true }),
+      // Still unnamed, still a miss — the hand edit was to some other field.
       row({ title: 'Card purchase', category: 'other', userEdited: true }),
       row({ title: 'Carrefour' }),
     ]);
-    eq('coverage: hand-corrected rows are excluded, both the good and the bad',
-      [c.imported, c.skipped, c.measured, c.named], [3, 2, 1, 1]);
+    eq('coverage: a hand-edited row stays in the denominator',
+      [c.imported, c.skipped, c.measured], [3, 0, 3]);
+    eq('coverage: a name the user typed is not counted as one the parser read',
+      c.named, 1);
+    ok('coverage: but a hand edit to some other field does not invent a miss',
+      cov([row({ title: 'Carrefour', userEdited: true })]).named === 1);
+    eq('coverage: their category is theirs, so it leaves the category count only',
+      [c.decided, c.categoryMeasured], [2, 1]);
+  }
+
+  // ── the regression that made the whole number worthless ──
+  //
+  // Ten unnamed rows plus a bulk override on the generic title reported a
+  // PERFECT naming score, because every one of the ten was stamped
+  // `userEdited` and fell out of `measured`. Three taps from a shipped screen.
+  {
+    const rows = [];
+    for (let i = 0; i < 10; i += 1) rows.push(row({ title: 'Card purchase', category: 'other' }));
+    for (let i = 0; i < 5; i += 1) rows.push(row({ title: 'Carrefour' }));
+    const before = cov(rows);
+    const after = cov(rows.map((t) => (t.title === 'Card purchase'
+      ? { ...t, category: 'shopping', userEdited: true } : t)), { 'card purchase': 'shopping' });
+    eq('coverage: a bulk override cannot erase the naming misses under it',
+      [after.measured, after.named], [before.measured, before.named]);
+    ok('coverage: and the misses are still ten of fifteen', after.measured - after.named === 10);
+  }
+
+  // ── every measured row is accounted for on screen ──
+  //
+  // The screen shows `named of measured`, then `categorised of
+  // categoryMeasured`. If those do not close, the user reads 100 then 60 with
+  // nothing saying where the other 40 went.
+  {
+    const rows = [
+      row({ title: 'Carrefour' }),
+      row({ title: 'Talabat', category: 'dining' }),
+      row({ title: 'Noon', userEdited: true }),
+    ];
+    const c = cov(rows, { carrefour: 'groceries' });
+    ok('coverage: measured is exactly the decided rows plus the asked-about ones',
+      c.measured === c.decided + c.categoryMeasured);
+    eq('coverage: a pin and a hand-filed row are both decided', c.decided, 2);
   }
 
   // ── the two halves of the screen agree ──

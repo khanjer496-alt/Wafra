@@ -150,6 +150,24 @@ export interface Transaction {
    */
   userEdited?: boolean;
   /**
+   * The user replaced the parser's shop name by hand.
+   *
+   * Narrower than `userEdited` on purpose, and the narrowness is the whole
+   * point. `userEdited` says "something on this row was decided by a human" —
+   * an amount, a date, an account, or a bulk merchant rule that stamped
+   * hundreds of rows the user never opened. Parser-coverage measurement needs
+   * a different question: did the parser get this merchant's NAME right? A
+   * hand-typed name must never be scored as a parser success, and a row whose
+   * date was corrected must not be dropped from the measurement for it.
+   *
+   * Set only by the `editTransaction` reducer, and only when the patch carries
+   * a title that differs from the row's current one. Once true it stays true.
+   *
+   * Optional and additive: every row written before this existed reads as
+   * absent, which is the correct answer for them — nobody retyped their title.
+   */
+  titleEdited?: boolean;
+  /**
    * Raw SMS body, kept ONLY when the parser wasn't confident (generic title
    * or fallback category) so the user can report unrecognized formats from
    * Settings → Improve accuracy. Never leaves the device unless shared.

@@ -283,6 +283,16 @@ const S = {
     ar: 'اضغط على أي صف لعرض سجل الخصومات أو لضبط تذكير.',
   },
   improveAccuracy: { en: 'Improve accuracy', ar: 'تحسين الدقة' },
+  // The permanent way into /categorise. Home's prompt has a floor under it, so
+  // without this row a user who sorts down to two merchants is locked out of
+  // the screen mid-job and left fixing rows one at a time — the exact chore
+  // the screen exists to replace.
+  sortShops: { en: 'Sort your shops', ar: 'صنّف متاجرك' },
+  sortShopsCount: {
+    en: '{count} shop{s} with no category yet',
+    ar: '{count} متجر بلا تصنيف حتى الآن',
+  },
+  sortShopsNone: { en: 'Every shop has a category', ar: 'كل متجر له تصنيف' },
   improveAccuracyHint: {
     en: 'Bank messages the app is not reading well. Some have no merchant name at all; most read the name correctly but have no category yet. Share the list with the developer and the next update will handle them. Long account numbers are masked.',
     ar: 'رسائل بنكية لا يقرأها التطبيق جيداً. بعضها بلا اسم متجر إطلاقاً، ومعظمها يُقرأ الاسم فيه بشكل صحيح لكن بلا تصنيف بعد. شارك القائمة مع المطوّر وسيعالجها التحديث القادم. الأرقام الطويلة مخفية.',
@@ -336,8 +346,15 @@ const S = {
     ar: 'قرأت وفرة {imported} رسالة بنكية إلى هذا السجل، وليس بينها عملية شراء يُفترض أن تحمل اسم متجر — كلها تحويلات ودفعات بطاقات وما شابهها.',
   },
   coverageCategories: {
-    en: 'It filed {categorised} of those {categoryMeasured} purchases under a real category.',
-    ar: 'ووضعت {categorised} من تلك العمليات الـ {categoryMeasured} تحت تصنيف حقيقي.',
+    en: 'Of the {categoryMeasured} purchases whose category it was actually asked for, it filed {categorised} under a real category.',
+    ar: 'ومن بين {categoryMeasured} عملية شراء سُئلت وفرة عن تصنيفها فعلاً، وضعت {categorised} تحت تصنيف حقيقي.',
+  },
+  // Without this line the screen loses rows between two sentences: "named the
+  // shop in 100 of 100" followed by "of the 60 it was asked about" reads as a
+  // typo, and the 40 pinned merchants are never accounted for anywhere.
+  coverageDecided: {
+    en: 'The category on the other {decided} is yours: you pinned the shop or filed the entry by hand, so Wafra is not scored on those.',
+    ar: 'أما تصنيف العمليات الـ {decided} الأخرى فهو من عندك: ثبّتّ المتجر أو صنّفت العملية بنفسك، فلا تُحاسَب وفرة عليها.',
   },
   coverageSkipped: {
     en: 'The other {skipped} are transfers, card payments, ATM withdrawals, fees and money coming in. None of those has a shop name or a spending category to get right, so they are left out of both counts rather than counted as failures.',

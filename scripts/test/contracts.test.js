@@ -28,6 +28,16 @@ function ok(name, cond, detail) {
 
 const ROOT = path.join(__dirname, '../..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+/**
+ * Source with its comments removed.
+ *
+ * For the assertions below that mean "this identifier is not USED here". A
+ * regex over raw source cannot tell a call from the sentence explaining why
+ * there is no call, so an accurate comment turns those assertions red — which
+ * has already happened once in this file, and the fix that suggests itself is
+ * to delete the comment.
+ */
+const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 
 /* ── Icons: a name in the type, a shape on the screen ─────────────────── */
@@ -938,6 +948,68 @@ ok('green is still reserved for money actually earned',
 ok('the spoken label agrees with the sign on screen',
   /\$\{arrived \? t\('plusWord'/.test(txRow),
   'a screen reader saying "minus" over a plus is worse than either alone');
+
+// ---------------------------------------------------------------------------
+// A merchant rule's blast radius is defined once, and the printed count is it.
+//
+// The classic shape of this file's bug, in its purest form: the reducer matched
+// the bare override key and rewrote every row carrying it, while the screen
+// offering the tap counted through a filter that drops rows on purpose. Five
+// rows titled TALABAT printed "2 entries" and moved 5 — reverting a hand-filed
+// `dining` decision and stamping an expense category onto an income refund,
+// which puts that row off-list in the entry sheet's own chips.
+//
+// uncategorised.test.js proves the predicate's behaviour. What cannot be
+// proved there is that the two React modules still ROUTE through it: store.tsx
+// and entry-detail-sheet.tsx are not compiled by this suite.
+{
+  const store = read('src/lib/store.tsx');
+  const sheet = read('src/components/entry-detail-sheet.tsx');
+  const uncat = read('src/lib/uncategorised.ts');
+  const branch = store.match(/case 'setMerchantOverride': \{[\s\S]*?\n    \}/)[0];
+
+  ok('the blast radius is one exported predicate, not three key matches',
+    /export function overrideAppliesTo\(t: Transaction, key: string\): boolean/.test(uncat));
+  ok('the store applies a merchant rule through that predicate',
+    /overrideAppliesTo\(t, key\)/.test(branch) &&
+      !/t\.title\.trim\(\)\.toLowerCase\(\) === key/.test(branch),
+    'a bare key match here moves rows nothing counted');
+  ok('a bulk merchant rule does not forge a hand edit',
+    !/userEdited/.test(code(branch)),
+    'userEdited is immutable, and a default must not masquerade as an answer');
+  ok('the entry sheet counts the same rows the store will move',
+    /overrideAppliesTo\(t, key\)/.test(sheet),
+    'the "also update N entries" prompt is the only warning before the rewrite');
+  ok('the count on the categorise list is the override predicate, not candidacy',
+    /if \(!overrideAppliesTo\(t, key\)\) continue;/.test(uncat) &&
+      /if \(t\.userEdited\) return false;/.test(uncat));
+}
+
+// ---------------------------------------------------------------------------
+// titleEdited: a hand-typed shop name is not a parser success.
+//
+// parserCoverage() measures how often the parser NAMED a merchant correctly.
+// `userEdited` cannot answer that — it is also set by correcting an amount or
+// a date — so the narrow signal has to be written where the edit happens.
+{
+  const types = read('src/lib/types.ts');
+  const store = read('src/lib/store.tsx');
+  const branch = store.match(/case 'editTransaction': \{[\s\S]*?\n    \}/)[0];
+  const override = store.match(/case 'setMerchantOverride': \{[\s\S]*?\n    \}/)[0];
+
+  ok('titleEdited is an optional, additive field on Transaction',
+    /titleEdited\?: boolean;/.test(types),
+    'existing rows must read as absent, which is correct for them');
+  ok('an edit sets titleEdited only when the title actually changed',
+    /const renamed = action\.patch\.title !== undefined && action\.patch\.title !== t\.title;/
+      .test(branch),
+    'editing an amount, a date or an account is not a renaming');
+  ok('titleEdited stays true once set',
+    /renamed \|\| t\.titleEdited/.test(branch));
+  ok('a bulk merchant rule never claims the title was retyped',
+    !/titleEdited/.test(code(override)),
+    'that path does not touch titles');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

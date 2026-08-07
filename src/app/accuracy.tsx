@@ -143,6 +143,14 @@ export default function AccuracyScreen() {
                     })}
                   </ThemedText>
                 )}
+                {/* `measured === categoryMeasured + decided`. Without this the
+                    two sentences above show 100 purchases and then 60, with
+                    nothing on screen saying where the other 40 went. */}
+                {coverage.decided > 0 && (
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {tf('coverageDecided', { decided: coverage.decided })}
+                  </ThemedText>
+                )}
                 {/* Only where there is something for it to be "the other" than.
                     A ledger with no purchases in it has already been told, in
                     the line above, that all of it is transfers. */}

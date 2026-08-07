@@ -34,6 +34,7 @@ import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
+import { overrideAppliesTo } from '@/lib/uncategorised';
 import type { FxUpdate } from '@/lib/fx';
 
 import type {
@@ -422,10 +423,22 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, transactions: sortTxs([action.transaction, ...state.transactions]) };
     case 'editTransaction': {
       const transactions = sortTxs(
-        state.transactions.map((t) =>
+        state.transactions.map((t) => {
+          if (t.id !== action.id) return t;
+          // `titleEdited` is the narrow half of `userEdited`: the user
+          // replaced the parser's SHOP NAME, as opposed to correcting an
+          // amount, a date or an account. Parser-coverage measurement needs
+          // that distinction — a hand-typed name must never be scored as a
+          // parser naming success, and a row whose date was fixed must not be
+          // dropped from the measurement for it. So it is set only when the
+          // patch carries a title that actually differs from the one on the
+          // row, and once set it survives every later edit.
+          const renamed = action.patch.title !== undefined && action.patch.title !== t.title;
           // userEdited pins the row: nothing re-parsed may overwrite it later.
-          t.id === action.id ? { ...t, ...action.patch, userEdited: true } : t,
-        ),
+          return renamed || t.titleEdited
+            ? { ...t, ...action.patch, userEdited: true, titleEdited: true }
+            : { ...t, ...action.patch, userEdited: true };
+        }),
       );
       return { ...state, transactions };
     }
@@ -559,11 +572,24 @@ function reducer(state: AppState, action: Action): AppState {
       const merchantOverrides = { ...state.merchantOverrides, [key]: action.category };
       const transactions = action.applyToExisting
         ? state.transactions.map((t) =>
-            // Bulk recategorisation is a user decision too, so these rows are
-            // pinned against re-parsing exactly like a single edit.
-            t.title.trim().toLowerCase() === key
-              ? { ...t, category: action.category, userEdited: true }
-              : t,
+            // `overrideAppliesTo` is the ONE definition of this rule's blast
+            // radius. The screen that offers the tap prints a count computed
+            // from the same predicate, so the number the user reads and the
+            // rows this line rewrites cannot drift apart. A bare key match
+            // here — which is what this was — reverted hand-filed rows and
+            // stamped expense categories onto income refunds, neither of
+            // which was in the count printed on the button.
+            //
+            // `userEdited` is NOT set. It is immutable by the contract stated
+            // on migratePersistedState, and a merchant rule is a default
+            // rather than a per-row answer, so it must not masquerade as one:
+            // pinning here would launder hundreds of rows the user never
+            // opened into "hand-corrected" and hide them from every
+            // measurement that counts on the distinction. Nothing is lost by
+            // not pinning — the rule itself lives in `merchantOverrides`,
+            // which both `guessCategory` and `parseSms` take as an input, so
+            // a re-parse re-derives this category instead of undoing it.
+            overrideAppliesTo(t, key) ? { ...t, category: action.category } : t,
           )
         : state.transactions;
       return { ...state, merchantOverrides, transactions };

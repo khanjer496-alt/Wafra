@@ -381,12 +381,30 @@ export function noFormatsReason(opts: {
  *    would only ever count deliberate behaviour as failure. This also keeps
  *    the measurement in step with `lowConfidence` in import-plan.ts, which
  *    gates on `type === 'expense'` for the same reason.
- *  - **A row the user corrected no longer reports on the parser.** Counting a
- *    hand-typed shop name as a parser success is the vanity direction, and it
- *    is the one that makes a number untrustworthy.
  *  - **A category the user decided is decided.** `merchantOverrides` is the
  *    stored half of `categoryDeliberate`: if the user pinned this merchant to
- *    a category — `other` included — the parser is not being asked.
+ *    a category — `other` included — the parser is not being asked. Neither is
+ *    it being asked about a row the user filed by hand. Both come out of the
+ *    CATEGORY figure only, and both are reported as `decided` so the screen's
+ *    own arithmetic closes instead of quietly losing rows between two numbers.
+ *
+ * WHAT IS DELIBERATELY *NOT* EXCLUDED, and the trap that made it so. An
+ * earlier cut of this function dropped every `userEdited` row out of
+ * `measured` on the reasoning that a hand-corrected row no longer reports on
+ * the parser. That reasoning is right about the CATEGORY and wrong about the
+ * NAME, and the difference is not academic: `setMerchantOverride` stamps
+ * `userEdited` on every row matching a merchant, so one tap on the categorise
+ * screen moved hundreds of rows the user never opened out of the denominator.
+ * A ledger of ten unnamed `Card purchase` rows could be made to report a
+ * perfect naming score in three taps, and the more of their ledger a user
+ * sorted the better the parser looked. An exclusion that can only ever move
+ * the number up is a flattering denominator, whatever it is called, and this
+ * is a number whose entire job is to surface failure.
+ *
+ * The vanity case the old exclusion was reaching for is real but much
+ * narrower — a user who RETYPES the shop name, whose typing must not read as
+ * the parser's success. `titleEdited` says exactly that and nothing else, so
+ * the row stays measured and scores as the miss it was.
  *
  * WHAT IS STILL COUNTED PESSIMISTICALLY, on purpose. `categoryDeliberate` is
  * computed during parsing and never written to the ledger, so the handful of
@@ -418,15 +436,26 @@ export interface ParserCoverage {
   imported: number;
   /**
    * Of `imported`, rows where there was nothing for the parser to get right —
-   * transfers, card payments, structural rows, credits, and rows the user has
-   * since corrected. Reported so the two figures below can be read against a
-   * denominator the user can see rather than one they have to trust.
+   * transfers, card payments, structural rows and credits. Reported so the
+   * figures below can be read against a denominator the user can see rather
+   * than one they have to trust. Rows the user corrected are NOT in here; see
+   * the block comment above for why that exclusion was a lie.
    */
   skipped: number;
   /** Purchases where a shop name was expected. Never a divisor without a guard. */
   measured: number;
-  /** Of `measured`, rows carrying a real merchant rather than the fallback. */
+  /**
+   * Of `measured`, rows carrying a real merchant the PARSER read. A name the
+   * user typed themselves is not a parser success and is not counted here.
+   */
   named: number;
+  /**
+   * Of `measured`, rows the user has already answered for — a pinned merchant
+   * or a hand-filed category. `measured === categoryMeasured + decided`, so
+   * the screen can show where every row went instead of dropping some between
+   * one sentence and the next.
+   */
+  decided: number;
   /** Of `measured`, rows whose category the parser was actually asked for. */
   categoryMeasured: number;
   /** Of `categoryMeasured`, rows filed under something other than `other`. */
@@ -451,6 +480,7 @@ export function parserCoverage(state: {
     skipped: 0,
     measured: 0,
     named: 0,
+    decided: 0,
     categoryMeasured: 0,
     categorised: 0,
   };
@@ -465,7 +495,6 @@ export function parserCoverage(state: {
       tx.isTransfer ||
       tx.cardPaymentSide !== undefined ||
       tx.type !== 'expense' ||
-      tx.userEdited ||
       namesNoMerchant(tx.title)
     ) {
       cov.skipped += 1;
@@ -473,12 +502,20 @@ export function parserCoverage(state: {
     }
 
     cov.measured += 1;
-    if (tx.title !== GENERIC_MERCHANT) cov.named += 1;
+    // A name the user typed is the user's, not the parser's. `titleEdited` is
+    // set only when the title actually changed, so editing an amount or a date
+    // on a correctly-read row does not turn it into a miss.
+    if (!tx.titleEdited && tx.title !== GENERIC_MERCHANT) cov.named += 1;
 
-    // The user's own pin on this merchant IS the decision, so there is no
-    // parser guess left to score. Same trim/lowercase key the parser reads
-    // overrides by, or the two would disagree about which rows are pinned.
-    if (overrides[tx.title.trim().toLowerCase()] !== undefined) continue;
+    // The user's own pin on this merchant, or their own hand on this row, IS
+    // the decision — there is no parser guess left to score. Same trim/
+    // lowercase key the parser reads overrides by, or the two would disagree
+    // about which rows are pinned. Counted rather than dropped, so the two
+    // sentences on screen add up to `measured`.
+    if (tx.userEdited || overrides[tx.title.trim().toLowerCase()] !== undefined) {
+      cov.decided += 1;
+      continue;
+    }
     cov.categoryMeasured += 1;
     if (tx.category !== 'other') cov.categorised += 1;
   }

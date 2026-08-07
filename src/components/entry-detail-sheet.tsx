@@ -14,6 +14,7 @@ import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate,
 import { formatOriginalCurrency } from '@/lib/fx';
 import { getActiveMarket } from '@/lib/markets';
 import { useStore } from '@/lib/store';
+import { overrideAppliesTo } from '@/lib/uncategorised';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
@@ -59,14 +60,32 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     setIsTransfer(!!transaction.isTransfer);
   }, [transaction]);
 
+  /**
+   * How many OTHER entries "yes, update all" would move.
+   *
+   * Two things this is careful about, both of which it used to get wrong:
+   *
+   * 1. It counts through `overrideAppliesTo` — the same predicate the
+   *    `setMerchantOverride` reducer applies — rather than matching the bare
+   *    key. A plain key match counted rows the rule must not touch (income
+   *    refunds, hand-filed decisions, transfer legs) and would have gone on
+   *    over-reporting the moment the reducer started filtering.
+   * 2. It keys on the title as it stands in the FIELD, not as it arrived. The
+   *    rule `save` writes is keyed on the edited name, so counting the old one
+   *    described a different merchant than the button acted on. Outside edit
+   *    mode the two are the same string, seeded above.
+   *
+   * The row being edited is excluded by id because the prompt says "also
+   * update N entries"; its own category is already applied by the edit.
+   */
   const sameMerchantCount = useMemo(() => {
     if (!transaction) return 0;
-    const key = transaction.title.trim().toLowerCase();
+    const key = title.trim().toLowerCase();
     if (key.length < 3) return 0;
     return state.transactions.filter(
-      (t) => t.id !== transaction.id && t.title.trim().toLowerCase() === key,
+      (t) => t.id !== transaction.id && overrideAppliesTo(t, key),
     ).length;
-  }, [transaction, state.transactions]);
+  }, [transaction, title, state.transactions]);
 
   if (!transaction) return null;
 

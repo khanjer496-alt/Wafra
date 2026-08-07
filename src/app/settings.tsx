@@ -35,6 +35,7 @@ import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
+import { uncategorisedMerchants } from '@/lib/uncategorised';
 import { getChargeAlertPreference, setChargeAlertsEnabled } from '@/lib/background-relay';
 import {
   cancelDailySummary,
@@ -101,6 +102,11 @@ export default function SettingsScreen() {
   );
   const [smsGranted, setSmsGranted] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
+  // Home only offers the categorise prompt above a floor, so a user who sorts
+  // their way down to two merchants loses the only route to the screen with
+  // the job half done. This row is the permanent way in, and it stays visible
+  // at zero to say so.
+  const unsorted = useMemo(() => uncategorisedMerchants(state), [state]);
   // A count of 0 is not a verdict on every device — see noFormatsReason().
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
@@ -846,6 +852,16 @@ export default function SettingsScreen() {
                   ? t('noUnrecognized')
                   : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
+            )}
+            {linkRow(
+              t('sortShops'),
+              unsorted.merchants.length > 0
+                ? tf('sortShopsCount', {
+                    count: unsorted.merchants.length,
+                    s: unsorted.merchants.length === 1 ? '' : 's',
+                  })
+                : t('sortShopsNone'),
+              () => router.push('/categorise'),
             )}
             {linkRow(t('eraseAll'), null, confirmErase, true, true)}
           </Section>

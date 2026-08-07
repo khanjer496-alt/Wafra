@@ -10,6 +10,7 @@
  */
 const {
   CATEGORISE_PROMPT_THRESHOLD,
+  overrideAppliesTo,
   uncategorisedMerchants,
   worthPrompting,
 } = require('./build/uncategorised');
@@ -164,18 +165,89 @@ ok('nothing on an empty list is worth prompting for', !worthPrompting(uncategori
 }
 
 /* ── Grouping: the key the store actually writes rules under ────────────── */
+//
+// THE FIXTURE IS THE TEST. `count` is the only warning the user gets before a
+// bulk rewrite, so it has to be the blast radius of the tap and NOT the number
+// of rows that put this merchant on the list — and those two numbers only ever
+// differ over rows the candidacy filter drops. A fixture made purely of
+// candidates asserts the right property and cannot fail, which is exactly how
+// the unfiltered reducer shipped: three plain rows, count 3, blast radius 3.
+//
+// So this fixture carries one of every interesting row:
+//
+//   dropped by candidacy, MOVED by the rule — the archived-account row and the
+//     row already sitting in `transport`. The merchant → category mapping is
+//     global; hiding a card does not exempt its rows from a rule the user set,
+//     and re-filing a guessed category is the whole point of an override.
+//   dropped by BOTH — the hand-filed row, the income refund, the transfer leg.
+//     Each is a decision or is not spending, and the reducer must not touch it.
 {
   const rows = [
     tx({ title: 'ADNOC Station', amountFils: 5000 }),
     tx({ title: ' adnoc station ', amountFils: 5000, date: '2026-07-09' }),
     tx({ title: 'ADNOC Station', amountFils: 5000, date: '2026-07-05' }),
+    tx({ title: 'ADNOC Station', amountFils: 5000, accountId: 'gone' }),
+    tx({ title: 'ADNOC Station', amountFils: 5000, category: 'transport' }),
+    tx({ title: 'ADNOC Station', amountFils: 5000, category: 'dining', userEdited: true }),
+    tx({ title: 'ADNOC Station', amountFils: 7000, type: 'income' }),
+    tx({ title: 'ADNOC Station', amountFils: 9000, isTransfer: true }),
   ];
   const out = uncategorisedMerchants(state(rows));
   eq('spellings that share an override key are one merchant', out.merchants.length, 1);
   eq('the key is the trimmed lowercase title the reducer matches', out.merchants[0].key, 'adnoc station');
   eq('the label shown is the commonest spelling', out.merchants[0].merchant, 'ADNOC Station');
-  eq('the row count is every row that key will move', out.merchants[0].count, 3);
+  eq('the row count is every row that key will move', out.merchants[0].count, 5);
+  eq('the money printed is the money those same rows carry', out.merchants[0].totalFils, 25000);
   eq('last seen is the newest of the group', out.merchants[0].lastDate, '2026-07-09');
+  eq('the summary totals what the taps would move', [out.rowCount, out.totalFils], [5, 25000]);
+
+  // The same fixture, said the other way round: the printed number IS the
+  // predicate the store applies, row for row.
+  const moved = rows.filter((t) => overrideAppliesTo(t, 'adnoc station'));
+  eq('count equals exactly the rows the shared predicate moves', out.merchants[0].count, moved.length);
+}
+
+/* ── The predicate the reducer and both screens share ───────────────────── */
+{
+  const applies = (over) => overrideAppliesTo(tx({ title: 'Talabat', ...over }), 'talabat');
+
+  ok('a plain other-category expense is moved', applies({}));
+  ok('a row already guessed into another category is re-filed', applies({ category: 'dining' }));
+  ok('an archived-account row is moved: the mapping is global', applies({ accountId: 'gone' }));
+  ok('a differently-spelled row under the same key is moved',
+    overrideAppliesTo(tx({ title: '  TALABAT  ' }), 'talabat'));
+
+  ok('a hand-filed row is a decision and is left alone',
+    !applies({ category: 'dining', userEdited: true }));
+  ok('an income refund never takes an expense category',
+    !applies({ type: 'income', category: 'other' }));
+  ok('a flagged transfer is not spending and is left alone', !applies({ isTransfer: true }));
+  ok('a card-payment leg is not spending and is left alone',
+    !applies({ cardPaymentSide: 'debit' }));
+  ok('a hand-split row keeps the category pinned to its largest part',
+    !applies({
+      splits: [
+        { category: 'groceries', amountFils: 600 },
+        { category: 'shopping', amountFils: 400 },
+      ],
+    }));
+  ok('a different merchant is never touched', !overrideAppliesTo(tx({ title: 'Carrefour' }), 'talabat'));
+
+  // The reported reproduction, whole. Five rows titled TALABAT; the screen
+  // used to print 2 and the tap used to rewrite 5.
+  const talabat = [
+    tx({ title: 'TALABAT', amountFils: 4000 }),
+    tx({ title: 'TALABAT', amountFils: 6000 }),
+    tx({ title: 'TALABAT', amountFils: 5000, category: 'dining', userEdited: true }),
+    tx({ title: 'TALABAT', amountFils: 3000, type: 'income' }),
+    tx({ title: 'TALABAT', amountFils: 8000, accountId: 'gone' }),
+  ];
+  const out = uncategorisedMerchants(state(talabat));
+  eq('the reproduction prints the blast radius, not the candidate count',
+    out.merchants[0].count, 3);
+  eq('and the blast radius is the rows the predicate names',
+    talabat.filter((t) => overrideAppliesTo(t, 'talabat')).map((t) => t.amountFils),
+    [4000, 6000, 8000]);
 }
 
 /* ── Exclusion: merchants the user has already ruled on ─────────────────── */
