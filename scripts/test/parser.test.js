@@ -1100,6 +1100,33 @@ t('a channel that names no biller keeps the account title',
   'Dear Customer, Your payment to the account number \u00b7\u00b7\u00b7\u00b72543 has been processed.\nAmount Due: AED 408.45\nAmount Paid: AED 408.45\nRemaining Balance: AED 0\nTransaction Date: 2022-03-11\nPayment Channel: Bank Website\nCard Number: NA\nMode of Payment : Credit/Debit',
   { merchant: 'Payment to \u20222543', amountFils: 40845, date: '2022-03-11' });
 
+// \u2550\u2550 THE BILLER'S FIGURES ARE THE BILLER'S \u2550\u2550
+//
+// The receipt quotes three amounts and not one of them describes the account
+// the money came OUT of. This row is nonetheless filed against that account \u2014
+// it is the account the SMS arrived about \u2014 and import-plan's noteSnapshot
+// writes snapshotFils/snapshotKind straight onto it. So "Remaining Balance:
+// AED 0" (what is left owing on the PHONE account) was stored as the paying
+// Liv Debit Card's cash balance, and the card read AED 0.00 until some later
+// alert overwrote it. One user had five of these.
+//
+// Real digits here rather than the export's "\u00b7\u00b7\u00b7\u00b7" redaction: the mask is the
+// diagnostic's, never the bank's, and the last-4 slice is only exercised by a
+// full number.
+t('a biller receipt never snapshots the account that paid it',
+  'Dear Customer, Your payment to the account number 0501232543 has been processed.\nAmount Due: AED 408.45\nAmount Paid: AED 408.45\nRemaining Balance: AED 0\nTransaction Date: 2022-03-11\nTransaction Time: 11:34:49\nPayment Channel: Bank Website\nCard Number: NA\nMode of Payment : Credit/Debit',
+  { merchant: 'Payment to \u20222543', amountFils: 40845, kind: 'transaction', type: 'expense',
+    transfer: false, snapshotFils: null, snapshotKind: null });
+// CONTROL, and the reason this family is NOT reclassified as a card payment:
+// the SAME bank, the SAME "has been processed" verb, and this one really is a
+// settlement \u2014 it names a masked PAN as the payee instead of an account
+// number. That is the message the user's card payments actually arrive in, and
+// it must keep its cardPayment kind and its transfer hint while the receipt
+// above keeps its expense.
+t('a masked PAN in the same processed-payment voice is still a card payment',
+  'Dear Customer, Your payment instructions of AED 5,645.07 to 5492********3749 has been processed on 05/08/2026 20:02',
+  { kind: 'cardPayment', transfer: true, amountFils: 564507, card: { last4: '3749', kind: 'credit' } });
+
 // Third corpus, from the shipped build.
 t('Trip.com is travel, dot and all',
   'Purchase of GBP 37.6 with Debit Card ending 4733 at TRIP.COM, LONDON. Avl Balance is AED 43,415.07.',
@@ -3510,6 +3537,38 @@ t('a partly-paid biller receipt records what was PAID, not what was due',
     'المبلغ المستحق: 849.45 درهم\nالمبلغ المدفوع: 100.00 درهم\nالمبلغ المتبقي: 749.45 درهم\n' +
     'تم الدفع عن طريق: الموقع الإلكتروني لإتصالات',
   { amountFils: 10000 });
+// AN OVERPAYMENT, PAID THROUGH THE IVR, WITH NO BILLER IN THE CHANNEL LINE.
+// Real message, and the Arabic twin of the English receipt above: 682.00 paid
+// against 681.45 due, leaving المبلغ المتبقي at -0.55 — you enter whole dirhams
+// at an IVR keypad. Three claims in one, and all three were wrong before:
+//
+//   - the AMOUNT is the 682.00 that moved, not the 681.45 that was asked for.
+//     It happened to be right by luck (the loop skipped the due figure as a
+//     balance-shaped one) rather than because the PAID label was read.
+//   - it stays an EXPENSE. 681.45 is 649.00 + 5% VAT, i.e. a postpaid plan
+//     price, and nothing in either language names a card as the payee — the
+//     only card field is "رقم البطاقة: NA", the funding instrument, and it is
+//     empty. Reading it as a card settlement would pull a real monthly telecom
+//     bill out of the spending total and mint a credit card out of a telecom
+//     account number.
+//   - and NO SNAPSHOT. المبلغ المستحق carries no availability prefix, so it
+//     read as `outstanding` — and cardFigure() renders an outstanding snapshot
+//     as the headline OWED figure on a credit card. Paying this phone bill put
+//     AED 681.45 of debt on a card that had none.
+t('an Arabic IVR overpayment receipt is the amount PAID, still spending, and snapshots nothing',
+  'عزيزي العميل،\nلقد تمت عملية الدفع بنجاح لحساب رقم: 0501231849\n' +
+    'المبلغ المستحق: 681.45 درهم\nالمبلغ المدفوع: 682 درهم\nالمبلغ المتبقي: -0.55 درهم\n' +
+    'تاريخ المعاملة: 2022-05-24\nوقت المعاملة: 21:29:40\n' +
+    'تم الدفع عن طريق: جهازالمجيب الالي\nرقم البطاقة: NA\nرقم المعاملة: 88776251',
+  { merchant: 'Payment to •1849', amountFils: 68200, kind: 'transaction', type: 'expense',
+    transfer: false, date: '2022-05-24', snapshotFils: null, snapshotKind: null });
+// The named-biller half of the same fix: Etisalat is still Etisalat, and its
+// المبلغ المتبقي is still not the paying account's balance.
+t('a named Arabic biller receipt snapshots nothing either',
+  AR_RECEIPT_HEAD +
+    'المبلغ المستحق: 849.45 درهم\nالمبلغ المدفوع: 849.45 درهم\nالمبلغ المتبقي: 00.00 درهم\n' +
+    'تم الدفع عن طريق: الموقع الإلكتروني لإتصالات',
+  { merchant: 'Etisalat', category: 'telecom', snapshotFils: null, snapshotKind: null });
 // "تطبيق" (application) CONTAINS "طبي" (medical), and Arabic letters are not
 // word characters, so the health rule matched inside the word: four of the
 // five Arabic receipt families were filed as HEALTH by that one substring.

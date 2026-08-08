@@ -3946,6 +3946,46 @@ function parseSmsInner(
   // with its amount taken from whichever figure came first rather than from
   // the label — which is right only for as long as the bill happens to be
   // settled in full. A PARTIAL payment would have recorded the amount DUE.
+  //
+  // ─── THIS IS NOT A CREDIT-CARD BILL PAYMENT. Do not make it one. ───
+  //
+  // It reads like one: an account number, an amount DUE, an amount PAID and a
+  // REMAINING BALANCE is exactly the shape of a card settlement, and a diagnostic
+  // that sees "Payment to •2543 … -681.45" filed as spending on a debit card
+  // reasonably concludes the user's card payments are being lost. They are not.
+  // The evidence that this payee is a BILLER and never a card:
+  //
+  //   - It is the same template, label for label, as the receipts pinned in
+  //     parser.test.js whose own channel line says "Etisalat Mobile App" /
+  //     "تطبيق إتصالات للهواتف الذكية". Only the CHANNEL differs in the samples
+  //     that look card-like ("Bank Website", "جهازالمجيب الالي" = the IVR), and
+  //     the channel says how the user paid, not who was paid. "Paid through my
+  //     bank's website" is how people pay phone and utility bills.
+  //   - The amounts are a round dirham figure plus 5% UAE VAT, every time:
+  //     408.45 = 389.00, 681.45 = 649.00, 849.45 = 809.00, 450.45 = 429.00.
+  //     Those are postpaid plan prices. A credit-card statement total is a
+  //     month of arbitrary purchases and does not land on plan-price + VAT,
+  //     twice, then repeat the identical figure for three months running.
+  //   - Neither language names a card as the PAYEE. The only card field in the
+  //     body is the funding instrument — "Card Number: NA" / "رقم البطاقة: NA" —
+  //     and it is empty.
+  //
+  // The user's real card payments arrive in a different message entirely, the
+  // "payment instructions of AED X to 5492********4833" shape handled above,
+  // which already parses as `cardPayment`.
+  //
+  // What it would cost to reclassify: `transferHint` would pull a real monthly
+  // telecom bill out of the spending total, a phantom CREDIT card would be
+  // minted from a telecom account number, and `allocatePayments` would settle
+  // a statement with money that never touched that card. Note also that the
+  // corpus already contains a receipt whose payee account ends 4822 for a user
+  // whose Liv DEBIT card ends 4822 — biller account fragments collide with card
+  // fragments, so last-4 alone can never identify the payee. A payment credited
+  // to the wrong card is worse than one credited to none.
+  //
+  // If a bank ever does send a card settlement in this template, the rule that
+  // catches it must key on the body NAMING a credit card as the payee, and it
+  // needs a real sample first.
   const portalPay = raw.match(PORTAL_RECEIPT_RE);
   if (portalPay) {
     // Last four, not first four: an unmasked account number would otherwise
@@ -3974,8 +4014,37 @@ function parseSmsInner(
         minDueFils: null,
         card,
         transferHint: false,
-        snapshotFils,
-        snapshotKind,
+        /**
+         * EVERY FIGURE IN THIS RECEIPT BELONGS TO THE BILLER, NOT TO THE USER.
+         *
+         * "Remaining Balance: AED 0" is what is left owing on the ETISALAT
+         * account after the bill was settled; "المبلغ المستحق: 681.45 درهم" is
+         * what that account was asking for. Neither is a fact about the card or
+         * the current account the money came OUT of — but this row is filed
+         * against that account (it is the account the SMS arrived about), and
+         * import-plan's `noteSnapshot` writes `snapshotFils`/`snapshotKind`
+         * straight onto whatever account the row resolved to.
+         *
+         * So the generic `extractSnapshot` pass over the body did two things,
+         * both silent and both wrong:
+         *
+         *   - the English receipt quoted a `balance` of 0, which set the paying
+         *     Liv Debit Card's balance to AED 0.00 every time a telecom bill was
+         *     paid, and it stayed there until a real alert overwrote it;
+         *   - the Arabic receipt has no "remaining/available" prefix on its
+         *     first figure, so المبلغ المستحق read as `outstanding` — and
+         *     cardFigure() in cards.ts turns an `outstanding` snapshot into the
+         *     headline OWED number on a credit card. Paying an AED 681.45 phone
+         *     bill made a card report AED 681.45 of debt it did not have.
+         *
+         * This is the same mistake the card-payment branch above documents for
+         * its funding-account leg, and it takes the same answer: drop the figure
+         * rather than re-aim it. The account it describes is the biller's, is
+         * not in the user's Accounts, and inventing a second snapshot target
+         * here would be guessing.
+         */
+        snapshotFils: null,
+        snapshotKind: null,
         categoryGuess: cat.id,
         ...(cat.pinned ? { categoryPinned: true as const } : {}),
         currency,
