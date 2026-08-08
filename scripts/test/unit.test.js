@@ -1065,6 +1065,40 @@ ok('dues: a payment inside the 40-day window settles the statement',
 ok('dues: a payment from the previous cycle does not settle this statement',
   allocLib.duePaidFils(floorState('2026-07-05'), floorState('2026-07-05').cardDues[0]) === 0);
 
+// The one-payment case above makes the floor look like an arbitrary one-day
+// cliff worth removing. It is not: the floor is the ONLY thing bounding the
+// oldest statement from below, and the ledger it has to survive is a full
+// inbox scan.
+//
+// Every proposed relaxation — fall through to the oldest statement, drop the
+// floor when no earlier statement exists, widen it to a fixed larger number —
+// reduces to the same thing on this state, because none of these payments can
+// be claimed by any statement: the oldest known statement swallows the OLDEST
+// unclaimed payment and reports a bill the user genuinely owes as settled.
+// Measured against a patched build, an AED 1,000 statement due 15 Aug 2026 was
+// marked paid by a payment dated 10 Sep 2025 — eleven months earlier — and
+// `duePayments` named that row as the one that settled it.
+//
+// A payment nothing can place is money that paid a statement this app never
+// captured. It stays uncredited, and the balance it leaves showing is one the
+// user can clear with Mark paid.
+const firstImportState = {
+  accounts: [legCard],
+  cardDues: [{ id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-15', paidFils: 0 }],
+  transactions: ['2025-09', '2025-10', '2025-11', '2025-12', '2026-01',
+                 '2026-02', '2026-03', '2026-04', '2026-05', '2026-06']
+    .map((m, i) => ({
+      id: `o${i}`, type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+      date: `${m}-10`, category: 'other', title: 'card payment', source: 'sms',
+    })),
+};
+ok('dues: a year of older payments does not settle the one captured statement',
+  allocLib.duePaidFils(firstImportState, firstImportState.cardDues[0]) === 0,
+  String(allocLib.duePaidFils(firstImportState, firstImportState.cardDues[0])));
+ok('dues: and that statement is still shown as owed in full',
+  allocLib.openDues(firstImportState, new Date(2026, 7, 8)).length === 1 &&
+  allocLib.openDues(firstImportState, new Date(2026, 7, 8))[0].remainingFils === 100000);
+
 // ── One charge is not a subscription ──
 const subsLib2 = require('./build/subscriptions');
 const oneOff = (title, date) => ({
