@@ -108,8 +108,16 @@ async function main() {
   ok('the local-currency comparison is case-insensitive',
     summarizeForeignActivity([charge('l', 'aed', 10000, 10000)], () => true, 'AED')
       .transactions.length === 0);
-  // The default reads the active market pack, which is what the screen relies on.
-  const { setActiveMarket } = require('./build/markets.js');
+  // The default reads the LEDGER's currency, which with no money recorded is
+  // the active market pack — what the screen relied on before the pin existed.
+  const {
+    canSelectMarket,
+    getActiveMarket,
+    ledgerCurrencyCode,
+    setActiveMarket,
+    setLedgerCurrency,
+  } = require('./build/markets.js');
+  setLedgerCurrency(null);
   setActiveMarket('SA');
   ok('with no argument the active market decides what is local',
     summarizeForeignActivity(mixed).groups.map((g) => g.currency).join(',') === 'USD,AED');
@@ -127,6 +135,58 @@ async function main() {
        { ...charge('i', 'USD', 10000, 36725), type: 'income' }],
       () => true, 'AED',
     ).transactions.length === 0);
+
+  // ── A country change must not relabel money nothing converted ──────────
+  //
+  // `marketId` answered two questions at once: which bank vocabulary the
+  // parser matches, and what currency the stored fils ARE. Switching country
+  // in Settings swapped both, and only the first is a preference — one USD
+  // 100.00 charge stored as 36730 fils printed "AED 367" before the switch and
+  // "SAR 367" after it, on the same untouched row. formatAED(46520) returned
+  // "AED 465" under AE and "SAR 465" under SA with nothing converted in
+  // between, and on this very screen that figure sits under a heading reading
+  // "Converted total".
+  //
+  // Converting is not the fix: there is no per-row rate into the new currency,
+  // a historical row's rate on its own day is not knowable offline, and the
+  // pass would rewrite every figure the user ever recorded with no undo. So
+  // the ledger pins its own currency and a differently-denominated pack is
+  // refused. See markets.ts.
+  const { formatAED } = require('./build/format.js');
+
+  setLedgerCurrency(null);
+  setActiveMarket('AE');
+  ok('an empty ledger still follows the pack it picks',
+    setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465');
+  setActiveMarket('AE');
+
+  setLedgerCurrency('AED');
+  ok('a pack denominated in another currency is refused, not applied',
+    setActiveMarket('SA') === false && getActiveMarket().id === 'AE');
+  ok('so stored fils keep the currency they were recorded in',
+    formatAED(46520, { decimals: false }) === 'AED 465');
+  ok('and the refusal is visible before it is attempted',
+    canSelectMarket('SA') === false && canSelectMarket('AE') === true);
+  ok('a pack in the SAME currency is never refused',
+    setActiveMarket('AE') === true && getActiveMarket().id === 'AE');
+
+  // The screen calls "foreign" whatever is not the LEDGER's currency, so an
+  // AED ledger sitting under an SA pack must not start filing its own money
+  // as foreign activity.
+  ok('the ledger currency, not the pack, decides what counts as foreign',
+    ledgerCurrencyCode() === 'AED' &&
+      summarizeForeignActivity(mixed).groups.map((g) => g.currency).join(',') === 'USD,SAR');
+
+  // Erasing or restoring releases the pin on the same tick — there is no
+  // stored field to migrate, so an emptied ledger is free to move country.
+  setLedgerCurrency(null);
+  ok('releasing the pin lets the country change through again',
+    setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465');
+  setLedgerCurrency('SAR');
+  ok('an SAR ledger pins SAR, not whichever pack shipped first',
+    setActiveMarket('AE') === false && formatAED(46520, { decimals: false }) === 'SAR 465');
+  setLedgerCurrency(null);
+  setActiveMarket('AE');
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

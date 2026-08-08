@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -17,6 +16,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
@@ -53,6 +53,24 @@ import { t, tf } from '@/lib/i18n';
 
 type Segment = 'subscriptions' | 'cards' | 'utilities';
 
+/**
+ * A confirmation waiting on the user, or null.
+ *
+ * Every committing action on this screen — marking a bill paid, settling a
+ * card statement, deleting a reminder, dropping a subscription — used to be
+ * gated by `Alert.alert` with the store call inside a button's `onPress`. On
+ * react-native-web that method is empty, so the alert never drew and the store
+ * call was unreachable: four buttons that did nothing at all, in silence. The
+ * work lives in `onConfirm` and is handed to a sheet that is actually drawn.
+ */
+type Confirmation = {
+  question: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+};
+
 export default function BillsScreen() {
   const theme = useTheme();
   const enter = useScreenEntering();
@@ -77,6 +95,7 @@ export default function BillsScreen() {
   const [detail, setDetail] = useState<Subscription | null>(null);
   // A due is a question about one card, not a reason to leave the Bills tab.
   const [cardDetail, setCardDetail] = useState<Account | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [showStopped, setShowStopped] = useState(false);
   const [adderVisible, setAdderVisible] = useState(false);
   const [title, setTitle] = useState('');
@@ -314,73 +333,65 @@ export default function BillsScreen() {
     const accountId =
       bill.accountId ?? state.accounts.find((a) => !a.archived)?.id ?? state.accounts[0]?.id;
     if (!accountId) return;
-    Alert.alert(
-      tf('markBillPaidTitle', { title: bill.title }),
-      tf('billRecordsExpense', { amount: formatAED(bill.amountFils, { decimals: false }) }),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('markPaid'),
-          onPress: () =>
-            markBillPaid(billId, key, {
-              type: 'expense',
-              amountFils: bill.amountFils,
-              category: bill.category,
-              accountId,
-              title: bill.title,
-              date: todayISO,
-              source: 'manual',
-            }),
-        },
-      ],
-    );
+    setConfirmation({
+      question: tf('markBillPaidTitle', { title: bill.title }),
+      body: tf('billRecordsExpense', { amount: formatAED(bill.amountFils, { decimals: false }) }),
+      confirmLabel: t('markPaid'),
+      onConfirm: () =>
+        markBillPaid(billId, key, {
+          type: 'expense',
+          amountFils: bill.amountFils,
+          category: bill.category,
+          accountId,
+          title: bill.title,
+          date: todayISO,
+          source: 'manual',
+        }),
+    });
   };
 
   const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
-    Alert.alert(
-      tf('payAccountTitle', { name: accName }),
-      tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('markPaid'),
-          onPress: () =>
-            payCardDue(
-              dueId,
-              remainingFils,
-              {
-                type: 'income',
-                amountFils: remainingFils,
-                category: 'other',
-                accountId,
-                title: tf('accountPaymentTitle', { name: accName }),
-                date: todayISO,
-                source: 'manual',
-                isTransfer: true,
-              },
-              true,
-            ),
-        },
-      ],
-    );
+    setConfirmation({
+      question: tf('payAccountTitle', { name: accName }),
+      body: tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
+      confirmLabel: t('markPaid'),
+      onConfirm: () =>
+        payCardDue(
+          dueId,
+          remainingFils,
+          {
+            type: 'income',
+            amountFils: remainingFils,
+            category: 'other',
+            accountId,
+            title: tf('accountPaymentTitle', { name: accName }),
+            date: todayISO,
+            source: 'manual',
+            isTransfer: true,
+          },
+          true,
+        ),
+    });
   };
 
   const onLongPressBill = (billId: string, billTitle: string) => {
-    Alert.alert(t('deleteReminderTitle'), tf('deleteReminderBody', { title: billTitle }), [
-      { text: t('cancel'), style: 'cancel' },
-      { text: t('delete'), style: 'destructive', onPress: () => deleteBill(billId) },
-    ]);
+    setConfirmation({
+      question: t('deleteReminderTitle'),
+      body: tf('deleteReminderBody', { title: billTitle }),
+      confirmLabel: t('delete'),
+      destructive: true,
+      onConfirm: () => deleteBill(billId),
+    });
   };
 
   const onDismissSub = (sub: Subscription) => {
-    Alert.alert(
-      t('notASubscriptionQ'),
-      tf('removeSubscriptionBody', { title: sub.title }),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        { text: t('remove'), style: 'destructive', onPress: () => setNotSubscription(sub.title, true) },
-      ],
-    );
+    setConfirmation({
+      question: t('notASubscriptionQ'),
+      body: tf('removeSubscriptionBody', { title: sub.title }),
+      confirmLabel: t('remove'),
+      destructive: true,
+      onConfirm: () => setNotSubscription(sub.title, true),
+    });
   };
 
   const renderRecurringRow = (sub: Subscription, i: number) => {
@@ -1174,6 +1185,19 @@ export default function BillsScreen() {
         </Pressable>
       </Modal>
       <CardDetailSheet account={cardDetail} onClose={() => setCardDetail(null)} />
+      {/* Mounted only while there is something to confirm, so the entry
+          animation runs on every open rather than once per screen. */}
+      {confirmation && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmation(null)}
+          question={confirmation.question}
+          body={confirmation.body}
+          confirmLabel={confirmation.confirmLabel}
+          destructive={confirmation.destructive}
+          onConfirm={confirmation.onConfirm}
+        />
+      )}
     </ThemedView>
   );
 }

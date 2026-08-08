@@ -168,6 +168,23 @@ function sources(dir = SRC) {
   ok('the country picker offers every pack rather than the next one',
     /MARKETS\.map\(/.test(settings) && !/MARKETS\[\(i \+ 1\)/.test(settings));
 
+  /**
+   * And a pack it cannot apply says so on the row.
+   *
+   * `setActiveMarket` refuses a pack denominated differently from money the
+   * ledger already holds, because switching would RELABEL every stored figure
+   * rather than convert it — the same 125,050 fils printing "AED 1,250.50"
+   * and then "SAR 1,250.50" — and there is no rate offline that could convert
+   * a ledger of hand-entered amounts and statement balances. The refusal is
+   * right; a refusal the user cannot see is not. `setMarket` changing nothing
+   * is exactly as informative as the alert that never opened, so the picker
+   * has to ask `canSelectMarket` BEFORE the tap and put the reason on the row.
+   */
+  ok('a country pack the ledger will not accept is refused visibly, not silently',
+    /canSelectMarket\(/.test(settings) &&
+      /disabled: !allowed/.test(settings) &&
+      /tf\('marketPinned'/.test(settings));
+
   ok('both languages are named in the language picker',
     /LANGUAGE_NAMES = \{ en: 'English', ar: '[^']+' \}/.test(settings) &&
       /\(\['en', 'ar'\] as const\)\.map\(/.test(settings));
@@ -234,6 +251,168 @@ function sources(dir = SRC) {
   // describing a screen it no longer was.
   ok('no styles survive for the removed money-month grid',
     !/monthHead|dayGrid|dayCell|dayChoice/.test(settings));
+}
+
+/**
+ * A button that commits something may not depend on an alert to do it.
+ *
+ * Same defect as the region pickers above, one screen further on. On
+ * react-native-web `Alert.alert` is `static alert() {}` — an empty method, no
+ * dialog, no warning, no throw. An alert-driven CHOOSER opens nothing, which
+ * is bad; an alert-driven CONFIRMATION is worse, because the work itself sits
+ * in `onPress` of a button that is never drawn. "Mark paid", "Pay", "Delete"
+ * and "Remove" were all in that state: the store call was unreachable code in
+ * the web export and the tap did nothing at all, in silence.
+ *
+ * What is pinned here is the property, not the fix. The previous version of
+ * this file asserted that `Alert.alert` was PRESENT and therefore locked the
+ * bug in; asserting the opposite — that no alert survives anywhere — would be
+ * the same mistake mirrored, because an alert that only REPORTS costs a
+ * message, not an action. So: find every alert call, and check that no
+ * committing action is inside one. A screen may keep an alert; it may not put
+ * the commit in it.
+ *
+ * Two scanning rules, both learned the hard way:
+ *  • comments are stripped first, or the comment explaining why an alert is
+ *    not used here fails the scan for alerts;
+ *  • nothing is sliced between markers. Each check is anchored on the thing
+ *    itself — the call, the element — so moving code around cannot fake a
+ *    pass or invent a failure.
+ */
+{
+  const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8');
+  const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+  /** The argument list of every `Alert.alert(...)`, balanced across nesting. */
+  function alertCalls(text) {
+    const out = [];
+    const re = /\bAlert\.alert\s*\(/g;
+    let m;
+    while ((m = re.exec(text))) {
+      let depth = 1;
+      let i = re.lastIndex;
+      let quote = null;
+      for (; i < text.length && depth > 0; i += 1) {
+        const c = text[i];
+        if (quote) {
+          if (c === '\\') i += 1;
+          else if (c === quote) quote = null;
+          continue;
+        }
+        if (c === "'" || c === '"' || c === '`') quote = c;
+        else if (c === '(') depth += 1;
+        else if (c === ')') depth -= 1;
+      }
+      out.push(text.slice(re.lastIndex, i - 1));
+    }
+    return out;
+  }
+
+  // Everything on these three screens that changes stored state or money.
+  const COMMITS = [
+    'markBillPaid',
+    'payCardDue',
+    'deleteBill',
+    'setNotSubscription',
+    'addBill',
+    'purchasePro',
+    'restorePro',
+    'setPro',
+  ];
+
+  const screens = {
+    'app/(tabs)/bills.tsx': ['markBillPaid', 'payCardDue', 'deleteBill', 'setNotSubscription'],
+    'components/card-payment-sheet.tsx': ['payCardDue'],
+    'app/pro.tsx': ['purchasePro', 'restorePro'],
+  };
+
+  for (const [rel, expected] of Object.entries(screens)) {
+    const src = code(read(rel));
+    const inAlerts = [];
+    for (const args of alertCalls(src)) {
+      for (const id of COMMITS) {
+        if (new RegExp(`\\b${id}\\s*\\(`).test(args)) inAlerts.push(`${rel}: ${id}`);
+      }
+    }
+    ok(`${rel} commits nothing from inside an alert`, inAlerts.length === 0, inAlerts.join(' | '));
+
+    // And the scan is not vacuously green because the action was renamed away
+    // from under it: each screen still performs the work it is checked for.
+    const missing = expected.filter((id) => !new RegExp(`\\b${id}\\s*\\(`).test(src));
+    ok(`${rel} still performs its committing actions (${expected.length})`,
+      missing.length === 0, missing.join(' | '));
+  }
+
+  {
+    const bills = code(read('app/(tabs)/bills.tsx'));
+    // Each commit hangs off a confirmation the screen draws itself, and the
+    // one sheet that renders them is handed that same callback.
+    const wired = [
+      /onConfirm: \(\) =>\s*markBillPaid\(/,
+      /onConfirm: \(\) =>\s*payCardDue\(/,
+      /onConfirm: \(\) =>\s*deleteBill\(/,
+      /onConfirm: \(\) =>\s*setNotSubscription\(/,
+    ].filter((re) => re.test(bills));
+    ok(`every Bills commit hangs off a confirmation (${wired.length} of 4)`, wired.length === 4);
+    ok('Bills draws the confirmation it gates on',
+      /<ConfirmSheet[\s\S]{0,600}onConfirm=\{confirmation\.onConfirm\}/.test(bills));
+
+    // The wording is the part of this that was never broken. Pin the keys so a
+    // later rewrite of the mechanism cannot quietly take the copy with it.
+    const keys = [
+      'markBillPaidTitle', 'billRecordsExpense', 'payAccountTitle', 'payAccountBody',
+      'deleteReminderTitle', 'deleteReminderBody', 'notASubscriptionQ', 'removeSubscriptionBody',
+    ];
+    const lost = keys.filter((k) => !bills.includes(`'${k}'`));
+    ok(`Bills still says what it always said (${keys.length} strings)`, lost.length === 0,
+      lost.join(' | '));
+  }
+
+  {
+    const sheet = code(read('components/card-payment-sheet.tsx'));
+    ok('the card sheet files its payment from a drawn confirmation',
+      /const filePayment = \(\) => \{[\s\S]{0,500}payCardDue\(/.test(sheet) &&
+        /<ConfirmSheet[\s\S]{0,600}onConfirm=\{filePayment\}/.test(sheet));
+
+    // The two notices that only report were not left silent either: they are
+    // drawn in the sheet, where an alert would have shown nothing on web.
+    ok('the reminder answers are shown in the sheet rather than announced',
+      /setNotice\(\{ title: t\('notifsAreOff'\)/.test(sheet) &&
+        /title: t\('reminderSet'\)/.test(sheet) &&
+        /\{notice && \(/.test(sheet));
+
+    const keys = ['markStatementPaid', 'fileCardPaymentBody', 'notifsForCardDue', 'cardReminderBody'];
+    const lost = keys.filter((k) => !sheet.includes(`'${k}'`));
+    ok(`the card sheet still says what it always said (${keys.length} strings)`,
+      lost.length === 0, lost.join(' | '));
+  }
+
+  {
+    const pro = code(read('app/pro.tsx'));
+    // The paywall's five answers report, they do not ask — so they are drawn
+    // inline rather than in a sheet. What matters is that a tap on the two
+    // buttons that sell the app can never again produce nothing.
+    const outcomes = [
+      "title: t('playOnlyTitle')",
+      "title: t('nothingToRestore')",
+      "title: t('purchaseFailed')",
+      "title: t('restoreFailed')",
+      "title: t('noPurchaseFound')",
+    ].filter((s) => pro.includes(s));
+    ok(`every paywall outcome reaches the screen (${outcomes.length} of 5)`, outcomes.length === 5);
+    ok('the paywall renders the answer it just produced', /\{notice && \(/.test(pro));
+  }
+
+  {
+    // The sheet itself is drawn, like ChoiceSheet, and offers the shape
+    // ChoiceSheet does not: confirm or cancel, with a destructive variant.
+    const confirm = code(read('components/ui/confirm-sheet.tsx'));
+    ok('the confirmation sheet is drawn, not delegated',
+      /<BottomSheet/.test(confirm) && !/\bAlert\b/.test(confirm));
+    ok('the confirmation sheet offers a way out and a destructive variant',
+      /cancelLabel \?\? t\('cancel'/.test(confirm) &&
+        /variant=\{destructive \? 'danger' : 'filled'\}/.test(confirm));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

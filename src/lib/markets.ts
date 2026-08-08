@@ -176,12 +176,86 @@ export const MARKETS: MarketPack[] = [AE, SA];
 
 let active: MarketPack = AE;
 
+/**
+ * ISO 4217 code the STORED `amountFils` are denominated in, or null while the
+ * ledger holds no money.
+ *
+ * `marketId` used to answer two different questions at once: which bank and
+ * merchant vocabulary the parser matches senders against, and what currency
+ * the stored fils ARE. Only the first is a preference. The second is a fact
+ * about money already recorded, and swapping the pack quietly rewrote it —
+ * one USD 100.00 charge stored as 36730 fils printed "AED 367" before a
+ * country change and "SAR 367" after it, same untouched row, nothing
+ * converted. On the Foreign spending screen that figure sits under a heading
+ * that literally reads "Converted total".
+ *
+ * CONVERTING INSTEAD IS THE TRAP. The stored fils are all the app has: there
+ * is no per-row rate into the new currency, a historical row's true rate on
+ * its own day is not knowable offline, and a conversion pass would silently
+ * rewrite every figure the user ever recorded — with no undo, and with the
+ * parser, the bank-quoted `fxRate` fields and every hand-entered amount all
+ * left describing the old currency. A wrong number is worse than an honest
+ * label.
+ *
+ * So the accounting currency is pinned BY THE LEDGER: once money is recorded,
+ * only a pack denominated in the same currency may become active. Nothing new
+ * is persisted for this — `marketId` is still the record, it simply can no
+ * longer drift once there is money that would be relabelled by the drift. The
+ * store re-derives this from state on every reduction, so erasing the ledger
+ * (or restoring a different one) releases the pin on the same tick.
+ *
+ * The pin lives here rather than in the country picker so it holds for every
+ * caller — Settings, onboarding, a restored backup, the Worker.
+ */
+let ledgerCurrency: string | null = null;
+
 export function getActiveMarket(): MarketPack {
   return active;
 }
 
-export function setActiveMarket(id: string): void {
+/**
+ * Pin the accounting currency to `code`, or release it with `null` when the
+ * ledger holds no money. Anything that is not a three-letter code releases.
+ */
+export function setLedgerCurrency(code: string | null): void {
+  const wanted = code?.trim().toUpperCase();
+  ledgerCurrency = wanted && /^[A-Z]{3}$/.test(wanted) ? wanted : null;
+}
+
+/** ISO 4217 code pack `id` denominates in — what a ledger recorded under it is. */
+export function marketCurrencyCode(id: string): string {
+  return (MARKETS.find((m) => m.id === id) ?? AE).currency.code;
+}
+
+/** ISO 4217 code the stored fils are denominated in. */
+export function ledgerCurrencyCode(): string {
+  return ledgerCurrency ?? active.currency.code;
+}
+
+/** How that currency renders in front of an amount: the "AED" in "AED 1,234". */
+export function ledgerCurrencyDisplay(): string {
+  if (!ledgerCurrency) return active.currency.display;
+  return (
+    MARKETS.find((m) => m.currency.code === ledgerCurrency)?.currency.display ?? ledgerCurrency
+  );
+}
+
+/** Whether pack `id` can be selected without relabelling money already stored. */
+export function canSelectMarket(id: string): boolean {
+  if (!ledgerCurrency) return true;
+  return (MARKETS.find((m) => m.id === id) ?? AE).currency.code === ledgerCurrency;
+}
+
+/**
+ * Select a market pack. Returns false — and changes NOTHING, not even the
+ * bank registry — when the pack is denominated differently from money the
+ * ledger already holds. See `ledgerCurrency` above for why the answer is a
+ * refusal rather than a conversion.
+ */
+export function setActiveMarket(id: string): boolean {
+  if (!canSelectMarket(id)) return false;
   active = MARKETS.find((m) => m.id === id) ?? AE;
+  return true;
 }
 
 /** Best-effort country from the device locale ("en-SA" → SA). */

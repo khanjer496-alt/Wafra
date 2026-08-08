@@ -1,4 +1,4 @@
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Transaction } from '@/lib/types';
 
 export interface CurrencyActivity {
@@ -24,8 +24,9 @@ export interface ForeignActivitySummary {
 /**
  * Summarise charge rows that carry the original amount from a bank alert.
  *
- * The active market's currency is the ledger's accounting currency, so local
- * totals continue to use `amountFils`. Original minor units are only ever added
+ * `localFils` is the row's stored `amountFils`, so "local" here means the
+ * LEDGER's accounting currency — the one those fils are denominated in — not
+ * whichever market pack happens to be active. Original minor units are only ever added
  * within one ISO currency group; adding USD and EUR together would create a
  * precise-looking number with no financial meaning.
  *
@@ -38,14 +39,14 @@ export interface ForeignActivitySummary {
  * SAR, that disagree, because one of them is the AED equivalent this ledger
  * stores. A charge in the money you spend every day is not foreign activity.
  *
- * `localCurrency` is a parameter with the active market as its default so a
- * caller — or a test — can ask the question for a market without having to
- * move the global first.
+ * `localCurrency` is a parameter with the ledger's own currency as its default
+ * so a caller — or a test — can ask the question for a currency without having
+ * to move the global first.
  */
 export function summarizeForeignActivity(
   transactions: Transaction[],
   include: (transaction: Transaction) => boolean = () => true,
-  localCurrency: string = getActiveMarket().currency.code,
+  localCurrency: string = ledgerCurrencyCode(),
 ): ForeignActivitySummary {
   const local = localCurrency.trim().toUpperCase();
   const foreign = transactions.filter(

@@ -672,9 +672,26 @@ const S = {
   },
   regionHeader: { en: 'Region', ar: 'المنطقة' },
   countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
+  // What the pack changes, stated as what it changes: which banks and shops
+  // are recognised in NEW messages. It does not restate the currency as
+  // something the pack sets, because on a ledger that already holds money it
+  // cannot — see marketPinned below.
   countryPackDetail: {
-    en: '{country} · {currency} · banks and merchants',
-    ar: '{country} · {currency} · البنوك والمتاجر',
+    en: '{country} · {currency} · bank and shop names in new messages',
+    ar: '{country} · {currency} · أسماء البنوك والمتاجر في الرسائل الجديدة',
+  },
+  /**
+   * Why a differently-denominated pack is greyed out.
+   *
+   * The honest sentence, because the dishonest one was the bug: switching
+   * packs used to relabel every stored figure — the same 125,050 fils
+   * printing "AED 1,250.50" and then "SAR 1,250.50" — with nothing converted
+   * and no rate that could have converted it. So the pack is refused, and the
+   * row says which currency the money is already in and what the way out is.
+   */
+  marketPinned: {
+    en: 'Your money is recorded in {currency}. Switching would relabel it, not convert it.',
+    ar: 'أموالك مسجّلة بـ {currency}. التبديل سيغيّر التسمية فقط ولن يحوّل المبالغ.',
   },
   uaeName: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
   saudiName: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },

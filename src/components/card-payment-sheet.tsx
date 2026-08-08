@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
@@ -52,6 +53,25 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     if (due) setNow(new Date());
   }, [due]);
 
+  const [confirming, setConfirming] = useState(false);
+  /**
+   * What "Remind me" has to say, drawn in the sheet instead of announced.
+   *
+   * Both outcomes — permission refused, reminder scheduled — went through
+   * `Alert.alert`, which is an empty method on react-native-web: the button
+   * scheduled the reminder and then said nothing whatsoever, so the only
+   * evidence it had worked was a notification three days later. An inline
+   * line under the actions is visible on every platform and does not cover
+   * the figures the user came here to read.
+   */
+  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  useEffect(() => {
+    // A new statement is a new sheet: neither the confirmation nor the last
+    // reminder's answer belongs to it.
+    setConfirming(false);
+    setNotice(null);
+  }, [due]);
+
   const data = useMemo(() => {
     if (!due) return null;
     // The prop is a snapshot Home captured when the row was tapped, and the
@@ -92,58 +112,43 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
   // file a zero-fils income transfer against the card.
   const canMarkPaid = status.remainingFils > 0;
 
-  const markPaid = () => {
-    if (!canMarkPaid) return;
-    const name = account?.name ?? 'Card';
-    Alert.alert(
-      t('markStatementPaid'),
-      tf('fileCardPaymentBody', {
-        amount: formatAED(status.remainingFils),
-        name,
-      }),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('markPaid'),
-          onPress: () => {
-            payCardDue(
-              live.id,
-              status.remainingFils,
-              {
-                type: 'income',
-                amountFils: status.remainingFils,
-                category: 'other',
-                accountId: live.accountId,
-                title: `${name} payment`,
-                date: toISODate(new Date()),
-                source: 'manual',
-                isTransfer: true,
-              },
-              true,
-            );
-            onClose();
-          },
-        },
-      ],
+  const name = account?.name ?? 'Card';
+
+  // The payment itself. Reachable from the confirmation sheet and from
+  // nowhere else — it used to live inside an alert button's `onPress`, which
+  // on the web export was code no tap could ever reach.
+  const filePayment = () => {
+    payCardDue(
+      live.id,
+      status.remainingFils,
+      {
+        type: 'income',
+        amountFils: status.remainingFils,
+        category: 'other',
+        accountId: live.accountId,
+        title: `${name} payment`,
+        date: toISODate(new Date()),
+        source: 'manual',
+        isTransfer: true,
+      },
+      true,
     );
+    onClose();
   };
 
   const remindMe = async () => {
     const granted = await requestNotificationPermission();
     if (!granted) {
-      Alert.alert(
-        t('notifsAreOff'),
-        t('notifsForCardDue'),
-      );
+      setNotice({ title: t('notifsAreOff'), body: t('notifsForCardDue') });
       return;
     }
     await syncPaymentReminders(state);
     // The scheduler puts card dues at three days out and again on the day
     // (notifications.ts). Promising two days was a number nothing produced.
-    Alert.alert(
-      t('reminderSet'),
-      tf('cardReminderBody', { date: shortDate(live.dueDate) }),
-    );
+    setNotice({
+      title: t('reminderSet'),
+      body: tf('cardReminderBody', { date: shortDate(live.dueDate) }),
+    });
   };
 
   return (
@@ -226,9 +231,45 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       />
 
       <View style={styles.actions}>
-        <Button inline label={t('markPaid')} onPress={markPaid} disabled={!canMarkPaid} />
+        <Button
+          inline
+          label={t('markPaid')}
+          onPress={() => setConfirming(true)}
+          disabled={!canMarkPaid}
+        />
         <Button inline variant="outline" label={t('remindMe')} onPress={remindMe} />
       </View>
+
+      {notice && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.notice,
+            { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+          ]}>
+          <ThemedText type="smallBold">{notice.title}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {notice.body}
+          </ThemedText>
+        </View>
+      )}
+
+      {/* Nested inside this sheet rather than beside it: a Modal presented
+          from within the presented one stacks, where dismissing this sheet
+          and presenting another in the same frame does not. */}
+      {confirming && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirming(false)}
+          question={t('markStatementPaid')}
+          body={tf('fileCardPaymentBody', {
+            amount: formatAED(status.remainingFils),
+            name,
+          })}
+          confirmLabel={t('markPaid')}
+          onConfirm={filePayment}
+        />
+      )}
     </BottomSheet>
   );
 }
@@ -260,5 +301,11 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     gap: Spacing.two + 2,
+  },
+  notice: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.half,
   },
 });

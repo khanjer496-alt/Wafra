@@ -1,4 +1,4 @@
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { getLanguage, t } from '@/lib/i18n';
 
 const MONTHS = [
@@ -75,9 +75,17 @@ export function toWholeDirhamFils(fils: number): number {
   return Math.round(fils / 100) * 100;
 }
 
-/** "AED 1,234.56" — currency symbol follows the active market. */
+/**
+ * "AED 1,234.56" — the code names what the STORED fils actually are.
+ *
+ * Not the active pack's currency. `fils` is a number out of the ledger and
+ * nothing here converts it, so the only code this may print is the one the
+ * ledger is denominated in; printing the pack's turned a country change in
+ * Settings into a silent relabelling of every figure in the app. See
+ * `ledgerCurrency` in markets.ts.
+ */
 export function formatAED(fils: number, opts?: { decimals?: boolean }): string {
-  return `${getActiveMarket().currency.display} ${formatAmount(fils, opts)}`;
+  return `${ledgerCurrencyDisplay()} ${formatAmount(fils, opts)}`;
 }
 
 /** Compact form for chart labels: "1.2k", "18k". */

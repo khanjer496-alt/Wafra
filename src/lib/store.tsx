@@ -18,7 +18,12 @@ import {
 import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
-import { detectMarketId, setActiveMarket } from '@/lib/markets';
+import {
+  detectMarketId,
+  marketCurrencyCode,
+  setActiveMarket,
+  setLedgerCurrency,
+} from '@/lib/markets';
 import {
   generateSeedAccounts,
   generateSeedCardDues,
@@ -394,6 +399,10 @@ export function migratePersistedState(
     // Rows that kept their raw SMS re-parse under the CURRENT grammar on
     // every launch. A hand-corrected row is the user's answer, not the
     // parser's, so it remains the exact object supplied to this migration.
+    // Released first for the same reason the hydrate branch releases it: this
+    // runs over a backup being restored, whose pack is a property of the state
+    // arriving, not of the one it replaces.
+    setLedgerCurrency(null);
     if (parsed.marketId) setActiveMarket(parsed.marketId);
     parsed.transactions = parsed.transactions.flatMap((t) => {
       if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
@@ -517,7 +526,42 @@ type Action =
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'clearAll' };
 
+/**
+ * Money already recorded, as opposed to plans that can be retyped.
+ *
+ * Transactions, bills and card dues all store fils that came out of a real
+ * statement or a real charge; relabelling them in another currency is the
+ * defect this guards. Budgets and goals are deliberately NOT here: they are
+ * targets the user set, the onboarding presets are already chosen per market
+ * (`limitsByMarket`), and counting them would refuse a country change to
+ * someone still stepping back and forth through onboarding, who has no
+ * recorded money at all.
+ */
+function ledgerHoldsMoney(s: AppState): boolean {
+  return s.transactions.length > 0 || s.bills.length > 0 || s.cardDues.length > 0;
+}
+
+/**
+ * Pin (or release) the ledger's accounting currency from the state that now
+ * exists — see `ledgerCurrency` in markets.ts for why the pin exists at all.
+ *
+ * Derived rather than persisted: the currency of record IS `marketId`, and the
+ * pin is what stops `marketId` drifting once there is money it would relabel.
+ * Recomputing it after every action is what makes `clearAll` and `restore`
+ * release or re-pin it on the same tick, with no field to migrate.
+ */
+function syncLedgerCurrency(next: AppState): AppState {
+  setLedgerCurrency(
+    next.marketId && ledgerHoldsMoney(next) ? marketCurrencyCode(next.marketId) : null,
+  );
+  return next;
+}
+
 function reducer(state: AppState, action: Action): AppState {
+  return syncLedgerCurrency(reduceState(state, action));
+}
+
+function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'hydrate':
     case 'loadDemo':
@@ -532,6 +576,10 @@ function reducer(state: AppState, action: Action): AppState {
       if (!next.trialStartTs) next.trialStartTs = Date.now();
       // Localize automatically: country pack from the device locale, once.
       if (!next.marketId) next.marketId = detectMarketId();
+      // The incoming state brings its own accounting currency with it, so any
+      // pin held by the state being replaced must not veto its pack. A restore
+      // of an SAR backup over an AED ledger is exactly that case.
+      setLedgerCurrency(null);
       setActiveMarket(next.marketId);
       if (!next.language) next.language = detectLanguage();
       setLanguage(next.language === 'ar' ? 'ar' : 'en');
@@ -555,7 +603,12 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'setMarket':
-      setActiveMarket(action.id);
+      // Refused outright once the ledger holds money: the pack change would
+      // relabel every stored figure in a currency it was never recorded in,
+      // and nothing here converts. markets.ts owns that judgement so it holds
+      // for onboarding and Settings alike; `marketId` must not move when the
+      // pack did not.
+      if (!setActiveMarket(action.id)) return state;
       return { ...state, marketId: action.id };
     case 'setUiLanguage':
       setLanguage(action.language === 'ar' ? 'ar' : 'en');

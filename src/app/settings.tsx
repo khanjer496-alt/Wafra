@@ -63,7 +63,7 @@ import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '
 import { tapped } from '@/lib/haptics';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import { MARKETS } from '@/lib/markets';
+import { canSelectMarket, ledgerCurrencyDisplay, MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
 // Deliberately this branch's relay client, not the other one's isRelaySupported/
 // unpairRelay/stopRelayWake trio: the two relay clients speak incompatible wire
@@ -415,11 +415,32 @@ export default function SettingsScreen() {
    * packs plus Cancel, already at the ceiling — and on react-native-web
    * `Alert.alert` is an empty method, so the row did nothing at all.
    */
-  const marketChoices = MARKETS.map((m) => ({
-    value: m.id,
-    label: marketName(m.id),
-    detail: m.currency.display,
-  }));
+  /**
+   * A pack denominated differently from money already recorded is SHOWN and
+   * refused, with the reason on the row.
+   *
+   * `setMarket` answers such a request by changing nothing at all — the right
+   * answer, because there is no rate that could convert a ledger of
+   * hand-entered amounts, bill totals and statement balances, and a plausible
+   * wrong number is worse than an honest label. But a silent no-op is the
+   * same class of defect as the alert that never opened: the user taps, the
+   * app does nothing, and nothing says why. So the constraint is stated
+   * before the tap rather than swallowed after it.
+   *
+   * Shown rather than omitted: a user hunting for Saudi Arabia in a list that
+   * does not contain it concludes the app cannot do Saudi Arabia at all.
+   */
+  const marketChoices = MARKETS.map((m) => {
+    const allowed = canSelectMarket(m.id);
+    return {
+      value: m.id,
+      label: marketName(m.id),
+      detail: allowed
+        ? m.currency.display
+        : tf('marketPinned', { currency: ledgerCurrencyDisplay() }),
+      disabled: !allowed,
+    };
+  });
 
   const applyLanguage = (next: 'en' | 'ar') => {
     if (next === language) return;

@@ -13,6 +13,18 @@ export interface Choice<T extends string> {
   label: string;
   /** One line under the label — what picking this actually changes. */
   detail?: string;
+  /**
+   * Offered, visibly, but not selectable — with `detail` carrying the reason.
+   *
+   * Not the same as omitting the option, and the difference matters: a user
+   * looking for Saudi Arabia in a list that does not contain it concludes the
+   * app cannot do it. Shown and greyed with "your ledger is recorded in AED"
+   * underneath, they learn what the constraint actually is. The alternative
+   * that was considered and rejected is letting the tap through and reporting
+   * the refusal afterwards, which spends a tap to say what the row could have
+   * said on sight.
+   */
+  disabled?: boolean;
 }
 
 interface ChoiceSheetProps<T extends string> {
@@ -81,23 +93,30 @@ export function ChoiceSheet<T extends string>({
       <View>
         {options.map((option, i) => {
           const active = option.value === value;
+          const off = option.disabled === true;
           return (
             <Pressable
               key={option.value}
               accessibilityRole="button"
-              accessibilityState={{ selected: active }}
+              accessibilityState={{ selected: active, disabled: off }}
               accessibilityLabel={option.label}
-              onPress={() => pick(option.value)}
+              // No handler at all rather than a guarded one: a Pressable with
+              // an onPress still reports itself as pressable to a screen
+              // reader and still animates under the thumb, which is the same
+              // lie the silent no-op told.
+              onPress={off ? undefined : () => pick(option.value)}
               style={({ pressed }) => [
                 styles.option,
                 i > 0 && {
                   borderTopWidth: StyleSheet.hairlineWidth,
                   borderTopColor: theme.cardBorder,
                 },
-                pressed && { transform: [{ scale: 0.985 }] },
+                pressed && !off && { transform: [{ scale: 0.985 }] },
               ]}>
               <View style={styles.text}>
-                <ThemedText type="small">{option.label}</ThemedText>
+                <ThemedText type="small" style={off ? styles.labelOff : undefined}>
+                  {option.label}
+                </ThemedText>
                 {option.detail && (
                   <ThemedText type="meta" themeColor="textTertiary">
                     {option.detail}
@@ -131,5 +150,11 @@ const styles = StyleSheet.create({
   text: {
     flex: 1,
     gap: Spacing.half,
+  },
+  // The label dims; the line under it does not. That line is the whole point
+  // of showing a disabled option, and dimming it along with the label is how
+  // a greyed row ends up unable to say why it is greyed.
+  labelOff: {
+    opacity: 0.5,
   },
 });

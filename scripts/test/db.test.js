@@ -355,7 +355,15 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
     '@/lib/theme-preference': { setThemePreference() {} },
     '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
-    '@/lib/markets': { detectMarketId: () => 'AE', setActiveMarket() {} },
+    // `setActiveMarket` returns whether the pack was applied: it refuses a pack
+    // denominated differently from money the ledger already holds. The stub
+    // says yes, which is the empty-ledger answer these fixtures start from.
+    '@/lib/markets': {
+      detectMarketId: () => 'AE',
+      setActiveMarket: () => true,
+      setLedgerCurrency() {},
+      marketCurrencyCode: (id) => (id === 'SA' ? 'SAR' : 'AED'),
+    },
     '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
@@ -1657,10 +1665,11 @@ if (!workflow) {
     '@/lib/sms-parser': require('./build/sms-parser'),
     '@/lib/heal': require('./build/heal'),
     '@/lib/ledger': require('./build/ledger'),
-    '@/lib/markets': {
-      detectMarketId: () => 'AE',
-      setActiveMarket: require('./build/markets').setActiveMarket,
-    },
+    // The real pack module, with only the device-locale probe pinned. Naming
+    // its exports one at a time here meant every export the hydration path
+    // later reached for — the ledger-currency pin among them — arrived as
+    // `undefined` at call time rather than as a missing-stub failure.
+    '@/lib/markets': { ...require('./build/markets'), detectMarketId: () => 'AE' },
   });
   const { parserCoverage } = require('./build/accuracy');
   const { normalizeServiceName } = require('./build/sms-parser');
