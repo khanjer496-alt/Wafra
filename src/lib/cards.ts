@@ -132,12 +132,21 @@ export function mergeImportedCardDues(
     const prior = merged[at];
     const priorKnown = !prior.minDueEstimated;
     const nextKnown = !due.minDueEstimated;
+    // A figure the bank stated always beats one this app guessed. Between two
+    // figures the bank BOTH stated, the later one is its correction of the
+    // earlier — `existing` is walked before `incoming`, so `due` is the fresher
+    // reading. Math.max here meant a bank revising a minimum DOWN never landed,
+    // and `belowMinimum` went on accusing the user of underpaying against a
+    // figure the bank itself had superseded. Two guesses still take the larger:
+    // neither is evidence, and the larger one is the safer thing to show.
     const minimum =
       priorKnown && !nextKnown
         ? prior.minDueFils
         : !priorKnown && nextKnown
           ? due.minDueFils
-          : Math.max(prior.minDueFils, due.minDueFils);
+          : priorKnown && nextKnown
+            ? due.minDueFils
+            : Math.max(prior.minDueFils, due.minDueFils);
     const settledAt = [prior.settledAt, due.settledAt]
       .filter((value): value is string => Boolean(value))
       .sort()
@@ -273,12 +282,111 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
   const sided = new Set(
     matched.filter((t) => t.cardPaymentSide !== undefined).map((t) => `${t.date}|${t.amountFils}`),
   );
-  const value = matched
-    .filter((t) => t.cardPaymentSide !== undefined || !sided.has(`${t.date}|${t.amountFils}`))
-    .slice()
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const value = collapseSettlementLegs(
+    matched.filter((t) => t.cardPaymentSide !== undefined || !sided.has(`${t.date}|${t.amountFils}`)),
+  );
   paymentsCache.byKey.set(key, value);
   return value;
+}
+
+/** Which half of a settlement a row is: the parser's answer, or its origin. */
+type SettlementLeg = 'debit' | 'receipt' | 'manual' | 'unsided';
+
+function settlementLeg(t: Transaction): SettlementLeg {
+  if (t.cardPaymentSide) return t.cardPaymentSide;
+  return t.source === 'manual' ? 'manual' : 'unsided';
+}
+
+interface OpenSettlement {
+  row: Transaction;
+  leg: SettlementLeg;
+  /** Legs already folded in. One movement has one of each, never two. */
+  absorbed: Set<SettlementLeg>;
+}
+
+/**
+ * One movement, two rows, and the clock is the only thing keeping them apart.
+ *
+ * The rule above collapses a compat row against a sided one on the same day.
+ * Two rows carrying OPPOSITE sides are the same shape of error and were not
+ * caught by it at all, because both are sided. `dedupe.ts` is supposed to pair
+ * them at import, but it insists the two captures be within 30 minutes of each
+ * other, and the two legs of one card payment are not reliably that close:
+ *
+ *   'AED 1,000.00 has been debited from your account XXX0004 towards the
+ *    payment of your Credit Card 1234.'                  15:00, side=debit
+ *   'Payment of AED 1,000.00 received towards your Credit Card ending 1234.'
+ *                                            next morning 08:00, side=receipt
+ *
+ * At a 29-minute gap that imported as ONE payment; at 31 minutes it imported
+ * as two, and the second AED 1,000 poured into the following month's AED 800
+ * statement and marked it settled. The user is shown a card that owes nothing
+ * and gets no reminder for a bill they still owe — from nothing but how long
+ * the bank took to send its second SMS.
+ *
+ * A manual "Mark paid" row is the same story told from the other end. It is by
+ * construction a claim about a payment the bank is about to confirm, and it is
+ * stamped with the device's today while the bank's receipt carries the
+ * provider's date — so the two disagree by a day roughly whenever the payment
+ * is made in the evening. dedupe.ts matches a manual row on its exact date
+ * only, so that one-day skew imports the bank's confirmation as a second
+ * payment of the same money.
+ *
+ * Both are handled here as well as at import, because a ledger that already
+ * holds the phantom row cannot heal itself: the second leg is a legitimately
+ * distinct SMS, so no rescan will ever decline to import it, and reading the
+ * pair correctly is the only thing that puts the balance back.
+ *
+ * ±1 day, and each settlement absorbs each leg at most once, so two genuine
+ * payments that both arrive in two legs stay two payments. The residual error
+ * — two same-amount payments on consecutive days that EACH lost a leg, folded
+ * into one — is the direction this file already prefers: a payment dropped
+ * leaves a balance the user can clear with Mark paid, while a payment counted
+ * twice quietly settles a bill they still owe.
+ */
+function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
+  const ordered = rows
+    .slice()
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
+    );
+  // Bucketed by amount so a card with hundreds of same-size payments does not
+  // turn this into a quadratic walk on the render path.
+  const open = new Map<number, OpenSettlement[]>();
+  const kept: Transaction[] = [];
+
+  for (const row of ordered) {
+    const leg = settlementLeg(row);
+    // 'unsided' is a compat row the same-day rule above already had its say
+    // about; nothing else may fold it in on a guess.
+    if (leg === 'unsided') {
+      kept.push(row);
+      continue;
+    }
+    const bucket = (open.get(row.amountFils) ?? []).filter(
+      (s) => s.row.date >= shiftISO(row.date, -1),
+    );
+    const fits = (s: OpenSettlement) =>
+      s.leg !== leg &&
+      s.leg !== 'unsided' &&
+      !s.absorbed.has(leg) &&
+      // A manual claim explains bank alerts; two bank alerts explain each
+      // other. Two manual rows are two deliberate taps, not one movement.
+      !(s.leg === 'manual' && leg === 'manual');
+    const partner =
+      bucket.find((s) => fits(s) && s.row.date === row.date) ?? bucket.find(fits);
+    if (partner) {
+      partner.absorbed.add(leg);
+      open.set(row.amountFils, bucket);
+      continue;
+    }
+    bucket.push({ row, leg, absorbed: new Set() });
+    open.set(row.amountFils, bucket);
+    kept.push(row);
+  }
+
+  return kept;
 }
 
 /** A card's statements: one per due date, however many rows describe each. */

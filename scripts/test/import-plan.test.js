@@ -1239,5 +1239,166 @@ const afterFirst = apply(BASE, first);
     { tx: again.txCount, dues: again.dueCount });
 }
 
+// ── One card payment, two SMS, hours apart ──────────────────────────────
+//
+// The bank confirms a card payment twice: once against the account the money
+// left, once against the card it arrived on. dedupe.ts pairs the two only if
+// they land within 30 minutes of each other, and banks do not promise that —
+// a receipt posted the next morning is ordinary. Both rows then allocate, and
+// because a statement can only absorb what it owes, the surplus pours into the
+// NEXT statement and marks a bill paid that nobody paid.
+//
+// So the assertion is not "one row in the ledger" — the phantom row is
+// dedupe.ts's to prevent, and a ledger already holding one cannot re-scan its
+// way out. It is that the money is counted ONCE wherever it is counted: the
+// September statement must still be owed, at every gap.
+{
+  const cardMath = require('./build/cards.js');
+  const dedupe = require('./build/dedupe.js');
+  const AUG = 'Your FAB Credit Card ending 1234 statement for Aug 2026: Total Amount Due AED 1,000.00, Minimum Amount Due AED 50.00. Payment Due Date 26/08/2026.';
+  const SEP = 'Your FAB Credit Card ending 1234 statement for Sep 2026: Total Amount Due AED 800.00, Minimum Amount Due AED 40.00. Payment Due Date 26/09/2026.';
+  const DEBIT_LEG = 'Dear Customer, AED 1,000.00 has been debited from your account XXX0004 towards the payment of your Credit Card 1234.';
+  const RECEIPT_LEG = 'FAB: Payment of AED 1,000.00 received towards your Credit Card ending 1234. Thank you.';
+  const DEBIT_AT = Date.parse('2026-08-26T15:00:00Z');
+  const NOW = new Date('2026-09-05T12:00:00Z');
+
+  /** Both statements imported, the way a user's inbox delivers them. */
+  const withStatements = () => {
+    let state = BASE;
+    for (const [body, ts] of [
+      [AUG, Date.parse('2026-08-01T06:00:00Z')],
+      [SEP, Date.parse('2026-09-01T06:00:00Z')],
+    ]) {
+      const s = scan([{ body, ts, sender: 'FAB' }]);
+      state = apply(state, buildImportPlan(s.parsed, state, s.newestTs, NOW));
+    }
+    return state;
+  };
+
+  const settle = (gapMs) => {
+    const s = scan([
+      { body: DEBIT_LEG, ts: DEBIT_AT, sender: 'FAB' },
+      { body: RECEIPT_LEG, ts: DEBIT_AT + gapMs, sender: 'FAB' },
+    ]);
+    let state = apply(withStatements(), buildImportPlan(s.parsed, withStatements(), s.newestTs, NOW));
+    // The store reconciles captures after every import; do the same here so
+    // this measures what survives the real pipeline, not the plan alone.
+    state = { ...state, transactions: dedupe.reconcileCaptureDuplicates(state.transactions) };
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    const sep = state.cardDues.find((d) => d.dueDate === '2026-09-26');
+    return {
+      sepAllocated: cardMath.duePaidFils(state, sep),
+      open: cardMath.openDues(state, NOW).map((d) => `${d.due.dueDate}:${d.remainingFils}`),
+      paidTotal: cardMath.cardStatementView(state, card.id).paidTotalFils,
+    };
+  };
+
+  const base = settle(5 * 60_000);
+  ok('settlement legs 5 minutes apart: September is untouched',
+    base.sepAllocated === 0 && base.open.join() === '2026-09-26:80000', base);
+
+  for (const [label, gapMs] of [
+    ['31 minutes', 31 * 60_000],
+    ['four hours', 4 * 3_600_000],
+    ['the next morning', 17 * 3_600_000],
+  ]) {
+    const out = settle(gapMs);
+    ok(`settlement legs ${label} apart do not also settle September`,
+      out.sepAllocated === 0 && out.open.join() === '2026-09-26:80000', out);
+    ok(`settlement legs ${label} apart are one AED 1,000 payment on the sheet`,
+      out.paidTotal === 100000, out);
+  }
+
+  // "Mark paid" is a claim about a payment the bank is about to confirm. It is
+  // stamped with the device's today; the receipt carries the provider's date,
+  // so an evening payment routinely skews the two by a day. dedupe.ts matches
+  // a manual row on its exact date only, and that one day of skew used to buy
+  // the user a second AED 1,000 payment.
+  const markedPaid = () => {
+    const state = withStatements();
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    return {
+      ...state,
+      // payCardDue (store.tsx) records the transfer and leaves paidFils alone.
+      transactions: [
+        { id: 'manual-paid', type: 'income', amountFils: 100000, category: 'other',
+          accountId: card.id, title: 'FAB Credit Card •1234 payment',
+          date: '2026-08-26', source: 'manual', isTransfer: true },
+        ...state.transactions,
+      ],
+      cardDues: state.cardDues.map((d) =>
+        d.dueDate === '2026-08-26' ? { ...d, settledAt: '2026-08-26T20:00:00.000Z' } : d),
+    };
+  };
+
+  for (const [label, at] of [
+    ['the same evening', '2026-08-26T18:00:00Z'],
+    ['the next morning', '2026-08-27T08:00:00Z'],
+  ]) {
+    const before = markedPaid();
+    const s = scan([{ body: RECEIPT_LEG, ts: Date.parse(at), sender: 'FAB' }]);
+    const state = apply(before, buildImportPlan(s.parsed, before, s.newestTs, NOW));
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    const sep = state.cardDues.find((d) => d.dueDate === '2026-09-26');
+    const view = cardMath.cardStatementView(state, card.id);
+    ok(`Mark paid plus the bank's receipt ${label} is one payment, not two`,
+      cardMath.duePaidFils(state, sep) === 0 && view.paidTotalFils === 100000,
+      { sep: cardMath.duePaidFils(state, sep), paidTotal: view.paidTotalFils,
+        payments: view.payments.map((t) => `${t.date}|${t.source}`) });
+  }
+
+  // The other direction: two genuine payments of the same size, each split
+  // across a debit and a receipt leg, are still two payments.
+  const twoGenuine = (() => {
+    const state = withStatements();
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    const leg = (id, date, side) => ({
+      id, type: 'income', amountFils: 100000, category: 'other', accountId: card.id,
+      title: 'Card payment', date, source: 'sms', isTransfer: true, cardPaymentSide: side,
+      ts: Date.parse(`${date}T12:00:00Z`),
+    });
+    const full = { ...state, transactions: [
+      leg('a-debit', '2026-08-26', 'debit'), leg('a-receipt', '2026-08-26', 'receipt'),
+      leg('b-debit', '2026-08-27', 'debit'), leg('b-receipt', '2026-08-27', 'receipt'),
+    ] };
+    return cardMath.cardStatementView(full, card.id).paidTotalFils;
+  })();
+  ok('two same-size payments, each in two legs, are still AED 2,000',
+    twoGenuine === 200000, twoGenuine);
+}
+
+// ── A minimum the bank restates ─────────────────────────────────────────
+//
+// Math.max between two figures the bank BOTH stated meant a correction
+// downward never landed, and `belowMinimum` went on accusing the user of
+// underpaying against a figure the bank itself had superseded. Between two
+// guesses there is no newer and no better, so the larger still wins.
+{
+  const cardMath = require('./build/cards.js');
+  const card = { id: 'C', name: 'FAB Credit Card •1234', kind: 'card', cardType: 'credit',
+    last4: '1234', bankName: 'FAB', openingFils: 0, color: '#fff' };
+  const due = (id, minDueFils, extra) => ({ id, accountId: 'C', totalDueFils: 100000,
+    minDueFils, dueDate: '2026-08-26', paidFils: 0, ...extra });
+  const minOf = (a, b) => cardMath.mergeImportedCardDues([a], [b], [card])[0].minDueFils;
+
+  ok('a minimum the bank revises down replaces the one it revised',
+    minOf(due('d1', 20000), due('d2', 5000)) === 5000);
+  ok('a minimum the bank revises up replaces it too',
+    minOf(due('d1', 5000), due('d2', 20000)) === 20000);
+  ok('a stated minimum still beats an estimate, whichever arrived first',
+    minOf(due('d1', 20000), due('d2', 5000, { minDueEstimated: true })) === 20000 &&
+      minOf(due('d1', 5000, { minDueEstimated: true }), due('d2', 20000)) === 20000);
+  ok('two estimates still take the larger',
+    minOf(due('d1', 5000, { minDueEstimated: true }),
+      due('d2', 7000, { minDueEstimated: true })) === 7000);
+
+  // The whole point of the estimate flag: a guess must never be quoted back
+  // as the bank's figure, and must never make the user look delinquent.
+  const stated = cardMath.mergeImportedCardDues(
+    [due('d1', 20000)], [due('d2', 5000)], [card])[0];
+  ok('the merged row is still marked as a figure, not a guess',
+    stated.minDueEstimated === undefined, stated);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
