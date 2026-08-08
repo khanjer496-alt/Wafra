@@ -148,8 +148,21 @@ export interface ParsedCard {
  * against a dining budget for a software subscription. Correcting the rule
  * reaches those rows only through healPatch's new deliberate-category branch,
  * which needs this re-read to run.
+ *
+ * 15: Three parser changes landed on 14 without bumping it, which meant none
+ * of them could reach a row already in the ledger. That is the whole point of
+ * this number, so the miss is worth naming:
+ *   - the e&/Etisalat bill receipt no longer writes the BILLER's figures onto
+ *     the user's own account. Untouched, a stored row keeps a snapshot that
+ *     set one user's debit card balance to AED 0.00 and reported AED 681.45
+ *     owed on a card holding no debt;
+ *   - MCD-<store code>, CENTRAL <mall>, Gowabi, Muang Boran, Don Muang,
+ *     e-visa and Zain now have categories, and an existing row reaches them
+ *     only through healPatch's deliberate-category branch, which needs this;
+ *   - declined messages are recognised by an exported predicate the hydrate
+ *     migration uses.
  */
-export const PARSER_VERSION = 14;
+export const PARSER_VERSION = 15;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -3055,6 +3068,50 @@ function maskMerchantNames(text: string): string {
   return out;
 }
 
+/**
+ * The two-pass refusal test, in ONE place.
+ *
+ * `parseSmsInner` has always had it inline. It is a function now because a
+ * second caller needs the identical answer — `isDeclinedMessage`, which the
+ * ledger migration in accounts.ts uses as its evidence for deleting a row that
+ * a current parser would never have created. Two copies of this expression
+ * would mean a stored row could be deleted for a refusal the live parser no
+ * longer sees, or kept for one it does; a shared function makes that
+ * impossible by construction.
+ *
+ * `body` is the normalised text; `suppressible` is that text with merchant
+ * descriptors and the fraud-reporting footer blanked out. Both are passed in
+ * rather than recomputed because parseSmsInner already holds them and
+ * maskMerchantNames walks a /g regex over the whole body.
+ */
+function declinedInBody(body: string, suppressible: string): boolean {
+  return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+}
+
+/**
+ * Does this message state that the transaction was REFUSED?
+ *
+ * Exported for one caller: `removeDeclinedTransactions` in accounts.ts, which
+ * deletes ledger rows that an older parser imported from decline alerts. A
+ * declined transaction moved no money, so the row is not a mislabelled expense
+ * — it is an event that never happened, and healing (which only ever adds
+ * information to a row) has no way to take it back.
+ *
+ * That migration must not delete a row merely because `parseSms` now returns
+ * null for its stored text: `raw` is retained as a 300-character EXCERPT
+ * (import-plan.ts), and a body truncated before its amount parses to null for
+ * a reason that has nothing to do with the transaction being real. Truncation
+ * can hide a refusal; it cannot invent one. So this is the affirmative half of
+ * the evidence, and it answers the question the parser itself asks, about the
+ * SMS text — never about the title the old parser wrote onto the row.
+ */
+export function isDeclinedMessage(message: string): boolean {
+  const source = message.trim();
+  if (!source) return false;
+  const body = foldOrthography(stripInvisible(source));
+  return declinedInBody(body, blank(maskMerchantNames(body), FRAUD_FOOTER_RE));
+}
+
 // SNAPSHOT_RE and PLAIN_BALANCE_RE are market-compiled in
 // ensureCurrencyPatterns, because both now require a currency token in front
 // of the figure and the aliases for that come from the active market pack.
@@ -3567,8 +3624,9 @@ function parseSmsInner(
   // footer stapled underneath it (FRAUD_FOOTER_RE).
   const suppressible = blank(maskMerchantNames(raw), FRAUD_FOOTER_RE);
   // The masked pass catches a refusal stated about the transaction; the
-  // unmasked pass catches one the merchant descriptor swallowed.
-  if (DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(raw)) return null;
+  // unmasked pass catches one the merchant descriptor swallowed. Both live in
+  // `declinedInBody` so `isDeclinedMessage` and this call site can never drift.
+  if (declinedInBody(raw, suppressible)) return null;
   // ...but the RELEASE of a hold is the settlement notice, not the hold.
   if (PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))) return null;
   // Footer boilerplate ("do not disclose your PIN", "never share your OTP",

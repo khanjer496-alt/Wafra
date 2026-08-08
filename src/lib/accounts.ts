@@ -1,4 +1,5 @@
 import { bankBrandForName, bankIdentityForName, issuerIdentityForName } from '@/lib/markets';
+import { isDeclinedMessage, parseSms } from '@/lib/sms-parser';
 import type { Account, AppState, CardDue } from '@/lib/types';
 
 /**
@@ -410,6 +411,74 @@ export function repairCardPaymentAccounts(state: AppState): AppState {
  * structurally empty generated artifacts beside one substantive target. This
  * one acts on a guess the user confirmed, and must never run by itself.
  */
+/**
+ * Delete ledger rows imported from a DECLINED transaction alert.
+ *
+ * A refused transaction moved no money. One user's ledger carries 59 rows
+ * titled "Insufficient Funds" totalling AED 89,897 — every one of them a
+ * direct-debit refusal an older parser read as a purchase, and every one of
+ * them counted against their spending.
+ *
+ * Nothing else can reach them. A rescan HEALS rows it re-reads, but healPatch
+ * only ever ADDS information — there is no patch that means "this never
+ * happened" — and a message the parser now suppresses is dropped in
+ * auto-import.ts before the import planner sees it, so the stale-misread sweep
+ * that already exists for bill reminders and card statements never gets its
+ * fingerprint. Without a migration these rows survive every future scan
+ * forever.
+ *
+ * Deleting user data needs evidence, so a row goes only when ALL of these hold:
+ *
+ *  - it came from SMS and still carries its `raw` body. No text, no evidence:
+ *    a manual entry, an iOS relay row (which discards the body by design) and
+ *    a private-mode ledger keep every row they have.
+ *  - `userEdited` is false. A row the user corrected is theirs.
+ *  - the parser's own refusal test fires on that raw text — `isDeclinedMessage`
+ *    reads the SMS, never the title. "Insufficient Funds" is a legal trade
+ *    name, and deleting on the title would take a real shop's charge with it.
+ *  - `parseSms` now returns nothing for it, so a CURRENT parser demonstrably
+ *    would not have created this row. Required IN ADDITION to the refusal test,
+ *    because a decline word can sit in a message that really did move money:
+ *    an insufficient-balance FEE is money that left the account.
+ *    And required only in addition, never alone — `raw` is stored as a
+ *    300-character EXCERPT, and a body truncated before its amount parses to
+ *    null for reasons that have nothing to do with the transaction being real.
+ *    Truncation can hide a refusal; it cannot invent one.
+ *  - it is not a transfer. Card settlements are what `allocatePayments` and
+ *    `internalTransferIds` reconcile against, and this is the same guard the
+ *    existing stale-misread sweep uses. A decline alert should never produce
+ *    one; if one exists, leaving it costs nothing, since transfers are already
+ *    outside the spending totals.
+ *  - it carries no `splits`. A split is hand-built allocation.
+ *
+ * Nothing persisted holds a transaction id — bills key on account, card dues
+ * derive what has been paid from the ledger at read time, and
+ * `internalTransferIds` recomputes per render — so removal leaves nothing
+ * pointing at a row that no longer exists. Auto-detected BILLS are left alone
+ * deliberately: one exists only because the user tapped to create it, which
+ * makes it a user decision rather than parser output.
+ *
+ * Cheap enough for every hydrate: `raw` survives only on rows the parser was
+ * unsure about (145 of 14,314 in the reference ledger), so the parse runs on a
+ * fraction of a percent of the rows and every other row costs four field
+ * reads. Idempotent, and returns the SAME state object when it removes nothing.
+ */
+export function removeDeclinedTransactions(state: AppState): AppState {
+  const doomed = new Set<string>();
+  for (const tx of state.transactions) {
+    if (tx.source !== 'sms' || tx.userEdited || tx.isTransfer || tx.splits) continue;
+    const raw = tx.raw;
+    if (!raw) continue;
+    // The parser's own refusal test, on the SMS text — never on the title.
+    if (!isDeclinedMessage(raw)) continue;
+    // ...and a current parser would not create this row from that text.
+    if (parseSms(raw)) continue;
+    doomed.add(tx.id);
+  }
+  if (doomed.size === 0) return state;
+  return { ...state, transactions: state.transactions.filter((t) => !doomed.has(t.id)) };
+}
+
 export function mergeRenewedCard(state: AppState, oldId: string, newId: string): AppState {
   const older = state.accounts.find((a) => a.id === oldId);
   const newer = state.accounts.find((a) => a.id === newId);

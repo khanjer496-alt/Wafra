@@ -13,6 +13,7 @@ import {
   markCardsDistinct,
   mergeDuplicateAccounts,
   mergeRenewedCard,
+  removeDeclinedTransactions,
   repairCardPaymentAccounts,
   repairDuplicateStatements,
 } from '@/lib/accounts';
@@ -593,10 +594,19 @@ function reduceState(state: AppState, action: Action): AppState {
       const paymentsRepaired = repairDuplicateStatements(
         repairCardPaymentAccounts(accountsMerged),
       );
+      // A declined transaction moved no money, and no rescan can take one
+      // back: healing only ever adds information to a row, and a message the
+      // parser now suppresses never reaches the import planner to be swept.
+      // Runs AFTER the account repairs (which read `state.transactions` to
+      // decide which card has history) and BEFORE finalizeHydrationTransactions,
+      // so nothing downstream ever sees a row this proves never happened.
+      // Requires the market pack to be live, which setActiveMarket did above:
+      // it re-parses stored SMS text.
+      const declinesRemoved = removeDeclinedTransactions(paymentsRepaired);
       return {
-        ...paymentsRepaired,
-        transactions: finalizeHydrationTransactions(paymentsRepaired.transactions, next.transactions),
-        cardDues: mergeImportedCardDues([], paymentsRepaired.cardDues, paymentsRepaired.accounts),
+        ...declinesRemoved,
+        transactions: finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
+        cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
       };
     }
     case 'markParserVersion':

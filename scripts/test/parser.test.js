@@ -2200,6 +2200,51 @@ t('ACCESS DENIED CAFE survives the unmasked decline pass',
   'AED 25.00 spent at ACCESS DENIED CAFE with Debit Card 1234',
   { type: 'expense', amountFils: 2500 });
 
+// ── isDeclinedMessage: the same refusal test, exported for the ledger ──
+//
+// accounts.ts deletes rows an older parser imported from decline alerts, and
+// its evidence is this predicate — the parser's own answer about the SMS text,
+// never the title the old parser wrote onto the row. The two must agree
+// exactly, so the assertion is the AGREEMENT, not a second opinion: every
+// message the parser suppresses as a refusal must read true here, and every
+// message that keeps its transaction must read false. They share
+// `declinedInBody` in sms-parser.ts, and these pin that they still do.
+{
+  const { isDeclinedMessage } = require('./build/sms-parser');
+  const declines = [
+    'Your transaction of AED 500.00 at SHARAF DG was declined due to insufficient funds.',
+    'Your card was declined for AED 250.00 at NOON due to insufficient funds.',
+    'Your transaction of AED 250.00 at NOON declined due to insufficient funds.',
+    'Transaction of AED 250.00 at SPINNEYS declined due to insufficient balance.',
+    'Your transaction of AED 250.00 at NOON was not authorised.',
+    'Your payment of AED 250.00 to DEWA failed. Please retry.',
+    'عمليتك بمبلغ 250.00 درهم مرفوضة',
+  ];
+  for (const m of declines) {
+    const agree = isDeclinedMessage(m) && parseSms(m) === null;
+    if (agree) { pass++; console.log(`✓ isDeclinedMessage agrees with the parser: ${m.slice(0, 46)}…`); }
+    else { fail++; console.log(`✗ isDeclinedMessage disagrees with the parser: ${m}`,
+      `decline=${isDeclinedMessage(m)} parse=${parseSms(m) !== null ? 'kept' : 'skipped'}`); }
+  }
+  // Everything a refusal must NOT be. Each of these is a real posting, and a
+  // migration that read any of them as a decline would delete real money.
+  const notDeclines = [
+    // The fraud-reporting footer stapled to a POSTED alert by nearly every issuer.
+    'AED 250.00 spent at CARREFOUR with Debit Card 1234. If this was not you, call 600 54 0000.',
+    // An insufficient-balance FEE is money that actually left the account.
+    'AED 25.00 has been debited from your account 1234 as an insufficient balance fee. Avl Bal AED 400.00',
+    // Shop names that read like reason codes.
+    'AED 32.00 spent at TIMEOUT MARKET DUBAI with Debit Card 1234',
+    'AED 25.00 spent at ACCESS DENIED CAFE with Debit Card 1234',
+    // A raw excerpt cut before its amount: truncation must never invent a refusal.
+    'Purchase of AED',
+  ];
+  for (const m of notDeclines) {
+    if (!isDeclinedMessage(m)) { pass++; console.log(`✓ not a refusal: ${m.slice(0, 46)}…`); }
+    else { fail++; console.log(`✗ read as a refusal and would be deleted: ${m}`); }
+  }
+}
+
 // ── An EPP offer is appended to the purchase it advertises against ──
 // ADCB, RAKBANK and Emirates NBD all staple the conversion pitch to the alert
 // for the purchase that triggered it, so this gate deleted exactly the large
@@ -3988,6 +4033,30 @@ t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBA
   const { PARSER_VERSION } = require('./build/sms-parser');
   ok('PARSER_VERSION is past 9, so an existing ledger is re-read',
     typeof PARSER_VERSION === 'number' && PARSER_VERSION > 9, String(PARSER_VERSION));
+
+  /**
+   * And the number is documented up to its own value.
+   *
+   * "Bump PARSER_VERSION" is a step a human has to remember, and three parser
+   * changes once landed on 14 without it — so a bill-receipt fix that stops
+   * the app writing a biller's balance onto the user's card, and a batch of
+   * new merchant categories, both shipped unable to reach a single row already
+   * in the ledger. Nothing failed; the fixes were simply inert, which is the
+   * worst shape a defect can take.
+   *
+   * A changelog line per version is the convention this constant already
+   * follows, so requiring the CURRENT version to have one turns forgetting the
+   * bump into a red test: you cannot write the note for a version you did not
+   * declare. It cannot force a bump for a change that needs one — nothing
+   * static can — but it removes the silent half of the failure.
+   */
+  const src = require('fs').readFileSync(
+    require('path').join(__dirname, '../../src/lib/sms-parser.ts'),
+    'utf8',
+  );
+  const declared = src.slice(0, src.indexOf('export const PARSER_VERSION'));
+  ok(`version ${PARSER_VERSION} says in the changelog what it re-reads for`,
+    new RegExp(`^\\s*\\*\\s*${PARSER_VERSION}:\\s*\\S`, 'm').test(declared));
 }
 
 /* ── a merchant rule may not cross the direction it was chosen under ──────

@@ -2136,6 +2136,83 @@ ok('stale: a stale statement that gets paid leaves openDues',
     acc.repairCardPaymentAccounts(unknownBank) === unknownBank);
 }
 
+// ── a declined transaction is deleted from the ledger, not relabelled ──
+//
+// A refused transaction moved no money. One real ledger carries 59 rows titled
+// "Insufficient Funds" totalling AED 89,897, counted as spending, and no
+// rescan can take them back: healing only ever ADDS information to a row.
+// `removeDeclinedTransactions` is the only path that deletes one, so every
+// assertion below is about what it must REFUSE to delete.
+{
+  const acc = require('./build/accounts');
+  const row = (over) => ({
+    id: 'r', type: 'expense', amountFils: 50000, category: 'other',
+    accountId: 'a1', title: 'Insufficient Funds', date: '2025-09-01',
+    source: 'sms', ...over,
+  });
+  const DECLINE = 'Your transaction of AED 500.00 at SHARAF DG was declined due to insufficient funds.';
+  const st = (tx) => ({ accounts: [], transactions: [tx], cardDues: [], bills: [], accountHints: {} });
+
+  const removed = acc.removeDeclinedTransactions(st(row({ raw: DECLINE })));
+  ok('a row whose raw SMS says the transaction was refused is deleted',
+    removed.transactions.length === 0, removed.transactions);
+  ok('removing declines is idempotent',
+    acc.removeDeclinedTransactions(removed) === removed);
+
+  // Every guardrail, one row each. All of these keep the row.
+  const kept = [
+    ['a row the user corrected by hand is theirs',
+      row({ raw: DECLINE, userEdited: true })],
+    ['no raw text is no evidence: a manual entry is never deleted',
+      row({ source: 'manual', raw: DECLINE })],
+    ['no raw text is no evidence: an iOS relay row keeps its row',
+      row({ raw: undefined })],
+    ['a transfer is what card allocation reconciles against and is left alone',
+      row({ raw: DECLINE, isTransfer: true })],
+    ['a hand-built split is hand-built allocation',
+      row({ raw: DECLINE, splits: [{ category: 'other', amountFils: 50000 }] })],
+    // The title is NOT the evidence. A shop really called this keeps its charge.
+    ['a merchant genuinely named "Insufficient Funds" keeps its purchase',
+      row({ raw: 'Purchase of AED 500.00 with Debit Card ending 4822 at INSUFFICIENT FUNDS LLC, DUBAI. Avl Balance is AED 55.00.' })],
+    // Real money left the account, and the message says "insufficient balance".
+    ['an insufficient-balance FEE is money that actually moved',
+      row({ title: 'Bank fee', raw: 'AED 25.00 has been debited from your account 1234 as an insufficient balance fee. Avl Bal AED 400.00' })],
+    // From the real diagnostic. The bank MASKED the amount (THB ····9260.00),
+    // which the parser refuses on purpose, so this genuine AED 3,366.95
+    // purchase no longer re-parses. A `parseSms() === null` rule on its own
+    // would have deleted it; requiring the parser's own refusal test as well
+    // is what saves it.
+    ['a purchase whose stored raw carries a MASKED figure is not a decline',
+      row({ title: 'Plenary Wellness Phuket', amountFils: 336695, raw:
+        'Credit Card Purchase \nCard No XXXX3749 \nTHB ····9260.00 \nPLENARY WELLNESS PHUKET THA \n05/12/25 11:20 \nAvailable Balance AED ····0426.77' })],
+    // raw is stored as a 300-character EXCERPT, so a body can be cut before
+    // its amount. Truncation can hide a refusal; it cannot invent one.
+    ['a raw excerpt truncated before its amount is not a decline',
+      row({ title: 'Carrefour', raw: 'Purchase of AED' })],
+  ];
+  for (const [name, tx] of kept) {
+    const s = st(tx);
+    ok(`decline removal: ${name}`, acc.removeDeclinedTransactions(s) === s,
+      acc.removeDeclinedTransactions(s).transactions);
+  }
+
+  // Only the declined row goes; its neighbours on the same day stay put.
+  const mixed = {
+    accounts: [], cardDues: [], bills: [], accountHints: {},
+    transactions: [
+      row({ id: 'good', title: 'Fishbasket', amountFils: 1188100, raw: undefined }),
+      row({ id: 'declined', raw: DECLINE }),
+      row({ id: 'tt', title: 'Telegraphic transfer', isTransfer: true, raw: undefined }),
+    ],
+  };
+  const swept = acc.removeDeclinedTransactions(mixed);
+  ok('decline removal takes the declined row and nothing beside it',
+    swept.transactions.map((t) => t.id).join(',') === 'good,tt',
+    swept.transactions.map((t) => t.id));
+  ok('decline removal leaves a ledger with nothing to remove untouched',
+    acc.removeDeclinedTransactions(swept) === swept);
+}
+
 // ── a paid card stops saying it is overdue ──
 //
 // The whole chain, because every link of it was broken at some point: the SMS
