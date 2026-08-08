@@ -22,11 +22,17 @@ import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
+import { t } from '@/lib/i18n';
 
 export default function NotFoundScreen() {
   const theme = useTheme();
   const router = useRouter();
+  // The language is read as a value, not just used through t(): the compiler
+  // memoises this component on what it can see going in, and the module-level
+  // language is not one of those things.
+  const language = useLanguage();
 
   return (
     <ThemedView style={styles.root}>
@@ -36,16 +42,15 @@ export default function NotFoundScreen() {
             <Icon name="search" size={22} color={theme.textTertiary} />
           </View>
 
-          <ThemedText type="heading">This page moved on</ThemedText>
+          <ThemedText type="heading">{t('notFoundTitle', language)}</ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
-            Nothing lives at that link. Your entries are untouched — this is a signpost pointing at
-            a room that isn&apos;t there.
+            {t('notFoundBody', language)}
           </ThemedText>
 
           <View style={styles.actions}>
-            <Button inline label="Go home" onPress={() => router.replace('/')} />
+            <Button inline label={t('goHome', language)} onPress={() => router.replace('/')} />
             {router.canGoBack() && (
-              <Button inline variant="outline" label="Back" onPress={() => router.back()} />
+              <Button inline variant="outline" label={t('back', language)} onPress={() => router.back()} />
             )}
           </View>
         </View>

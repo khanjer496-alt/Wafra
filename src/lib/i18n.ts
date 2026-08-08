@@ -1903,7 +1903,7 @@ const S = {
     ar: 'صرفت {amount} اليوم · {count} عملية',
   },
   dailySummaryLine: { en: '{amount} — {merchant}', ar: '{amount} — {merchant}' },
-  dailySummaryMore: { en: '+{count} more', ar: '+{count} اخري' },
+  dailySummaryMore: { en: '+{count} more', ar: '+{count} أخرى' },
   dailySummaryBudget: {
     en: '{spent} of {limit} monthly limits ({percent}%)',
     ar: '{spent} من {limit} من حدودك الشهرية ({percent}%)',
@@ -1938,7 +1938,7 @@ const S = {
   dailySummarySetting: { en: 'Daily spend summary', ar: 'ملخص الصرف اليومي' },
   dailySummaryOn: {
     en: 'Every evening at 9pm, if you spent anything',
-    ar: 'كل مساء الساعه ٩، اذا صرفت شيئا',
+    ar: 'كل مساء الساعة ٩، إذا صرفت شيئاً',
   },
   dailySummaryOff: { en: 'Off', ar: 'متوقف' },
   notificationBillDue: { en: '{name} due {when}', ar: '{name} مستحق {when}' },
@@ -1953,6 +1953,46 @@ const S = {
   debitCardWithDigits: { en: 'Debit Card •{last4}', ar: 'بطاقة خصم •{last4}' },
   cardWithDigits: { en: 'Card •{last4}', ar: 'بطاقة •{last4}' },
   accountWithDigits: { en: 'Account •{last4}', ar: 'حساب •{last4}' },
+
+  // The screen for a link that leads nowhere. It is the one place a person can
+  // arrive at without having asked for it, which is exactly why it may not be
+  // the one place that answers in the wrong language.
+  notFoundTitle: { en: 'This page moved on', ar: 'هذه الصفحة لم تعد هنا' },
+  notFoundBody: {
+    en: 'Nothing lives at that link. Your entries are untouched — this is a signpost pointing at a room that isn’t there.',
+    ar: 'لا شيء في هذا الرابط. عملياتك كما هي — هذه لافتة تشير إلى غرفة غير موجودة.',
+  },
+  goHome: { en: 'Go home', ar: 'إلى الرئيسية' },
+
+  // ── Titles the PARSER mints ──
+  //
+  // A row the parser understood structurally has no merchant to show, so it is
+  // given a title of its own: "ATM withdrawal", "Salary", "Card •3644 payment".
+  // Those literals are the STORED value — `STRUCTURAL_TITLES.has(...)` in
+  // sms-parser.ts, `NO_MERCHANT_TITLES` in accuracy.ts and the accuracy export
+  // all match on them, and a translated ledger would break every one — so they
+  // stay English on disk and are translated on the way to the screen, through
+  // `structuralTitleLabel` at the bottom of this file.
+  titleAtmWithdrawal: { en: 'ATM withdrawal', ar: 'سحب من الصراف' },
+  titleBankFee: { en: 'Bank fee', ar: 'رسوم بنكية' },
+  titleVatFee: { en: 'VAT fee', ar: 'ضريبة القيمة المضافة' },
+  titleCashDeposit: { en: 'Cash deposit', ar: 'إيداع نقدي' },
+  titleCheque: { en: 'Cheque', ar: 'شيك' },
+  titleParking: { en: 'Parking', ar: 'مواقف' },
+  titleOutgoingTransfer: { en: 'Outgoing transfer', ar: 'تحويل صادر' },
+  titleIncomingTransfer: { en: 'Incoming transfer', ar: 'تحويل وارد' },
+  titleRefund: { en: 'Refund', ar: 'استرداد' },
+  titleInwardRemittance: { en: 'Inward remittance', ar: 'حوالة واردة' },
+  titleOutwardRemittance: { en: 'Outward remittance', ar: 'حوالة صادرة' },
+  titleTelegraphicTransfer: { en: 'Telegraphic transfer', ar: 'حوالة برقية' },
+  titleBankTransfer: { en: 'Bank transfer', ar: 'تحويل بنكي' },
+  titleSavingsTransfer: { en: 'Savings transfer', ar: 'تحويل إلى الادخار' },
+  titleCardPayment: { en: 'Card payment', ar: 'دفعة بطاقة' },
+  titleAccountDebit: { en: 'Account debit', ar: 'خصم من الحساب' },
+  titleMobileRecharge: { en: 'Mobile recharge', ar: 'شحن رصيد الهاتف' },
+  titleCardStatement: { en: 'Card statement', ar: 'كشف حساب البطاقة' },
+  titleBillPayment: { en: 'Bill payment', ar: 'دفع فاتورة' },
+  titleSalary: { en: 'Salary', ar: 'راتب' },
 } as const;
 
 export type StringKey = keyof typeof S;
@@ -2026,4 +2066,73 @@ export function tf(
   return t(key, override).replace(/\{(\w+)\}/g, (whole, name) =>
     name in vars ? String(vars[name]) : whole,
   );
+}
+
+/**
+ * Does this text contain Arabic script?
+ *
+ * The bundled Latin faces have NO Arabic coverage — every codepoint in the
+ * block maps to .notdef in Geist — so a call site that pins `Fonts.sans*` over
+ * an Arabic string does not merely look wrong, it renders nothing readable.
+ * `ThemedText` asks this before it puts the Arabic face back; see the comment
+ * there. The whole block is the test, digits and punctuation included, because
+ * Geist cannot draw those either.
+ */
+export function hasArabicScript(text: string): boolean {
+  // The Arabic block, the two supplements, Extended-A and both presentation
+  // form blocks — the same literal-range style arabic-sms.ts uses, so the two
+  // definitions of "this is Arabic" can be read side by side.
+  return /[؀-ۿݐ-ݿࡰ-ࣿﭐ-﷿ﹰ-ﻼ]/.test(text);
+}
+
+/**
+ * The English literal the parser stores → what to PRINT for it.
+ *
+ * A row the parser recognised structurally has no merchant to show, so it
+ * carries a title the parser wrote itself. Those literals are load-bearing
+ * identity — sms-parser's `STRUCTURAL_TITLES`, accuracy.ts's
+ * `NO_MERCHANT_TITLES` / `CARD_PAYMENT_TITLE_RE`, and the format-report export
+ * all match on the exact English — so the ledger keeps them in English and the
+ * translation happens here, once, on the way to a screen.
+ */
+const STRUCTURAL_TITLE_KEYS: Record<string, StringKey> = {
+  'ATM withdrawal': 'titleAtmWithdrawal',
+  'Bank fee': 'titleBankFee',
+  'VAT fee': 'titleVatFee',
+  'Cash deposit': 'titleCashDeposit',
+  Cheque: 'titleCheque',
+  Parking: 'titleParking',
+  'Outgoing transfer': 'titleOutgoingTransfer',
+  'Incoming transfer': 'titleIncomingTransfer',
+  Refund: 'titleRefund',
+  'Inward remittance': 'titleInwardRemittance',
+  'Outward remittance': 'titleOutwardRemittance',
+  'Telegraphic transfer': 'titleTelegraphicTransfer',
+  'Bank transfer': 'titleBankTransfer',
+  'Savings transfer': 'titleSavingsTransfer',
+  'Card payment': 'titleCardPayment',
+  'Account debit': 'titleAccountDebit',
+  'Mobile recharge': 'titleMobileRecharge',
+  'Card statement': 'titleCardStatement',
+  'Bill payment': 'titleBillPayment',
+  Salary: 'titleSalary',
+};
+
+/** "Card •3644" and "Card •3644 payment" — a title with the digits inside it. */
+const CARD_TITLE_RE = /^Card •([0-9Xx*]{2,6})( payment)?$/;
+
+/**
+ * A parser-minted title in the current UI language; anything else untouched.
+ *
+ * A merchant name is a proper noun and is never translated — passing one
+ * through here returns it byte-for-byte, which is what lets a display layer
+ * call this on every title without knowing which kind it holds.
+ */
+export function structuralTitleLabel(title: string, override?: Lang): string {
+  const key = STRUCTURAL_TITLE_KEYS[title];
+  if (key) return t(key, override);
+  const card = CARD_TITLE_RE.exec(title);
+  if (!card) return title;
+  const name = tf('cardWithDigits', { last4: card[1] }, override);
+  return card[2] ? tf('accountPaymentTitle', { name }, override) : name;
 }
