@@ -1,12 +1,14 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { ChoiceSheet, type Choice } from '@/components/ui/choice-sheet';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { AmountField, Money } from '@/components/ui/money';
@@ -19,6 +21,28 @@ import { formatAmount, monthKey, parseAmountToFils, shortDate } from '@/lib/form
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
+
+/**
+ * A confirmation waiting on the user, or null.
+ *
+ * Deleting a card and its entries was gated by `Alert.alert`, nested inside a
+ * second `Alert.alert` that offered the long-press options. On
+ * react-native-web `Alert.alert` is `static alert() {}` — an empty method, no
+ * dialog, no warning, no throw — so neither ever drew: the long press did
+ * nothing at all, and `deleteAccount` sat as unreachable code inside a button
+ * that was never rendered. Both halves are drawn now, the menu as a
+ * `ChoiceSheet` and the confirmation as a `ConfirmSheet`.
+ */
+type Confirmation = {
+  question: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+};
+
+/** What a long press on a card row offers. `limit` is credit-cards only. */
+type CardAction = 'limit' | 'visibility' | 'delete';
 
 /**
  * Every card as a row: bank, last four, and the one figure that is actually
@@ -38,6 +62,10 @@ export default function CardsScreen() {
   const [detail, setDetail] = useState<Account | null>(null);
   const [limitFor, setLimitFor] = useState<Account | null>(null);
   const [limitText, setLimitText] = useState('');
+  // The card a long press is asking about, and the confirmation that the
+  // destructive answer to it opens second.
+  const [optionsFor, setOptionsFor] = useState<Account | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
 
   // Opened from a due row: land straight on that card's history.
   const { card: cardParam } = useLocalSearchParams<{ card?: string }>();
@@ -102,26 +130,29 @@ export default function CardsScreen() {
     setLimitFor(null);
   };
 
-  const cardOptions = (card: Account) => {
-    Alert.alert(card.name, card.archived ? t('hiddenFromLists') : undefined, [
-      ...(card.cardType === 'credit'
-        ? [{ text: t('setCreditLimit'), onPress: () => askCreditLimit(card) }]
-        : []),
-      {
-        text: card.archived ? t('unhide') : t('hideCard'),
-        onPress: () => editAccount(card.id, { archived: !card.archived }),
-      },
-      {
-        text: t('deleteCardAndEntries'),
-        style: 'destructive' as const,
-        onPress: () =>
-          Alert.alert(t('deleteCardTitle'), tf('deleteCardBody', { name: card.name }), [
-            { text: t('cancel'), style: 'cancel' },
-            { text: t('delete'), style: 'destructive', onPress: () => deleteAccount(card.id) },
-          ]),
-      },
-      { text: t('cancel'), style: 'cancel' as const },
-    ]);
+  // Only a credit card has a limit to set, so a debit card is offered two
+  // rows rather than a third that could not do anything.
+  const cardActions = (card: Account): Choice<CardAction>[] => [
+    ...(card.cardType === 'credit'
+      ? [{ value: 'limit' as CardAction, label: t('setCreditLimit') }]
+      : []),
+    { value: 'visibility', label: card.archived ? t('unhide') : t('hideCard') },
+    { value: 'delete', label: t('deleteCardAndEntries') },
+  ];
+
+  // Setting a limit and hiding happen on the spot; deleting the card and its
+  // entries asks first, exactly as the two stacked alerts did.
+  const onCardAction = (card: Account, action: CardAction) => {
+    if (action === 'limit') askCreditLimit(card);
+    else if (action === 'visibility') editAccount(card.id, { archived: !card.archived });
+    else
+      setConfirmation({
+        question: t('deleteCardTitle'),
+        body: tf('deleteCardBody', { name: card.name }),
+        confirmLabel: t('delete'),
+        destructive: true,
+        onConfirm: () => deleteAccount(card.id),
+      });
   };
 
   const renderCard = (card: Account, i: number, list: Account[], inactive: boolean) => {
@@ -146,7 +177,7 @@ export default function CardsScreen() {
       <Row
         key={card.id}
         onPress={() => setDetail(card)}
-        onLongPress={() => cardOptions(card)}
+        onLongPress={() => setOptionsFor(card)}
         last={i === list.length - 1}
         accessibilityLabel={tf('cardOpenHistoryA11y', { name: card.name })}
         style={inactive ? styles.inactiveRow : undefined}>
@@ -243,6 +274,32 @@ export default function CardsScreen() {
         <AmountField label={t('totalCreditLimit')} value={limitText} onChangeText={setLimitText} fontSize={34} />
         <Button label={t('saveLimit')} onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
       </BottomSheet>
+
+      {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
+          inherits its clipping and its scroll offset on web. */}
+      {optionsFor && (
+        <ChoiceSheet
+          visible
+          onClose={() => setOptionsFor(null)}
+          title={optionsFor.name}
+          body={optionsFor.archived ? t('hiddenFromLists') : undefined}
+          options={cardActions(optionsFor)}
+          onSelect={(action) => onCardAction(optionsFor, action)}
+        />
+      )}
+      {/* Mounted only while there is something to confirm, so the entry
+          animation runs on every open rather than once per screen. */}
+      {confirmation && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmation(null)}
+          question={confirmation.question}
+          body={confirmation.body}
+          confirmLabel={confirmation.confirmLabel}
+          destructive={confirmation.destructive}
+          onConfirm={confirmation.onConfirm}
+        />
+      )}
     </ThemedView>
   );
 }

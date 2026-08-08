@@ -32,7 +32,6 @@ import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   AppState,
   Linking,
   Platform,
@@ -45,6 +44,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, SectionHeader } from '@/components/ui/layout';
@@ -149,6 +149,14 @@ export default function IosSetupScreen() {
     getActiveMarket().banks.map((bank) => bank.name),
   );
   const [copied, setCopied] = useState<string | null>(null);
+  /**
+   * Private mode has to come off before this screen can pair, and that is the
+   * user's call, not the wizard's. It was an `Alert.alert` with the whole
+   * turn-it-off-and-connect sequence inside a button's `onPress` — code the
+   * web export never draws and therefore never runs, so "Connect this iPhone"
+   * did nothing at all for anyone in private mode. Drawn as a sheet instead.
+   */
+  const [askPrivateMode, setAskPrivateMode] = useState(false);
 
   // Test step
   const [listening, setListening] = useState(false);
@@ -277,23 +285,20 @@ export default function IosSetupScreen() {
       void performConnect();
       return;
     }
-    Alert.alert(t('iosPrivateModeTitle'), t('iosPrivateModeBody'), [
-      { text: t('cancel'), style: 'cancel' },
-      {
-        text: t('iosTurnOffPrivateMode'),
-        onPress: () => {
-          void (async () => {
-            try {
-              await setPrivateMode(false);
-              await performConnect();
-            } catch {
-              fail(t('iosConnectFailed'));
-            }
-          })();
-        },
-      },
-    ]);
-  }, [fail, performConnect, setPrivateMode, state.privateMode]);
+    setAskPrivateMode(true);
+  }, [performConnect, state.privateMode]);
+
+  /** The other side of that question. Reached only from the sheet. */
+  const leavePrivateModeAndConnect = useCallback(() => {
+    void (async () => {
+      try {
+        await setPrivateMode(false);
+        await performConnect();
+      } catch {
+        fail(t('iosConnectFailed'));
+      }
+    })();
+  }, [fail, performConnect, setPrivateMode]);
 
   const finish = useCallback(() => {
     if (params.fromOnboarding === '1') {
@@ -909,6 +914,17 @@ export default function IosSetupScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
+
+      {askPrivateMode && (
+        <ConfirmSheet
+          visible
+          onClose={() => setAskPrivateMode(false)}
+          question={t('iosPrivateModeTitle')}
+          body={t('iosPrivateModeBody')}
+          confirmLabel={t('iosTurnOffPrivateMode')}
+          onConfirm={leavePrivateModeAndConnect}
+        />
+      )}
     </ThemedView>
   );
 }

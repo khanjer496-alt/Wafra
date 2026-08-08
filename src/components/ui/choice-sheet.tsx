@@ -31,7 +31,18 @@ interface ChoiceSheetProps<T extends string> {
   visible: boolean;
   onClose: () => void;
   title: string;
-  /** Optional lede above the list, for a choice with consequences. */
+  /**
+   * The question, in sentence case, above the list.
+   *
+   * `title` goes in the sheet's caps header, which is right for a NOUN — the
+   * thing being chosen ("Country", "Language"). It is wrong for a sentence:
+   * an alert's title moved verbatim into it came out as "REMEMBER FOR
+   * CARREFOUR?", which is a shout, and the copy is not the part that was
+   * broken. ConfirmSheet has carried this slot since it was written; this is
+   * the same slot, so a question reads the same whichever sheet answers it.
+   */
+  question?: string;
+  /** Optional lede under it, for a choice with consequences. */
   body?: string;
   options: Choice<T>[];
   /**
@@ -66,6 +77,7 @@ export function ChoiceSheet<T extends string>({
   visible,
   onClose,
   title,
+  question,
   body,
   options,
   value,
@@ -85,6 +97,11 @@ export function ChoiceSheet<T extends string>({
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title={title}>
+      {question && (
+        <ThemedText type="subtitle" accessibilityRole="header">
+          {question}
+        </ThemedText>
+      )}
       {body && (
         <ThemedText type="small" themeColor="textSecondary">
           {body}

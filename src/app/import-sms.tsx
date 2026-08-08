@@ -22,7 +22,7 @@
  */
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
   FadeInDown,
@@ -95,6 +95,22 @@ function messageBlocks(input: string): number {
 type PasteVerdict = { kind: 'filed' | 'unreadable'; count: number };
 
 /**
+ * Something this screen has to SAY, drawn rather than announced.
+ *
+ * All four of these were `Alert.alert(title, body)`. On react-native-web that
+ * method is `static alert() {}` — no dialog, no console warning, no throw — so
+ * a scan refused because the ledger had not hydrated, a denied SMS permission,
+ * and an inbox with nothing new all reported themselves into a dialog that is
+ * never drawn. The button consumed the tap and said nothing, and the only
+ * available reading of that is that it is broken.
+ *
+ * None of them is a question: there is no second button and nothing to
+ * confirm, so none of them wants a ConfirmSheet. They want to be visible,
+ * which is what the paste verdict below already does with the same two lines.
+ */
+type Notice = { title: string; body: string };
+
+/**
  * The loading state: skeleton lines under a scan line sweeping down them.
  * No spinner — a spinner says "wait", this says what is being read.
  */
@@ -136,13 +152,14 @@ export default function ImportSmsScreen() {
   const [trackedBills, setTrackedBills] = useState<Set<number>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
   const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const started = useRef(false);
 
   const runScan = async () => {
     // The plan's duplicate checks read state.transactions, so scanning before
     // the ledger has loaded imports the whole inbox a second time.
     if (!state.hydrated) {
-      Alert.alert(t('importOneMoment'), t('dataStillLoading'));
+      setNotice({ title: t('importOneMoment'), body: t('dataStillLoading') });
       return;
     }
     // The scan is Wafra reading a whole inbox on its own — the paid half.
@@ -155,13 +172,14 @@ export default function ImportSmsScreen() {
     setScanning(true);
     setProgress(null);
     setPasteVerdict(null);
+    setNotice(null);
     try {
       const granted = await requestSmsPermission();
       if (!granted) {
-        Alert.alert(
-          t('smsPermissionNeeded'),
-          t('smsPermissionNeededBody'),
-        );
+        setNotice({
+          title: t('smsPermissionNeeded'),
+          body: t('smsPermissionNeededBody'),
+        });
         return;
       }
       // Full history: fingerprints make rescans safe (no duplicates).
@@ -174,7 +192,7 @@ export default function ImportSmsScreen() {
       setPlan(p);
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
-        Alert.alert(t('upToDate'), t('inboxAlreadyFiled'));
+        setNotice({ title: t('upToDate'), body: t('inboxAlreadyFiled') });
       }
     } finally {
       setScanning(false);
@@ -187,9 +205,10 @@ export default function ImportSmsScreen() {
    */
   const runParse = (input: string) => {
     if (!state.hydrated) {
-      Alert.alert(t('importOneMoment'), t('dataStillLoading'));
+      setNotice({ title: t('importOneMoment'), body: t('dataStillLoading') });
       return;
     }
+    setNotice(null);
     // Deliberately NO isProActive gate here. Pasting is the only ingestion
     // path an iPhone has without a Shortcut, so paywalling it charged an
     // iPhone user for the privilege of doing the work by hand that an Android
@@ -336,6 +355,7 @@ export default function ImportSmsScreen() {
                     onChangeText={(value) => {
                       setText(value);
                       setPasteVerdict(null);
+                      setNotice(null);
                     }}
                     multiline
                     placeholder={t('bankMessageExample')}
@@ -379,6 +399,27 @@ export default function ImportSmsScreen() {
                   back it needs t() keys with ar: values, and its href is
                   /ios-setup — iphone-setup.tsx was the losing filename and is
                   gone. */}
+            </Section>
+          )}
+
+          {/* The answer to a tap that could not do what it offered. It sits
+              above the plan because it is the reason the plan is empty, or the
+              reason there is no plan at all. */}
+          {notice !== null && !scanning && (
+            <Section index={1}>
+              <View accessibilityLiveRegion="polite">
+                <Block>
+                  <View style={styles.unreadRow}>
+                    <Icon name="alert" size={17} color={theme.warning} />
+                    <View style={styles.rowText}>
+                      <ThemedText type="small">{notice.title}</ThemedText>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        {notice.body}
+                      </ThemedText>
+                    </View>
+                  </View>
+                </Block>
+              </View>
             </Section>
           )}
 

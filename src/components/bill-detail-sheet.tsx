@@ -1,14 +1,16 @@
-import React, { useMemo } from 'react';
-import { Alert, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { HistoryStrip } from '@/components/ui/charts';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { CategoryTile } from '@/components/ui/tile';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { isSpending } from '@/lib/ledger';
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { formatAmount, monthKey, monthLabel, shiftMonthKey, shortDate } from '@/lib/format';
@@ -31,8 +33,28 @@ interface BillDetailSheetProps {
  * and there is nothing here to act on — which is a finding, not an empty state.
  */
 export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps) {
+  const theme = useTheme();
   const { state, setNotSubscription } = useStore();
   const now = useMemo(() => new Date(), []);
+
+  const [confirming, setConfirming] = useState(false);
+  /**
+   * What "Remind me the day before" has to say, drawn in the sheet instead of
+   * announced. Both outcomes — permission refused, reminder scheduled — went
+   * through `Alert.alert`, which on react-native-web is `static alert() {}`:
+   * the button scheduled the reminder and then said nothing whatsoever, so the
+   * only evidence it had worked was a notification the day before the charge.
+   * An inline line under the actions is visible on every platform and does not
+   * cover the history strip the user came here to read.
+   */
+  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  useEffect(() => {
+    // A new charge is a new sheet: neither the confirmation nor the last
+    // reminder's answer belongs to it.
+    setConfirming(false);
+    setNotice(null);
+  }, [subscription]);
+
   const cadenceLabel = (cadence: Subscription['cadence']): string =>
     cadence === 'weekly'
       ? t('cadenceWeekly')
@@ -96,36 +118,24 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
   const remindMe = async () => {
     const granted = await requestNotificationPermission();
     if (!granted) {
-      Alert.alert(
-        t('notifsAreOff'),
-        t('notifsForBill'),
-      );
+      setNotice({ title: t('notifsAreOff'), body: t('notifsForBill') });
       return;
     }
     await syncPaymentReminders(state);
     // Subscriptions are scheduled one day out, with the body "renews
     // tomorrow". Two days was never scheduled by anything.
-    Alert.alert(
-      t('reminderSet'),
-      tf('reminderDayBeforeBody', { date: shortDate(subscription.nextExpectedISO) }),
-    );
+    setNotice({
+      title: t('reminderSet'),
+      body: tf('reminderDayBeforeBody', { date: shortDate(subscription.nextExpectedISO) }),
+    });
   };
 
-  const notRecurring = () => {
-    Alert.alert(
-      t('notRecurringQ'),
-      tf('stopRecurringBody', { title: subscription.title }),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('notRecurring'),
-          onPress: () => {
-            setNotSubscription(subscription.title, true);
-            onClose();
-          },
-        },
-      ],
-    );
+  // The demotion itself. Reachable from the confirmation sheet and from
+  // nowhere else — it used to live inside an alert button's `onPress`, which
+  // on the web export was code no tap could ever reach.
+  const stopRecurring = () => {
+    setNotSubscription(subscription.title, true);
+    onClose();
   };
 
   return (
@@ -166,8 +176,41 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
 
       <View style={styles.actions}>
         <Button inline label={t('remindDayBefore')} onPress={remindMe} />
-        <Button inline variant="outline" label={t('notRecurring')} onPress={notRecurring} />
+        <Button
+          inline
+          variant="outline"
+          label={t('notRecurring')}
+          onPress={() => setConfirming(true)}
+        />
       </View>
+
+      {notice && (
+        <View
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.notice,
+            { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+          ]}>
+          <ThemedText type="smallBold">{notice.title}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {notice.body}
+          </ThemedText>
+        </View>
+      )}
+
+      {/* Nested inside this sheet rather than beside it: a Modal presented
+          from within the presented one stacks, where dismissing this sheet
+          and presenting another in the same frame does not. */}
+      {confirming && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirming(false)}
+          question={t('notRecurringQ')}
+          body={tf('stopRecurringBody', { title: subscription.title })}
+          confirmLabel={t('notRecurring')}
+          onConfirm={stopRecurring}
+        />
+      )}
     </BottomSheet>
   );
 }
@@ -191,5 +234,11 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     gap: Spacing.two + 2,
+  },
+  notice: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.half,
   },
 });
