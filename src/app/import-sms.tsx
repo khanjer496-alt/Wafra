@@ -72,6 +72,29 @@ const PREVIEW_LIMIT = 60;
 const PANEL_HEIGHT = 186;
 
 /**
+ * How many messages the user actually pasted, counted the way `pasteHint`
+ * asks them to paste: one per blank-line-separated block. Used only to say
+ * how many of them came back unreadable.
+ */
+function messageBlocks(input: string): number {
+  const blocks = input
+    .split(/\n\s*\n/)
+    .map((block) => block.trim())
+    .filter(Boolean).length;
+  // Something was pasted — the parse button is disabled otherwise — so the
+  // floor is one. "0 messages in a format we do not know" is not an answer.
+  return Math.max(1, blocks);
+}
+
+/**
+ * What a paste that produced no plan actually was. `filed` means the parser
+ * read it and the ledger already had every row; `unreadable` means the parser
+ * could make nothing of it at all. Two different answers, and the screen used
+ * to give neither.
+ */
+type PasteVerdict = { kind: 'filed' | 'unreadable'; count: number };
+
+/**
  * The loading state: skeleton lines under a scan line sweeping down them.
  * No spinner — a spinner says "wait", this says what is being read.
  */
@@ -112,6 +135,7 @@ export default function ImportSmsScreen() {
   const [progress, setProgress] = useState<{ scanned: number; found: number } | null>(null);
   const [trackedBills, setTrackedBills] = useState<Set<number>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
+  const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
   const started = useRef(false);
 
   const runScan = async () => {
@@ -130,6 +154,7 @@ export default function ImportSmsScreen() {
     }
     setScanning(true);
     setProgress(null);
+    setPasteVerdict(null);
     try {
       const granted = await requestSmsPermission();
       if (!granted) {
@@ -173,9 +198,29 @@ export default function ImportSmsScreen() {
     const parsed: ScannedSms[] = parseSmsBatch(input, state.merchantOverrides);
     const p = buildImportPlan(parsed, state, state.lastScanTs);
     const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
-    setSkippedCount(Math.max(0, txLike.length - p.txCount));
-    setPlan(p);
+    const skipped = Math.max(0, txLike.length - p.txCount);
+    setSkippedCount(skipped);
     setTrackedBills(new Set());
+    // A plan with nothing in it is not a plan, and rendering one as if it were
+    // is how an unreadable paste dead-ended: a strip reading "0 matched ·
+    // 0 cards · 0 unread", no preview, no footer button, no explanation — and
+    // <SupplementImports /> gone, because that block is gated on `plan ===
+    // null`. The relay, forwarded-email and PDF routes disappeared at the
+    // exact moment they were the only thing left to offer. The scan path has
+    // said "up to date" on an empty result for a long time; the paste path
+    // needs the same courtesy, and one more verdict than the scan has: a
+    // message the parser could make nothing of is not a message already filed.
+    if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
+      setPlan(null);
+      setPasteVerdict(
+        skipped > 0
+          ? { kind: 'filed', count: skipped }
+          : { kind: 'unreadable', count: messageBlocks(input) },
+      );
+      return;
+    }
+    setPasteVerdict(null);
+    setPlan(p);
   };
 
   const applyPlan = () => {
@@ -286,7 +331,12 @@ export default function ImportSmsScreen() {
                   <TextInput
                     accessibilityLabel={t('pasteBankMessagesA11y')}
                     value={text}
-                    onChangeText={setText}
+                    // A verdict is about the text that produced it. Editing
+                    // the box makes it stale, so it goes when the text does.
+                    onChangeText={(value) => {
+                      setText(value);
+                      setPasteVerdict(null);
+                    }}
                     multiline
                     placeholder={t('bankMessageExample')}
                     placeholderTextColor={theme.textTertiary}
@@ -468,6 +518,38 @@ export default function ImportSmsScreen() {
                 </Section>
               )}
             </>
+          )}
+
+          {/* The answer to a paste that filed nothing. It sits ABOVE the
+              alternative routes and leaves them on screen, because "we cannot
+              read this one" and "here are the other ways in" are one thought. */}
+          {pasteVerdict !== null && !scanning && (
+            <Section index={1}>
+              <Block>
+                <View style={styles.unreadRow}>
+                  <Icon
+                    name="alert"
+                    size={17}
+                    color={pasteVerdict.kind === 'filed' ? theme.textTertiary : theme.warning}
+                  />
+                  <View style={styles.rowText}>
+                    <ThemedText type="small">
+                      {pasteVerdict.kind === 'filed'
+                        ? t('upToDate')
+                        : tf('unknownMessageFormats', {
+                            count: pasteVerdict.count,
+                            s: pasteVerdict.count === 1 ? '' : 's',
+                          })}
+                    </ThemedText>
+                    <ThemedText type="meta" themeColor="textTertiary">
+                      {pasteVerdict.kind === 'filed'
+                        ? `${pasteVerdict.count} ${t('alreadyFiledSkipped')}`
+                        : t('pasteHint')}
+                    </ThemedText>
+                  </View>
+                </View>
+              </Block>
+            </Section>
           )}
 
           {!scanning && plan === null && (
