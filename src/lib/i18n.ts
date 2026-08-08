@@ -1123,6 +1123,12 @@ const S = {
   nothingOutYet: { en: 'Nothing has gone out in this period yet.', ar: 'لم يخرج أي مبلغ في هذه الفترة بعد.' },
   noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
   noStatementYet: { en: 'No statement message has arrived for this card yet.', ar: 'لم تصل رسالة كشف حساب لهذه البطاقة بعد.' },
+  // Not "none yet" — none ever. A debit card spends the money already in the
+  // account, so it issues no statement and there is no bill to pay toward it.
+  debitHasNoStatement: {
+    en: 'A debit card has no statement and no bill to pay — it spends the balance in the account.',
+    ar: 'بطاقة الخصم المباشر ليس لها كشف حساب ولا فاتورة تُسدَّد — فهي تنفق الرصيد الموجود في الحساب.',
+  },
   underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
   transferExplainer: { en: 'Kept in balances, excluded from income and spending', ar: 'يُحتسب في الأرصدة ويُستثنى من الدخل والمصروف' },
   perYear: { en: 'per year', ar: 'سنوياً' },

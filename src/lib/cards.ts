@@ -214,6 +214,21 @@ function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>)
   return (
     t.isTransfer === true &&
     ids.has(t.accountId) &&
+    // Nothing in a group with no credit card in it can be a payment TOWARD a
+    // card, because there is no bill to pay. Without this, the income branch
+    // below read every incoming transfer to a current account as a settlement:
+    // a user's Liv DEBIT card •4822 showed "Payments made 360,054" — their
+    // salary, their deposits, and the inbound leg of their own outgoing
+    // telegraphic transfers — under a Statements section that said, honestly
+    // and forever, "no statement message has arrived for this card yet". A
+    // debit card does not issue statements, so that section could never
+    // resolve and the figure beside it could never be right.
+    //
+    // Deliberately keyed on the GROUP, not on `t.accountId`. One physical card
+    // can appear as both a debit and a credit row (see cardAccountIds), and a
+    // real settlement is often filed against the debit sibling — narrowing to
+    // `creditIds.has(t.accountId)` here would drop those.
+    creditIds.size > 0 &&
     (t.type === 'income' ||
       // Older builds stored card payments in the wrong direction. Keep
       // that compatibility path, but only for a row whose title says it
@@ -757,6 +772,17 @@ export interface CardStatementView {
   open: CardDue[];
   outstandingFils: number;
   billedFils: number;
+  /**
+   * Whether this card can have a bill at all.
+   *
+   * False for a debit-only card, and then `statements` and `payments` are both
+   * empty BY DEFINITION rather than by accident — which is a different thing
+   * from "none have arrived yet", and the screen has to be able to tell them
+   * apart. It could not: a debit card showed an empty Statements list under
+   * "no statement message has arrived for this card YET", a sentence that
+   * promises one is coming when none ever can.
+   */
+  billable: boolean;
 }
 
 export function cardStatementView(state: AppState, accountId: string): CardStatementView {
@@ -774,6 +800,10 @@ export function cardStatementView(state: AppState, accountId: string): CardState
   // the payment that settled it was invisible in this very list.
   const ids = cardAccountIds(state, accountId);
   const payments = cardPaymentsOf(state, ids).sort((a, b) => b.date.localeCompare(a.date));
+  // The group, not the one row the sheet was opened on: one physical card can
+  // appear as both a debit and a credit row, and opening the debit one must
+  // not hide the bill the credit one carries.
+  const billable = state.accounts.some((a) => ids.has(a.id) && a.cardType === 'credit');
 
   const paidByDueId = new Map(statements.map((d) => [d.id, duePaidFils(state, d)] as const));
 
@@ -799,6 +829,7 @@ export function cardStatementView(state: AppState, accountId: string): CardState
     paidTotalFils: payments.reduce((s, t) => s + t.amountFils, 0),
     paidByDueId,
     open,
+    billable,
     outstandingFils: open.reduce(
       (s, d) => s + Math.max(0, d.totalDueFils - (paidByDueId.get(d.id) ?? 0)),
       0,
