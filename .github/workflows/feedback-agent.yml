@@ -1,0 +1,353 @@
+name: Feedback agent
+
+# The far half of feedback → agent → pull request.
+#
+# server/src/index.ts stores a feedback item in D1 and POSTs a
+# `repository_dispatch` carrying ITS ID AND NOTHING ELSE. This job fetches the
+# item back with its own read-only scoped token, hands it to an agent, proves
+# the agent's work goes red before green against the real corpus, and opens a
+# DRAFT pull request. Nothing here merges anything.
+#
+# THREE RULES THIS FILE IS BUILT AROUND, in descending order of how expensive
+# they are to get wrong:
+#
+# 1. THE USER'S WORDS DO NOT LEAVE THIS RUNNER. This app reads bank SMS. A
+#    feedback report is prose a user typed, and the most useful thing they can
+#    put in it is the alert that parsed wrong — their bank, their card's last
+#    four, an amount they spent. The relay keeps that fourteen days behind a
+#    token; a pull request keeps it forever, in public, on something anyone can
+#    fork. So the report is written to $RUNNER_TEMP, never into the workspace,
+#    never echoed to a log, and never quoted in the pull request body — and the
+#    verbatim-quote gate below FAILS THE RUN rather than publishing a leak.
+#
+# 2. RED BEFORE GREEN, PROVEN. "Add a failing test" is unfalsifiable as a
+#    prompt instruction, so it is checked instead: the test change ALONE is
+#    applied to a clean tree and the suite must FAIL, then the whole change is
+#    applied and it must PASS. An agent that "fixed" a bug it never reproduced
+#    cannot get past it.
+#
+# 3. ONE RUN PER FEEDBACK ITEM, AND A BUDGET ABOVE THAT. The Worker caps
+#    dispatches at FEEDBACK_DISPATCH_PER_HOUR (see server/src/index.ts) so a
+#    flood of reports cannot become a flood of agent runs. The concurrency
+#    group below is the second half: a duplicate dispatch for an id already in
+#    flight queues behind it instead of starting a second agent on the same
+#    report.
+
+on:
+  repository_dispatch:
+    # Must match FEEDBACK_DISPATCH_EVENT in server/src/feedback.ts.
+    types: [wafra-feedback]
+  workflow_dispatch:
+    inputs:
+      feedback_id:
+        description: 'Feedback id to work on. Use this to re-run an item the relay could not dispatch, or one whose first run failed.'
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: feedback-agent-${{ github.event.client_payload.feedbackId || inputs.feedback_id }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    # Two full runs of the app suite plus an agent turn. Generous rather than
+    # tight: a job killed half-way leaves a branch and no pull request, which is
+    # a worse state to debug than a slow one.
+    timeout-minutes: 60
+    env:
+      # This job never runs the e2e suite, so npm postinstall must not fetch a
+      # browser for it.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      FEEDBACK_ID: ${{ github.event.client_payload.feedbackId || inputs.feedback_id }}
+      # Repository VARIABLE (Settings → Secrets and variables → Actions →
+      # Variables), e.g. https://wafra-relay.<account>.workers.dev
+      RELAY_URL: ${{ vars.WAFRA_RELAY_URL }}
+      # Repository SECRET holding the SAME value as the Worker secret
+      # FEEDBACK_READ_TOKEN — see the block at the end of server/wrangler.toml.
+      FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      WORK: ${{ runner.temp }}/feedback
+      # The agent CLI's flags live here so correcting them is one line rather
+      # than an edit inside a shell step. See "Run the agent" for what about
+      # them could not be verified.
+      CLAUDE_ARGS: '--print --permission-mode acceptEdits'
+
+    steps:
+      # ── Refuse to start rather than fail half-way ──
+      #
+      # Each of these is a configuration mistake a human makes once, and each
+      # otherwise surfaces three steps later as a curl exit code or an empty
+      # file. Same convention as deploy-relay.yml: the run ends in a sentence in
+      # the job summary, not a stack trace.
+      - name: Preflight
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${RELAY_URL:-}" ]           || missing+=("variable WAFRA_RELAY_URL")
+          [ -n "${FEEDBACK_READ_TOKEN:-}" ] || missing+=("secret WAFRA_FEEDBACK_READ_TOKEN")
+          [ -n "${ANTHROPIC_API_KEY:-}" ]   || missing+=("secret ANTHROPIC_API_KEY")
+          if [ ${#missing[@]} -gt 0 ]; then
+            {
+              echo "## Cannot start"
+              echo
+              for name in "${missing[@]}"; do echo "- \`$name\` is not set"; done
+              echo
+              echo "Add them under **Settings → Secrets and variables → Actions**."
+              echo "\`WAFRA_FEEDBACK_READ_TOKEN\` must equal the Worker secret \`FEEDBACK_READ_TOKEN\`"
+              echo "(\`npx wrangler secret put FEEDBACK_READ_TOKEN\` — see \`server/wrangler.toml\`)."
+              echo
+              echo "The feedback item is still in the relay. Re-run this workflow once they are set."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          # The id arrives in a repository_dispatch client_payload and is about
+          # to be interpolated into a URL and a git branch name, so it is
+          # matched against the shape the Worker generates rather than trusted.
+          if ! printf '%s' "$FEEDBACK_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            echo "::error::feedback id is not a UUID. Refusing to put it in a URL or a branch name."
+            exit 1
+          fi
+          echo "Working on feedback \`$FEEDBACK_ID\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+        with:
+          # The branch is pushed from here; a shallow clone makes that awkward.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install relay dependencies
+        working-directory: server
+        run: npm ci
+
+      # ── Fetch the report ──
+      #
+      # Into $RUNNER_TEMP, outside the git workspace, so no later `git add -A`
+      # can sweep it into a commit. Nothing here prints the body.
+      - name: Fetch the feedback item
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK"
+          if ! curl -sS --fail-with-body --max-time 30 \
+              -H "authorization: Bearer $FEEDBACK_READ_TOKEN" \
+              -H 'accept: application/json' \
+              "${RELAY_URL%/}/v1/feedback/$FEEDBACK_ID" \
+              -o "$WORK/feedback.json" 2> "$WORK/curl.err"; then
+            {
+              echo "## Could not read the feedback item"
+              echo
+              echo "\`GET <relay>/v1/feedback/$FEEDBACK_ID\` failed."
+              echo
+              echo "- **401** — \`WAFRA_FEEDBACK_READ_TOKEN\` does not match the Worker's \`FEEDBACK_READ_TOKEN\`."
+              echo "- **503** — the Worker has no \`FEEDBACK_READ_TOKEN\` set at all."
+              echo "- **404** — the item expired. Feedback is kept 14 days and then deleted, always."
+              echo
+              echo '```'
+              # curl's own diagnostics only. The response body is never printed:
+              # on a 200 that is the user's words, and this log is public.
+              tail -5 "$WORK/curl.err"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # ── The prompt ──
+      #
+      # Composed by a committed script rather than inline, so the instructions
+      # an agent actually acts on are reviewable as prose in a diff. It writes
+      # the prompt to $RUNNER_TEMP and prints only metadata.
+      - name: Compose the prompt
+        run: |
+          set -euo pipefail
+          node .github/scripts/feedback-prompt.mjs \
+            "$WORK/feedback.json" "$WORK/PROMPT.md" "$WORK"
+          # Only fields the relay validates against a fixed alphabet reach
+          # GITHUB_ENV, so none of them can carry a newline into it.
+          node -e '
+            const fs = require("fs");
+            const item = JSON.parse(fs.readFileSync(process.env.WORK + "/feedback.json", "utf8"));
+            fs.appendFileSync(process.env.GITHUB_ENV,
+              "FEEDBACK_PLATFORM=" + item.platform + "\n" +
+              "FEEDBACK_APP_VERSION=" + item.appVersion + "\n" +
+              "FEEDBACK_LOCALE=" + (item.locale || "unknown") + "\n");
+          '
+
+      # ── The agent ──
+      #
+      # THIS STEP COULD NOT BE VERIFIED FROM THE MACHINE THAT WROTE IT.
+      #
+      # Everything else in this file is ordinary CI whose behaviour follows from
+      # the repository. This step does not: it depends on a CLI that is not
+      # installed there and whose flags could not be checked against its own
+      # --help. It is written as the documented headless invocation — prompt on
+      # stdin, `--print`, ANTHROPIC_API_KEY in the environment — and CLAUDE_ARGS
+      # above exists so that correcting it is one line.
+      #
+      # CONFIRM IT AGAINST https://docs.claude.com/en/docs/claude-code BEFORE
+      # THE FIRST REAL RUN. Two specific things: whether the flags in
+      # CLAUDE_ARGS are still spelled that way, and whether the package is still
+      # published under that name. If either is wrong the step fails loudly, no
+      # branch is pushed, and the item is still in D1 to re-fire through
+      # workflow_dispatch — so the failure mode is a wasted run, not a bad pull
+      # request.
+      #
+      # `anthropics/claude-code-action` is the other documented way to do this
+      # and would replace this step entirely. It is deliberately NOT used here
+      # because its input names could not be checked either, and getting a
+      # marketplace action's inputs wrong fails less obviously than a missing
+      # shell flag does.
+      - name: Run the agent
+        run: |
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+          claude $CLAUDE_ARGS < "$WORK/PROMPT.md" | tee "$WORK/agent.log"
+
+      # ── Red, then green ──
+      #
+      # The claim "a failing-then-passing test" is checked, not trusted.
+      - name: Prove the test fails without the fix and passes with it
+        run: |
+          set -euo pipefail
+          git add -A
+          if git diff --cached --quiet; then
+            echo "::error::the agent changed nothing. There is nothing to open a pull request for."
+            echo "The agent produced no diff for this report." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          git diff --cached --binary > "$WORK/full.patch"
+          git diff --cached --binary -- scripts/test server/test > "$WORK/tests.patch"
+          if [ ! -s "$WORK/tests.patch" ]; then
+            echo "::error::no test was added or changed. A fix with no reproduction is not accepted."
+            exit 1
+          fi
+
+          # A clean tree carrying the test change and nothing else. `git clean`
+          # without -x leaves gitignored paths alone, so node_modules survives.
+          git reset --quiet
+          git checkout -- .
+          git clean -fdq
+          git apply "$WORK/tests.patch"
+          echo "── the suite WITH the new test and WITHOUT the fix ──"
+          if npm test > "$WORK/red.log" 2>&1; then
+            echo "::error::the new test passes without the fix, so it does not reproduce the report."
+            tail -40 "$WORK/red.log"
+            exit 1
+          fi
+          echo "red, as it must be."
+
+          git checkout -- .
+          git clean -fdq
+          git apply "$WORK/full.patch"
+          echo "── the suite WITH the fix ──"
+          npm test 2>&1 | tail -40
+
+      - name: Check the relay too
+        run: |
+          set -euo pipefail
+          npm --prefix server run typecheck
+          npm --prefix server test | tail -5
+          bash scripts/test/worker-gate.sh | tail -3
+
+      # ── The gate that matters most ──
+      #
+      # See .github/scripts/feedback-no-verbatim.mjs for why this is a hard
+      # failure and why it must not be weakened when it trips.
+      - name: Refuse to publish anything quoted from the user
+        run: |
+          set -euo pipefail
+          git add -A
+          node .github/scripts/feedback-no-verbatim.mjs \
+            "$WORK/feedback.json" "$WORK/SUMMARY.md"
+
+      - name: Open a draft pull request
+        run: |
+          set -euo pipefail
+          branch="feedback/$FEEDBACK_ID"
+          git config user.name  'wafra-feedback-agent'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add -A
+          # Written to a file rather than passed as a multi-line -m: a YAML
+          # block scalar ends at the first line indented less than the block,
+          # and a commit body's second line starts at column 0.
+          {
+            echo "fix: issue reported in feedback $FEEDBACK_ID"
+            echo
+            echo "Reported from ${FEEDBACK_PLATFORM} ${FEEDBACK_APP_VERSION} (locale ${FEEDBACK_LOCALE})."
+            echo "Opened by .github/workflows/feedback-agent.yml. Draft — needs human review."
+          } > "$WORK/commit-message.txt"
+          git commit --quiet -F "$WORK/commit-message.txt"
+          # A re-run of the same id is an update of the same branch, not a
+          # second one. Fetch first so --force-with-lease has something to
+          # lease against instead of refusing on stale info.
+          git fetch --quiet origin "+refs/heads/$branch:refs/remotes/origin/$branch" 2>/dev/null || true
+          git push --force-with-lease origin "$branch"
+
+          {
+            echo "Filed from **${FEEDBACK_PLATFORM}**, app **${FEEDBACK_APP_VERSION}**, locale \`${FEEDBACK_LOCALE}\`."
+            echo
+            echo "Relay feedback id \`${FEEDBACK_ID}\` — readable with the maintainer read token for"
+            echo "14 days from when it was filed, then deleted."
+            echo
+            echo "**The report itself is deliberately not reproduced here.** It is prose a user typed"
+            echo "and can contain a real bank alert; this pull request is public and permanent, and the"
+            echo "relay's copy is neither. What follows is the agent's own account of the problem."
+            echo
+            cat "$WORK/SUMMARY.md"
+            echo
+            echo "---"
+            echo
+            echo "### What this run already proved"
+            echo
+            echo "- The added test **fails** on a tree carrying the test change alone."
+            echo "- The whole change makes \`npm test\` **pass**."
+            echo "- \`npm --prefix server\` typecheck and tests, and the Worker gate, pass."
+            echo "- Nothing in the diff or in this description quotes the report verbatim."
+            echo
+            echo "### What a human still has to decide"
+            echo
+            echo "- Whether this is the *right* reproduction of what was actually reported."
+            echo "- Whether the fix belongs where it was put."
+            echo "- Whether it deserves a corpus case rather than a one-off test."
+            echo
+            echo "> Note: this pull request was created with \`GITHUB_TOKEN\`, so \`ci.yml\` will **not**"
+            echo "> start on it by itself. Close and reopen it, or push a commit, to get a CI run."
+            echo
+            echo "Draft on purpose. Nothing here is ready to merge unreviewed."
+          } > "$WORK/pr-body.md"
+
+          existing=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body-file "$WORK/pr-body.md"
+            url=$(gh pr view "$existing" --json url --jq .url)
+          else
+            url=$(gh pr create --draft \
+              --title "Feedback: ${FEEDBACK_PLATFORM} ${FEEDBACK_APP_VERSION} — reported issue" \
+              --body-file "$WORK/pr-body.md" \
+              --head "$branch")
+          fi
+          {
+            echo "## Draft pull request opened"
+            echo
+            echo "$url"
+          } >> "$GITHUB_STEP_SUMMARY"

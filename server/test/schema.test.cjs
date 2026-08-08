@@ -53,6 +53,7 @@ const schema = fs.readFileSync(path.join(root, 'schema.sql'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8');
 const imports = fs.readFileSync(path.join(root, 'src/imports.ts'), 'utf8');
 const ingestRow = fs.readFileSync(path.join(root, 'src/ingest-row.ts'), 'utf8');
+const feedback = fs.readFileSync(path.join(root, 'src/feedback.ts'), 'utf8');
 const ingest = worker.slice(
   worker.indexOf("url.pathname === '/v1/ingest'"),
   worker.indexOf("url.pathname === '/v1/import/capabilities'"));
@@ -166,6 +167,56 @@ ok('a refused sender is not echoed back to the caller',
   !/json\(\{[^}]*\bsender\b[^}]*\}, 4\d\d\)/.test(worker));
 ok('the sender module has no persistence or logging surface',
   !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(ingestRow));
+
+// ── Feedback, and the one place this service stores prose ──
+//
+// Everything about how the endpoint BEHAVES is exercised in
+// scripts/test/worker.test.js against a real database. What is left for this
+// file is the same category of thing as the assertions above: properties whose
+// violation is the ABSENCE of an observable event, which no request can drive.
+ok('feedback lives in its own table and never in the sealed queue',
+  /CREATE TABLE IF NOT EXISTS feedback \(/.test(schema) &&
+    !/INSERT INTO queue[\s\S]{0,400}feedback/i.test(worker));
+// Column definitions only — the `--` prose around them says "no IP address"
+// and would match its own prohibition.
+const feedbackColumns = schema
+  .slice(schema.indexOf('CREATE TABLE IF NOT EXISTS feedback ('))
+  .split(/^\);$/m)[0]
+  .replace(/--[^\n]*/g, '');
+ok('the feedback table records no address, device or credential',
+  feedbackColumns.length > 0 &&
+    !/\b(?:ip|ip_address|device_id|token_hash|user_agent|fingerprint)\b/i.test(feedbackColumns));
+ok('the feedback retention ceiling is shorter than the queue\'s, and written at insert',
+  /export const FEEDBACK_RETENTION_SECONDS = 14 \* 24 \* 60 \* 60;/.test(feedback) &&
+    /VALUES \(\?1, unixepoch\(\), unixepoch\(\) \+ \?2,/.test(worker) &&
+    /DELETE FROM feedback WHERE expires_at <= unixepoch\(\)/.test(worker));
+// A client_payload is readable by anyone with access to the repository's
+// Actions data and is kept in the run record. The feedback is not — which is
+// the entire reason a separate authenticated read route exists.
+ok('the repository_dispatch carries the feedback id and nothing else',
+  /client_payload: \{ feedbackId \},/.test(worker) &&
+    !/client_payload:[\s\S]{0,200}\b(?:text|diagnostic|appVersion|locale)\b/.test(worker));
+ok('the dispatch degrades to a stored row rather than a 500 when GitHub is absent',
+  /'skipped_unconfigured'/.test(worker) && /'skipped_budget'/.test(worker) &&
+    /return json\(\{ id, dispatched: dispatchStatus === 'pending' \}, 202\)/.test(worker));
+ok('the repository name is validated before it is interpolated into an API path',
+  /githubRepository\(env\.GITHUB_REPOSITORY\)/.test(worker) &&
+    /export function githubRepository/.test(feedback) &&
+    !/repos\/\$\{env\.GITHUB_REPOSITORY/.test(worker));
+ok('the agent read scope is a hashed bearer compared in constant time',
+  /hashToken\(env\.FEEDBACK_READ_TOKEN\)/.test(worker) &&
+    /timingSafeEqual\(presentedHash, expectedHash\)/.test(worker) &&
+    /feedback_read_not_configured/.test(worker));
+ok('over-long feedback is refused rather than truncated into the column',
+  /return \{ error: 'text_too_long', status: 400 \}/.test(feedback) &&
+    /return \{ error: 'diagnostic_too_large', status: 413 \}/.test(feedback) &&
+    !/\.slice\(0, MAX_FEEDBACK/.test(feedback) && !/\.substring\(/.test(feedback));
+ok('the feedback module has no persistence or logging surface',
+  !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(feedback));
+// The Worker's observability sampling is on. Nothing in the request path may
+// write a payload to it — not a bank message, and not a bug report either.
+ok('no route logs anything at all',
+  !/console\./.test(worker));
 
 // The parser decides which leg of a card settlement a message is, because the
 // relay drops the wording the app used to re-read. Nothing here needs to know

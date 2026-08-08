@@ -32,18 +32,58 @@ head_sampling_rate = 0.1
 #   npx wrangler secret put PUSH_TOKEN_KEY    # base64 of 32 random bytes
 #   npx wrangler secret put EXPO_ACCESS_TOKEN # EAS enhanced push security
 #
-# EXPO_PROJECT_ID and EMAIL_DOMAIN are not secret — they belong in a [vars]
-# block here, which is where the Worker reads them from. They are commented out
-# rather than left empty because both are per-owner values with no sensible
-# default, and an empty string would deploy a Worker that looks configured and
-# silently registers no push tokens. Uncomment and fill in:
+# The feedback → agent → PR loop needs two more. BOTH ARE OPTIONAL: without
+# them the feedback endpoint still accepts and stores reports, it just never
+# wakes an agent and never serves the read route. Nothing 500s.
+#
+#   npx wrangler secret put GITHUB_DISPATCH_TOKEN
+#     A GitHub PAT used for exactly one call: POST /repos/{owner}/{repo}/dispatches.
+#     Fine-grained PAT (preferred): scoped to THIS REPOSITORY ONLY, with the
+#       single repository permission `Contents: Read and write`. That is what
+#       the dispatch endpoint requires; it grants no access to Actions secrets,
+#       to other repositories, or to the account.
+#     Classic PAT (fallback): `repo` on a private repository, `public_repo` on
+#       a public one. Strictly broader than the fine-grained equivalent — use it
+#       only if fine-grained tokens are unavailable for the org.
+#     Set an expiry and rotate it. Nothing depends on the token surviving: a
+#     dead token records dispatch_status = 'failed' on the row and the feedback
+#     is still there to re-fire by hand.
+#
+#   npx wrangler secret put FEEDBACK_READ_TOKEN
+#     Any high-entropy string (`openssl rand -base64 32`). The Actions job
+#     presents it as a bearer to GET /v1/feedback/:id. It reads ONE feedback
+#     item and can do nothing else on this service — it is not a device
+#     credential and cannot ingest, sync, acknowledge or administer anything.
+#     The SAME value must be set as the repository secret
+#     WAFRA_FEEDBACK_READ_TOKEN (Settings → Secrets and variables → Actions),
+#     which is where .github/workflows/feedback-agent.yml reads it from.
+#     Whoever owns the Cloudflare account sets both halves; they are the only
+#     person who can, since the Worker secret is write-only after it is set.
+#
+# EXPO_PROJECT_ID, EMAIL_DOMAIN and GITHUB_REPOSITORY are not secret — they
+# belong in a [vars] block here, which is where the Worker reads them from.
+# They are commented out rather than left empty because each is a per-owner
+# value with no sensible default, and an empty string would deploy a Worker
+# that looks configured and silently registers no push tokens. Uncomment and
+# fill in:
 #
 # [vars]
 # EXPO_PROJECT_ID = "00000000-0000-0000-0000-000000000000"  # the EAS project UUID the app uses
 # EMAIL_DOMAIN = "mail.example.com"                          # only if Email Routing is set up
+# GITHUB_REPOSITORY = "owner/repo"                           # where feedback dispatches land
 #
 # Without EXPO_PROJECT_ID (or PUSH_TOKEN_KEY) the Worker refuses push
 # registration and sends no wakes; capture still works on foreground and
 # background sync. Without EMAIL_DOMAIN the email supplement reports itself as
-# disabled and /v1/email-token returns 503. Both are deliberate degradations,
-# not failures. Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.
+# disabled and /v1/email-token returns 503. Without GITHUB_REPOSITORY or
+# GITHUB_DISPATCH_TOKEN feedback is stored with dispatch_status =
+# 'skipped_unconfigured' and no agent runs. Without FEEDBACK_READ_TOKEN the
+# agent read route is 503. All of these are deliberate degradations, not
+# failures. Route EMAIL_DOMAIN to this Worker with Cloudflare Email Routing.
+#
+# ONE THING TO SET AT THE EDGE, not here. /v1/feedback is the only write path
+# with no bearer token in front of it. The Worker's own global fixed window is
+# a backstop, exactly as it is for /v1/pair; the production first line should
+# be a Cloudflare rate-limiting rule on `http.request.uri.path eq
+# "/v1/feedback"`, which is the only layer that can see a client IP without
+# this service ever storing one.

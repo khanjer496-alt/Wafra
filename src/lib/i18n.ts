@@ -1889,6 +1889,82 @@ const S = {
     en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
     ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',
   },
+
+  // Feedback. The register here is the same as the privacy section's: say what
+  // leaves the phone, say it before it leaves, and never describe the feature
+  // in terms of what it is FOR ("help us improve") when it can be described in
+  // terms of what it DOES.
+  sendFeedback: { en: 'Send feedback', ar: 'إرسال ملاحظة' },
+  sendFeedbackDetail: {
+    en: 'Report a bug, and choose what to attach',
+    ar: 'أبلغ عن خلل، واختر ما تُرفقه',
+  },
+  feedbackIntro: {
+    en: 'Say what went wrong. Nothing leaves this phone until you tap Send, and the whole report is printed below so you can read it first.',
+    ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال، والتقرير كاملاً مطبوع بالأسفل لتقرأه أولاً.',
+  },
+  feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
+  feedbackPlaceholder: {
+    en: 'Tuesday’s charge was filed twice.',
+    ar: 'سُجّلت عملية الثلاثاء مرتين.',
+  },
+  feedbackInputA11y: { en: 'Describe what went wrong', ar: 'اكتب ما الذي حدث' },
+  feedbackDigitsMasked: {
+    en: 'Long numbers you type are masked before sending.',
+    ar: 'تُخفى الأرقام الطويلة التي تكتبها قبل الإرسال.',
+  },
+  feedbackChars: { en: '{used} of {max}', ar: '{used} من {max}' },
+  feedbackAttachHeader: { en: 'WHAT TO ATTACH', ar: 'ما الذي يُرفق' },
+  feedbackAttachRow: { en: 'Attached', ar: 'المرفق' },
+  feedbackDetailNone: { en: 'Just what you wrote', ar: 'ما كتبته فقط' },
+  feedbackDetailNoneHint: { en: 'Nothing from your ledger.', ar: 'لا شيء من سجلك.' },
+  feedbackDetailShapes: { en: 'And the message shapes', ar: 'وأشكال الرسائل' },
+  feedbackDetailShapesHint: {
+    en: 'Bank messages with every digit blanked and every name replaced. Send this if an entry was read wrong.',
+    ar: 'رسائل البنك مع حذف كل رقم واستبدال كل اسم. أرسل هذا إذا قُرئت عملية بشكل خاطئ.',
+  },
+  feedbackDetailFigures: { en: 'And the amounts behind your totals', ar: 'والمبالغ خلف مجاميعك' },
+  feedbackDetailFiguresHint: {
+    en: 'Adds balances and statement figures. Still no names. Send this if a total looks wrong.',
+    ar: 'يضيف الأرصدة وأرقام الكشوف. ولا أسماء أيضاً. أرسل هذا إذا بدا أحد المجاميع خاطئاً.',
+  },
+  feedbackPrivateOn: {
+    en: 'Private Mode is on, so only your message can be sent.',
+    ar: 'الوضع الخاص مفعّل، لذا لا يمكن إرسال سوى رسالتك.',
+  },
+  feedbackPrivateBlocked: {
+    en: 'Private Mode keeps your ledger on this phone.',
+    ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
+  },
+  feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
+  feedbackPreviewNote: {
+    en: 'This is the report itself, not a summary of it. It is written in English so whoever fixes the bug can read it.',
+    ar: 'هذا هو التقرير نفسه، لا ملخص له. وهو مكتوب بالإنجليزية ليقرأه من سيصلح الخلل.',
+  },
+  feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
+  feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
+  feedbackSendQ: { en: 'Send this report?', ar: 'إرسال هذا التقرير؟' },
+  feedbackSendBody: {
+    en: 'The report above is what leaves this phone. Nothing else goes with it.',
+    ar: 'التقرير أعلاه هو ما يغادر هذا الهاتف. ولا شيء غيره.',
+  },
+  feedbackSaveCopy: { en: 'Save a copy', ar: 'حفظ نسخة' },
+  feedbackNeedsMessage: { en: 'Say what went wrong first.', ar: 'اكتب ما الذي حدث أولاً.' },
+  feedbackSentTitle: { en: 'Report sent', ar: 'أُرسل التقرير' },
+  feedbackSentBody: {
+    en: 'Reference {id}. This is how the parser learns a format it cannot read.',
+    ar: 'المرجع {id}. هكذا يتعلّم القارئ صيغة لا يستطيع قراءتها.',
+  },
+  feedbackNoTransportTitle: { en: 'Sending is not connected yet', ar: 'الإرسال غير موصول بعد' },
+  feedbackNoTransportBody: {
+    en: 'This build has no way to deliver a report, so nothing was uploaded. Save a copy and send it yourself.',
+    ar: 'لا توجد في هذه النسخة طريقة لتسليم التقرير، لذا لم يُرفع شيء. احفظ نسخة وأرسلها بنفسك.',
+  },
+  feedbackFailedTitle: { en: 'Could not send', ar: 'تعذّر الإرسال' },
+  feedbackFailedBody: {
+    en: 'The report did not leave the phone. Save a copy so it is not lost, and try again later.',
+    ar: 'لم يغادر التقرير الهاتف. احفظ نسخة كي لا تضيع، وحاول لاحقاً.',
+  },
   onboardImportResult: {
     en: '{entries} entr{ending} filed{cards}. Nothing left the phone.',
     ar: 'سُجّلت {entries} عملية{cards}. لم يغادر شيء الهاتف.',

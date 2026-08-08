@@ -67,6 +67,19 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
+
+# The feedback payload builder, under a name of its own.
+#
+# `feedback` exists on BOTH sides of this repo — src/lib/feedback.ts builds the
+# report on the phone, server/src/feedback.ts receives it — and the loop over
+# server/src further down copies by BASENAME into this same directory, so
+# whichever runs last wins and the other vanishes. It was the app module that
+# lost, in silence: build/feedback.js exported the Worker's validator and the
+# app's own suite failed with "FEEDBACK_DETAILS is not iterable", which names
+# neither file. Nothing in build/ imports this module — only the screen does —
+# so the rename costs nothing here and the guard below stops the next collision
+# from being discovered the same way.
+[ -f ../../src/lib/feedback.ts ] && rewrite ../../src/lib/feedback.ts build/app-feedback.ts
 for f in stubs/*.ts; do
   cp "$f" "build/$(basename "$f")"
 done
@@ -109,6 +122,22 @@ fi
 # executes. A green `npm test` is impossible in that state, but so is a red
 # one that points at the real problem. Loop over the directory so a sixth
 # module is picked up by existing without anyone remembering this line.
+
+# Nothing the app compiled above may be silently replaced by a Worker module of
+# the same name. Two files called `feedback.ts` — one per side — already did
+# exactly that, and the failure surfaced two suites away as a missing export.
+# A basename clash is legitimate (the two sides of one feature usually share a
+# word); resolving it by luck of loop order is not.
+for f in ../../server/src/*.ts; do
+  base=$(basename "$f")
+  [ "$base" = "index.ts" ] && continue
+  if [ -f "build/$base" ]; then
+    echo "build.sh: server/src/$base would overwrite build/$base, already emitted by the app." >&2
+    echo "build.sh: emit one of the two under a different name — see app-feedback above." >&2
+    exit 1
+  fi
+done
+
 for f in ../../server/src/*.ts; do
   rewrite "$f" "build/$(basename "$f")"
 done

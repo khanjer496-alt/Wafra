@@ -183,10 +183,16 @@ export default function ImportSmsScreen() {
         return;
       }
       // Full history: fingerprints make rescans safe (no duplicates).
-      const { parsed, newestTs } = await scanInbox(0, state.merchantOverrides, (scanned, found) =>
-        setProgress({ scanned, found }),
+      const { parsed, newestTs, declined } = await scanInbox(
+        0,
+        state.merchantOverrides,
+        (scanned, found) => setProgress({ scanned, found }),
       );
-      const p = buildImportPlan(parsed, state, newestTs);
+      // `declined` carried through, exactly as the automatic path does. Without
+      // it this screen — the one a user reaches BECAUSE something looks wrong —
+      // is the one path that cannot clear a refused transaction the ledger
+      // recorded as spending.
+      const p = buildImportPlan(parsed, state, newestTs, new Date(), declined);
       const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
       setSkippedCount(Math.max(0, txLike.length - p.txCount));
       setPlan(p);

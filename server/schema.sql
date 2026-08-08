@@ -109,6 +109,62 @@ CREATE TABLE IF NOT EXISTS pair_limits (
   request_count INTEGER NOT NULL
 );
 
+-- In-app feedback, and the one place this service stores prose.
+--
+-- READ THIS BEFORE ADDING A COLUMN. Everything above is built on "the message
+-- text is parsed and dropped", and nothing here weakens that: a bank alert
+-- still never lands in a column. What lands here is what a user TYPED into a
+-- feedback screen and pressed send on, plus a diagnostic their client redacted
+-- before it left the phone. That is a different category of data from a message
+-- their bank pushed at them while they were asleep, and refusing to keep it
+-- would not protect anyone — it would only mean nobody can report a parser bug.
+--
+-- What it costs instead:
+--   * its own table, never `queue`, and NOT sealed to a device — a maintainer
+--     and an agent have to read it, so it does not pretend to be private;
+--   * a SHORT ceiling. `expires_at` is fourteen days out, half the queue's
+--     thirty, and the cron sweep in src/index.ts enforces it whether or not
+--     anything was ever done with the item;
+--   * bounded size, refused rather than truncated (see src/feedback.ts);
+--   * no IP address, no device id, no token — an anonymous row.
+CREATE TABLE IF NOT EXISTS feedback (
+  id          TEXT PRIMARY KEY,
+  created_at  INTEGER NOT NULL,
+  -- Written at insert, not derived at read, so shortening the constant later
+  -- cannot retroactively extend the life of a row already on disk.
+  expires_at  INTEGER NOT NULL,
+  app_version TEXT NOT NULL,
+  platform    TEXT NOT NULL CHECK (platform IN ('ios', 'android', 'web')),
+  locale      TEXT,
+  -- The user's own words, scrubbed of control characters and bounded.
+  text        TEXT NOT NULL,
+  -- Serialized JSON, redacted client-side. Bounded at the wire.
+  diagnostic  TEXT,
+  -- 'pending' | 'sent' | 'failed' | 'skipped_unconfigured' | 'skipped_budget'.
+  -- An operator has to be able to tell "no agent ran because GitHub is not
+  -- wired up" from "no agent ran because the hourly budget was spent" without
+  -- a log line quoting the payload.
+  dispatch_status TEXT,
+  dispatched_at   INTEGER
+);
+
+-- The feedback endpoint is reachable without a paired device, because the users
+-- most likely to hit a parser bug are on ANDROID and never touch this relay at
+-- all. That makes it the one write path with no bearer token in front of it, so
+-- it gets the same shape of backstop /v1/pair has: a global fixed window that
+-- stores no IP address, no hash of one, and nothing else user-derived.
+--
+-- Two counters, not one, and they bound different things. `feedback` bounds
+-- WRITES (how much a flood can put in the database). `dispatch` bounds AGENT
+-- RUNS (how much a flood can spend), because one repository_dispatch is one CI
+-- job with a model behind it, and the cost of that is not proportional to the
+-- cost of an INSERT.
+CREATE TABLE IF NOT EXISTS feedback_limits (
+  id            TEXT PRIMARY KEY,
+  window_start  INTEGER NOT NULL,
+  request_count INTEGER NOT NULL
+);
+
 -- Upgrading a database created before these columns existed. SQLite has no
 -- ADD COLUMN IF NOT EXISTS and re-running this file has to stay safe, so they
 -- are commented rather than executed: the error from a second run would be the
@@ -127,3 +183,4 @@ CREATE INDEX IF NOT EXISTS devices_by_vault ON devices (vault_id);
 CREATE INDEX IF NOT EXISTS invites_by_expiry ON device_invites (expires_at);
 CREATE INDEX IF NOT EXISTS push_by_expiry ON push_registrations (expires_at);
 CREATE INDEX IF NOT EXISTS receipts_by_expiry ON ingest_receipts (expires_at);
+CREATE INDEX IF NOT EXISTS feedback_by_expiry ON feedback (expires_at);

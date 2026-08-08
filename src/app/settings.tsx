@@ -1016,6 +1016,16 @@ export default function SettingsScreen() {
                   : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
             )}
+            {/* Directly under "Improve accuracy", because it is the same
+                errand one step further on: that screen tells you WHAT the app
+                read wrong and hands you a diagnostic, and this one is how the
+                diagnostic reaches somebody who can fix it. Free, and not
+                gated: a bug report is not a feature, and a paywall on the only
+                channel back from the user would cost far more than it earns.
+                The sub-line names the choice rather than promising anything,
+                because the whole design of that screen is that nothing is
+                attached until the user picks it. */}
+            {linkRow(t('sendFeedback'), t('sendFeedbackDetail'), () => router.push('/feedback'))}
             {linkRow(t('backupJson'), null, gated(backupJson), { pro: true })}
             {linkRow(t('restoreBackup'), null, gated(restoreFromFile), { pro: true })}
             {linkRow(t('exportCsv'), null, exportCsv)}

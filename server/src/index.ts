@@ -39,6 +39,14 @@ import {
   timingSafeEqual,
 } from './crypto';
 import {
+  FEEDBACK_DISPATCH_EVENT,
+  FEEDBACK_RETENTION_SECONDS,
+  githubRepository,
+  isFeedbackReject,
+  MAX_FEEDBACK_BYTES,
+  validateFeedback,
+} from './feedback';
+import {
   extractPdfStatementRows,
   normalizeEmailContent,
   parseRawEmail,
@@ -59,6 +67,17 @@ export interface Env extends PushEnv {
   DB: D1Database;
   /** Domain routed to this Email Worker, for token@domain forwarding. */
   EMAIL_DOMAIN?: string;
+  /**
+   * Bearer secret the feedback→agent loop reads one item with. Absent means
+   * `GET /v1/feedback/:id` is 503: no agent, no read path, feedback still
+   * collected. See the feedback section below for why this is a Worker secret
+   * rather than a row in `devices` like every other scope.
+   */
+  FEEDBACK_READ_TOKEN?: string;
+  /** GitHub PAT used only to POST a repository_dispatch. Absent = no dispatch. */
+  GITHUB_DISPATCH_TOKEN?: string;
+  /** `owner/repo` the dispatch is aimed at. Not secret; a [vars] entry. */
+  GITHUB_REPOSITORY?: string;
 }
 
 /** Longer than any real bank SMS; anything bigger is abuse or a mistake. */
@@ -81,6 +100,38 @@ const INGEST_PER_HOUR = 300;
 const REPLAY_WINDOW_SECONDS = 15 * 60;
 /** Bounded abuse without making a normal long-offline phone lose history. */
 const MAX_QUEUED_ROWS = 10_000;
+/**
+ * Feedback writes per hour, globally.
+ *
+ * The only write path here with no bearer token in front of it, so it gets the
+ * same shape of backstop /v1/pair has — a global fixed window that stores
+ * nothing user-derived. Sixty an hour is far above any real rate (this is a
+ * personal-finance app with a feedback screen, not a support desk) and far
+ * below what makes the table interesting to fill.
+ *
+ * A GLOBAL window means one abuser can lock everyone else out for the rest of
+ * the hour, exactly as on /v1/pair, and that is a deliberate trade: the
+ * alternative is a per-IP bucket, and this service's whole claim is that it
+ * keeps no IP addresses. The production first line stays a Cloudflare rate-
+ * limiting rule at the edge, which does see the IP and does not persist it.
+ */
+const FEEDBACK_PER_HOUR = 60;
+/**
+ * Agent runs per hour, globally. THIS is the cost bound, not the one above.
+ *
+ * One repository_dispatch is one Actions job with a model behind it, running
+ * the full test corpus twice. That is minutes of CI and real money per item,
+ * and it is not proportional to the cost of the INSERT that triggered it — so
+ * it is budgeted separately. Past this, feedback is still accepted and still
+ * stored; it just does not wake an agent, and the row says so
+ * (`dispatch_status = 'skipped_budget'`) rather than looking like a success.
+ *
+ * Five an hour is a hundred and twenty a day of worst case. A real flood is
+ * therefore capped at CI spend a human would notice on a dashboard rather than
+ * on an invoice, and the feedback itself is never lost — a maintainer can
+ * re-fire any id by hand through the workflow's workflow_dispatch input.
+ */
+const FEEDBACK_DISPATCH_PER_HOUR = 5;
 /** Fallback pack for a device paired before market selection existed. */
 const DEFAULT_MARKET = 'AE';
 /**
@@ -265,6 +316,81 @@ async function overRateLimit(env: Env, deviceId: string): Promise<boolean> {
     .bind(deviceId, windowStart)
     .first<{ request_count: number }>();
   return (row?.request_count ?? INGEST_PER_HOUR + 1) > INGEST_PER_HOUR;
+}
+
+/**
+ * Both feedback windows, in one helper over one table.
+ *
+ * Same fixed-window UPSERT as the two above and for the same reason: the
+ * counter is read back out of `RETURNING` in the SAME statement that increments
+ * it, so two concurrent requests cannot both observe "not over yet" before
+ * either writes. `id` is the bucket name — 'feedback' for writes, 'dispatch'
+ * for agent runs — so the two budgets share the mechanism and nothing else.
+ */
+async function overFeedbackWindow(env: Env, bucket: string, ceiling: number): Promise<boolean> {
+  const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+  const row = await env.DB.prepare(
+    `INSERT INTO feedback_limits (id, window_start, request_count)
+     VALUES (?1, ?2, 1)
+     ON CONFLICT(id) DO UPDATE SET
+       request_count = CASE
+         WHEN feedback_limits.window_start = excluded.window_start
+         THEN feedback_limits.request_count + 1
+         ELSE 1
+       END,
+       window_start = excluded.window_start
+     RETURNING request_count`,
+  )
+    .bind(bucket, windowStart)
+    .first<{ request_count: number }>();
+  return (row?.request_count ?? ceiling + 1) > ceiling;
+}
+
+/**
+ * Ask GitHub to run the feedback agent for ONE id.
+ *
+ * The client_payload carries the id and nothing else. That is the whole point
+ * of the read endpoint: the feedback text never travels through GitHub's event
+ * API, never lands in a workflow-run record, and never appears in Actions logs
+ * — the job fetches it with its own scoped token and writes it to a file. A
+ * dispatch payload is visible to anyone with read access to the repository's
+ * Actions data; a feedback item should not be.
+ *
+ * Failures are recorded as a status on the row and are never thrown at the
+ * user: their report is already stored, and a GitHub outage is not a reason to
+ * tell them their feedback was rejected. Nothing about the payload is logged,
+ * here or anywhere else in this file.
+ */
+async function sendRepositoryDispatch(env: Env, feedbackId: string): Promise<void> {
+  const repository = githubRepository(env.GITHUB_REPOSITORY);
+  let status: 'sent' | 'failed' = 'failed';
+  if (repository && env.GITHUB_DISPATCH_TOKEN) {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repository}/dispatches`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${env.GITHUB_DISPATCH_TOKEN}`,
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          'content-type': 'application/json',
+          // GitHub rejects an API request with no User-Agent outright.
+          'user-agent': 'wafra-relay',
+        },
+        body: JSON.stringify({
+          event_type: FEEDBACK_DISPATCH_EVENT,
+          client_payload: { feedbackId },
+        }),
+      });
+      if (res.ok) status = 'sent';
+    } catch {
+      // Network, DNS, TLS. The row keeps 'failed' and the item is still there.
+    }
+  }
+  await env.DB.prepare(
+    'UPDATE feedback SET dispatch_status = ?2, dispatched_at = unixepoch() WHERE id = ?1',
+  )
+    .bind(feedbackId, status)
+    .run();
 }
 
 async function queueIsFull(env: Env, deviceId: string): Promise<boolean> {
@@ -1328,6 +1454,160 @@ export default {
       return empty(204);
     }
 
+    // ── Feedback: the user files a bug, an agent picks it up ──
+    //
+    // The transport half of feedback → agent → pull request. The app POSTs a
+    // sentence and a client-redacted diagnostic; the Worker stores it, and
+    // asks GitHub to run an agent against the repository carrying THE ID ONLY.
+    // The agent fetches the item back through the read route below.
+    //
+    // Why the id and not the payload: a repository_dispatch client_payload is
+    // readable by anyone with access to the repository's Actions data and is
+    // retained in the run record. The feedback is not.
+    //
+    // NO BEARER TOKEN GUARDS THE WRITE, and that is a decision rather than an
+    // oversight. Android is the platform this app was built for — it scans the
+    // inbox on-device and never touches this relay — so the users most likely
+    // to find a parser bug have no device row here to authenticate as.
+    // Requiring pairing would silently exclude exactly the reports worth
+    // having. What stands in for the token is: a global fixed window, a hard
+    // body ceiling, a separate budget on the expensive half (agent runs), and
+    // a table whose contents expire in fourteen days.
+    if (req.method === 'POST' && url.pathname === '/v1/feedback') {
+      if (await overFeedbackWindow(env, 'feedback', FEEDBACK_PER_HOUR)) {
+        return json({ error: 'rate_limited' }, 429);
+      }
+      const incoming = await readBody(req, MAX_FEEDBACK_BYTES);
+      if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
+      const parsed = ((): unknown => {
+        try {
+          return JSON.parse(incoming.text) as unknown;
+        } catch {
+          // Unlike /v1/ingest there is no bare-text fallback: that one exists
+          // because Shortcuts is fiddly about JSON, and nothing but the app
+          // itself posts here.
+          return null;
+        }
+      })();
+      const validated = validateFeedback(parsed);
+      // The rejected value is never echoed, for the same reason a refused
+      // sender is not: an error that quotes what it refused turns a write-only
+      // endpoint into a way to read data back out of it.
+      if (isFeedbackReject(validated)) {
+        return json({ error: validated.error }, validated.status);
+      }
+
+      // Decided BEFORE the insert so the stored row explains itself: an
+      // operator looking at a feedback item with no PR behind it can tell
+      // "GitHub was never wired up" from "the hourly agent budget was spent"
+      // without a log line, and without anything quoting the payload.
+      const repository = githubRepository(env.GITHUB_REPOSITORY);
+      const dispatchStatus = !repository || !env.GITHUB_DISPATCH_TOKEN
+        ? 'skipped_unconfigured'
+        : (await overFeedbackWindow(env, 'dispatch', FEEDBACK_DISPATCH_PER_HOUR))
+          ? 'skipped_budget'
+          : 'pending';
+
+      const id = crypto.randomUUID();
+      await env.DB.prepare(
+        `INSERT INTO feedback
+          (id, created_at, expires_at, app_version, platform, locale, text, diagnostic,
+           dispatch_status, dispatched_at)
+         VALUES (?1, unixepoch(), unixepoch() + ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL)`,
+      )
+        .bind(
+          id,
+          FEEDBACK_RETENTION_SECONDS,
+          validated.appVersion,
+          validated.platform,
+          validated.locale,
+          validated.text,
+          validated.diagnostic,
+          dispatchStatus,
+        )
+        .run();
+
+      if (dispatchStatus === 'pending') {
+        ctx.waitUntil(sendRepositoryDispatch(env, id));
+      }
+      // `dispatched` says an agent run was REQUESTED, not that GitHub accepted
+      // it — the request is detached so the user's screen does not wait on
+      // api.github.com. The id is returned so a user can quote it and a
+      // maintainer can re-fire the workflow by hand.
+      return json({ id, dispatched: dispatchStatus === 'pending' }, 202);
+    }
+
+    // ── Feedback read: one item, by id, for the agent ──
+    //
+    // Scoped bearer token, hashed, compared in constant time — the same shape
+    // as every other credential here. It is the ONE scope that is a Worker
+    // secret rather than a column in `devices`, because the caller is a CI job
+    // and not a phone: there is no keypair to seal to, no vault to belong to,
+    // and no device row to hang a `feedback_token_hash` off. Inventing a
+    // device to represent GitHub would be a worse fit than this, not a better
+    // one. Everything else about the pattern is unchanged, including the rule
+    // that the credential is least-privilege: it reads one feedback item and
+    // can do nothing else on this service.
+    const feedbackRoute = /^\/v1\/feedback\/([^/]+)$/.exec(url.pathname);
+    if (feedbackRoute && req.method === 'GET') {
+      // Absent secret degrades the way EMAIL_DOMAIN and PUSH_TOKEN_KEY do:
+      // the feature reports itself off rather than the Worker 500ing.
+      if (!env.FEEDBACK_READ_TOKEN) return json({ error: 'feedback_read_not_configured' }, 503);
+      const header = req.headers.get('authorization') ?? '';
+      const presented = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+      if (!presented) return json({ error: 'unauthorized' }, 401);
+      // Digest both sides before comparing, so the compare is over
+      // fixed-length values and length alone leaks nothing.
+      const [presentedHash, expectedHash] = await Promise.all([
+        hashToken(presented),
+        hashToken(env.FEEDBACK_READ_TOKEN),
+      ]);
+      if (!timingSafeEqual(presentedHash, expectedHash)) {
+        return json({ error: 'unauthorized' }, 401);
+      }
+      if (!UUID_RE.test(feedbackRoute[1])) return json({ error: 'bad_feedback_id' }, 400);
+      // `expires_at` is in the WHERE clause, not only in the cron sweep: the
+      // retention promise must hold in the half-hour between sweeps too.
+      const row = await env.DB.prepare(
+        `SELECT id, created_at, app_version, platform, locale, text, diagnostic
+           FROM feedback WHERE id = ?1 AND expires_at > unixepoch()`,
+      )
+        .bind(feedbackRoute[1])
+        .first<{
+          id: string;
+          created_at: number;
+          app_version: string;
+          platform: string;
+          locale: string | null;
+          text: string;
+          diagnostic: string | null;
+        }>();
+      if (!row) return json({ error: 'feedback_not_found' }, 404);
+      return json({
+        id: row.id,
+        createdAt: row.created_at,
+        appVersion: row.app_version,
+        platform: row.platform,
+        locale: row.locale,
+        text: row.text,
+        // Handed back as JSON rather than as the stored string, so the agent
+        // does not have to double-parse. A row whose diagnostic somehow will
+        // not parse yields null rather than failing the whole fetch — the
+        // user's words are the part that matters.
+        diagnostic: ((): unknown => {
+          if (!row.diagnostic) return null;
+          try {
+            return JSON.parse(row.diagnostic) as unknown;
+          } catch {
+            return null;
+          }
+        })(),
+      });
+    }
+
+    // There is no list route on purpose. An id is a UUID the client is told
+    // once; nothing here will enumerate what users have written.
+
     if (req.method === 'GET' && url.pathname === '/v1/health') {
       return json({ ok: true });
     }
@@ -1443,6 +1723,13 @@ export default {
     // README's retention promise is enforced here, not left to successful
     // client acknowledgements or device cleanup.
     await env.DB.prepare('DELETE FROM queue WHERE created_at < unixepoch() - 2592000').run();
+    // Feedback expires on its own written ceiling — fourteen days, half the
+    // queue's — whether or not an agent ever looked at it, whether or not a PR
+    // was opened, and whether or not anyone marked it handled. There is no
+    // "keep this one" path, because the moment there is one, this table stops
+    // being a fourteen-day buffer and starts being an archive of things users
+    // typed about their bank accounts.
+    await env.DB.prepare('DELETE FROM feedback WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM push_registrations WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM device_invites WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare(

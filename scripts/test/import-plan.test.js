@@ -11,7 +11,7 @@
 // close the app, open it again, and the same messages are read a second time.
 
 const { buildImportPlan } = require('./build/import-plan.js');
-const { parseSms } = require('./build/sms-parser.js');
+const { parseSms, isDeclinedMessage } = require('./build/sms-parser.js');
 
 let pass = 0;
 let fail = 0;
@@ -34,14 +34,27 @@ const BASE = {
   parserVersion: 0,
 };
 
-/** A scan result, the way scanInbox would hand it over. */
+/**
+ * A scan result, the way scanInbox would hand it over.
+ *
+ * `declined` mirrors auto-import.ts exactly, including the part that is easy
+ * to get wrong: a message only reaches it when the parse returned null AND the
+ * parser's own `isDeclinedMessage` says the text is a refusal. "No longer
+ * parses" on its own is not evidence a charge did not happen — an OTP, an
+ * offer and a bank-masked figure all parse to null, and one of those is a real
+ * purchase. The scan's own newestTs advances over suppressed messages too.
+ */
 function scan(messages, channel = 'inbox') {
   const parsed = [];
+  const declined = [];
   let newestTs = 0;
   for (const { body, ts, sender } of messages) {
-    const p = parseSms(body);
-    if (!p) continue;
     if (ts > newestTs) newestTs = ts;
+    const p = parseSms(body);
+    if (!p) {
+      if (isDeclinedMessage(body)) declined.push({ smsTs: ts, sender: sender ?? 'ENBD', channel });
+      continue;
+    }
     parsed.push({
       ...p,
       date: p.date ?? new Date(ts).toISOString().slice(0, 10),
@@ -50,7 +63,7 @@ function scan(messages, channel = 'inbox') {
       channel,
     });
   }
-  return { parsed, newestTs };
+  return { parsed, declined, newestTs };
 }
 
 /** Apply a plan to a state the way the store's importBatch does. */
@@ -467,6 +480,154 @@ const afterFirst = apply(BASE, first);
   ok('a reminder rescan never removes a user-edited matching row',
     !plan.batch.updates.some((u) => u.id === 'edited-reminder' && u.remove),
     plan.batch.updates);
+}
+
+/* ── Declines: rows for money that never moved ────────────────────────────
+ *
+ * A user's ledger held 59 rows titled "Insufficient Funds" totalling
+ * AED 89,897, counted as real spending. The parser already refuses those
+ * messages, and accounts.ts already deletes such rows — but only on the
+ * evidence of the row's STORED body, and 14,169 of that ledger's 14,314 rows
+ * have none. All 59 were among them.
+ *
+ * The evidence exists at SCAN time and was being thrown away: parseSms returns
+ * null for a decline, so scanInbox's `if (p)` dropped the message and its
+ * timestamp never reached the planner. It reaches it now, and the join is the
+ * timestamp alone — a decline has no parsed amount, so the `s{ts}-{amount}`
+ * key cannot be rebuilt from it. Everything below is a guard on that join. */
+const DECLINE_TS = T0 + 5_000_000;
+const DECLINED_ROW = {
+  id: 'declined-1108', type: 'expense', amountFils: 110800, category: 'other',
+  accountId: 'acc-main', title: 'Insufficient Funds',
+  date: new Date(DECLINE_TS).toISOString().slice(0, 10),
+  source: 'sms', ts: DECLINE_TS, smsKey: `s${DECLINE_TS}-110800`,
+};
+const DECLINE_SMS = [{
+  body: 'Your transaction of AED 1,108.00 at NOON was declined due to insufficient funds.',
+  ts: DECLINE_TS,
+}];
+
+{
+  const s = scan(DECLINE_SMS);
+  ok('the scan carries the decline it refused to parse',
+    s.parsed.length === 0 && s.declined.length === 1 && s.declined[0].smsTs === DECLINE_TS,
+    s);
+  const state = { ...BASE, transactions: [DECLINED_ROW] };
+  const plan = buildImportPlan(s.parsed, state, s.newestTs, new Date(2026, 7, 2), s.declined);
+  ok('a re-read removes the expense a decline alert had created',
+    plan.batch.updates.filter((u) => u.remove).map((u) => u.id).join() === 'declined-1108',
+    plan.batch.updates);
+  ok('...and imports nothing in its place', plan.txCount === 0, plan.batch.transactions);
+
+  // Once it is gone there is nothing to find, so a later scan is a no-op.
+  const healed = { ...state, transactions: [] };
+  ok('the sweep is idempotent',
+    buildImportPlan(s.parsed, healed, s.newestTs, new Date(2026, 7, 2), s.declined)
+      .batch.updates.length === 0);
+}
+
+/* Callers that cannot supply declines get the old behaviour, not a guess.
+ * The relay is the real one: the Worker discards Message Content before
+ * sealing a row, so no body ever reaches this device to be tested. */
+{
+  const state = { ...BASE, transactions: [DECLINED_ROW] };
+  const plan = buildImportPlan([], state, DECLINE_TS);
+  ok('with no declines carried, nothing is swept',
+    plan.batch.updates.length === 0, plan.batch.updates);
+}
+
+/* The guards, one at a time. Each one is a way a timestamp could point at a
+ * row that did NOT come from the decline. */
+{
+  const s = scan(DECLINE_SMS);
+  const plan = (transactions) =>
+    buildImportPlan(s.parsed, { ...BASE, transactions }, s.newestTs, new Date(2026, 7, 2), s.declined);
+  const swept = (transactions) => plan(transactions).batch.updates.some((u) => u.remove);
+
+  ok('never a row the user edited',
+    !swept([{ ...DECLINED_ROW, userEdited: true }]));
+  ok('never a transfer',
+    !swept([{ ...DECLINED_ROW, isTransfer: true }]));
+  ok('never a split row, whose parts are rows of their own',
+    !swept([{ ...DECLINED_ROW, splits: [{ category: 'dining', amountFils: 110800 }] }]));
+  ok('never a row this device did not import from a message',
+    !swept([{ ...DECLINED_ROW, source: 'manual' }]));
+  ok('never a row dated nowhere near the message',
+    !swept([{ ...DECLINED_ROW, date: '2025-01-04' }]));
+
+  // Two rows on one millisecond cannot both have come from one decline, and
+  // nothing here can say which did.
+  ok('never when two rows share the timestamp',
+    !swept([DECLINED_ROW, { ...DECLINED_ROW, id: 'other-1108', amountFils: 4200, smsKey: `s${DECLINE_TS}-4200` }]));
+
+  // A row that predates the `ts` column is still reachable: dedupe.ts reads the
+  // timestamp out of `s{ts}-{amount}`, and so does this.
+  const legacy = { ...DECLINED_ROW, ts: undefined };
+  ok('a legacy row with no ts column is matched through its smsKey',
+    swept([legacy]));
+}
+
+/* The timestamp of a message the parser can still read is off limits. On the
+ * full re-read a version bump forces, `parsed` is the whole inbox, so a real
+ * charge sharing a millisecond with a decline takes its own row out of play. */
+{
+  const s = scan([
+    ...DECLINE_SMS,
+    { body: 'Purchase of AED 42.00 with Debit Card ending 1234 at SPINNEYS, DUBAI.', ts: DECLINE_TS },
+  ]);
+  const real = {
+    id: 'real-42', type: 'expense', amountFils: 4200, category: 'groceries',
+    accountId: 'acc-main', title: 'Spinneys',
+    date: new Date(DECLINE_TS).toISOString().slice(0, 10),
+    source: 'sms', ts: DECLINE_TS, smsKey: `s${DECLINE_TS}-4200`,
+  };
+  const plan = buildImportPlan(s.parsed, { ...BASE, transactions: [real] }, s.newestTs,
+    new Date(2026, 7, 2), s.declined);
+  ok('a timestamp this scan still parses is never swept',
+    !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
+}
+
+/* The class this whole guardrail exists for.
+ *
+ * A naive "delete anything that no longer parses" rule would have deleted two
+ * GENUINE purchases from the same ledger — AED 3,366.95 and AED 2,787.97 —
+ * whose stored bodies carry a figure the bank masked (`THB ····9260.00`) and
+ * the parser refuses on purpose. Neither is a refusal, so neither is ever
+ * carried as one; and if such a row were somehow reached by a colliding
+ * timestamp, its own retained text vetoes the removal. */
+{
+  const masked = 'Purchase of THB ····9260.00 at PLENARY WELLNESS PHUKET THA with Credit Card ending 8575.';
+  ok('a bank-masked figure parses to null but is NOT a decline',
+    parseSms(masked) === null && !isDeclinedMessage(masked));
+  const s = scan([{ body: masked, ts: DECLINE_TS }]);
+  ok('...so the scan carries no decline for it',
+    s.declined.length === 0, s.declined);
+
+  // And the veto, driven by the decline at the same millisecond.
+  const genuine = {
+    id: 'plenary', type: 'expense', amountFils: 336695, category: 'other',
+    accountId: 'acc-main', title: 'Plenary Wellness Phuket',
+    date: new Date(DECLINE_TS).toISOString().slice(0, 10),
+    source: 'sms', ts: DECLINE_TS, smsKey: `s${DECLINE_TS}-336695`, raw: masked,
+  };
+  const withDecline = scan(DECLINE_SMS);
+  const plan = buildImportPlan([], { ...BASE, transactions: [genuine] }, DECLINE_TS,
+    new Date(2026, 7, 2), withDecline.declined);
+  ok('a row whose own stored text is not a refusal is never swept',
+    !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
+}
+
+/* Suppression is not refusal. Everything else parseSms drops — OTPs, offers,
+ * spend summaries, pre-auth holds — must never become deletion evidence. */
+{
+  const notDeclines = [
+    'Your OTP for the transaction of AED 250.00 at NOON is 448120. Do not share it.',
+    'Get 20% off at CARREFOUR when you pay with your Card ending 1234.',
+    'You spent AED 3,420.00 this month with Card ending 1234.',
+  ];
+  const s = scan(notDeclines.map((body, i) => ({ body, ts: DECLINE_TS + i })));
+  ok('suppressed-but-not-declined messages are carried as neither',
+    s.parsed.length === 0 && s.declined.length === 0, s.declined);
 }
 
 /* ── what must STILL import ──────────────────────────────────────────── */
