@@ -4100,5 +4100,332 @@ t('Western Union is not a shop',
     undefined);
 }
 
+// ── A REFUND IS MONEY COMING BACK, WHATEVER THE CARD IS CALLED ──
+//
+// The refund test was one literal — "refunded to your card/account" — and the
+// phrasing every issuer here actually sends uses the NOUN: "Refund of AED
+// 150.00 has been PROCESSED to your Debit Card ending 4502". Direction then
+// fell through to the word lists, where DEBIT_WORDS' bare `debit(?:ed)?` is
+// satisfied by the PRODUCT NAME "Debit Card" — so one sentence came back
+// income on a credit card and expense on a debit card. A AED 150 refund
+// recorded as AED 150 of new spending, in the original merchant's category:
+// the error is doubled and every other field on the row is right, so nothing
+// looks wrong.
+t('a refund processed to a DEBIT card is income, not spending',
+  'Refund of AED 150.00 has been processed to your Debit Card ending 4502. Avl Balance is AED 400.00',
+  { type: 'income', amountFils: 15000, card: { last4: '4502', kind: 'debit' } });
+t('...and the credit-card twin still agrees with it',
+  'Refund of AED 150.00 has been processed to your Credit Card ending 4110. Avl Cr. Limit is AED 400.00',
+  { type: 'income', amountFils: 15000 });
+t('"posted to your Debit Card" is the same event',
+  'Your refund of AED 259.40 from PAYPAL has been posted to your Debit Card ending 6737. Your available balance is AED 266.43',
+  { type: 'income', amountFils: 25940, merchant: 'Paypal' });
+t('a purchase that "has been refunded" reverses too',
+  'Your purchase of AED 300.00 at CARREFOUR with Card ending 4502 has been refunded. Avl Balance is AED 700.00',
+  { type: 'income', amountFils: 30000 });
+t('the multi-line "Debit Card Refund" header is a refund',
+  'Debit Card Refund\nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE\n19/02/26 15:45\nBalance AED 1780.67',
+  { type: 'income', amountFils: 5358 });
+// CONTROL: an ordinary debit-card purchase is still spending. The refund rule
+// may not claim a message just because it names a debit card.
+t('a plain debit-card purchase is untouched by the refund rule',
+  'Purchase of AED 24.00 with Debit Card ending 4502 at CARREFOUR, DUBAI. Avl Balance is AED 258.91.',
+  { type: 'expense', amountFils: 2400, merchant: 'Carrefour' });
+
+// ── THE REPORTED "10% CASHBACK" MERCHANT ──
+//
+// merchantFromLines takes the first line after the amount that is not a date,
+// a card or a balance, and a bank that prints a reward badge ABOVE the
+// acquirer descriptor gave every such row a merchant called "10% Cashback" —
+// 305 rows in one ledger. Amount, card, date and direction are all correct,
+// which is why it survived so long.
+t('a reward badge above the descriptor is not the shop',
+  'Debit Card Purchase\nCard XXXX5083\nAED 53.58\n10% Cashback\nMARK AND SAVE Dubai AE\n19/02/26 15:45\nAvailable Balance AED 1780.67',
+  { merchant: 'Mark & Save', amountFils: 5358 });
+t('...and neither is "Earn 2X Rewards"',
+  'Debit Card Purchase\nCard XXXX5083\nAED 53.58\nEarn 2X Rewards\nMARK AND SAVE Dubai AE\n19/02/26 15:45\nAvailable Balance AED 1780.67',
+  { merchant: 'Mark & Save' });
+// CONTROL: the same badge BELOW the descriptor always worked, and still must.
+t('the descriptor still wins when the badge follows it',
+  'Credit Card Purchase\nCard No XXXX3749\nAED 267.00\nOFF PRICE GENERAL TRAD SHARJAH ARE\n11/07/26 19:38\nAvailable Balance AED 9235.93\n10% Cashback',
+  { merchant: 'Off Price General Trad' });
+
+// ── AN OFFER FOOTER IS NOT THE PAYEE, AND NOT THE CATEGORY ──
+//
+// The payee grammar reads the whole body and returns the FIRST at/to/from
+// clause; a multi-line alert's real descriptor carries no preposition, so the
+// promo footer's brand won outright.
+{
+  const base = 'Credit Card Purchase\nCard No XXXX3749\nAED 267.00\nOFF PRICE GENERAL TRAD SHARJAH ARE\n11/07/26 19:38\nAvl Bal AED 9235.93\n';
+  t('a cashback footer does not become the shop',
+    base + 'Enjoy 10% Cashback at Carrefour. T&C apply.',
+    { merchant: 'Off Price General Trad', category: 'shopping', amountFils: 26700 });
+  t('...nor a "save up to 50% at" footer',
+    base + 'Save up to 50% at Talabat with your FAB card.',
+    { merchant: 'Off Price General Trad', category: 'shopping' });
+  t('...nor a "20% off at" footer',
+    base + 'Exclusive: 20% off at Sharaf DG. Conditions apply.',
+    { merchant: 'Off Price General Trad', category: 'shopping' });
+  t('...nor a buy-now-pay-later footer',
+    base + 'Buy now, pay later at Namshi with 0% interest.',
+    { merchant: 'Off Price General Trad', category: 'shopping' });
+}
+t('a "% off at <brand>" footer is not the shop on a debit alert either',
+  'Debit Card Purchase\nCard XXXX5083\nAED 53.58\nMARK AND SAVE         Dubai           AE\n19/02/26 15:45\nBalance AED 1780.67\nGet up to 30% off at Noon.com with your card.',
+  { merchant: 'Mark & Save' });
+t('a "redeem points at" footer loses to the payee the message names',
+  'AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.Avl.Limit is AED 2508.31. Redeem points at Sharaf DG.',
+  { merchant: 'Salik', category: 'transport' });
+// CONTROL: "cashback" is the NAME of a UAE card product, so the word alone may
+// never blank the sentence its real payee sits in.
+t('a Cashback Card purchase keeps its merchant',
+  'Your Cashback Card 1234 purchase AED 89.50 at CARREFOUR, Dubai. Avl Bal AED 500.00',
+  { merchant: 'Carrefour', amountFils: 8950 });
+// CONTROL: a percentage in a real sentence is not an offer.
+t('VAT at 5% is not an offer clause',
+  'AED 15.70 has been deducted from your account ····1711 for VAT on toll transaction(s) during June 2026. Your current account balance is AED 146.80.',
+  { merchant: 'VAT fee', amountFils: 1570 });
+
+// ── THE STATEMENT TOTAL, OR NOTHING ──
+//
+// The total and the minimum are not interchangeable. When TOTAL_DUE_RE could
+// not read the total the branch fell back to first-amount extraction, which
+// returns whichever figure the bank printed first — and half of them print the
+// minimum first. The user opens Bills and believes they owe AED 425 of AED
+// 8,500.
+t('"Amount due" is the total, even after the minimum',
+  'Your credit card statement for card 1234 is ready. Min Amt AED 425.00. Amount due AED 8,500.00. Payment due date 18/08/2026.',
+  { kind: 'cardStatement', amountFils: 850000, minDueFils: 42500, dueDay: 18 });
+t('"Total outstanding" is the total',
+  'Your credit card statement for card 1234 is ready. Minimum payment AED 425.00. Total outstanding AED 8,500.00. Payment due date 18/08/2026.',
+  { kind: 'cardStatement', amountFils: 850000, minDueFils: 42500 });
+t('"statement amount" is the total',
+  'Credit Card 1234 statement generated. Min due AED 425.00, statement amount AED 8,500.00, due date 18/08/2026.',
+  { kind: 'cardStatement', amountFils: 850000, minDueFils: 42500 });
+t('a MASKED total is refused rather than replaced by the minimum',
+  'Your credit card statement for card 1234 is ready. Total amount due AED ····8500.00, Min Amt AED 425.00. Payment due date 18/08/2026.',
+  null);
+// CONTROL: "minimum amount due" contains "amount due" verbatim, and the total
+// pattern may never read it as the total.
+t('the minimum is not promoted by the widened total pattern',
+  'Your credit card statement for card 1234 is ready. Minimum amount due AED 425.00. Total amount due AED 8,500.00. Payment due date 18/08/2026.',
+  { kind: 'cardStatement', amountFils: 850000, minDueFils: 42500 });
+// CONTROL: the abbreviated summary block states NO total, and is still a
+// readable reminder — refusing it would lose the payment date for no gain.
+{
+  const p = parseSms('Card XXXX8722\nAvailable Balance AED 440.10\nLast Stmt 2022-05-11\nMin Amt AED 154.32\nPymt due 2022-06-06\nLast Pymt AED 50.00\nLast Pymt date 2022-05-07');
+  ok('a summary that states only a minimum still raises its reminder',
+    p && p.kind === 'cardStatement' && p.minDueFils === 15432 && p.dueDay === 6,
+    JSON.stringify(p && { k: p.kind, a: p.amountFils, min: p.minDueFils, d: p.date }));
+}
+
+// ── AN AVAILABLE-LIMIT NOTICE IS NOT A PURCHASE ──
+//
+// BALANCE_PREFIX_RE (which stops a balance being read as the amount) and
+// SNAPSHOT_FIGURE (which reads it AS a balance) were written separately and
+// drifted. Every phrasing in the gap between them was a balance to one and a
+// transaction to the other.
+t('an issuer-named available limit is not spending',
+  'Your available credit limit on your RAKBANK Credit Card ending 4711 is now AED 50,000.00',
+  null);
+t('...and does not become a card payment when a payment sentence precedes it',
+  'Thank you for your payment towards your RAKBANK Credit Card ending 4711. Your available credit limit on your RAKBANK Credit Card ending 4711 is now AED 50,000.00',
+  null);
+t('a Covered Card limit notice is not spending either',
+  'Your available limit on your ADIB Covered Card ending with 4110 is AED 42,000.00',
+  null);
+t('a product-named limit notice is not spending',
+  'Available limit on your Mashreq Solitaire Credit Card 4110 is AED 42,000.00',
+  null);
+t('"ending in" is the same balance sentence as "ending"',
+  'Available balance on your account ending in 1234 is AED 42,000.00',
+  null);
+t('an account TYPE between "your" and "account" changes nothing',
+  'Available balance on your savings account 1234 is AED 42,000.00',
+  null);
+// CONTROL: the balance guard must not reach across a sentence and eat a real
+// purchase that follows a balance.
+t('a balance still loses to the purchase stated after it',
+  'Balance AED 5,000. Purchase of AED 250.00 at NOON with Credit Card 1234',
+  { amountFils: 25000, merchant: 'Noon' });
+
+// ── AN OVER-CAP AMOUNT IS REFUSED, NOT REPLACED BY THE FEE ──
+//
+// The plausibility cap skipped the figure and carried on down the message —
+// and a high-value UAE remittance or property alert almost always carries a
+// "Fee AED 25.00" footer, so the row imported at the fee.
+t('a AED 1.2M transfer is not imported as its AED 25 fee',
+  'AED 1,234,567.89 has been transferred from your account 1234 to ABC PROPERTIES. Fee AED 25.00 applied.',
+  null);
+t('a AED 2.5M debit is not imported as its AED 100 charge',
+  'AED 2,500,000.00 has been debited from your account 1234 towards property purchase. Charges AED 100.00.',
+  null);
+// CONTROL: an over-cap BALANCE is still just a balance, and the purchase beside
+// it still imports.
+t('an over-cap balance does not refuse the purchase it sits beside',
+  'Purchase of AED 24.00 with Debit Card ending 4502 at CARREFOUR, DUBAI. Avl Balance is AED 2,258,910.00.',
+  { amountFils: 2400, merchant: 'Carrefour' });
+
+// ── A FOREIGN BALANCE IS A BALANCE ──
+//
+// extractForeignAmount took the first regex hit with none of the guards its
+// local-currency twin has, so a foreign balance was converted into a purchase
+// on a message that states no amount at all.
+t('a foreign available balance is not a purchase',
+  'Your USD account 1234 has been debited. Avl Bal is USD 5,000.00',
+  null);
+t('a foreign available limit is not a purchase',
+  'Purchase at YAMM.COM with Credit Card 1234. Available limit is USD 1,200.00',
+  null);
+t('a foreign balance printed first does not beat the purchase after it',
+  'Avl Bal USD 1,200.00. Purchase of USD 50.00 at YAMM.COM with Credit Card 1234',
+  { amountFils: 18363, originalCurrency: 'USD', originalAmountMinor: 5000, fxSource: 'fallback' });
+// A code missing from the cross-rate table does not leave the row unconverted:
+// on the foreign-only alert shape there is no local figure, so the whole
+// transaction disappears. Thailand, Singapore and Sri Lanka are mainstream UAE
+// travel and remittance corridors.
+t('a Thai baht purchase is not dropped for want of a rate',
+  'Credit Card Purchase\nCard No XXXX3644\nTHB 50.00\nSOME SHOP CITY\n07/07/26 14:53\nAvl Bal AED 7806.31',
+  { originalCurrency: 'THB', originalAmountMinor: 5000, fxSource: 'fallback' });
+t('a Singapore dollar purchase is not dropped either',
+  'Credit Card Purchase\nCard No XXXX3644\nSGD 50.00\nSOME SHOP CITY\n07/07/26 14:53\nAvl Bal AED 7806.31',
+  { originalCurrency: 'SGD', originalAmountMinor: 5000, fxSource: 'fallback' });
+// A merchant whose name opens with an ISO code and a number is not a foreign
+// charge, and `fxSource: 'bank'` is the marker that tells fx.ts a rate is real
+// and must not be corrected.
+{
+  const p = parseSms('AED 250.00 spent at CAD 3 TRADING LLC with Credit Card 1234');
+  ok('a currency code inside a trade name invents no FX rate',
+    p && p.amountFils === 25000 && p.originalCurrency === undefined && p.fxSource === undefined,
+    JSON.stringify(p && { a: p.amountFils, oc: p.originalCurrency, r: p.fxRate, s: p.fxSource }));
+}
+
+// ── A DEADLINE IS NOT THE DATE THE MONEY MOVED ──
+//
+// extractDate takes the first date-shaped token in the body. A single-line
+// purchase alert carries no timestamp of its own, so a "statement payment due
+// date" footer won unopposed and booked the spend weeks into the future.
+t('a statement due-date footer does not date the purchase',
+  'Purchase of AED 96.00 with Credit Card ending 4110 at CARREFOUR, DUBAI. Avl Cr. Limit AED 5,000.00. Your statement payment due date is 26/12/2025.',
+  { merchant: 'Carrefour', amountFils: 9600, date: null });
+t('an EMI reminder footer does not date the purchase',
+  'Purchase of AED 96.00 with Debit Card ending 4502 at CARREFOUR, DUBAI. Avl Balance is AED 258.91. Pay your loan EMI on 05/09/2026.',
+  { merchant: 'Carrefour', amountFils: 9600, date: null });
+t('a "statement due on" footer does not date the spend',
+  'AED 250.00 spent at NOON with Credit Card 1234. Statement due on 27/07/2026.',
+  { merchant: 'Noon', amountFils: 25000, date: null });
+// CONTROL: on a REMINDER the deadline IS the date, and the day it produces is
+// what the Bills tab is built on.
+t('a bill reminder still takes its due date',
+  'Your DEWA bill of AED 300.00 is due on 15/08/2026.',
+  { kind: 'billDue', date: '2026-08-15', dueDay: 15 });
+// CONTROL: a posting with its own timestamp is unaffected.
+t('a multi-line alert still takes its own timestamp',
+  'Credit Card Purchase\nCard No XXXX3749\nAED 267.00\nOFF PRICE GENERAL TRAD SHARJAH ARE\n11/07/26 19:38\nAvl Bal AED 9235.93',
+  { date: '2026-07-11' });
+
+// ── A CREDIT WORD IN A SHOP'S NAME IS NOT A DIRECTION ──
+//
+// CREDIT_WORDS matched a bare `credit` guarded only against card/limit/line/
+// score/facility, so a trade name carrying the word turned a purchase into
+// income — the spend gone, revenue in its place, and the shop's name replaced
+// by a structural title so the row can never be recognised again.
+t('a shop called CREDIT SUISSE is still a purchase',
+  'AED 45.00 at CREDIT SUISSE DUBAI using Card 4110 on 30/07/2026. Avl Balance AED 100.00',
+  { type: 'expense', amountFils: 4500, merchant: 'Credit Suisse' });
+t('a terse alert naming EMIRATES CREDIT UNION is still a purchase',
+  'Txn alert: AED 450.00, EMIRATES CREDIT UNION, Card 4110, 30/07/2026.',
+  { type: 'expense', amountFils: 45000 });
+// CONTROL: the verb still decides, in both directions.
+t('money credited to the account is still income',
+  'AED 5,000.00 has been credited to your account 1234. Available balance AED 20,000.00',
+  { type: 'income', amountFils: 500000 });
+t('a bare "Credit of AED" is still income',
+  'Credit of AED 500.00 to your account 1234. Avl Bal AED 900.00',
+  { type: 'income', amountFils: 50000 });
+
+// ── A GLOBAL BRAND MAY NOT CLAIM A LOCAL TRADE NAME ──
+//
+// SERVICE_NAMES exists so rows GROUP, so a monthly visit to a Sharjah shop
+// merging into the user's real streaming subscription is worse than a wrong
+// label: it inflates the subscription and corrupts every per-merchant total
+// and override keyed on that name.
+{
+  const { normalizeServiceName } = require('./build/sms-parser');
+  const same = (name, from, want) => {
+    const got = normalizeServiceName(from);
+    if (got === want) { pass++; console.log(`✓ ${name}`); }
+    else { fail++; console.log(`✗ ${name}\n    got ${got} != ${want}`); }
+  };
+  same('a car-parts shop is not the streaming service', 'SHAHID AUTO SPARE PARTS TR', null);
+  same('a cafeteria is not the streaming service', 'AL SHAHID CAFETERIA', null);
+  same('a barber is not StarzPlay', 'STARZ MENS SALOON', null);
+  same('an interior fit-out is not Adobe', 'ADOBE INTERIOR DECOR LLC', null);
+  same('a cafeteria is not Amazon', 'AMAZON CAFETERIA LLC', null);
+  same('a car rental is not Netflix', 'NETFLIX CAR RENTAL', null);
+  same('a nursery is not Disney+', 'DISNEY KIDS NURSERY', null);
+  same('a restaurant is not Anghami', 'ANGHAMI RESTAURANT', null);
+  same('an electronics trader is not Audible', 'AUDIBLE ELECTRONICS TR', null);
+  same('a general trading company is not Fiverr', 'FIVERR GENERAL TRADING', null);
+  same('a marketing agency is not LinkedIn', 'LINKEDIN MARKETING FZE', null);
+  same('a cafe is not GitHub', 'GITHUB CAFE', null);
+  same('an advertising firm is not Telegram', 'TELEGRAM ADVERTISING LLC', null);
+  // CONTROL: the services themselves must keep their canonical names, or the
+  // grouping this table exists for stops working.
+  same('the real Netflix descriptor still resolves', 'NETFLIX.COM', 'Netflix');
+  same('the real Shahid descriptor still resolves', 'SHAHID VIP', 'Shahid');
+  same('the real Adobe descriptor still resolves', 'ADOBE *CREATIVE CLOUD', 'Adobe');
+  same('the real Amazon descriptor still resolves', 'AMAZON.AE', 'Amazon');
+}
+
+// ── A PROMO FOOTER MAY NOT DELETE A REAL PURCHASE ──
+//
+// PROMO_RE is answered by TXN_EVIDENCE_RE, which knew "available balance" and
+// "available credit" but not "available limit", and knew "Avl Bal" but not the
+// bare "Balance AED …" line the largest family in the real corpus ends with.
+t('a bare balance line is evidence enough to survive a cashback footer',
+  'Debit Card Purchase\nCard XXXX5083\nAED 10.00\nDUBAI INTEGRATED ECONODUBAI           AE\n03/02/26 14:26\nBalance AED 9774.87\n5% cashback at ENOC stations this month.',
+  { amountFils: 1000, merchant: 'Dubai Integrated Economic Zones' });
+t('an available limit is evidence enough too',
+  'Transaction of AED 45.00 on Card 4110 successful. Cashback earned: AED 4.50. Available limit AED 500.00',
+  { amountFils: 4500 });
+
+// ── AN INSTALMENT PITCH IS NOT A SECOND PURCHASE ──
+//
+// Each of these restates a purchase already on the ledger from its own alert,
+// and banks pitch EPP on the LARGEST purchases — which is where a duplicate
+// costs most.
+t('"eligible for conversion into easy instalments" is a pitch',
+  'Your transaction of AED 3,600.00 at SHARAF DG on Credit Card 1234 is eligible for conversion into easy instalments. Call 600500500.',
+  null);
+t('"can be converted to instalments" is a pitch',
+  'Dear Customer, your purchase of AED 2,246.14 at www.shein.com with credit card ending 7656 can be converted to instalments at 0% interest. SMS EPP to 4488.',
+  null);
+t('the imperative "Convert your ... into ... instalments" is a pitch',
+  'Convert your AED 3,600.00 purchase at APPLE STORE on your Credit Card 1234 into 12 easy instalments.',
+  null);
+t('"eligible for 0% instalment plan" is a pitch',
+  'Your purchase of AED 3,600.00 at APPLE STORE with credit card 1234 is now eligible for 0% instalment plan for up to 12 months.',
+  null);
+// CONTROL: banks staple the pitch to the real alert BY DESIGN. Suppressing
+// that would delete the purchases the offer advertises against.
+t('an EPP line stapled to a real alert keeps its purchase',
+  'Purchase of AED 3,600.00 with Credit Card ending 1234 at APPLE STORE, DUBAI. Avl Cr. Limit is AED 5,000.00. Convert now to easy instalments.',
+  { amountFils: 360000, merchant: 'Apple Store' });
+
+// ── THE FUNDING ACCOUNT'S BALANCE IS NOT THE CARD'S HEADROOM ──
+//
+// On the account-side leg of a card payment the card named is the one being
+// paid, but the balance quoted belongs to the account the money left. Stored
+// as the card's available limit, that figure reaches accounts.ts and
+// import-plan.ts as a snapshot on the card.
+t('the debit leg of a card payment quotes no card snapshot',
+  'AED 5,000.00 has been debited from your account 7001 towards the payment of your Credit Card 4110. Available balance AED 3,000.00',
+  { kind: 'cardPayment', side: 'debit', amountFils: 500000, snapshotFils: null, snapshotKind: null });
+// CONTROL: on the card's own receipt the figure really is the card's headroom.
+t('the receipt leg still records the card limit',
+  'Thank you for your payment of AED 5,000.00 towards your Credit Card 4110. Available limit is now AED 20,000.00',
+  { kind: 'cardPayment', side: 'receipt', snapshotFils: 2000000, snapshotKind: 'limit' });
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
