@@ -1,9 +1,20 @@
 /**
  * Settings.
  *
- * There is no appearance picker: `app.json` sets `userInterfaceStyle:
- * automatic` and the app follows the OS. Everything here either changes what
- * the app is allowed to read, or what a month means.
+ * Grouped by what a row does TO YOU, not by what it does inside. The two
+ * alerts you might have come here to silence are at the top; then what the
+ * app is allowed to read; then the ledger chores and the exports; and the one
+ * irreversible action stands alone at the bottom, with nothing above it to
+ * mis-tap into.
+ *
+ * Two rules hold the screen together, and both were broken before:
+ *
+ * 1. A chevron means "a choice opens" — a screen, or a picker. It never means
+ *    "tapping this has already changed the setting". Country and Language
+ *    both used to be one-tap cycles wearing that chevron.
+ * 2. A row that leads to the paywall says so before it is tapped. Back up and
+ *    Restore bounced a free user to /pro while Export CSV and Expense report,
+ *    one hairline below them, simply worked.
  */
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
@@ -18,6 +29,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   I18nManager,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -28,7 +40,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Segmented, Toggle } from '@/components/ui/controls';
+import { Button, Segmented, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { WafraMark } from '@/components/wafra-logo';
@@ -47,6 +59,7 @@ import {
   syncDailySummary,
 } from '@/lib/notifications';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import { tapped } from '@/lib/haptics';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { MARKETS } from '@/lib/markets';
@@ -73,7 +86,14 @@ import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
 
-/** The reporting month can start on any day that exists in February. */
+/**
+ * A language is named in its own language, in both languages: an Arabic
+ * speaker looking for Arabic looks for "العربية", not for a translation of
+ * the word "Arabic". These two are the same string in every locale, which is
+ * why they are the only user-visible text on this screen that does not go
+ * through t().
+ */
+const LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -98,6 +118,7 @@ export default function SettingsScreen() {
       : 'system';
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
+  const language: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
   // `undefined` is "not read yet" and `null` is "read, and there is no pairing".
   // Collapsing the two would print "not connected" for a frame to a user whose
   // capture is in fact running, on the screen where they came to check.
@@ -121,6 +142,10 @@ export default function SettingsScreen() {
   const [instantAlerts, setInstantAlerts] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
   const instantAvailable = isSmsScanningAvailable() && SmsReader?.setInstantAlerts != null;
+  // The per-charge alert exists on both platforms by two different mechanisms
+  // and on the web by neither, so the notification group's closing hairline
+  // has to be drawn under whichever row is actually last.
+  const chargeAlertsAvailable = instantAvailable || isRelayPlatform();
 
   useEffect(() => {
     if (!isRelayPlatform()) return;
@@ -151,16 +176,27 @@ export default function SettingsScreen() {
 
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
+  const proActive = isProActive(state);
+
   const gated = (fn: () => void) => () => {
-    if (isProActive(state)) fn();
+    if (proActive) fn();
     else router.push('/pro');
   };
 
-  // Founder unlock: 7 taps on the mark toggles Pro on side-load builds
-  // (Play builds grant it through Google Play billing instead).
+  /**
+   * Founder unlock: 7 taps toggles Pro on side-load builds (Play builds grant
+   * it through Google Play billing instead).
+   *
+   * On the VERSION ROW, which is where pro.tsx says it lives — "seven taps on
+   * the version row in Settings, which nobody reaches by accident". It had
+   * drifted onto the Wafra mark, the largest and most idly-tapped thing in the
+   * section, announced to VoiceOver as a plain button that does nothing six
+   * times out of seven. pro.tsx rejected a long-press on its own icon for
+   * being "an ordinary thing to try"; poking a logo is no less ordinary.
+   */
   const tapCount = React.useRef(0);
   const tapTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onLogoTap = () => {
+  const onVersionTap = () => {
     tapCount.current += 1;
     if (tapTimer.current) clearTimeout(tapTimer.current);
     tapTimer.current = setTimeout(() => (tapCount.current = 0), 1500);
@@ -233,11 +269,19 @@ export default function SettingsScreen() {
   const toggleSms = async (enabled: boolean) => {
     if (!enabled) {
       // Android grants permissions but never takes them back on request; the
-      // only honest "off" is the one in the system settings.
-      Alert.alert(
-        t('turnSmsReadingOff'),
-        t('smsRevokeHint'),
-      );
+      // only honest "off" is the one in the system settings. So say where it
+      // is AND open it — the alert used to type out "Settings → Apps → Wafra →
+      // Permissions → SMS" and then offer a single OK, leaving the user to
+      // walk there by hand from a screen that could have taken them.
+      Alert.alert(t('turnSmsReadingOff'), t('smsRevokeHint'), [
+        { text: t('cancel'), style: 'cancel' },
+        {
+          text: t('openPhoneSettings'),
+          onPress: () => {
+            void Linking.openSettings().catch(() => {});
+          },
+        },
+      ]);
       return;
     }
     const granted = await requestSmsPermission();
@@ -345,13 +389,39 @@ export default function SettingsScreen() {
 
   /* ── Region ─────────────────────────────────────────────────────────── */
 
-  const cycleMarket = () => {
-    const i = MARKETS.findIndex((m) => m.id === market.id);
-    setMarket(MARKETS[(i + 1) % MARKETS.length].id);
+  const marketName = (id: string) => t(id === 'SA' ? 'saudiName' : 'uaeName');
+
+  /**
+   * The country pack is a choice, not a cycle.
+   *
+   * It used to be one tap on a chevron row, advancing to the next pack in the
+   * list modulo its length: no picker, no confirmation, no undo. Nothing
+   * converts the ledger when it moves, so the same stored 125050 fils printed
+   * "AED 1,250.50" before the tap and "SAR 1,250.50" after it — every figure
+   * in the app relabelled in a currency the money was never in. It also swaps
+   * the bank and merchant registry the parser matches senders against. A
+   * thumb landing short of Language was enough to do all of that, and nothing
+   * on screen said so.
+   *
+   * Now the row opens the list and the user names the country they mean.
+   */
+  const chooseMarket = () => {
+    Alert.alert(t('country'), t('onboardMarketBody'), [
+      // Android draws at most three alert buttons, which is exactly the two
+      // packs plus Cancel. A third pack needs a real sheet, not a fourth
+      // button that Android will quietly refuse to show.
+      ...MARKETS.map((m) => ({
+        text: `${marketName(m.id)} · ${m.currency.display}`,
+        onPress: () => {
+          if (m.id !== market.id) setMarket(m.id);
+        },
+      })),
+      { text: t('cancel'), style: 'cancel' as const },
+    ]);
   };
 
-  const cycleLanguage = () => {
-    const next = state.language === 'ar' ? 'en' : 'ar';
+  const applyLanguage = (next: 'en' | 'ar') => {
+    if (next === language) return;
     // No alert, and nothing to restart. The strings re-render from this and
     // the layout mirrors from the `direction` style on the root — see the
     // Direction component in app/_layout.tsx for why I18nManager could never
@@ -364,6 +434,24 @@ export default function SettingsScreen() {
       I18nManager.allowRTL(next === 'ar');
       I18nManager.forceRTL(next === 'ar');
     }
+  };
+
+  /**
+   * Same disease as the country cycle, and worse consequences: one tap used to
+   * flip the whole app to Arabic and mirror the layout, and the row's subtitle
+   * ("English · العربية is available instantly") described availability rather
+   * than saying which language was on. A user who mis-tapped had to find the
+   * same row again in a mirrored UI they could not read. Naming both languages
+   * up front costs one extra tap and removes that trap.
+   */
+  const chooseLanguage = () => {
+    Alert.alert(t('language'), undefined, [
+      ...(['en', 'ar'] as const).map((code) => ({
+        text: LANGUAGE_NAMES[code],
+        onPress: () => applyLanguage(code),
+      })),
+      { text: t('cancel'), style: 'cancel' as const },
+    ]);
   };
 
   /* ── Data ───────────────────────────────────────────────────────────── */
@@ -619,32 +707,57 @@ export default function SettingsScreen() {
 
   /* ── Rows ───────────────────────────────────────────────────────────── */
 
+  const chevron = language === 'ar' ? 'chevron-left' : 'chevron-right';
+
+  /**
+   * A row that opens something — a screen, or a picker sheet. The chevron is
+   * that promise and nothing else on this screen may borrow it.
+   *
+   * `pro` draws the lock. Without it a gated row is indistinguishable from the
+   * free row under it, and the first time a user learns which is which is the
+   * paywall they did not ask for.
+   */
   const linkRow = (
     title: string,
     subtitle: string | null,
     onPress: () => void,
-    last = false,
-    danger = false,
-  ) => (
-    <Row onPress={onPress} last={last} accessibilityLabel={title}>
-      <View style={styles.rowText}>
-        <ThemedText type="small" style={danger ? { color: theme.expense } : undefined}>
-          {title}
-        </ThemedText>
-        {subtitle && (
-          <ThemedText type="meta" themeColor="textTertiary">
-            {subtitle}
-          </ThemedText>
-        )}
-      </View>
-      <Icon
-        name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
-        size={15}
-        color={danger ? theme.expense : theme.textTertiary}
-      />
-    </Row>
-  );
+    { last = false, pro = false }: { last?: boolean; pro?: boolean } = {},
+  ) => {
+    const locked = pro && !proActive;
+    return (
+      <Row
+        onPress={onPress}
+        last={last}
+        accessibilityLabel={locked ? `${title} · ${t('wafraPro')}` : title}>
+        <View style={styles.rowText}>
+          <ThemedText type="small">{title}</ThemedText>
+          {subtitle && (
+            <ThemedText type="meta" themeColor="textTertiary">
+              {subtitle}
+            </ThemedText>
+          )}
+        </View>
+        {locked && <Icon name="lock" size={13} color={theme.warning} />}
+        <Icon name={chevron} size={15} color={theme.textTertiary} />
+      </Row>
+    );
+  };
 
+  /**
+   * The label and its sub-line are part of the target.
+   *
+   * Row renders a plain View when it is handed neither press handler, which
+   * left every toggle row here as a 44dp switch floating beside two lines of
+   * dead text — while each link row beside them was tappable edge to edge.
+   *
+   * The handler goes on the TEXT, not on the Row. Handing Row an `onPress`
+   * makes it one Pressable with accessibilityRole="button", and a Pressable is
+   * an accessibility element by default: the switch inside it stops being
+   * separately focusable and its on/off state — the only thing a screen-reader
+   * user has on this row — is replaced by "button". `accessible={false}` here
+   * keeps the text and the switch as the two things VoiceOver finds, and hands
+   * the thumb the other 80% of the row.
+   */
   const switchRow = (
     title: string,
     subtitle: string,
@@ -653,12 +766,18 @@ export default function SettingsScreen() {
     last = false,
   ) => (
     <Row last={last}>
-      <View style={styles.rowText}>
+      <Pressable
+        accessible={false}
+        style={styles.rowText}
+        onPress={() => {
+          tapped();
+          onChange(!value);
+        }}>
         <ThemedText type="small">{title}</ThemedText>
         <ThemedText type="meta" themeColor="textTertiary">
           {subtitle}
         </ThemedText>
-      </View>
+      </Pressable>
       <Toggle value={value} onChange={onChange} label={title} />
     </Row>
   );
@@ -691,16 +810,174 @@ export default function SettingsScreen() {
                         : t('trialEndedBanner')}
                   </ThemedText>
                 </View>
-                <Icon
-                  name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
-                  size={15}
-                  color={theme.textTertiary}
-                />
+                <Icon name={chevron} size={15} color={theme.textTertiary} />
               </View>
             </Block>
           </Section>
 
+          {/* Notifications, out of "Privacy" and up here.
+              A 9pm digest of what you spent is not a privacy setting by any
+              reading, and neither is a per-charge banner — they were filed
+              there because the code that delivers them lives near the code
+              that captures. Turning an alert off is one of the two things
+              people actually open this screen to do, so it goes above the
+              things they do twice a year. The group carries no header until
+              one exists in both languages; the rows say what they are. */}
           <Section index={1}>
+            {switchRow(
+              t('dailySummarySetting'),
+              state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
+              state.dailySummary,
+              (next) => void toggleDailySummary(next),
+              !chargeAlertsAvailable,
+            )}
+            {/* One outcome, one label.
+                Android fires this from the SMS broadcast the instant the
+                message lands; iPhone fires it when the relay wake delivers,
+                which can be a moment later. That is a true difference and an
+                invisible one — the two platforms are mutually exclusive, so no
+                user ever sees both rows, which is exactly why they must not
+                have had two different names ("Alert me on every charge" and
+                "Transaction alerts"). The timing nuance lives in the sub-line,
+                where it belongs. */}
+            {instantAvailable &&
+              switchRow(
+                t('alertEveryCharge'),
+                smsGranted
+                  ? instantAlerts
+                    ? t('instantAlertsOn')
+                    : t('instantAlertsOff')
+                  : t('instantAlertsNeedSms'),
+                instantAlerts && smsGranted,
+                (next) => {
+                  if (!smsGranted) {
+                    Alert.alert(t('turnOnSmsFirst'), t('turnOnSmsFirstBody'));
+                    return;
+                  }
+                  void toggleInstantAlerts(next);
+                },
+                true,
+              )}
+            {isRelayPlatform() &&
+              switchRow(
+                t('alertEveryCharge'),
+                // Borrowed from the daily digest because it is the only plain
+                // "Off" in the string table; the iPhone row wants its own
+                // off-state sentence the way its Android twin has one.
+                chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
+                chargeAlerts,
+                (next) => void toggleChargeAlerts(next),
+                true,
+              )}
+          </Section>
+
+          <Section index={2}>
+            <SectionHeader title={t('privacyHeader')} />
+            {switchRow(
+              t('privateMode'),
+              t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
+              state.privateMode,
+              togglePrivateMode,
+            )}
+            {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
+            {isSmsScanningAvailable() &&
+              switchRow(
+                t('readBankSms'),
+                t(smsGranted ? 'smsGrantedLocal' : 'smsOffNoImport'),
+                smsGranted,
+                toggleSms,
+              )}
+            {/* iPhone capture is a privacy setting as much as a feature: the
+                relay is the ONE path in the whole app where anything derived
+                from a message leaves the phone. It belongs in this section,
+                stated plainly, rather than filed under convenience — and this
+                row is also the only way into (and back out of) that setup from
+                Settings, which the base branch had no entry point for at all. */}
+            {isRelayPlatform() &&
+              linkRow(
+                t('automaticCapture'),
+                relay === undefined
+                  ? t('captureChecking')
+                  : relay === null
+                    ? t('captureIosOff')
+                    : relay.setupState === 'verified'
+                      ? t('captureIosOn')
+                      : t('captureIosNeedsTest'),
+                () => router.push('/ios-setup'),
+              )}
+            {/* Gated like every other capture row above it. Rendering this
+                unconditionally made it the one dead end in the section on
+                iOS: it read "Off · for banks that push instead of SMS", sent a
+                non-Pro user to the paywall first because of gated(), and only
+                then said notification access "works on the phone app only" —
+                to someone holding a phone. There is no iOS equivalent to
+                offer, so the row is not shown rather than shown broken. */}
+            {notifAvailable &&
+              linkRow(
+                t('bankAppNotifsTitle'),
+                t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
+                gated(onNotificationAccess),
+                { pro: true },
+              )}
+            {linkRow(
+              t('trustedSettingsRow'),
+              t('trustedSettingsDetail'),
+              () => router.push('/trusted-devices'),
+              { last: true },
+            )}
+            {/* The retention disclosure, as a footnote under the rows it is
+                about rather than a ~50-word wall standing between the header
+                and the first setting. It still describes both platforms on a
+                device that is only ever one of them — cutting it to this phone
+                needs copy that does not exist yet. */}
+            <Block style={styles.privacyCopy}>
+              <Icon name="lock" size={16} color={theme.textTertiary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
+                {t('privacyRetentionExact')}
+              </ThemedText>
+            </Block>
+          </Section>
+
+          <Section index={3}>
+            <SectionHeader title={t('dataHeader')} />
+            {/* The two "teach the app" chores first: both carry a live count,
+                both are why someone opens this section on an ordinary day, and
+                neither is an export. Back up and Restore follow, marked. */}
+            {linkRow(
+              t('sortShops'),
+              unsorted.merchants.length > 0
+                ? tf('sortShopsCount', {
+                    count: unsorted.merchants.length,
+                    s: unsorted.merchants.length === 1 ? '' : 's',
+                  })
+                : t('sortShopsNone'),
+              () => router.push('/categorise'),
+            )}
+            {/* "No unrecognized formats" is a claim about message text this
+                phone may never have had. On iOS the relay discards it before
+                the row arrives and private mode deletes it on purpose, so the
+                count is 0 either way — see noFormatsReason(). The row still
+                leads somewhere on those devices: the card diagnostic is built
+                from the ledger, not from raw, and works everywhere. */}
+            {linkRow(
+              t('improveAccuracy'),
+              formats > 0
+                ? tf('unreadFormatsCount', {
+                    count: formats,
+                    s: formats === 1 ? '' : 's',
+                  })
+                : noFormats === 'none-found'
+                  ? t('noUnrecognized')
+                  : t('formatsNotKeptRow'),
+              () => router.push('/accuracy'),
+            )}
+            {linkRow(t('backupJson'), null, gated(backupJson), { pro: true })}
+            {linkRow(t('restoreBackup'), null, gated(restoreFromFile), { pro: true })}
+            {linkRow(t('exportCsv'), null, exportCsv)}
+            {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod, { last: true })}
+          </Section>
+
+          <Section index={4}>
             <SectionHeader title={t('appearanceHeader')} />
             <Block>
               {/* The handoff said to follow the OS and offer no picker. That is
@@ -728,190 +1005,48 @@ export default function SettingsScreen() {
             </Block>
           </Section>
 
-          <Section index={2}>
-            <SectionHeader title={t('privacyHeader')} />
-            <Block style={styles.privacyCopy}>
-              <Icon name="lock" size={16} color={theme.textTertiary} />
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
-                {t('privacyRetentionExact')}
-              </ThemedText>
-            </Block>
-            {switchRow(
-              t('privateMode'),
-              t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
-              state.privateMode,
-              togglePrivateMode,
-            )}
-            {switchRow(
-              t('appLockTitle'),
-              t('appLockDetail'),
-              state.appLock,
-              toggleAppLock,
-            )}
-            {isSmsScanningAvailable() &&
-              switchRow(
-                t('readBankSms'),
-                t(smsGranted ? 'smsGrantedLocal' : 'smsOffNoImport'),
-                smsGranted,
-                toggleSms,
-              )}
-            {instantAvailable &&
-              switchRow(
-                t('alertEveryCharge'),
-                smsGranted
-                  ? instantAlerts
-                    ? t('instantAlertsOn')
-                    : t('instantAlertsOff')
-                  : t('instantAlertsNeedSms'),
-                instantAlerts && smsGranted,
-                (next) => {
-                  if (!smsGranted) {
-                    Alert.alert(
-                      t('turnOnSmsFirst'),
-                      t('turnOnSmsFirstBody'),
-                    );
-                    return;
-                  }
-                  void toggleInstantAlerts(next);
-                },
-              )}
-            {/* The nightly digest. Separate from the per-charge banner on
-                purpose: one is an interruption at the moment money moves, the
-                other is a summary you read when the day is over, and a user
-                who wants the second rarely wants the first. */}
-            {switchRow(
-              t('dailySummarySetting'),
-              state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
-              state.dailySummary,
-              (next) => void toggleDailySummary(next),
-            )}
-            {/* iOS's answer to Android's "Alert every charge". Separate row
-                rather than a shared one because the two are not the same
-                promise: Android's fires from the SMS broadcast the instant the
-                message lands, while this one fires when the relay wake
-                delivers, which can be a moment later or a batch at once. */}
-            {isRelayPlatform() &&
-              switchRow(
-                t('chargeAlertsSetting'),
-                chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
-                chargeAlerts,
-                (next) => void toggleChargeAlerts(next),
-              )}
-            {/* iPhone capture is a privacy setting as much as a feature: the
-                relay is the ONE path in the whole app where anything derived
-                from a message leaves the phone. It belongs in this section,
-                stated plainly, rather than filed under convenience — and this
-                row is also the only way into (and back out of) that setup from
-                Settings, which the base branch had no entry point for at all. */}
-            {isRelayPlatform() &&
-              linkRow(
-                t('automaticCapture'),
-                relay === undefined
-                  ? t('captureChecking')
-                  : relay === null
-                    ? t('captureIosOff')
-                    : relay.setupState === 'verified'
-                      ? t('captureIosOn')
-                      : t('captureIosNeedsTest'),
-                () => router.push('/ios-setup'),
-              )}
-            {/* Gated like every other capture row above it. Rendering this
-                unconditionally made it the one dead end in the section on
-                iOS: it read "Off · for banks that push instead of SMS", sent a
-                non-Pro user to the paywall first because of gated(), and only
-                then said notification access "works on the phone app only" —
-                to someone holding a phone. There is no iOS equivalent to
-                offer, so the row is not shown rather than shown broken. */}
-            {notifAvailable && (
-              <Row
-                onPress={gated(onNotificationAccess)}
-                accessibilityLabel={t('bankAppNotifsTitle')}>
-                <View style={styles.rowText}>
-                  <ThemedText type="small">{t('bankAppNotifsTitle')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {t(notifEnabled ? 'bankPushOn' : 'bankPushOff')}
-                  </ThemedText>
-                </View>
-                <Icon
-                  name={state.language === 'ar' ? 'chevron-left' : 'chevron-right'}
-                  size={15}
-                  color={theme.textTertiary}
-                />
-              </Row>
-            )}
-            {linkRow(
-              t('trustedSettingsRow'),
-              t('trustedSettingsDetail'),
-              () => router.push('/trusted-devices'),
-              true,
-            )}
-          </Section>
-
-          <Section index={3}>
+          <Section index={5}>
             <SectionHeader title={t('regionHeader')} />
+            {/* "Country pack" was a developer's word for the pack architecture
+                in markets.ts. The user picked a country. The sub-line already
+                names the currency and what the pack changes. */}
             {linkRow(
-              t('countryPack'),
+              t('country'),
               tf('countryPackDetail', {
-                country: t(market.id === 'SA' ? 'saudiName' : 'uaeName'),
+                country: marketName(market.id),
                 currency: market.currency.display,
               }),
-              cycleMarket,
+              chooseMarket,
             )}
-            {linkRow(
-              t('language'),
-              t('languageSettingDetail'),
-              cycleLanguage,
-              true,
-            )}
+            {/* The sub-line is the language that is ON, in that language —
+                the one thing a glance needs and the old one never said. */}
+            {linkRow(t('language'), LANGUAGE_NAMES[language], chooseLanguage, { last: true })}
           </Section>
 
-          <Section index={4}>
-            <SectionHeader title={t('dataHeader')} />
-            {linkRow(t('backupJson'), null, gated(backupJson))}
-            {linkRow(t('restoreBackup'), null, gated(restoreFromFile))}
-            {linkRow(t('exportCsv'), null, exportCsv)}
-            {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod)}
-            {/* "No unrecognized formats" is a claim about message text this
-                phone may never have had. On iOS the relay discards it before
-                the row arrives and private mode deletes it on purpose, so the
-                count is 0 either way — see noFormatsReason(). The row still
-                leads somewhere on those devices: the card diagnostic is built
-                from the ledger, not from raw, and works everywhere. */}
-            {linkRow(
-              t('improveAccuracy'),
-              formats > 0
-                ? tf('unreadFormatsCount', {
-                    count: formats,
-                    s: formats === 1 ? '' : 's',
-                  })
-                : noFormats === 'none-found'
-                  ? t('noUnrecognized')
-                  : t('formatsNotKeptRow'),
-              () => router.push('/accuracy'),
-            )}
-            {linkRow(
-              t('sortShops'),
-              unsorted.merchants.length > 0
-                ? tf('sortShopsCount', {
-                    count: unsorted.merchants.length,
-                    s: unsorted.merchants.length === 1 ? '' : 's',
-                  })
-                : t('sortShopsNone'),
-              () => router.push('/categorise'),
-            )}
-            {linkRow(t('eraseAll'), null, confirmErase, true, true)}
-          </Section>
-
-          <Section index={5} style={styles.about}>
-            <Pressable accessibilityRole="button" accessibilityLabel="Wafra" onPress={onLogoTap}>
-              <WafraMark size={34} />
-            </Pressable>
+          <Section index={6} style={styles.about}>
+            <WafraMark size={34} />
             <ThemedText type="default" themeColor="textSecondary">
               {t('settingsTagline')}
             </ThemedText>
-            <ThemedText type="nano" themeColor="textTertiary">
-              Wafra {version}
-            </ThemedText>
+            <Pressable onPress={onVersionTap} hitSlop={8}>
+              <ThemedText type="nano" themeColor="textTertiary">
+                Wafra {version}
+              </ThemedText>
+            </Pressable>
+          </Section>
+
+          {/* Erase, alone.
+              It used to be the seventh row of the Data list, one hairline
+              below "Sort your shops", carrying the same chevron — a chevron
+              that on every other row of this screen pushes a screen and on
+              this one opened a destructive alert. Colour was the only thing
+              separating a chore from the irreversible act. A button says
+              "this does something" where a chevron says "a screen lives
+              here", and the gap above it is there to be crossed deliberately.
+              The confirmation copy behind it is untouched; it is the best
+              writing on the screen. */}
+          <Section index={7} style={styles.danger}>
+            <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
           </Section>
         </ScrollView>
       </SafeAreaView>
@@ -946,32 +1081,18 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Spacing.half,
   },
-  monthHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    paddingBottom: Spacing.three - 2,
-  },
-  dayGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -Spacing.half,
-    paddingBottom: Spacing.three - 2,
-  },
-  dayCell: {
-    width: '14.2857%',
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dayChoice: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  // The four styles for the 28-day salary-month grid are gone too. They
+  // outlived the grid itself by a release and kept this file describing a
+  // screen it no longer was — along with an orphan doc comment about which
+  // days exist in February, attached to nothing.
+  //
+  // The grid was removed from Settings AND from onboarding at the owner's
+  // request (961684b): a calendar standing between someone and the thing they
+  // installed the app for, asking a question the app can answer for itself
+  // from the salary credit it is about to read. `monthStartDay` stays in state
+  // at its default so the setting can come back as an INFERRED value rather
+  // than as a prompt. Putting the picker back here would re-ask the question
+  // the owner deleted.
   about: {
     alignItems: 'flex-start',
     gap: Spacing.two + 2,
@@ -985,5 +1106,10 @@ const styles = StyleSheet.create({
   privacyCopyText: {
     flex: 1,
     lineHeight: 18,
+  },
+  // Twice the gap every other section gets. Erase is the only control on this
+  // screen that cannot be undone, and the distance is the point.
+  danger: {
+    paddingTop: Spacing.four,
   },
 });
