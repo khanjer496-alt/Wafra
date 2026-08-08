@@ -62,7 +62,7 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          insights seed subscriptions cards analytics period purchases markets i18n balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
-         splits db-schema storage-diagnostics daily-summary charge-alert \
+         fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts

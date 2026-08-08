@@ -76,6 +76,58 @@ async function main() {
   ok('updated local amount is exact to one fils', updates[0].amountFils === 7345);
   ok('currency formatting retains original code', /USD/.test(formatOriginalCurrency(2000, 'USD', 'en')));
 
+  // ── Foreign means "not the local currency" ─────────────────────────────
+  //
+  // fx-summary.ts was absent from build.sh's module list, so nothing in the
+  // gate compiled it, let alone ran it. Requiring it here is half the fix; the
+  // other half is the comparison it never made. Every row carrying an
+  // `originalCurrency` counted as foreign, including rows whose original
+  // currency IS the local one — which the parser produces whenever a bank
+  // states its own currency explicitly. The screen then printed the row's
+  // stored `amountFils` (the LOCAL-currency figure) beside the original under
+  // the same three letters: two numbers, both labelled SAR, that disagree.
+  const { summarizeForeignActivity } = require('./build/fx-summary.js');
+  const charge = (id, currency, originalMinor, amountFils) => ({
+    id, type: 'expense', amountFils, category: 'shopping', accountId: 'a1',
+    title: 'Charge', date: '2026-07-10', originalCurrency: currency,
+    originalAmountMinor: originalMinor, fxSource: 'bank',
+  });
+  const mixed = [
+    charge('usd', 'USD', 10000, 36725),
+    charge('sar', 'SAR', 10000, 9790),
+    charge('aed', 'AED', 10000, 10000),
+  ];
+  const underAE = summarizeForeignActivity(mixed, () => true, 'AED');
+  ok('a charge in the local currency is not foreign activity',
+    underAE.groups.map((g) => g.currency).join(',') === 'USD,SAR');
+  ok('and it is not in the converted total either',
+    underAE.totalLocalFils === 36725 + 9790);
+  const underSA = summarizeForeignActivity(mixed, () => true, 'SAR');
+  ok('switching the market moves which currency counts as local',
+    underSA.groups.map((g) => g.currency).join(',') === 'USD,AED');
+  ok('the local-currency comparison is case-insensitive',
+    summarizeForeignActivity([charge('l', 'aed', 10000, 10000)], () => true, 'AED')
+      .transactions.length === 0);
+  // The default reads the active market pack, which is what the screen relies on.
+  const { setActiveMarket } = require('./build/markets.js');
+  setActiveMarket('SA');
+  ok('with no argument the active market decides what is local',
+    summarizeForeignActivity(mixed).groups.map((g) => g.currency).join(',') === 'USD,AED');
+  setActiveMarket('AE');
+  ok('and back again under the AE pack',
+    summarizeForeignActivity(mixed).groups.map((g) => g.currency).join(',') === 'USD,SAR');
+  // Everything the summary already did, still done.
+  ok('groups still order by local value, largest first',
+    underAE.groups[0].currency === 'USD' && underAE.groups[0].localFils === 36725);
+  ok('conversion-quality counts still add up',
+    underAE.bankQuotedCount === 2 && underAE.referenceCount === 0 && underAE.estimatedCount === 0);
+  ok('transfers and income are still excluded',
+    summarizeForeignActivity(
+      [{ ...charge('t', 'USD', 10000, 36725), isTransfer: true },
+       { ...charge('i', 'USD', 10000, 36725), type: 'income' }],
+      () => true, 'AED',
+    ).transactions.length === 0);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 }

@@ -901,6 +901,170 @@ ok('dues: the June payment still covers June',
 ok('dues: July stays open after June is marked paid',
   allocLib.openDues(markPaidState, new Date(2026, 6, 20)).length === 1);
 
+// ── A manual claim and the bank's confirmation of it are ONE payment ──
+//
+// "Mark paid" is stamped with the device's today; the bank's receipt carries
+// the provider's date, and a payment made in the evening or over a weekend can
+// land days later. At a ±1 day collapse window the pair imported as two
+// payments of the same money, and the surplus poured into the NEXT statement
+// and settled a bill nobody had paid.
+const legCard = {
+  id: 'c1', name: 'Card •1234', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff',
+};
+const mkLegs = (rows) => ({
+  accounts: [legCard],
+  cardDues: [
+    { id: 'jul', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-07-15', paidFils: 0, settledAt: '2026-07-10T18:00:00Z' },
+    { id: 'aug', accountId: 'c1', totalDueFils: 80000, minDueFils: 4000, dueDate: '2026-08-15', paidFils: 0 },
+  ],
+  transactions: rows,
+});
+const manualJul10 = {
+  id: 'm1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+  date: '2026-07-10', category: 'other', title: 'Card •1234 payment', source: 'manual',
+};
+const receiptJul12 = {
+  id: 'r1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+  date: '2026-07-12', category: 'other', title: 'Payment received', source: 'sms',
+  cardPaymentSide: 'receipt',
+};
+const skewedLegs = mkLegs([manualJul10, receiptJul12]);
+ok('dues: a bank receipt two days after Mark paid is the same payment, not a second one',
+  allocLib.duePaidFils(skewedLegs, skewedLegs.cardDues[1]) === 0);
+ok('dues: the August statement the phantom leg had settled is still owed',
+  allocLib.openDues(skewedLegs, new Date(2026, 7, 1)).length === 1 &&
+  allocLib.openDues(skewedLegs, new Date(2026, 7, 1))[0].remainingFils === 80000);
+ok('dues: and the July statement it really paid is still covered',
+  allocLib.duePaidFils(skewedLegs, skewedLegs.cardDues[0]) === 100000);
+// The far side of the same window: a manual claim does not swallow a bank leg
+// from a different fortnight.
+const distantLegs = mkLegs([
+  manualJul10,
+  { ...receiptJul12, id: 'r2', date: '2026-07-25' },
+]);
+ok('dues: a bank receipt fifteen days later is a different payment',
+  allocLib.duePaidFils(distantLegs, distantLegs.cardDues[1]) === 80000);
+
+// The SMS-vs-SMS window stays tight. Two bank alerts are two OBSERVATIONS of a
+// movement the bank timestamps itself; widening that would fold a standing
+// instruction's genuine repeat payments into one.
+const twoBankLegs = mkLegs([
+  { id: 'b1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+    date: '2026-07-08', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'debit' },
+  { id: 'b2', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+    date: '2026-07-12', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'receipt' },
+]);
+ok('dues: two bank alerts four days apart stay two payments',
+  allocLib.duePaidFils(twoBankLegs, twoBankLegs.cardDues[1]) === 80000);
+const adjacentBankLegs = mkLegs([
+  { id: 'b1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+    date: '2026-07-09', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'debit' },
+  { id: 'b2', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+    date: '2026-07-10', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'receipt' },
+]);
+ok('dues: the two legs of one settlement a night apart are still one payment',
+  allocLib.duePaidFils(adjacentBankLegs, adjacentBankLegs.cardDues[1]) === 0);
+
+// The invariant the whole allocator exists for, restated over the wider window:
+// two overlapping statements, one payment, counted exactly once.
+const overlapOnce = mkLegs([manualJul10, receiptJul12]);
+ok('dues: one payment across two overlapping statements is counted exactly once',
+  allocLib.duePaidFils(overlapOnce, overlapOnce.cardDues[0]) +
+  allocLib.duePaidFils(overlapOnce, overlapOnce.cardDues[1]) === 100000);
+
+// ── "N payments matched" is a claim about ONE statement ──
+//
+// The card sheet answered it with its own filter — every income-side transfer
+// ever made to the account, lifetime-wide, no statement and no date in it — so
+// a card paid monthly for six months read "6 payments matched" beside a
+// statement one payment had settled.
+const matchedState = {
+  accounts: [legCard],
+  cardDues: [
+    { id: 'jun', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-06-15', paidFils: 0 },
+    { id: 'jul', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-07-15', paidFils: 0 },
+  ],
+  transactions: [
+    { id: 'p_jun', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+      date: '2026-06-10', category: 'other', title: 'card payment', source: 'sms' },
+    { id: 'p_jul', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+      date: '2026-07-10', category: 'other', title: 'card payment', source: 'sms' },
+  ],
+};
+eq('dues: each statement names only the payment credited to it',
+  [allocLib.duePayments(matchedState, matchedState.cardDues[0]).map((t) => t.id),
+   allocLib.duePayments(matchedState, matchedState.cardDues[1]).map((t) => t.id)],
+  [['p_jun'], ['p_jul']]);
+// An overpayment really does pay into both, so it is named against both.
+const spillState = {
+  ...matchedState,
+  transactions: [{
+    id: 'big', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 150000,
+    date: '2026-06-10', category: 'other', title: 'card payment', source: 'sms',
+  }],
+};
+eq('dues: a payment that spills is named against both statements it paid',
+  [allocLib.duePayments(spillState, spillState.cardDues[0]).map((t) => t.id),
+   allocLib.duePayments(spillState, spillState.cardDues[1]).map((t) => t.id)],
+  [['big'], ['big']]);
+// The reported symptom, stated as a number: six monthly payments, and the
+// statement one of them settled says one — not six.
+const sixMonths = {
+  accounts: [legCard],
+  cardDues: ['2026-03-15', '2026-04-15', '2026-05-15', '2026-06-15', '2026-07-15', '2026-08-15']
+    .map((dueDate, i) => ({
+      id: `d${i}`, accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate, paidFils: 0,
+    })),
+  transactions: ['2026-03-10', '2026-04-10', '2026-05-10', '2026-06-10', '2026-07-10', '2026-08-10']
+    .map((date, i) => ({
+      id: `p${i}`, type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+      date, category: 'other', title: 'card payment', source: 'sms',
+    })),
+};
+eq('dues: six monthly payments read as ONE against the statement one of them paid',
+  allocLib.duePayments(sixMonths, sixMonths.cardDues[5]).map((t) => t.id), ['p5']);
+ok('dues: the lifetime filter the sheet used to run would have said six',
+  sixMonths.transactions.filter(
+    (t) => t.accountId === 'c1' && t.isTransfer && t.type === 'income').length === 6);
+
+// The two collapsed legs of one settlement are one matched payment, not two.
+eq('dues: a settlement that arrived in two legs counts once in the matched list',
+  allocLib.duePayments(skewedLegs, skewedLegs.cardDues[0]).length, 1);
+// And the compat expense-side row `isCardPayment` credits is in the list too —
+// the old filter required type === 'income' and never saw it.
+const compatState = {
+  accounts: [legCard],
+  cardDues: [{ id: 'jul', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-07-15', paidFils: 0 }],
+  transactions: [{
+    id: 'compat', type: 'expense', isTransfer: true, accountId: 'c1', amountFils: 100000,
+    date: '2026-07-10', category: 'other', title: 'Card payment', source: 'sms',
+  }],
+};
+ok('dues: the compat expense-side settlement row is a matched payment',
+  allocLib.duePayments(compatState, compatState.cardDues[0]).length === 1 &&
+  allocLib.duePaidFils(compatState, compatState.cardDues[0]) === 100000);
+
+// ── The 40-day floor is deliberate, and stays ──
+//
+// A payment more than ~40 days before a due date belongs to the PREVIOUS
+// statement's cycle, not this one. When that earlier statement was never
+// captured — a first import, a card added late — crediting this one instead
+// would say "nothing owed" about a balance that is genuinely owed, which is
+// the expensive direction of error this whole file is written against. Leaving
+// it uncredited leaves a balance the user can clear with Mark paid.
+const floorState = (date) => ({
+  accounts: [legCard],
+  cardDues: [{ id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-15', paidFils: 0 }],
+  transactions: [{
+    id: 'p', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
+    date, category: 'other', title: 'card payment', source: 'sms',
+  }],
+});
+ok('dues: a payment inside the 40-day window settles the statement',
+  allocLib.duePaidFils(floorState('2026-07-06'), floorState('2026-07-06').cardDues[0]) === 100000);
+ok('dues: a payment from the previous cycle does not settle this statement',
+  allocLib.duePaidFils(floorState('2026-07-05'), floorState('2026-07-05').cardDues[0]) === 0);
+
 // ── One charge is not a subscription ──
 const subsLib2 = require('./build/subscriptions');
 const oneOff = (title, date) => ({

@@ -1400,5 +1400,196 @@ const afterFirst = apply(BASE, first);
     stated.minDueEstimated === undefined, stated);
 }
 
+/* ── one push row can only ever be ONE charge ──────────────────────────
+ *
+ * Five defects, all of which end the same way: two real charges become one
+ * row and the money silently leaves the ledger. The constraint every case
+ * below encodes is that under-merging (a visible duplicate the user can
+ * delete) is always preferable to over-merging (a charge that vanishes).
+ */
+{
+  const { duplicateGuard, reconcileCaptureDuplicates } = require('./build/dedupe.js');
+
+  const D0 = Date.parse('2026-07-10T09:00:00Z');
+  const pushRow = (extra) => ({
+    id: 'push-1', type: 'expense', amountFils: 2500, category: 'other',
+    accountId: 'fab', title: 'Card purchase', date: '2026-07-10',
+    source: 'sms', viaPush: true, smsKey: `s${D0}-2500`, ts: D0, ...extra,
+  });
+
+  /* 1 — a push row supersedes ONCE. It described one charge, not every
+   *     charge of that value in the next two minutes. */
+  {
+    const guard = duplicateGuard([pushRow()]);
+    const starbucks = {
+      date: '2026-07-10', amountFils: 2500, title: 'Starbucks', type: 'expense',
+      smsKey: `s${D0 + 10_000}-2500`, ts: D0 + 10_000, channel: 'inbox',
+    };
+    ok('supersession: the first SMS claims the push row',
+      guard.supersedes(starbucks) === 'push-1', guard.supersedes(starbucks));
+    guard.consume('push-1');
+    guard.add(starbucks);
+    const costa = {
+      date: '2026-07-10', amountFils: 2500, title: 'Costa', type: 'expense',
+      smsKey: `s${D0 + 90_000}-2500`, ts: D0 + 90_000, channel: 'inbox',
+    };
+    ok('supersession: a consumed push row cannot be superseded a second time',
+      guard.supersedes(costa) === null, guard.supersedes(costa));
+    ok('supersession: the second genuine charge is not a duplicate either',
+      !guard.has(costa));
+  }
+
+  /* 1b — the same thing through the real import path. Two AED 25 charges
+   *      must not collapse into one patch against a single push row. */
+  {
+    const state = {
+      ...BASE,
+      accounts: [{
+        id: 'fab', name: 'FAB Debit •1234', kind: 'card', cardType: 'debit',
+        last4: '1234', bankName: 'FAB', openingFils: 0, color: '#fff',
+      }],
+      accountHints: { 1234: 'fab' },
+      transactions: [pushRow()],
+    };
+    const incoming = scan([
+      { body: 'Purchase of AED 25.00 with Debit Card ending 1234 at STARBUCKS, DUBAI.', ts: D0 + 10_000 },
+      { body: 'Purchase of AED 25.00 with Debit Card ending 1234 at COSTA COFFEE, DUBAI.', ts: D0 + 90_000 },
+    ]);
+    const plan = buildImportPlan(incoming.parsed, state, incoming.newestTs);
+    ok('supersession: two SMS charges over one push row leave one new row plus one patch',
+      plan.txCount === 1 && plan.batch.updates.length === 1,
+      { txCount: plan.txCount, updates: plan.batch.updates, txs: plan.batch.transactions });
+    const after = apply(state, plan);
+    const total = after.transactions
+      .filter((t) => t.type === 'expense')
+      .reduce((n, t) => n + t.amountFils, 0);
+    ok('supersession: both AED 25 charges survive the import',
+      after.transactions.length === 2 && total === 5000,
+      after.transactions.map((t) => [t.title, t.amountFils]));
+  }
+
+  /* 2 — a merged push/SMS pair must stop being a push row. A persisted SMS
+   *     row has NO viaPush key at all (JSON drops undefined), so the spread
+   *     that built the merged row could not clear the push row's `true`, and
+   *     the resurrected row went on eating charges on every later hydrate. */
+  {
+    const push = pushRow({ id: 'p1', title: 'Coffee' });
+    // exactly what AsyncStorage hands back: no viaPush key
+    const sms = JSON.parse(JSON.stringify({
+      ...push, id: 's1', viaPush: undefined, title: 'Coffee',
+      smsKey: `s${D0 + 5_000}-2500`, ts: D0 + 5_000,
+    }));
+    const merged = reconcileCaptureDuplicates([push, sms]);
+    ok('hydrate: a push/SMS pair still becomes one row',
+      merged.length === 1 && merged[0].id === 's1', merged);
+    ok('hydrate: the merged row no longer claims to be a push capture',
+      merged[0].viaPush !== true, merged[0]);
+    const genuine = {
+      ...sms, id: 's2', title: 'Costa', amountFils: 2500,
+      ts: D0 + 65_000, smsKey: `s${D0 + 65_000}-2500`,
+    };
+    ok('hydrate: the merged row does not swallow a later genuine charge',
+      reconcileCaptureDuplicates([...merged, genuine]).length === 2,
+      reconcileCaptureDuplicates([...merged, genuine]));
+  }
+
+  /* 3 — cross-channel pairing may ignore the merchant only when one side
+   *     names none. Two SPECIFIC titles are two merchants. */
+  {
+    const guard = duplicateGuard([pushRow({ id: 'generic', title: 'Card purchase' })]);
+    ok('cross-channel: a generic push title still pairs with a specific SMS',
+      guard.supersedes({
+        date: '2026-07-10', amountFils: 2500, title: 'Costa', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'inbox',
+      }) === 'generic');
+
+    const named = duplicateGuard([pushRow({ id: 'named', title: 'Starbucks' })]);
+    ok('cross-channel: two different named merchants never pair',
+      named.supersedes({
+        date: '2026-07-10', amountFils: 2500, title: 'Costa', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'inbox',
+      }) === null);
+
+    // and the same asymmetry the other way: an SMS row must not silently
+    // absorb the push about a DIFFERENT merchant of the same value.
+    const smsFirst = duplicateGuard([{
+      id: 'sms-first', type: 'expense', amountFils: 2500, category: 'dining',
+      accountId: 'fab', title: 'Costa', date: '2026-07-10', source: 'sms',
+      smsKey: `s${D0}-2500`, ts: D0,
+    }]);
+    ok('cross-channel: a push naming another merchant is not dropped',
+      !smsFirst.has({
+        date: '2026-07-10', amountFils: 2500, title: 'Starbucks', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'push',
+      }));
+    ok('cross-channel: a push about the same merchant is still dropped',
+      duplicateGuard([{
+        id: 'sms-first', type: 'expense', amountFils: 2500, category: 'dining',
+        accountId: 'fab', title: 'Costa', date: '2026-07-10', source: 'sms',
+        smsKey: `s${D0}-2500`, ts: D0,
+      }]).has({
+        date: '2026-07-10', amountFils: 2500, title: 'Costa Coffee', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'push',
+      }));
+  }
+
+  /* 3b — dedupe.ts restates sms-parser's STRUCTURAL_TITLES rather than
+   *      importing it (db.test.js pins that it has no dependencies), so the
+   *      copy has to be held to the original. A title the parser assigns from
+   *      the shape of a message names no merchant and must never be compared
+   *      to one. */
+  {
+    const { STRUCTURAL_TITLES } = require('./build/sms-parser.js');
+    const { sameMerchantCapture } = require('./build/dedupe.js');
+    const missed = [...STRUCTURAL_TITLES].filter(
+      (t) => !sameMerchantCapture(t, 'Some Specific Merchant'),
+    );
+    ok('cross-channel: every structural parser title counts as naming no merchant',
+      missed.length === 0, missed);
+    ok('cross-channel: a real merchant name is still not generic',
+      !sameMerchantCapture('Starbucks', 'Costa'));
+  }
+
+  /* 4 — a manually logged row carries no event clock. It explains the ONE
+   *     message about it, not every identical charge for the rest of the day. */
+  {
+    const manual = {
+      id: 'manual-salik', type: 'expense', amountFils: 40000, category: 'transport',
+      accountId: 'fab', title: 'Salik', date: '2026-07-10', source: 'manual',
+    };
+    const guard = duplicateGuard([manual]);
+    const topUp = (ts) => ({
+      date: '2026-07-10', amountFils: 40000, title: 'Salik', type: 'expense',
+      smsKey: `s${ts}-40000`, ts, channel: 'inbox',
+    });
+    ok('timeless: the SMS for a manually logged charge is still dropped',
+      guard.has(topUp(D0)));
+    ok('timeless: a genuine repeat nine hours later is NOT dropped',
+      !guard.has(topUp(D0 + 9 * 3_600_000)),
+      'a manual row with no timestamp blocked every later identical charge');
+  }
+
+  /* 5 — the two captures of one settlement can straddle midnight. Seconds
+   *     apart is one event whichever calendar day each landed on; minutes
+   *     apart is still two (unit.test.js pins the 3-minute case). */
+  {
+    const midnight = Date.parse('2026-07-11T00:00:00Z');
+    const side = (ts, date) => ({
+      date, amountFils: 400000, title: 'Card •3749 payment', type: 'income',
+      smsKey: `s${ts}-400000`, ts, channel: 'inbox', accountId: 'fab-3749',
+      eventKind: 'cardPayment', cardPaymentSide: 'receipt',
+    });
+    const guard = duplicateGuard([]);
+    guard.add(side(midnight - 2_000, '2026-07-10'));
+    ok('midnight: the second capture of one settlement is not a second payment',
+      guard.has(side(midnight + 3_000, '2026-07-11')));
+
+    const apart = duplicateGuard([]);
+    apart.add(side(midnight - 2_000, '2026-07-10'));
+    ok('midnight: two settlements three minutes apart stay two payments',
+      !apart.has(side(midnight + 178_000, '2026-07-11')));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

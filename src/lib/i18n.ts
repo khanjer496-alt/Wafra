@@ -1121,6 +1121,18 @@ const S = {
     en: 'No previous Wafra Pro purchase on this Google account.',
     ar: 'لا توجد عملية شراء سابقة لوفرة برو على حساب Google هذا.',
   },
+  // Deliberately NOT noPurchaseFound: the store was never reached, so nothing
+  // is known about what this account has bought.
+  restoreFailed: { en: 'Could not reach the store', ar: 'تعذّر الوصول إلى المتجر' },
+  restoreFailedBody: {
+    en: 'Your purchase has not been checked yet. Check your connection and try again.',
+    ar: 'لم يتم التحقق من عملية الشراء بعد. تحقق من الاتصال وحاول مرة أخرى.',
+  },
+  purchaseFailed: { en: 'Purchase could not start', ar: 'تعذّر بدء عملية الشراء' },
+  purchaseFailedBody: {
+    en: 'The store did not respond. Nothing has been charged. Check your connection and try again.',
+    ar: 'لم يستجب المتجر. لم يتم خصم أي مبلغ. تحقق من الاتصال وحاول مرة أخرى.',
+  },
   monthsFreeSuffix: { en: '· {months} months free', ar: '· {months} أشهر مجاناً' },
   trialDaysLeftPaywall: {
     en: 'Everything is free for your first {total} days — {left} day{s} left. Keep it going:',
@@ -1321,6 +1333,14 @@ const S = {
     en: '{count} transfer{s} not counted',
     ar: '{count} تحويل مستبعد من الإجمالي',
   },
+  // Rows on a hidden account. They are still listed — they are real records
+  // and searching for one should find it — but every other total in the app
+  // leaves them out, so this one must too, and must say so.
+  hiddenAccountsExcluded: {
+    en: '{count} on hidden accounts',
+    ar: '{count} في حسابات مخفية',
+  },
+  smsImportsOnly: { en: 'Imported messages', ar: 'الرسائل المستوردة' },
   showResults: { en: 'Show {count} result{s}', ar: 'عرض {count} نتيجة' },
   nothingMatches: {
     en: 'Nothing matches. Adjust search or filters.',

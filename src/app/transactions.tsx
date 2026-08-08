@@ -27,7 +27,8 @@ import { categoryLabel, CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/li
 import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
 import { inPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { amountInCategories, touchesCategories } from '@/lib/splits';
 import { tapped } from '@/lib/haptics';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
@@ -118,20 +119,54 @@ export default function TransactionsScreen() {
     ...DEFAULT_FILTERS,
     // Insights category drill-down deep-links here pre-filtered
     categories: new Set<CategoryId>(deepCategories),
-    // Reviewing an SMS import, or drilling into one merchant, must show
-    // everything even if the app is scoped to a past period.
+    // Reviewing an SMS import must show everything even if the app is scoped
+    // to a past period: the point of that list is "what just arrived".
     //
-    // A category drill-down is the opposite: it comes from a row on Flow that
-    // reads "Groceries · 16% · 1,774" FOR THE SELECTED PERIOD. Landing on
-    // all-time rows would show a list that cannot add up to the figure that
-    // was tapped, which is the whole class of bug this app has been fixing.
-    datePreset: source === 'sms' || merchantParam ? 'all' : 'selected',
-    // Home's In/Out figures deep-link here pre-filtered by type
-    type: typeParam === 'income' || typeParam === 'expense' ? typeParam : null,
+    // A drill-down is the opposite. It comes from a row that reads
+    // "Groceries · 16% · 1,774" or "Talabat · 640" FOR THE SELECTED PERIOD,
+    // and landing on all-time rows shows a list that cannot add up to the
+    // figure that was tapped — the whole class of bug this app keeps fixing.
+    // The category path was corrected first; the merchant path was left
+    // all-time and disagreed exactly the same way, by a factor of five on a
+    // busy merchant.
+    datePreset: source === 'sms' ? 'all' : 'selected',
+    // Home's In/Out figures deep-link here pre-filtered by type.
+    //
+    // A category or merchant drill-down carries no type, and both of the rows
+    // that produce one are SPENDING-only (insights.ts counts categories under
+    // isSpending; analytics.ts's topMerchants likewise). Left unscoped, a
+    // refund filed under `groceries` was listed and netted off, so a Flow row
+    // of 1,774 opened a header of −1,574.
+    type:
+      typeParam === 'income' || typeParam === 'expense'
+        ? typeParam
+        : deepCategories.length > 0 || merchantParam
+          ? 'expense'
+          : null,
   }));
+  /**
+   * The import toast's "Review" arrives as `?source=sms`, and a route param is
+   * not something "Clear all filters" can reset. It used to be read straight
+   * out of the URL inside the predicate, so the badge counted zero filters, the
+   * Clear button could not clear it, and every non-SMS row stayed hidden with
+   * nothing on screen saying why. Held as state, it is an ordinary filter:
+   * counted, shown as a chip, and clearable like the rest.
+   */
+  const [smsOnly, setSmsOnly] = useState(source === 'sms');
   const [sheetVisible, setSheetVisible] = useState(false);
   /** Which end of the custom range is currently open in the native picker. */
   const [picking, setPicking] = useState<'dateFrom' | 'dateTo' | null>(null);
+  /**
+   * What is typed into the range boxes on web, where there is no picker.
+   *
+   * `@react-native-community/datetimepicker` has no web implementation — it
+   * warns and renders null — so tapping From or To set `picking` and produced
+   * nothing at all, and "Date range" was the one preset that could not be
+   * used. Kept separate from `filters` so a half-typed date does not
+   * repeatedly re-filter the ledger; the bound moves only once the text is a
+   * whole ISO date.
+   */
+  const [rangeDraft, setRangeDraft] = useState({ dateFrom: '', dateTo: '' });
   const [editing, setEditing] = useState<Transaction | null>(null);
 
   const todayISO = toISODate(new Date());
@@ -143,7 +178,8 @@ export default function TransactionsScreen() {
     (filters.categories.size > 0 ? 1 : 0) +
     (filters.datePreset !== 'selected' ? 1 : 0) +
     (filters.minFils ? 1 : 0) +
-    (merchantFilter ? 1 : 0);
+    (merchantFilter ? 1 : 0) +
+    (smsOnly ? 1 : 0);
 
   const filtered = useMemo(() => {
     const q = appliedQuery.trim().toLowerCase();
@@ -151,17 +187,23 @@ export default function TransactionsScreen() {
     const threeKey = shiftMonthKey(currentKey, -2);
     const merchantKey = merchantFilter?.toLowerCase();
     let list = state.transactions.filter((t) => {
-      if (source === 'sms' && t.source !== 'sms') return false;
+      if (smsOnly && t.source !== 'sms') return false;
       if (merchantKey && t.title.trim().toLowerCase() !== merchantKey) return false;
       if (filters.type && t.type !== filters.type) return false;
       if (filters.accountId && t.accountId !== filters.accountId) return false;
-      if (filters.categories.size > 0 && !filters.categories.has(t.category)) return false;
+      // Every PART of a split row, not just its headline category. Testing
+      // `t.category` dropped the AED 100 groceries share of a mostly-dining
+      // charge out of the groceries drill-down entirely, while Flow's slice —
+      // which reads allocations — had counted it.
+      if (filters.categories.size > 0 && !touchesCategories(t, filters.categories)) return false;
       if (filters.minFils && t.amountFils < filters.minFils) return false;
       const k = monthKey(t.date);
       if (filters.datePreset === 'selected' && !inPeriod(t.date, period)) return false;
       if (filters.datePreset === 'month' && k !== currentKey) return false;
       if (filters.datePreset === 'lastMonth' && k !== lastKey) return false;
-      if (filters.datePreset === '3months' && k < threeKey) return false;
+      // Bounded at BOTH ends. Only the older one was checked, so a bill dated
+      // next month was listed — and totalled — under "Last 3 months".
+      if (filters.datePreset === '3months' && (k < threeKey || k > currentKey)) return false;
       // Inclusive on both ends: someone asking for 1-31 Jan means to see the
       // 31st. ISO dates compare correctly as strings, so no parsing needed.
       if (filters.datePreset === 'custom') {
@@ -178,25 +220,36 @@ export default function TransactionsScreen() {
     if (filters.sort === 'largest') {
       list = [...list].sort((a, b) => b.amountFils - a.amountFils);
     } else if (filters.sort === 'oldest') {
-      list = [...list].reverse();
+      // Sorted, not reversed. The store orders by `date` alone (store.tsx,
+      // sortTxs), so reversing put the day's rows in reverse IMPORT order —
+      // a coffee at 08:00 below a dinner at 21:00 under "Oldest first". Sort
+      // by the alert timestamp where there is one, which is the only thing
+      // that knows the order within a day.
+      list = [...list].sort(
+        (a, b) =>
+          (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) ||
+          (a.ts ?? Date.parse(`${a.date}T12:00:00Z`)) -
+            (b.ts ?? Date.parse(`${b.date}T12:00:00Z`)),
+      );
     }
     return list;
   }, [
     state.transactions,
     appliedQuery,
     filters,
-    source,
+    smsOnly,
     merchantFilter,
     currentKey,
     period,
     language,
   ]);
 
+  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
   const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccountIds(state.accounts)),
-    [state.transactions, state.accounts],
+    () => internalTransferIds(state.transactions, liveAccounts),
+    [state.transactions, liveAccounts],
   );
 
   const accountById = useMemo(
@@ -231,19 +284,40 @@ export default function TransactionsScreen() {
    * the arriving side — worded by the bank exactly like being paid — was
    * added to the total while its twin was skipped. Moving AED 20,000 between
    * two of your own accounts read as AED 20,000 earned.
+   *
+   * Asked of ledger.ts rather than spelled out here, which is the point of
+   * that file. The local spelling was missing the live-account check every
+   * other total in the app applies, so archiving a card removed its AED 4,000
+   * from Home's "Out" and left it in the header of the screen Home links to:
+   * tap 12,000, land on −16,000.
    */
   const counts = useCallback(
-    (t: Transaction) => !t.isTransfer && !internal.has(t.id),
-    [internal],
+    (t: Transaction) => countsInTotals(t, liveAccounts, internal),
+    [liveAccounts, internal],
+  );
+
+  /**
+   * What one row adds to the total above it — signed, and scoped to the
+   * category filter when there is one.
+   *
+   * The scoping is the second half of the split fix. A AED 500 charge split
+   * 400 groceries / 100 dining belongs in the groceries list, but only its
+   * 400 belongs in the groceries TOTAL; adding the whole 500 put the header
+   * AED 100 above the Flow row that was tapped to get here.
+   */
+  const contribution = useCallback(
+    (t: Transaction) => {
+      if (!counts(t)) return 0;
+      const fils =
+        filters.categories.size > 0 ? amountInCategories(t, filters.categories) : t.amountFils;
+      return t.type === 'expense' ? -fils : fils;
+    },
+    [counts, filters.categories],
   );
 
   const totalShown = useMemo(
-    () =>
-      filtered.reduce(
-        (s, t) => (counts(t) ? s + (t.type === 'expense' ? -t.amountFils : t.amountFils) : s),
-        0,
-      ),
-    [filtered, counts],
+    () => filtered.reduce((s, t) => s + contribution(t), 0),
+    [filtered, contribution],
   );
 
   // Transfers are listed — they are real records and the user wants to find
@@ -252,10 +326,21 @@ export default function TransactionsScreen() {
   // "In AED 25,000" links here, a AED 3,000 card payment is an income-side
   // transfer, and the header read 25,000 above rows summing to 28,000. The
   // rule is stated now rather than left for the user to work out.
-  const transfersShown = useMemo(
-    () => filtered.filter((t) => !counts(t)).length,
-    [filtered, counts],
-  );
+  //
+  // Rows on a hidden account are the same shape of exception and get their own
+  // half of the caption: they stay listed, because searching for an old charge
+  // should still find it, but they are out of every other total in the app and
+  // so are out of this one.
+  const excluded = useMemo(() => {
+    let transfers = 0;
+    let hidden = 0;
+    for (const t of filtered) {
+      if (counts(t)) continue;
+      if (liveAccounts.has(t.accountId)) transfers += 1;
+      else hidden += 1;
+    }
+    return { transfers, hidden };
+  }, [filtered, counts, liveAccounts]);
 
   const sections = useMemo<DaySection[]>(() => {
     if (filters.sort === 'largest') {
@@ -269,13 +354,10 @@ export default function TransactionsScreen() {
     }
     return [...byDay.entries()].map(([date, data]) => ({
       title: friendlyDate(date, todayISO),
-      totalFils: data.reduce(
-        (s, t) => (counts(t) ? s + (t.type === 'expense' ? -t.amountFils : t.amountFils) : s),
-        0,
-      ),
+      totalFils: data.reduce((s, t) => s + contribution(t), 0),
       data,
     }));
-  }, [filtered, filters.sort, todayISO, totalShown, counts, tr]);
+  }, [filtered, filters.sort, todayISO, totalShown, contribution, tr]);
 
   const toggleCategory = (id: CategoryId) => {
     setFilters((current) => {
@@ -288,6 +370,10 @@ export default function TransactionsScreen() {
 
   const clearFilters = () => {
     setMerchantFilter(null);
+    // Including the one that arrived as a route param. "Clear all" that leaves
+    // a restriction in place is worse than no button.
+    setSmsOnly(false);
+    setRangeDraft({ dateFrom: '', dateTo: '' });
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
   };
 
@@ -382,18 +468,35 @@ export default function TransactionsScreen() {
             )}
           </View>
 
-          {merchantFilter && (
+          {/* The restrictions that came from the link that opened this screen.
+              Both are removable here, which is the only thing that explains an
+              otherwise inexplicably short list. */}
+          {(merchantFilter || smsOnly) && (
             <View style={styles.chipRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
-                onPress={() => setMerchantFilter(null)}
-                style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                  {merchantFilter}
-                </ThemedText>
-                <Icon name="close" size={13} color={theme.primary} />
-              </Pressable>
+              {merchantFilter && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
+                  onPress={() => setMerchantFilter(null)}
+                  style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                    {merchantFilter}
+                  </ThemedText>
+                  <Icon name="close" size={13} color={theme.primary} />
+                </Pressable>
+              )}
+              {smsOnly && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
+                  onPress={() => setSmsOnly(false)}
+                  style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                    {tr('smsImportsOnly')}
+                  </ThemedText>
+                  <Icon name="close" size={13} color={theme.primary} />
+                </Pressable>
+              )}
             </View>
           )}
 
@@ -421,11 +524,14 @@ export default function TransactionsScreen() {
                     s: activeFilterCount === 1 ? '' : 's',
                   })}`
                 : ''}
-              {transfersShown > 0
+              {excluded.transfers > 0
                 ? ` · ${trf('transfersExcluded', {
-                    count: transfersShown,
-                    s: transfersShown === 1 ? '' : 's',
+                    count: excluded.transfers,
+                    s: excluded.transfers === 1 ? '' : 's',
                   })}`
+                : ''}
+              {excluded.hidden > 0
+                ? ` · ${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
                 : ''}
             </ThemedText>
             <View style={styles.summaryRight}>
@@ -546,19 +652,47 @@ export default function TransactionsScreen() {
                     <ThemedText type="micro" themeColor="textSecondary">
                       {label}
                     </ThemedText>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`${label}: ${
-                        filters[field] ? shortDate(filters[field]!) : tr('anyLabel')
-                      }`}
-                      onPress={() => setPicking(field)}
-                      style={[styles.rangeInput, { backgroundColor: theme.backgroundSelected }]}>
-                      <ThemedText
-                        type="small"
-                        themeColor={filters[field] ? 'text' : 'textSecondary'}>
-                        {filters[field] ? shortDate(filters[field]!) : tr('anyLabel')}
-                      </ThemedText>
-                    </Pressable>
+                    {Platform.OS === 'web' ? (
+                      // Typed, because there is no picker to open here. The
+                      // bound only moves on a complete ISO date, so the list
+                      // is not re-filtered against "2026-0".
+                      <TextInput
+                        accessibilityLabel={`${label}: ${
+                          filters[field] ? shortDate(filters[field]!) : tr('anyLabel')
+                        }`}
+                        value={rangeDraft[field]}
+                        onChangeText={(text) => {
+                          setRangeDraft((current) => ({ ...current, [field]: text }));
+                          const iso = text.trim();
+                          const whole = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+                          if (whole || iso === '') {
+                            setFilters((current) => ({ ...current, [field]: whole ? iso : null }));
+                          }
+                        }}
+                        placeholder="YYYY-MM-DD"
+                        placeholderTextColor={theme.textSecondary}
+                        inputMode="numeric"
+                        style={[
+                          styles.rangeInput,
+                          styles.rangeTextInput,
+                          { backgroundColor: theme.backgroundSelected, color: theme.text },
+                        ]}
+                      />
+                    ) : (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`${label}: ${
+                          filters[field] ? shortDate(filters[field]!) : tr('anyLabel')
+                        }`}
+                        onPress={() => setPicking(field)}
+                        style={[styles.rangeInput, { backgroundColor: theme.backgroundSelected }]}>
+                        <ThemedText
+                          type="small"
+                          themeColor={filters[field] ? 'text' : 'textSecondary'}>
+                          {filters[field] ? shortDate(filters[field]!) : tr('anyLabel')}
+                        </ThemedText>
+                      </Pressable>
+                    )}
                   </View>
                 );
               })}
@@ -566,13 +700,14 @@ export default function TransactionsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={tr('clearFilter')}
-                  onPress={() =>
+                  onPress={() => {
+                    setRangeDraft({ dateFrom: '', dateTo: '' });
                     setFilters((current) => ({
                       ...current,
                       dateFrom: null,
                       dateTo: null,
-                    }))
-                  }
+                    }));
+                  }}
                   style={styles.rangeClear}
                   hitSlop={8}>
                   <ThemedText type="small" style={{ color: theme.primary }}>
@@ -582,7 +717,10 @@ export default function TransactionsScreen() {
               ) : null}
             </View>
           )}
-          {picking !== null && (
+          {/* Never mounted on web: the package has no web build, so this
+              renders null after a console warning. The typed fields above are
+              the web path. */}
+          {picking !== null && Platform.OS !== 'web' && (
             <DateTimePicker
               mode="date"
               display="calendar"
@@ -820,6 +958,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.two + 2,
     justifyContent: 'center',
+  },
+  rangeTextInput: {
+    fontSize: 14,
+    fontWeight: '500',
   },
   rangeClear: {
     minHeight: 44,

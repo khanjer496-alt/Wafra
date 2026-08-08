@@ -76,12 +76,23 @@ export function buildPaymentReminders(
 
   const todayWord = t('today').toLocaleLowerCase();
 
+  // liveAccounts/internal are passed for the same reason every other caller
+  // passes them: without them a recurring own-account sweep that predates the
+  // transfer flag reads as a monthly commitment, and the user gets a push
+  // telling them their own money is about to be charged to them. Bills need
+  // the same pair — a charge on an archived card would otherwise reconcile a
+  // bill to "Paid" and silence its reminder while the money is still owed.
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internal = internalTransferIds(state.transactions, liveAccounts);
+
   // Bills: the day before, and the day itself.
   const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
   for (const { bill, status, dueISO } of billsForMonth(
     state.bills,
     state.transactions,
     now,
+    liveAccounts,
+    internal,
   )) {
     // Paid covers both marked-paid and auto-reconciled-from-the-debit, so
     // this is the only check needed — the old second `paidMonths` guard below
@@ -132,13 +143,6 @@ export function buildPaymentReminders(
 
   // Subscriptions: the day before the next expected charge. Merchants already
   // tracked as bill reminders are skipped — one reminder per obligation.
-  //
-  // liveAccounts/internal are passed for the same reason every other caller
-  // passes them: without them a recurring own-account sweep that predates the
-  // transfer flag reads as a monthly commitment, and the user gets a push
-  // telling them their own money is about to be charged to them.
-  const liveAccounts = liveAccountIds(state.accounts);
-  const internal = internalTransferIds(state.transactions, liveAccounts);
   for (const sub of detectSubscriptions(
     state.transactions,
     state.notSubscriptions,

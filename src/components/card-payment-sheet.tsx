@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,8 +8,8 @@ import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { dueWithStatus, duePaidFils } from '@/lib/cards';
-import { formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
+import { dueWithStatus, duePaidFils, duePayments } from '@/lib/cards';
+import { formatAED, formatAmount, monthKey, shortDate, toISODate } from '@/lib/format';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
 import type { CardDue } from '@/lib/types';
@@ -32,14 +32,36 @@ interface CardPaymentSheetProps {
 export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
   const theme = useTheme();
   const { state, payCardDue } = useStore();
-  const now = useMemo(() => new Date(), []);
-  const todayISO = toISODate(now);
+
+  /**
+   * The clock is read when the sheet OPENS, not when this component mounts.
+   *
+   * Home renders `<CardPaymentSheet due={cardDue} />` unconditionally and this
+   * function returns null while `due` is null, so the component is mounted for
+   * the entire life of the Home tab. A `useMemo(() => new Date(), [])` therefore
+   * froze at tab mount: an app left resident for three days showed a `daysLeft`
+   * three days stale and — worse — filed the "Mark paid" transfer dated three
+   * days ago, which is far enough back to fall outside the window that folds it
+   * together with the bank's receipt, so the same money imported twice.
+   *
+   * `due` is null between openings, so the dependency really does change on
+   * every open even when the same statement is reopened.
+   */
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    if (due) setNow(new Date());
+  }, [due]);
 
   const data = useMemo(() => {
     if (!due) return null;
-    const status = dueWithStatus(state, due, now);
-    const paid = duePaidFils(state, due);
-    const account = state.accounts.find((a) => a.id === due.accountId);
+    // The prop is a snapshot Home captured when the row was tapped, and the
+    // store moves underneath it: a relay import that arrives with the sheet
+    // open can settle this very statement. Read the live row so the figures —
+    // and the Mark paid amount computed from them — are the current ones.
+    const live = state.cardDues.find((d) => d.id === due.id) ?? due;
+    const status = dueWithStatus(state, live, now);
+    const paid = duePaidFils(state, live);
+    const account = state.accounts.find((a) => a.id === live.accountId);
 
     // What this card has been charged in the current month, which is the
     // figure the next statement is being built from.
@@ -47,30 +69,36 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     let monthFils = 0;
     let charges = 0;
     for (const t of state.transactions) {
-      if (t.accountId !== due.accountId || t.isTransfer || t.type !== 'expense') continue;
+      if (t.accountId !== live.accountId || t.isTransfer || t.type !== 'expense') continue;
       if (monthKey(t.date) !== key) continue;
       monthFils += t.amountFils;
       charges += 1;
     }
 
-    const payments = state.transactions.filter(
-      (t) => t.accountId === due.accountId && t.isTransfer && t.type === 'income',
-    ).length;
+    // What the allocator actually credited to THIS statement. Counting every
+    // income-side transfer on the account instead read "6 payments matched"
+    // beside a statement one payment had settled.
+    const payments = duePayments(state, live).length;
 
-    return { status, paid, account, monthFils, charges, payments };
+    return { live, status, paid, account, monthFils, charges, payments };
   }, [due, state, now]);
 
   if (!due || !data) return null;
 
-  const { status, paid, account, monthFils, charges, payments } = data;
-  const paidShare = due.totalDueFils > 0 ? paid / due.totalDueFils : 0;
+  const { live, status, paid, account, monthFils, charges, payments } = data;
+  const paidShare = live.totalDueFils > 0 ? paid / live.totalDueFils : 0;
+  // Nothing left to pay is not a payment. Without this, a background import
+  // that settled the statement while the sheet was open still let Mark paid
+  // file a zero-fils income transfer against the card.
+  const canMarkPaid = status.remainingFils > 0;
 
   const markPaid = () => {
+    if (!canMarkPaid) return;
     const name = account?.name ?? 'Card';
     Alert.alert(
       t('markStatementPaid'),
       tf('fileCardPaymentBody', {
-        amount: formatAmount(status.remainingFils),
+        amount: formatAED(status.remainingFils),
         name,
       }),
       [
@@ -79,15 +107,15 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
           text: t('markPaid'),
           onPress: () => {
             payCardDue(
-              due.id,
+              live.id,
               status.remainingFils,
               {
                 type: 'income',
                 amountFils: status.remainingFils,
                 category: 'other',
-                accountId: due.accountId,
+                accountId: live.accountId,
                 title: `${name} payment`,
-                date: todayISO,
+                date: toISODate(new Date()),
                 source: 'manual',
                 isTransfer: true,
               },
@@ -114,7 +142,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
     // (notifications.ts). Promising two days was a number nothing produced.
     Alert.alert(
       t('reminderSet'),
-      tf('cardReminderBody', { date: shortDate(due.dueDate) }),
+      tf('cardReminderBody', { date: shortDate(live.dueDate) }),
     );
   };
 
@@ -126,18 +154,17 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
             {t('stillOwed')}
           </ThemedText>
           <ThemedText type="nano" style={{ color: theme.expense }}>
-            {tf('dueDate', { date: shortDate(due.dueDate) })} ·{' '}
+            {tf('dueDate', { date: shortDate(live.dueDate) })} ·{' '}
             {status.daysLeft < 0
               ? tf('lateDays', { days: -status.daysLeft })
               : tf('daysShort', { days: status.daysLeft })}
           </ThemedText>
         </View>
-        <Money
-          fils={status.remainingFils}
-          type="sheetAmount"
-          prefix={false}
-          color="#F2EFE8"
-        />
+        {/* The hero carried no unit at all — "1,000" on the one screen whose
+            entire purpose is to say how much money to move. `Money`'s default
+            prefix is the active market's code, the same one every other figure
+            in the app is shown under. */}
+        <Money fils={status.remainingFils} type="sheetAmount" color="#F2EFE8" />
         <View style={styles.track}>
           <View
             style={[
@@ -149,12 +176,12 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
         <ThemedText type="nano" style={{ color: '#8C857A' }}>
           {tf('paidOfTotal', {
             paid: formatAmount(paid, { decimals: false }),
-            total: formatAmount(due.totalDueFils, { decimals: false }),
+            total: formatAED(live.totalDueFils, { decimals: false }),
           })}
           {/* Only the bank knows the minimum. When it never stated one, say
               nothing rather than quote the app's own 5% guess back as "Min". */}
           {status.minimumKnown
-            ? ` · ${tf('minimumShort', { amount: formatAmount(due.minDueFils, { decimals: false }) })}`
+            ? ` · ${tf('minimumShort', { amount: formatAED(live.minDueFils, { decimals: false }) })}`
             : ''}
         </ThemedText>
         {status.belowMinimum && (
@@ -175,7 +202,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
             value: (
               <ThemedText type="small" tabular>
                 {tf('chargesAcross', {
-                  amount: formatAmount(monthFils, { decimals: false }),
+                  amount: formatAED(monthFils, { decimals: false }),
                   count: charges,
                   s: charges === 1 ? '' : 's',
                 })}
@@ -199,7 +226,7 @@ export function CardPaymentSheet({ due, onClose }: CardPaymentSheetProps) {
       />
 
       <View style={styles.actions}>
-        <Button inline label={t('markPaid')} onPress={markPaid} />
+        <Button inline label={t('markPaid')} onPress={markPaid} disabled={!canMarkPaid} />
         <Button inline variant="outline" label={t('remindMe')} onPress={remindMe} />
       </View>
     </BottomSheet>

@@ -77,7 +77,14 @@ export default function ProScreen() {
       Alert.alert(t('playOnlyTitle'), t('playOnlyBody'));
       return;
     }
-    if (await purchasePro(plan)) setPro(true);
+    const outcome = await purchasePro(plan);
+    if (outcome === 'granted') setPro(true);
+    // 'cancelled' is the user closing the sheet, and gets no dialogue —
+    // telling someone their own decision failed is noise. 'failed' is the
+    // store: an unactivated SKU, an SDK that would not configure, a throw.
+    // Without this branch the button was simply inert forever, which reads as
+    // a broken app rather than a broken listing.
+    else if (outcome === 'failed') Alert.alert(t('purchaseFailed'), t('purchaseFailedBody'));
   };
 
   const restore = async () => {
@@ -85,7 +92,12 @@ export default function ProScreen() {
       Alert.alert(t('nothingToRestore'), t('nothingToRestoreBody'));
       return;
     }
-    if (await restorePro()) setPro(true);
+    const restored = await restorePro();
+    if (restored) setPro(true);
+    // null is "could not ask the store", NOT "never paid". A subscriber
+    // reinstalling on a bad connection must not be told their purchase does
+    // not exist — they should be told to try again.
+    else if (restored === null) Alert.alert(t('restoreFailed'), t('restoreFailedBody'));
     else Alert.alert(t('noPurchaseFound'), t('noPurchaseFoundBody'));
   };
 

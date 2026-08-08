@@ -38,8 +38,8 @@ import {
   monthLabel,
   shiftMonthKey,
 } from '@/lib/format';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
-import { buildInsights, composition, spentInMonthForCategory, summarizeMonth } from '@/lib/insights';
+import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
+import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
@@ -68,6 +68,10 @@ export default function FlowScreen() {
   // Limits are monthly, so they follow the global period only when it IS a
   // month; a year or a custom range falls back to the current month.
   const key = period.mode === 'month' ? period.key : monthKey(now);
+  // Whether the limits below are measuring the period the rest of the screen
+  // is about. When they are not, they say which month they ARE measuring and
+  // they leave the summary rail — see `monthScoped` at both use sites.
+  const monthScoped = period.mode === 'month';
   const live = isCurrentMonth(period, now);
 
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
@@ -115,22 +119,39 @@ export default function FlowScreen() {
     [comp, summary.byCategory.length, dark, language],
   );
 
-  const limits = useMemo(
+  /**
+   * The month the limits are measured over, summarised ONCE.
+   *
+   * When the selected period is a month, `key === period.key` and this is
+   * `summary` itself — the same rows, the same predicates, the same period, so
+   * the per-category totals are identical by construction. This screen used to
+   * call `spentInMonthForCategory` once per budget instead, and each of those
+   * is a full walk of the ledger allocating an `Allocation[]` per row for a
+   * number `summarizeMonth` had already accumulated thirty lines above.
+   * insights.ts deleted exactly this pattern for exactly this reason: "at
+   * 10,000 rows and eight budgets that redundant work was most of the time
+   * buildInsights took."
+   *
+   * In a year/range/all view the limits fall back to the current month, which
+   * `summary` does not cover — so that month is summarised, once, rather than
+   * once per budget.
+   */
+  const limitBasis = useMemo(
     () =>
-      state.budgets
-        .map((b) => ({
-          budget: b,
-          spent: spentInMonthForCategory(
-            state.transactions,
-            key,
-            b.category,
-            liveAccounts,
-            internal,
-          ),
-        }))
-        .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils),
-    [state.budgets, state.transactions, key, liveAccounts, internal],
+      monthScoped
+        ? summary
+        : summarizeMonth(state.transactions, key, liveAccounts, internal),
+    [monthScoped, summary, state.transactions, key, liveAccounts, internal],
   );
+
+  const limits = useMemo(() => {
+    const spentByCategory = new Map(
+      limitBasis.byCategory.map((c) => [c.category, c.totalFils] as const),
+    );
+    return state.budgets
+      .map((b) => ({ budget: b, spent: spentByCategory.get(b.category) ?? 0 }))
+      .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils);
+  }, [state.budgets, limitBasis]);
 
   const totalLimit = limits.reduce((s, r) => s + r.budget.limitFils, 0);
   // Only the categories that actually have a limit. Comparing the whole
@@ -148,20 +169,33 @@ export default function FlowScreen() {
   const elapsed = live ? Math.max(1, elapsedDays(period, now, state.transactions)) : monthDays;
   const monthShare = live ? Math.min(1, elapsed / monthDays) : 1;
 
-  /** In and out for the six months ending at the selected one. */
+  /**
+   * In and out for the six months ending at the selected one, in ONE pass.
+   *
+   * Six calls to `summarizeMonth` is six full walks of the ledger, and five
+   * sixths of each is spent on rows belonging to one of the other five months.
+   * A month key is what `summarizeMonth` matches on anyway — `inPeriod` for a
+   * month period is `monthKey(t.date) === key` — so asking which of the six a
+   * row falls in is the same question asked once instead of six times, over
+   * the same `isIncome`/`isSpending` predicates.
+   */
   const trend = useMemo(() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const k = shiftMonthKey(key, -i);
-      const s = summarizeMonth(state.transactions, k, liveAccounts, internal);
-      months.push({
-        key: k,
-        label: monthLabel(k, true).split(' ')[0],
-        income: s.incomeFils,
-        expense: s.expenseFils,
-      });
+    const keys: string[] = [];
+    for (let i = 5; i >= 0; i--) keys.push(shiftMonthKey(key, -i));
+    const slot = new Map(keys.map((k, i) => [k, i] as const));
+    const totals = keys.map(() => ({ income: 0, expense: 0 }));
+    for (const tx of state.transactions) {
+      const i = slot.get(monthKey(tx.date));
+      if (i === undefined) continue;
+      if (isIncome(tx, liveAccounts, internal)) totals[i].income += tx.amountFils;
+      else if (isSpending(tx, liveAccounts, internal)) totals[i].expense += tx.amountFils;
     }
-    return months;
+    return keys.map((k, i) => ({
+      key: k,
+      label: monthLabel(k, true).split(' ')[0],
+      income: totals[i].income,
+      expense: totals[i].expense,
+    }));
   }, [state.transactions, key, liveAccounts, internal]);
 
   const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
@@ -213,7 +247,15 @@ export default function FlowScreen() {
                 {formatAED(comp.totalFils, { decimals: false })}
               </ThemedText>
             </View>
-            {totalLimit > 0 && (
+            {/* Only while the limits and "Total out" describe the same span.
+                Limits are monthly; the period pill is not, and this cell was
+                printed unqualified beside a period-scoped total whatever the
+                pill said. On "This year" the rail read `Total out AED 210,000`
+                next to `With limits 1,177 / 1,800` — August's spending under a
+                2026 heading, two figures a reader is invited to compare and
+                cannot. Out of the rail in those views; the section below still
+                shows the limits, under the month it is actually measuring. */}
+            {totalLimit > 0 && monthScoped && (
               <View style={[styles.summaryCell, styles.summaryPaired, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('limitedSpend')}
@@ -327,8 +369,15 @@ export default function FlowScreen() {
 
           {/* ── Limits ── */}
           <Animated.View entering={enter(FadeInDown.delay(40).duration(320))} style={styles.section}>
+            {/* The month is named whenever it is not the period the rest of
+                the screen is about, so "AED 623 left" cannot be read as the
+                year's remaining allowance. Composed from the existing label
+                rather than a new phrase, so it needs no new translation and
+                stays true in Arabic. */}
             <SectionHeader
-              title={t('limitsHeader')}
+              title={
+                monthScoped ? t('limitsHeader') : `${t('limitsHeader')} · ${monthLabel(key, true)}`
+              }
               right={limits.length > 0 ? t('newLimit') : undefined}
               onPressRight={limits.length > 0 ? () => setLimitFor('new') : undefined}
             />

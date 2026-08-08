@@ -337,13 +337,42 @@ interface OpenSettlement {
  * distinct SMS, so no rescan will ever decline to import it, and reading the
  * pair correctly is the only thing that puts the balance back.
  *
- * ±1 day, and each settlement absorbs each leg at most once, so two genuine
- * payments that both arrive in two legs stay two payments. The residual error
- * — two same-amount payments on consecutive days that EACH lost a leg, folded
- * into one — is the direction this file already prefers: a payment dropped
- * leaves a balance the user can clear with Mark paid, while a payment counted
- * twice quietly settles a bill they still owe.
+ * Each settlement absorbs each leg at most once, so two genuine payments that
+ * both arrive in two legs stay two payments. The residual error — two
+ * same-amount payments a few days apart that EACH lost a leg, folded into one
+ * — is the direction this file already prefers: a payment dropped leaves a
+ * balance the user can clear with Mark paid, while a payment counted twice
+ * quietly settles a bill they still owe.
+ *
+ * THE WINDOW IS NOT ONE NUMBER, because the two cases are not one case.
+ *
+ * Two bank alerts are two OBSERVATIONS of a movement the bank is timestamping
+ * itself, so they land within hours of each other and ±1 day is already
+ * generous. Widening that would start folding genuine repeat payments — a
+ * standing instruction that pays the same amount on consecutive days is a real
+ * shape — so it stays at 1.
+ *
+ * A manual "Mark paid" row is not an observation at all. It is the user's
+ * ASSERTION that this statement has been paid, stamped with the device's today,
+ * and the bank's confirmation of the same money can be days away: a payment
+ * initiated on a Thursday evening settles and texts on Sunday, and a user who
+ * taps Mark paid when the reminder fires may be a day either side of the
+ * transfer. At ±1 day the pair imported as two payments of the same money and
+ * the surplus poured into the NEXT month's statement and settled it — the
+ * repro is a July statement of 1,000 marked paid on the 10th, the bank's
+ * receipt landing on the 12th, and August's 800 reading as nothing owed.
+ *
+ * So a manual claim absorbs a matching bank leg over ±7 days. It is still
+ * matched on amount and card — the bucket is keyed by `amountFils` and
+ * `cardPaymentsOf` has already narrowed to this card's account ids — which is
+ * every axis available here; the parser captures no statement date, so
+ * matching by statement is not on the table.
  */
+/** Two bank alerts describing one movement. Deliberately tight — see above. */
+const OBSERVED_COLLAPSE_DAYS = 1;
+/** A manual claim and the bank's confirmation of it. */
+const ASSERTED_COLLAPSE_DAYS = 7;
+
 function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
   const ordered = rows
     .slice()
@@ -364,18 +393,28 @@ function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
       kept.push(row);
       continue;
     }
+    // Pruned at the WIDER window; `fits` applies the right one per pair, so an
+    // SMS-vs-SMS pair six days apart is still two payments.
     const bucket = (open.get(row.amountFils) ?? []).filter(
-      (s) => s.row.date >= shiftISO(row.date, -1),
+      (s) => s.row.date >= shiftISO(row.date, -ASSERTED_COLLAPSE_DAYS),
     );
-    const fits = (s: OpenSettlement) =>
-      s.leg !== leg &&
-      s.leg !== 'unsided' &&
-      !s.absorbed.has(leg) &&
+    const fits = (s: OpenSettlement) => {
+      if (s.leg === leg || s.leg === 'unsided' || s.absorbed.has(leg)) return false;
       // A manual claim explains bank alerts; two bank alerts explain each
       // other. Two manual rows are two deliberate taps, not one movement.
-      !(s.leg === 'manual' && leg === 'manual');
+      if (s.leg === 'manual' && leg === 'manual') return false;
+      const span = s.leg === 'manual' || leg === 'manual'
+        ? ASSERTED_COLLAPSE_DAYS
+        : OBSERVED_COLLAPSE_DAYS;
+      return s.row.date >= shiftISO(row.date, -span);
+    };
+    const fitting = bucket.filter(fits);
     const partner =
-      bucket.find((s) => fits(s) && s.row.date === row.date) ?? bucket.find(fits);
+      fitting.find((s) => s.row.date === row.date) ??
+      // Nearest in time, not oldest. Rows are walked in date order, so the last
+      // fitting entry is the closest one — and with a seven-day window a bucket
+      // can hold more than the two candidates the ±1 day rule ever saw.
+      fitting.at(-1);
     if (partner) {
       partner.absorbed.add(leg);
       open.set(row.amountFils, bucket);
@@ -399,6 +438,14 @@ interface Statement {
   /** Date part of settledAt, when the user marked this statement paid. */
   settledOn: string | null;
   dueIds: string[];
+  /** The payment rows any part of which was credited to this statement. */
+  rows: Transaction[];
+}
+
+/** What allocation concluded about one statement. */
+interface Allocation {
+  paidFils: number;
+  payments: Transaction[];
 }
 
 /**
@@ -438,7 +485,7 @@ function allocatePayments(
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
-): Map<string, number> {
+): Map<string, Allocation> {
   const ids = cardAccountIds(state, accountId);
   const known = state.cardDues.filter((d) => ids.has(d.accountId));
   const dues = target && !known.some((d) => d.id === target.id) ? [...known, target] : known;
@@ -454,6 +501,7 @@ function allocatePayments(
         paidFils: d.paidFils,
         settledOn,
         dueIds: [d.id],
+        rows: [],
       });
       continue;
     }
@@ -482,12 +530,15 @@ function allocatePayments(
       if (until && payment.date > until) continue;
       const take = Math.min(outstanding, left);
       s.paidFils += take;
+      s.rows.push(payment);
       left -= take;
     }
   }
 
-  const allocated = new Map<string, number>();
-  for (const s of statements) for (const id of s.dueIds) allocated.set(id, s.paidFils);
+  const allocated = new Map<string, Allocation>();
+  for (const s of statements) {
+    for (const id of s.dueIds) allocated.set(id, { paidFils: s.paidFils, payments: s.rows });
+  }
   return allocated;
 }
 
@@ -497,7 +548,29 @@ function allocatePayments(
  * already remapped every ledger reference onto that one account id.
  */
 export function duePaidFils(state: AppState, due: CardDue): number {
-  return allocatePayments(state, due.accountId, due).get(due.id) ?? due.paidFils;
+  return allocatePayments(state, due.accountId, due).get(due.id)?.paidFils ?? due.paidFils;
+}
+
+/**
+ * The payment rows credited to THIS statement, newest first.
+ *
+ * "3 payments matched" is a claim about one statement, and the card sheet used
+ * to answer it with its own filter: every income-side transfer ever made to the
+ * account, lifetime-wide, with no statement and no date in it. On a card paid
+ * monthly for six months that read "6 payments matched" beside a statement one
+ * payment had settled. It also disagreed with the allocation in three
+ * directions at once — it missed the compat expense-side rows `isCardPayment`
+ * deliberately still credits, it counted both halves of a settlement that
+ * `collapseSettlementLegs` folds into one, and it counted payments the
+ * allocator had already spent on an earlier statement.
+ *
+ * One rule, one answer: these are exactly the rows `duePaidFils` poured into
+ * this statement. A payment that spilled across two statements appears against
+ * both, because it really did pay into both.
+ */
+export function duePayments(state: AppState, due: CardDue): Transaction[] {
+  const rows = allocatePayments(state, due.accountId, due).get(due.id)?.payments ?? [];
+  return rows.slice().sort((a, b) => b.date.localeCompare(a.date));
 }
 
 function shiftISO(iso: string, days: number): string {

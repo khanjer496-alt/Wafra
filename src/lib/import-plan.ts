@@ -585,6 +585,10 @@ export function buildImportPlan(
     if (protectedSupersededId && priorById.get(protectedSupersededId)?.userEdited) {
       // The fuller SMS still proves the notification was a duplicate, but it
       // must not overwrite the user's corrected title/category/account.
+      // That push row has now been accounted for, though: without saying so,
+      // the NEXT same-value message in the window was dropped against it too,
+      // and that one was a real charge nobody ever saw.
+      guard.consume(protectedSupersededId);
       guard.add(captureCandidate);
       continue;
     }
@@ -614,6 +618,11 @@ export function buildImportPlan(
           viaPush: false,
         });
       }
+      // One notification is one charge. Two AED 25 SMS a minute apart used to
+      // supersede the SAME push row twice; the store keys patches by id and
+      // keeps the last, so the first message's charge was never written at
+      // all — AED 25 of spending gone, with no duplicate to hint at it.
+      guard.consume(supersededId);
       guard.add(candidate);
       continue;
     }

@@ -35,7 +35,7 @@ import {
   toISODate,
   totalAsShown,
 } from '@/lib/format';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import {
   activeSubscriptions,
   billCommitments,
@@ -48,7 +48,7 @@ import {
   type Subscription,
 } from '@/lib/subscriptions';
 import { useStore } from '@/lib/store';
-import type { Account, CategoryId } from '@/lib/types';
+import type { Account, Bill, CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 type Segment = 'subscriptions' | 'cards' | 'utilities';
@@ -99,15 +99,18 @@ export default function BillsScreen() {
     return tf('scheduleInManyDays', { days });
   };
 
-  const rows = useMemo(
-    () => billsForMonth(state.bills, state.transactions, now),
-    [state.bills, state.transactions, now],
-  );
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
     () => internalTransferIds(state.transactions, liveAccounts),
     [state.transactions, liveAccounts],
+  );
+  // The same live/internal pair every other screen that adds money up passes.
+  // Without it a charge on an archived card reconciles a bill to "Paid" while
+  // Flow's Total out never moves.
+  const rows = useMemo(
+    () => billsForMonth(state.bills, state.transactions, now, liveAccounts, internal),
+    [state.bills, state.transactions, now, liveAccounts, internal],
   );
   const detected = useMemo(
     () =>
@@ -138,6 +141,44 @@ export default function BillsScreen() {
   // to equal them. `subscriptionsMonthlyTotal` stays the figure for anything
   // that does arithmetic with it.
   const subsTotal = totalAsShown(subs.map((s) => s.monthlyEquivalentFils));
+
+  /**
+   * The single-due focal card's figures.
+   *
+   * This was an IIFE inside the render tree, so a full scan of every
+   * transaction ran on EVERY render — toggling "Stopped subscriptions",
+   * opening or closing the detail modal, any store dispatch — for a card that
+   * shows exactly one due. Memoised on what it actually reads.
+   */
+  const focalDue = useMemo(() => {
+    if (dues.length !== 1) return null;
+    const item = dues[0];
+    const account = state.accounts.find((a) => a.id === item.due.accountId) ?? null;
+    let recentSpend = 0;
+    for (const transaction of state.transactions) {
+      if (
+        transaction.accountId === item.due.accountId &&
+        transaction.type === 'expense' &&
+        !transaction.isTransfer &&
+        monthKey(transaction.date) === key
+      ) {
+        recentSpend += transaction.amountFils;
+      }
+    }
+    // `openDues` has already allocated imported card-payment transactions
+    // across statements. Keep every focal figure on that one result: raw
+    // due.paidFils only records manual edits.
+    const paidFils = Math.max(0, item.due.totalDueFils - item.remainingFils);
+    const paidShare = Math.max(0, Math.min(1, paidFils / Math.max(1, item.due.totalDueFils)));
+    return {
+      item,
+      account,
+      recentSpend,
+      paidFils,
+      paidShare,
+      urgent: item.status === 'urgent' || item.status === 'overdue',
+    };
+  }, [dues, state.accounts, state.transactions, key]);
   const trackedTitles = useMemo(
     () => new Set(state.bills.map((b) => b.title.toLowerCase())),
     [state.bills],
@@ -148,9 +189,15 @@ export default function BillsScreen() {
   const detailData = useMemo(() => {
     if (!detail) return null;
     const titleKey = detail.title.trim().toLowerCase();
+    // The SAME predicate `detectSubscriptions` grouped these rows with. A
+    // looser one here (type + isTransfer, with no live/internal sets) counted
+    // charges the detection had already excluded: a Netflix charge on an
+    // archived card inflated this sheet's "Charges" and "Total paid" above the
+    // figure the row that opened the sheet was derived from.
     const txs = state.transactions
       .filter(
-        (t) => t.type === 'expense' && !t.isTransfer && t.title.trim().toLowerCase() === titleKey,
+        (t) =>
+          isSpending(t, liveAccounts, internal) && t.title.trim().toLowerCase() === titleKey,
       )
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     if (txs.length === 0) return null;
@@ -165,7 +212,7 @@ export default function BillsScreen() {
     const sortedAmounts = txs.map((t) => t.amountFils).sort((a, b) => a - b);
     const medianFils = sortedAmounts[Math.floor(sortedAmounts.length / 2)];
     return { txs, firstISO, accounts, totalFils, medianFils };
-  }, [detail, state.transactions, state.accounts]);
+  }, [detail, state.transactions, state.accounts, liveAccounts, internal]);
 
   const subscribedFor = (firstISO: string): string => {
     const d = new Date(`${firstISO}T12:00:00`);
@@ -179,6 +226,36 @@ export default function BillsScreen() {
       ? tf('subscriptionYearsMonths', { years: y, months: m })
       : tf('subscriptionYears', { count: y, s: y === 1 ? '' : 's' });
   };
+
+  /**
+   * Whether "Remind me" can honestly be offered for this subscription.
+   *
+   * Weekly cannot. `paidMonths` is keyed by money month and `billsForMonth`
+   * returns one row per bill, so a charge that lands four times a month has
+   * nowhere to live — and filing AED 40 a WEEK as a monthly reminder of AED 40
+   * understates it by 4.33x, which is the same class of error as the yearly
+   * case below in the opposite direction. An affordance that can only produce
+   * a wrong number is worse than no affordance.
+   */
+  const remindable = (sub: Subscription): boolean => sub.cadence !== 'weekly';
+
+  /**
+   * The reminder a subscription becomes.
+   *
+   * `sub.avgAmountFils` is the RAW charge and `Bill` was monthly-only, so an
+   * Amazon Prime renewal of AED 310 a YEAR was filed as AED 310 a MONTH and
+   * restated at twelve times the money in the Reminders list and in every
+   * notification derived from it. `yearlyOnISO` is what confines it to the one
+   * month it actually falls in; see types.ts.
+   */
+  const billFromSubscription = (sub: Subscription): Omit<Bill, 'id' | 'paidMonths'> => ({
+    title: sub.title,
+    category: sub.category,
+    amountFils: sub.avgAmountFils,
+    dueDay: Number(sub.nextExpectedISO.slice(8)),
+    yearlyOnISO: sub.cadence === 'yearly' ? sub.nextExpectedISO : undefined,
+    autoDetected: true,
+  });
 
   const statusMeta = (status: BillStatus, daysLeft: number) => {
     switch (status) {
@@ -196,11 +273,27 @@ export default function BillsScreen() {
     }
   };
 
+  /**
+   * Exactly what `saveBill` will accept — asked once so the button cannot
+   * offer what the handler refuses.
+   *
+   * The disabled test used to be `!dueDayText`, which is true of "45", "0" and
+   * "12.5". Those left the Save button at full opacity and the tap silently did
+   * nothing, with the sheet still open and no reason given.
+   */
+  const draftDueDay = Number(dueDayText);
+  const draftValid =
+    Boolean(title.trim()) &&
+    Boolean(parseAmountToFils(amountText)) &&
+    dueDayText.trim() !== '' &&
+    Number.isInteger(draftDueDay) &&
+    draftDueDay >= 1 &&
+    draftDueDay <= 31;
+
   const saveBill = () => {
     const fils = parseAmountToFils(amountText);
-    const dueDay = Number(dueDayText);
-    if (!title.trim() || !fils || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return;
-    addBill({ title: title.trim(), category, amountFils: fils, dueDay });
+    if (!draftValid || !fils) return;
+    addBill({ title: title.trim(), category, amountFils: fils, dueDay: draftDueDay });
     setTitle('');
     setAmountText('');
     setDueDayText('');
@@ -210,7 +303,16 @@ export default function BillsScreen() {
   const onPay = (billId: string) => {
     const bill = state.bills.find((b) => b.id === billId);
     if (!bill) return;
-    const accountId = bill.accountId ?? state.accounts[0]?.id;
+    // `state.accounts[0]` is the raw, UNFILTERED list, so index 0 can be an
+    // archived account — and an expense booked there is excluded by
+    // `liveAccountIds`/`isSpending`, so an AED 450 DEWA bill flipped to "Paid"
+    // while Flow's Total out never moved. Prefer the account the user pinned to
+    // the bill, then the first one still in play; the raw first account is kept
+    // only as the last resort where EVERY account is archived, because a
+    // "Mark paid" that quietly does nothing is worse than one that books the
+    // expense where the user can still see it.
+    const accountId =
+      bill.accountId ?? state.accounts.find((a) => !a.archived)?.id ?? state.accounts[0]?.id;
     if (!accountId) return;
     Alert.alert(
       tf('markBillPaidTitle', { title: bill.title }),
@@ -363,20 +465,12 @@ export default function BillsScreen() {
                 {t('tracked')}
               </ThemedText>
             ) : null}
-            {!tracked && sub.status !== 'stopped' && next >= 0 && next <= 7 ? (
+            {!tracked && sub.status !== 'stopped' && remindable(sub) && next >= 0 && next <= 7 ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={tf('remindAboutA11y', { title: sub.title })}
                 hitSlop={8}
-                onPress={() =>
-                  addBill({
-                    title: sub.title,
-                    category: sub.category,
-                    amountFils: sub.avgAmountFils,
-                    dueDay: Number(sub.nextExpectedISO.slice(8)),
-                    autoDetected: true,
-                  })
-                }
+                onPress={() => addBill(billFromSubscription(sub))}
                 style={({ pressed }) => [
                   styles.remindBtn,
                   {
@@ -456,67 +550,58 @@ export default function BillsScreen() {
           {/* Credit-card statement dues live in their own tab. */}
           {segment === 'cards' && (
             <>
-              {dues.length === 1 && (() => {
-                const item = dues[0];
-                const account = state.accounts.find((a) => a.id === item.due.accountId);
-                const urgent = item.status === 'urgent' || item.status === 'overdue';
-                const recentSpend = state.transactions
-                  .filter(
-                    (transaction) =>
-                      transaction.accountId === item.due.accountId &&
-                      transaction.type === 'expense' &&
-                      !transaction.isTransfer &&
-                      monthKey(transaction.date) === key,
-                  )
-                  .reduce((sum, transaction) => sum + transaction.amountFils, 0);
-                // `openDues` has already allocated imported card-payment
-                // transactions across statements. Keep every focal figure on
-                // that one result: raw due.paidFils only records manual edits.
-                const paidFils = Math.max(0, item.due.totalDueFils - item.remainingFils);
-                const paidShare = Math.max(
-                  0,
-                  Math.min(1, paidFils / Math.max(1, item.due.totalDueFils)),
-                );
+              {focalDue && (() => {
+                const { item, account, urgent, recentSpend, paidFils, paidShare } = focalDue;
                 return (
                   <View
                     style={[
                       styles.dueFocal,
                       { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
                     ]}>
-                    <View style={styles.dueFocalTop}>
-                      <View style={[styles.cardSummaryBadge, { backgroundColor: theme.primarySoft }]}>
-                        <Icon name="wallet" size={18} color={theme.primary} />
+                    {/* One target, not a decorated header sitting above one.
+                        The card name, the due date and the chevron used to be
+                        a plain View — the chevron promised a tap and only the
+                        amount below it answered. */}
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={account?.name ?? t('card')}
+                      onPress={() => setCardDetail(account)}
+                      style={({ pressed }) => (pressed ? { opacity: 0.6 } : null)}>
+                      <View style={styles.dueFocalTop}>
+                        <View style={[styles.cardSummaryBadge, { backgroundColor: theme.primarySoft }]}>
+                          <Icon name="wallet" size={18} color={theme.primary} />
+                        </View>
+                        <View style={styles.dueFocalTitle}>
+                          <ThemedText type="smallBold" numberOfLines={1}>
+                            {account?.name ?? t('card')}
+                          </ThemedText>
+                          <ThemedText
+                            type="meta"
+                            style={{ color: urgent ? theme.expense : theme.textSecondary }}>
+                            {item.status === 'overdue'
+                              ? tf('overdueDays', { days: -item.daysLeft })
+                              : tf('payByWithDays', {
+                                  date: shortDate(item.due.dueDate),
+                                  days: item.daysLeft,
+                                })}
+                          </ThemedText>
+                        </View>
+                        <Icon name="chevron-right" size={16} color={theme.textTertiary} />
                       </View>
-                      <View style={styles.dueFocalTitle}>
-                        <ThemedText type="smallBold" numberOfLines={1}>
-                          {account?.name ?? t('card')}
-                        </ThemedText>
-                        <ThemedText
-                          type="meta"
-                          style={{ color: urgent ? theme.expense : theme.textSecondary }}>
-                          {item.status === 'overdue'
-                            ? tf('overdueDays', { days: -item.daysLeft })
-                            : tf('payByWithDays', {
-                                date: shortDate(item.due.dueDate),
-                                days: item.daysLeft,
-                              })}
-                        </ThemedText>
-                      </View>
-                      <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-                    </View>
 
-                    <Pressable onPress={() => setCardDetail(account ?? null)}>
-                      <ThemedText type="meta" themeColor="textSecondary">
-                        {t('outstandingTitle')}
-                      </ThemedText>
-                      <View style={styles.cardSummaryMoney}>
-                        <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
-                        <ThemedText
-                          type="sheetAmount"
-                          tabular
-                          style={urgent ? { color: theme.expense } : undefined}>
-                          {formatAmount(item.remainingFils, { decimals: false })}
+                      <View style={styles.dueFocalOutstanding}>
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {t('outstandingTitle')}
                         </ThemedText>
+                        <View style={styles.cardSummaryMoney}>
+                          <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                          <ThemedText
+                            type="sheetAmount"
+                            tabular
+                            style={urgent ? { color: theme.expense } : undefined}>
+                            {formatAmount(item.remainingFils, { decimals: false })}
+                          </ThemedText>
+                        </View>
                       </View>
                     </Pressable>
 
@@ -572,7 +657,7 @@ export default function BillsScreen() {
                         </ThemedText>
                       </Pressable>
                       <Pressable
-                        onPress={() => setCardDetail(account ?? null)}
+                        onPress={() => setCardDetail(account)}
                         style={[styles.dueDetailsButton, { borderColor: theme.cardBorderStrong }]}>
                         <ThemedText type="smallBold">{t('seeAll')}</ThemedText>
                       </Pressable>
@@ -798,7 +883,7 @@ export default function BillsScreen() {
                 </View>
               )}
               <View>
-                {rows.map(({ bill, status, daysLeft }, i) => {
+                {rows.map(({ bill, status, daysLeft, dueISO }, i) => {
                   const meta = statusMeta(status, daysLeft);
                   return (
                     <Pressable
@@ -813,8 +898,13 @@ export default function BillsScreen() {
                         <ThemedText type="default" numberOfLines={1}>
                           {bill.title}
                         </ThemedText>
+                        {/* "Day 12" is the right phrasing for something that
+                            happens every month and the wrong one for a yearly
+                            renewal, which needs to name its month or it reads
+                            as another monthly charge. */}
                         <ThemedText type="small" style={{ color: meta.color }}>
-                          {meta.label} · {t('day')} {bill.dueDay}
+                          {meta.label} ·{' '}
+                          {bill.yearlyOnISO ? shortDate(dueISO) : `${t('day')} ${bill.dueDay}`}
                         </ThemedText>
                       </View>
                       <View style={styles.rowRight}>
@@ -986,16 +1076,12 @@ export default function BillsScreen() {
 
                 {/* Actions */}
                 <View style={styles.detailActions}>
-                  {!trackedTitles.has(detail.title.toLowerCase()) && detail.status !== 'stopped' && (
+                  {!trackedTitles.has(detail.title.toLowerCase()) &&
+                    detail.status !== 'stopped' &&
+                    remindable(detail) && (
                     <Pressable
                       onPress={() => {
-                        addBill({
-                          title: detail.title,
-                          category: detail.category,
-                          amountFils: detail.avgAmountFils,
-                          dueDay: Number(detail.nextExpectedISO.slice(8)),
-                          autoDetected: true,
-                        });
+                        addBill(billFromSubscription(detail));
                         setDetail(null);
                       }}
                       style={[styles.detailBtn, { backgroundColor: theme.primary }]}>
@@ -1077,13 +1163,10 @@ export default function BillsScreen() {
 
             <Pressable
               onPress={saveBill}
-              disabled={!title.trim() || !parseAmountToFils(amountText) || !dueDayText}
+              disabled={!draftValid}
               style={[
                 styles.saveBtn,
-                {
-                  backgroundColor: theme.primary,
-                  opacity: !title.trim() || !parseAmountToFils(amountText) || !dueDayText ? 0.45 : 1,
-                },
+                { backgroundColor: theme.primary, opacity: draftValid ? 1 : 0.45 },
               ]}>
               <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('saveReminder')}</ThemedText>
             </Pressable>
@@ -1183,6 +1266,10 @@ const styles = StyleSheet.create({
     gap: Spacing.two + 2,
   },
   dueFocalTitle: { flex: 1, minWidth: 0, gap: 1 },
+  // The header row and the outstanding figure are now one Pressable, so the
+  // parent's `gap` no longer separates them — it separates the Pressable from
+  // the progress bar below. This restores the space it used to add.
+  dueFocalOutstanding: { marginTop: Spacing.two + 2 },
   dueProgress: { height: 7, borderRadius: 4, overflow: 'hidden' },
   dueProgressFill: { height: '100%', borderRadius: 4 },
   dueFacts: {
