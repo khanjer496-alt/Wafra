@@ -262,14 +262,18 @@ export function buildInsights(
   }
 
   // Budget alerts (budgets are monthly — skip in year/range/all views)
+  //
+  // The spend per category is read out of `current`, not recomputed. This loop
+  // used to call `spentInMonthForCategory` per budget, and each of those calls
+  // is a full walk of the ledger allocating an Allocation array per row — for
+  // a number `summarizeMonth` had already accumulated over the same rows, the
+  // same period and the same live/internal sets, twenty lines above. The two
+  // agree by construction: both sum `allocationsOf` over the rows `isSpending`
+  // admits inside the period. At 10,000 rows and eight budgets that redundant
+  // work was most of the time buildInsights took.
+  const spentByCategory = new Map(current.byCategory.map((c) => [c.category, c.totalFils]));
   for (const b of isMonthMode ? budgets : []) {
-    const spent = spentInMonthForCategory(
-      transactions,
-      period,
-      b.category,
-      liveAccounts,
-      internalTransfers,
-    );
+    const spent = spentByCategory.get(b.category) ?? 0;
     if (b.limitFils <= 0) continue;
     const ratio = spent / b.limitFils;
     const cat = getCategory(b.category);
