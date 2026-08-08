@@ -77,7 +77,7 @@ import {
   unpairDevice,
   type RelayConfig,
 } from '@/lib/relay';
-import { promptDeleteShortcut, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
+import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import {
   buildExpenseReportHtml,
   reportExpenses,
@@ -366,6 +366,8 @@ export default function SettingsScreen() {
     question: string;
     body?: string;
     confirmLabel: string;
+    /** Overrides "Cancel" where declining has its own word ("Done"). */
+    cancelLabel?: string;
     destructive?: boolean;
     onConfirm: () => void;
   } | null>(null);
@@ -686,7 +688,15 @@ export default function SettingsScreen() {
     // matching alert. The relay refuses it now, but refusing is not the same
     // as not sending, and no API in existence lets this app delete it.
     if (shortcutCleanupApplies(cfg !== null)) {
-      promptDeleteShortcut(t('shortcutCleanupErased'));
+      // Not a question, but the only door out of it is a button, so it is a
+      // confirmation shaped like one: "Done" declines, "Open Shortcuts" acts.
+      setConfirmation({
+        question: t('shortcutStillInstalledTitle'),
+        body: t('shortcutCleanupErased'),
+        confirmLabel: t('iosOpenShortcutsApp'),
+        cancelLabel: t('iosDone'),
+        onConfirm: openShortcutsApp,
+      });
     }
   };
 
@@ -713,7 +723,7 @@ export default function SettingsScreen() {
    * check, before it reads the body — but the message still leaves the phone,
    * which is the part a privacy claim has to own. So the confirmation says up
    * front that Wafra cannot delete the Shortcut, and a successful erase ends
-   * with `promptDeleteShortcut`, which names the exact steps and opens the
+   * with the shortcut-cleanup sheet, which names the exact steps and opens the
    * Shortcuts app. See `src/lib/shortcut-cleanup.ts`.
    */
   const confirmErase = () => {
@@ -1122,6 +1132,7 @@ export default function SettingsScreen() {
           question={confirmation.question}
           body={confirmation.body}
           confirmLabel={confirmation.confirmLabel}
+          cancelLabel={confirmation.cancelLabel}
           destructive={confirmation.destructive}
           onConfirm={confirmation.onConfirm}
         />

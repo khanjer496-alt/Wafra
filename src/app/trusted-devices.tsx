@@ -38,7 +38,7 @@ import {
   revokeTrustedDevice,
   type RelayConfig,
 } from '@/lib/relay';
-import { promptDeleteShortcut, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
+import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import {
   MAX_TRUSTED_DEVICES,
@@ -155,6 +155,13 @@ export default function TrustedDevicesScreen() {
    */
   const [removing, setRemoving] = useState(false);
   const [deletingVault, setDeletingVault] = useState(false);
+  /**
+   * The Shortcut this phone built is still installed, and still putting bank
+   * text on the network — see shortcut-cleanup.ts. Raised after a revoke that
+   * covers THIS device, and answered by opening Apple's Shortcuts app, which
+   * is the only door either side of this app can reach.
+   */
+  const [shortcutLeft, setShortcutLeft] = useState(false);
 
   const load = useCallback(async (spinner = true) => {
     if (spinner) setLoading(true);
@@ -360,9 +367,7 @@ export default function TrustedDevicesScreen() {
       // Only for this phone. Another device's Shortcut lives on that phone,
       // and telling this user to go delete it here would send them looking
       // for something that is not on their device.
-      if (isSelf && shortcutCleanupApplies(true)) {
-        promptDeleteShortcut(t('shortcutCleanupLeft', language), language);
-      }
+      if (isSelf && shortcutCleanupApplies(true)) setShortcutLeft(true);
     } catch (error) {
       showError(error);
     } finally {
@@ -387,9 +392,7 @@ export default function TrustedDevicesScreen() {
       committed();
       // Every device in the vault is revoked, including this one. This is the
       // only one whose Shortcut this screen can speak to.
-      if (shortcutCleanupApplies(true)) {
-        promptDeleteShortcut(t('shortcutCleanupLeft', language), language);
-      }
+      if (shortcutCleanupApplies(true)) setShortcutLeft(true);
     } catch (error) {
       showError(error);
     } finally {
@@ -793,6 +796,17 @@ export default function TrustedDevicesScreen() {
           confirmLabel={t('trustedDeleteVaultAction', language)}
           destructive
           onConfirm={() => void performDeleteVault()}
+        />
+      )}
+      {shortcutLeft && (
+        <ConfirmSheet
+          visible
+          onClose={() => setShortcutLeft(false)}
+          question={t('shortcutStillInstalledTitle', language)}
+          body={t('shortcutCleanupLeft', language)}
+          confirmLabel={t('iosOpenShortcutsApp', language)}
+          cancelLabel={t('iosDone', language)}
+          onConfirm={openShortcutsApp}
         />
       )}
     </ThemedView>

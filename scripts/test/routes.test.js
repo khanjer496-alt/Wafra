@@ -343,6 +343,38 @@ function sources(dir = SRC) {
       missing.length === 0, missing.join(' | '));
   }
 
+  /**
+   * The same property, across the whole of src/, without an allowlist.
+   *
+   * The per-screen scan above needs a list of identifiers that count as
+   * committing, which is fine for three files it was written beside and
+   * useless as a repo-wide rule: the next screen commits through a function
+   * nobody thought to add, and the check passes because it was never looking.
+   *
+   * `onPress` is the property itself, and it needs no list. An alert that only
+   * REPORTS has no buttons of its own — `Alert.alert(title, body)` — and costs
+   * a message on web. An alert that carries an `onPress` has put a handler
+   * somewhere that is never drawn, never invoked, and never errors: not a
+   * missing message but a dead control, for any action, under any name.
+   *
+   * So the rule is exactly one sentence, and it holds everywhere: an alert may
+   * say something; it may not be the only way to DO something.
+   */
+  const walk = (dir) =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = path.join(dir, e.name);
+      return e.isDirectory() ? walk(full) : /\.tsx?$/.test(e.name) ? [full] : [];
+    });
+
+  const withHandler = [];
+  for (const file of walk(SRC)) {
+    for (const args of alertCalls(code(fs.readFileSync(file, 'utf8')))) {
+      if (/\bonPress\b/.test(args)) withHandler.push(path.relative(SRC, file));
+    }
+  }
+  ok(`no alert anywhere in src/ carries an onPress (${withHandler.length} found)`,
+    withHandler.length === 0, [...new Set(withHandler)].join(' | '));
+
   {
     const bills = code(read('app/(tabs)/bills.tsx'));
     // Each commit hangs off a confirmation the screen draws itself, and the

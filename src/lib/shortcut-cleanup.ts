@@ -23,9 +23,7 @@
  * URL that targets a single shortcut's delete action, so this is as far as the
  * OS lets anyone go.
  */
-import { Alert, Linking, Platform } from 'react-native';
-
-import { t, type Lang } from '@/lib/i18n';
+import { Linking, Platform } from 'react-native';
 
 /** Apple's app-level URL scheme. It carries no query and no identifier. */
 const SHORTCUTS_APP_URL = 'shortcuts://';
@@ -43,28 +41,24 @@ export function shortcutCleanupApplies(hadPairing: boolean): boolean {
 }
 
 /**
- * Tell the user the Shortcut survived, and offer the Shortcuts app.
+ * Open Apple's Shortcuts app. The only door this module can offer.
  *
- * `body` is supplied by the caller because what is true differs by path — an
- * erase, leaving a vault, and deleting a whole vault leave different things
- * behind — and every one of those sentences must come from the string table
- * with an Arabic value beside it.
+ * This used to be `promptDeleteShortcut(body, language)`, which raised the
+ * alert itself and put this call in a button's `onPress`. That was never the
+ * inert-on-web defect the rest of the sweep was about — `shortcutCleanupApplies`
+ * gates every call site on `Platform.OS === 'ios'`, so the alert could not
+ * silently do nothing on a platform that never reaches it. It was a smaller
+ * thing: a library reaching for UI, which is why the fix had to be a two-file
+ * change and why the alert outlived every other one in the app.
  *
- * `language` mirrors t()'s own override so a screen that already resolves its
- * copy against a subscribed language (trusted-devices does) does not fall back
- * to the module-level one for these three labels alone.
+ * Now the callers own the asking — they are screens, they already hold the
+ * body string that differs per path, and they can draw a sheet — and this owns
+ * the one thing only it knows: the URL.
+ *
+ * Best effort by design. A phone with the Shortcuts app removed cannot open
+ * it, and there is nothing useful to say about that: the sheet has already
+ * told the user what is still installed and what it is still doing.
  */
-export function promptDeleteShortcut(body: string, language?: Lang): void {
-  Alert.alert(t('shortcutStillInstalledTitle', language), body, [
-    {
-      text: t('iosOpenShortcutsApp', language),
-      onPress: () => {
-        // Best effort. A phone with the Shortcuts app removed cannot open it,
-        // and there is nothing useful to say about that here — the alert has
-        // already told the user what to delete and where.
-        void Linking.openURL(SHORTCUTS_APP_URL).catch(() => {});
-      },
-    },
-    { text: t('iosDone', language), style: 'cancel' },
-  ]);
+export function openShortcutsApp(): void {
+  void Linking.openURL(SHORTCUTS_APP_URL).catch(() => {});
 }
