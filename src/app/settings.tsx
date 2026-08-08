@@ -41,6 +41,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Segmented, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
@@ -261,10 +262,12 @@ export default function SettingsScreen() {
       void enablePrivateMode();
       return;
     }
-    Alert.alert(t('privateModeEnableTitle'), t('privateModeEnableIosBody'), [
-      { text: t('cancel'), style: 'cancel' },
-      { text: t('privateModeEnable'), onPress: () => void enablePrivateMode() },
-    ]);
+    setConfirmation({
+      question: t('privateModeEnableTitle'),
+      body: t('privateModeEnableIosBody'),
+      confirmLabel: t('privateModeEnable'),
+      onConfirm: () => void enablePrivateMode(),
+    });
   };
 
   const toggleSms = async (enabled: boolean) => {
@@ -274,15 +277,14 @@ export default function SettingsScreen() {
       // is AND open it — the alert used to type out "Settings → Apps → Wafra →
       // Permissions → SMS" and then offer a single OK, leaving the user to
       // walk there by hand from a screen that could have taken them.
-      Alert.alert(t('turnSmsReadingOff'), t('smsRevokeHint'), [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('openPhoneSettings'),
-          onPress: () => {
-            void Linking.openSettings().catch(() => {});
-          },
+      setConfirmation({
+        question: t('turnSmsReadingOff'),
+        body: t('smsRevokeHint'),
+        confirmLabel: t('openPhoneSettings'),
+        onConfirm: () => {
+          void Linking.openSettings().catch(() => {});
         },
-      ]);
+      });
       return;
     }
     const granted = await requestSmsPermission();
@@ -345,6 +347,28 @@ export default function SettingsScreen() {
   const [chargeAlerts, setChargeAlerts] = useState(true);
   /** Which region picker is open, if any. Only one can be. */
   const [regionSheet, setRegionSheet] = useState<'country' | 'language' | null>(null);
+  /**
+   * The one confirmation on this screen, whichever is currently being asked.
+   *
+   * Same shape as Bills, and here for the same reason: every gate on this
+   * screen put its real work inside an `Alert.alert` button's `onPress`, and
+   * on react-native-web `Alert.alert` is an empty method — so the work was
+   * unreachable and the button was silent. That included **Erase everything
+   * on this phone**, which is the one action on this screen that cannot be
+   * undone and the one a user is most likely to press twice when nothing
+   * appears to happen.
+   *
+   * `body` is optional here where Bills makes it required: two of these gates
+   * are a bare question ("turn SMS reading off?") whose answer is the button
+   * label, and padding them out would mean writing copy that adds nothing.
+   */
+  const [confirmation, setConfirmation] = useState<{
+    question: string;
+    body?: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
   const [reportScopeSheet, setReportScopeSheet] = useState(false);
   useEffect(() => {
     let current = true;
@@ -378,17 +402,12 @@ export default function SettingsScreen() {
       Alert.alert(t('notAvailable'), t('notifsPhoneOnly'));
       return;
     }
-    Alert.alert(
-      t('bankAppNotifsTitle'),
-      t('notifAccessFull'),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: notifEnabled ? t('openSettings') : t('enableAction'),
-          onPress: () => NotificationReader?.openSettings(),
-        },
-      ],
-    );
+    setConfirmation({
+      question: t('bankAppNotifsTitle'),
+      body: t('notifAccessFull'),
+      confirmLabel: notifEnabled ? t('openSettings') : t('enableAction'),
+      onConfirm: () => NotificationReader?.openSettings(),
+    });
   };
 
   /* ── Region ─────────────────────────────────────────────────────────── */
@@ -567,18 +586,17 @@ export default function SettingsScreen() {
       });
       if (picked.canceled || !picked.assets?.[0]) return;
       const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
-      Alert.alert(t('restoreBackupQ'), t('restoreReplacesAll'), [
-        { text: t('cancel'), style: 'cancel' },
-        {
-          text: t('restoreAction'),
-          style: 'destructive',
-          onPress: () => {
-            if (!restoreBackup(content)) {
-              Alert.alert(t('invalidFile'), t('notAWafraBackup'));
-            }
-          },
+      setConfirmation({
+        question: t('restoreBackupQ'),
+        body: t('restoreReplacesAll'),
+        confirmLabel: t('restoreAction'),
+        destructive: true,
+        onConfirm: () => {
+          if (!restoreBackup(content)) {
+            Alert.alert(t('invalidFile'), t('notAWafraBackup'));
+          }
         },
-      ]);
+      });
     } catch {
       Alert.alert(t('couldNotReadFile'), t('couldNotReadFileBody'));
     }
@@ -613,13 +631,12 @@ export default function SettingsScreen() {
         // never work: the relay answers 409 `last_owner` forever, and the
         // ledger was silently left intact behind a message about the network.
         if (error instanceof RelayError && error.code === 'last_owner') {
-          Alert.alert(t('eraseVaultOwnerTitle'), t('eraseVaultOwnerBody'), [
-            { text: t('cancel'), style: 'cancel' },
-            {
-              text: t('trustedSettingsRow'),
-              onPress: () => router.push('/trusted-devices'),
-            },
-          ]);
+          setConfirmation({
+            question: t('eraseVaultOwnerTitle'),
+            body: t('eraseVaultOwnerBody'),
+            confirmLabel: t('trustedSettingsRow'),
+            onConfirm: () => router.push('/trusted-devices'),
+          });
           return;
         }
         Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
@@ -706,9 +723,9 @@ export default function SettingsScreen() {
     // `undefined` is "not read yet", and on iOS the cautious reading is that a
     // pairing exists.
     const mentionsShortcut = Platform.OS === 'ios' && relay !== null;
-    Alert.alert(
-      t('eraseEverythingQ'),
-      mentionsShortcut
+    setConfirmation({
+      question: t('eraseEverythingQ'),
+      body: mentionsShortcut
         ? t('eraseEverythingIosBody')
         : // A phone that reads its own inbox rebuilds the entries on the next
           // scan. Promising they are "permanently deleted" and then handing
@@ -717,11 +734,10 @@ export default function SettingsScreen() {
           isSmsScanningAvailable()
           ? t('eraseEverythingSmsBody')
           : t('eraseEverythingBody'),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        { text: t('eraseAction'), style: 'destructive', onPress: () => void eraseAllData() },
-      ],
-    );
+      confirmLabel: t('eraseAction'),
+      destructive: true,
+      onConfirm: () => void eraseAllData(),
+    });
   };
 
   /* ── Rows ───────────────────────────────────────────────────────────── */
@@ -1099,6 +1115,17 @@ export default function SettingsScreen() {
         options={reportScopeChoices}
         onSelect={(scope) => void createExpenseReport(scope)}
       />
+      {confirmation && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmation(null)}
+          question={confirmation.question}
+          body={confirmation.body}
+          confirmLabel={confirmation.confirmLabel}
+          destructive={confirmation.destructive}
+          onConfirm={confirmation.onConfirm}
+        />
+      )}
     </ThemedView>
   );
 }
