@@ -29,7 +29,7 @@ import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryLabel, rampColor } from '@/lib/categories';
+import { categoryLabel, getCategory, rampColor } from '@/lib/categories';
 import {
   formatAED,
   formatAmount,
@@ -114,6 +114,9 @@ export default function FlowScreen() {
         label: c.category
           ? categoryLabel(c.category, language)
           : tf('moreCategories', { count: summary.byCategory.length - MAX_SLICES }, language),
+        // The pooled remainder is not a category and gets no glyph — see the
+        // row below for why that is the honest answer rather than a gap.
+        icon: c.category ? getCategory(c.category).icon : null,
         color: c.category ? rampColor(i, dark) : dark ? '#2A2620' : '#D9D3C6',
       })),
     [comp, summary.byCategory.length, dark, language],
@@ -331,18 +334,43 @@ export default function FlowScreen() {
                       },
                       pressed && { opacity: 0.6 },
                     ]}>
-                    {/* An 8px swatch, not a 26px glyph tile. The tile restated
-                        the ramp at full saturation on every row, so five filled
-                        avatars competed with the one stacked bar they are meant
-                        to key into — and category identity is supposed to come
-                        from the word, per theme.ts. The swatch's only job is
-                        "this row is that segment". */}
+                    {/* The swatch keys the row to the bar; the glyph says
+                        what the row IS.
+                        
+                        Both, deliberately, and neither in the other's colour.
+                        This was a 26px filled glyph tile once and that was
+                        wrong — five saturated avatars competed with the single
+                        stacked bar they are meant to key into — so it became
+                        an 8px swatch, which fixed the competition and left the
+                        rows identified by their word alone.
+                        
+                        Drawing the glyph in the ramp colour instead would have
+                        been one mark rather than two, and it is the first
+                        thing to try. It cannot work here: the ramp descends to
+                        lightnesses at 2.0-2.8:1 against the page, which is why
+                        the swatch carries a border — the FILL is identity, the
+                        EDGE is visibility. A stroked glyph has no edge to
+                        borrow, so the tail categories would have been drawn in
+                        a colour that is not reliably visible, and the last two
+                        rows would simply have looked empty.
+                        
+                        So the glyph takes a readable ink and adds no colour to
+                        the row. It competes with nothing, because the thing
+                        that competed was saturation, not presence. */}
                     <View
                       style={[
                         styles.swatch,
                         { backgroundColor: s.color, borderColor: theme.textTertiary },
                       ]}
                     />
+                    <View style={styles.glyph}>
+                      {/* The pooled row stands for several categories at once,
+                          so no single glyph is true of it. It keeps its swatch
+                          and leaves this box empty rather than borrowing a
+                          meaning it does not have — the box still reserves the
+                          width, so the labels stay on one x. */}
+                      {s.icon && <Icon name={s.icon} size={15} color={theme.textSecondary} />}
+                    </View>
                     <ThemedText type="small" style={styles.compLabel} numberOfLines={1}>
                       {s.label}
                     </ThemedText>
@@ -645,6 +673,10 @@ const styles = StyleSheet.create({
   // categories then look like three. So the EDGE carries visibility and the
   // fill carries identity.
   swatch: { width: 8, height: 8, borderRadius: 2, borderWidth: StyleSheet.hairlineWidth },
+  // Fixed box so the labels start at one x whether the row drew a 15px glyph
+  // or the 8px pooled swatch. Without it the list steps sideways on the last
+  // row, which reads as a rendering fault rather than a different kind of row.
+  glyph: { width: 18, alignItems: 'center', justifyContent: 'center' },
   compLabel: { flex: 1 },
   compShare: { width: 38 },
   compFigure: { width: 72 },
