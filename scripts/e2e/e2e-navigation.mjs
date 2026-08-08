@@ -340,9 +340,14 @@ await pressEverything('bills · fixed', async () => { await bills(); await tapKe
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'See all'); await page.waitForTimeout(1200); });
 await pressEverything('settings', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1300); },
-  // Erasing the ledger and cycling the language both make every later
-  // control on the screen a different control; they get their own passes.
-  { skip: ['Erase everything on this phone', 'Language', 'Country pack'] });
+  // Erasing the ledger is the one control here the sweep must not press.
+  // Country and Language are back in: they used to be one-tap cycles that
+  // relabelled every later control on the screen, and are now chooser sheets
+  // that change nothing until an option inside them is picked — so the sweep
+  // covers them, and the closable-sheet assertion covers them too. That is
+  // worth having, because the bug this replaced was a row that opened
+  // nothing at all.
+  { skip: ['Erase everything on this phone'] });
 
 /**
  * Put the settings back.
@@ -575,6 +580,13 @@ for (const [name, enter] of [
   await tapKey(page, 'Settings');
   await page.waitForTimeout(1300);
   ok('settings: the language row is there', (await tapKey(page, 'Language', 5000)) === true);
+  await page.waitForTimeout(900);
+  // The row opens a chooser; it does not switch anything by itself. That is
+  // the point of it — the one-tap cycle it replaced could flip a mis-tap into
+  // a mirrored Arabic UI the user could not read their way back out of.
+  ok('settings: the language row opens a chooser rather than switching',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language ?? 'en')) === 'en');
+  ok('settings: the chooser names both languages', (await tapKey(page, 'العربية', 5000)) === true);
   await page.waitForTimeout(1200);
   ok('settings: the language switch is written down',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'ar');
@@ -628,6 +640,8 @@ for (const [name, enter] of [
   await tapKey(page, 'الإعدادات', 5000);
   await page.waitForTimeout(1300);
   await tapKey(page, 'اللغة', 5000);
+  await page.waitForTimeout(900);
+  await tapKey(page, 'English', 5000);
   await page.waitForTimeout(1200);
   ok('settings: switching back returns the app to English',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'en');

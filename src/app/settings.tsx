@@ -40,6 +40,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { Button, Segmented, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
@@ -342,6 +343,9 @@ export default function SettingsScreen() {
    * still gets the alerts the relay was set up to deliver.
    */
   const [chargeAlerts, setChargeAlerts] = useState(true);
+  /** Which region picker is open, if any. Only one can be. */
+  const [regionSheet, setRegionSheet] = useState<'country' | 'language' | null>(null);
+  const [reportScopeSheet, setReportScopeSheet] = useState(false);
   useEffect(() => {
     let current = true;
     void getChargeAlertPreference()
@@ -404,21 +408,18 @@ export default function SettingsScreen() {
    * on screen said so.
    *
    * Now the row opens the list and the user names the country they mean.
+   *
+   * The list is a ChoiceSheet rather than an alert. `Alert.alert` cannot be
+   * the control here on either platform this app actually ships to plus the
+   * one it exports to: Android draws at most three alert buttons — the two
+   * packs plus Cancel, already at the ceiling — and on react-native-web
+   * `Alert.alert` is an empty method, so the row did nothing at all.
    */
-  const chooseMarket = () => {
-    Alert.alert(t('country'), t('onboardMarketBody'), [
-      // Android draws at most three alert buttons, which is exactly the two
-      // packs plus Cancel. A third pack needs a real sheet, not a fourth
-      // button that Android will quietly refuse to show.
-      ...MARKETS.map((m) => ({
-        text: `${marketName(m.id)} · ${m.currency.display}`,
-        onPress: () => {
-          if (m.id !== market.id) setMarket(m.id);
-        },
-      })),
-      { text: t('cancel'), style: 'cancel' as const },
-    ]);
-  };
+  const marketChoices = MARKETS.map((m) => ({
+    value: m.id,
+    label: marketName(m.id),
+    detail: m.currency.display,
+  }));
 
   const applyLanguage = (next: 'en' | 'ar') => {
     if (next === language) return;
@@ -444,15 +445,10 @@ export default function SettingsScreen() {
    * same row again in a mirrored UI they could not read. Naming both languages
    * up front costs one extra tap and removes that trap.
    */
-  const chooseLanguage = () => {
-    Alert.alert(t('language'), undefined, [
-      ...(['en', 'ar'] as const).map((code) => ({
-        text: LANGUAGE_NAMES[code],
-        onPress: () => applyLanguage(code),
-      })),
-      { text: t('cancel'), style: 'cancel' as const },
-    ]);
-  };
+  const languageChoices = (['en', 'ar'] as const).map((code) => ({
+    value: code,
+    label: LANGUAGE_NAMES[code],
+  }));
 
   /* ── Data ───────────────────────────────────────────────────────────── */
 
@@ -532,13 +528,15 @@ export default function SettingsScreen() {
     }
   };
 
-  const chooseExpenseReportPeriod = () => {
-    Alert.alert(t('expenseReportPeriod'), t('expenseReportPeriodBody'), [
-      { text: t('currentMoneyMonth'), onPress: () => void createExpenseReport('month') },
-      { text: t('allExpenses'), onPress: () => void createExpenseReport('all') },
-      { text: t('cancel'), style: 'cancel' },
-    ]);
-  };
+  /**
+   * Same reason as Country and Language: an alert is not a picker. This one
+   * chooses what goes in the PDF, so getting it silently wrong — or, on web,
+   * getting nothing at all — produces a report about the wrong months.
+   */
+  const reportScopeChoices = [
+    { value: 'month' as const, label: t('currentMoneyMonth') },
+    { value: 'all' as const, label: t('allExpenses') },
+  ];
 
   const restoreFromFile = async () => {
     try {
@@ -974,7 +972,7 @@ export default function SettingsScreen() {
             {linkRow(t('backupJson'), null, gated(backupJson), { pro: true })}
             {linkRow(t('restoreBackup'), null, gated(restoreFromFile), { pro: true })}
             {linkRow(t('exportCsv'), null, exportCsv)}
-            {linkRow(t('exportExpensePdf'), null, chooseExpenseReportPeriod, { last: true })}
+            {linkRow(t('exportExpensePdf'), null, () => setReportScopeSheet(true), { last: true })}
           </Section>
 
           <Section index={4}>
@@ -1016,11 +1014,13 @@ export default function SettingsScreen() {
                 country: marketName(market.id),
                 currency: market.currency.display,
               }),
-              chooseMarket,
+              () => setRegionSheet('country'),
             )}
             {/* The sub-line is the language that is ON, in that language —
                 the one thing a glance needs and the old one never said. */}
-            {linkRow(t('language'), LANGUAGE_NAMES[language], chooseLanguage, { last: true })}
+            {linkRow(t('language'), LANGUAGE_NAMES[language], () => setRegionSheet('language'), {
+              last: true,
+            })}
           </Section>
 
           <Section index={6} style={styles.about}>
@@ -1050,6 +1050,34 @@ export default function SettingsScreen() {
           </Section>
         </ScrollView>
       </SafeAreaView>
+
+      {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
+          inherits its clipping and its scroll offset on web. */}
+      <ChoiceSheet
+        visible={regionSheet === 'country'}
+        onClose={() => setRegionSheet(null)}
+        title={t('country')}
+        body={t('onboardMarketBody')}
+        options={marketChoices}
+        value={market.id}
+        onSelect={setMarket}
+      />
+      <ChoiceSheet
+        visible={regionSheet === 'language'}
+        onClose={() => setRegionSheet(null)}
+        title={t('language')}
+        options={languageChoices}
+        value={language}
+        onSelect={applyLanguage}
+      />
+      <ChoiceSheet
+        visible={reportScopeSheet}
+        onClose={() => setReportScopeSheet(false)}
+        title={t('expenseReportPeriod')}
+        body={t('expenseReportPeriodBody')}
+        options={reportScopeChoices}
+        onSelect={(scope) => void createExpenseReport(scope)}
+      />
     </ThemedView>
   );
 }

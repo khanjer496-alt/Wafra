@@ -144,8 +144,23 @@ function sources(dir = SRC) {
 
   ok('neither region row mutates the setting on tap',
     !/cycleMarket|cycleLanguage/.test(settings) &&
-      /const chooseMarket = \(\) => \{\s*Alert\.alert\(/.test(settings) &&
-      /const chooseLanguage = \(\) => \{\s*Alert\.alert\(/.test(settings));
+      /<ChoiceSheet[\s\S]{0,400}title=\{t\('country'\)\}/.test(settings) &&
+      /<ChoiceSheet[\s\S]{0,400}title=\{t\('language'\)\}/.test(settings));
+
+  /**
+   * And the picker may not be an alert.
+   *
+   * The first fix for the cycles used `Alert.alert` with one button per
+   * option, which looked right and was inert where it mattered:
+   * react-native-web's Alert is `static alert() {}` — an empty method, no
+   * warning, no error — so in the web export both rows opened nothing at all.
+   * That is strictly worse than the cycle it replaced, and it shipped green
+   * because the unit test above pinned the alert as the fix. Android also
+   * draws at most three alert buttons, which two country packs plus Cancel
+   * already exhausts. Pin the sheet, not the alert.
+   */
+  ok('the region pickers are drawn, not delegated to Alert',
+    !/const chooseMarket|const chooseLanguage|const chooseExpenseReportPeriod/.test(settings));
 
   // Every pack in MARKETS has to be offered, or the picker is a cycle with
   // extra steps: naming one country and cycling to "the other" is the same
