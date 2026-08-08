@@ -252,6 +252,8 @@ which stays in the foreground app.
 | `DELETE` | `/v1/email-token` | Admin bearer → revoke email forwarding |
 | `POST` | `/v1/email/ingest` | Email bearer + `{text?, html?, eventId?}` → structured sealed rows |
 | `POST` | `/v1/import/pdf` | Admin bearer + `application/pdf` bytes → structured sealed rows |
+| `POST` | `/v1/feedback` | **No bearer** + `{text, appVersion, platform, locale?, diagnostic?}` → `202 {id, dispatched}` |
+| `GET` | `/v1/feedback/:id` | Feedback-read bearer → the one item, for the agent that will fix it |
 | `GET` | `/v1/health` | → `{ok: true}` |
 
 No email, no password, no account. Identity is a key the phone generated. Sync
@@ -275,6 +277,49 @@ keyed receipt described above.
 Forwarded email has a separate inject-only credential for a specific reason:
 SMTP headers expose the destination address outside the app/relay TLS
 connection, so it must not be the same secret as the Shortcut's.
+
+## Feedback, and the one exception to "it keeps nothing"
+
+`POST /v1/feedback` is the only path here that stores prose, and the only write
+path with no bearer token in front of it. Both are deliberate.
+
+**Why it stores text at all.** Everything above is about data the user never
+chose to send: an SMS their bank pushed at them, captured by an automation
+while they were asleep. Feedback is the opposite — they opened a screen, typed
+a sentence and pressed send. Refusing to keep it would protect nobody; it would
+only mean nobody can report a parser bug.
+
+**Why it has no token.** Android scans the inbox on-device and never touches
+this relay, so the users most likely to *find* a parser bug have no device row
+here to authenticate as. Requiring pairing would silently exclude exactly the
+reports worth having.
+
+What that costs, all enforced and all covered by tests:
+
+| | |
+| --- | --- |
+| **Retention** | 14 days, half the queue's 30. `expires_at` is written at insert, checked on every read, and swept by the cron — whether or not an agent ever looked at it, whether or not a PR was opened. There is no "keep this one" path, because the moment there is one this stops being a buffer and becomes an archive of things users typed about their bank accounts. |
+| **Rate limit** | 60 writes/hour globally, plus a separate **5 agent runs/hour** budget. A global window, same shape as `/v1/pair`, because a per-IP bucket would mean storing an IP. Cloudflare's edge rate limiting stays the production first line — it is the only layer that sees an address without this service keeping one. |
+| **Size** | 32 KiB whole body, 4 000 code points of text, 16 KiB of serialized diagnostic. **Refused, never truncated**: `413 too_large` / `400 text_too_long` / `413 diagnostic_too_large`. A diagnostic that does not fit is a client sending rows where it should send counts. |
+| **Contents** | No IP, no device id, no token, no fingerprint. An anonymous row. |
+| **Logging** | Nothing in the request path logs anything at all; `server/test/schema.test.cjs` asserts the absence. |
+
+Under a flood the two budgets separate cheap from expensive: every accepted
+report is still stored in full, but past 5 an hour the row records
+`dispatch_status = 'skipped_budget'` and no agent runs. Nothing is lost — a
+maintainer re-fires any id by hand through the workflow's `workflow_dispatch`
+input. Worst case is 120 agent runs a day, which is a number a human notices on
+a dashboard rather than on an invoice.
+
+When feedback arrives the Worker fires a GitHub `repository_dispatch`
+(`wafra-feedback`) carrying **the id and nothing else**, and
+`.github/workflows/feedback-agent.yml` fetches the item back through the read
+route. A `client_payload` is readable by anyone with access to the repository's
+Actions data and is kept in the run record; the report is not. With
+`GITHUB_DISPATCH_TOKEN` or `GITHUB_REPOSITORY` unset the feedback is still
+stored and the row says `skipped_unconfigured` — nothing 500s. See the secrets
+block at the end of `wrangler.toml` for exactly which token, which scopes, and
+who sets which half.
 
 ## Email and PDF supplement
 

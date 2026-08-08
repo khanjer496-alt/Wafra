@@ -1,9 +1,14 @@
 import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
-import { bankBrandForName, bankFromSender, bankIdentityForName } from '@/lib/markets';
+import {
+  bankBrandForName,
+  bankFromSender,
+  bankIdentityForName,
+  bankFromName,
+} from '@/lib/markets';
 import { duplicateGuard } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
-import { overrideFitsDirection, STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
+import { isDeclinedMessage, overrideFitsDirection, STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
 import type { Account, AppState, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
@@ -33,6 +38,28 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Relay-only origin. It must never be inferred from the wake itself. */
   captureSource?: 'shortcut' | 'email' | 'pdf';
 };
+
+/**
+ * A message the scan read and the parser REFUSED as a refusal — a decline.
+ *
+ * Only the timestamp travels. The body is tested against the parser's own
+ * `isDeclinedMessage` at the point it is read (auto-import.ts) and then
+ * dropped, so nothing that is not already a fingerprint leaves the scanner.
+ *
+ * This exists because the evidence for deleting a declined row is at SCAN
+ * time and used to be thrown away. `parseSms` returns null for a decline, so
+ * the message vanished from `parsed` and the planner never learned that the
+ * inbox still holds, at that exact millisecond, an alert saying the money
+ * never moved. The ledger migration in accounts.ts can only use a row's
+ * STORED `raw`, and raw retention is recent: one real user has 59 decline
+ * rows worth AED 89,897 and not one of them carries a body. The inbox does.
+ */
+export interface DeclinedSms {
+  /** The SMS/notification timestamp, the same one `smsKey` is built from. */
+  smsTs: number;
+  sender?: string;
+  channel?: CaptureChannel;
+}
 
 export interface ImportPlan {
   batch: ImportBatchInput;
@@ -84,6 +111,14 @@ export function buildImportPlan(
   state: AppState,
   newestTs: number,
   today: Date = new Date(),
+  /**
+   * Messages this same scan read and the parser refused as declines. Optional
+   * and last on purpose: `today` predates it and several callers pass it
+   * positionally, and the two capture pipes that cannot supply declines (the
+   * relay, which never sees a body, and the onboarding scan, which runs
+   * against an empty ledger) are correct with the default.
+   */
+  declined: DeclinedSms[] = [],
 ): ImportPlan {
   // An unhydrated store is not an empty ledger, it is an unknown one — and
   // every duplicate check below is a lookup against `state.transactions`.
@@ -234,7 +269,13 @@ export function buildImportPlan(
     // Mada. Reinterpreting its structured result from English-only raw-text
     // heuristics silently downgraded explicit Arabic debit cards to unknown.
     const kind = p.card.kind as ResolvedCardKind;
-    const bank = bankFromSender(p.sender);
+    // A message that spells out its issuer ("Emirates NBD Credit Card Mini
+    // Stmt for Card ending 8575") is STATING the bank; a sender ID only
+    // suggests one. That distinction is the only thing that can separate two
+    // real cards sharing their last four digits at different banks — one user
+    // holds a Liv card and an ENBD card both ending 8575, and payments were
+    // settling against the wrong one.
+    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
     const scoped = hintKey(bank?.name, last4, kind);
     const noteType = (ref: string) => {
       if (kind === 'account' || kind === 'unknown') return;
@@ -456,7 +497,7 @@ export function buildImportPlan(
       }
       if (!p.date) continue;
       if (p.date < staleDueCutoff) continue;
-      const statementBank = bankFromSender(p.sender);
+      const statementBank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
         ? accountCandidates().filter(
             ({ ref, account }) =>
@@ -574,6 +615,10 @@ export function buildImportPlan(
     if (protectedSupersededId && priorById.get(protectedSupersededId)?.userEdited) {
       // The fuller SMS still proves the notification was a duplicate, but it
       // must not overwrite the user's corrected title/category/account.
+      // That push row has now been accounted for, though: without saying so,
+      // the NEXT same-value message in the window was dropped against it too,
+      // and that one was a real charge nobody ever saw.
+      guard.consume(protectedSupersededId);
       guard.add(captureCandidate);
       continue;
     }
@@ -603,6 +648,11 @@ export function buildImportPlan(
           viaPush: false,
         });
       }
+      // One notification is one charge. Two AED 25 SMS a minute apart used to
+      // supersede the SAME push row twice; the store keys patches by id and
+      // keeps the last, so the first message's charge was never written at
+      // all — AED 25 of spending gone, with no duplicate to hint at it.
+      guard.consume(supersededId);
       guard.add(candidate);
       continue;
     }
@@ -642,6 +692,77 @@ export function buildImportPlan(
       // only on Android's local parser path, where one actually exists.
       raw: lowConfidence ? p.raw?.slice(0, 300) : undefined,
     });
+  }
+
+  // ── Rows an older parser imported from a DECLINE ────────────────────────
+  //
+  // A declined transaction moved no money, so the row is not a mislabelled
+  // expense — it is an event that never happened, and healing (which only ever
+  // adds information to a row) has no way to take it back. The two branches
+  // above already do exactly this for a bill reminder that was booked as a
+  // real expense; a decline is the same shape of mistake with no `p` to hang
+  // it off, because a suppressed message parses to null.
+  //
+  // The join is the SMS timestamp alone — a decline has no parsed amount, so
+  // the `s{ts}-{amount}` smsKey cannot be reconstructed from it. Five things
+  // stand between that and deleting a row some OTHER message produced:
+  //
+  //  1. The timestamp is exact, to the millisecond, and it is the phone's own
+  //     record of when the message arrived. Two different messages landing on
+  //     the same millisecond is the only way a wrong row can be reached at all.
+  //  2. A timestamp this scan re-read into something the parser still
+  //     understands is off limits. On the full re-read a version bump forces,
+  //     `parsed` is the whole inbox, so any live transaction sitting on that
+  //     millisecond takes its own timestamp out of play.
+  //  3. Exactly one stored row may sit on the timestamp. Two rows cannot both
+  //     have come from one decline and nothing here can say which did.
+  //  4. The row's own date must be near the message. A stale or reused
+  //     timestamp from another era is the only realistic collision, and this
+  //     rejects it outright; a week is far wider than the drift between an
+  //     alert's stated date and when the bank sent it.
+  //  5. If the row kept its source text, that text must itself read as a
+  //     decline. This is the guard that protects the class of row the ledger
+  //     migration was built around: two genuine purchases whose stored body
+  //     carries a masked figure (`THB ····9260.00`) the parser refuses on
+  //     purpose. They no longer parse, but they do not read as refusals, and
+  //     nothing may delete them.
+  //
+  // Plus the guards the sweep above uses: never a transfer, never a row the
+  // user has edited, never a split (its parts are their own rows), and never a
+  // row this device did not import from a message.
+  if (declined.length > 0) {
+    // Same derivation dedupe.ts uses: prefer the stored timestamp, fall back to
+    // the one inside `s{ts}-{amount}` for rows that predate the `ts` column.
+    const rowTs = (t: Transaction): number | undefined => {
+      if (Number.isFinite(t.ts)) return t.ts;
+      const m = t.smsKey?.match(/^s(\d+)-/);
+      return m ? Number(m[1]) : undefined;
+    };
+    const parsedTs = new Set<number>();
+    for (const p of parsed) if (p.smsTs !== undefined) parsedTs.add(p.smsTs);
+    const rowsByTs = new Map<number, Transaction[]>();
+    for (const t of state.transactions) {
+      const ts = rowTs(t);
+      if (ts === undefined) continue;
+      const bucket = rowsByTs.get(ts);
+      if (bucket) bucket.push(t);
+      else rowsByTs.set(ts, [t]);
+    }
+    const NEAR_MS = 7 * 86400000;
+    const swept = new Set<string>();
+    for (const d of declined) {
+      if (!Number.isFinite(d.smsTs) || parsedTs.has(d.smsTs)) continue;
+      const rows = rowsByTs.get(d.smsTs);
+      if (!rows || rows.length !== 1) continue;
+      const row = rows[0];
+      if (swept.has(row.id)) continue;
+      if (row.source !== 'sms') continue;
+      if (row.userEdited || row.isTransfer || row.splits) continue;
+      if (Math.abs(Date.parse(`${row.date}T12:00:00Z`) - d.smsTs) > NEAR_MS) continue;
+      if (row.raw !== undefined && !isDeclinedMessage(row.raw)) continue;
+      swept.add(row.id);
+      updates.push({ id: row.id, remove: true });
+    }
   }
 
   // A balance may have been noted while the card kind was still unknown and

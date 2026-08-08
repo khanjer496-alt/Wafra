@@ -32,7 +32,6 @@ import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   AppState,
   Linking,
   Platform,
@@ -45,6 +44,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, SectionHeader } from '@/components/ui/layout';
@@ -67,6 +67,7 @@ import {
   markRelayConfigured,
   markRelayVerified,
   pairDevice,
+  RelayError,
   syncRelay,
   unpairDevice,
   type RelayConfig,
@@ -94,6 +95,40 @@ type Recovery = 'settings' | 'shortcut' | null;
 const TEST_TIMEOUT_MS = 120_000;
 const POLL_MS = 2_500;
 
+/**
+ * A failed pairing, said in the user's language and as a next step.
+ *
+ * `RelayError.message` is written for whoever is reading the stack trace:
+ * "Pairing failed (503).", "Could not reach Wafra. Check your connection.",
+ * "Pairing returned an unexpected response." Rendering it verbatim put an
+ * English literal — and a status code — on the one screen the entire iPhone
+ * product depends on, in a build that ships in Arabic. Trusted devices solved
+ * this a file over by switching on `RelayError.code`; this is the same move,
+ * against the same translated keys, so the two screens cannot disagree about
+ * what a rate limit or a revoked device means.
+ *
+ * The detail line carries what to DO. The step's own "Connect this iPhone"
+ * button sits directly under this block and is the retry.
+ */
+function connectFailure(error: unknown): { message: string; detail: string | null } {
+  if (!(error instanceof RelayError)) return { message: t('iosConnectFailed'), detail: null };
+  switch (error.code) {
+    case 'rate_limited':
+      return { message: t('trustedTryLater'), detail: t('trustedTryLaterBody') };
+    case 'unauthorized':
+      return { message: t('trustedAccessEnded'), detail: t('trustedAccessEndedBody') };
+    case 'device_limit':
+      return { message: t('trustedLimitTitle'), detail: t('trustedLimitBody') };
+    default:
+      // A dead network and a relay 5xx are both "try again"; anything else is
+      // the relay refusing, which is not the user's connection but is still
+      // "nothing was changed here".
+      return error.retryable
+        ? { message: t('iosConnectFailed'), detail: t('trustedUnavailableBody') }
+        : { message: t('trustedUnavailableTitle'), detail: t('trustedUnavailableBody') };
+  }
+}
+
 export default function IosSetupScreen() {
   const theme = useTheme();
   const router = useRouter();
@@ -105,6 +140,7 @@ export default function IosSetupScreen() {
   const [pairing, setPairing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<Recovery>(null);
   // Most people should not have to tap eight banks before setup can begin.
   // Start with every supported UAE sender and let privacy-conscious users
@@ -113,6 +149,14 @@ export default function IosSetupScreen() {
     getActiveMarket().banks.map((bank) => bank.name),
   );
   const [copied, setCopied] = useState<string | null>(null);
+  /**
+   * Private mode has to come off before this screen can pair, and that is the
+   * user's call, not the wizard's. It was an `Alert.alert` with the whole
+   * turn-it-off-and-connect sequence inside a button's `onPress` — code the
+   * web export never draws and therefore never runs, so "Connect this iPhone"
+   * did nothing at all for anyone in private mode. Drawn as a sheet instead.
+   */
+  const [askPrivateMode, setAskPrivateMode] = useState(false);
 
   // Test step
   const [listening, setListening] = useState(false);
@@ -132,13 +176,15 @@ export default function IosSetupScreen() {
   /** The relay has answered at least once, so capture is live, not proposed. */
   const captureOn = cfg?.setupState === 'verified';
 
-  const fail = useCallback((message: string, how: Recovery = null) => {
+  const fail = useCallback((message: string, how: Recovery = null, detail: string | null = null) => {
     setError(message);
+    setErrorDetail(detail);
     setRecovery(how);
   }, []);
 
   const clearError = useCallback(() => {
     setError(null);
+    setErrorDetail(null);
     setRecovery(null);
   }, []);
 
@@ -227,7 +273,8 @@ export default function IosSetupScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
     } catch (e) {
-      fail(e instanceof Error ? e.message : t('iosConnectFailed'));
+      const failure = connectFailure(e);
+      fail(failure.message, null, failure.detail);
     } finally {
       setPairing(false);
     }
@@ -238,23 +285,20 @@ export default function IosSetupScreen() {
       void performConnect();
       return;
     }
-    Alert.alert(t('iosPrivateModeTitle'), t('iosPrivateModeBody'), [
-      { text: t('cancel'), style: 'cancel' },
-      {
-        text: t('iosTurnOffPrivateMode'),
-        onPress: () => {
-          void (async () => {
-            try {
-              await setPrivateMode(false);
-              await performConnect();
-            } catch {
-              fail(t('iosConnectFailed'));
-            }
-          })();
-        },
-      },
-    ]);
-  }, [fail, performConnect, setPrivateMode, state.privateMode]);
+    setAskPrivateMode(true);
+  }, [performConnect, state.privateMode]);
+
+  /** The other side of that question. Reached only from the sheet. */
+  const leavePrivateModeAndConnect = useCallback(() => {
+    void (async () => {
+      try {
+        await setPrivateMode(false);
+        await performConnect();
+      } catch {
+        fail(t('iosConnectFailed'));
+      }
+    })();
+  }, [fail, performConnect, setPrivateMode]);
 
   const finish = useCallback(() => {
     if (params.fromOnboarding === '1') {
@@ -488,9 +532,18 @@ export default function IosSetupScreen() {
     <View accessibilityLiveRegion="polite">
       <Block style={styles.note}>
         <Icon name="alert" size={16} color={theme.expense} />
-        <ThemedText type="meta" style={[styles.noteText, { color: theme.expense }]}>
-          {error}
-        </ThemedText>
+        <View style={styles.noteCopy}>
+          <ThemedText type="meta" style={[styles.noteLine, { color: theme.expense }]}>
+            {error}
+          </ThemedText>
+          {/* What went wrong, then what to do about it — the second line is
+              the only part a user can act on. */}
+          {errorDetail && (
+            <ThemedText type="meta" themeColor="textSecondary" style={styles.noteLine}>
+              {errorDetail}
+            </ThemedText>
+          )}
+        </View>
       </Block>
       {recovery === 'settings' && (
         <Button
@@ -861,6 +914,17 @@ export default function IosSetupScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
+
+      {askPrivateMode && (
+        <ConfirmSheet
+          visible
+          onClose={() => setAskPrivateMode(false)}
+          question={t('iosPrivateModeTitle')}
+          body={t('iosPrivateModeBody')}
+          confirmLabel={t('iosTurnOffPrivateMode')}
+          onConfirm={leavePrivateModeAndConnect}
+        />
+      )}
     </ThemedView>
   );
 }
@@ -913,6 +977,10 @@ const styles = StyleSheet.create({
     marginTop: Spacing.four,
   },
   noteText: { flex: 1, lineHeight: 18 },
+  // The error note carries two lines — what happened, and what to do — so its
+  // copy needs a column, not a single Text.
+  noteCopy: { flex: 1, gap: Spacing.half },
+  noteLine: { lineHeight: 18 },
   listening: { flexDirection: 'row', gap: Spacing.two, alignItems: 'center', marginTop: Spacing.four },
   caught: {
     flexDirection: 'row',

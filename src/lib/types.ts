@@ -207,6 +207,28 @@ export interface Bill {
   amountFils: number;
   /** Day of month the bill is due (1–31). */
   dueDay: number;
+  /**
+   * A bill that falls due ONCE A YEAR, on this date's month and day.
+   *
+   * Absent — which is every bill written before this field existed — means the
+   * ordinary thing: monthly, on `dueDay`. `dueDay` stays populated either way
+   * and always equals this date's day, so every reader that predates yearly
+   * bills still shows a defensible figure.
+   *
+   * One nullable field rather than a `cadence` enum plus a separate anchor,
+   * because two fields have an invalid combination — `cadence: 'yearly'` with
+   * no anchor — and there is no honest thing to do with such a record. A bill
+   * with no anniversary cannot be placed in a year, and one placed in every
+   * month is the defect this exists to fix: a yearly Amazon Prime charge of
+   * AED 310 was filed as a MONTHLY reminder at AED 310, twelve times the money,
+   * in the Reminders list and in every notification derived from it.
+   *
+   * Weekly is deliberately not representable. `paidMonths` is keyed by money
+   * month and `billsForMonth` returns one row per bill, so a bill that falls
+   * due four times a month has nowhere to live; the screens that create bills
+   * therefore do not offer to make one.
+   */
+  yearlyOnISO?: string;
   accountId?: string;
   /** True when created from a detected SMS/recurring pattern. */
   autoDetected?: boolean;

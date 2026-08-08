@@ -50,3 +50,8 @@ scripts/test/build/
 server/node_modules/
 server/.wrangler/
 server/.test-build/
+
+# Transient git worktrees created by parallel agent runs. The checkouts are
+# scratch space for a single run and are removed when it ends; the work itself
+# arrives as branches, never as files here.
+.claude/worktrees/

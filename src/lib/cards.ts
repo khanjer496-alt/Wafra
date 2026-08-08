@@ -132,12 +132,21 @@ export function mergeImportedCardDues(
     const prior = merged[at];
     const priorKnown = !prior.minDueEstimated;
     const nextKnown = !due.minDueEstimated;
+    // A figure the bank stated always beats one this app guessed. Between two
+    // figures the bank BOTH stated, the later one is its correction of the
+    // earlier — `existing` is walked before `incoming`, so `due` is the fresher
+    // reading. Math.max here meant a bank revising a minimum DOWN never landed,
+    // and `belowMinimum` went on accusing the user of underpaying against a
+    // figure the bank itself had superseded. Two guesses still take the larger:
+    // neither is evidence, and the larger one is the safer thing to show.
     const minimum =
       priorKnown && !nextKnown
         ? prior.minDueFils
         : !priorKnown && nextKnown
           ? due.minDueFils
-          : Math.max(prior.minDueFils, due.minDueFils);
+          : priorKnown && nextKnown
+            ? due.minDueFils
+            : Math.max(prior.minDueFils, due.minDueFils);
     const settledAt = [prior.settledAt, due.settledAt]
       .filter((value): value is string => Boolean(value))
       .sort()
@@ -205,6 +214,21 @@ function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>)
   return (
     t.isTransfer === true &&
     ids.has(t.accountId) &&
+    // Nothing in a group with no credit card in it can be a payment TOWARD a
+    // card, because there is no bill to pay. Without this, the income branch
+    // below read every incoming transfer to a current account as a settlement:
+    // a user's Liv DEBIT card •4822 showed "Payments made 360,054" — their
+    // salary, their deposits, and the inbound leg of their own outgoing
+    // telegraphic transfers — under a Statements section that said, honestly
+    // and forever, "no statement message has arrived for this card yet". A
+    // debit card does not issue statements, so that section could never
+    // resolve and the figure beside it could never be right.
+    //
+    // Deliberately keyed on the GROUP, not on `t.accountId`. One physical card
+    // can appear as both a debit and a credit row (see cardAccountIds), and a
+    // real settlement is often filed against the debit sibling — narrowing to
+    // `creditIds.has(t.accountId)` here would drop those.
+    creditIds.size > 0 &&
     (t.type === 'income' ||
       // Older builds stored card payments in the wrong direction. Keep
       // that compatibility path, but only for a row whose title says it
@@ -273,12 +297,150 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
   const sided = new Set(
     matched.filter((t) => t.cardPaymentSide !== undefined).map((t) => `${t.date}|${t.amountFils}`),
   );
-  const value = matched
-    .filter((t) => t.cardPaymentSide !== undefined || !sided.has(`${t.date}|${t.amountFils}`))
-    .slice()
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const value = collapseSettlementLegs(
+    matched.filter((t) => t.cardPaymentSide !== undefined || !sided.has(`${t.date}|${t.amountFils}`)),
+  );
   paymentsCache.byKey.set(key, value);
   return value;
+}
+
+/** Which half of a settlement a row is: the parser's answer, or its origin. */
+type SettlementLeg = 'debit' | 'receipt' | 'manual' | 'unsided';
+
+function settlementLeg(t: Transaction): SettlementLeg {
+  if (t.cardPaymentSide) return t.cardPaymentSide;
+  return t.source === 'manual' ? 'manual' : 'unsided';
+}
+
+interface OpenSettlement {
+  row: Transaction;
+  leg: SettlementLeg;
+  /** Legs already folded in. One movement has one of each, never two. */
+  absorbed: Set<SettlementLeg>;
+}
+
+/**
+ * One movement, two rows, and the clock is the only thing keeping them apart.
+ *
+ * The rule above collapses a compat row against a sided one on the same day.
+ * Two rows carrying OPPOSITE sides are the same shape of error and were not
+ * caught by it at all, because both are sided. `dedupe.ts` is supposed to pair
+ * them at import, but it insists the two captures be within 30 minutes of each
+ * other, and the two legs of one card payment are not reliably that close:
+ *
+ *   'AED 1,000.00 has been debited from your account XXX0004 towards the
+ *    payment of your Credit Card 1234.'                  15:00, side=debit
+ *   'Payment of AED 1,000.00 received towards your Credit Card ending 1234.'
+ *                                            next morning 08:00, side=receipt
+ *
+ * At a 29-minute gap that imported as ONE payment; at 31 minutes it imported
+ * as two, and the second AED 1,000 poured into the following month's AED 800
+ * statement and marked it settled. The user is shown a card that owes nothing
+ * and gets no reminder for a bill they still owe — from nothing but how long
+ * the bank took to send its second SMS.
+ *
+ * A manual "Mark paid" row is the same story told from the other end. It is by
+ * construction a claim about a payment the bank is about to confirm, and it is
+ * stamped with the device's today while the bank's receipt carries the
+ * provider's date — so the two disagree by a day roughly whenever the payment
+ * is made in the evening. dedupe.ts matches a manual row on its exact date
+ * only, so that one-day skew imports the bank's confirmation as a second
+ * payment of the same money.
+ *
+ * Both are handled here as well as at import, because a ledger that already
+ * holds the phantom row cannot heal itself: the second leg is a legitimately
+ * distinct SMS, so no rescan will ever decline to import it, and reading the
+ * pair correctly is the only thing that puts the balance back.
+ *
+ * Each settlement absorbs each leg at most once, so two genuine payments that
+ * both arrive in two legs stay two payments. The residual error — two
+ * same-amount payments a few days apart that EACH lost a leg, folded into one
+ * — is the direction this file already prefers: a payment dropped leaves a
+ * balance the user can clear with Mark paid, while a payment counted twice
+ * quietly settles a bill they still owe.
+ *
+ * THE WINDOW IS NOT ONE NUMBER, because the two cases are not one case.
+ *
+ * Two bank alerts are two OBSERVATIONS of a movement the bank is timestamping
+ * itself, so they land within hours of each other and ±1 day is already
+ * generous. Widening that would start folding genuine repeat payments — a
+ * standing instruction that pays the same amount on consecutive days is a real
+ * shape — so it stays at 1.
+ *
+ * A manual "Mark paid" row is not an observation at all. It is the user's
+ * ASSERTION that this statement has been paid, stamped with the device's today,
+ * and the bank's confirmation of the same money can be days away: a payment
+ * initiated on a Thursday evening settles and texts on Sunday, and a user who
+ * taps Mark paid when the reminder fires may be a day either side of the
+ * transfer. At ±1 day the pair imported as two payments of the same money and
+ * the surplus poured into the NEXT month's statement and settled it — the
+ * repro is a July statement of 1,000 marked paid on the 10th, the bank's
+ * receipt landing on the 12th, and August's 800 reading as nothing owed.
+ *
+ * So a manual claim absorbs a matching bank leg over ±7 days. It is still
+ * matched on amount and card — the bucket is keyed by `amountFils` and
+ * `cardPaymentsOf` has already narrowed to this card's account ids — which is
+ * every axis available here; the parser captures no statement date, so
+ * matching by statement is not on the table.
+ */
+/** Two bank alerts describing one movement. Deliberately tight — see above. */
+const OBSERVED_COLLAPSE_DAYS = 1;
+/** A manual claim and the bank's confirmation of it. */
+const ASSERTED_COLLAPSE_DAYS = 7;
+
+function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
+  const ordered = rows
+    .slice()
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
+    );
+  // Bucketed by amount so a card with hundreds of same-size payments does not
+  // turn this into a quadratic walk on the render path.
+  const open = new Map<number, OpenSettlement[]>();
+  const kept: Transaction[] = [];
+
+  for (const row of ordered) {
+    const leg = settlementLeg(row);
+    // 'unsided' is a compat row the same-day rule above already had its say
+    // about; nothing else may fold it in on a guess.
+    if (leg === 'unsided') {
+      kept.push(row);
+      continue;
+    }
+    // Pruned at the WIDER window; `fits` applies the right one per pair, so an
+    // SMS-vs-SMS pair six days apart is still two payments.
+    const bucket = (open.get(row.amountFils) ?? []).filter(
+      (s) => s.row.date >= shiftISO(row.date, -ASSERTED_COLLAPSE_DAYS),
+    );
+    const fits = (s: OpenSettlement) => {
+      if (s.leg === leg || s.leg === 'unsided' || s.absorbed.has(leg)) return false;
+      // A manual claim explains bank alerts; two bank alerts explain each
+      // other. Two manual rows are two deliberate taps, not one movement.
+      if (s.leg === 'manual' && leg === 'manual') return false;
+      const span = s.leg === 'manual' || leg === 'manual'
+        ? ASSERTED_COLLAPSE_DAYS
+        : OBSERVED_COLLAPSE_DAYS;
+      return s.row.date >= shiftISO(row.date, -span);
+    };
+    const fitting = bucket.filter(fits);
+    const partner =
+      fitting.find((s) => s.row.date === row.date) ??
+      // Nearest in time, not oldest. Rows are walked in date order, so the last
+      // fitting entry is the closest one — and with a seven-day window a bucket
+      // can hold more than the two candidates the ±1 day rule ever saw.
+      fitting.at(-1);
+    if (partner) {
+      partner.absorbed.add(leg);
+      open.set(row.amountFils, bucket);
+      continue;
+    }
+    bucket.push({ row, leg, absorbed: new Set() });
+    open.set(row.amountFils, bucket);
+    kept.push(row);
+  }
+
+  return kept;
 }
 
 /** A card's statements: one per due date, however many rows describe each. */
@@ -291,6 +453,14 @@ interface Statement {
   /** Date part of settledAt, when the user marked this statement paid. */
   settledOn: string | null;
   dueIds: string[];
+  /** The payment rows any part of which was credited to this statement. */
+  rows: Transaction[];
+}
+
+/** What allocation concluded about one statement. */
+interface Allocation {
+  paidFils: number;
+  payments: Transaction[];
 }
 
 /**
@@ -330,7 +500,7 @@ function allocatePayments(
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
-): Map<string, number> {
+): Map<string, Allocation> {
   const ids = cardAccountIds(state, accountId);
   const known = state.cardDues.filter((d) => ids.has(d.accountId));
   const dues = target && !known.some((d) => d.id === target.id) ? [...known, target] : known;
@@ -346,6 +516,7 @@ function allocatePayments(
         paidFils: d.paidFils,
         settledOn,
         dueIds: [d.id],
+        rows: [],
       });
       continue;
     }
@@ -374,12 +545,15 @@ function allocatePayments(
       if (until && payment.date > until) continue;
       const take = Math.min(outstanding, left);
       s.paidFils += take;
+      s.rows.push(payment);
       left -= take;
     }
   }
 
-  const allocated = new Map<string, number>();
-  for (const s of statements) for (const id of s.dueIds) allocated.set(id, s.paidFils);
+  const allocated = new Map<string, Allocation>();
+  for (const s of statements) {
+    for (const id of s.dueIds) allocated.set(id, { paidFils: s.paidFils, payments: s.rows });
+  }
   return allocated;
 }
 
@@ -389,7 +563,29 @@ function allocatePayments(
  * already remapped every ledger reference onto that one account id.
  */
 export function duePaidFils(state: AppState, due: CardDue): number {
-  return allocatePayments(state, due.accountId, due).get(due.id) ?? due.paidFils;
+  return allocatePayments(state, due.accountId, due).get(due.id)?.paidFils ?? due.paidFils;
+}
+
+/**
+ * The payment rows credited to THIS statement, newest first.
+ *
+ * "3 payments matched" is a claim about one statement, and the card sheet used
+ * to answer it with its own filter: every income-side transfer ever made to the
+ * account, lifetime-wide, with no statement and no date in it. On a card paid
+ * monthly for six months that read "6 payments matched" beside a statement one
+ * payment had settled. It also disagreed with the allocation in three
+ * directions at once — it missed the compat expense-side rows `isCardPayment`
+ * deliberately still credits, it counted both halves of a settlement that
+ * `collapseSettlementLegs` folds into one, and it counted payments the
+ * allocator had already spent on an earlier statement.
+ *
+ * One rule, one answer: these are exactly the rows `duePaidFils` poured into
+ * this statement. A payment that spilled across two statements appears against
+ * both, because it really did pay into both.
+ */
+export function duePayments(state: AppState, due: CardDue): Transaction[] {
+  const rows = allocatePayments(state, due.accountId, due).get(due.id)?.payments ?? [];
+  return rows.slice().sort((a, b) => b.date.localeCompare(a.date));
 }
 
 function shiftISO(iso: string, days: number): string {
@@ -576,6 +772,17 @@ export interface CardStatementView {
   open: CardDue[];
   outstandingFils: number;
   billedFils: number;
+  /**
+   * Whether this card can have a bill at all.
+   *
+   * False for a debit-only card, and then `statements` and `payments` are both
+   * empty BY DEFINITION rather than by accident — which is a different thing
+   * from "none have arrived yet", and the screen has to be able to tell them
+   * apart. It could not: a debit card showed an empty Statements list under
+   * "no statement message has arrived for this card YET", a sentence that
+   * promises one is coming when none ever can.
+   */
+  billable: boolean;
 }
 
 export function cardStatementView(state: AppState, accountId: string): CardStatementView {
@@ -593,6 +800,10 @@ export function cardStatementView(state: AppState, accountId: string): CardState
   // the payment that settled it was invisible in this very list.
   const ids = cardAccountIds(state, accountId);
   const payments = cardPaymentsOf(state, ids).sort((a, b) => b.date.localeCompare(a.date));
+  // The group, not the one row the sheet was opened on: one physical card can
+  // appear as both a debit and a credit row, and opening the debit one must
+  // not hide the bill the credit one carries.
+  const billable = state.accounts.some((a) => ids.has(a.id) && a.cardType === 'credit');
 
   const paidByDueId = new Map(statements.map((d) => [d.id, duePaidFils(state, d)] as const));
 
@@ -618,6 +829,7 @@ export function cardStatementView(state: AppState, accountId: string): CardState
     paidTotalFils: payments.reduce((s, t) => s + t.amountFils, 0),
     paidByDueId,
     open,
+    billable,
     outstandingFils: open.reduce(
       (s, d) => s + Math.max(0, d.totalDueFils - (paidByDueId.get(d.id) ?? 0)),
       0,

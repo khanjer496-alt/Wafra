@@ -338,6 +338,109 @@ const hits = parsed.filter((x) => x.p);
     ignored.slice(0, 3).join(' | '));
 }
 
+/* ── An own-account move stays one movement when an account is hidden ── */
+
+/**
+ * The same "must be true of all of it" idea, applied one layer up: whatever a
+ * transaction IS cannot depend on whether the user has hidden the account it
+ * sits on. Hiding is a display decision made months later; the money moved
+ * when it moved.
+ *
+ * `internalTransferIds` broke that. It required BOTH legs to sit on an account
+ * in the set it was handed, and every caller hands it `liveAccountIds(...)` —
+ * so retiring an account (move the balance to the new one, then long-press ->
+ * "Hide from lists", the ordinary way anyone closes an account) deleted the
+ * leaving leg from the set's point of view and left the arriving leg unpaired.
+ * That leg is worded by the bank exactly like being paid and carries no
+ * transfer flag, so nothing downstream could tell it from a salary.
+ *
+ * The titles below are what the parser actually emits for the two halves of a
+ * FAB/ADCB own-account transfer, which is why the structural-title match in
+ * ledger.ts recognises them.
+ */
+{
+  const ledger = require('./build/ledger');
+  const ins = require('./build/insights');
+  const analytics = require('./build/analytics');
+
+  const accountsWith = (archived) => [
+    { id: 'old', name: 'ADCB 0002', kind: 'bank', openingFils: 0, color: '#000', archived },
+    { id: 'nw', name: 'ADCB 0004', kind: 'bank', openingFils: 0, color: '#000' },
+  ];
+  const transactions = [
+    { id: 'out', type: 'expense', amountFils: 1900000, category: 'other', accountId: 'old',
+      title: 'Outgoing transfer', date: '2026-06-10', source: 'sms', isTransfer: true },
+    { id: 'in', type: 'income', amountFils: 1900000, category: 'business', accountId: 'nw',
+      title: 'Incoming transfer', date: '2026-06-10', source: 'sms' },
+    { id: 'pay', type: 'income', amountFils: 2500000, category: 'salary', accountId: 'nw',
+      title: 'Salary', date: '2026-06-25', source: 'sms' },
+    { id: 'b1', type: 'expense', amountFils: 20000, category: 'groceries', accountId: 'nw',
+      title: 'Carrefour', date: '2026-06-12', source: 'sms' },
+  ];
+
+  const read = (archived) => {
+    const accounts = accountsWith(archived);
+    const live = ledger.liveAccountIds(accounts);
+    const internal = ledger.internalTransferIds(transactions, live);
+    return {
+      internal,
+      summary: ins.summarizeMonth(transactions, { mode: 'month', key: '2026-06' }, live, internal),
+      series: analytics.netWorthSeries({ accounts, transactions }, 1),
+    };
+  };
+
+  const shown = read(false);
+  const hidden = read(true);
+
+  ok('transfer: both legs pair while the source account is shown',
+    shown.internal.size === 2 && shown.internal.has('out') && shown.internal.has('in'),
+    [...shown.internal].join(','));
+  ok('transfer: both legs still pair once the source account is hidden',
+    hidden.internal.size === 2 && hidden.internal.has('out') && hidden.internal.has('in'),
+    [...hidden.internal].join(','));
+
+  ok('transfer: In is the salary alone while the source account is shown',
+    shown.summary.incomeFils === 2500000, String(shown.summary.incomeFils));
+  ok('transfer: hiding the source account does not turn the arrival into income',
+    hidden.summary.incomeFils === 2500000, String(hidden.summary.incomeFils));
+
+  // The account being retired has already been emptied, so hiding it is
+  // arithmetically a no-op: net worth must read the same on both sides of the
+  // toggle. It did not — 24,485 became 43,800, the transfer counted as
+  // arriving money — and netWorthSeries builds its own paired set, so it needs
+  // asserting separately from the headline.
+  ok('transfer: hiding an emptied account does not move the net-worth series',
+    hidden.series[0].fils === shown.series[0].fils && shown.series[0].fils === 2480000,
+    `${shown.series[0].fils} -> ${hidden.series[0].fils}`);
+
+  // Passing the accounts themselves is the shape that cannot be narrowed by
+  // mistake, and must agree with the widened legacy Set.
+  const byAccounts = ledger.internalTransferIds(transactions, accountsWith(true));
+  ok('transfer: Account[] and the legacy Set of ids agree',
+    byAccounts.size === hidden.internal.size && [...byAccounts].every((id) => hidden.internal.has(id)),
+    [...byAccounts].join(','));
+
+  // Widening must not widen the MATCH. Two accounts are still required, and a
+  // real arrival of the same value on the same day is still real.
+  const decoy = [
+    { id: 'd-out', type: 'expense', amountFils: 500000, category: 'other', accountId: 'old',
+      title: 'Outgoing transfer', date: '2026-06-15', source: 'sms', isTransfer: true },
+    { id: 'd-pay', type: 'income', amountFils: 500000, category: 'salary', accountId: 'nw',
+      title: 'Salary', date: '2026-06-15', source: 'sms' },
+  ];
+  ok('transfer: widening the account set does not let a salary be eaten as an arriving leg',
+    ledger.internalTransferIds(decoy, accountsWith(true)).size === 0);
+
+  const selfPair = [
+    { id: 's-out', type: 'expense', amountFils: 500000, category: 'other', accountId: 'old',
+      title: 'Outgoing transfer', date: '2026-06-15', source: 'sms', isTransfer: true },
+    { id: 's-in', type: 'income', amountFils: 500000, category: 'business', accountId: 'old',
+      title: 'Incoming transfer', date: '2026-06-15', source: 'sms' },
+  ];
+  ok('transfer: one account still cannot transfer to itself',
+    ledger.internalTransferIds(selfPair, accountsWith(true)).size === 0);
+}
+
 /* ── Coverage, reported rather than asserted ─────────────────────────── */
 
 {

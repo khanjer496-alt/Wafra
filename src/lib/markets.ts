@@ -15,6 +15,17 @@ export interface BankDef {
   color: string;
   /** Bank website, used to fetch its logo (favicon) at runtime. */
   domain?: string;
+  /**
+   * The bank that actually issues this brand's cards, when the brand is a
+   * digital sub-brand rather than a licence of its own. Liv is Emirates NBD's
+   * app; a Liv card and an ENBD card with the same last four digits are one
+   * piece of plastic, filed twice because two sender IDs describe it.
+   *
+   * This is NOT a display alias — the brands stay distinct everywhere the user
+   * can see them. It only says whose card it is when deciding whether two rows
+   * are the same card.
+   */
+  issuer?: string;
 }
 
 export interface MarketPack {
@@ -98,6 +109,72 @@ const ARABIC_KEYWORDS: [RegExp, CategoryId][] = [
   [/دو\b|اتصالات\s*الامارات|موبايلي|زين|اس\s*تي\s*سي/, 'telecom'],
 ];
 
+/**
+ * Merchants that belong to no single market pack.
+ *
+ * A UAE card is used abroad, and the acquirer's descriptor is the same string
+ * whichever country the CARD was issued in. Nothing here is UAE- or Saudi-
+ * specific, so it is shared by every pack the way ARABIC_KEYWORDS is, rather
+ * than copied into each.
+ *
+ * THE BAR FOR AN ENTRY IS THAT THE NAME SAYS WHAT WAS BOUGHT. A store code, a
+ * processor prefix and a person's name all say nothing, and `other` is the
+ * honest answer for those — see the report in the commit that added this list
+ * for the ones deliberately left alone (2C2P, FAT*THE VIOLE, SP ALL-CHARMS,
+ * MARFAA, CRO, TUBA INT...). Every rule below fires on a real message from the
+ * accuracy corpus; none was written against an invented descriptor.
+ *
+ * These are consulted BEFORE the parser's own global vocabulary, so a rule here
+ * can take a category AWAY from a better answer. That is why each one is
+ * anchored on a whole brand token and never on a bare English word: `CENTRAL`,
+ * `TOPS` and `SPA` all appear in this corpus and none of them is safe alone.
+ */
+const CROSS_BORDER_KEYWORDS: [RegExp, CategoryId][] = [
+  // McDonald's own acquirer descriptor is "MCD-<store number> <location>", so
+  // the brand never appears in full: "MCD-0297 PHUKET AIRPO PHUKET THA". The
+  // digit after the hyphen is what makes this a store code and not a word.
+  [/\bmcd-\s?\d/i, 'dining'],
+  // Central Group's Thai malls and department stores, e.g. "PZD131 CENTRAL
+  // PHUKET". "Central" alone is in half the street addresses on earth — and in
+  // "central bank" — so the brand only counts with one of its own mall names
+  // behind it. CentralPlaza is deliberately absent: the global vocabulary
+  // already files any `plaza` as shopping, so it needs nothing from here.
+  [/\bcentral\s*(?:phuket|festival|pattaya|embassy|chidlom|ladprao|world)\b|\bcentralworld\b/i, 'shopping'],
+  // Thailand's beauty-and-wellness booking platform, which arrives behind Opn's
+  // processor prefix as "OPN*gowabi.com".
+  [/\bgowabi\b/i, 'personal-care'],
+  // A ticketed spectator sport: "PATONG BOXING STADIUM". `\bstadium\b` alone
+  // was rejected — Dubai has a metro station called Stadium, and that is
+  // transport.
+  [/\bmuay\s?thai\b|\bboxing\s+stadium\b/i, 'entertainment'],
+  // "PHUKET KART SPEED". A bare `\bkart\b` is one letter from `mart` and `cart`
+  // in a field that is routinely truncated, so it carries either the go- prefix,
+  // the -ing ending, or a track noun.
+  [/\bgo-?karts?\b|\bkarting\b|\bkarts?\s+(?:speed|racing|track|circuit)\b/i, 'entertainment'],
+  // The Ancient City outside Bangkok — an open-air museum. The global
+  // vocabulary already reads the word `museum`; this landmark does not contain
+  // it.
+  [/\bmuang\s?boran\b/i, 'entertainment'],
+  // A travel document bought for a trip: "E-VISA VIET NAM HA NOI VNM". The
+  // hyphen-or-nothing spelling is load-bearing — a bare `visa` is the card
+  // network, and every second card alert names it.
+  [/\be-?visas?\b/i, 'travel'],
+  // Bangkok's older international airport, as "CF-1024 DON MUANG BANGKOK THA".
+  // Kept as a place name rather than a generic `airport` rule, which would
+  // outrank the MCD- line above and file an airport McDonald's as travel.
+  [/\bdon\s?muang\b/i, 'travel'],
+  // Zain is the telecom across Jordan, Kuwait, Bahrain, Iraq and Sudan; the
+  // Saudi pack already knows it. It is ALSO a common given name ("Zain Ali
+  // Trading"), and `telecom` unlocks the relaxed bill path in subscriptions.ts
+  // — a misfire here does not mislabel one row, it mints a monthly bill. So the
+  // brand only counts in front of one of its own products or markets, which is
+  // what the real descriptor carries: "ZAIN WEBSITE AND SELFC, AMMAN".
+  [/\bzain\s+(?:website|self-?care|self-?c\b|telecom|mobile|cash|prepaid|jordan|kuwait|bahrain|jo\b|kw\b|bh\b|iq\b)/i, 'telecom'],
+  // "WASSAGY EBOOKS ...". The global vocabulary reads `bookshop` and
+  // `book store`; this is the same claim about the same goods.
+  [/\be-?books?\b/i, 'shopping'],
+];
+
 const AE: MarketPack = {
   id: 'AE',
   name: 'United Arab Emirates',
@@ -124,11 +201,14 @@ const AE: MarketPack = {
     { re: /\bsib\b|sharjah\s*islamic/i, name: 'Sharjah Islamic', color: '#006B54', domain: 'sib.ae' },
     { re: /\bnbf\b/i, name: 'NBF', color: '#5C6670', domain: 'nbf.ae' },
     { re: /\bwio\b/i, name: 'Wio', color: '#C4F04A', domain: 'wio.io' },
-    { re: /\bliv\b/i, name: 'Liv', color: '#00D3B9', domain: 'liv.me' },
+    { re: /\bliv\b/i, name: 'Liv', color: '#00D3B9', domain: 'liv.me', issuer: 'Emirates NBD' },
     { re: /\bajman\s*bank/i, name: 'Ajman Bank', color: '#00747A', domain: 'ajmanbank.ae' },
     { re: /\bcbi\b/i, name: 'CBI', color: '#7A2048', domain: 'cbi.ae' },
   ],
-  keywords: ARABIC_KEYWORDS, // the UAE vocabulary is the current global baseline
+  // The UAE vocabulary is the current global baseline. Arabic runs first
+  // because it is the older, better-tested list; the cross-border chains run
+  // after it and before the parser's own global table.
+  keywords: [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS],
 };
 
 const SA: MarketPack = {
@@ -158,6 +238,7 @@ const SA: MarketPack = {
     [/petromin|sasco|aldrees|naft/i, 'transport'],
     [/\bsadad\b/i, 'utilities'],
     ...ARABIC_KEYWORDS,
+    ...CROSS_BORDER_KEYWORDS,
   ],
 };
 
@@ -165,12 +246,86 @@ export const MARKETS: MarketPack[] = [AE, SA];
 
 let active: MarketPack = AE;
 
+/**
+ * ISO 4217 code the STORED `amountFils` are denominated in, or null while the
+ * ledger holds no money.
+ *
+ * `marketId` used to answer two different questions at once: which bank and
+ * merchant vocabulary the parser matches senders against, and what currency
+ * the stored fils ARE. Only the first is a preference. The second is a fact
+ * about money already recorded, and swapping the pack quietly rewrote it —
+ * one USD 100.00 charge stored as 36730 fils printed "AED 367" before a
+ * country change and "SAR 367" after it, same untouched row, nothing
+ * converted. On the Foreign spending screen that figure sits under a heading
+ * that literally reads "Converted total".
+ *
+ * CONVERTING INSTEAD IS THE TRAP. The stored fils are all the app has: there
+ * is no per-row rate into the new currency, a historical row's true rate on
+ * its own day is not knowable offline, and a conversion pass would silently
+ * rewrite every figure the user ever recorded — with no undo, and with the
+ * parser, the bank-quoted `fxRate` fields and every hand-entered amount all
+ * left describing the old currency. A wrong number is worse than an honest
+ * label.
+ *
+ * So the accounting currency is pinned BY THE LEDGER: once money is recorded,
+ * only a pack denominated in the same currency may become active. Nothing new
+ * is persisted for this — `marketId` is still the record, it simply can no
+ * longer drift once there is money that would be relabelled by the drift. The
+ * store re-derives this from state on every reduction, so erasing the ledger
+ * (or restoring a different one) releases the pin on the same tick.
+ *
+ * The pin lives here rather than in the country picker so it holds for every
+ * caller — Settings, onboarding, a restored backup, the Worker.
+ */
+let ledgerCurrency: string | null = null;
+
 export function getActiveMarket(): MarketPack {
   return active;
 }
 
-export function setActiveMarket(id: string): void {
+/**
+ * Pin the accounting currency to `code`, or release it with `null` when the
+ * ledger holds no money. Anything that is not a three-letter code releases.
+ */
+export function setLedgerCurrency(code: string | null): void {
+  const wanted = code?.trim().toUpperCase();
+  ledgerCurrency = wanted && /^[A-Z]{3}$/.test(wanted) ? wanted : null;
+}
+
+/** ISO 4217 code pack `id` denominates in — what a ledger recorded under it is. */
+export function marketCurrencyCode(id: string): string {
+  return (MARKETS.find((m) => m.id === id) ?? AE).currency.code;
+}
+
+/** ISO 4217 code the stored fils are denominated in. */
+export function ledgerCurrencyCode(): string {
+  return ledgerCurrency ?? active.currency.code;
+}
+
+/** How that currency renders in front of an amount: the "AED" in "AED 1,234". */
+export function ledgerCurrencyDisplay(): string {
+  if (!ledgerCurrency) return active.currency.display;
+  return (
+    MARKETS.find((m) => m.currency.code === ledgerCurrency)?.currency.display ?? ledgerCurrency
+  );
+}
+
+/** Whether pack `id` can be selected without relabelling money already stored. */
+export function canSelectMarket(id: string): boolean {
+  if (!ledgerCurrency) return true;
+  return (MARKETS.find((m) => m.id === id) ?? AE).currency.code === ledgerCurrency;
+}
+
+/**
+ * Select a market pack. Returns false — and changes NOTHING, not even the
+ * bank registry — when the pack is denominated differently from money the
+ * ledger already holds. See `ledgerCurrency` above for why the answer is a
+ * refusal rather than a conversion.
+ */
+export function setActiveMarket(id: string): boolean {
+  if (!canSelectMarket(id)) return false;
   active = MARKETS.find((m) => m.id === id) ?? AE;
+  return true;
 }
 
 /** Best-effort country from the device locale ("en-SA" → SA). */
@@ -194,6 +349,63 @@ export function bankFromSender(
     if (b.re.test(sender)) return { name: b.name, color: b.color, domain: b.domain };
   }
   return null;
+}
+
+/**
+ * The bank a message NAMES, as opposed to the one its sender ID implies.
+ *
+ * Sender was the only source of bank identity, which is fine until two real
+ * cards share their last four digits at different banks — one user holds a Liv
+ * card and an Emirates NBD card both ending 8575, and every alert had to be
+ * attributed by sender alone, so statements and payments landed on whichever
+ * card the sender happened to name.
+ *
+ * Deliberately narrow: only a bank name sitting immediately before a card noun
+ * counts, as in "Emirates NBD Credit Card Mini Stmt for Card ending 8575".
+ * A bank named anywhere in the body would be worse than useless — banks put
+ * their own name in promo footers ("download the new FAB mobile banking app"),
+ * and co-branded cards name a partner that is not the issuer.
+ */
+export function bankFromMessage(
+  text: string | undefined,
+): { name: string; color: string; domain?: string } | null {
+  if (!text) return null;
+  for (const b of active.banks) {
+    const re = new RegExp(`(?:${b.re.source})[^\\n]{0,16}?\\b(?:credit|debit|cr\\.?)\\s*card\\b`, 'i');
+    if (re.test(text)) return { name: b.name, color: b.color, domain: b.domain };
+  }
+  return null;
+}
+
+/** The active market's entry for a bank name, in bankFromSender's shape. */
+export function bankFromName(
+  name: string | undefined,
+): { name: string; color: string; domain?: string } | null {
+  if (!name) return null;
+  for (const b of active.banks) {
+    if (b.name === name) return { name: b.name, color: b.color, domain: b.domain };
+  }
+  return null;
+}
+
+/**
+ * The identity of whoever ISSUED this bank's cards — the sub-brand's parent
+ * when it has one, otherwise the bank itself.
+ *
+ * Use this to decide whether two card rows are the same card. Use
+ * bankIdentityForName for anything the user reads: Liv and Emirates NBD are
+ * different products and are still shown as such.
+ */
+export function issuerIdentityForName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  for (const m of MARKETS) {
+    for (const b of m.banks) {
+      if (b.name.toLowerCase() === name.toLowerCase() || b.re.test(name)) {
+        return bankIdentityForName(b.issuer ?? b.name);
+      }
+    }
+  }
+  return bankIdentityForName(name);
 }
 
 /** Brand identity for a bank NAME shown in the UI (any market's pack). */

@@ -1,4 +1,4 @@
-import { bankFromSender, getActiveMarket } from '@/lib/markets';
+import { bankFromMessage, bankFromSender, getActiveMarket } from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -148,8 +148,21 @@ export interface ParsedCard {
  * against a dining budget for a software subscription. Correcting the rule
  * reaches those rows only through healPatch's new deliberate-category branch,
  * which needs this re-read to run.
+ *
+ * 15: Three parser changes landed on 14 without bumping it, which meant none
+ * of them could reach a row already in the ledger. That is the whole point of
+ * this number, so the miss is worth naming:
+ *   - the e&/Etisalat bill receipt no longer writes the BILLER's figures onto
+ *     the user's own account. Untouched, a stored row keeps a snapshot that
+ *     set one user's debit card balance to AED 0.00 and reported AED 681.45
+ *     owed on a card holding no debt;
+ *   - MCD-<store code>, CENTRAL <mall>, Gowabi, Muang Boran, Don Muang,
+ *     e-visa and Zain now have categories, and an existing row reaches them
+ *     only through healPatch's deliberate-category branch, which needs this;
+ *   - declined messages are recognised by an exported predicate the hydrate
+ *     migration uses.
  */
-export const PARSER_VERSION = 14;
+export const PARSER_VERSION = 15;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -202,6 +215,12 @@ export interface ParsedSms {
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
   /** Balance / available-limit / outstanding figure the bank quoted, if any. */
+  /**
+   * The bank this message NAMES, when it names one before a card noun. Stronger
+   * evidence than the sender ID, and the only thing that can tell two real
+   * cards apart when they share their last four digits at different banks.
+   */
+  bankHint?: string;
   snapshotFils: number | null;
   snapshotKind: SnapshotKind | null;
   categoryGuess: CategoryId;
@@ -340,8 +359,22 @@ export interface ParseOptions {
  */
 const AR_CREDIT_WORDS =
   'ايداع|اودع|قيد داين|راتب|مرتب|رواتب|استرداد|استرجاع|مسترد|اضيف|اضافه مبلغ|حواله وارده|تحويل وارد';
+// The BARE NOUN "credit" is stated positively rather than fenced off with a
+// list of the nouns it must not precede. That list — card|limit|line|score|
+// facility — was a list of the collisions someone had already been bitten by,
+// and the next one is always a trade name: EMIRATES CREDIT UNION and CREDIT
+// SUISSE both made `hasCredit` true, and on a terse field-list alert with no
+// direction clause at all that is the whole decision. A AED 450 purchase came
+// back as AED 450 of INCOME titled "Incoming transfer" — the spend gone,
+// revenue in its place, and the shop's name thrown away so the row can never
+// be recognised or overridden.
+//
+// So a bare "credit" now has to be doing a MONEY job: credit OF, credit TO,
+// credit advice, credit AED. The verb "credited" is unchanged and still counts
+// on its own, which is how every real credit alert in this corpus states it.
 const CREDIT_WORDS = new RegExp(
-  `credit(?:ed)?(?!\\s*(?:card|limit|line|score|facility))|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your|${AR_CREDIT_WORDS}`,
+  `credited|\\bcredit(?=\\s+(?:of|to|for|amount|advice|note|entry|txn|transaction|aed|dhs|sar)\\b)` +
+    `|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your|${AR_CREDIT_WORDS}`,
   'i',
 );
 /**
@@ -844,8 +877,78 @@ const DECLINED_RE =
  */
 const REVERSAL_RE =
   /\brevers(?:ed|al)\b|charge-?\s?backs?\b|credited back|re-?credited|returned to your (?:card|account)/i;
+/**
+ * A REFUND, recognised by the noun as well as by one verb phrase.
+ *
+ * This used to be the single literal `refunded to your (?:card|account)`, and
+ * the phrasing every UAE issuer actually sends — "Refund of AED 150.00 has
+ * been PROCESSED to your Debit Card ending 4502" — walked straight past it.
+ * That mattered far more than a missing label, because direction then fell
+ * through to the word lists, and DEBIT_WORDS contains a bare `debit(?:ed)?`
+ * which the PRODUCT NAME "Debit Card" satisfies on its own. So the identical
+ * sentence came back `income` on a credit card and `expense` on a debit card:
+ * a AED 150 refund recorded as AED 150 of NEW spending, carrying the original
+ * merchant's category. A 2x error on the commonest card in the corpus, and
+ * invisible — every other field on the row is right.
+ *
+ * Three shapes, all of them observed:
+ *   noun + destination  — "Refund of AED 150.00 ... processed/posted to your ..."
+ *   passive verb        — "Your purchase of AED 300.00 at CARREFOUR ... has been refunded."
+ *   multi-line header   — a line that reads exactly "Debit Card Refund"
+ *
+ * The gap clause is `(?:[^.\n]|\.\d)` rather than `[^.\n]`, because the amount
+ * sits inside it and "150.00" would otherwise end the window at the decimal
+ * point. The header alternative is deliberately anchored to a WHOLE line and
+ * to the card-kind prefix banks actually print: a looser "any line containing
+ * refund" would let a marketing line ("Get a refund on your first order") flip
+ * a real purchase to income, which is this bug pointed the other way.
+ */
+const REFUND_RE =
+  /\brefund(?:ed)?\b(?:[^.\n]|\.\d){0,40}?\b(?:to|into|onto|posted|processed|credited)\b|\b(?:has|have|had|been)\s+(?:been\s+)?refunded\b|^(?:(?:credit|debit|covered|prepaid|charge)\s+card\s+)?refund\b[ .\r]*$/im;
 const PROMO_RE =
   /cashback|voucher|promo|discount|t&cs?\b|terms apply|conditions apply|shop now|hurry|limited time|congratulations|you (?:could|can) win|opt-?out|\bdnd\d*\b|bit\.ly|wa\.me|tinyurl|payment plan|bonus|rewards? (?:on|program|draw)|earn \d+x|https?:\/\//i;
+/**
+ * AN OFFER SENTENCE, taken out of the payee grammar's way.
+ *
+ * MERCHANT_RE reads the whole body and extractMerchant returns the FIRST
+ * "at/to/from" clause that survives its filters — and on a multi-line card
+ * alert the real descriptor line carries no preposition at all, so the payee
+ * grammar never sees it. Any promotional clause later in the message therefore
+ * wins outright, and the ones banks actually append all name a brand:
+ *
+ *   "…OFF PRICE GENERAL TRAD SHARJAH ARE… Enjoy 10% Cashback at Carrefour."
+ *     -> merchant "Carrefour", category groceries — a Sharjah trader's AED 267
+ *        filed against a supermarket it has nothing to do with;
+ *   "…Get up to 30% off at Noon.com with your card."  -> merchant "30% Off At Noon";
+ *   "…for Salik on 11-02-2025… Redeem points at Sharaf DG." -> merchant "Sharaf Dg",
+ *        beating a payee the fixtures pin.
+ *
+ * Blanked exactly the way CONTACT_FOOTER_RE is, and length-preserving for the
+ * same reason: every other offset into the body stays valid.
+ *
+ * THE TRIGGER IS THE OFFER, NEVER THE NOUN. "cashback" on its own may not
+ * qualify — it is the NAME of a UAE card product, and "Your Cashback Card 1234
+ * purchase AED 89.50 at CARREFOUR" is a real purchase whose payee sits in the
+ * same sentence. So a percentage only counts beside an offer word, or after an
+ * offer verb; that also keeps "VAT @5% on toll transactions" out, which is a
+ * real sentence carrying a real payee.
+ *
+ * The sentence boundary is a full stop that is NOT followed by a digit or a
+ * space. A decimal point is always followed by a digit ("AED 267.00"), a
+ * sentence end by a space or nothing, and a domain dot by a letter — so the
+ * clause can span "Noon.com" without ever swallowing an amount or reaching
+ * back into the posting sentence in front of it.
+ */
+const PROMO_SENTENCE_CHAR = String.raw`(?:[^.\n]|\.(?![\d\s]))`;
+const PROMO_SENTENCE_RE = new RegExp(
+  `${PROMO_SENTENCE_CHAR}*(?:` +
+    String.raw`\d{1,3}\s*%\s*(?:off|cash\s?back|back|discount|interest|instal?ments?)` +
+    `|(?:enjoy|get|save|earn|avail|grab|book|shop|redeem|flat|extra|exclusive|up\\s+to)\\b${PROMO_SENTENCE_CHAR}{0,40}?\\d{1,3}\\s*%` +
+    `|\\bredeem\\b${PROMO_SENTENCE_CHAR}{0,40}?\\bpoints?\\b` +
+    String.raw`|\bt&cs?\b|\bconditions\s+apply\b|\bterms\s+apply\b` +
+    `)${PROMO_SENTENCE_CHAR}*`,
+  'gi',
+);
 /**
  * Evidence that money ACTUALLY moved — banks append promo footers to real
  * alerts ("...Avl Bal AED 5,376. 0% instalments... bit.ly/..."), so promo
@@ -859,8 +962,20 @@ const PROMO_RE =
  * on its own it is just as likely to be the OFFER of one ("Complete your first
  * purchase using your e& money card and get AED 15 cashback").
  */
+// Two spellings of the same evidence were missing, and their absence DELETED
+// real purchases rather than mislabelling them. `available limit` is the
+// headroom every credit-card alert quotes — the list had "available balance"
+// and "available credit" but not this one — and a bare `Balance AED 9774.87`
+// on its own line is the balance footer of the largest family in the real
+// corpus (the multi-line block: #6, #13, #42, #44, #101, #102, #108, #137).
+// A "5% cashback at ENOC stations" footer on either shape trips PROMO_RE, and
+// with no evidence to answer it the whole AED 10.00 purchase was discarded.
+//
+// The bare balance is LINE-ANCHORED on purpose: a loose `balance` appears in
+// marketing all the time ("maintain a balance of AED 5,000 and get…"), and
+// loosening it here would hand every such offer a licence to import.
 const TXN_EVIDENCE_RE =
-  /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit)|bill amount|payment due|due (?:on|by|date)|pay by/i;
+  /purchase (?:of|amount)|purchase\s+(?:aed|dhs?|sar)\b|\d{4}\s+purchase\b|was used for|\bused (?:for|at|on)\b|\bspent\b|\bdebited\b|\bdeducted\b|has been (?:debited|deducted|credited|received)|debited from|deducted from|credited to|withdraw|avl\.?\s*(?:bal|cr|limit)|available (?:balance|credit|limit)|(?:^|\n)\s*bal(?:ance)?\s+(?:aed|dhs?|sar)\b|bill amount|payment due|due (?:on|by|date)|pay by/i;
 
 /**
  * The SHAPE of a posted transaction, as opposed to a word that happens to
@@ -1033,8 +1148,11 @@ let AED_AMOUNT_RE = /x^/g;
 let AED_SUFFIX_RE = /x^/g;
 let MIN_DUE_RE = /x^/;
 let TOTAL_DUE_RE = /x^/;
+/** TOTAL_DUE_RE's LABEL without its figure — see statementTotalFils. */
+let TOTAL_DUE_LABEL_RE = /x^/;
 let AR_MIN_DUE_RE = /x^/;
 let AR_TOTAL_DUE_RE = /x^/;
+let AR_TOTAL_DUE_LABEL_RE = /x^/;
 let OUTSTANDING_RE = /x^/;
 let BARE_BALANCE_RE = /x^/;
 let SNAPSHOT_RE = /x^/;
@@ -1068,11 +1186,65 @@ let compiledForMarket = '';
 const CARD_GAP =
   String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|account|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+(?:\s+|\.(?=\w))){0,3}?card`;
 
-/** Units of each currency per 1 USD — cross rates derive from this table. */
+/**
+ * WHICH card or account a balance figure belongs to, when the bank names it
+ * between the balance noun and the figure: "available credit limit ON YOUR
+ * RAKBANK CREDIT CARD ENDING 4711 is now AED 50,000.00".
+ *
+ * ONE string, used by both SNAPSHOT_FIGURE (which reads the figure AS a
+ * balance) and BALANCE_PREFIX_RE (which stops extractAmountFils reading the
+ * same figure as an AMOUNT). Those two were written separately and drifted:
+ * the amount-side copy allowed only `(credit|debit|covered)? (card|a/c|account)`
+ * and only the spellings `ending`/`ending with`, while the snapshot-side copy
+ * also took `ending in`, `acct` and `a/c`. Every phrasing in the gap between
+ * them was read as a balance by one and as a PURCHASE by the other:
+ *
+ *   "Available balance on your account ending IN 1234 is AED 42,000.00"
+ *     -> a AED 42,000 expense whose snapshot is the same AED 42,000, which the
+ *        doc-comment on extractAmountFils says must never happen again;
+ *   "Your available credit limit on your RAKBANK Credit Card ending 4711 is
+ *    now AED 50,000.00"
+ *     -> a AED 50,000 expense, and with a payment sentence in front of it a
+ *        AED 50,000 CARD PAYMENT that never happened.
+ *
+ * Sharing the string is the fix, not widening either copy: they cannot drift
+ * again. The card side reuses CARD_GAP so an issuer and product name can sit
+ * inside the phrase ("your ADIB Covered Card"), and the account side takes the
+ * same tempered gap so an account TYPE can ("your savings account 1234").
+ * Both gaps are bounded and both sit INSIDE an "on/for/of/in your ..." phrase
+ * that has to start immediately after the balance noun, so neither can reach
+ * across a sentence and swallow a real amount.
+ */
+const ACCOUNT_GAP =
+  String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+\s+){0,2}?(?:a\/?c|acct?|account)`;
+const BALANCE_REF_CLAUSE =
+  String.raw`(?:\s*(?:on|for|of|in)\s+(?:your\s+)?(?:${CARD_GAP}|${ACCOUNT_GAP})` +
+  String.raw`\s*(?:no\.?|number|ending(?:\s+(?:in|with))?)?\s*[\dXx*•\-]{0,16})?`;
+
+/**
+ * Units of each currency per 1 USD — cross rates derive from this table.
+ *
+ * A code that is NOT in here is not merely left unconverted: extractForeignAmount
+ * refuses it, and on the multi-line alert shape that quotes only the foreign
+ * figure ("Credit Card Purchase / Card No XXXX3644 / THB 1,850.00 / SOME SHOP /
+ * …") there is no local figure to fall back to, so parseSms returns null and
+ * the transaction disappears with no row and no error. The table held 19 codes
+ * and none of the mainstream UAE travel and remittance corridors — Thailand,
+ * Singapore, Hong Kong, Sri Lanka, Nepal, Bangladesh, Jordan — so a holiday's
+ * worth of spending simply never arrived.
+ *
+ * These rates are a FALLBACK and are labelled as one: every row converted here
+ * carries `fxSource: 'fallback'`, which is what tells fx.ts the figure may be
+ * corrected later. An approximate rate on a visible row beats an exact rate on
+ * a row that does not exist.
+ */
 const UNITS_PER_USD: Record<string, number> = {
   USD: 1, AED: 3.6725, SAR: 3.75, EUR: 0.85, GBP: 0.74, QAR: 3.64,
   KWD: 0.307, BHD: 0.377, OMR: 0.385, INR: 83.5, PKR: 283, PHP: 56,
   EGP: 48, CAD: 1.37, AUD: 1.52, JPY: 150, CNY: 7.2, CHF: 0.8, TRY: 41,
+  JOD: 0.709, THB: 34, SGD: 1.29, HKD: 7.8, KRW: 1370, MYR: 4.3,
+  IDR: 16200, LKR: 300, NPR: 134, BDT: 120, ZAR: 18, VND: 25400,
+  SEK: 10.5, NOK: 10.7, DKK: 6.4, PLN: 3.9, ILS: 3.7, MAD: 9.8, LBP: 89500,
 };
 
 function ensureCurrencyPatterns(): void {
@@ -1100,16 +1272,35 @@ function ensureCurrencyPatterns(): void {
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
   // statement, which is the same class of error as reading a balance as an
   // amount, only quieter.
+  //
+  // "Amount due", "total outstanding" and "statement amount" are the same
+  // figure under three more spellings, and all three were still falling
+  // through to that first-amount fallback — so a statement that stated its
+  // minimum FIRST recorded the minimum as the total, which is the exact
+  // failure this pattern exists to prevent. The bare "amount due" alternative
+  // needs the minimum guard, because "MINIMUM amount due AED 425.00" contains
+  // it verbatim: without the lookbehind, widening this pattern would have
+  // caused the very bug it is closing.
+  // The LABEL is compiled on its own as well as with its figure, because
+  // "there is a total here that I could not read" and "this message states no
+  // total at all" have to be answered differently. See statementTotalFils.
+  const TOTAL_DUE_LABEL =
+    `(?:total\\s+(?:amount\\s+due|due|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
+    `|closing\\s+balance|statement\\s+balance|new\\s+balance|statement\\s+amount` +
+    `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
-    `(?:total\\s+(?:amount\\s+due|due|billed\\s+am(?:oun)?t)|closing\\s+balance|statement\\s+balance|new\\s+balance)\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `${TOTAL_DUE_LABEL}\\s*(?:is|:)?\\s*(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  TOTAL_DUE_LABEL_RE = new RegExp(TOTAL_DUE_LABEL, 'i');
   // Arabic renders the currency AFTER the figure as often as before it
   // ("3,240.00 درهم"), so both due patterns make it optional on the left.
   // MIN_DUE_RE was English-only, which left every Arabic statement with a null
   // minimum — and a statement with no minimum produces no reminder.
   AR_MIN_DUE_RE = new RegExp(
     `(?:الحد الادني للدفع|الحد الادني المستحق|الحد الادني)\\s*(?:هو|:)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  const AR_TOTAL_DUE_LABEL = `(?:اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|اجمالي المستحق)`;
   AR_TOTAL_DUE_RE = new RegExp(
-    `(?:اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|اجمالي المستحق)\\s*(?:هو|:)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+    `${AR_TOTAL_DUE_LABEL}\\s*(?:هو|:)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  AR_TOTAL_DUE_LABEL_RE = new RegExp(AR_TOTAL_DUE_LABEL, 'i');
   OUTSTANDING_RE = new RegExp(
     `\\boutstanding(?:\\s+(?:amount|balance))?\\s*(?:is|:|of)?\\s*(?:${CUR})?\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
   // A bare "Balance AED 9774.87" line. This is the balance footer of the
@@ -1155,8 +1346,7 @@ function ensureCurrencyPatterns(): void {
   // `figureOf` below takes whichever one matched, which is why callers must
   // never index a fixed group for the amount.
   const SNAPSHOT_FIGURE =
-    `(?:\\s*(?:on|for|of|in)\\s+(?:your\\s+)?(?:credit\\s+|debit\\s+|covered\\s+)?(?:card|a\\/?c|acct?|account)` +
-    `\\s*(?:no\\.?|number|ending(?:\\s+(?:in|with))?)?\\s*[\\dXx*•\\-]{0,16})?` +
+    BALANCE_REF_CLAUSE +
     `\\s*(?:is|:|\\.|-|,)?\\s*(?:now|currently)?\\s*` +
     `(?:(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)|([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}]))`;
   // "Avl. Cr.limit is AED4417.96" is how ADCB writes the available headroom on
@@ -1288,26 +1478,59 @@ interface ForeignAmount {
   rate: number;
 }
 
+/**
+ * The FOREIGN figure a card alert quotes, or null.
+ *
+ * This used to take the FIRST regex hit in the body and convert it, with none
+ * of the guards its local-currency twin (extractAmountFils) has spent this
+ * whole file earning. A foreign BALANCE was therefore a purchase:
+ *
+ *   "Your USD account 1234 has been debited. Avl Bal is USD 5,000.00"
+ *     -> a AED 18,362.50 expense, on a message that states no amount at all;
+ *   "Avl Bal USD 1,200.00. Purchase of USD 50.00 at YAMM.COM …"
+ *     -> AED 4,407.00, because the balance is simply earlier in the string
+ *        than the purchase it deleted.
+ *
+ * So the candidates are walked in message order and each is put through the
+ * same BALANCE_PREFIX_RE window extractAmountFils uses. Prefix candidates are
+ * still preferred over suffix ones, which is the precedence the single-match
+ * version had; ordering now only decides between figures of the same form.
+ */
 function extractForeignAmount(raw: string): ForeignAmount | null {
-  const pre = raw.match(FX_PREFIX_RE);
-  const suf = pre ? null : raw.match(FX_SUFFIX_RE);
-  const code = (pre?.[1] ?? suf?.[2])?.toUpperCase();
-  const num = pre?.[2] ?? suf?.[1];
-  if (!code || !num || !(code in UNITS_PER_USD)) return null;
-  // Where the digits start: after the code for the prefix form, at the match
-  // for the suffix form.
-  const at = pre ? (pre.index ?? 0) + pre[0].length - num.length : (suf?.index ?? 0);
-  if (isMaskedFigure(raw, at)) return null;
-  const original = Number(num.replace(/,/g, ''));
-  const rate = fxMinorPerUnit(code) / 100;
-  const fils = Math.round(original * rate * 100);
-  if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
-  return {
-    currency: code,
-    amountMinor: Math.round(original * 100),
-    localFils: fils,
-    rate,
+  /** Where the CODE starts (the balance window ends there) and where the digits do. */
+  const candidates: { at: number; digitsAt: number; code: string; num: string }[] = [];
+  const collect = (re: RegExp, codeGroup: 1 | 2) => {
+    const scan = new RegExp(re.source, 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = scan.exec(raw))) {
+      const num = codeGroup === 1 ? m[2] : m[1];
+      // Prefix form: the digits sit at the END of the match, after the code.
+      // Suffix form: the match STARTS on them.
+      const digitsAt = codeGroup === 1 ? m.index + m[0].length - num.length : m.index;
+      candidates.push({ at: m.index, digitsAt, code: m[codeGroup].toUpperCase(), num });
+    }
   };
+  collect(FX_PREFIX_RE, 1);
+  if (!candidates.length) collect(FX_SUFFIX_RE, 2);
+
+  for (const c of candidates) {
+    if (!(c.code in UNITS_PER_USD)) continue;
+    if (isMaskedFigure(raw, c.digitsAt)) continue;
+    // 56, exactly as extractAmountFils: the window has to hold a balance noun
+    // plus the card reference that can sit between it and the figure.
+    if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at))) continue;
+    const original = Number(c.num.replace(/,/g, ''));
+    const rate = fxMinorPerUnit(c.code) / 100;
+    const fils = Math.round(original * rate * 100);
+    if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+    return {
+      currency: c.code,
+      amountMinor: Math.round(original * 100),
+      localFils: fils,
+      rate,
+    };
+  }
+  return null;
 }
 
 function extractForeignAmountFils(raw: string): number | null {
@@ -1336,8 +1559,12 @@ const MAX_PLAUSIBLE_AMOUNT_FILS = 100_000_000;
 // wildcard. A loose gap would let a real amount be read as a balance in
 // "Balance AED 5,000. Purchase of AED 250 at NOON" — the opposite failure, and
 // the one that silently deletes a purchase.
-const BALANCE_PREFIX_RE =
-  /(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)(?:\s+(?:on|for|of|in)\s+(?:your\s+)?(?:credit\s+|debit\s+|covered\s+)?(?:card|a\/c|account)\s*(?:no\.?|number|ending(?:\s+with)?)?\s*[\dXx*•\-]{0,16})?\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$/i;
+const BALANCE_PREFIX_RE = new RegExp(
+  String.raw`(?:bal(?:ance)?|avl|avail(?:able)?|limit|outstanding|total|الرصيد المتاح|الرصيد الحالي|الحد المتاح|المتاح|الرصيد|رصيدك)` +
+    BALANCE_REF_CLAUSE +
+    String.raw`\s*(?:is|:|\.|-|هو)?\s*(?:now|currently|الان)?\s*$`,
+  'i',
+);
 
 /** Card identity: "Credit Card ending 1234", "Debit Card ..5678", "a/c XX9012", "card no. *1234". */
 // "Covered Card" is what every Sharia-compliant issuer (DIB, ADIB, EIB, Ajman,
@@ -1675,6 +1902,25 @@ const MOBILE_RECHARGE_RE =
 // plural form and the "card purchase" header are the noise.
 const LINE_NOISE_RE =
   /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
+/**
+ * A REWARD BADGE printed on its own line, which is not the acquirer descriptor.
+ *
+ * This is the reported production bug: a bank that prints "10% Cashback"
+ * BETWEEN the amount and the shop name, and merchantFromLines taking the first
+ * line after the amount that is not a date, a card or a balance. 305 rows
+ * filed against a merchant called "10% Cashback" — with the right amount, the
+ * right card, the right date and the right direction, so nothing looked
+ * broken. Move the same badge BELOW the descriptor and the real shop wins,
+ * which is exactly why it went unnoticed for so long.
+ *
+ * Anchored to the START of the line and to the badge's own SHAPE, not to the
+ * bare vocabulary: a real trade name may contain "REWARDS" (loyalty shops
+ * exist) and dropping every line that mentions it would cost the merchant on
+ * a genuine purchase. No acquirer descriptor begins with a percentage, and no
+ * acquirer descriptor is nothing but a reward noun and a figure.
+ */
+const LINE_PROMO_RE =
+  /^(?:(?:up\s+to|flat|get|earn|enjoy|save|extra|additional)\s+)*\d{1,3}(?:\.\d+)?\s*%|^(?:earn|get)\s+\d{1,3}\s*x\b|^(?:cash\s?back|rewards?|points?)\b(?:\s+(?:earned|credited|awarded))?\s*[:.]?\s*(?:[\d,]+(?:\.\d{1,2})?)?\s*$/i;
 const LINE_DATE_RE = /^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/;
 const TRAILING_PLACE_RE =
   /\s+(?:DXB|DUBAI|ABU DHABI|SHARJAH|AJMAN|ARE|UAE|FRA|USA|GBR|DEU|NLD|ESP|ITA|IRL|SGP|HKG|IND|SAU|KSA|LUX|CAN|AUS|CHE|SWE|POL|JPN|RIYADH|JEDDAH|QAT|GHA|KWT|BHR|OMN|JOR|LBN|EGY|TUR|THA|MYS|KOR|CHN|PAK|LKA|PHL|BGD|ZAF|KEN|NGA|MAR|GRC|PRT|BEL|AUT|DNK|NOR|FIN|CZE|RUS|BRA|MEX|NZL|VNM|IDN|TWN|MCO|LIE)$/i;
@@ -1801,6 +2047,7 @@ function merchantFromLines(raw: string): string {
   for (const line of lines.slice(amountIdx + 1)) {
     if (LINE_DATE_RE.test(line)) continue;
     if (LINE_NOISE_RE.test(line)) continue;
+    if (LINE_PROMO_RE.test(line)) continue;
     if (amountLineRe.test(line)) continue;
     if ((line.match(/[A-Za-z]/g) ?? []).length < 3) continue;
     // Acquirer descriptors are fixed-width fields padded with spaces:
@@ -1857,7 +2104,7 @@ const OUTGOING_MOVE_RE =
 // have to carry the hint, because it is the pair of them sharing a dedupe key
 // that stops one payment landing on the ledger twice.
 const TRANSFER_HINT_RE =
-  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|inward\s+remittance|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
+  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:credit\s+)?card|credit\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|credit\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Exchange houses move money; they do not sell anything. There is no
@@ -2394,8 +2641,8 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/anthropic|claude/i, 'Claude'],
   [/real-?debrid/i, 'Real-Debrid'],
   [/all-?debrid/i, 'AllDebrid'],
-  [/netflix/i, 'Netflix'],
-  [/spotify/i, 'Spotify'],
+  [/\bnetflix\b/i, 'Netflix'],
+  [/\bspotify\b/i, 'Spotify'],
   [/you\s*tube|yt\s*premium/i, 'YouTube Premium'],
   [/google\s*one|google\s*storage/i, 'Google One'],
   // Mashreq sends this one as "DOMAINS G.CO" and Google's own descriptor is
@@ -2412,16 +2659,16 @@ const SERVICE_NAMES: [RegExp, string][] = [
   // ("AMZ*Centraldereservasc") — the money still went to Amazon, and the
   // gibberish sub-merchant reference is not a name anyone can recognise.
   [/\bamz\s*\*|\bamzn\b|\bamazon\b/i, 'Amazon'],
-  [/disney/i, 'Disney+'],
-  [/anghami/i, 'Anghami'],
-  [/shahid/i, 'Shahid'],
+  [/\bdisney\b/i, 'Disney+'],
+  [/\banghami\b/i, 'Anghami'],
+  [/\bshahid\b/i, 'Shahid'],
   [/\bosn\b/i, 'OSN+'],
-  [/starz/i, 'StarzPlay'],
-  [/deezer/i, 'Deezer'],
-  [/audible/i, 'Audible'],
-  [/dropbox/i, 'Dropbox'],
-  [/linkedin/i, 'LinkedIn'],
-  [/adobe/i, 'Adobe'],
+  [/\bstarz\b/i, 'StarzPlay'],
+  [/\bdeezer\b/i, 'Deezer'],
+  [/\baudible\b/i, 'Audible'],
+  [/\bdropbox\b/i, 'Dropbox'],
+  [/\blinkedin\b/i, 'LinkedIn'],
+  [/\badobe\b/i, 'Adobe'],
   // Word-bounded: "CANVAS TRADING" or "CANVAS HOME" must not become Canva.
   [/\bcanva\b/i, 'Canva'],
   [/microsoft\s*365|office\s*365/i, 'Microsoft 365'],
@@ -2439,12 +2686,12 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/liv\.?\s*prime/i, 'Liv Prime'],
   [/\bcafu\b|cafuae|www cafu/i, 'CAFU'],
   [/crypto\.com/i, 'Crypto.com'],
-  [/binance/i, 'Binance'],
-  [/fiverr/i, 'Fiverr'],
-  [/discord/i, 'Discord'],
+  [/\bbinance\b/i, 'Binance'],
+  [/\bfiverr\b/i, 'Fiverr'],
+  [/\bdiscord\b/i, 'Discord'],
   [/\bnotion\b/i, 'Notion'],
-  [/github/i, 'GitHub'],
-  [/telegram/i, 'Telegram Premium'],
+  [/\bgithub\b/i, 'GitHub'],
+  [/\btelegram\b/i, 'Telegram Premium'],
   [/xbox\s*game\s*pass/i, 'Xbox Game Pass'],
   // UAE names seen under three spellings each across HSBC, Liv and ENBD
   // descriptors. Canonicalising them is what lets one merchant override — and
@@ -2550,13 +2797,51 @@ export const STRUCTURAL_TITLES = new Set([
   'Mobile recharge',
 ]);
 
+/**
+ * The BUSINESS ACTIVITY a UAE trade name states about itself.
+ *
+ * A dozen of the canonical names above are ordinary words, and a Sharjah or
+ * Deira trade name built on one of them is not the global service:
+ * SHAHID AUTO SPARE PARTS TR is a car-parts shop, not the MBC streaming
+ * service; STARZ MENS SALOON is a barber; ADOBE INTERIOR DECOR LLC fits out
+ * offices; NETFLIX CAR RENTAL rents cars. "Shahid" is the sharp one — it is a
+ * common Arabic word and given name, so those trade names are ordinary here.
+ *
+ * The damage is worse than a wrong label, because SERVICE_NAMES exists so rows
+ * GROUP: a monthly visit to the local shop merged into the user's real
+ * streaming subscription, inflating it and corrupting subscription detection,
+ * per-merchant totals and any override keyed on that name.
+ *
+ * Deliberately ACTIVITY words and not legal forms. "LLC", "FZE" and "TR" would
+ * catch these same descriptors, and would also catch a real global brand that
+ * files under a UAE entity — the guard has to be something no streaming
+ * service's descriptor says about itself. A cafeteria, a saloon, a nursery or
+ * a car rental is exactly that.
+ */
+const LOCAL_TRADE_ACTIVITY_RE =
+  /\b(?:trad(?:ing|ers?)|caf[eé]|cafeteria|cafteria|restaurant|salo{1,2}n|nursery|kindergarten|garage|spare\s*parts|auto\s+(?:spare|parts|repair)|car\s+rental|rent\s+a\s+car|contracting|construction|real\s*estate|foodstuff|grocer(?:y|ies)|supermarket|hypermarket|laundry|tailoring|advertis(?:ing|ement)|marketing|electronics|interior|decor|technical\s+services|building\s+materials|used\s+furniture|mobile\s+phones?|cargo|tourism|perfumes?|textiles?|stationery|bakery|sweets|catering|pharmacy|clinic)\b/i;
+/**
+ * Canonical names that are ALSO ordinary words, and so may not claim a
+ * descriptor that names a local business activity. Everything absent from this
+ * set keeps matching exactly as before.
+ */
+const AMBIGUOUS_SERVICES = new Set([
+  'Shahid', 'StarzPlay', 'Adobe', 'Amazon', 'Netflix', 'Disney+', 'Anghami',
+  'Audible', 'Fiverr', 'LinkedIn', 'GitHub', 'Telegram Premium', 'Deezer',
+  'Discord', 'Dropbox', 'Binance',
+]);
+
 /** Clean descriptor noise and map to a canonical service name when known. */
 export function normalizeServiceName(merchant: string): string | null {
   const stripped = merchant
     .replace(/^(?:tap|alp|web|eig|sq|wl)\s*\*\s*/i, '') // processor prefixes: "TAP*Keeta"
     .replace(/^(?:paypal|google|gpay|apl|amzn|pos|ziina|mamo)\s*\*?\s*/i, '');
   for (const [re, name] of SERVICE_NAMES) {
-    if (re.test(stripped) || re.test(merchant)) return name;
+    if (!(re.test(stripped) || re.test(merchant))) continue;
+    // `continue`, not `return null`: a later rule may still recognise this
+    // descriptor, and refusing one claim is not the same as refusing them all.
+    if (AMBIGUOUS_SERVICES.has(name) && LOCAL_TRADE_ACTIVITY_RE.test(merchant)) continue;
+    return name;
   }
   return null;
 }
@@ -2630,11 +2915,27 @@ function extractAmountFils(raw: string): number | null {
   candidates.sort((a, b) => a.index - b.index);
 
   for (const c of candidates) {
-    if (!Number.isFinite(c.value) || c.value <= 0 || c.value > MAX_PLAUSIBLE_AMOUNT_FILS) continue;
+    if (!Number.isFinite(c.value) || c.value <= 0) continue;
     // 56, not 24: the window has to hold a balance noun plus the card
     // reference that can sit between it and the figure.
     const prefix = raw.slice(Math.max(0, c.index - 56), c.index);
     if (BALANCE_PREFIX_RE.test(prefix)) continue;
+    // THE TWO SKIPS ARE NOT THE SAME SKIP, and treating them alike was a
+    // silent 50,000x error. A balance is genuinely not the amount, so the loop
+    // moves past it and keeps looking. An OVER-CAP figure is different: it is
+    // the transaction's own amount, stated in a sentence this parser has
+    // decided it cannot trust. Carrying on then lands on the next figure in
+    // the message — and a UAE remittance or property alert above the cap
+    // almost always carries a "Fee AED 25.00 applied" footer, so
+    //
+    //   "AED 1,234,567.89 has been transferred from your account 1234 to ABC
+    //    PROPERTIES. Fee AED 25.00 applied."
+    //
+    // imported as a AED 25.00 row. The cap's whole argument is that a figure
+    // this size is not spending; it says nothing that makes the FEE the
+    // transaction. Refuse the message instead — an unimported alert is
+    // visible, a AED 25 row standing in for AED 1.2M is not.
+    if (c.value > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
     return c.value;
   }
   return null;
@@ -2642,6 +2943,35 @@ function extractAmountFils(raw: string): number | null {
 
 function amountWithFx(raw: string): number | null {
   return extractAmountFils(raw) ?? extractForeignAmountFils(raw);
+}
+
+/**
+ * WHAT A CREDIT-CARD STATEMENT SAYS IS OWED — or nothing at all.
+ *
+ * A statement states two figures and they are not interchangeable: the TOTAL
+ * is the debt, the MINIMUM is the smallest payment that avoids a penalty. When
+ * TOTAL_DUE_RE could not read the total, both statement branches fell back to
+ * first-amount extraction — which returns whichever figure the bank printed
+ * FIRST, and half of them print the minimum first. A AED 8,500 statement then
+ * arrived as AED 425, the user reads the Bills tab, and believes that is the
+ * whole debt. Same collapse when the total is MASKED ("Total amount due AED
+ * ····8500.00") and the minimum beside it is not.
+ *
+ * The discriminator is whether the message SAYS it has a total. A summary
+ * block that quotes only "Min Amt AED 154.32" and no total at all is a real
+ * corpus shape and stays readable on the fallback — that row is a payment
+ * reminder and losing it helps nobody. But when a total LABEL is present and
+ * its figure could not be read, the message is refused outright: something in
+ * this message is the debt, this parser does not know which figure, and
+ * answering with the minimum is not a smaller error than answering with
+ * nothing. It is a confident wrong number where the user makes a payment
+ * decision.
+ */
+function statementTotalFils(raw: string): number | null {
+  const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(AR_TOTAL_DUE_RE);
+  if (totalMatch) return Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100);
+  if (TOTAL_DUE_LABEL_RE.test(raw) || AR_TOTAL_DUE_LABEL_RE.test(raw)) return null;
+  return amountWithFx(raw);
 }
 
 function extractMerchant(raw: string, re: RegExp): string {
@@ -2736,6 +3066,50 @@ function maskMerchantNames(text: string): string {
     out = out.slice(0, start) + ' '.repeat(m[1].length) + out.slice(start + m[1].length);
   }
   return out;
+}
+
+/**
+ * The two-pass refusal test, in ONE place.
+ *
+ * `parseSmsInner` has always had it inline. It is a function now because a
+ * second caller needs the identical answer — `isDeclinedMessage`, which the
+ * ledger migration in accounts.ts uses as its evidence for deleting a row that
+ * a current parser would never have created. Two copies of this expression
+ * would mean a stored row could be deleted for a refusal the live parser no
+ * longer sees, or kept for one it does; a shared function makes that
+ * impossible by construction.
+ *
+ * `body` is the normalised text; `suppressible` is that text with merchant
+ * descriptors and the fraud-reporting footer blanked out. Both are passed in
+ * rather than recomputed because parseSmsInner already holds them and
+ * maskMerchantNames walks a /g regex over the whole body.
+ */
+function declinedInBody(body: string, suppressible: string): boolean {
+  return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
+}
+
+/**
+ * Does this message state that the transaction was REFUSED?
+ *
+ * Exported for one caller: `removeDeclinedTransactions` in accounts.ts, which
+ * deletes ledger rows that an older parser imported from decline alerts. A
+ * declined transaction moved no money, so the row is not a mislabelled expense
+ * — it is an event that never happened, and healing (which only ever adds
+ * information to a row) has no way to take it back.
+ *
+ * That migration must not delete a row merely because `parseSms` now returns
+ * null for its stored text: `raw` is retained as a 300-character EXCERPT
+ * (import-plan.ts), and a body truncated before its amount parses to null for
+ * a reason that has nothing to do with the transaction being real. Truncation
+ * can hide a refusal; it cannot invent one. So this is the affirmative half of
+ * the evidence, and it answers the question the parser itself asks, about the
+ * SMS text — never about the title the old parser wrote onto the row.
+ */
+export function isDeclinedMessage(message: string): boolean {
+  const source = message.trim();
+  if (!source) return false;
+  const body = foldOrthography(stripInvisible(source));
+  return declinedInBody(body, blank(maskMerchantNames(body), FRAUD_FOOTER_RE));
 }
 
 // SNAPSHOT_RE and PLAIN_BALANCE_RE are market-compiled in
@@ -3055,6 +3429,29 @@ const DAY_MONTH_DATE_RE =
  */
 const DUE_BY_NUMERIC_RE = /\b(?:by|before)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
 const DUE_BY_NAMED_RE = /\b(?:by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+/**
+ * A DEADLINE clause and the date it introduces — the same footer read from the
+ * other side.
+ *
+ * DUE_BY_* above exist so a statement's deadline WINS. This exists so it
+ * LOSES: on a posted purchase the statement/EMI footer is not the date the
+ * money moved, and extractDate takes the first date-shaped token in the body
+ * without caring which clause it came from. The whole clause is blanked, verb
+ * and date together, so nothing is left for the looser date patterns to find.
+ *
+ * Every alternative names a deadline word — due, EMI, "pay ... by" — so the
+ * transaction's own timestamp can never be inside one. `paid` is deliberately
+ * not reachable: `\bpay\s` cannot match it, and "paid on 12/06/2026" is a
+ * posting date, not a deadline.
+ */
+const DUE_DATE_TOKEN =
+  String.raw`(?:\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[-\s]?[A-Za-z]{3,9}[-\s]?\d{2,4}|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4})`;
+const DUE_DATE_FOOTER_RE = new RegExp(
+  String.raw`\bdue\s*(?:date)?\s*(?:is|on|by|before|:)?\s*${DUE_DATE_TOKEN}` +
+    String.raw`|\bemi\s+(?:on|due|by)\s+${DUE_DATE_TOKEN}` +
+    String.raw`|\bpay\s+(?:\w+\s+){0,3}?(?:by|before|on)\s+${DUE_DATE_TOKEN}`,
+  'gi',
+);
 // "the payment due date of your FAB Credit Card ending with 4833 is 06-07-2026"
 // — the due phrase and its date sit either side of the card clause, so the
 // bridge between them is bounded rather than adjacent, and has to tolerate the
@@ -3182,7 +3579,7 @@ function extractDate(raw: string): string | null {
  * it took before senders existed. It is never allowed to decide WHETHER a
  * message is a transaction — only to disambiguate one that already is.
  */
-export function parseSms(
+function parseSmsInner(
   message: string,
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
@@ -3227,8 +3624,9 @@ export function parseSms(
   // footer stapled underneath it (FRAUD_FOOTER_RE).
   const suppressible = blank(maskMerchantNames(raw), FRAUD_FOOTER_RE);
   // The masked pass catches a refusal stated about the transaction; the
-  // unmasked pass catches one the merchant descriptor swallowed.
-  if (DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(raw)) return null;
+  // unmasked pass catches one the merchant descriptor swallowed. Both live in
+  // `declinedInBody` so `isDeclinedMessage` and this call site can never drift.
+  if (declinedInBody(raw, suppressible)) return null;
   // ...but the RELEASE of a hold is the settlement notice, not the hold.
   if (PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))) return null;
   // Footer boilerplate ("do not disclose your PIN", "never share your OTP",
@@ -3306,8 +3704,19 @@ export function parseSms(
   // commonest posting clause in this corpus. What identifies the pitch is the
   // MONTHLY QUOTE — a per-month figure offered ("as low as", "starting from",
   // "only") — or the issuer's own /epp/ landing path.
+  // The pitch is also written in the OFFER voice, and only the accepted voice
+  // was listed. "…is eligible for conversion into easy instalments", "…can be
+  // converted to instalments at 0% interest" and the imperative "Convert your
+  // AED 3,600.00 purchase at APPLE STORE … into 12 easy instalments" all
+  // restate a purchase that is already on the ledger from its own alert, so
+  // the month counted it twice — and banks pitch EPP on the LARGEST purchases,
+  // which is where a duplicate hurts most.
+  //
+  // The `posted && SETTLED_TENSE_RE` escape hatch below covers all of them
+  // unchanged: an EPP line stapled to a real alert ("…Avl Cr. Limit is AED
+  // 5,000.00. Convert now to easy instalments.") still keeps its purchase.
   if (
-    /\*?convert now\*?|converted into instalments?|converted into installments?|interest payment plan|easy payment plan/i.test(raw) &&
+    /\*?convert now\*?|converted in(?:to)? instal?ments?|\bcan\s+be\s+converted\b|\bconvert\s+your\b(?:[^.\n]|\.\d){0,72}?\binto\b|\beligible\s+for\b(?:[^.\n]|\.\d){0,40}?(?:conversion|instal?ments?|payment\s+plan|0\s*%)|interest payment plan|easy payment plan/i.test(raw) &&
     !(posted && SETTLED_TENSE_RE.test(raw))
   ) {
     return null;
@@ -3353,13 +3762,51 @@ export function parseSms(
     };
   }
 
-  const date = extractDate(raw);
+  // TWO DATES, because a message can carry two and they mean opposite things.
+  //
+  // `statedDate` is any date in the body — which is the right answer for a
+  // REMINDER, where the deadline IS the date. `date` is the date of a posting,
+  // and for that the deadline is exactly the wrong answer: extractDate takes
+  // the first date-shaped token it can read, so
+  //
+  //   "Purchase of AED 96.00 with Credit Card 4110 at CARREFOUR, DUBAI.
+  //    Avl Cr. Limit AED 5,000.00. Your statement payment due date is 26/12/2025."
+  //
+  // filed the purchase in December. The multi-line FAB shape was safe only by
+  // accident — its own "15/12/25 22:34" line comes first and wins the race —
+  // and single-line ENBD/Mashreq alerts carry no timestamp at all, so the
+  // footer ran unopposed and booked the spend weeks into the future, sometimes
+  // past today. Blanked here rather than inside extractDate for the same
+  // reason there are two variables: on the billDue and cardStatement paths
+  // that clause is the answer, and those branches read `statedDate`.
+  const statedDate = extractDate(raw);
+  const date = extractDate(blank(raw, DUE_DATE_FOOTER_RE));
   const snapshot = extractSnapshot(raw);
   const snapshotFils = snapshot?.fils ?? null;
   let snapshotKind = snapshot?.kind ?? null;
   // On a credit card, "Avl Bal" is available CREDIT (limit headroom), not
   // money in an account — storing it as a balance made cards look rich.
   if (snapshotKind === 'balance' && card?.kind === 'credit') snapshotKind = 'limit';
+  /**
+   * THE ACCOUNT-SIDE LEG OF A CARD PAYMENT QUOTES THE ACCOUNT'S BALANCE, and
+   * the card it names is not the account that balance belongs to.
+   *
+   * "AED 5,000.00 has been debited from your account 7001 towards the payment
+   * of your Credit Card 4110. Available balance AED 3,000.00" resolves `card`
+   * to 4110 — correctly, that is the card being paid — and the rule above then
+   * relabelled the FUNDING ACCOUNT's remaining AED 3,000 as card 4110's
+   * available credit. import-plan.ts and accounts.ts both write a snapshot
+   * from this field, so the figure lands on the card.
+   *
+   * Dropped rather than re-attached: the account it describes is named in the
+   * same sentence but is not this row's `card`, and inventing a second
+   * snapshot target here would be guessing. Only when the phrase was a plain
+   * BALANCE — an "avl limit" / "available credit" on this leg really is the
+   * card's, and keeps working.
+   */
+  const fundingAccountBalance = snapshot?.kind === 'balance' && cardPaymentLeg(raw) === 'debit';
+  const cardPaymentSnapshotFils = fundingAccountBalance ? null : snapshotFils;
+  const cardPaymentSnapshotKind = fundingAccountBalance ? null : snapshotKind;
 
   // Card payment received (transfer into the card) — before debit detection,
   // since these messages also contain the word "payment". Only credit cards
@@ -3378,8 +3825,8 @@ export function parseSms(
       card: { ...card, kind: 'credit' },
       cardPaymentSide: cardPaymentLeg(raw),
       transferHint: true,
-      snapshotFils,
-      snapshotKind,
+      snapshotFils: cardPaymentSnapshotFils,
+      snapshotKind: cardPaymentSnapshotKind,
       categoryGuess: 'other',
       categoryDeliberate: true,
       currency,
@@ -3415,8 +3862,8 @@ export function parseSms(
         // payment branches can never drift apart.
         cardPaymentSide: cardPaymentLeg(raw),
         transferHint: true,
-        snapshotFils,
-        snapshotKind,
+        snapshotFils: cardPaymentSnapshotFils,
+        snapshotKind: cardPaymentSnapshotKind,
         categoryGuess: 'other',
         categoryDeliberate: true,
         currency,
@@ -3557,6 +4004,46 @@ export function parseSms(
   // with its amount taken from whichever figure came first rather than from
   // the label — which is right only for as long as the bill happens to be
   // settled in full. A PARTIAL payment would have recorded the amount DUE.
+  //
+  // ─── THIS IS NOT A CREDIT-CARD BILL PAYMENT. Do not make it one. ───
+  //
+  // It reads like one: an account number, an amount DUE, an amount PAID and a
+  // REMAINING BALANCE is exactly the shape of a card settlement, and a diagnostic
+  // that sees "Payment to •2543 … -681.45" filed as spending on a debit card
+  // reasonably concludes the user's card payments are being lost. They are not.
+  // The evidence that this payee is a BILLER and never a card:
+  //
+  //   - It is the same template, label for label, as the receipts pinned in
+  //     parser.test.js whose own channel line says "Etisalat Mobile App" /
+  //     "تطبيق إتصالات للهواتف الذكية". Only the CHANNEL differs in the samples
+  //     that look card-like ("Bank Website", "جهازالمجيب الالي" = the IVR), and
+  //     the channel says how the user paid, not who was paid. "Paid through my
+  //     bank's website" is how people pay phone and utility bills.
+  //   - The amounts are a round dirham figure plus 5% UAE VAT, every time:
+  //     408.45 = 389.00, 681.45 = 649.00, 849.45 = 809.00, 450.45 = 429.00.
+  //     Those are postpaid plan prices. A credit-card statement total is a
+  //     month of arbitrary purchases and does not land on plan-price + VAT,
+  //     twice, then repeat the identical figure for three months running.
+  //   - Neither language names a card as the PAYEE. The only card field in the
+  //     body is the funding instrument — "Card Number: NA" / "رقم البطاقة: NA" —
+  //     and it is empty.
+  //
+  // The user's real card payments arrive in a different message entirely, the
+  // "payment instructions of AED X to 5492********4833" shape handled above,
+  // which already parses as `cardPayment`.
+  //
+  // What it would cost to reclassify: `transferHint` would pull a real monthly
+  // telecom bill out of the spending total, a phantom CREDIT card would be
+  // minted from a telecom account number, and `allocatePayments` would settle
+  // a statement with money that never touched that card. Note also that the
+  // corpus already contains a receipt whose payee account ends 4822 for a user
+  // whose Liv DEBIT card ends 4822 — biller account fragments collide with card
+  // fragments, so last-4 alone can never identify the payee. A payment credited
+  // to the wrong card is worse than one credited to none.
+  //
+  // If a bank ever does send a card settlement in this template, the rule that
+  // catches it must key on the body NAMING a credit card as the payee, and it
+  // needs a real sample first.
   const portalPay = raw.match(PORTAL_RECEIPT_RE);
   if (portalPay) {
     // Last four, not first four: an unmasked account number would otherwise
@@ -3575,6 +4062,55 @@ export function parseSms(
     const merchant = biller ?? `Payment to •${last4}`;
     if (amountFils > 0) {
       const cat = categoryOf(raw, 'expense', overrides, merchant);
+      /**
+       * A RECEIPT IN THIS TEMPLATE IS A POSTPAID TELECOM BILL, EVEN WHEN THE
+       * CHANNEL LINE NAMES NOBODY.
+       *
+       * The paragraph above is careful never to invent a PAYEE from a channel
+       * that names none, and that still holds — `merchant` is untouched, and
+       * "Payment to •2543" is what the row is called. This is the weaker,
+       * separate claim that the row is a phone bill, and the evidence for it is
+       * in the messages rather than in a hunch:
+       *
+       *   - The account fragment 2543 appears in this corpus TWICE in this
+       *     template: once paid through "Etisalat Mobile App" and once through
+       *     "Bank Website". Same biller account, two channels. The Arabic half
+       *     does the same thing with "الموقع الإلكتروني لإتصالات" and the IVR.
+       *     The channel says how the user paid, not who was paid — so the
+       *     receipts with an anonymous channel are the same bills as the ones
+       *     that name the biller, and those are already telecom.
+       *   - Every amount is a round dirham figure plus exactly 5% UAE VAT:
+       *     408.45 = 389.00, 681.45 = 649.00, 849.45 = 809.00, 450.45 = 429.00.
+       *     Those are postpaid plan prices.
+       *   - The only card field in the body is the funding instrument, and it
+       *     is empty: "Card Number: NA" / "رقم البطاقة: NA".
+       *
+       * WHY THE ARITHMETIC IS NOT THE RULE. It cannot be: the real Arabic IVR
+       * receipt paid 682.00 against 681.45 due, because you type whole dirhams
+       * at a keypad. Plan-price-plus-VAT is what identifies the FAMILY, not what
+       * identifies a message. The template is the rule.
+       *
+       * SCOPE, AND WHAT WOULD FALSIFY IT. This sits inside the `portalPay`
+       * branch, so it can only ever reach a message that already matched
+       * PORTAL_RECEIPT_RE — "payment to the account number NNNN … amount paid".
+       * It cannot leak into the keyword tables, where "Amount Due" is also
+       * credit-card-statement vocabulary and would file statements as phone
+       * bills. And it defers to `cat` whenever the body decided anything at all,
+       * so a user's merchant override wins, and so does a biller that names
+       * itself anywhere the vocabulary can see it.
+       *
+       * `telecom` unlocks the relaxed bill path in subscriptions.ts, which is
+       * the thing this file is otherwise careful not to hand out on a hunch.
+       * Here it is the point: four AED 408.45 receipts to one account over four
+       * months IS a monthly bill, and tracking it is what the user wants. The
+       * exposure if this is ever wrong is a recurring bill filed as Telecom that
+       * was really Utilities — a wrong label on a real bill, not a phantom one.
+       *
+       * If a receipt in this exact template ever turns up from a biller that is
+       * not a telco, this is the line to narrow, and it will need that message
+       * first.
+       */
+      const category: CategoryId = cat.deliberate ? cat.id : 'telecom';
       return {
         kind: 'transaction',
         type: 'expense',
@@ -3585,9 +4121,39 @@ export function parseSms(
         minDueFils: null,
         card,
         transferHint: false,
-        snapshotFils,
-        snapshotKind,
-        categoryGuess: cat.id,
+        /**
+         * EVERY FIGURE IN THIS RECEIPT BELONGS TO THE BILLER, NOT TO THE USER.
+         *
+         * "Remaining Balance: AED 0" is what is left owing on the ETISALAT
+         * account after the bill was settled; "المبلغ المستحق: 681.45 درهم" is
+         * what that account was asking for. Neither is a fact about the card or
+         * the current account the money came OUT of — but this row is filed
+         * against that account (it is the account the SMS arrived about), and
+         * import-plan's `noteSnapshot` writes `snapshotFils`/`snapshotKind`
+         * straight onto whatever account the row resolved to.
+         *
+         * So the generic `extractSnapshot` pass over the body did two things,
+         * both silent and both wrong:
+         *
+         *   - the English receipt quoted a `balance` of 0, which set the paying
+         *     Liv Debit Card's balance to AED 0.00 every time a telecom bill was
+         *     paid, and it stayed there until a real alert overwrote it;
+         *   - the Arabic receipt has no "remaining/available" prefix on its
+         *     first figure, so المبلغ المستحق read as `outstanding` — and
+         *     cardFigure() in cards.ts turns an `outstanding` snapshot into the
+         *     headline OWED number on a credit card. Paying an AED 681.45 phone
+         *     bill made a card report AED 681.45 of debt it did not have.
+         *
+         * This is the same mistake the card-payment branch above documents for
+         * its funding-account leg, and it takes the same answer: drop the figure
+         * rather than re-aim it. The account it describes is the biller's, is
+         * not in the user's Accounts, and inventing a second snapshot target
+         * here would be guessing.
+         */
+        snapshotFils: null,
+        snapshotKind: null,
+        categoryGuess: category,
+        categoryDeliberate: true,
         ...(cat.pinned ? { categoryPinned: true as const } : {}),
         currency,
         reference,
@@ -3668,13 +4234,11 @@ export function parseSms(
     BILL_DUE_WORDS.test(raw) &&
     !STATEMENT_TXN_BLOCK_RE.test(raw)
   ) {
-    const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(AR_TOTAL_DUE_RE);
-    const amountFils = totalMatch
-      ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100)
-      : amountWithFx(raw);
-    if (!amountFils) return null;
     const minMatch = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
-    const dueDate = extractDueDate(raw) ?? date;
+    const minDueFils = minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null;
+    const amountFils = statementTotalFils(raw);
+    if (!amountFils) return null;
+    const dueDate = extractDueDate(raw) ?? statedDate;
     return {
       kind: 'cardStatement',
       type: 'expense',
@@ -3682,7 +4246,7 @@ export function parseSms(
       merchant: 'Card statement',
       date: dueDate,
       dueDay: dueDate ? Number(dueDate.slice(8)) : null,
-      minDueFils: minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null,
+      minDueFils,
       card: null,
       transferHint: false,
       snapshotFils,
@@ -3705,13 +4269,11 @@ export function parseSms(
     // Arabic states both figures the same way English does, and if the total
     // is not read the row records the MINIMUM instead — AED 162 for a AED
     // 3,240 statement.
-    const totalMatch = raw.match(TOTAL_DUE_RE) ?? raw.match(AR_TOTAL_DUE_RE);
-    const amountFils = totalMatch
-      ? Math.round(Number(totalMatch[1].replace(/,/g, '')) * 100)
-      : amountWithFx(raw);
-    if (!amountFils) return null;
     const minMatch = raw.match(MIN_DUE_RE) ?? raw.match(AR_MIN_DUE_RE);
-    const statementDue = extractDueDate(raw) ?? date;
+    const minDueFils = minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null;
+    const amountFils = statementTotalFils(raw);
+    if (!amountFils) return null;
+    const statementDue = extractDueDate(raw) ?? statedDate;
     return {
       kind: 'cardStatement',
       type: 'expense',
@@ -3727,7 +4289,7 @@ export function parseSms(
       // keep losing to the transaction's own timestamp.
       date: statementDue,
       dueDay: statementDue ? Number(statementDue.slice(8)) : null,
-      minDueFils: minMatch ? Math.round(Number(minMatch[1].replace(/,/g, '')) * 100) : null,
+      minDueFils,
       card: { ...card, kind: 'credit' },
       transferHint: false,
       snapshotFils,
@@ -3744,7 +4306,25 @@ export function parseSms(
   // ...and so do the two clauses a reminder signs off with. See
   // HYPOTHETICAL_PAYMENT_RE: the direction WORDS read the body without them,
   // while every clause test below still reads `prose` in full.
-  const stated = blank(blank(prose, HYPOTHETICAL_PAYMENT_RE), PAYMENT_INSTRUCTION_RE);
+  // ...and neither is a SHOP'S NAME. maskMerchantNames blanks the descriptor
+  // the payee grammar reads, and it is applied here for exactly the reason it
+  // was applied to the decline patterns: a word inside a trade name is not a
+  // statement about the transaction. CREDIT_WORDS matches a bare
+  // `credit(?:ed)?` guarded only against "credit card|limit|line|score|
+  // facility", so
+  //
+  //   "AED 45.00 at CREDIT SUISSE DUBAI using Card 4110 on 30/07/2026"
+  //
+  // came back as INCOME — a AED 45 purchase became AED 45 of revenue, a 2x
+  // swing decided by the shop's surname. ("using Card 4110" is not a debit
+  // word either: DEBIT_WORDS' via/using/through alternative needs an explicit
+  // card KIND in front of "card".) The clause tests below are untouched and
+  // still read `prose` in full, so a direction stated in the sentence always
+  // beats this, which is the order this file already insists on.
+  const stated = blank(
+    blank(maskMerchantNames(prose), HYPOTHETICAL_PAYMENT_RE),
+    PAYMENT_INSTRUCTION_RE,
+  );
   const hasDebit = DEBIT_WORDS.test(stated);
   const hasCredit = CREDIT_WORDS.test(stated);
   // Carrier-billed store purchases ("App Store & Google Play bill") are
@@ -3755,7 +4335,7 @@ export function parseSms(
 
   // A refund or reversal reverses spending: money coming back IN, whatever
   // verbs the message uses ("Purchase amount of AED X ... has been refunded").
-  const isRefund = /refunded to your (?:card|account)/i.test(prose) || REVERSAL_RE.test(prose);
+  const isRefund = REFUND_RE.test(prose) || REVERSAL_RE.test(prose);
 
   if (PROMO_RE.test(raw) && !TXN_EVIDENCE_RE.test(raw)) return null;
   // "AED 500.00 has been reversed to your Card ending 1234" names no verb from
@@ -3779,7 +4359,37 @@ export function parseSms(
   // amount means the bank quoted the local value itself and the implied rate is
   // real; null means this file's cross-rate table guessed it. See ForeignAmount.
   const bankLocalFils = extractAmountFils(raw);
-  const foreignAmount = extractForeignAmount(raw);
+  const foreignCandidate = extractForeignAmount(raw);
+  /**
+   * A FOREIGN FIGURE THE LOCAL ONE CONTRADICTS IS NOT A CONVERSION.
+   *
+   * When the body states both halves, the implied rate between them is
+   * recorded as `fxSource: 'bank'` — the marker that tells fx.ts this rate is
+   * REAL and must not be corrected. That is the right reading of a genuine
+   * dual-currency alert, and the wrong reading of a merchant whose name
+   * happens to open with an ISO code and a number:
+   *
+   *   "AED 250.00 spent at CAD 3 TRADING LLC with Credit Card 1234"
+   *     -> a CAD 3.00 purchase at 83.33 AED/CAD, stamped as the bank's own rate.
+   *
+   * The total on that row is right; only the annotation is invented. So the
+   * annotation is dropped when the two halves cannot be the same money at any
+   * plausible rate. The band is deliberately wide — a factor of eight either
+   * side of this file's stale cross-rate table — because the table is a
+   * fallback and a real bank rate may drift a long way from it. The collisions
+   * this catches are off by 30x and 200x.
+   */
+  const fxImplausible =
+    !!foreignCandidate &&
+    bankLocalFils !== null &&
+    (() => {
+      const implied = bankLocalFils / foreignCandidate.amountMinor;
+      const table = foreignCandidate.rate;
+      if (!(implied > 0) || !(table > 0)) return true;
+      const ratio = implied / table;
+      return ratio > 8 || ratio < 1 / 8;
+    })();
+  const foreignAmount = fxImplausible ? null : foreignCandidate;
   const amountFils = bankLocalFils ?? foreignAmount?.localFils ?? null;
   if (!amountFils) return null;
 
@@ -3819,7 +4429,7 @@ export function parseSms(
    * call-centre footer blanked out. Length-preserving, so the Arabic path can
    * still slice a name out of `clean` at these offsets.
    */
-  const payeeText = blank(raw, CONTACT_FOOTER_RE);
+  const payeeText = blank(blank(raw, CONTACT_FOOTER_RE), PROMO_SENTENCE_RE);
   // English first in BOTH branches, always. On a bilingual body the two halves
   // name the same shop, and the Latin spelling is the one SERVICE_NAMES,
   // cleanDescriptor's acquirer heuristics, the merchant-override keys and
@@ -4071,7 +4681,12 @@ export function parseSms(
     transferHint = true;
   }
 
-  const cat = categoryOf(titlePinned ? merchant : raw, type, overrides, merchant);
+  // `payeeText` and not `raw`: an offer footer must not decide the CATEGORY
+  // either. With the payee grammar fixed the row is titled correctly, and
+  // "Enjoy 10% Cashback at Carrefour" stapled to a Sharjah trader's purchase
+  // still filed it under groceries — the merchant right, the category still
+  // borrowed from an advert. It is the same sentence and the same argument.
+  const cat = categoryOf(titlePinned ? merchant : payeeText, type, overrides, merchant);
 
   return {
     kind: isBillDue ? 'billDue' : 'transaction',
@@ -4089,8 +4704,10 @@ export function parseSms(
         }
       : {}),
     merchant,
-    date,
-    dueDay: isBillDue && date ? Number(date.slice(8)) : null,
+    // A REMINDER's date is its deadline, so it reads the unblanked body. A
+    // POSTING's is not, and reads the body with the deadline clause removed.
+    date: isBillDue ? statedDate : date,
+    dueDay: isBillDue && statedDate ? Number(statedDate.slice(8)) : null,
     minDueFils: null,
     card,
     transferHint,
@@ -4242,6 +4859,25 @@ function merchantsAgree(a: ParsedSms, b: ParsedSms): boolean {
   if (!ka || !kb) return true;
   return ka === kb;
 }
+/**
+ * The parse, plus the bank the message NAMES.
+ *
+ * A wrapper rather than 27 edited return sites, and the hint is advisory: the
+ * import planner prefers it over the sender when both exist, because a message
+ * that spells out "Emirates NBD Credit Card" is stating its issuer, while a
+ * sender ID only suggests one.
+ */
+export function parseSms(
+  message: string,
+  overrides?: Record<string, CategoryId>,
+  options?: ParseOptions,
+): ParsedSms | null {
+  const parsed = parseSmsInner(message, overrides, options);
+  if (!parsed) return null;
+  const named = bankFromMessage(message);
+  return named ? { ...parsed, bankHint: named.name } : parsed;
+}
+
 export function parseSmsBatch(
   text: string,
   overrides?: Record<string, CategoryId>,

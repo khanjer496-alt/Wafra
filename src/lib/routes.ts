@@ -43,6 +43,7 @@ export const APP_ROUTES = [
   '/ios-setup',
   '/add-transaction',
   '/pro',
+  '/feedback',
 ] as const;
 
 /** A screen, with no query string. */

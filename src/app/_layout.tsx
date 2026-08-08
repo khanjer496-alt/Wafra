@@ -16,6 +16,12 @@ import { StoreProvider, useStore } from '@/lib/store';
 // Required at module scope so expo-task-manager can load the wake-only relay
 // handler when iOS launches the JS bundle in the background.
 import '@/lib/background-relay';
+import { installFeedbackTransport } from '@/lib/feedback-transport';
+
+// Installed once, at module load, before any screen can offer to send. The
+// capture module keeps its promise of holding no network by taking delivery
+// through a setter; this is the one call that fills it in.
+installFeedbackTransport();
 
 /**
  * Mirrors the whole app left-to-right or right-to-left, live.

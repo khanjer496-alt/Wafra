@@ -19,6 +19,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { formatAED } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 import { inPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -45,9 +46,20 @@ export default function CurrencyScreen() {
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [query, setQuery] = useState('');
 
+  // The ledger's own currency is passed rather than left to the default, so
+  // this screen states which currency it is calling "local" instead of
+  // inheriting it. "Foreign" below means "not the currency the stored fils are
+  // in" — a SAR charge on a SAR ledger is not foreign activity, and its stored
+  // fils are the same money as its original amount, not a conversion of it.
+  const ledgerCurrency = ledgerCurrencyCode();
   const summary = useMemo(
-    () => summarizeForeignActivity(state.transactions, (tx) => inPeriod(tx.date, period)),
-    [state.transactions, period],
+    () =>
+      summarizeForeignActivity(
+        state.transactions,
+        (tx) => inPeriod(tx.date, period),
+        ledgerCurrency,
+      ),
+    [state.transactions, period, ledgerCurrency],
   );
   const accountById = useMemo(
     () => new Map(state.accounts.map((account) => [account.id, account] as const)),

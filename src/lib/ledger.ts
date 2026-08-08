@@ -90,11 +90,35 @@ export function isInboundTransfer(t: Transaction): boolean {
  *  - two DIFFERENT accounts, both the user's own
  *  - within three days, for a transfer that clears overnight
  *  - each row pairs once, so three 500s do not all cancel one
+ *
+ * "Both the user's own" means EVERY account, hidden ones included. Closing an
+ * old account, moving the balance to the new one and then hiding the old one
+ * is the ordinary path here, and while this function narrowed itself to the
+ * live set that last step un-paired the move: the leaving leg vanished with
+ * its account and the arriving leg — which the bank words exactly like being
+ * paid, and which carries no transfer flag of its own — went back to reading
+ * as income. Toggling "Hide from lists" on the source account took Home's In
+ * from AED 25,000 to AED 44,000 and net worth from AED 24,485 to AED 43,800,
+ * money the user had merely walked from one pocket to another.
+ *
+ * Hiding an account is a display decision. It must not change what a movement
+ * WAS. The live filter is a separate rule and already applied separately, by
+ * `countsInTotals` above, after the pairing has been established.
  */
 export function internalTransferIds(
   transactions: Transaction[],
-  accountIds: Set<string>,
+  accounts: Set<string> | Account[],
 ): Set<string> {
+  // Callers hold `liveAccountIds(...)` for the predicates above and naturally
+  // passed it here too, which is how the narrowing got in. Take `Account[]`
+  // and there is nothing to get wrong; take the legacy Set and widen it to
+  // every account the rows themselves name, which comes to the same thing —
+  // deleting an account deletes its transactions (store.tsx, 'deleteAccount'),
+  // so a stored row always belongs to an account that still exists.
+  const accountIds = Array.isArray(accounts)
+    ? new Set(accounts.map((a) => a.id))
+    : new Set(transactions.map((t) => t.accountId));
+
   const paired = new Set<string>();
   const outgoing = new Map<number, Transaction[]>();
   for (const t of transactions) {

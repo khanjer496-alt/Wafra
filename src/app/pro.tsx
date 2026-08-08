@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -67,26 +67,56 @@ export default function ProScreen() {
   const trial = trialDaysLeft(state);
   const rows = features();
 
+  /**
+   * What the last tap on Get Pro or Restore had to say.
+   *
+   * Every one of these answers was an `Alert.alert`, and `isBillingAvailable()`
+   * is false on the web export — where `Alert.alert` is an empty method. So on
+   * the one build the end-to-end suite drives, the two buttons on the screen
+   * that sells the product did nothing, said nothing and logged nothing.
+   *
+   * It is drawn under the buttons rather than over them: none of these five
+   * outcomes asks the user to decide anything, so none of them has earned a
+   * modal. What they have to do is be visible, which an alert was not.
+   */
+  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+
   const buy = async () => {
+    setNotice(null);
     if (!isBillingAvailable()) {
       // Store-name copy stays in i18n rather than being assembled from
       // billingStore(): contracts.test.js fails any English sentence written
       // into a screen, and a template literal is still an English sentence.
       // These keys read "Play Store", which is correct for this Android
       // milestone; the App Store wording needs its own keys before iOS ships.
-      Alert.alert(t('playOnlyTitle'), t('playOnlyBody'));
+      setNotice({ title: t('playOnlyTitle'), body: t('playOnlyBody') });
       return;
     }
-    if (await purchasePro(plan)) setPro(true);
+    const outcome = await purchasePro(plan);
+    if (outcome === 'granted') setPro(true);
+    // 'cancelled' is the user closing the sheet, and gets no dialogue —
+    // telling someone their own decision failed is noise. 'failed' is the
+    // store: an unactivated SKU, an SDK that would not configure, a throw.
+    // Without this branch the button was simply inert forever, which reads as
+    // a broken app rather than a broken listing.
+    else if (outcome === 'failed')
+      setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
   };
 
   const restore = async () => {
+    setNotice(null);
     if (!isBillingAvailable()) {
-      Alert.alert(t('nothingToRestore'), t('nothingToRestoreBody'));
+      setNotice({ title: t('nothingToRestore'), body: t('nothingToRestoreBody') });
       return;
     }
-    if (await restorePro()) setPro(true);
-    else Alert.alert(t('noPurchaseFound'), t('noPurchaseFoundBody'));
+    const restored = await restorePro();
+    if (restored) setPro(true);
+    // null is "could not ask the store", NOT "never paid". A subscriber
+    // reinstalling on a bad connection must not be told their purchase does
+    // not exist — they should be told to try again.
+    else if (restored === null)
+      setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
+    else setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
   };
 
   return (
@@ -203,6 +233,19 @@ export default function ProScreen() {
               </View>
               <Button label={t('getPro')} onPress={buy} />
               <Button variant="ghost" label={t('restorePurchase')} onPress={restore} />
+              {notice && (
+                <View
+                  accessibilityLiveRegion="polite"
+                  style={[
+                    styles.notice,
+                    { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+                  ]}>
+                  <ThemedText type="small">{notice.title}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {notice.body}
+                  </ThemedText>
+                </View>
+              )}
             </Section>
           )}
         </ScrollView>
@@ -256,6 +299,12 @@ const styles = StyleSheet.create({
   plans: {
     flexDirection: 'row',
     gap: Spacing.two + 2,
+  },
+  notice: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.half,
   },
   plan: {
     flex: 1,

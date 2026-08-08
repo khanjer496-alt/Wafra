@@ -672,9 +672,26 @@ const S = {
   },
   regionHeader: { en: 'Region', ar: 'المنطقة' },
   countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
+  // What the pack changes, stated as what it changes: which banks and shops
+  // are recognised in NEW messages. It does not restate the currency as
+  // something the pack sets, because on a ledger that already holds money it
+  // cannot — see marketPinned below.
   countryPackDetail: {
-    en: '{country} · {currency} · banks and merchants',
-    ar: '{country} · {currency} · البنوك والمتاجر',
+    en: '{country} · {currency} · bank and shop names in new messages',
+    ar: '{country} · {currency} · أسماء البنوك والمتاجر في الرسائل الجديدة',
+  },
+  /**
+   * Why a differently-denominated pack is greyed out.
+   *
+   * The honest sentence, because the dishonest one was the bug: switching
+   * packs used to relabel every stored figure — the same 125,050 fils
+   * printing "AED 1,250.50" and then "SAR 1,250.50" — with nothing converted
+   * and no rate that could have converted it. So the pack is refused, and the
+   * row says which currency the money is already in and what the way out is.
+   */
+  marketPinned: {
+    en: 'Your money is recorded in {currency}. Switching would relabel it, not convert it.',
+    ar: 'أموالك مسجّلة بـ {currency}. التبديل سيغيّر التسمية فقط ولن يحوّل المبالغ.',
   },
   uaeName: { en: 'United Arab Emirates', ar: 'الإمارات العربية المتحدة' },
   saudiName: { en: 'Saudi Arabia', ar: 'المملكة العربية السعودية' },
@@ -1106,6 +1123,12 @@ const S = {
   nothingOutYet: { en: 'Nothing has gone out in this period yet.', ar: 'لم يخرج أي مبلغ في هذه الفترة بعد.' },
   noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
   noStatementYet: { en: 'No statement message has arrived for this card yet.', ar: 'لم تصل رسالة كشف حساب لهذه البطاقة بعد.' },
+  // Not "none yet" — none ever. A debit card spends the money already in the
+  // account, so it issues no statement and there is no bill to pay toward it.
+  debitHasNoStatement: {
+    en: 'A debit card has no statement and no bill to pay — it spends the balance in the account.',
+    ar: 'بطاقة الخصم المباشر ليس لها كشف حساب ولا فاتورة تُسدَّد — فهي تنفق الرصيد الموجود في الحساب.',
+  },
   underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
   transferExplainer: { en: 'Kept in balances, excluded from income and spending', ar: 'يُحتسب في الأرصدة ويُستثنى من الدخل والمصروف' },
   perYear: { en: 'per year', ar: 'سنوياً' },
@@ -1120,6 +1143,18 @@ const S = {
   noPurchaseFoundBody: {
     en: 'No previous Wafra Pro purchase on this Google account.',
     ar: 'لا توجد عملية شراء سابقة لوفرة برو على حساب Google هذا.',
+  },
+  // Deliberately NOT noPurchaseFound: the store was never reached, so nothing
+  // is known about what this account has bought.
+  restoreFailed: { en: 'Could not reach the store', ar: 'تعذّر الوصول إلى المتجر' },
+  restoreFailedBody: {
+    en: 'Your purchase has not been checked yet. Check your connection and try again.',
+    ar: 'لم يتم التحقق من عملية الشراء بعد. تحقق من الاتصال وحاول مرة أخرى.',
+  },
+  purchaseFailed: { en: 'Purchase could not start', ar: 'تعذّر بدء عملية الشراء' },
+  purchaseFailedBody: {
+    en: 'The store did not respond. Nothing has been charged. Check your connection and try again.',
+    ar: 'لم يستجب المتجر. لم يتم خصم أي مبلغ. تحقق من الاتصال وحاول مرة أخرى.',
   },
   monthsFreeSuffix: { en: '· {months} months free', ar: '· {months} أشهر مجاناً' },
   trialDaysLeftPaywall: {
@@ -1321,6 +1356,14 @@ const S = {
     en: '{count} transfer{s} not counted',
     ar: '{count} تحويل مستبعد من الإجمالي',
   },
+  // Rows on a hidden account. They are still listed — they are real records
+  // and searching for one should find it — but every other total in the app
+  // leaves them out, so this one must too, and must say so.
+  hiddenAccountsExcluded: {
+    en: '{count} on hidden accounts',
+    ar: '{count} في حسابات مخفية',
+  },
+  smsImportsOnly: { en: 'Imported messages', ar: 'الرسائل المستوردة' },
   showResults: { en: 'Show {count} result{s}', ar: 'عرض {count} نتيجة' },
   nothingMatches: {
     en: 'Nothing matches. Adjust search or filters.',
@@ -1846,6 +1889,82 @@ const S = {
     en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
     ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',
   },
+
+  // Feedback. The register here is the same as the privacy section's: say what
+  // leaves the phone, say it before it leaves, and never describe the feature
+  // in terms of what it is FOR ("help us improve") when it can be described in
+  // terms of what it DOES.
+  sendFeedback: { en: 'Send feedback', ar: 'إرسال ملاحظة' },
+  sendFeedbackDetail: {
+    en: 'Report a bug, and choose what to attach',
+    ar: 'أبلغ عن خلل، واختر ما تُرفقه',
+  },
+  feedbackIntro: {
+    en: 'Say what went wrong. Nothing leaves this phone until you tap Send, and the whole report is printed below so you can read it first.',
+    ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال، والتقرير كاملاً مطبوع بالأسفل لتقرأه أولاً.',
+  },
+  feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
+  feedbackPlaceholder: {
+    en: 'Tuesday’s charge was filed twice.',
+    ar: 'سُجّلت عملية الثلاثاء مرتين.',
+  },
+  feedbackInputA11y: { en: 'Describe what went wrong', ar: 'اكتب ما الذي حدث' },
+  feedbackDigitsMasked: {
+    en: 'Long numbers you type are masked before sending.',
+    ar: 'تُخفى الأرقام الطويلة التي تكتبها قبل الإرسال.',
+  },
+  feedbackChars: { en: '{used} of {max}', ar: '{used} من {max}' },
+  feedbackAttachHeader: { en: 'WHAT TO ATTACH', ar: 'ما الذي يُرفق' },
+  feedbackAttachRow: { en: 'Attached', ar: 'المرفق' },
+  feedbackDetailNone: { en: 'Just what you wrote', ar: 'ما كتبته فقط' },
+  feedbackDetailNoneHint: { en: 'Nothing from your ledger.', ar: 'لا شيء من سجلك.' },
+  feedbackDetailShapes: { en: 'And the message shapes', ar: 'وأشكال الرسائل' },
+  feedbackDetailShapesHint: {
+    en: 'Bank messages with every digit blanked and every name replaced. Send this if an entry was read wrong.',
+    ar: 'رسائل البنك مع حذف كل رقم واستبدال كل اسم. أرسل هذا إذا قُرئت عملية بشكل خاطئ.',
+  },
+  feedbackDetailFigures: { en: 'And the amounts behind your totals', ar: 'والمبالغ خلف مجاميعك' },
+  feedbackDetailFiguresHint: {
+    en: 'Adds balances and statement figures. Still no names. Send this if a total looks wrong.',
+    ar: 'يضيف الأرصدة وأرقام الكشوف. ولا أسماء أيضاً. أرسل هذا إذا بدا أحد المجاميع خاطئاً.',
+  },
+  feedbackPrivateOn: {
+    en: 'Private Mode is on, so only your message can be sent.',
+    ar: 'الوضع الخاص مفعّل، لذا لا يمكن إرسال سوى رسالتك.',
+  },
+  feedbackPrivateBlocked: {
+    en: 'Private Mode keeps your ledger on this phone.',
+    ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
+  },
+  feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
+  feedbackPreviewNote: {
+    en: 'This is the report itself, not a summary of it. It is written in English so whoever fixes the bug can read it.',
+    ar: 'هذا هو التقرير نفسه، لا ملخص له. وهو مكتوب بالإنجليزية ليقرأه من سيصلح الخلل.',
+  },
+  feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
+  feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
+  feedbackSendQ: { en: 'Send this report?', ar: 'إرسال هذا التقرير؟' },
+  feedbackSendBody: {
+    en: 'The report above is what leaves this phone. Nothing else goes with it.',
+    ar: 'التقرير أعلاه هو ما يغادر هذا الهاتف. ولا شيء غيره.',
+  },
+  feedbackSaveCopy: { en: 'Save a copy', ar: 'حفظ نسخة' },
+  feedbackNeedsMessage: { en: 'Say what went wrong first.', ar: 'اكتب ما الذي حدث أولاً.' },
+  feedbackSentTitle: { en: 'Report sent', ar: 'أُرسل التقرير' },
+  feedbackSentBody: {
+    en: 'Reference {id}. This is how the parser learns a format it cannot read.',
+    ar: 'المرجع {id}. هكذا يتعلّم القارئ صيغة لا يستطيع قراءتها.',
+  },
+  feedbackNoTransportTitle: { en: 'Sending is not connected yet', ar: 'الإرسال غير موصول بعد' },
+  feedbackNoTransportBody: {
+    en: 'This build has no way to deliver a report, so nothing was uploaded. Save a copy and send it yourself.',
+    ar: 'لا توجد في هذه النسخة طريقة لتسليم التقرير، لذا لم يُرفع شيء. احفظ نسخة وأرسلها بنفسك.',
+  },
+  feedbackFailedTitle: { en: 'Could not send', ar: 'تعذّر الإرسال' },
+  feedbackFailedBody: {
+    en: 'The report did not leave the phone. Save a copy so it is not lost, and try again later.',
+    ar: 'لم يغادر التقرير الهاتف. احفظ نسخة كي لا تضيع، وحاول لاحقاً.',
+  },
   onboardImportResult: {
     en: '{entries} entr{ending} filed{cards}. Nothing left the phone.',
     ar: 'سُجّلت {entries} عملية{cards}. لم يغادر شيء الهاتف.',
@@ -1903,7 +2022,7 @@ const S = {
     ar: 'صرفت {amount} اليوم · {count} عملية',
   },
   dailySummaryLine: { en: '{amount} — {merchant}', ar: '{amount} — {merchant}' },
-  dailySummaryMore: { en: '+{count} more', ar: '+{count} اخري' },
+  dailySummaryMore: { en: '+{count} more', ar: '+{count} أخرى' },
   dailySummaryBudget: {
     en: '{spent} of {limit} monthly limits ({percent}%)',
     ar: '{spent} من {limit} من حدودك الشهرية ({percent}%)',
@@ -1938,7 +2057,7 @@ const S = {
   dailySummarySetting: { en: 'Daily spend summary', ar: 'ملخص الصرف اليومي' },
   dailySummaryOn: {
     en: 'Every evening at 9pm, if you spent anything',
-    ar: 'كل مساء الساعه ٩، اذا صرفت شيئا',
+    ar: 'كل مساء الساعة ٩، إذا صرفت شيئاً',
   },
   dailySummaryOff: { en: 'Off', ar: 'متوقف' },
   notificationBillDue: { en: '{name} due {when}', ar: '{name} مستحق {when}' },
@@ -1953,6 +2072,46 @@ const S = {
   debitCardWithDigits: { en: 'Debit Card •{last4}', ar: 'بطاقة خصم •{last4}' },
   cardWithDigits: { en: 'Card •{last4}', ar: 'بطاقة •{last4}' },
   accountWithDigits: { en: 'Account •{last4}', ar: 'حساب •{last4}' },
+
+  // The screen for a link that leads nowhere. It is the one place a person can
+  // arrive at without having asked for it, which is exactly why it may not be
+  // the one place that answers in the wrong language.
+  notFoundTitle: { en: 'This page moved on', ar: 'هذه الصفحة لم تعد هنا' },
+  notFoundBody: {
+    en: 'Nothing lives at that link. Your entries are untouched — this is a signpost pointing at a room that isn’t there.',
+    ar: 'لا شيء في هذا الرابط. عملياتك كما هي — هذه لافتة تشير إلى غرفة غير موجودة.',
+  },
+  goHome: { en: 'Go home', ar: 'إلى الرئيسية' },
+
+  // ── Titles the PARSER mints ──
+  //
+  // A row the parser understood structurally has no merchant to show, so it is
+  // given a title of its own: "ATM withdrawal", "Salary", "Card •3644 payment".
+  // Those literals are the STORED value — `STRUCTURAL_TITLES.has(...)` in
+  // sms-parser.ts, `NO_MERCHANT_TITLES` in accuracy.ts and the accuracy export
+  // all match on them, and a translated ledger would break every one — so they
+  // stay English on disk and are translated on the way to the screen, through
+  // `structuralTitleLabel` at the bottom of this file.
+  titleAtmWithdrawal: { en: 'ATM withdrawal', ar: 'سحب من الصراف' },
+  titleBankFee: { en: 'Bank fee', ar: 'رسوم بنكية' },
+  titleVatFee: { en: 'VAT fee', ar: 'ضريبة القيمة المضافة' },
+  titleCashDeposit: { en: 'Cash deposit', ar: 'إيداع نقدي' },
+  titleCheque: { en: 'Cheque', ar: 'شيك' },
+  titleParking: { en: 'Parking', ar: 'مواقف' },
+  titleOutgoingTransfer: { en: 'Outgoing transfer', ar: 'تحويل صادر' },
+  titleIncomingTransfer: { en: 'Incoming transfer', ar: 'تحويل وارد' },
+  titleRefund: { en: 'Refund', ar: 'استرداد' },
+  titleInwardRemittance: { en: 'Inward remittance', ar: 'حوالة واردة' },
+  titleOutwardRemittance: { en: 'Outward remittance', ar: 'حوالة صادرة' },
+  titleTelegraphicTransfer: { en: 'Telegraphic transfer', ar: 'حوالة برقية' },
+  titleBankTransfer: { en: 'Bank transfer', ar: 'تحويل بنكي' },
+  titleSavingsTransfer: { en: 'Savings transfer', ar: 'تحويل إلى الادخار' },
+  titleCardPayment: { en: 'Card payment', ar: 'دفعة بطاقة' },
+  titleAccountDebit: { en: 'Account debit', ar: 'خصم من الحساب' },
+  titleMobileRecharge: { en: 'Mobile recharge', ar: 'شحن رصيد الهاتف' },
+  titleCardStatement: { en: 'Card statement', ar: 'كشف حساب البطاقة' },
+  titleBillPayment: { en: 'Bill payment', ar: 'دفع فاتورة' },
+  titleSalary: { en: 'Salary', ar: 'راتب' },
 } as const;
 
 export type StringKey = keyof typeof S;
@@ -2026,4 +2185,73 @@ export function tf(
   return t(key, override).replace(/\{(\w+)\}/g, (whole, name) =>
     name in vars ? String(vars[name]) : whole,
   );
+}
+
+/**
+ * Does this text contain Arabic script?
+ *
+ * The bundled Latin faces have NO Arabic coverage — every codepoint in the
+ * block maps to .notdef in Geist — so a call site that pins `Fonts.sans*` over
+ * an Arabic string does not merely look wrong, it renders nothing readable.
+ * `ThemedText` asks this before it puts the Arabic face back; see the comment
+ * there. The whole block is the test, digits and punctuation included, because
+ * Geist cannot draw those either.
+ */
+export function hasArabicScript(text: string): boolean {
+  // The Arabic block, the two supplements, Extended-A and both presentation
+  // form blocks — the same literal-range style arabic-sms.ts uses, so the two
+  // definitions of "this is Arabic" can be read side by side.
+  return /[؀-ۿݐ-ݿࡰ-ࣿﭐ-﷿ﹰ-ﻼ]/.test(text);
+}
+
+/**
+ * The English literal the parser stores → what to PRINT for it.
+ *
+ * A row the parser recognised structurally has no merchant to show, so it
+ * carries a title the parser wrote itself. Those literals are load-bearing
+ * identity — sms-parser's `STRUCTURAL_TITLES`, accuracy.ts's
+ * `NO_MERCHANT_TITLES` / `CARD_PAYMENT_TITLE_RE`, and the format-report export
+ * all match on the exact English — so the ledger keeps them in English and the
+ * translation happens here, once, on the way to a screen.
+ */
+const STRUCTURAL_TITLE_KEYS: Record<string, StringKey> = {
+  'ATM withdrawal': 'titleAtmWithdrawal',
+  'Bank fee': 'titleBankFee',
+  'VAT fee': 'titleVatFee',
+  'Cash deposit': 'titleCashDeposit',
+  Cheque: 'titleCheque',
+  Parking: 'titleParking',
+  'Outgoing transfer': 'titleOutgoingTransfer',
+  'Incoming transfer': 'titleIncomingTransfer',
+  Refund: 'titleRefund',
+  'Inward remittance': 'titleInwardRemittance',
+  'Outward remittance': 'titleOutwardRemittance',
+  'Telegraphic transfer': 'titleTelegraphicTransfer',
+  'Bank transfer': 'titleBankTransfer',
+  'Savings transfer': 'titleSavingsTransfer',
+  'Card payment': 'titleCardPayment',
+  'Account debit': 'titleAccountDebit',
+  'Mobile recharge': 'titleMobileRecharge',
+  'Card statement': 'titleCardStatement',
+  'Bill payment': 'titleBillPayment',
+  Salary: 'titleSalary',
+};
+
+/** "Card •3644" and "Card •3644 payment" — a title with the digits inside it. */
+const CARD_TITLE_RE = /^Card •([0-9Xx*]{2,6})( payment)?$/;
+
+/**
+ * A parser-minted title in the current UI language; anything else untouched.
+ *
+ * A merchant name is a proper noun and is never translated — passing one
+ * through here returns it byte-for-byte, which is what lets a display layer
+ * call this on every title without knowing which kind it holds.
+ */
+export function structuralTitleLabel(title: string, override?: Lang): string {
+  const key = STRUCTURAL_TITLE_KEYS[title];
+  if (key) return t(key, override);
+  const card = CARD_TITLE_RE.exec(title);
+  if (!card) return title;
+  const name = tf('cardWithDigits', { last4: card[1] }, override);
+  return card[2] ? tf('accountPaymentTitle', { name }, override) : name;
 }

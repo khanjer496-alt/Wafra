@@ -20,6 +20,7 @@ import {
   buildImportPlan,
   isSmsScanningAvailable,
   scanInbox,
+  type DeclinedSms,
   type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
@@ -39,6 +40,18 @@ export type CaptureSource = 'sms' | 'relay' | 'none';
 
 export interface CaptureResult {
   parsed: ScannedSms[];
+  /**
+   * Timestamps of messages this collection read and refused as declines, so
+   * the planner can retire rows an older parser booked from them.
+   *
+   * Android only, and it is not an omission on the other pipe. The relay
+   * parses server-side and discards Message Content before sealing the row
+   * (server/src/index.ts), so there is no body on this device to test and
+   * nothing to re-read once a queue row is acknowledged — the same reason
+   * there is no relay equivalent of the parser-version re-read below. Always
+   * `[]` there, which makes the sweep a no-op rather than a wrong answer.
+   */
+  declined: DeclinedSms[];
   /** Newest message timestamp seen, for the next incremental scan. */
   newestTs: number;
   source: CaptureSource;
@@ -95,6 +108,7 @@ async function clearStagedRows(snapshot: string | null): Promise<void> {
 
 const EMPTY: CaptureResult = {
   parsed: [],
+  declined: [],
   newestTs: 0,
   source: 'none',
   commit: NOOP,
@@ -118,8 +132,13 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     // healed in place, not duplicated.
     const reread = state.parserVersion !== PARSER_VERSION;
     const sinceMs = reread || state.lastScanTs <= 0 ? 0 : state.lastScanTs + 1;
-    const { parsed, newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
-    return { parsed, newestTs, source: 'sms', commit: NOOP, needsSetup: false };
+    // `declined` is the other half of that re-read. A decline the old parser
+    // booked as an expense cannot be healed into anything — the money never
+    // moved — so the row has to be retired, and the proof is the message
+    // still sitting in the inbox at that exact millisecond. The scan is the
+    // only place that proof exists. The default covers a stubbed scanInbox.
+    const { parsed, declined = [], newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
+    return { parsed, declined, newestTs, source: 'sms', commit: NOOP, needsSetup: false };
   }
 
   // Note there is no relay equivalent of the re-read above, and there cannot
@@ -150,6 +169,8 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
         );
         return {
           parsed: staged.rows,
+          // No body ever reached this device; see CaptureResult.declined.
+          declined: [],
           newestTs,
           source: 'relay',
           commit: async () => {
@@ -182,6 +203,8 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
     return {
       parsed: collected,
+      // No body ever reached this device; see CaptureResult.declined.
+      declined: [],
       newestTs,
       source: 'relay',
       commit: async () => {
@@ -216,8 +239,14 @@ export interface CapturePlan {
 
 /** collectNewMessages() + buildImportPlan(), which is all any caller wants. */
 export async function planNewMessages(state: AppState): Promise<CapturePlan> {
-  const { parsed, newestTs, source, commit, needsSetup } = await collectNewMessages(state);
-  return { plan: buildImportPlan(parsed, state, newestTs), source, commit, needsSetup };
+  const { parsed, declined, newestTs, source, commit, needsSetup } =
+    await collectNewMessages(state);
+  return {
+    plan: buildImportPlan(parsed, state, newestTs, new Date(), declined),
+    source,
+    commit,
+    needsSetup,
+  };
 }
 
 /** True when this build can capture at all, configured or not. */

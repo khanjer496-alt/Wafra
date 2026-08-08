@@ -3,9 +3,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, SectionHeader } from '@/components/ui/layout';
@@ -58,6 +59,7 @@ export function SupplementImports() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [confirmingRevoke, setConfirmingRevoke] = useState(false);
 
   const errorText = useCallback((value: unknown): string => {
     if (!(value instanceof CloudImportError)) return copy.errUnexpected;
@@ -230,29 +232,26 @@ export function SupplementImports() {
     }
   };
 
-  const revoke = () => {
-    if (!cfg?.forwardingAddress) return;
-    Alert.alert(copy.revokeTitle, copy.revokeBody, [
-      { text: language === 'ar' ? 'إلغاء' : 'Cancel', style: 'cancel' },
-      {
-        text: copy.revoke,
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            setBusy('email-revoke');
-            setError(null);
-            try {
-              await revokeEmailForwardingAddress(cfg);
-              setCfg(await clearRelayEmailCredential(cfg));
-            } catch (e) {
-              setError(errorText(e));
-            } finally {
-              setBusy(null);
-            }
-          })();
-        },
-      },
-    ]);
+  /**
+   * The revocation itself, reachable from the confirmation sheet and from
+   * nowhere else — it used to sit inside an alert button's `onPress`, which on
+   * the web export is code no tap can reach: `Alert.alert` is `static alert() {}`
+   * there, so "Revoke address" did nothing at all and said nothing about it.
+   */
+  const revokeAddress = () => {
+    if (!cfg) return;
+    void (async () => {
+      setBusy('email-revoke');
+      setError(null);
+      try {
+        await revokeEmailForwardingAddress(cfg);
+        setCfg(await clearRelayEmailCredential(cfg));
+      } catch (e) {
+        setError(errorText(e));
+      } finally {
+        setBusy(null);
+      }
+    })();
   };
 
   const locked = state.privateMode;
@@ -362,7 +361,7 @@ export function SupplementImports() {
                 <Button
                   variant="ghost"
                   label={busy === 'email-revoke' ? copy.revoking : copy.revoke}
-                  onPress={revoke}
+                  onPress={() => setConfirmingRevoke(true)}
                   disabled={busy !== null}
                 />
               </>
@@ -401,6 +400,25 @@ export function SupplementImports() {
           <ThemedText type="meta" themeColor="textTertiary">{copy.privacyBody}</ThemedText>
         </View>
       </View>
+
+      {/* A sibling, not a nested sheet: this block is a section of a scrolling
+          screen, not a presented modal, so there is no parent to stack under.
+          Mounted only while there is something to confirm, so the sheet's
+          entry animation runs on every open. The address guard was the alert's
+          own early return and still has to hold — the button is drawn only in
+          that branch, but the sheet's own confirm must not fire against a
+          config that lost its credential while the sheet was open. */}
+      {confirmingRevoke && cfg?.forwardingAddress && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmingRevoke(false)}
+          question={copy.revokeTitle}
+          body={copy.revokeBody}
+          confirmLabel={copy.revoke}
+          destructive
+          onConfirm={revokeAddress}
+        />
+      )}
     </View>
   );
 }

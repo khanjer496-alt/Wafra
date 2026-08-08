@@ -323,7 +323,15 @@ export function TrendCurve({
   const y = (fils: number) => pad + (1 - (fils - lo) / span) * plot;
 
   const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i)},${y(p.fils)}`).join(' ');
-  const area = `${line} L${width},${y(lo)} L0,${y(lo)} Z`;
+  // The wash under the line closes through the two baseline corners, and they
+  // have to be taken in the order the line left off. Under RTL the path ends at
+  // x=0, so the LTR order (width, then 0) sent it back across the whole chart
+  // and then out again along the floor: the polygon crossed itself, and the
+  // nonzero fill that survived was a bowtie sliver between the curve and its
+  // own chord rather than the area beneath it.
+  const area = rtl
+    ? `${line} L0,${y(lo)} L${width},${y(lo)} Z`
+    : `${line} L${width},${y(lo)} L0,${y(lo)} Z`;
   const last = points[points.length - 1];
   const rising = last.fils >= points[0].fils;
   // Falling takes the graphic clay for the same reason the bars do: this is a

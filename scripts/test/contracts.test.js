@@ -864,13 +864,35 @@ function ktSources(dir) {
     due.paidFils === 0 && allocatedPaidFils === 40000 && allocated.remainingFils === 60000,
     `raw=${due.paidFils} paid=${allocatedPaidFils} outstanding=${allocated.remainingFils}`);
 
+  /**
+   * Anchored on the focal figures themselves, not on the block they used to
+   * be computed in.
+   *
+   * The first version of this scan sliced bills.tsx between `dues.length ===
+   * 1` and `dues.length > 1` and searched inside. When the per-render scan
+   * was hoisted into a `focalDue` memo — a fix for a different defect, and a
+   * correct one — the opening marker disappeared, the slice came back as the
+   * empty string, and every regex below failed against nothing. A contract
+   * that breaks when the code it protects is merely MOVED reports refactors
+   * as regressions and says nothing about the thing it exists to defend.
+   *
+   * So: the whole file, and the property. `paidFils` must be derived from the
+   * allocated remainder, the bar must be that same figure over the total, the
+   * "paid of total" line must print that same figure, and raw `due.paidFils`
+   * — which records manual edits only — must not appear on this screen at
+   * all. Where those four live is the screen's business.
+   */
   const bills = read('src/app/(tabs)/bills.tsx');
-  const focal = bills.match(/dues\.length === 1[\s\S]*?dues\.length > 1/)?.[0] ?? '';
+  // Comments stripped before the last check: the line that documents WHY the
+  // raw field is unused says its name, and a scan that cannot tell prose from
+  // code would force that explanation to be deleted to stay green.
+  const billsCode = bills.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   ok('the Bills focal derives progress and paid-of-total from the allocated remainder',
-    /const paidFils = Math\.max\(0, item\.due\.totalDueFils - item\.remainingFils\)/.test(focal) &&
-      /Math\.min\(1, paidFils \/ Math\.max\(1, item\.due\.totalDueFils\)\)/.test(focal) &&
-      /paid: formatAED\(paidFils, \{ decimals: false \}\)/.test(focal) &&
-      !/item\.due\.paidFils/.test(focal));
+    /const paidFils = Math\.max\(0, item\.due\.totalDueFils - item\.remainingFils\)/.test(billsCode) &&
+      /Math\.min\(1, paidFils \/ Math\.max\(1, item\.due\.totalDueFils\)\)/.test(billsCode) &&
+      /paid: formatAED\(paidFils, \{ decimals: false \}\)/.test(billsCode) &&
+      !/\bdue\.paidFils\b/.test(billsCode),
+    billsCode.match(/\bdue\.paidFils\b/g));
 }
 
 /* ── the same rule, written the other way round ─────────────────────── */
@@ -1093,6 +1115,144 @@ ok('the spoken label agrees with the sign on screen',
   ok('a bulk merchant rule never claims the title was retyped',
     !/titleEdited/.test(code(override)),
     'that path does not touch titles');
+}
+
+/* ── a drill-down adds up to the figure that was tapped ───────────────
+ *
+ * Every route into src/app/transactions.tsx comes from a NUMBER on another
+ * screen: Home's In/Out, a Flow category row, a Stats merchant row. The
+ * contract is that the header on the screen you land on equals the figure you
+ * touched to get there. Four separate ways it did not:
+ *
+ *   Home computes Out from live accounts; this screen's total did not, so
+ *   archiving a card made 12,000 open as −16,000.
+ *   Flow's slices come from allocationsOf; this screen read t.category, so a
+ *   split charge was counted whole or dropped entirely.
+ *   Stats' merchant rows are period-scoped; this screen opened all-time.
+ *   Flow's slices are spending-only; this screen netted refunds off.
+ */
+{
+  const tx = code(read('src/app/transactions.tsx'));
+
+  ok('the transactions total asks ledger.ts what counts',
+    /countsInTotals\(t, liveAccounts, internal\)/.test(tx) &&
+      !/!t\.isTransfer && !internal\.has/.test(tx),
+    'the local spelling had no live-account check, so a hidden card kept spending');
+
+  ok('the category filter matches every part of a split row',
+    /touchesCategories\(t, filters\.categories\)/.test(tx) &&
+      !/filters\.categories\.has\(/.test(tx),
+    'reading t.category hides the smaller half of a split from its own list');
+
+  ok('the total counts only the filtered categories of a split row',
+    /amountInCategories\(t, filters\.categories\)/.test(tx),
+    'otherwise a 400-groceries/100-dining charge adds 500 to a groceries total');
+
+  ok('"Last 3 months" is bounded at both ends',
+    /k < threeKey \|\| k > currentKey/.test(tx),
+    'a bill dated next month was listed and totalled under it');
+
+  ok('a merchant drill-down opens in the period the figure was read in',
+    /datePreset: source === 'sms' \? 'all' : 'selected'/.test(tx),
+    'topMerchants is period-scoped; the drill-down was all-time');
+
+  ok('a category or merchant drill-down is scoped to spending',
+    /deepCategories\.length > 0 \|\| merchantParam\s*\n?\s*\? 'expense'/.test(tx),
+    'both rows are built from isSpending, so a refund must not net off the header');
+
+  ok('the SMS restriction is state rather than a route param',
+    /useState\(source === 'sms'\)/.test(tx) &&
+      /smsOnly && t\.source !== 'sms'/.test(tx) &&
+      !/source === 'sms' && t\.source/.test(tx),
+    'a route param cannot be cleared by "Clear all filters"');
+  ok('"Clear all filters" clears the SMS restriction and counts it',
+    /setSmsOnly\(false\)/.test(tx) && /\(smsOnly \? 1 : 0\)/.test(tx));
+
+  ok('"Oldest first" sorts by date rather than reversing store order',
+    !/\.reverse\(\)/.test(tx),
+    'sortTxs orders by date alone, so reversing gave reverse IMPORT order within a day');
+
+  ok('the custom range is usable where there is no native picker',
+    /Platform\.OS === 'web' \?/.test(tx) && /picking !== null && Platform\.OS !== 'web'/.test(tx),
+    'datetimepicker has no web build; it warns and renders null');
+}
+
+/* ── splits are read by their parts, everywhere ───────────────────────── */
+{
+  const { amountInCategories, touchesCategories } = require('./build/splits');
+  const carrefour = {
+    id: 'a',
+    amountFils: 50000,
+    type: 'expense',
+    category: 'dining',
+    splits: [
+      { category: 'groceries', amountFils: 10000 },
+      { category: 'dining', amountFils: 40000 },
+    ],
+  };
+  const plain = { id: 'b', amountFils: 20000, type: 'expense', category: 'groceries' };
+
+  ok('a split row belongs to every category it touches',
+    touchesCategories(carrefour, new Set(['groceries'])) &&
+      touchesCategories(carrefour, new Set(['dining'])) &&
+      !touchesCategories(carrefour, new Set(['transport'])));
+  ok('a split row contributes only its own part to a category total',
+    amountInCategories(carrefour, new Set(['groceries'])) === 10000 &&
+      amountInCategories(carrefour, new Set(['dining'])) === 40000);
+  ok('a pooled slice sums exactly the parts it stands for',
+    amountInCategories(carrefour, new Set(['groceries', 'dining'])) === 50000);
+  ok('an unsplit row still counts whole, under its own category',
+    amountInCategories(plain, new Set(['groceries'])) === 20000 &&
+      amountInCategories(plain, new Set(['dining'])) === 0);
+}
+
+/* ── the trial clock cannot run backwards or overrun ──────────────────
+ *
+ * `trialStartTs` is a device clock reading, so it can land in the future — a
+ * fast clock at first launch, a restored backup, a deliberate change. The
+ * subtraction was unbounded above, and the paywall offered "your first 3 days
+ * — 8 days left". */
+{
+  const { trialDaysLeft, TRIAL_DAYS, isProActive } = require('./build/purchases');
+  const DAY = 86400000;
+  const now = Date.UTC(2026, 5, 1);
+
+  ok('a trial that has just started is the full length',
+    trialDaysLeft({ trialStartTs: now }, now) === TRIAL_DAYS);
+  ok('a trial that has run out is over',
+    trialDaysLeft({ trialStartTs: now - 4 * DAY }, now) === 0 &&
+      isProActive({ pro: false, trialStartTs: now - 4 * DAY }, now) === false);
+  ok('a trial start in the future grants no more than the trial has',
+    trialDaysLeft({ trialStartTs: now + 5 * DAY }, now) === TRIAL_DAYS,
+    `got ${trialDaysLeft({ trialStartTs: now + 5 * DAY }, now)}`);
+
+  const offsets = [];
+  for (let d = -400; d <= 400; d += 7) offsets.push(d);
+  const out = offsets.map((d) => trialDaysLeft({ trialStartTs: now + d * DAY }, now));
+  ok('no clock reading produces a day count outside 0…TRIAL_DAYS',
+    out.every((v) => Number.isInteger(v) && v >= 0 && v <= TRIAL_DAYS),
+    out.filter((v) => v < 0 || v > TRIAL_DAYS).join(' | '));
+}
+
+/* ── a store that cannot be reached is not a customer who never paid ─── */
+{
+  const sdk = read('src/lib/billing.ts');
+  const pro = read('src/app/pro.tsx');
+
+  ok('restorePro has three answers, not two',
+    /export async function restorePro\(\): Promise<boolean \| null>/.test(sdk),
+    'false meant both "never bought it" and "could not ask"');
+  ok('the paywall tells a subscriber to retry rather than that nothing exists',
+    /restored === null/.test(code(pro)) && /restoreFailed/.test(pro),
+    'a reinstall on bad connectivity read as "No purchase found"');
+
+  ok('a purchase reports why it did not happen',
+    /export type PurchaseOutcome = 'granted' \| 'cancelled' \| 'failed'/.test(sdk));
+  ok('backing out of the store sheet is told apart from a broken store',
+    /userCancelled/.test(code(sdk)),
+    'an unactivated SKU made "Get Pro" silently inert, forever');
+  ok('the paywall reports a failed purchase and stays silent on a cancelled one',
+    /outcome === 'failed'/.test(code(pro)) && !/outcome === 'cancelled'/.test(code(pro)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

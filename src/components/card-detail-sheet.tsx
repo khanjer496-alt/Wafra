@@ -88,6 +88,22 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
         </View>
       )}
 
+      {/*
+        Both lists below are about a BILL, and a debit card does not have one.
+        Drawn unconditionally, this sheet told a user their Liv debit card had
+        "Payments made 360,054" — their salary and deposits — under a
+        Statements section reading "no statement message has arrived for this
+        card yet", which promises one is coming when none ever can. `billable`
+        is asked of the whole card group, so opening the debit sibling of a
+        real credit card still shows that card's bill.
+      */}
+      {!data.billable && (
+        <ThemedText type="default" themeColor="textSecondary">
+          {t('debitHasNoStatement')}
+        </ThemedText>
+      )}
+
+      {data.billable && (
       <View>
         <SectionHeader title={t('statements')} />
         {data.statements.length === 0 ? (
@@ -121,7 +137,9 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
           })
         )}
       </View>
+      )}
 
+      {data.billable && (
       <View>
         <SectionHeader
           title={t('paymentsMade')}
@@ -143,6 +161,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
           ))
         )}
       </View>
+      )}
     </BottomSheet>
   );
 }

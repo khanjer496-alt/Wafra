@@ -70,14 +70,29 @@ export function yearlySavingMonths(prices = PRO_PRICES): number {
  *  users see "3 days free" natively. */
 export const TRIAL_DAYS = 3;
 
-/** Whole days of trial remaining (0 when over). */
+/**
+ * Whole days of trial remaining, always within 0…TRIAL_DAYS.
+ *
+ * Both ends are clamped, and the upper one is not decoration. `trialStartTs`
+ * can sit in the FUTURE — a device whose clock was fast at first launch and
+ * later corrected, a restored backup, a user who moved the date deliberately.
+ * Unclamped, `TRIAL_DAYS - elapsed` then grows without bound and the paywall
+ * offered "your first 3 days — 8 days left", a sentence that argues with
+ * itself on the screen that sells the product.
+ *
+ * What this does NOT claim to be is tamper-proof. A local clock cannot be one:
+ * moving the date backwards has always stretched a trial derived from it, and
+ * no arithmetic here can tell that apart from a genuinely slow clock without
+ * server state. The bound keeps the figure honest and keeps the grant finite;
+ * the real entitlement gate is RevenueCat, asked at every launch.
+ */
 export function trialDaysLeft(
   state: { trialStartTs: number },
   nowMs: number = Date.now(),
 ): number {
   const start = state.trialStartTs || nowMs;
-  const elapsedDays = (nowMs - start) / 86400000;
-  return Math.max(0, Math.ceil(TRIAL_DAYS - elapsedDays));
+  const elapsedDays = Math.max(0, (nowMs - start) / 86400000);
+  return Math.min(TRIAL_DAYS, Math.max(0, Math.ceil(TRIAL_DAYS - elapsedDays)));
 }
 
 /** Pro features unlocked: purchased/founder Pro, or still inside the trial. */
