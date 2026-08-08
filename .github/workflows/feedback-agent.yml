@@ -74,7 +74,12 @@ jobs:
       # Repository SECRET holding the SAME value as the Worker secret
       # FEEDBACK_READ_TOKEN — see the block at the end of server/wrangler.toml.
       FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      # A SUBSCRIPTION, not an API key. `claude setup-token` (run once, locally,
+      # on a Pro/Max/Team/Enterprise plan) mints a long-lived OAuth token that
+      # the CLI reads from this exact variable name; it lasts a year and is
+      # renewed by running the same command again. Documented for CI at
+      # https://code.claude.com/docs/en/authentication#generate-a-long-lived-token
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       GH_TOKEN: ${{ github.token }}
       WORK: ${{ runner.temp }}/feedback
       # The agent CLI's flags live here so correcting them is one line rather
@@ -95,7 +100,7 @@ jobs:
           missing=()
           [ -n "${RELAY_URL:-}" ]           || missing+=("variable WAFRA_RELAY_URL")
           [ -n "${FEEDBACK_READ_TOKEN:-}" ] || missing+=("secret WAFRA_FEEDBACK_READ_TOKEN")
-          [ -n "${ANTHROPIC_API_KEY:-}" ]   || missing+=("secret ANTHROPIC_API_KEY")
+          [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || missing+=("secret CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token')")
           if [ ${#missing[@]} -gt 0 ]; then
             {
               echo "## Cannot start"
@@ -195,26 +200,28 @@ jobs:
       #
       # THIS STEP COULD NOT BE VERIFIED FROM THE MACHINE THAT WROTE IT.
       #
-      # Everything else in this file is ordinary CI whose behaviour follows from
-      # the repository. This step does not: it depends on a CLI that is not
-      # installed there and whose flags could not be checked against its own
-      # --help. It is written as the documented headless invocation — prompt on
-      # stdin, `--print`, ANTHROPIC_API_KEY in the environment — and CLAUDE_ARGS
-      # above exists so that correcting it is one line.
+      # The headless invocation, checked against the docs rather than written
+      # from memory: prompt on stdin, `--print` for non-interactive output,
+      # `--permission-mode acceptEdits` so the agent may edit files without a
+      # prompt, and CLAUDE_CODE_OAUTH_TOKEN in the environment.
+      #   https://code.claude.com/docs/en/headless
+      #   https://code.claude.com/docs/en/cli-reference
       #
-      # CONFIRM IT AGAINST https://docs.claude.com/en/docs/claude-code BEFORE
-      # THE FIRST REAL RUN. Two specific things: whether the flags in
-      # CLAUDE_ARGS are still spelled that way, and whether the package is still
-      # published under that name. If either is wrong the step fails loudly, no
-      # branch is pushed, and the item is still in D1 to re-fire through
-      # workflow_dispatch — so the failure mode is a wasted run, not a bad pull
-      # request.
+      # NOT `--dangerously-skip-permissions` (= `--permission-mode
+      # bypassPermissions`). It would also work, and it removes the one
+      # remaining boundary around an agent running unattended on a checkout
+      # with a token in its environment. `acceptEdits` buys the thing this
+      # workflow actually needs — unprompted file edits — and nothing else.
       #
-      # `anthropics/claude-code-action` is the other documented way to do this
-      # and would replace this step entirely. It is deliberately NOT used here
-      # because its input names could not be checked either, and getting a
-      # marketplace action's inputs wrong fails less obviously than a missing
-      # shell flag does.
+      # `anthropics/claude-code-action@v1` is the other documented route and
+      # would replace this step entirely; it takes `claude_code_oauth_token`
+      # as well as `anthropic_api_key`. The CLI is kept here because a wrong
+      # shell flag fails more obviously than a wrong marketplace input.
+      #
+      # Still unverified from the authoring environment: that this exact
+      # package/flag combination runs, since the CLI is not installed there. If
+      # it is wrong the step fails loudly, no branch is pushed, and the item is
+      # still in D1 to re-fire — a wasted run, not a bad pull request.
       - name: Run the agent
         run: |
           set -euo pipefail
