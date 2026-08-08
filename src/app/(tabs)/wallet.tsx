@@ -112,8 +112,32 @@ export default function WalletScreen() {
   // tablet and under RTL.
   const [curveWidth, setCurveWidth] = useState(0);
 
-  // Scans every transaction once per account, so it is kept off the render path.
-  const total = useMemo(() => netWorthFils(state), [state]);
+  /**
+   * The headline figure, and how much of this screen it can actually speak for.
+   *
+   * Scans every transaction once per account, so it is kept off the render
+   * path — and it counts as well as sums, because the sum alone lies.
+   * `netWorthFils` adds up only balances the bank has quoted; an account whose
+   * balance cannot be known contributes nothing (balances.ts), which makes
+   * "unknown" and "zero" the same output. A phone whose cards have never sent
+   * a statement SMS was therefore told, in display type, that its net worth
+   * was AED 0 — directly above rows that each said "no balance SMS yet".
+   *
+   * So the headline gets the same three-state vocabulary those rows already
+   * use: nothing knowable is a dash, not a zero, and a partial answer says how
+   * many accounts it had to leave out so it can be reconciled against them.
+   */
+  const worth = useMemo(() => {
+    let known = 0;
+    let unknown = 0;
+    for (const account of state.accounts) {
+      // Archived accounts are out of the sum, so they are out of the count.
+      if (account.archived) continue;
+      if (reliableBalanceFils(state, account) === null) unknown += 1;
+      else known += 1;
+    }
+    return { fils: netWorthFils(state), known, unknown };
+  }, [state]);
 
   /**
    * Movement since the start of the six-month window. A single figure with no
@@ -319,9 +343,18 @@ export default function WalletScreen() {
                 AED
               </ThemedText>
               <ThemedText type="amount" tabular>
-                {formatAmount(total, { decimals: false })}
+                {worth.known > 0 ? formatAmount(worth.fils, { decimals: false }) : '—'}
               </ThemedText>
             </View>
+            {worth.unknown > 0 && (
+              <ThemedText type="micro" themeColor="textSecondary">
+                {/* "label · count" is this screen's own idiom for a qualifier
+                    with a number on it — the bank group headings below read
+                    the same way — so the caption needs no sentence of its own
+                    to say WHICH rows the figure could not include. */}
+                {worth.known > 0 ? `${t('noBalanceYet')} · ${worth.unknown}` : t('noBalanceYet')}
+              </ThemedText>
+            )}
           </View>
 
           {/* The shape behind that figure — a line, not bars.
