@@ -109,6 +109,72 @@ const ARABIC_KEYWORDS: [RegExp, CategoryId][] = [
   [/دو\b|اتصالات\s*الامارات|موبايلي|زين|اس\s*تي\s*سي/, 'telecom'],
 ];
 
+/**
+ * Merchants that belong to no single market pack.
+ *
+ * A UAE card is used abroad, and the acquirer's descriptor is the same string
+ * whichever country the CARD was issued in. Nothing here is UAE- or Saudi-
+ * specific, so it is shared by every pack the way ARABIC_KEYWORDS is, rather
+ * than copied into each.
+ *
+ * THE BAR FOR AN ENTRY IS THAT THE NAME SAYS WHAT WAS BOUGHT. A store code, a
+ * processor prefix and a person's name all say nothing, and `other` is the
+ * honest answer for those — see the report in the commit that added this list
+ * for the ones deliberately left alone (2C2P, FAT*THE VIOLE, SP ALL-CHARMS,
+ * MARFAA, CRO, TUBA INT...). Every rule below fires on a real message from the
+ * accuracy corpus; none was written against an invented descriptor.
+ *
+ * These are consulted BEFORE the parser's own global vocabulary, so a rule here
+ * can take a category AWAY from a better answer. That is why each one is
+ * anchored on a whole brand token and never on a bare English word: `CENTRAL`,
+ * `TOPS` and `SPA` all appear in this corpus and none of them is safe alone.
+ */
+const CROSS_BORDER_KEYWORDS: [RegExp, CategoryId][] = [
+  // McDonald's own acquirer descriptor is "MCD-<store number> <location>", so
+  // the brand never appears in full: "MCD-0297 PHUKET AIRPO PHUKET THA". The
+  // digit after the hyphen is what makes this a store code and not a word.
+  [/\bmcd-\s?\d/i, 'dining'],
+  // Central Group's Thai malls and department stores, e.g. "PZD131 CENTRAL
+  // PHUKET". "Central" alone is in half the street addresses on earth — and in
+  // "central bank" — so the brand only counts with one of its own mall names
+  // behind it. CentralPlaza is deliberately absent: the global vocabulary
+  // already files any `plaza` as shopping, so it needs nothing from here.
+  [/\bcentral\s*(?:phuket|festival|pattaya|embassy|chidlom|ladprao|world)\b|\bcentralworld\b/i, 'shopping'],
+  // Thailand's beauty-and-wellness booking platform, which arrives behind Opn's
+  // processor prefix as "OPN*gowabi.com".
+  [/\bgowabi\b/i, 'personal-care'],
+  // A ticketed spectator sport: "PATONG BOXING STADIUM". `\bstadium\b` alone
+  // was rejected — Dubai has a metro station called Stadium, and that is
+  // transport.
+  [/\bmuay\s?thai\b|\bboxing\s+stadium\b/i, 'entertainment'],
+  // "PHUKET KART SPEED". A bare `\bkart\b` is one letter from `mart` and `cart`
+  // in a field that is routinely truncated, so it carries either the go- prefix,
+  // the -ing ending, or a track noun.
+  [/\bgo-?karts?\b|\bkarting\b|\bkarts?\s+(?:speed|racing|track|circuit)\b/i, 'entertainment'],
+  // The Ancient City outside Bangkok — an open-air museum. The global
+  // vocabulary already reads the word `museum`; this landmark does not contain
+  // it.
+  [/\bmuang\s?boran\b/i, 'entertainment'],
+  // A travel document bought for a trip: "E-VISA VIET NAM HA NOI VNM". The
+  // hyphen-or-nothing spelling is load-bearing — a bare `visa` is the card
+  // network, and every second card alert names it.
+  [/\be-?visas?\b/i, 'travel'],
+  // Bangkok's older international airport, as "CF-1024 DON MUANG BANGKOK THA".
+  // Kept as a place name rather than a generic `airport` rule, which would
+  // outrank the MCD- line above and file an airport McDonald's as travel.
+  [/\bdon\s?muang\b/i, 'travel'],
+  // Zain is the telecom across Jordan, Kuwait, Bahrain, Iraq and Sudan; the
+  // Saudi pack already knows it. It is ALSO a common given name ("Zain Ali
+  // Trading"), and `telecom` unlocks the relaxed bill path in subscriptions.ts
+  // — a misfire here does not mislabel one row, it mints a monthly bill. So the
+  // brand only counts in front of one of its own products or markets, which is
+  // what the real descriptor carries: "ZAIN WEBSITE AND SELFC, AMMAN".
+  [/\bzain\s+(?:website|self-?care|self-?c\b|telecom|mobile|cash|prepaid|jordan|kuwait|bahrain|jo\b|kw\b|bh\b|iq\b)/i, 'telecom'],
+  // "WASSAGY EBOOKS ...". The global vocabulary reads `bookshop` and
+  // `book store`; this is the same claim about the same goods.
+  [/\be-?books?\b/i, 'shopping'],
+];
+
 const AE: MarketPack = {
   id: 'AE',
   name: 'United Arab Emirates',
@@ -139,7 +205,10 @@ const AE: MarketPack = {
     { re: /\bajman\s*bank/i, name: 'Ajman Bank', color: '#00747A', domain: 'ajmanbank.ae' },
     { re: /\bcbi\b/i, name: 'CBI', color: '#7A2048', domain: 'cbi.ae' },
   ],
-  keywords: ARABIC_KEYWORDS, // the UAE vocabulary is the current global baseline
+  // The UAE vocabulary is the current global baseline. Arabic runs first
+  // because it is the older, better-tested list; the cross-border chains run
+  // after it and before the parser's own global table.
+  keywords: [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS],
 };
 
 const SA: MarketPack = {
@@ -169,6 +238,7 @@ const SA: MarketPack = {
     [/petromin|sasco|aldrees|naft/i, 'transport'],
     [/\bsadad\b/i, 'utilities'],
     ...ARABIC_KEYWORDS,
+    ...CROSS_BORDER_KEYWORDS,
   ],
 };
 

@@ -4004,6 +4004,55 @@ function parseSmsInner(
     const merchant = biller ?? `Payment to •${last4}`;
     if (amountFils > 0) {
       const cat = categoryOf(raw, 'expense', overrides, merchant);
+      /**
+       * A RECEIPT IN THIS TEMPLATE IS A POSTPAID TELECOM BILL, EVEN WHEN THE
+       * CHANNEL LINE NAMES NOBODY.
+       *
+       * The paragraph above is careful never to invent a PAYEE from a channel
+       * that names none, and that still holds — `merchant` is untouched, and
+       * "Payment to •2543" is what the row is called. This is the weaker,
+       * separate claim that the row is a phone bill, and the evidence for it is
+       * in the messages rather than in a hunch:
+       *
+       *   - The account fragment 2543 appears in this corpus TWICE in this
+       *     template: once paid through "Etisalat Mobile App" and once through
+       *     "Bank Website". Same biller account, two channels. The Arabic half
+       *     does the same thing with "الموقع الإلكتروني لإتصالات" and the IVR.
+       *     The channel says how the user paid, not who was paid — so the
+       *     receipts with an anonymous channel are the same bills as the ones
+       *     that name the biller, and those are already telecom.
+       *   - Every amount is a round dirham figure plus exactly 5% UAE VAT:
+       *     408.45 = 389.00, 681.45 = 649.00, 849.45 = 809.00, 450.45 = 429.00.
+       *     Those are postpaid plan prices.
+       *   - The only card field in the body is the funding instrument, and it
+       *     is empty: "Card Number: NA" / "رقم البطاقة: NA".
+       *
+       * WHY THE ARITHMETIC IS NOT THE RULE. It cannot be: the real Arabic IVR
+       * receipt paid 682.00 against 681.45 due, because you type whole dirhams
+       * at a keypad. Plan-price-plus-VAT is what identifies the FAMILY, not what
+       * identifies a message. The template is the rule.
+       *
+       * SCOPE, AND WHAT WOULD FALSIFY IT. This sits inside the `portalPay`
+       * branch, so it can only ever reach a message that already matched
+       * PORTAL_RECEIPT_RE — "payment to the account number NNNN … amount paid".
+       * It cannot leak into the keyword tables, where "Amount Due" is also
+       * credit-card-statement vocabulary and would file statements as phone
+       * bills. And it defers to `cat` whenever the body decided anything at all,
+       * so a user's merchant override wins, and so does a biller that names
+       * itself anywhere the vocabulary can see it.
+       *
+       * `telecom` unlocks the relaxed bill path in subscriptions.ts, which is
+       * the thing this file is otherwise careful not to hand out on a hunch.
+       * Here it is the point: four AED 408.45 receipts to one account over four
+       * months IS a monthly bill, and tracking it is what the user wants. The
+       * exposure if this is ever wrong is a recurring bill filed as Telecom that
+       * was really Utilities — a wrong label on a real bill, not a phantom one.
+       *
+       * If a receipt in this exact template ever turns up from a biller that is
+       * not a telco, this is the line to narrow, and it will need that message
+       * first.
+       */
+      const category: CategoryId = cat.deliberate ? cat.id : 'telecom';
       return {
         kind: 'transaction',
         type: 'expense',
@@ -4045,7 +4094,8 @@ function parseSmsInner(
          */
         snapshotFils: null,
         snapshotKind: null,
-        categoryGuess: cat.id,
+        categoryGuess: category,
+        categoryDeliberate: true,
         ...(cat.pinned ? { categoryPinned: true as const } : {}),
         currency,
         reference,

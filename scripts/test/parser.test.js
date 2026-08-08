@@ -1100,6 +1100,53 @@ t('a channel that names no biller keeps the account title',
   'Dear Customer, Your payment to the account number \u00b7\u00b7\u00b7\u00b72543 has been processed.\nAmount Due: AED 408.45\nAmount Paid: AED 408.45\nRemaining Balance: AED 0\nTransaction Date: 2022-03-11\nPayment Channel: Bank Website\nCard Number: NA\nMode of Payment : Credit/Debit',
   { merchant: 'Payment to \u20222543', amountFils: 40845, date: '2022-03-11' });
 
+// \u2550\u2550 THE PAYEE IS STILL NOT INVENTED, BUT THE TRADE IS NOW NAMED \u2550\u2550
+//
+// The assertion directly above is unchanged and stays unchanged: a channel
+// naming no biller still keeps "Payment to \u20222543" as the title, because
+// inventing a payee is the failure this file exists to prevent. What is added
+// here is the weaker, separate claim that the ROW IS A PHONE BILL.
+//
+// The evidence is two messages up and one language over. The SAME account
+// fragment 2543 arrives in this template twice \u2014 once through "Etisalat Mobile
+// App", once through "Bank Website" \u2014 and the Arabic half does it again with
+// "\u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u0625\u0644\u0643\u062a\u0631\u0648\u0646\u064a \u0644\u0625\u062a\u0635\u0627\u0644\u0627\u062a" and the IVR. One biller account, several
+// channels; the channel says how the user paid, not who was paid. And every
+// amount in the family is a round dirham plus exactly 5% UAE VAT \u2014 408.45 =
+// 389.00, 681.45 = 649.00, 849.45 = 809.00, 450.45 = 429.00 \u2014 i.e. postpaid
+// plan prices.
+//
+// The arithmetic is NOT the rule and must never become one: the real Arabic IVR
+// receipt below paid 682.00 against 681.45 due, because you type whole dirhams
+// at a keypad. The TEMPLATE is the rule, and it is applied inside the receipt
+// branch only \u2014 "Amount Due" is credit-card-statement vocabulary too, and a
+// keyword rule on it would file statements as phone bills.
+t('a receipt whose channel names nobody is still a telecom bill',
+  'Dear Customer, Your payment to the account number \u00b7\u00b7\u00b7\u00b72543 has been processed.\nAmount Due: AED 408.45\nAmount Paid: AED 408.45\nRemaining Balance: AED 0\nTransaction Date: 2022-03-11\nTransaction Time: 11:34:49\nPayment Channel: Bank Website\nCard Number: NA\nMode of Payment : Credit/Debit',
+  { merchant: 'Payment to \u20222543', category: 'telecom', amountFils: 40845 });
+// The named half is unaffected: the channel line still decides, and a biller it
+// names still wins over the template's default.
+t('a named biller still decides its own category',
+  'Dear Customer, Your payment to the account number \u00b7\u00b7\u00b7\u00b72543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App',
+  { merchant: 'Etisalat', category: 'telecom' });
+// AND THE DEFAULT DOES NOT ESCAPE THE BRANCH. This is the control that matters:
+// "Amount Due" and "Amount Paid" are also what a credit-card statement says, and
+// a statement must not become a phone bill. It never reaches PORTAL_RECEIPT_RE
+// because nothing in it is a payment TO an account number.
+{
+  const stmt = parseSms('Your Credit Card ending 3749 statement is ready. Amount Due: AED 408.45 Min Amount Due: AED 100.00 Due Date: 25/03/2022');
+  ok('a card statement in the same money words is not a telecom bill',
+    !stmt || stmt.categoryGuess !== 'telecom',
+    JSON.stringify(stmt && { k: stmt.kind, c: stmt.categoryGuess }));
+}
+// ...and an ordinary purchase that happens to carry the words is untouched.
+{
+  const buy = parseSms('Purchase of AED 408.45 with Debit Card ending 8783 at SOME SHOP, DUBAI. Avl Balance is AED 100.00.');
+  ok('a plain purchase is not swept into the receipt family',
+    buy && buy.categoryGuess !== 'telecom',
+    JSON.stringify(buy && { m: buy.merchant, c: buy.categoryGuess }));
+}
+
 // \u2550\u2550 THE BILLER'S FIGURES ARE THE BILLER'S \u2550\u2550
 //
 // The receipt quotes three amounts and not one of them describes the account
@@ -3562,6 +3609,17 @@ t('an Arabic IVR overpayment receipt is the amount PAID, still spending, and sna
     'تم الدفع عن طريق: جهازالمجيب الالي\nرقم البطاقة: NA\nرقم المعاملة: 88776251',
   { merchant: 'Payment to •1849', amountFils: 68200, kind: 'transaction', type: 'expense',
     transfer: false, date: '2022-05-24', snapshotFils: null, snapshotKind: null });
+// The Arabic twin of the English "Bank Website" receipt: same template, same
+// family, an IVR channel that names no biller — and the same conclusion. Note
+// this is the message that rules OUT any arithmetic-based rule: 682.00 paid is
+// not 649.00 + VAT, it is whole dirhams typed at a keypad. The payee is still
+// "Payment to •1849" and is still not invented.
+t('the Arabic receipt paid through the IVR is a telecom bill too',
+  'عزيزي العميل،\nلقد تمت عملية الدفع بنجاح لحساب رقم: 0501231849\n' +
+    'المبلغ المستحق: 681.45 درهم\nالمبلغ المدفوع: 682 درهم\nالمبلغ المتبقي: -0.55 درهم\n' +
+    'تاريخ المعاملة: 2022-05-24\nوقت المعاملة: 21:29:40\n' +
+    'تم الدفع عن طريق: جهازالمجيب الالي\nرقم البطاقة: NA\nرقم المعاملة: 88776251',
+  { merchant: 'Payment to •1849', category: 'telecom' });
 // The named-biller half of the same fix: Etisalat is still Etisalat, and its
 // المبلغ المتبقي is still not the paying account's balance.
 t('a named Arabic biller receipt snapshots nothing either',

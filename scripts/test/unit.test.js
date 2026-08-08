@@ -1852,9 +1852,223 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('artifact cleanup: distinct Arabic bank names never collapse into one identity',
     acc.mergeDuplicateAccounts(distinctArabicBanks) === distinctArabicBanks,
     acc.mergeDuplicateAccounts(distinctArabicBanks).accounts);
+  // ── An import block duplicated wholesale, with no bank on any row ──
+  //
+  // Real diagnostic, 53 card rows. Six of them are a second copy of an earlier
+  // run of the same messages — "Credit Card •9417", "Debit Card •6498",
+  // "Card •3397", "Account •1712" — and not one of those rows ever learned a
+  // sender, so the grouping pass dropped them all before it started. The bank
+  // account pair is the expensive one: netWorthFils counted its AED 0.55 twice.
+  const nb = (over) => ({
+    id: 'x', name: 'Credit Card •9417', kind: 'card', cardType: 'credit',
+    last4: '9417', openingFils: 0, color: '#111',
+    snapshotFils: 0, snapshotKind: 'outstanding', snapshotTs: 100, ...over,
+  });
+  const unattributedClones = {
+    accounts: [
+      nb({ id: 'first' }),
+      nb({ id: 'second', snapshotTs: 200 }),
+      { id: 'bank-1', name: 'Account •1712', kind: 'bank', last4: '1712',
+        openingFils: 0, color: '#444', snapshotFils: 55, snapshotKind: 'balance', snapshotTs: 1 },
+      { id: 'bank-2', name: 'Account •1712', kind: 'bank', last4: '1712',
+        openingFils: 0, color: '#444', snapshotFils: 55, snapshotKind: 'balance', snapshotTs: 2 },
+    ],
+    transactions: [
+      { id: 'u1', accountId: 'first', date: '2019-11-21', amountFils: 600,
+        type: 'expense', category: 'other', title: 'Spinneys' },
+    ],
+    cardDues: [], bills: [], accountHints: { '9417': 'first' },
+  };
+  const unattributedMerged = acc.mergeDuplicateAccounts(unattributedClones);
+  ok('a duplicated import block with no bank on any row is folded',
+    unattributedMerged.accounts.length === 2,
+    unattributedMerged.accounts.map((a) => [a.id, a.name]));
+  ok('the unattributed survivor is the most recently quoted copy',
+    unattributedMerged.accounts[0].id === 'second', unattributedMerged.accounts[0]);
+  ok('the duplicated unattributed balance is no longer counted twice',
+    unattributedMerged.accounts.reduce((n, a) => n + (a.snapshotFils ?? 0), 0) === 55);
+  ok('history on the dropped copy follows the survivor',
+    unattributedMerged.transactions[0].accountId === 'second' &&
+      unattributedMerged.accountHints['9417'] === 'second');
+  ok('folding an unattributed block is idempotent',
+    acc.mergeDuplicateAccounts(unattributedMerged) === unattributedMerged);
+
+  // ── and the step too far, in every direction it could go ──
+  //
+  // For a row with no bank the displayed name is generated from the digits and
+  // the type, so it adds nothing: without the extra evidence below, this fold
+  // IS "merge on last four alone", which the Wio •8026 / FAB •8026 pair in the
+  // same ledger proves wrong. Each case here must stay at two rows.
+  const stepTooFar = [
+    ['two banks, one suffix, is two cards', {
+      accounts: [
+        { id: 'wio', name: 'Wio Debit Card •8026', kind: 'card', cardType: 'debit',
+          last4: '8026', bankName: 'Wio', openingFils: 0, color: '#1' },
+        { id: 'fab', name: 'FAB Debit Card •8026', kind: 'card', cardType: 'debit',
+          last4: '8026', bankName: 'FAB', openingFils: 0, color: '#2' },
+      ],
+    }],
+    ['an unattributed row never folds into one that names a bank', {
+      accounts: [
+        nb({ id: 'named', bankName: 'Emirates NBD', name: 'Emirates NBD Credit Card •9417' }),
+        nb({ id: 'nameless' }),
+      ],
+    }],
+    ['unattributed rows quoting DIFFERENT figures are two instruments', {
+      accounts: [nb({ id: 'a', snapshotFils: 0 }), nb({ id: 'b', snapshotFils: 125000, snapshotTs: 200 })],
+    }],
+    ['...and so are two quoting different KINDS of figure', {
+      accounts: [nb({ id: 'a' }), nb({ id: 'b', snapshotKind: 'limit', snapshotTs: 200 })],
+    }],
+    ['one row with a bank-quoted figure and one without stay apart', {
+      accounts: [
+        nb({ id: 'a' }),
+        nb({ id: 'b', snapshotFils: undefined, snapshotKind: undefined, snapshotTs: undefined, openingFils: 500 }),
+      ],
+    }],
+    ['a different card type is a different card, bank or no bank', {
+      accounts: [nb({ id: 'a' }), nb({ id: 'b', cardType: 'debit', name: 'Debit Card •9417', snapshotTs: 200 })],
+    }],
+    ['a card and a bank account sharing four digits are not one thing', {
+      accounts: [
+        nb({ id: 'a', snapshotFils: undefined, snapshotKind: undefined, snapshotTs: undefined }),
+        { id: 'b', name: 'Account •9417', kind: 'bank', last4: '9417', openingFils: 0, color: '#111' },
+      ],
+    }],
+  ];
+  for (const [name, over] of stepTooFar) {
+    const s = { transactions: [], cardDues: [], bills: [], accountHints: {}, ...over };
+    ok(`unattributed fold stops one step short: ${name}`,
+      acc.mergeDuplicateAccounts(s).accounts.length === 2,
+      acc.mergeDuplicateAccounts(s).accounts.map((a) => a.id));
+  }
+
+  // The statement guard, stated separately because it is the one that cost an
+  // AED 500 statement last time: two unattributed rows that BOTH carry a
+  // statement never collapse, however identical they look.
+  const bothWithDues = {
+    accounts: [nb({ id: 'a' }), nb({ id: 'b', snapshotTs: 200 })],
+    transactions: [],
+    cardDues: [
+      { id: 'p', accountId: 'a', dueDate: '2026-08-26', totalDueFils: 50000, minDueFils: 2500, paidFils: 0 },
+      { id: 'q', accountId: 'b', dueDate: '2026-09-26', totalDueFils: 70000, minDueFils: 3500, paidFils: 0 },
+    ],
+    bills: [], accountHints: {},
+  };
+  const bothAfter = acc.mergeDuplicateAccounts(bothWithDues);
+  ok('two unattributed rows that both carry a statement are never fused',
+    bothAfter.accounts.length === 2 &&
+      bothAfter.cardDues.reduce((n, d) => n + d.totalDueFils, 0) === 120000,
+    bothAfter.accounts.map((a) => a.id));
+
   // And a clean state is returned untouched, not rebuilt.
   ok('artifact cleanup: a state with no duplicates is returned as-is',
     acc.mergeDuplicateAccounts(guardState) === guardState);
+}
+
+// ── one statement, filed against two cards of the same issuer ──
+//
+// Straight out of a real diagnostic. FAB •5793 has no purchase, no payment and
+// no ledger row of any kind, and it carries statements due on BOTH the 6th and
+// the 27th — two billing cycles, which one piece of plastic cannot have. Every
+// one of its statements is a copy of a statement on a card that DOES have the
+// payment clearing it. The payment settles the real copy; the phantom copy
+// stays open forever and the user is told they owe money they have paid.
+{
+  const acc = require('./build/accounts');
+  const cardsLib = require('./build/cards');
+  const TODAY = new Date('2026-08-08T09:00:00Z');
+  const card = (id, last4, over) => ({
+    id, name: `FAB Credit Card •${last4}`, kind: 'card', cardType: 'credit',
+    last4, bankName: 'FAB', openingFils: 0, color: '#09f', ...over,
+  });
+  const pay = (id, accountId, date, amountFils, last4) => ({
+    id, accountId, date, amountFils, type: 'income', category: 'other',
+    title: `Card •${last4} payment`, source: 'sms', isTransfer: true, cardPaymentSide: 'debit',
+  });
+  const fab = {
+    accounts: [
+      card('a3749', '3749'),
+      card('a3324', '3324'),
+      card('a5793', '5793', { snapshotFils: 400000, snapshotKind: 'limit', snapshotTs: 1 }),
+    ],
+    transactions: [
+      { id: 'buy', accountId: 'a3749', date: '2026-08-02', amountFils: 1264,
+        type: 'expense', category: 'other', title: 'AllDebrid', source: 'sms' },
+      pay('p1', 'a3749', '2026-08-05', 564507, '3749'),
+      pay('p2', 'a3324', '2026-08-01', 890880, '3324'),
+    ],
+    cardDues: [
+      { id: 'real-aug', accountId: 'a3749', dueDate: '2026-08-26', totalDueFils: 564507, minDueFils: 28225, paidFils: 0 },
+      { id: 'ghost-aug', accountId: 'a5793', dueDate: '2026-08-26', totalDueFils: 564507, minDueFils: 28225, paidFils: 0 },
+      // The second billing cycle •5793 also claims. Same shape, different card.
+      { id: 'real-early', accountId: 'a3324', dueDate: '2026-08-05', totalDueFils: 890880, minDueFils: 44544, paidFils: 0 },
+      { id: 'ghost-early', accountId: 'a5793', dueDate: '2026-08-05', totalDueFils: 890880, minDueFils: 44544, paidFils: 0 },
+    ],
+    bills: [], accountHints: {},
+  };
+
+  const before = cardsLib.openDues(fab, TODAY);
+  ok('repro: a paid FAB statement is still shown as owed on the phantom card',
+    before.length === 1 && before[0].due.accountId === 'a5793' && before[0].remainingFils === 564507,
+    before.map((d) => [d.due.accountId, d.remainingFils]));
+
+  const fixed = acc.repairDuplicateStatements(fab);
+  ok('the duplicate statement moves to the card that has the history',
+    fixed.cardDues.every((d) => d.accountId !== 'a5793'),
+    fixed.cardDues.map((d) => [d.id, d.accountId]));
+  ok('no statement is deleted — both copies survive, on the right card',
+    fixed.cardDues.length === 4);
+  ok('and no card row is deleted either: the split stays visible',
+    fixed.accounts.length === 3);
+  const after = cardsLib.openDues(fixed, TODAY);
+  ok('so the app stops billing for money already paid',
+    after.length === 0, after.map((d) => [d.due.accountId, d.remainingFils]));
+  ok('repairing duplicate statements is idempotent',
+    acc.repairDuplicateStatements(fixed) === fixed);
+
+  // ── the bar, and what stays split when it is not met ──
+  const only = (over) => ({ ...fab, cardDues: [
+    { id: 'real-aug', accountId: 'a3749', dueDate: '2026-08-26', totalDueFils: 564507, minDueFils: 28225, paidFils: 0 },
+    { id: 'ghost-aug', accountId: 'a5793', dueDate: '2026-08-26', totalDueFils: 564507, minDueFils: 28225, paidFils: 0, ...over },
+  ] });
+  const unchanged = [
+    ['a different total is a different statement', { totalDueFils: 564508 }],
+    ['a different due date is a different statement', { dueDate: '2026-08-27' }],
+    ['a different stated minimum is a different statement', { minDueFils: 28226 }],
+    ['an ESTIMATED minimum is this app\'s 5% guess, not evidence', { minDueEstimated: true }],
+  ];
+  for (const [name, over] of unchanged) {
+    const s = only(over);
+    ok(`statements stay on their own cards: ${name}`,
+      acc.repairDuplicateStatements(s) === s);
+  }
+  // Both cards have history: two real obligations the app cannot tell apart.
+  const bothLive = {
+    ...only({}),
+    transactions: [...fab.transactions, pay('p3', 'a5793', '2026-08-04', 100, '5793')],
+  };
+  ok('two cards that BOTH have history keep both statements',
+    acc.repairDuplicateStatements(bothLive) === bothLive);
+  // Neither does: nothing here says which one is the phantom.
+  const neitherLive = { ...only({}), transactions: [] };
+  ok('two cards with no history at all keep both statements',
+    acc.repairDuplicateStatements(neitherLive) === neitherLive);
+  // A different issuer is a different bank's statement, whatever it says.
+  const crossIssuer = {
+    ...only({}),
+    accounts: [fab.accounts[0], fab.accounts[1],
+      { ...fab.accounts[2], bankName: 'ADCB', name: 'ADCB Credit Card •5793' }],
+  };
+  ok('an identical statement at another bank is another bank\'s statement',
+    acc.repairDuplicateStatements(crossIssuer) === crossIssuer);
+  // A debit row is not a statement holder.
+  const debitSide = {
+    ...only({}),
+    accounts: [fab.accounts[0], fab.accounts[1], { ...fab.accounts[2], cardType: 'debit' }],
+  };
+  ok('a debit row never absorbs or surrenders a credit statement',
+    acc.repairDuplicateStatements(debitSide) === debitSide);
 }
 
 // ── card-payment title/account mismatch repair ──

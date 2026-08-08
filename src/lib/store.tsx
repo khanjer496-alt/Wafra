@@ -14,6 +14,7 @@ import {
   mergeDuplicateAccounts,
   mergeRenewedCard,
   repairCardPaymentAccounts,
+  repairDuplicateStatements,
 } from '@/lib/accounts';
 import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
@@ -586,7 +587,12 @@ function reduceState(state: AppState, action: Action): AppState {
       // Older states can carry two rows for one card. Collapse on the way in,
       // once, rather than teaching every screen to tolerate it.
       const accountsMerged = mergeDuplicateAccounts(next);
-      const paymentsRepaired = repairCardPaymentAccounts(accountsMerged);
+      // Before mergeImportedCardDues, which collapses per (account, due date):
+      // moving a phantom copy onto the real card is what lets that collapse
+      // see the two rows as the one statement they are.
+      const paymentsRepaired = repairDuplicateStatements(
+        repairCardPaymentAccounts(accountsMerged),
+      );
       return {
         ...paymentsRepaired,
         transactions: finalizeHydrationTransactions(paymentsRepaired.transactions, next.transactions),
@@ -710,8 +716,17 @@ function reduceState(state: AppState, action: Action): AppState {
         lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
         parserVersion: PARSER_VERSION,
       }));
+      // A statement the bank named by a number that is not the card's is only
+      // recognisable once the batch's own dues are in state beside the ones
+      // already there. Moving it changes which (account, due date) pairs exist,
+      // so the per-statement collapse has to run again over the result.
+      const repaired = repairDuplicateStatements(merged);
       return {
-        ...merged,
+        ...repaired,
+        cardDues:
+          repaired === merged
+            ? merged.cardDues
+            : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
         transactions: sortTxs(reconcileCaptureDuplicates(merged.transactions)),
       };
     }

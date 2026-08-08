@@ -1591,5 +1591,67 @@ const afterFirst = apply(BASE, first);
   }
 }
 
+/* ── FAB: two messages, one statement, two card identities ───────────────
+ *
+ * The whole path, from the bank's own wording through the real parser and the
+ * real planner to the figure a user reads on Home. FAB sends this statement
+ * twice: once naming the card, once in a reminder that quotes a number which
+ * is not the card's last four. The second one mints a card that has never had
+ * a transaction of any kind and books the statement against it a second time,
+ * so the payment settles the real copy and the phantom copy is still billed.
+ *
+ * This is not a parser bug — both messages are read correctly, and each names
+ * the digits it names. It is decided after the batch lands, which is why the
+ * repair is in accounts.ts and this test drives the store's own sequence. */
+{
+  const acc = require('./build/accounts.js');
+  const cardsLib = require('./build/cards.js');
+
+  const T = (iso) => Date.parse(iso);
+  const FAB_INBOX = [
+    { body: 'Credit Card Purchase \nCard No XXXX3749 \nAED 12.64 \nALLDEBRID DUBAI ARE \n02/08/26 11:16 \nAvl Bal AED 4142.86',
+      ts: T('2026-08-02T11:16:00Z'), sender: 'FAB' },
+    { body: 'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26',
+      ts: T('2026-08-01T06:00:00Z'), sender: 'FAB' },
+    { body: 'Dear Customer, the payment due date of your FAB Credit Card ending with 5793 is 26-08-2026. The total amount due is AED 5,645.07 and the Minimum due amount is AED 282.25. Please ignore the message, if already paid.',
+      ts: T('2026-08-03T06:00:00Z'), sender: 'FAB' },
+    { body: 'Your payment instructions of AED 5,645.07 to 5492********3749 has been processed',
+      ts: T('2026-08-05T09:00:00Z'), sender: 'FAB' },
+  ];
+
+  const s = scan(FAB_INBOX);
+  const imported = apply(BASE, buildImportPlan(s.parsed, BASE, s.newestTs));
+  const named = (state, id) => state.accounts.find((a) => a.id === id)?.name;
+
+  ok('FAB: the reminder mints a second card row for one statement',
+    imported.accounts.length === 2 &&
+      imported.accounts.map((a) => a.last4).sort().join(',') === '3749,5793',
+    imported.accounts.map((a) => a.name));
+  ok('FAB: and a second copy of the statement against it',
+    imported.cardDues.length === 2 &&
+      imported.cardDues.every((d) => d.totalDueFils === 564507 && d.dueDate === '2026-08-26'),
+    imported.cardDues);
+  ok('FAB: the payment is read as a card payment and lands on the real card',
+    imported.transactions.some(
+      (t) => t.isTransfer && t.amountFils === 564507 && named(imported, t.accountId) === 'FAB Credit Card •3749'),
+    imported.transactions.map((t) => [t.title, named(imported, t.accountId)]));
+
+  const before = cardsLib.openDues(imported, new Date('2026-08-08T09:00:00Z'));
+  ok('FAB repro: the paid statement is billed a second time on a card with no history',
+    before.length === 1 &&
+      before[0].remainingFils === 564507 &&
+      named(imported, before[0].due.accountId) === 'FAB Credit Card •5793',
+    before.map((d) => [named(imported, d.due.accountId), d.remainingFils]));
+
+  // What store.tsx does with the batch once it has landed.
+  const repaired = acc.repairDuplicateStatements(imported);
+  const after = cardsLib.openDues(repaired, new Date('2026-08-08T09:00:00Z'));
+  ok('FAB fixed: nothing is owed, because the payment covered the statement',
+    after.length === 0, after.map((d) => [named(repaired, d.due.accountId), d.remainingFils]));
+  ok('FAB fixed: both card rows are still there for the user to reconcile',
+    repaired.accounts.length === 2 && repaired.cardDues.length === 2,
+    repaired.accounts.map((a) => a.name));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
