@@ -1186,6 +1186,45 @@ const S = {
   saved: { en: 'Saved', ar: 'المدخر' },
   overspent: { en: 'Overspent', ar: 'تجاوزت' },
   soFarThisMonth: { en: 'so far this month', ar: 'حتى الآن هذا الشهر' },
+
+  /**
+   * The line under the hero figure — the same period before this one, over the
+   * same number of days.
+   *
+   * Six strings rather than three plus a suffix, because a composed sentence
+   * fragment does not survive translation into Arabic: the qualifier does not
+   * attach where an English suffix would, and the result reads as two half
+   * sentences. Each of these is a whole sentence in both languages.
+   *
+   * "at the same point" is doing real work. Mid-period this compares an equal
+   * NUMBER OF DAYS, not an equal period, and saying so is the difference
+   * between a fair comparison and a claim the reader would rightly dispute if
+   * they checked it against last month's total.
+   */
+  homeVsMorePartial: {
+    en: '{amount} more out than {period} at the same point',
+    ar: 'صرفت {amount} أكثر من {period} عند النقطة نفسها',
+  },
+  homeVsLessPartial: {
+    en: '{amount} less out than {period} at the same point',
+    ar: 'صرفت {amount} أقل من {period} عند النقطة نفسها',
+  },
+  homeVsSamePartial: {
+    en: 'The same going out as {period} at the same point',
+    ar: 'الصرف نفسه مقارنةً بـ{period} عند النقطة نفسها',
+  },
+  homeVsMoreWhole: {
+    en: '{amount} more out than {period}',
+    ar: 'صرفت {amount} أكثر من {period}',
+  },
+  homeVsLessWhole: {
+    en: '{amount} less out than {period}',
+    ar: 'صرفت {amount} أقل من {period}',
+  },
+  homeVsSameWhole: {
+    en: 'The same going out as {period}',
+    ar: 'الصرف نفسه مقارنةً بـ{period}',
+  },
   allTime: { en: 'all time', ar: 'كل الفترات' },
   inWord: { en: 'in', ar: 'في' },
   inMinusOut: { en: 'in minus out', ar: 'الدخل ناقص المصروف' },

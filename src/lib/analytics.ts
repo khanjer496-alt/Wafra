@@ -1,7 +1,13 @@
 import { isFixedCommitment } from '@/lib/categories';
 import { monthKey, shiftMonthKey } from '@/lib/format';
 import { internalTransferIds, isSpending } from '@/lib/ledger';
-import { inPeriod, previousPeriod, toPeriod, type PeriodLike } from '@/lib/period';
+import {
+  comparablePreviousPeriod,
+  inPeriod,
+  periodLabel,
+  toPeriod,
+  type PeriodLike,
+} from '@/lib/period';
 import { allocationsOf, amountInCategory } from '@/lib/splits';
 import type { AppState, CategoryId, Transaction } from '@/lib/types';
 
@@ -49,9 +55,15 @@ export function categoryMovers(
   limit = 4,
   live?: Set<string>,
   internal?: Set<string>,
+  today: Date = new Date(),
 ): CategoryMover[] {
   const period = toPeriod(periodLike);
-  const prevPeriod = previousPeriod(period);
+  // Cut to the same elapsed length, NOT the whole previous period. Comparing
+  // sixteen days of this month against thirty-one of last is a subtraction of
+  // two different-sized things, and it reads as improvement every time: a
+  // ledger spending an identical amount every day of both months reported
+  // every category DOWN, all month, until the final day.
+  const prevPeriod = comparablePreviousPeriod(period, today, transactions);
   if (!prevPeriod) return []; // 'all time' has nothing to compare against
   const cur = new Map<CategoryId, number>();
   const prev = new Map<CategoryId, number>();
@@ -260,4 +272,88 @@ export function trendShape(points: { fils: number }[]): TrendShape {
     latestIsHighest: latestFils === maxFils,
     latestIsLowest: latestFils === minFils,
   };
+}
+
+export interface PeriodComparison {
+  /** Spending in the period so far. */
+  currentFils: number;
+  /** Spending in the previous period, over the SAME number of elapsed days. */
+  previousFils: number;
+  /** current − previous. Positive means more is going out than last time. */
+  deltaFils: number;
+  /** null when previous is zero — a ratio against nothing is not a ratio. */
+  ratio: number | null;
+  /** What the previous period is called, for the sentence under the figure. */
+  previousLabel: string;
+  /** True while the current period is still running, so the comparison is partial. */
+  partial: boolean;
+}
+
+/**
+ * This period's spending against the same stretch of the one before it.
+ *
+ * Returns null rather than a zero when there is nothing to compare against,
+ * which is the case that matters most: a ledger with one month of history has
+ * no previous month, and answering "+100%" against zero would be the app's
+ * loudest claim built on its thinnest evidence. Every caller must render
+ * nothing at all in that case — not a dash, not a 0%.
+ */
+export function periodComparison(
+  transactions: Transaction[],
+  periodLike: PeriodLike,
+  live?: Set<string>,
+  internal?: Set<string>,
+  today: Date = new Date(),
+): PeriodComparison | null {
+  const period = toPeriod(periodLike);
+  const previous = comparablePreviousPeriod(period, today, transactions);
+  if (!previous) return null;
+
+  let currentFils = 0;
+  let previousFils = 0;
+  let previousRows = 0;
+  for (const t of transactions) {
+    if (!isSpending(t, live, internal)) continue;
+    if (inPeriod(t.date, period)) currentFils += t.amountFils;
+    else if (inPeriod(t.date, previous)) {
+      previousFils += t.amountFils;
+      previousRows += 1;
+    }
+  }
+
+  // No rows at all in the comparison window means the ledger did not exist
+  // yet, which is different from a month where nothing was spent. Both would
+  // read as previousFils === 0; only the first one makes the comparison a lie.
+  if (previousRows === 0) return null;
+
+  return {
+    currentFils,
+    previousFils,
+    deltaFils: currentFils - previousFils,
+    ratio: previousFils > 0 ? (currentFils - previousFils) / previousFils : null,
+    previousLabel: periodLabel(previous.mode === 'range' ? previousPeriodOf(period) : previous),
+    partial: previous.mode === 'range',
+  };
+}
+
+/**
+ * The name to print for the comparison window.
+ *
+ * `comparablePreviousPeriod` returns a RANGE mid-month — 25 Jun to 10 Jul —
+ * and "25 Jun – 10 Jul" is a true label that nobody reads as "last month".
+ * So the label comes from the whole previous period and the `partial` flag
+ * carries the caveat, which lets the screen say "vs Jul, same 16 days" instead
+ * of a date range the reader has to decode.
+ */
+function previousPeriodOf(period: ReturnType<typeof toPeriod>) {
+  const [y, m] = period.mode === 'month' ? period.key.split('-').map(Number) : [0, 0];
+  if (period.mode === 'month') {
+    const d = new Date(y, m - 2, 1);
+    return {
+      mode: 'month' as const,
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+    };
+  }
+  if (period.mode === 'year') return { mode: 'year' as const, year: period.year - 1 };
+  return period;
 }

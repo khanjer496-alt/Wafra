@@ -1176,6 +1176,87 @@ async function queueItem(id, row, publicKey) {
     }
   }
 
+  /* ── is the installed Shortcut sending the bank label? ────────────────────
+   *
+   * The first published Wafra Capture was authored on a Mac, where Apple does
+   * not expose the iPhone-only `Message → Sender` property. It sends the
+   * message body and nothing else. Six of the nine bank formats in the corpus
+   * do not repeat their issuer inside that body, so a user on that snapshot
+   * gets rows the planner cannot place — silently, forever, because an iCloud
+   * link is a snapshot and a fixed Shortcut is a DIFFERENT link.
+   *
+   * The check has to be "can this row's bank be named", not "is sender
+   * non-empty". docs/ios-shortcut-spec.md warns that the Sender detail needs an
+   * explicit Text conversion, and without it a Contact object coerces itself
+   * into a perfectly non-empty string that identifies no bank. A presence
+   * check calls that healthy, which is worse than not checking.
+   */
+  {
+    // The active pack is module-level state and an earlier section leaves it on
+    // Saudi rules. `bankFromSender('ADCB')` is null under those, so without
+    // this the whole block silently tests the wrong market and three healthy
+    // cases read as broken. The suite's own closing comment says exactly this;
+    // it just says it thirty lines further down.
+    setActiveMarket('AE');
+    const named = (row) => relay.relayRowNamesItsBank(row);
+
+    ok('a row with no sender at all cannot name its bank',
+      named({ sender: undefined, bankHint: undefined }) === false);
+    ok('an empty sender is not a bank label',
+      named({ sender: '', bankHint: undefined }) === false);
+
+    // The failure this exists for: the Shortcut ran without the Text
+    // conversion and sent a person, or a serialized object. Non-empty, and
+    // worthless.
+    ok('a contact name is not a bank label',
+      named({ sender: 'Naser Khanjar', bankHint: undefined }) === false);
+    // A serialized object that carries no bank name is the hazard. One that
+    // happens to contain "ADCB" — because the contact really is named that —
+    // does identify ADCB, and calling it healthy is correct rather than lucky.
+    ok('an opaque contact object is not a bank label',
+      named({ sender: '<WFContact: 0x600002a1c3c0>', bankHint: undefined }) === false);
+    ok('but a contact whose name IS the bank still identifies it',
+      named({ sender: 'ADCB Alerts', bankHint: undefined }) === true);
+
+    ok('a real bank sender is healthy',
+      named({ sender: 'ADCB', bankHint: undefined }) === true);
+    ok('so is the other spelling banks use',
+      named({ sender: 'EmiratesNBD', bankHint: undefined }) === true);
+
+    // The body fallback: PR #10 taught the parser to read an issuer named
+    // immediately before a card noun. A sender-blind Shortcut still works for
+    // those messages, which is exactly why the count must be of rows that can
+    // name their bank BY EITHER ROUTE and not of rows that carried a sender.
+    ok('a body that names its own issuer is healthy without any sender',
+      named({ sender: undefined, bankHint: 'Emirates NBD' }) === true);
+    ok('an unrecognised bankHint is not a free pass',
+      named({ sender: undefined, bankHint: 'Not A Bank Plc' }) === false);
+
+    /* ── and whether saying anything would help ── */
+
+    const BLIND = 'https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1';
+    const FIXED = 'https://www.icloud.com/shortcuts/0000000000000000000000000000abcd';
+
+    // The gate. While the only published Shortcut is the sender-blind one,
+    // "reinstall it" fetches the same snapshot — a loop that blames the user
+    // for the app's problem.
+    ok('no warning while the only published Shortcut is the blind one',
+      relay.shortcutCaptureHealth(10, 0, BLIND).warn === false);
+    ok('the warning turns itself on once a different link is published',
+      relay.shortcutCaptureHealth(10, 0, FIXED).warn === true);
+    ok('and stays off when no Shortcut link is configured at all',
+      relay.shortcutCaptureHealth(10, 0, null).warn === false);
+
+    // One odd message is not a broken Shortcut.
+    ok('two unnamed rows are not yet a pattern',
+      relay.shortcutCaptureHealth(2, 0, FIXED).warn === false);
+
+    // One healthy row proves the Shortcut sends the label. That is what clears
+    // the warning after an update, with no dismissal to persist anywhere.
+    ok('a single healthy row clears the warning',
+      relay.shortcutCaptureHealth(10, 1, FIXED).warn === false);
+  }
+
   // The parser's active pack is module-level state. Leave it as found, so a
   // suite that runs after this one is not reading Saudi rules.
   setActiveMarket('AE');

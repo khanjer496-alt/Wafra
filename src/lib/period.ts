@@ -235,6 +235,70 @@ export function elapsedDays(p: PeriodLike, today: Date, transactions: Transactio
   }
 }
 
+/** First date the period covers. The mirror of `periodEndISO`. */
+export function periodStartISO(p: PeriodLike, transactions: Transaction[] = []): string {
+  const period = toPeriod(p);
+  switch (period.mode) {
+    case 'month':
+      return monthStartISO(period.key);
+    case 'year':
+      return yearBounds(period.year).from;
+    case 'range':
+      return period.from;
+    case 'all': {
+      let earliest = '';
+      for (const t of transactions) {
+        if (!earliest || t.date < earliest) earliest = t.date;
+      }
+      return earliest;
+    }
+  }
+}
+
+/**
+ * The previous period, cut to the same number of days the current one has
+ * actually covered — the only comparison that means anything mid-period.
+ *
+ * `previousPeriod` alone answers "the whole of last month", and comparing that
+ * against a month that is sixteen days old is not a comparison, it is a
+ * subtraction of two different-sized things. `categoryMovers` did exactly that
+ * and the effect was not subtle: a ledger spending an identical AED 100 every
+ * single day of both months reported groceries DOWN AED 1,500 on day sixteen.
+ * Every category, every day, until the last day of the month, when the bias
+ * silently vanished. The screen was telling people they were improving because
+ * the month was young.
+ *
+ * On a period that has already finished, elapsed equals length and this
+ * returns the whole previous period, which is then the right answer.
+ *
+ * Returns null when there is nothing honest to compare against: 'all time' has
+ * no previous, and a period that has covered no days yet has no length to
+ * match.
+ */
+export function comparablePreviousPeriod(
+  p: PeriodLike,
+  today: Date,
+  transactions: Transaction[] = [],
+): Period | null {
+  const period = toPeriod(p);
+  const previous = previousPeriod(period);
+  if (!previous) return null;
+
+  const elapsed = elapsedDays(period, today, transactions);
+  if (elapsed <= 0) return null;
+  if (elapsed >= daysInPeriod(period, today, transactions)) return previous;
+
+  const from = periodStartISO(previous, transactions);
+  if (!from) return null;
+  const to = new Date(`${from}T12:00:00`);
+  to.setDate(to.getDate() + elapsed - 1);
+  const toISO = toISODate(to);
+  // Never past the previous period's own end: a 31-day month compared against
+  // a 28-day February would otherwise reach into March.
+  const end = periodEndISO(previous, today);
+  return { mode: 'range', from, to: toISO < end ? toISO : end };
+}
+
 /** Last covered ISO date of the period (for point-in-time balances). */
 export function periodEndISO(p: PeriodLike, today: Date): string {
   const period = toPeriod(p);

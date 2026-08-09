@@ -921,10 +921,19 @@ function ktSources(dir) {
 
   // Every rollup in analytics.ts takes both sets and hands both to isSpending.
   // netWorthSeries is exempt: it derives its own from the state it is given.
+  //
+  // The exact count is deliberate and is meant to be edited. `every` alone
+  // cannot see a call that was DELETED — remove the exclusions from a rollup
+  // and the remaining calls are all still well-formed — so the number is what
+  // catches a removal. The cost is that adding a rollup fails this line until
+  // someone comes here, which is the point: the person adding it is exactly
+  // who should be asked whether their new total counts transfers.
+  //
+  // 5 since periodComparison, which powers the "vs last month" line on Home.
   const an = read('src/lib/analytics.ts');
   const calls = an.match(/isSpending\([^)]*\)/g) ?? [];
   ok('every analytics rollup applies both exclusions',
-    calls.length === 4 && calls.every((c) => c === 'isSpending(t, live, internal)'),
+    calls.length === 5 && calls.every((c) => c === 'isSpending(t, live, internal)'),
     calls.join(' | '));
 
   // The one insight that names a single row rather than a total. It sits on
