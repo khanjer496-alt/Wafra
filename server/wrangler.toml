@@ -67,10 +67,13 @@ head_sampling_rate = 0.1
 # that looks configured and silently registers no push tokens. Uncomment and
 # fill in:
 #
-# [vars]
 # EXPO_PROJECT_ID = "00000000-0000-0000-0000-000000000000"  # the EAS project UUID the app uses
 # EMAIL_DOMAIN = "mail.example.com"                          # only if Email Routing is set up
-# GITHUB_REPOSITORY = "owner/repo"                           # where feedback dispatches land
+#
+# GITHUB_REPOSITORY is set in the [vars] block at the end of this file. The
+# other two stay commented out until push wakes and Email Routing are actually
+# configured, because an empty string deploys a Worker that looks configured
+# and silently registers no push tokens.
 #
 # Without EXPO_PROJECT_ID (or PUSH_TOKEN_KEY) the Worker refuses push
 # registration and sends no wakes; capture still works on foreground and
@@ -87,3 +90,16 @@ head_sampling_rate = 0.1
 # be a Cloudflare rate-limiting rule on `http.request.uri.path eq
 # "/v1/feedback"`, which is the only layer that can see a client IP without
 # this service ever storing one.
+
+# Set, because feedback dispatch is configured. The Worker holds the token as a
+# secret; this says which repository to call. Not secret — it is the same
+# owner/name that is on every clone URL — and it has to live here rather than
+# beside the token because a `wrangler secret` is write-only once set, so a
+# value anyone may need to read back belongs in the config that is committed.
+#
+# Without it the Worker stores feedback with dispatch_status
+# 'skipped_unconfigured' and answers `dispatched: false`, which is what the
+# first live POST reported: storage worked, the token was there, and the Worker
+# had nothing to point at.
+[vars]
+GITHUB_REPOSITORY = "khanjer496-alt/Wafra"
