@@ -1612,6 +1612,30 @@ export default {
     // once; nothing here will enumerate what users have written.
 
     if (req.method === 'GET' && url.pathname === '/v1/health') {
+      /**
+       * A health check that cannot fail is not a health check.
+       *
+       * This returned `{ ok: true }` unconditionally and never touched D1, so
+       * it proved the Worker could run JavaScript — which answering at all
+       * already proved. Production ran for an unknown period with the remote
+       * database two additive columns behind `schema.sql`; `POST /v1/pair`
+       * threw and returned Cloudflare's 500 HTML, meaning NO NEW DEVICE could
+       * finish setup, and this endpoint reported healthy throughout. So did
+       * `npm run deploy`, whose runbook step is to curl exactly this.
+       *
+       * It now reads the columns the request path depends on. `LIMIT 0`
+       * returns no rows and no user data; a missing column still makes D1
+       * throw at prepare/execute time, which is the whole signal. Naming the
+       * columns rather than counting tables is deliberate: the outage was
+       * columns, and `SELECT 1` would have passed then too.
+       */
+      try {
+        await env.DB.prepare('SELECT market FROM devices LIMIT 0').all();
+        await env.DB.prepare('SELECT push_sent_at FROM push_registrations LIMIT 0').all();
+      } catch {
+        // The exception text can name internals, and this endpoint is public.
+        return json({ ok: false, error: 'schema_drift' }, 503);
+      }
       return json({ ok: true });
     }
 
