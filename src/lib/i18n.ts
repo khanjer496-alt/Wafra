@@ -1972,10 +1972,55 @@ const S = {
     en: 'This build has no way to deliver a report, so nothing was uploaded. Save a copy and send it yourself.',
     ar: 'لا توجد في هذه النسخة طريقة لتسليم التقرير، لذا لم يُرفع شيء. احفظ نسخة وأرسلها بنفسك.',
   },
+  feedbackPreparing: {
+    en: 'Preparing the attachment…',
+    ar: 'جارٍ تجهيز المرفق…',
+  },
   feedbackFailedTitle: { en: 'Could not send', ar: 'تعذّر الإرسال' },
+  /**
+   * The last resort, for a cause this screen does not recognise. Every cause
+   * it DOES recognise gets its own line below, because "try again later" is
+   * the wrong instruction for most of them: a build with no relay will fail
+   * identically forever, an oversized report needs a smaller attachment, and
+   * a report the server refused will be refused again unchanged.
+   *
+   * The transport already names five causes. Collapsing them here is the same
+   * mistake the send handler's own comment warns about one level up —
+   * "collapsing them is how a user ends up retrying a build that has no
+   * transport in it at all" — and it was made anyway, one level down.
+   */
   feedbackFailedBody: {
     en: 'The report did not leave the phone. Save a copy so it is not lost, and try again later.',
     ar: 'لم يغادر التقرير الهاتف. احفظ نسخة كي لا تضيع، وحاول لاحقاً.',
+  },
+  /**
+   * Not "try again later": this build shipped without a relay address
+   * compiled into it, so it cannot send now and will not be able to send in
+   * an hour. The only thing that fixes it is a newer build.
+   */
+  feedbackNoRelayBody: {
+    en: 'This build has no server address in it, so it can never send a report — waiting will not help. Save a copy, and install a newer build of Wafra.',
+    ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لا يمكنه إرسال أي تقرير مهما انتظرت. احفظ نسخة، وثبّت إصداراً أحدث من وفرة.',
+  },
+  feedbackOfflineTitle: { en: 'No connection', ar: 'لا يوجد اتصال' },
+  feedbackOfflineBody: {
+    en: 'The phone could not reach the server. Nothing was sent. This one is worth trying again once you are back online.',
+    ar: 'تعذّر على الهاتف الوصول إلى الخادم، ولم يُرسل شيء. تستحق هذه المحاولة إعادةً عند عودة الاتصال.',
+  },
+  feedbackTooLargeTitle: { en: 'Too much attached', ar: 'المرفقات كبيرة جداً' },
+  feedbackTooLargeBody: {
+    en: 'The report is over the size the server accepts. Choose a smaller option under WHAT TO ATTACH, or shorten the message, then send again.',
+    ar: 'حجم التقرير يتجاوز ما يقبله الخادم. اختر خياراً أصغر ضمن «ما الذي يُرفق»، أو اختصر الرسالة، ثم أعد الإرسال.',
+  },
+  feedbackRefusedTitle: { en: 'The server refused it', ar: 'رفضه الخادم' },
+  feedbackRefusedBody: {
+    en: 'The server would not take this report ({code}). Sending it again unchanged will get the same answer. Save a copy.',
+    ar: 'لم يقبل الخادم هذا التقرير ({code}). إعادة إرساله كما هو ستعطي النتيجة نفسها. احفظ نسخة.',
+  },
+  feedbackBusyTitle: { en: 'Too many reports just now', ar: 'تقارير كثيرة الآن' },
+  feedbackBusyBody: {
+    en: 'The server is limiting how many reports it takes per hour. Save a copy and send it again in a while.',
+    ar: 'يحدّ الخادم عدد التقارير المقبولة في الساعة. احفظ نسخة وأعد الإرسال بعد قليل.',
   },
   onboardImportResult: {
     en: '{entries} entr{ending} filed{cards}. Nothing left the phone.',
