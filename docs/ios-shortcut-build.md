@@ -9,45 +9,62 @@ developer and is not consumer onboarding.
 satisfy, and why each part is there. It is the authority if the two documents
 ever disagree. This file is the **procedure**: which buttons, in which order.
 
-Roughly 20 minutes. **A Mac is enough to build and publish it** — you do not
-need an iPhone for that part. Read the next section before starting if you do
-not have one, because it changes which steps are yours.
+Roughly 20 minutes on an iPhone or iPad. A Mac can maintain and publish the
+sender-blind base Shortcut, but it cannot complete the sender-aware graph on
+the current Shortcuts release. Read the next section before starting if you do
+not have an iPhone or iPad, because it changes who completes the graph.
 
 ---
 
-## If you do not have an iPhone
+## If you do not have an iPhone or iPad
 
-You can still do the part that unblocks everyone else. Authoring and publishing
-both work in Shortcuts on Mac; Apple's own Mac guide documents the link:
+The first published Wafra Capture was authored on a Mac and safely forwards the
+message body, but it cannot carry bank identity. On the Mac used to publish it,
+the Shortcut Input picker has no **Messages** type and the action library cannot
+construct **Get Details of Messages → Sender**. Searching for that action only
+offers details for Mac-supported content types. Do not publish a Mac-only edit
+as sender-aware v2: it would be another sender-blind snapshot.
+
+A Mac can publish ordinary Shortcuts; Apple's own guide documents the link.
+That does not prove macOS will preserve iPhone-only Message actions when it
+imports and re-shares a completed graph:
 
 > "Choose Copy iCloud Link from the pop-up menu, then click Share. The link is
 > copied to your Clipboard, ready for you to paste into an email, message, or
 > text document."
 > — <https://support.apple.com/guide/shortcuts-mac/share-shortcuts-apdf01f8c054/mac>
 
-What you cannot do from a Mac is **verify** it, for a reason that has nothing
-to do with Shortcuts: Messages on a Mac only receives SMS through Text Message
-Forwarding from an iPhone. With no iPhone there is no bank alert to trigger on
-and nothing to test against. (Separately, the **Message** automation trigger
-appears to be iPhone/iPad-only — every Apple page for it is scoped "on iPhone
-or iPad" — but the missing messages are the decisive part.)
+The **Message** personal-automation trigger is also documented only for iPhone
+or iPad. A Mac with no paired iPhone has no real bank SMS to trigger it with.
+Parser, relay and account-placement simulations are useful, but none can prove
+what Apple's automation supplies as the Message Sender.
 
 You also do not need a setup code to publish. The graph asks for one on first
 run and stores it on the user's own iCloud Drive, so a copy that has never been
 run is already credential-free. Step 5's deletion only applies if you tested it.
 
-So the split is: **you publish, one tester verifies.**
+So the split is: **one iPhone/iPad tester completes, verifies and publishes v2;
+the Mac owner wires that tested link into the app.**
 
 Pick a single iPhone tester as the designated verifier and do not tell anyone
 else iPhone capture works until they have finished:
 
-1. Install the published Shortcut from your link.
-2. Paste the setup code from their own copy of Wafra.
-3. Run it with `WAFRA_CAPTURE_TEST_V1` — Wafra should reach "pipe ready".
-4. Do step 8 below, the real locked-phone alert.
+1. Install the current Wafra Capture link and duplicate it on their iPhone.
+2. Complete steps 1, 3 and 4 below so the duplicate accepts **Messages** and
+   **Text**, extracts **Content** and **Sender**, explicitly converts Sender to
+   **Text**, and posts `text`, `sender` and `eventId`.
+3. Paste the setup code from their own copy of Wafra and run
+   `WAFRA_CAPTURE_TEST_V1`; Wafra should reach "pipe ready".
+4. Do step 8 below with a real locked-phone bank alert and confirm the row is
+   assigned to the correct bank/card rather than merely arriving.
+5. Remove any literal test data, verify the graph contains no setup code, relay
+   URL, bearer, phone number or bank name, then copy its iCloud link.
+6. Send that link to the Mac owner. Do not edit the graph between the successful
+   test and publication. If project ownership later requires re-sharing it from
+   another Apple account, repeat the physical verification on that exact link.
 
-Publishing something you could not run is a real risk, and this is the way to
-carry it honestly rather than pretend it is not there.
+The tester's setup token lives in their own iCloud Drive config file, not in the
+shared graph. Never ask them to send that code to the Mac owner.
 
 ---
 
@@ -61,9 +78,10 @@ copy it. It looks like this, on one line:
 {"v":1,"url":"https://<relay>/v1/ingest","token":"<long random string>"}
 ```
 
-That code contains **this device's ingest token**. It is a credential. It goes
-into the Shortcut you build now, and it must be gone again before you publish —
-step 5 is that removal, and it is not optional.
+That code contains **this device's ingest token**. It is a credential. The
+Shortcut writes it to that user's local iCloud Drive config file; it must never
+be typed as a literal action value, sent to the Mac owner, or included in an
+export. Step 5 verifies that boundary and is not optional.
 
 ---
 
