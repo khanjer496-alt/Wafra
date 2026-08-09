@@ -102,8 +102,19 @@ export function formatCompactAED(fils: number): string {
   return String(Math.round(aed));
 }
 
+/**
+ * Arabic-Indic (٠-٩) and Eastern Arabic-Indic (۰-۹) digits to ASCII, so an
+ * amount typed on an Arabic keyboard parses the same as one typed on an
+ * English one instead of being stripped out entirely.
+ */
+function toAsciiDigits(text: string): string {
+  return text.replace(/[٠-٩۰-۹]/g, (d) =>
+    String(d.charCodeAt(0) & 0xf),
+  );
+}
+
 export function parseAmountToFils(text: string): number | null {
-  const cleaned = text.replace(/[^0-9.]/g, '');
+  const cleaned = toAsciiDigits(text).replace(/[^0-9.]/g, '');
   if (!cleaned) return null;
   const value = Number(cleaned);
   if (!Number.isFinite(value) || value <= 0) return null;

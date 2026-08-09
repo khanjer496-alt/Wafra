@@ -40,6 +40,8 @@ eq('parseAmountToFils decimal', fmt.parseAmountToFils('12.5'), 1250);
 eq('parseAmountToFils with junk chars', fmt.parseAmountToFils('AED 1,234.56'), 123456);
 eq('parseAmountToFils invalid', fmt.parseAmountToFils('abc'), null);
 eq('parseAmountToFils zero', fmt.parseAmountToFils('0'), null);
+eq('parseAmountToFils arabic-indic digits', fmt.parseAmountToFils('٣٥٠'), 35000);
+eq('parseAmountToFils extended arabic-indic digits', fmt.parseAmountToFils('۳۵۰'), 35000);
 eq('monthKey', fmt.monthKey('2026-07-18'), '2026-07');
 eq('shiftMonthKey back over year', fmt.shiftMonthKey('2026-01', -1), '2025-12');
 eq('shiftMonthKey forward', fmt.shiftMonthKey('2026-12', 1), '2027-01');
