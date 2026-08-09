@@ -81,14 +81,19 @@ jobs:
       # https://code.claude.com/docs/en/authentication#generate-a-long-lived-token
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       GH_TOKEN: ${{ github.token }}
-      # NOT `${{ runner.temp }}`. The `runner` context exists only inside a
-      # step, and an expression using it in a job-level `env:` block is not a
-      # runtime error — GitHub refuses to LOAD the whole workflow, which means
-      # the file never registers and the repository_dispatch it exists for
-      # matches nothing. `RUNNER_TEMP` is the same value as an ordinary
-      # environment variable, available to every `run:` block, and needs no
-      # expression at all.
-      WORK: ${RUNNER_TEMP}/feedback
+      # WORK is deliberately NOT here. It is set in the first step instead,
+      # because neither way of writing it in this block works:
+      #
+      #   ${{ runner.temp }}  — the `runner` context exists only inside a step,
+      #     and using it here does not fail at runtime: GitHub refuses to LOAD
+      #     the whole workflow, so the file never registers and the
+      #     repository_dispatch it exists for matches nothing.
+      #   ${RUNNER_TEMP}      — a job-level `env:` value is a literal string,
+      #     never passed through a shell. `$WORK` then expanded to the seven
+      #     characters `${RUNNER_TEMP}/feedback`, a RELATIVE path, so the
+      #     user's report was written inside the git workspace — which
+      #     `git add -A` below would have swept into a public pull request,
+      #     the one thing rule 1 of this file forbids.
       # The agent CLI's flags live here so correcting them is one line rather
       # than an edit inside a shell step. See "Run the agent" for what about
       # them could not be verified.
@@ -130,6 +135,9 @@ jobs:
             exit 1
           fi
           echo "Working on feedback \`$FEEDBACK_ID\`." >> "$GITHUB_STEP_SUMMARY"
+          # Expanded by a shell, which is the only place $RUNNER_TEMP becomes a
+          # path, and exported so every later step sees the same absolute one.
+          echo "WORK=$RUNNER_TEMP/feedback" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v4
         with:

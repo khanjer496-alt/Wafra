@@ -1341,6 +1341,46 @@ ok('the spoken label agrees with the sign on screen',
       if (stepsAt < 0 || n < stepsAt) earlyRunner.push(`${file}:${n + 1}`);
     });
   }
+  /**
+   * And an `env:` value that only LOOKS like a variable.
+   *
+   * `WORK: ${RUNNER_TEMP}/feedback` in a job-level `env:` block is a literal
+   * string — GitHub passes env values through verbatim and no shell ever sees
+   * them. `$WORK` therefore expanded to the characters `${RUNNER_TEMP}/feedback`,
+   * a RELATIVE path, and the feedback report was written inside the git
+   * workspace instead of the runner's temp directory. A `git add -A` two steps
+   * later would have committed a user's bank SMS into a public pull request.
+   *
+   * Nothing failed. The directory was created, the file was written, the run
+   * reached the agent. Only the location was wrong, and the only place it was
+   * visible was one line of an env dump in the log.
+   *
+   * `${{ ... }}` is a GitHub expression and is fine; `${NAME}` and `$NAME` are
+   * shell syntax and belong in a `run:` block, or in `$GITHUB_ENV` written by
+   * one.
+   */
+  const literalEnv = [];
+  for (const file of files) {
+    const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
+    let inEnv = false;
+    let envIndent = 0;
+    lines.forEach((raw, n) => {
+      const line = /^\s*#/.test(raw) ? '' : raw.replace(/\s+#.*$/, '');
+      const opens = line.match(/^(\s*)env:\s*$/);
+      if (opens) { inEnv = true; envIndent = opens[1].length; return; }
+      if (inEnv && line.trim() && (line.length - line.trimStart().length) <= envIndent) inEnv = false;
+      if (!inEnv) return;
+      // `${{ }}` first, so a GitHub expression is never mistaken for a shell one.
+      const withoutExpressions = line.replace(/\$\{\{[^}]*\}\}/g, '');
+      if (/\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/.test(withoutExpressions)) {
+        literalEnv.push(`${file}:${n + 1} ${line.trim()}`);
+      }
+    });
+  }
+  ok('no env: value expects a shell to expand it',
+    literalEnv.length === 0,
+    literalEnv.slice(0, 3).join(' | '));
+
   ok('no workflow reads the runner context outside a step',
     earlyRunner.length === 0,
     earlyRunner.slice(0, 3).join(' | '));
