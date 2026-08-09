@@ -1524,6 +1524,23 @@ ok('the spoken label agrees with the sign on screen',
   ok('the agent output is captured, not published',
     />\s*"\$WORK\/agent\.log"/.test(invocation) && !/\btee\b/.test(invocation),
     `${wfPath}: ${invocation.trim()}`);
+
+  /**
+   * And a refused pull request does not take the summary down with it.
+   *
+   * `gh pr create` is the last call of the run. On a repository with "Allow
+   * GitHub Actions to create and approve pull requests" turned off it answers
+   * `not permitted`, and under `set -e` that ended the step — after the agent
+   * turn, two full suite runs and the verbatim gate had all passed, and with
+   * the branch already on the remote. Everything of value survived except the
+   * one thing that only existed in $RUNNER_TEMP: the body.
+   *
+   * It is safe to print at that point and only at that point, because the
+   * verbatim gate two steps earlier has already cleared it.
+   */
+  ok('a refused pull request still publishes the body it would have used',
+    /cat "\$WORK\/pr-body\.md"/.test(wf) && /compare\/\$\{branch\}/.test(wf),
+    `${wfPath}: the gh failure path must survive to write the summary`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

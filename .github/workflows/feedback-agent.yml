@@ -434,15 +434,57 @@ jobs:
           } > "$WORK/pr-body.md"
 
           existing=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+          set +e
           if [ -n "$existing" ]; then
-            gh pr edit "$existing" --body-file "$WORK/pr-body.md"
+            gh pr edit "$existing" --body-file "$WORK/pr-body.md" 2> "$WORK/gh.err"
+            created=$?
             url=$(gh pr view "$existing" --json url --jq .url)
           else
             url=$(gh pr create --draft \
               --title "Feedback: ${FEEDBACK_PLATFORM} ${FEEDBACK_APP_VERSION} — reported issue" \
               --body-file "$WORK/pr-body.md" \
-              --head "$branch")
+              --head "$branch" 2> "$WORK/gh.err")
+            created=$?
           fi
+          set -e
+
+          # ── The branch is already pushed. Do not throw the body away. ──
+          #
+          # A repository with "Allow GitHub Actions to create and approve pull
+          # requests" turned off answers the very last call of this run with
+          # `GitHub Actions is not permitted to create or approve pull requests`
+          # — after the agent turn, both suite runs and the verbatim gate have
+          # all passed. Everything of value exists at that point: the branch is
+          # on the remote and SUMMARY.md has been CLEARED by the verbatim gate
+          # two steps up, which is what makes it safe to print here and nowhere
+          # earlier. Losing it to a settings checkbox would mean re-running the
+          # whole job to recover a file that already exists.
+          if [ "$created" != "0" ]; then
+            {
+              echo "## The branch is pushed. The pull request was refused."
+              echo
+              echo '```'
+              tail -5 "$WORK/gh.err"
+              echo '```'
+              echo
+              echo "If that says **not permitted to create or approve pull requests**, it is a"
+              echo "repository setting and not a failure of this run: **Settings → Actions → General →"
+              echo "Workflow permissions** → tick _Allow GitHub Actions to create and approve pull"
+              echo "requests_. Nothing needs re-running once it is on — open this one by hand:"
+              echo
+              echo "<${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${branch}?expand=1>"
+              echo
+              echo "The body it would have used is below. It has already passed the verbatim gate,"
+              echo "so it quotes nothing from the report."
+              echo
+              echo "---"
+              echo
+              cat "$WORK/pr-body.md"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::the branch was pushed but the pull request could not be created. The body is in the job summary."
+            exit 1
+          fi
+
           {
             echo "## Draft pull request opened"
             echo
