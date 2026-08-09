@@ -37,6 +37,22 @@ jobs:
       # playwright is a devDependency for the e2e scripts; this build never
       # launches a browser, so skip the browser download during npm ci.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      # Expo INLINES every EXPO_PUBLIC_* value at bundle time, and Metro bundles
+      # inside `gradlew assembleRelease` below — so a value absent from this
+      # environment is absent from the APK, with no build error to say so.
+      #
+      # eas.json sets this for EAS builds and nothing set it here, so every APK
+      # this workflow has ever produced shipped with DEFAULT_RELAY_URL empty.
+      # `relay.ts` deliberately has no fallback ("a release with no deployed
+      # relay must fail setup visibly, not send financial messages to a domain
+      # that merely looks plausible"), which is right, and the visible failure
+      # is what nobody was looking at: iOS setup could not pair, and the
+      # feedback screen reported that sending was not connected in this build.
+      #
+      # A repository VARIABLE with the eas.json value as the fallback, so a
+      # fork or a renamed Worker overrides it without editing this file. Not a
+      # secret: it is a public URL that ships inside the APK by definition.
+      EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
     steps:
       - uses: actions/checkout@v4
 
