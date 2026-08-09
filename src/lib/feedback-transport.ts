@@ -34,10 +34,20 @@ interface FeedbackResponse {
 export class FeedbackSendError extends Error {
   /** The Worker's machine-readable reason, when it gave one. */
   readonly code: string | null;
-  constructor(message: string, code: string | null) {
+  /**
+   * The HTTP status, when the failure came from a response at all.
+   *
+   * Carried because the Worker's `error` body is optional and the screen has
+   * to say something true either way. Without it, a 429 the Worker did not
+   * label and a 500 were indistinguishable at the point where the user is
+   * being told whether trying again is worth their time.
+   */
+  readonly status: number | null;
+  constructor(message: string, code: string | null, status: number | null = null) {
     super(message);
     this.name = 'FeedbackSendError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -86,7 +96,11 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
     } catch {
       code = null;
     }
-    throw new FeedbackSendError(`The server refused the report (${response.status}).`, code);
+    throw new FeedbackSendError(
+      `The server refused the report (${response.status}).`,
+      code,
+      response.status,
+    );
   }
 
   let parsed: FeedbackResponse;

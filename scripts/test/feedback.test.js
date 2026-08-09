@@ -510,8 +510,12 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   ok('the screen previews the payload through the same formatter it sends',
     /const preview = useMemo\(\(\) => formatFeedbackPayload\(payload\)/.test(screen) &&
       /shareText\('wafra-feedback\.txt', preview\)/.test(screen));
+  // Rendered, in braces, whatever else shares the expression with it — the
+  // screen now shows a "preparing" line in its place while a level is being
+  // built, because a STALE preview under a new heading is this screen's one
+  // guarantee being false rather than a cosmetic lag.
   ok('the preview is drawn on the screen, not hidden behind a share sheet',
-    /\{preview\}/.test(screen));
+    /\{[^{}]*\bpreview\b[^{}]*\}/.test(screen));
 
   // Nothing is sent on mount, on a timer, or on anything but a tap that has
   // been confirmed. If submitFeedback is ever called from a useEffect, this is
@@ -519,11 +523,94 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   ok('submitFeedback is reached only from the confirmed send path',
     (screen.match(/submitFeedback\(/g) ?? []).length === 1 &&
       /<ConfirmSheet[\s\S]{0,400}onConfirm=\{\(\) => void send\(\)\}/.test(screen));
-  ok('nothing is submitted from an effect', !/useEffect/.test(screen));
+  /**
+   * The property, not the proxy.
+   *
+   * This used to be `!/useEffect/.test(screen)` — no effects at all, as a
+   * stand-in for "nothing submits from one". That held while the screen had no
+   * effects and stopped being usable the moment it needed one: building the
+   * `figures` attachment had to come off the render path, because doing it
+   * during render froze the app for seconds on a real ledger.
+   *
+   * So the body of every effect is read and checked for the call itself. That
+   * is strictly narrower than the old line — it still fails on the thing the
+   * old line existed to catch, and no longer fails on an effect that does
+   * something else.
+   */
+  const effectBodies = [];
+  for (let at = screen.indexOf('useEffect('); at >= 0; at = screen.indexOf('useEffect(', at + 1)) {
+    let depth = 0;
+    let end = at;
+    for (let i = screen.indexOf('(', at); i < screen.length; i += 1) {
+      if (screen[i] === '(') depth += 1;
+      else if (screen[i] === ')') {
+        depth -= 1;
+        if (depth === 0) { end = i; break; }
+      }
+    }
+    effectBodies.push(screen.slice(at, end + 1));
+  }
+  ok('nothing is submitted from an effect',
+    effectBodies.length > 0 && effectBodies.every((body) => !/submitFeedback\(/.test(body)),
+    `${effectBodies.length} effect(s) read`);
+
+  /**
+   * And the expensive build IS in one.
+   *
+   * Measured at ~270ms in Node on a 14,314-row ledger with twelve cards, which
+   * is seconds under Hermes. Run during render — which is where a `useMemo`
+   * keyed on `detail` runs it — the app stops answering the moment the third
+   * option is chosen, with no spinner and nothing to cancel. That was reported
+   * from a real phone as "lags and stops working".
+   */
+  ok('the attachment is built off the render path',
+    effectBodies.some((body) => /runAfterInteractions/.test(body) && /buildFeedbackPayload\(/.test(body)),
+    'the figures build must not run during render');
+  ok('Send is blocked while the attachment is still being built',
+    /const ready = [^;]*!preparing/.test(screen),
+    'sending mid-build would post the previous level under the new label');
 
   // The repo-wide rule, restated here because this screen is new: an alert on
   // react-native-web is an empty method, so a confirmation built from one is a
   // dead control. routes.test.js scans all of src/; this pins the screen.
+  /**
+   * Every cause the transport can throw is answered, or is deliberately not.
+   *
+   * The transport names five and the screen used to answer two: "no transport
+   * in this build", and everything else as "save a copy and try again later".
+   * The send handler's own comment argued against exactly that — "collapsing
+   * them is how a user ends up retrying a build that has no transport in it at
+   * all" — and then collapsed the five underneath it.
+   *
+   * It matters because the advice differs. A build with no relay address will
+   * fail identically forever and "later" never comes; an oversized report needs
+   * a smaller attachment; a refused report will be refused again unchanged.
+   * Only a network failure was ever worth retrying, and that is the one case
+   * the old wording fitted. A real report came back from a phone reading
+   * "Could not send ... try again later" when the truth was that the build
+   * predated the commit compiling the relay URL in.
+   *
+   * The two files are edited independently, so the list is read out of the
+   * transport rather than restated here. `bad_response` and `no_id` fall
+   * through on purpose: after either, the report may or may not have arrived,
+   * and "keep a copy" is the only honest thing to say.
+   */
+  const transport = code(read('src/lib/feedback-transport.ts'));
+  const thrown = [...transport.matchAll(/new FeedbackSendError\([^,]+,\s*'([a-z_]+)'/g)].map((m) => m[1]);
+  const fallThrough = new Set(['bad_response', 'no_id']);
+  ok('the transport still names its causes', thrown.length >= 4, thrown.join(', '));
+  const unanswered = thrown.filter(
+    (c) => !fallThrough.has(c) && !new RegExp(`case '${c}':`).test(screen),
+  );
+  ok('every actionable send failure gets its own answer',
+    unanswered.length === 0,
+    unanswered.length ? `unanswered: ${unanswered.join(', ')}` : '');
+
+  // And the one that was actually wrong: a build that can never send must not
+  // be told that waiting will help.
+  ok('a build with no relay address is not told to try again later',
+    /case 'no_relay_url':[\s\S]{0,160}feedbackNoRelayBody/.test(screen));
+
   ok('the screen uses no alert at all', !/\bAlert\b/.test(screen));
 
   ok('the attachment choice is drawn as a sheet', /<ChoiceSheet/.test(screen));

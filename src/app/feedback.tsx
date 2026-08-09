@@ -24,8 +24,15 @@
  */
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  InteractionManager,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -47,10 +54,74 @@ import {
   submitFeedback,
   type FeedbackDetail,
 } from '@/lib/feedback';
+import { FeedbackSendError } from '@/lib/feedback-transport';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { shareText } from '@/lib/share-text';
 import { useStore } from '@/lib/store';
+
+/**
+ * Why the report did not go, in the user's terms — and specifically whether
+ * trying again is worth their time.
+ *
+ * The send handler used to answer this with two branches: "no transport in
+ * this build", and everything else as "try again later". Its own comment made
+ * the case against that — "collapsing them is how a user ends up retrying a
+ * build that has no transport in it at all" — and then collapsed the five
+ * causes underneath.
+ *
+ * The distinction it was drawing is real but it drew it in the wrong place.
+ * `no_relay_url` is the SAME failure as a missing transport: a build that
+ * shipped without a server address will fail identically forever, and "later"
+ * never arrives. A 413 needs a smaller attachment. A 4xx will be refused again
+ * unchanged. Only a network failure is actually worth retrying, and it was the
+ * one case the old wording happened to fit.
+ *
+ * Exported for the suite: this is a pure mapping and testing it through a
+ * rendered screen would test React instead.
+ */
+export function describeSendFailure(error: unknown): { title: string; body: string } {
+  if (error instanceof FeedbackTransportMissingError) {
+    return { title: t('feedbackNoTransportTitle'), body: t('feedbackNoTransportBody') };
+  }
+  if (error instanceof FeedbackSendError) {
+    switch (error.code) {
+      case 'no_relay_url':
+        return { title: t('feedbackFailedTitle'), body: t('feedbackNoRelayBody') };
+      case 'network':
+        return { title: t('feedbackOfflineTitle'), body: t('feedbackOfflineBody') };
+      case 'too_large':
+        return { title: t('feedbackTooLargeTitle'), body: t('feedbackTooLargeBody') };
+      case 'rate_limited':
+        return { title: t('feedbackBusyTitle'), body: t('feedbackBusyBody') };
+    }
+    // A 429 the Worker did not label is still a rate limit, and saying "send
+    // it again in a while" is right for it and wrong for the 4xx above it.
+    if (error.status === 429) {
+      return { title: t('feedbackBusyTitle'), body: t('feedbackBusyBody') };
+    }
+    if (error.status !== null) {
+      return {
+        title: t('feedbackRefusedTitle'),
+        body: tf('feedbackRefusedBody', { code: error.code ?? String(error.status) }),
+      };
+    }
+  }
+  // Everything unrecognised, including `bad_response` and `no_id`: the report
+  // may or may not have arrived, so the only honest advice is to keep a copy.
+  return { title: t('feedbackFailedTitle'), body: t('feedbackFailedBody') };
+}
+
+/**
+ * The ledger the cheap placeholder payload is built from. A constant so its
+ * identity never changes and the memo holding it never re-runs.
+ */
+const EMPTY_LEDGER: Parameters<typeof buildFeedbackPayload>[0]['ledger'] = {
+  accounts: [],
+  transactions: [],
+  cardDues: [],
+  merchantOverrides: {},
+};
 
 /** The three levels, each with the one sentence that decides between them. */
 const DETAIL_COPY: Record<FeedbackDetail, { label: () => string; hint: () => string }> = {
@@ -87,30 +158,56 @@ export default function FeedbackScreen() {
   );
 
   /**
-   * The expensive half, memoised WITHOUT the message.
+   * The expensive half, kept OFF the render path.
    *
-   * At `figures` this runs `cardDiagnostics()` over the whole ledger, and
-   * rebuilding it on every keystroke would make the box stutter on exactly the
-   * phones that have most to report. The message is a plain string field, so
-   * it is folded in below where it costs nothing — and the two together are
-   * still one payload produced by one function, which is what the preview
-   * guarantee rests on.
+   * At `figures` this runs `cardDiagnostics()` over the whole ledger. Measured
+   * on a 14,314-row ledger with twelve cards and sixty statements it takes
+   * ~270ms in Node, which is seconds under Hermes on a mid-range phone — and
+   * it used to run synchronously inside a `useMemo`, during the render caused
+   * by choosing the level. So the sheet closed and the app stopped answering,
+   * with no spinner, nothing to cancel, and no way to tell it apart from a
+   * crash. That is what was reported: "lags and stops working when I press
+   * what to attach ... selecting third option".
+   *
+   * It was already memoised WITHOUT the message so typing did not rebuild it.
+   * That was right and is kept; it was never the problem. The problem was that
+   * the one render it did run on was a render the user was watching.
+   *
+   * `runAfterInteractions` waits for the sheet's own dismissal animation, so
+   * the frame showing "preparing" actually paints before the thread is taken.
+   * This DEFERS the cost, it does not remove it — the work is still one
+   * synchronous pass when it fires. What it buys is that the app says what it
+   * is doing instead of appearing dead, and that Send cannot fire against a
+   * payload that has not been built.
    */
-  const attachment = useMemo(
-    () =>
-      buildFeedbackPayload({
+  const cheapest = useMemo(
+    () => buildFeedbackPayload({ message: '', detail: 'none', build, ledger: EMPTY_LEDGER }),
+    [build],
+  );
+  const [attachment, setAttachment] = useState(cheapest);
+  const [preparing, setPreparing] = useState(false);
+  const { accounts, transactions, cardDues, merchantOverrides } = state;
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreparing(true);
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      const next = buildFeedbackPayload({
         message: '',
         detail,
         build,
-        ledger: {
-          accounts: state.accounts,
-          transactions: state.transactions,
-          cardDues: state.cardDues,
-          merchantOverrides: state.merchantOverrides,
-        },
-      }),
-    [detail, build, state.accounts, state.transactions, state.cardDues, state.merchantOverrides],
-  );
+        ledger: { accounts, transactions, cardDues, merchantOverrides },
+      });
+      if (cancelled) return;
+      setAttachment(next);
+      setPreparing(false);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+  }, [detail, build, accounts, transactions, cardDues, merchantOverrides]);
 
   const payload = useMemo(
     () => ({ ...attachment, message: scrubFeedbackMessage(message) }),
@@ -139,7 +236,11 @@ export default function FeedbackScreen() {
     };
   });
 
-  const ready = payload.message.length > 0 && !sending;
+  // `preparing` gates Send as hard as an empty message does. The payload the
+  // user is looking at is the one that gets posted, so sending while a level
+  // is still being built would post the previous level's attachment under the
+  // new level's label — the exact disagreement this screen exists to prevent.
+  const ready = payload.message.length > 0 && !sending && !preparing;
 
   const send = async () => {
     setSending(true);
@@ -149,14 +250,7 @@ export default function FeedbackScreen() {
       setMessage('');
       setNotice({ title: t('feedbackSentTitle'), body: tf('feedbackSentBody', { id: receipt.id }) });
     } catch (error) {
-      // Two different truths, and collapsing them is how a user ends up
-      // retrying a build that has no transport in it at all. The stub throws a
-      // named error precisely so this branch can exist.
-      setNotice(
-        error instanceof FeedbackTransportMissingError
-          ? { title: t('feedbackNoTransportTitle'), body: t('feedbackNoTransportBody') }
-          : { title: t('feedbackFailedTitle'), body: t('feedbackFailedBody') },
-      );
+      setNotice(describeSendFailure(error));
     } finally {
       setSending(false);
     }
@@ -282,8 +376,13 @@ export default function FeedbackScreen() {
                   machine-readable report whose indentation is load-bearing, and
                   mirroring it under RTL would shred the card diagnostic's
                   columns without making a single line easier to read. */}
+              {/* Never the previous level's report under the new level's
+                  heading. While the attachment is being built the preview says
+                  so and shows nothing, because a stale preview here is not a
+                  cosmetic lag — it is the screen's one guarantee being false
+                  for as long as the build takes. */}
               <ThemedText type="nano" themeColor="textSecondary" style={styles.preview}>
-                {preview}
+                {preparing ? t('feedbackPreparing') : preview}
               </ThemedText>
             </Block>
           </Section>
