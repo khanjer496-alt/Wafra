@@ -1255,5 +1255,63 @@ ok('the spoken label agrees with the sign on screen',
     /outcome === 'failed'/.test(code(pro)) && !/outcome === 'cancelled'/.test(code(pro)));
 }
 
+/* ── a workflow that GitHub cannot load fails silently ──────────────────────
+ *
+ * `feedback-agent.yml` answers `repository_dispatch`, and it referenced the
+ * bare `inputs` context — a named value GitHub only recognises for
+ * `workflow_dispatch` and `workflow_call`. Expressions are validated when the
+ * file is LOADED, not when a job runs, so the whole workflow was rejected: it
+ * never registered, `repository_dispatch` matched nothing, and the only
+ * outward sign was a zero-second failed run with no jobs appearing on pushes
+ * to a workflow that does not trigger on push.
+ *
+ * Meanwhile the relay reported `dispatched: true` and was right to — GitHub
+ * accepted the dispatch. There was simply no workflow behind it. Nothing in
+ * this repository could have caught that, which is what this is for.
+ *
+ * `github.event.inputs.<name>` is the form that works under every trigger,
+ * because it reads the event payload rather than a context that may not
+ * exist. It is null for a repository_dispatch run, which is exactly what the
+ * `||` fallbacks want.
+ */
+{
+  const dir = path.join(__dirname, '../../.github/workflows');
+  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)) : [];
+  ok('the workflow directory is readable', files.length > 0, dir);
+
+  const offenders = [];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(dir, file), 'utf8');
+    // WHICH triggers this workflow declares, read off the `on:` block rather
+    // than guessed from the whole file — "push:" appears in prose in several
+    // of these, and a comment must not decide whether a workflow is valid.
+    const onBlock = (() => {
+      const lines = text.split('\n');
+      const at = lines.findIndex((l) => /^on:\s*$/.test(l));
+      if (at < 0) return '';
+      const out = [];
+      for (let i = at + 1; i < lines.length; i += 1) {
+        if (/^\S/.test(lines[i])) break;
+        out.push(lines[i]);
+      }
+      return out.join('\n');
+    })();
+    const triggers = (onBlock.match(/^ {2}([a-z_]+):/gm) ?? []).map((m) => m.trim().slice(0, -1));
+    // `inputs` is a recognised named value ONLY for these two. A workflow that
+    // declares nothing else may use it and is correct; one that declares
+    // anything else alongside cannot, and GitHub rejects the whole file.
+    const inputsAreValid =
+      triggers.length > 0 && triggers.every((t) => t === 'workflow_dispatch' || t === 'workflow_call');
+    if (inputsAreValid) continue;
+    // Inside ${{ }} only; `inputs.foo` in a comment or a shell line is prose.
+    for (const expr of text.match(/\$\{\{[^}]*\}\}/g) ?? []) {
+      if (/(^|[^.\w])inputs\s*\./.test(expr)) offenders.push(`${file}: ${expr.trim()}`);
+    }
+  }
+  ok(`no workflow reads the bare inputs context (${files.length} files)`,
+    offenders.length === 0,
+    offenders.slice(0, 3).join(' | '));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

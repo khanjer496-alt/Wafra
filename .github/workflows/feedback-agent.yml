@@ -49,7 +49,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: feedback-agent-${{ github.event.client_payload.feedbackId || inputs.feedback_id }}
+  group: feedback-agent-${{ github.event.client_payload.feedbackId || github.event.inputs.feedback_id }}
   cancel-in-progress: false
 
 defaults:
@@ -67,7 +67,7 @@ jobs:
       # This job never runs the e2e suite, so npm postinstall must not fetch a
       # browser for it.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
-      FEEDBACK_ID: ${{ github.event.client_payload.feedbackId || inputs.feedback_id }}
+      FEEDBACK_ID: ${{ github.event.client_payload.feedbackId || github.event.inputs.feedback_id }}
       # Repository VARIABLE (Settings → Secrets and variables → Actions →
       # Variables), e.g. https://wafra-relay.<account>.workers.dev
       RELAY_URL: ${{ vars.WAFRA_RELAY_URL }}
