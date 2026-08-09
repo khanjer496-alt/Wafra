@@ -1443,9 +1443,21 @@ const S = {
     en: 'A safe probe checks the pipe; the first bank alert verifies the trigger.',
     ar: 'يفحص اختبار آمن المسار؛ ويتحقق أول تنبيه بنكي من المشغّل.',
   },
+  /**
+   * The sentence this note used to start with was "The relay discards raw
+   * Message Content after parsing" — which is true, and which presupposes the
+   * thing it never said: that the relay received the message in the first
+   * place. Someone skimming the screen before tapping Connect could read the
+   * whole note and not learn that their bank alert leaves the phone.
+   *
+   * That is the one way iPhone capture differs from Android, where parsing is
+   * entirely on-device, and it is the difference a person is entitled to be
+   * told before they agree to it rather than after. So it now leads, and the
+   * retention detail follows it.
+   */
   iosPrivacyNote: {
-    en: 'The relay discards raw Message Content after parsing. It keeps only the structured transaction and, when the Shortcut supplies it, the bank Sender label used to identify its card or account; both are sealed to this iPhone and queued for up to 30 days.',
-    ar: 'يتخلّص خادم الترحيل من محتوى الرسالة الخام بعد تحليله. ولا يحتفظ إلا ببيانات العملية المنظمة، وباسم مرسل البنك عندما يرسله الاختصار، لتحديد البطاقة أو الحساب؛ وتُشفّر هذه البيانات لهذا الآيفون وقد تبقى في قائمة الانتظار حتى ٣٠ يوماً.',
+    en: 'Apple gives no app access to the Messages inbox, so on iPhone the alert text is sent to Wafra’s relay to be read. That is the one difference from Android, where it never leaves the phone. The relay discards raw Message Content after parsing. It keeps only the structured transaction and, when the Shortcut supplies it, the bank Sender label used to identify its card or account; both are sealed to this iPhone and queued for up to 30 days.',
+    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل، لذلك يُرسَل نص التنبيه على الآيفون إلى خادم ترحيل وفرة ليُقرأ. وهذا هو الفارق الوحيد عن أندرويد، حيث لا يغادر النص الهاتف إطلاقاً. ويتخلّص خادم الترحيل من محتوى الرسالة الخام بعد تحليله. ولا يحتفظ إلا ببيانات العملية المنظمة، وباسم مرسل البنك عندما يرسله الاختصار، لتحديد البطاقة أو الحساب؛ وتُشفّر هذه البيانات لهذا الآيفون وقد تبقى في قائمة الانتظار حتى ٣٠ يوماً.',
   },
   iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
   iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
