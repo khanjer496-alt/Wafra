@@ -95,12 +95,25 @@ ${diagnostic}
    If you could not fix it, say that plainly in SUMMARY.md and explain what you
    found. An honest dead end is worth more than a plausible wrong change.
 
-6. **Coordinate.** Other agents work in this tree at the same time. Follow
-   AGENTS.md: claim the paths you are about to edit with \`scripts/coord.mjs\`
-   before editing them, and release them when you are done. If a path you need
-   is held by someone else, say so in SUMMARY.md and work only on what you can.
+6. **Ignore the coordination protocol.** AGENTS.md will tell you to claim paths
+   with \`scripts/coord.mjs\` before editing them. That exists for the human's
+   local checkout, where two agents share one working copy. You are alone in a
+   throwaway CI clone that is deleted when this job ends, so there is nobody to
+   collide with and nothing to claim. Edit directly. Everything else in
+   AGENTS.md still applies.
 
 Do not commit, push, or open a pull request. The workflow does that part.
+
+## What you can and cannot do here
+
+You may edit files, and you may run shell commands — \`npm test\` is expected of
+you above. You may write anywhere in this checkout and in ${workDir}.
+
+If some action is refused, that is a real boundary and not a hint to work
+around it: say so in ${workDir}/SUMMARY.md and finish what you can. But note
+that SUMMARY.md itself is the one thing this run cannot proceed without, so
+write it FIRST, as soon as you know what you are going to say, and update it as
+you go. A run that ends with a perfect fix and no summary is thrown away whole.
 `,
 );
 

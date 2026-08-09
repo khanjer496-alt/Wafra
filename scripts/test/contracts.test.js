@@ -1439,5 +1439,92 @@ ok('the spoken label agrees with the sign on screen',
     offenders.slice(0, 3).join(' | '));
 }
 
+/* ── what the prompt demands, the flags must permit ─────────────────────────
+ *
+ * feedback-agent.yml hands the agent a prompt that requires it to run
+ * `npm test` and to write `$RUNNER_TEMP/feedback/SUMMARY.md`. The flags it ran
+ * under granted neither: `--permission-mode acceptEdits` allows unprompted
+ * file edits inside the checkout and nothing more — no shell, and nothing
+ * outside the workspace — and `--print` means there is no human to approve
+ * either one, so both were refused mid-turn.
+ *
+ * Nothing about that looked like a misconfiguration. The agent found a real
+ * defect, added a real failing test, wrote a real fix, and the red-then-green
+ * gate went green on all of it. The run then died at the summary gate, seven
+ * minutes and two full suite runs later, and the only account of why was one
+ * sentence of the agent's own prose in the log.
+ *
+ * These two files are edited independently — one is YAML, one is a template
+ * string — and the coupling between them is invisible in either. So it is
+ * asserted: read what the prompt asks for out of the prompt, and require the
+ * workflow to grant exactly that.
+ */
+{
+  const root = path.join(__dirname, '../..');
+  const wfPath = '.github/workflows/feedback-agent.yml';
+  const promptPath = '.github/scripts/feedback-prompt.mjs';
+  const prompt = fs.readFileSync(path.join(root, promptPath), 'utf8');
+  // Whole-line comments dropped before anything is matched. The comment block
+  // above this check, and the one in the workflow, both NAME the flags at
+  // issue; a scan that cannot tell prose from code would force the
+  // explanations to be deleted to stay green. Third time this file has had to
+  // learn that.
+  const wf = fs.readFileSync(path.join(root, wfPath), 'utf8')
+    .split('\n')
+    .map((line) => (/^\s*#/.test(line) ? '' : line))
+    .join('\n');
+
+  // Anchored on the invocation itself, not on the flags appearing anywhere in
+  // the file, so a flag mentioned in prose cannot satisfy it.
+  const invocation = (wf.match(/^\s*claude \$CLAUDE_ARGS\b.*$/m) ?? [''])[0];
+  const args = (wf.match(/^\s*CLAUDE_ARGS:\s*'([^']*)'/m) ?? [null, ''])[1];
+  ok('the agent is actually invoked', invocation.length > 0 && args.length > 0, wfPath);
+
+  // The prompt names the summary as a path under the work directory it is
+  // given. A path outside the checkout needs --add-dir; the CLI refuses to
+  // write there otherwise, and refuses quietly enough that the first sign is
+  // a missing file two steps later.
+  const writesOutsideCheckout = /\$\{workDir\}\/SUMMARY\.md/.test(prompt);
+  ok('the prompt asks for a summary outside the checkout', writesOutsideCheckout, promptPath);
+  ok('the agent is given access to the directory the prompt tells it to write into',
+    !writesOutsideCheckout || /--add-dir\s+"\$WORK"/.test(invocation),
+    `${wfPath}: claude ... --add-dir "$WORK"`);
+
+  // Same shape for the shell. `acceptEdits` is not a superset of Bash.
+  const bypass = /--permission-mode\s+bypassPermissions|--dangerously-skip-permissions/.test(args);
+  // Variadic, so the list runs from the flag to the next one. Commas are split
+  // as well as spaces: the CLI accepts both spellings, and a guard that
+  // understood only one would fail a correct file.
+  const allowed = [];
+  for (const token of ((args.match(/--allowed-tools\s+(.*)$/) ?? [null, ''])[1]).split(/[\s,]+/)) {
+    if (!token) continue;
+    if (token.startsWith('--')) break;
+    allowed.push(token);
+  }
+  const needsShell = /npm test/.test(prompt);
+  ok('the prompt requires the agent to run the suite', needsShell, promptPath);
+  ok('the agent is permitted the shell the prompt requires',
+    !needsShell || bypass || allowed.includes('Bash'),
+    `${wfPath}: CLAUDE_ARGS = ${args}`);
+  // Write is separately gated from Edit, and SUMMARY.md is a new file.
+  ok('the agent is permitted to create files, not only edit them',
+    bypass || (allowed.includes('Write') && allowed.includes('Edit')),
+    `${wfPath}: CLAUDE_ARGS = ${args}`);
+
+  /**
+   * And the agent's own prose stays off the public log.
+   *
+   * Rule 1 at the top of that workflow is that the user's words do not leave
+   * the runner, and the file broke it: the agent's stdout was `| tee`'d, so
+   * every sentence it wrote after reading a bank alert went straight into an
+   * Actions log that is as public as the repository. The verbatim gate cannot
+   * help — it guards the pull request body and the diff, both of which come
+   * later. Redirect, never tee.
+   */
+  ok('the agent output is captured, not published',
+    />\s*"\$WORK\/agent\.log"/.test(invocation) && !/\btee\b/.test(invocation),
+    `${wfPath}: ${invocation.trim()}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

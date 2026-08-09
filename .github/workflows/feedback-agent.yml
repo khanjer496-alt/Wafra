@@ -97,7 +97,18 @@ jobs:
       # The agent CLI's flags live here so correcting them is one line rather
       # than an edit inside a shell step. See "Run the agent" for what about
       # them could not be verified.
-      CLAUDE_ARGS: '--print --permission-mode acceptEdits'
+      #
+      # `--add-dir` is deliberately NOT here even though it belongs with the
+      # rest: its argument is $WORK, and the paragraph above is about why a
+      # `$NAME` in this block is seven literal characters. It is passed on the
+      # command line, where a shell expands it.
+      #
+      # `--allowed-tools` is variadic (`<tools...>`), so the names are separated
+      # by SPACES and the next `--flag` ends the list. Not commas: if the CLI
+      # does not split on them then `Bash,Edit,Write` is one tool name that
+      # matches nothing, every tool is refused, and it fails exactly the silent
+      # way this whole edit exists to stop.
+      CLAUDE_ARGS: '--print --permission-mode acceptEdits --allowed-tools Bash Edit Write'
 
     steps:
       # ── Refuse to start rather than fail half-way ──
@@ -225,8 +236,26 @@ jobs:
       # NOT `--dangerously-skip-permissions` (= `--permission-mode
       # bypassPermissions`). It would also work, and it removes the one
       # remaining boundary around an agent running unattended on a checkout
-      # with a token in its environment. `acceptEdits` buys the thing this
-      # workflow actually needs — unprompted file edits — and nothing else.
+      # with a token in its environment.
+      #
+      # `acceptEdits` ALONE did not work, and the way it failed is worth
+      # keeping. It grants unprompted file EDITS and nothing else — no Bash,
+      # and no access outside the checkout. But the prompt this workflow hands
+      # the agent requires both: step 3 says `npm test` must be green, and step
+      # 5 says write $WORK/SUMMARY.md, which is in $RUNNER_TEMP precisely so the
+      # report cannot be committed. In `--print` mode there is no human to
+      # approve either, so both were denied silently mid-turn. The agent found
+      # a real defect, wrote a real test, wrote a real fix — and the run died
+      # seven minutes later at the summary gate, having burned two full suite
+      # runs, with the only explanation buried in the agent's own prose:
+      # "sandbox restrictions in this session blocked me from ...".
+      #
+      # So the permissions now match what the prompt asks for, and no more:
+      # `--allowed-tools Bash Edit Write` (Read/Glob/Grep are not gated) plus
+      # `--add-dir "$WORK"` for the summary. Granting Bash is most of what
+      # bypassPermissions would grant anyway; the difference kept here is that
+      # anything NOT on that list is still refused, and adding to the list is a
+      # diff someone reviews.
       #
       # `anthropics/claude-code-action@v1` is the other documented route and
       # would replace this step entirely; it takes `claude_code_oauth_token`
@@ -242,7 +271,53 @@ jobs:
           set -euo pipefail
           npm install -g @anthropic-ai/claude-code
           claude --version
-          claude $CLAUDE_ARGS < "$WORK/PROMPT.md" | tee "$WORK/agent.log"
+          # `>`, not `| tee`. The agent has just read the user's report and is
+          # writing prose about it; tee-ing that to stdout published it to the
+          # Actions log, which is as public as the repository — rule 1 of this
+          # file, broken by the file itself. Nothing downstream needed it: the
+          # only step that surfaces any of this scans it first.
+          claude $CLAUDE_ARGS --add-dir "$WORK" < "$WORK/PROMPT.md" > "$WORK/agent.log"
+
+      # ── Fail here, not seven minutes later ──
+      #
+      # SUMMARY.md is required by the verbatim gate two steps down, which is
+      # the right place to REFUSE and the wrong place to find out: by then the
+      # suite has run twice. A missing summary is nearly always a permission
+      # the step above did not grant, so it is diagnosed where it happened.
+      - name: The agent must have written its summary
+        run: |
+          set -euo pipefail
+          [ -s "$WORK/SUMMARY.md" ] && exit 0
+          echo "::error::the agent wrote no $WORK/SUMMARY.md."
+          {
+            echo "## The agent wrote no summary"
+            echo
+            echo "\`SUMMARY.md\` is step 5 of the prompt and the only text this workflow is"
+            echo "allowed to put in a pull request body — the report itself never leaves the"
+            echo "runner. Without it there is no run to continue."
+            echo
+            echo "Almost always a permission the agent did not have. Check \`CLAUDE_ARGS\` and"
+            echo "the \`--add-dir\` on the step above against what the prompt asks for:"
+            echo "\`.github/scripts/feedback-prompt.mjs\` tells the agent to run \`npm test\`"
+            echo "(needs \`Bash\`) and to write into \`\$RUNNER_TEMP\` (needs \`--add-dir\`)."
+            echo
+            echo "The agent's own last words usually name it:"
+            echo '```'
+            # Its last words are prose about the report, so they get the same
+            # gate the pull request body gets — the scanner, on the excerpt,
+            # before anything is published. Nothing is staged at this point, so
+            # the diff half of it is empty and this is a pure filter.
+            tail -20 "$WORK/agent.log" 2> /dev/null > "$WORK/agent-tail.txt" || true
+            if [ -s "$WORK/agent-tail.txt" ] && node .github/scripts/feedback-no-verbatim.mjs \
+                 "$WORK/feedback.json" "$WORK/agent-tail.txt" > /dev/null 2>&1; then
+              cat "$WORK/agent-tail.txt"
+            else
+              echo "(withheld: the agent produced no output, or its output quotes the report"
+              echo " and this summary is public. Read it with the relay read token instead.)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
       # ── Red, then green ──
       #
