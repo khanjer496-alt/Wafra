@@ -1341,6 +1341,37 @@ ok('the spoken label agrees with the sign on screen',
   ok('app.json declares the iOS bundle identifier',
     app.ios?.bundleIdentifier === 'app.wafra.ios',
     `expo.ios.bundleIdentifier is ${app.ios?.bundleIdentifier ?? 'missing'}`);
+
+  /**
+   * And the relay's copy of the same UUID is the same UUID.
+   *
+   * Expo's push service scopes a token to a project. The app registers under
+   * `expo.extra.eas.projectId`; the Worker addresses wakes using
+   * `EXPO_PROJECT_ID` from server/wrangler.toml. Two different values means
+   * every wake is sent to a project the device is not registered under —
+   * accepted by the API, delivered to nobody.
+   *
+   * There is no error to see. Capture keeps working on foreground and
+   * background sync, so the only symptom is alerts arriving later than they
+   * should, on a schedule nobody chose. Nothing on either side can notice,
+   * because neither file can see the other; a test is the only place the two
+   * are ever compared.
+   */
+  const wrangler = fs.readFileSync(
+    path.join(__dirname, '../../server/wrangler.toml'),
+    'utf8',
+  );
+  // The [vars] assignment, not the prose above it — the comment block there
+  // spells out a placeholder UUID, and a scan that could not tell them apart
+  // would pass on the documentation rather than the configuration.
+  const relayId = wrangler
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .map((line) => line.match(/^\s*EXPO_PROJECT_ID\s*=\s*"([^"]+)"/)?.[1])
+    .find(Boolean) ?? '';
+  ok('the relay is pointed at the same EAS project as the app',
+    relayId === projectId,
+    `wrangler.toml has ${relayId || '(unset — the Worker registers no push tokens)'}, app.json has ${projectId}`);
 }
 
 /* ── a workflow that GitHub cannot load fails silently ──────────────────────
