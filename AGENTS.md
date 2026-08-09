@@ -95,8 +95,13 @@ rely on that.
 ## Rules that keep this safe
 
 1. **Never edit a path another agent holds.** This is the whole point.
-2. **Never `git commit`, `push`, `checkout`, `reset`, or `stash`.** The tree has
-   a large pile of uncommitted work in flight. Branch state is the human's call.
+2. **Git history is the human's call.** Do not `git commit` or `push` unless the
+   human explicitly requests that exact operation. A requested commit must use
+   explicit pathspecs (prefer `git commit --only -- <paths>`) so another
+   session's staged or uncommitted work cannot enter it. Before a requested
+   push, verify the exact branch and remote. Do not `checkout`, `reset`, or
+   `stash` while shared changes are in flight unless the human explicitly
+   requests the exact operation after the affected paths have been resolved.
 3. **Claim narrowly.** Claim `src/lib/cards.ts`, not `src/`.
 4. **Release promptly.**
 5. Shared/high-traffic files (`package.json`, `app.json`, lockfiles) — claim,
