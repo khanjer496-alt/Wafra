@@ -58,7 +58,11 @@ on:
         type: boolean
         default: false
       what_to_test:
-        description: 'Optional. The "What to Test" note testers see in TestFlight. Only used when submit is on.'
+        description: 'ENTERPRISE PLANS ONLY — leave empty on any other plan. The "What to Test" note testers see in TestFlight. EAS maps it to the submission `changelog`, and a non-Enterprise account is refused with "Changelog submission is currently available for Enterprise plan only" — which happens AFTER the build has been created and paid for, killing only the submission. Set the note by hand in App Store Connect instead.'
+        type: string
+        default: ''
+      submit_build_id:
+        description: 'Submit a build that ALREADY EXISTS instead of making a new one. Paste an EAS build id. Use this when a build succeeded but its submission did not — rebuilding to retry a submission wastes 20-40 minutes for a binary that is already sitting on EAS. Every other input is ignored.'
         type: string
         default: ''
 
@@ -474,8 +478,72 @@ jobs:
       # --auto-submit-with-profile hands the submission to EAS as well, so it
       # happens on their infrastructure after the build finishes. That is what
       # makes "build and ship to TestFlight" possible in a three-minute job.
+      # ---- Submit a build that already exists.
+      #
+      #      A build and its submission are separate jobs on EAS, and only the
+      #      second one is cheap. When a build succeeds and its submission does
+      #      not — a plan restriction, an expired ASC key, an App Store Connect
+      #      outage — the binary is still sitting on Expo's servers, finished.
+      #      Without this path the only way to retry was `eas build` again:
+      #      20-40 minutes and a fresh set of build minutes to re-make a file
+      #      that already exists, and a build number burnt for nothing.
+      #
+      #      This ran for real the first time the workflow reached EAS.
+      #      `--what-to-test` is mapped by EAS to the submission `changelog`,
+      #      which is Enterprise-only, so build 7 compiled and its submission
+      #      was refused. The build id was in the log; there was nothing that
+      #      could take it.
+      - name: Submit an existing build
+        id: submit_only
+        if: inputs.submit_build_id != ''
+        env:
+          BUILD_ID: ${{ inputs.submit_build_id }}
+        run: |
+          set -o pipefail
+          if ! printf '%s' "$BUILD_ID" | grep -qiE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+            {
+              echo "# Not started — \`submit_build_id\` is not an EAS build id"
+              echo
+              echo "It should be a UUID, e.g. \`0f7dcb34-5ac1-42a9-80f9-60cac2170905\`. It is the last"
+              echo "path segment of the build page URL, and it is printed as **Build ID** in the log of"
+              echo "the run that made it."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          set +e
+          eas submit --platform ios --profile production --id "$BUILD_ID" --non-interactive 2>&1 | tee submit.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" = "0" ]; then
+            {
+              echo "# 🚀 Submitted to TestFlight"
+              echo
+              echo "Build \`$BUILD_ID\` was handed to App Store Connect. **No new build was made.**"
+              echo
+              echo "Apple processing takes 10-15 minutes. After that it is installable from the"
+              echo "TestFlight app for **internal** testers, with no Beta App Review."
+              echo
+              echo "Set the \"What to Test\" note by hand in App Store Connect → TestFlight — this"
+              echo "workflow cannot send one on a non-Enterprise plan."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "# ❌ The submission failed"
+              echo
+              echo "The build itself is untouched and still on EAS. Nothing needs rebuilding."
+              echo
+              echo '```'
+              tail -20 submit.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
       - name: Start the iOS build
         id: build
+        if: inputs.submit_build_id == ''
         env:
           PROFILE: ${{ inputs.profile }}
           WANT_SUBMIT: ${{ inputs.submit }}
@@ -565,6 +633,27 @@ jobs:
             echo "needs_interactive=false" >> "$GITHUB_OUTPUT"
           fi
 
+          # The build and the submission are separate jobs, and `eas build
+          # --auto-submit-with-profile` exits non-zero if EITHER fails. Read
+          # literally, a failed submission looked exactly like a failed build:
+          # the summary said "The EAS build command failed" about a binary that
+          # had compiled fine and was sitting on EAS, finished.
+          #
+          # `See logs: <build page>` is printed only once the build has been
+          # accepted and scheduled, so its presence alongside a submission
+          # error is what tells the two apart.
+          if [ "$status" != "0" ] && grep -q 'Failed to schedule iOS submission' build.err; then
+            echo "submit_failed=true" >> "$GITHUB_OUTPUT"
+            # The id EAS assigned, so the retry does not need a rebuild.
+            sed -n 's/.*Build ID *: *\([0-9a-f-]\{36\}\).*/\1/p' build.err | head -1 \
+              | sed 's/^/submitted_build_id=/' >> "$GITHUB_OUTPUT"
+            grep -qi 'Enterprise plan only' build.err \
+              && echo "submit_needs_enterprise=true" >> "$GITHUB_OUTPUT" \
+              || echo "submit_needs_enterprise=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "submit_failed=false" >> "$GITHUB_OUTPUT"
+          fi
+
           exit "$status"
 
       # ---- The summary. Written with always() so a failed build still leaves
@@ -584,6 +673,9 @@ jobs:
           BUILD_STATUS: ${{ steps.build.outputs.build_status }}
           ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
           NEEDS_INTERACTIVE: ${{ steps.build.outputs.needs_interactive }}
+          SUBMIT_FAILED: ${{ steps.build.outputs.submit_failed }}
+          SUBMIT_NEEDS_ENTERPRISE: ${{ steps.build.outputs.submit_needs_enterprise }}
+          SUBMITTED_BUILD_ID: ${{ steps.build.outputs.submitted_build_id }}
           EAS_STATUS: ${{ steps.build.outputs.status }}
           ASC_STATE: ${{ steps.asc.outputs.state }}
           ACCOUNT: ${{ steps.whoami.outputs.account }}
@@ -624,6 +716,39 @@ jobs:
               echo
               echo "Commit whatever it writes into \`app.json\` (the \`extra.eas.projectId\` line). After that this"
               echo "workflow works, and you never need a terminal again."
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$SUBMIT_FAILED" = "true" ]; then
+            {
+              echo "# ⚠️ The build is fine. Only the submission was refused."
+              echo
+              echo "\`eas build --auto-submit-with-profile\` exits non-zero if EITHER half fails, and"
+              echo "this was the second half. **The binary compiled and is on EAS.** Do not rebuild it."
+              echo
+              if [ "$SUBMIT_NEEDS_ENTERPRISE" = "true" ]; then
+                echo "## Why"
+                echo
+                echo "The **What to Test** note was passed, and EAS maps it to the submission"
+                echo "\`changelog\`, which Expo allows on **Enterprise plans only**. The refusal happens"
+                echo "after the build has been created, so it can only ever cost a submission."
+                echo
+                echo "Re-run with **what_to_test empty** and set the note by hand in App Store Connect"
+                echo "→ TestFlight, which every plan can do."
+                echo
+              fi
+              echo "## Send this build without rebuilding"
+              echo
+              echo "Run this workflow again with **submit_build_id** set to:"
+              echo
+              if [ -n "$SUBMITTED_BUILD_ID" ]; then
+                echo '```'
+                echo "$SUBMITTED_BUILD_ID"
+                echo '```'
+              else
+                echo "the **Build ID** printed in the _Start the iOS build_ step above."
+              fi
+              echo
+              echo "Every other input is ignored in that mode, and no build minutes are spent."
               echo
             } >> "$GITHUB_STEP_SUMMARY"
           elif [ "$EAS_STATUS" = "0" ]; then
