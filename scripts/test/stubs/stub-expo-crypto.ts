@@ -4,6 +4,8 @@
  * than a fake — a deterministic stub here would make every "the key is
  * reused / the key is different" assertion meaningless.
  */
+const nativeCrypto = globalThis.crypto;
+
 export function getRandomValues<T extends ArrayBufferView>(array: T): T {
-  return globalThis.crypto.getRandomValues(array as unknown as Uint8Array) as unknown as T;
+  return nativeCrypto.getRandomValues(array as unknown as Uint8Array) as unknown as T;
 }

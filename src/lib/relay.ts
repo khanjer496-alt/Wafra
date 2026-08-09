@@ -98,6 +98,51 @@ const TIMEOUT_MS = 15_000;
 /** Matches the Worker's `LIMIT 200` page and its `/v1/ack` ceiling. */
 const PAGE = 200;
 
+type RandomValuesCrypto = {
+  getRandomValues(array: Uint8Array): Uint8Array;
+};
+
+/**
+ * Hermes does not provide the Web Crypto global that Noble checks internally.
+ * Expo Crypto does provide the native CSPRNG, so expose only that one primitive
+ * before the first X25519 operation. This is deliberately not a Math.random
+ * fallback and does not pretend Hermes implements SubtleCrypto.
+ */
+function installNativeRandomValuesBridge(): void {
+  const runtime = globalThis as unknown as { crypto?: Partial<RandomValuesCrypto> };
+  if (typeof runtime.crypto?.getRandomValues === 'function') return;
+
+  const getRandomValues = (array: Uint8Array): Uint8Array => Crypto.getRandomValues(array);
+  if (runtime.crypto) {
+    Object.defineProperty(runtime.crypto, 'getRandomValues', {
+      configurable: true,
+      value: getRandomValues,
+    });
+    return;
+  }
+
+  Object.defineProperty(runtime, 'crypto', {
+    configurable: true,
+    value: { getRandomValues },
+    writable: true,
+  });
+}
+
+function createDeviceKeypair() {
+  // Install first: Noble's Hermes build may consult the global while deriving
+  // the public key even though the secret bytes themselves came from Expo.
+  installNativeRandomValuesBridge();
+  return deviceKeypair(Crypto.getRandomValues(new Uint8Array(32)));
+}
+
+function openDeviceSealed<T>(secretKey: Uint8Array, blob: SealedBlob): T {
+  // A returning device can sync without creating a fresh keypair in this JS
+  // session. Install before ECDH as well, so that path never depends on pairing
+  // having run first.
+  installNativeRandomValuesBridge();
+  return openSealed<T>(secretKey, blob);
+}
+
 export interface RelayConfig {
   baseUrl: string;
   deviceId: string;
@@ -504,9 +549,7 @@ export async function pairDevice(
   if (!base) {
     throw new RelayError('Automatic capture is not configured in this build.', false);
   }
-  // The 32 bytes are supplied here, not taken from a global inside the crypto
-  // module — see the note at the top of this file.
-  const keys = deviceKeypair(Crypto.getRandomValues(new Uint8Array(32)));
+  const keys = createDeviceKeypair();
   const pack = validRelayMarket(market) ?? DEFAULT_MARKET;
   let res: Response;
   try {
@@ -577,7 +620,7 @@ export async function joinTrustedVault(
     throw new RelayError('This phone is already connected to a vault.', false, 'already_paired');
   }
 
-  const keys = deviceKeypair(Crypto.getRandomValues(new Uint8Array(32)));
+  const keys = createDeviceKeypair();
   const pack = validRelayMarket(market) ?? DEFAULT_MARKET;
   let res: Response;
   try {
@@ -986,7 +1029,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
     const sealed = item as SealedBlob & { id: string };
     let row: unknown;
     try {
-      row = openSealed<unknown>(secretKey, sealed);
+      row = openDeviceSealed<unknown>(secretKey, sealed);
     } catch {
       // A cleared Keychain or corrupt payload makes this row unrecoverable.
       // Acknowledge it because the missing private key makes it unrecoverable.

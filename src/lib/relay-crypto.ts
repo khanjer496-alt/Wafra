@@ -21,9 +21,10 @@
  * simulator. It also contains NO randomness: opening is fully deterministic,
  * and the one place entropy is needed (the device secret key) takes its 32
  * bytes as an argument. That is not a stylistic choice — React Native defines
- * no `crypto.getRandomValues`, so noble's own key generation throws. The caller
- * (src/lib/relay.ts) supplies bytes from expo-crypto instead, which is why this
- * app needs no crypto polyfill at all.
+ * no `crypto.getRandomValues`, so Noble can throw under Hermes. The caller
+ * (src/lib/relay.ts) supplies bytes from expo-crypto and exposes that same
+ * native primitive through a minimal global bridge before entering X25519. No
+ * Math.random fallback or fake SubtleCrypto implementation is involved.
  *
  * That last paragraph is why this module keeps its keys as BYTES rather than as
  * the base64 strings the rest of the relay stores. The alternative that was
@@ -66,8 +67,10 @@ export interface DeviceKeypair {
 
 /**
  * `random32` must be real entropy — on device that is
- * `Crypto.getRandomValues(new Uint8Array(32))` from expo-crypto. X25519 clamps
- * the scalar internally, so any 32 uniformly random bytes are a valid key.
+ * `Crypto.getRandomValues(new Uint8Array(32))` from expo-crypto. The caller also
+ * installs Expo's native primitive as Hermes's missing global getRandomValues
+ * before invoking this function. X25519 clamps the scalar internally, so any
+ * 32 uniformly random bytes are a valid key.
  */
 export function deviceKeypair(random32: Uint8Array): DeviceKeypair {
   if (random32.length !== 32) throw new Error('relay: device key needs exactly 32 random bytes');

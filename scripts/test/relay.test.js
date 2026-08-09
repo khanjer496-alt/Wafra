@@ -10,10 +10,10 @@
 //     its entropy as an argument because React Native has no
 //     `crypto.getRandomValues` and noble's own key generation throws under
 //     Hermes — on the FIRST line of pairing, so iOS could never pair on a real
-//     device while every Node test passed. Node HAS getRandomValues, so no test
-//     here can catch that by running; what it can do is assert the entropy
-//     still arrives as an argument, which is what "the public half matches the
-//     secret half" does.
+//     device while every ordinary Node test passed. The Hermes regressions
+//     below temporarily remove Node's global while the expo-crypto stub keeps
+//     its captured native CSPRNG, covering both first-time pairing and a
+//     returning device's first decrypt.
 //   • THE TOKENS ARE SCOPED. The Shortcut carries the ingest token and lives
 //     outside the app forever, readable by anyone who opens the automation. If
 //     it could reach /v1/sync or /v1/ack it could read and delete the user's
@@ -187,6 +187,37 @@ async function queueItem(id, row, publicKey) {
   /* ═════════════════════════ Pairing ═════════════════════════ */
 
   {
+    // Hermes has no Web Crypto global. expo-crypto still has a native CSPRNG,
+    // represented by the test stub's captured WebCrypto function. Pairing must
+    // bridge that primitive before Noble enters X25519, or a real iPhone throws
+    // "crypto.getRandomValues must be defined" before making any request.
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+    try {
+      freshDevice();
+      const net = transport().install();
+      net.on('POST /v1/pair', () => json(200, credentials()));
+
+      await relay.pairDevice(BASE, 'Hermes iPhone', 'AE');
+
+      ok('pair: Expo native randomness is bridged onto the missing Hermes crypto global',
+        typeof globalThis.crypto?.getRandomValues === 'function');
+      ok('pair: the Hermes bridge still reaches the relay with a valid public key',
+        decodeKey(net.last('POST /v1/pair').body.publicKey).length === 32);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', {
+        configurable: true,
+        value: originalCrypto,
+        writable: true,
+      });
+    }
+  }
+
+  {
     freshDevice();
     const net = transport().install();
     const issued = credentials();
@@ -344,6 +375,38 @@ async function queueItem(id, row, publicKey) {
   }
 
   /* ═════════════════ Sync: open, keep, acknowledge ═════════════════ */
+
+  {
+    // A returning phone already has its private key and never calls pairDevice
+    // in this JS session. Its first Noble operation is ECDH while opening the
+    // synced row, so that path must install the Hermes bridge independently.
+    const { net, cfg } = await paired();
+    const item = await queueItem(
+      '01010101-0101-4101-8101-010101010101',
+      rowFor(AE_PURCHASE),
+    );
+    net.on('GET /v1/sync', () => json(200, { items: [item] }));
+
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+    try {
+      const result = await relay.syncRelay(cfg);
+      ok('sync: a returning Hermes device installs the native randomness bridge before ECDH',
+        typeof globalThis.crypto?.getRandomValues === 'function');
+      eq('sync: a returning Hermes device opens its queued row without re-pairing',
+        result.parsed.length, 1);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', {
+        configurable: true,
+        value: originalCrypto,
+        writable: true,
+      });
+    }
+  }
 
   {
     const { net, cfg } = await paired();
