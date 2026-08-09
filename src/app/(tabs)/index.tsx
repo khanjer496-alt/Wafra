@@ -978,7 +978,7 @@ const styles = StyleSheet.create({
   liveDot: { width: 6, height: 6, borderRadius: 3 },
 
   heroLabel: { marginBottom: Spacing.two },
-  heroCompare: { marginTop: Spacing.two },
+  heroCompare: { marginTop: Spacing.two, marginBottom: Spacing.two },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
   split: { flexDirection: 'row', marginTop: Spacing.four },
