@@ -49,7 +49,7 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 import type { ScannedSms } from '@/lib/auto-import';
-import { getActiveMarket, MARKETS } from '@/lib/markets';
+import { MARKETS, bankFromName, bankFromSender, getActiveMarket } from '@/lib/markets';
 import {
   decodeKey,
   deviceKeypair,
@@ -838,6 +838,16 @@ export interface RelaySyncResult {
   testReceived: number;
   /** Probe ids are reserved for the foreground setup verifier. */
   testIds: string[];
+  /**
+   * Shortcut-delivered rows in this page, and how many of them carried enough
+   * evidence to name their bank. See `shortcutCaptureHealth`.
+   *
+   * Counted HERE and nowhere later because neither field survives: a saved
+   * Transaction has no `sender` and no `captureSource`, so by the time a row
+   * is in the ledger the question cannot be asked any more.
+   */
+  shortcutRows: number;
+  shortcutRowsWithBank: number;
 }
 
 /**
@@ -845,6 +855,83 @@ export interface RelaySyncResult {
  * the same shape scanInbox() produces, so buildImportPlan() — deduplication,
  * card mapping, transfer detection, rescan healing — applies unchanged.
  */
+/**
+ * The iCloud snapshot that does NOT send the bank label.
+ *
+ * An iCloud Shortcut link is a snapshot, not a channel: editing the Shortcut
+ * and re-sharing mints a DIFFERENT link, and everyone who installed the old
+ * one keeps the old one forever. This is the id of the first published Wafra
+ * Capture, authored on a Mac — where Apple does not expose the iPhone-only
+ * `Message → Sender` property, so the graph sends the message body and nothing
+ * else.
+ *
+ * It is pinned here so the warning below can gate itself. Telling someone to
+ * reinstall while this is still the only published link sends them to fetch
+ * the same broken snapshot, and the prompt becomes a loop that blames the user
+ * for the app's problem. When `eas.json` carries a different link, the gate
+ * opens by itself — no second commit, and nobody has to remember.
+ */
+const SENDER_BLIND_SHORTCUT_ID = '85bd1e080e5849b591049eccffb9a3a1';
+
+/**
+ * Can this row's bank be named at all?
+ *
+ * Deliberately NOT "is `sender` non-empty". `docs/ios-shortcut-spec.md` warns
+ * that the Sender detail must be converted to Text explicitly, because a
+ * Shortcut that lets a Contact object coerce itself sends a person's name or a
+ * serialized object — a perfectly non-empty string that identifies no bank.
+ * A presence check passes that and reports a broken Shortcut as healthy, which
+ * is the one outcome worse than no check at all.
+ *
+ * The expression is the same one `buildImportPlan` resolves identity with, so
+ * "healthy" here means exactly "the planner can place this row", not something
+ * adjacent to it that drifts later.
+ */
+export function relayRowNamesItsBank(row: Pick<ParsedRelayRow, 'bankHint' | 'sender'>): boolean {
+  return Boolean((row.bankHint ? bankFromName(row.bankHint) : null) ?? bankFromSender(row.sender));
+}
+
+export interface ShortcutCaptureHealth {
+  /** Show the "update your Shortcut" prompt. */
+  warn: boolean;
+  /** Rows seen and rows whose bank could be named, for the counter's own state. */
+  seen: number;
+  named: number;
+}
+
+/**
+ * Whether the installed Shortcut looks sender-blind, and whether saying so
+ * would help.
+ *
+ * Three conditions, all required:
+ *
+ * 1. Enough rows to be a pattern rather than one odd message. A single alert
+ *    from a bank this market pack does not carry is not a broken Shortcut.
+ * 2. None of them named a bank. One healthy row proves the Shortcut sends the
+ *    label, and the count resets — which is what clears the warning after a
+ *    user updates, with no separate dismissal to persist.
+ * 3. A different Shortcut has actually been published. Otherwise "reinstall"
+ *    reinstalls the same snapshot.
+ *
+ * Counts only. Never the sender, never the body — this decides whether to show
+ * a sentence, and it does not need to keep evidence to do that.
+ */
+export function shortcutCaptureHealth(
+  seen: number,
+  named: number,
+  shortcutUrl: string | null = DEFAULT_SHORTCUT_URL,
+  minimumRows = 3,
+): ShortcutCaptureHealth {
+  const senderAwareLinkExists = Boolean(
+    shortcutUrl && !shortcutUrl.includes(SENDER_BLIND_SHORTCUT_ID),
+  );
+  return {
+    warn: senderAwareLinkExists && seen >= minimumRows && named === 0,
+    seen,
+    named,
+  };
+}
+
 export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> {
   let res: Response;
   try {
@@ -871,6 +958,8 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   const parsed: ScannedSms[] = [];
   const ids: string[] = [];
   let unreadable = 0;
+  let shortcutRows = 0;
+  let shortcutRowsWithBank = 0;
   let testReceived = 0;
   const testIds: string[] = [];
   // Decoded once per sync rather than once per row: a page is up to 200 rows,
@@ -916,6 +1005,12 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
       ids.push(sealed.id);
       continue;
     }
+    // Only the Shortcut can be unhealthy in this way. Email and PDF capture
+    // have no sender by design and must never trip the warning.
+    if (row.captureSource === 'shortcut') {
+      shortcutRows += 1;
+      if (relayRowNamesItsBank(row)) shortcutRowsWithBank += 1;
+    }
     parsed.push(relayRowToScannedSms(row));
     ids.push(sealed.id);
   }
@@ -923,7 +1018,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   // Oldest first, the order buildImportPlan() expects so that account
   // auto-creation sees a card's earliest appearance first.
   parsed.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
-  return { parsed, ids, unreadable, testReceived, testIds };
+  return { parsed, ids, unreadable, testReceived, testIds, shortcutRows, shortcutRowsWithBank };
 }
 
 export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
