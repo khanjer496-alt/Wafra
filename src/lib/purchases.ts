@@ -1,19 +1,19 @@
 /**
  * Billing for Wafra Pro, through RevenueCat.
  *
- * RevenueCat rather than Play Billing directly, because iOS is coming: the
- * thing it actually buys is one entitlement that both stores feed, so a
- * subscriber on Android stays a subscriber when they pick up an iPhone. With
- * a single store that would not be worth a dependency.
+ * RevenueCat rather than separate store adapters: one entitlement model and
+ * one validation path cover both stores. Wafra has no account-linking system,
+ * so anonymous purchases do not automatically transfer between an Android
+ * install and a separate iPhone install.
  *
  * The three moving parts, and which of them is the truth:
  *
  *   RevenueCat  the ONLY source of entitlement. Asked at launch, so a lapsed,
- *               refunded or cancelled subscription actually locks again, and
- *               a reinstall restores without the user hunting for a button.
+ *               refunded or cancelled subscription actually locks again.
+ *               A reinstall creates a new anonymous customer and still needs
+ *               the user-visible Restore button to attach the store receipt.
  *   state.pro   a cache of that answer, so the app is not blank while the
- *               network is slow — and, on side-load builds, the founder
- *               unlock, which is why it is still writable by hand.
+ *               network is slow.
  *   the trial   local and independent of both. Three days from first launch,
  *               granted before any purchase exists to check.
  *
@@ -45,10 +45,23 @@ export const PRO_SKUS = {
 
 export type ProPlan = keyof typeof PRO_SKUS;
 
-/** Display prices until Play Billing supplies localized live ones. */
+/**
+ * USD reference prices used only by web previews and web screenshots. Native
+ * builds with no usable storefront say the price is unavailable.
+ *
+ * Never prefix these with the ledger currency. The currency a user tracks and
+ * the currency Apple or Google bills are independent — a EUR ledger can be
+ * attached to a Canadian App Store account. Native paywalls replace these
+ * references with `priceString` from the active storefront.
+ */
 export const PRO_PRICES: Record<ProPlan, { fils: number }> = {
   monthly: { fils: 999 },
   yearly: { fils: 7499 },
+};
+
+export const PRO_REFERENCE_PRICE_STRINGS: Record<ProPlan, string> = {
+  monthly: 'US$9.99',
+  yearly: 'US$74.99',
 };
 
 /**
@@ -65,9 +78,9 @@ export function yearlySavingMonths(prices = PRO_PRICES): number {
   return Math.floor(saved / prices.monthly.fils);
 }
 
-/** Every Pro feature is free for this long after first launch. When Play
- *  Billing is wired, also configure a 3-day free trial on the SKUs so store
- *  users see "3 days free" natively. */
+/** Every Pro feature is free for this long after first launch. Do not also add
+ *  a storefront introductory trial: it would begin after this local trial and
+ *  silently turn the advertised three days into as many as six. */
 export const TRIAL_DAYS = 3;
 
 /**
@@ -95,7 +108,7 @@ export function trialDaysLeft(
   return Math.min(TRIAL_DAYS, Math.max(0, Math.ceil(TRIAL_DAYS - elapsedDays)));
 }
 
-/** Pro features unlocked: purchased/founder Pro, or still inside the trial. */
+/** Pro features unlocked: purchased Pro, or still inside the trial. */
 export function isProActive(
   state: { pro: boolean; trialStartTs: number },
   nowMs: number = Date.now(),

@@ -49,6 +49,7 @@ import {
 import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 
 const KIND_META: Record<AccountKind, { labelKey: StringKey; icon: import('@/components/ui/icon').IconName }> = {
@@ -353,7 +354,7 @@ export default function WalletScreen() {
             </ThemedText>
             <View style={styles.worthRow}>
               <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-                AED
+                {ledgerCurrencyDisplay()}
               </ThemedText>
               <ThemedText type="amount" tabular>
                 {worth.known > 0 ? formatAmount(worth.fils, { decimals: false }) : '—'}
@@ -608,7 +609,7 @@ export default function WalletScreen() {
                               : t('noBalanceYet')}
                         </ThemedText>
                         <View style={styles.featuredMoney}>
-                          <ThemedText type="micro" style={styles.featuredMuted}>AED</ThemedText>
+                          <ThemedText type="micro" style={styles.featuredMuted}>{ledgerCurrencyDisplay()}</ThemedText>
                           <ThemedText type="heading" tabular style={styles.featuredText}>
                             {figure.fils === null
                               ? '—'
@@ -684,14 +685,14 @@ export default function WalletScreen() {
                           <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
                             {spent > 0
                               ? tf('cardSpentThisMonth', {
-                                  amount: formatAmount(spent, { decimals: false }),
+                                  amount: formatAED(spent, { decimals: false }),
                                 })
                               : t('nothingSpentThisMonth')}
                           </ThemedText>
                         </View>
                         <View style={styles.accountRight}>
                           <View style={styles.compactMoney}>
-                            <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                            <ThemedText type="micro" themeColor="textTertiary">{ledgerCurrencyDisplay()}</ThemedText>
                             <ThemedText
                               type="smallBold"
                               tabular
@@ -753,7 +754,7 @@ export default function WalletScreen() {
                     </View>
                     <View style={styles.accountRight}>
                       <View style={styles.compactMoney}>
-                        <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                        <ThemedText type="micro" themeColor="textTertiary">{ledgerCurrencyDisplay()}</ThemedText>
                         <ThemedText type="smallBold" tabular numberOfLines={1} style={{ fontSize: 15 }}>
                           {balance !== null ? formatAmount(balance, { decimals: false }) : '—'}
                         </ThemedText>
@@ -981,7 +982,7 @@ export default function WalletScreen() {
             </View>
 
             <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
-              <ThemedText type="smallBold" themeColor="textSecondary">AED</ThemedText>
+              <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
               <TextInput
                 value={openingText}
                 onChangeText={setOpeningText}
@@ -1038,7 +1039,7 @@ export default function WalletScreen() {
             />
 
             <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
-              <ThemedText type="smallBold" themeColor="textSecondary">AED</ThemedText>
+              <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
               <TextInput
                 value={goalTarget}
                 onChangeText={setGoalTarget}

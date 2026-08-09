@@ -531,16 +531,27 @@ type Action =
 /**
  * Money already recorded, as opposed to plans that can be retyped.
  *
- * Transactions, bills and card dues all store fils that came out of a real
- * statement or a real charge; relabelling them in another currency is the
- * defect this guards. Budgets and goals are deliberately NOT here: they are
- * targets the user set, the onboarding presets are already chosen per market
- * (`limitsByMarket`), and counting them would refuse a country change to
- * someone still stepping back and forth through onboarding, who has no
+ * Transactions, accounts, bills and card dues all store fils that came out of
+ * a real balance, statement or charge; relabelling them in another currency is
+ * the defect this guards. Budgets and goals are deliberately NOT here: they
+ * are targets the user set, the onboarding presets are already chosen per
+ * market (`limitsByMarket`), and counting them would refuse a country change
+ * to someone still stepping back and forth through onboarding, who has no
  * recorded money at all.
  */
 function ledgerHoldsMoney(s: AppState): boolean {
-  return s.transactions.length > 0 || s.bills.length > 0 || s.cardDues.length > 0;
+  const accountHoldsMoney = s.accounts.some(
+    (account) =>
+      account.openingFils !== 0 ||
+      (typeof account.snapshotFils === 'number' && account.snapshotFils !== 0) ||
+      (typeof account.creditLimitFils === 'number' && account.creditLimitFils !== 0),
+  );
+  return (
+    accountHoldsMoney ||
+    s.transactions.length > 0 ||
+    s.bills.length > 0 ||
+    s.cardDues.length > 0
+  );
 }
 
 /**
@@ -1721,16 +1732,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const exportBackup = useCallback(() => {
-    const { hydrated: _h, ...data } = state;
+    // Store entitlements and the local trial clock are not ledger data. They
+    // are deliberately excluded so an editable JSON backup cannot mint Pro or
+    // restart a trial when it is restored.
+    const { hydrated: _h, pro: _pro, trialStartTs: _trial, ...data } = state;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });
   }, [state]);
 
   const restoreBackup = useCallback((json: string): boolean => {
     const restored = parseBackupForRestore(json);
     if (!restored) return false;
-    dispatch({ type: 'restore', state: restored });
+    // Older backups may still contain these fields. The current store answer
+    // wins regardless of what the file says.
+    const safeState = { ...restored, pro: state.pro, trialStartTs: state.trialStartTs };
+    dispatch({ type: 'restore', state: safeState });
     return true;
-  }, [dispatch]);
+  }, [dispatch, state.pro, state.trialStartTs]);
 
   const loadDemoData = useCallback(() => {
     dispatch({ type: 'loadDemo', state: demoState() });

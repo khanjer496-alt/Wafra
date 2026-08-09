@@ -50,6 +50,7 @@ import {
 import { useStore } from '@/lib/store';
 import type { Account, Bill, CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 type Segment = 'subscriptions' | 'cards' | 'utilities';
 
@@ -605,7 +606,7 @@ export default function BillsScreen() {
                           {t('outstandingTitle')}
                         </ThemedText>
                         <View style={styles.cardSummaryMoney}>
-                          <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                          <ThemedText type="micro" themeColor="textTertiary">{ledgerCurrencyDisplay()}</ThemedText>
                           <ThemedText
                             type="sheetAmount"
                             tabular
@@ -681,7 +682,7 @@ export default function BillsScreen() {
                   <View>
                     <ThemedText type="meta" themeColor="textSecondary">{t('dueAcrossCards')}</ThemedText>
                     <View style={styles.cardSummaryMoney}>
-                      <ThemedText type="micro" themeColor="textTertiary">AED</ThemedText>
+                      <ThemedText type="micro" themeColor="textTertiary">{ledgerCurrencyDisplay()}</ThemedText>
                       <ThemedText type="heading" tabular>
                         {formatAmount(totalAsShown(dues.map((item) => item.remainingFils)), { decimals: false })}
                       </ThemedText>
@@ -765,7 +766,7 @@ export default function BillsScreen() {
                   </ThemedText>
                   <ThemedText type="smallBold" tabular>
                     {tf('monthlyTotal', {
-                      amount: formatAmount(subsTotal, { decimals: false }),
+                      amount: formatAED(subsTotal, { decimals: false }),
                     })}
                   </ThemedText>
                 </View>
@@ -1143,7 +1144,7 @@ export default function BillsScreen() {
 
             <View style={styles.inputRow}>
               <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
-                <ThemedText type="smallBold" themeColor="textSecondary">AED</ThemedText>
+                <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
                 <TextInput
                   value={amountText}
                   onChangeText={setAmountText}

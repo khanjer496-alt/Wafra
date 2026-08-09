@@ -293,7 +293,7 @@ export interface AppState {
   appLock: boolean;
   /** Day of month the reporting month begins (salary day). 1 = calendar months. */
   monthStartDay: number;
-  /** Wafra Pro entitlement (Play Billing purchase, or founder unlock on side-loads). */
+  /** Cached Wafra Pro entitlement supplied by the platform stores via RevenueCat. */
   pro: boolean;
   /**
    * Strict local-only posture. Enabling it removes every retained diagnostic

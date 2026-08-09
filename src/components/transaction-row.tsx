@@ -8,7 +8,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { clockTime, formatAmount } from '@/lib/format';
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
 
@@ -67,7 +67,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
     where,
     account?.name,
     clock,
-    `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${getActiveMarket().currency.code}`,
+    `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`,
   ]
     .filter(Boolean)
     .join(', ');

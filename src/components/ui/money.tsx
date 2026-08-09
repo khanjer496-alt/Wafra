@@ -6,7 +6,7 @@ import { Fonts, Motion, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAmount } from '@/lib/format';
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 type Sign = 'none' | 'auto' | 'minus' | 'plus';
 
@@ -38,7 +38,7 @@ function signGlyph(fils: number, sign: Sign): string {
 function CurrencyPrefix() {
   return (
     <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-      {getActiveMarket().currency.display}
+      {ledgerCurrencyDisplay()}
     </ThemedText>
   );
 }

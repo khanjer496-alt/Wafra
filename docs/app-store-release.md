@@ -63,8 +63,9 @@ test Shortcut action. Do not provide a real user's token or bank message.
 
 - [ ] Apple Developer team and App Store Connect record created.
 - [ ] EAS project UUID and APNs credentials configured.
-- [ ] RevenueCat Apple public key, products, `pro` entitlement, and 3-day trial
-      configured and tested in StoreKit sandbox.
+- [ ] RevenueCat Apple public key, products, and `pro` entitlement configured
+      and tested in StoreKit sandbox. Do not add an introductory store trial
+      while the app's local three-day trial is enabled.
 - [ ] Production relay URL, D1 database, push access token, and public iCloud
       Shortcut URL configured.
 - [ ] Legal entity, jurisdiction, support email, support URL, and hosted privacy

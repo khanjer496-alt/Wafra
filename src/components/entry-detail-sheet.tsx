@@ -14,7 +14,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
@@ -164,7 +164,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   const sourceLabel = transaction.source === 'sms' ? t('bankSmsSource') : t('addedByHand');
   const fxSourceLabel =
     transaction.fxSource === 'bank'
-      ? t('bankQuotedRate')
+      ? tf('bankQuotedRate', { currency: ledgerCurrencyCode() })
       : transaction.fxSource === 'reference' && transaction.fxRateDate
         ? tf('datedReferenceRate', { date: shortDate(transaction.fxRateDate) })
         : t('offlineFxEstimate');
@@ -365,7 +365,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
                         <ThemedText type="small" themeColor="textSecondary">
                           {tf('fxRateValue', {
                             from: transaction.originalCurrency,
-                            to: getActiveMarket().currency.code,
+                            to: ledgerCurrencyCode(),
                             rate: transaction.fxRate.toFixed(4),
                             source: fxSourceLabel,
                           })}

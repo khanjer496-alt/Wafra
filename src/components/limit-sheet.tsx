@@ -15,6 +15,7 @@ import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/perio
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -304,7 +305,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
               </ThemedText>
               <View style={[styles.amountRow, { borderBottomColor: theme.text }]}>
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-                  AED
+                  {ledgerCurrencyDisplay()}
                 </ThemedText>
                 <TextInput
                   value={text}

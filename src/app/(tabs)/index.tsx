@@ -50,7 +50,7 @@ import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period
 import { periodComparison, type PeriodComparison } from '@/lib/analytics';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyCode, ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { AppState, CardDue, Transaction } from '@/lib/types';
@@ -334,7 +334,7 @@ function Hero({
       {Math.abs(netFils) >= 1_000_000_000 ? (
         <ThemedText type="display" tabular>
           <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-            AED{' '}
+            {ledgerCurrencyDisplay()}{' '}
           </ThemedText>
           {netFils < 0 ? '−' : ''}
           {formatCompactAED(netFils)}
@@ -342,7 +342,7 @@ function Hero({
       ) : (
         <View style={styles.heroRow}>
           <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-            AED
+            {ledgerCurrencyDisplay()}
           </ThemedText>
           <CountUpAmount fils={netFils} type="display" prefix="" durationMs={900} />
         </View>
@@ -756,7 +756,7 @@ export default function HomeScreen() {
     lastFxAttempt.current = signature;
     void buildReferenceFxUpdates(
       pending,
-      getActiveMarket().currency.code,
+      ledgerCurrencyCode(),
     ).then((updates) => {
       if (updates.length > 0) applyFxUpdates(updates);
     });
@@ -923,7 +923,7 @@ export default function HomeScreen() {
             {state.hydrated && today.length === 0 && (
               <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
                 <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
-                  AED 0
+                  {ledgerCurrencyDisplay()} 0
                 </ThemedText>
                 <ThemedText type="small">{t('noEntriesPeriod')}</ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>

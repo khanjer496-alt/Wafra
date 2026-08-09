@@ -7,25 +7,27 @@ and relay described below.
 ## English (default)
 
 **App name (30 chars max):**
-Wafra: Expense Tracker UAE
+Wafra: Budget & Money Tracker
 
 **Short description (80 chars max):**
-Automatic expense tracker for UAE banks. SMS-based, private, AED-first.
+Private expense tracker for budgets, bills, subscriptions and savings goals.
 
 **Full description (4000 chars max):**
 
-Wafra turns the transaction alerts your banks already send you into
-a living picture of your money — every card, every credit-card
-due date, every subscription. No bank logins and no transaction typing.
+Wafra brings spending, bills, subscriptions and savings goals into one clear,
+private ledger. Start manually, explore sample data, or connect a supported
+bank-alert import pack. No bank login required.
 
-TRACK AUTOMATICALLY
-• Android: purchases, transfers, salaries and fees parsed from bank SMS on-device
-• Android: full history on first scan
-• iPhone: a personal Shortcut forwards alerts only from bank senders you select
-• Public-example formats for Emirates NBD, ADCB, FAB, Mashreq, ADIB, Liv,
-  and Wio — each card recognized by its last digits
-• RAKBANK support is a labelled synthetic grammar probe until an attributable
-  message example is available
+START YOUR WAY
+• Add expenses and income yourself
+• Track budgets, bills, subscriptions, cards and savings goals
+• Import pasted alerts, forwarded email or PDF statements when supported
+
+OPTIONAL BANK-ALERT IMPORTS
+• UAE and Saudi Arabia packs recognize supported bank formats
+• Android can parse selected supported bank alerts on-device
+• iPhone uses a personal Shortcut for bank senders you choose
+• Coverage varies by bank and message format—check the in-app supported-bank list
 
 NEVER MISS A CARD PAYMENT
 • Statement SMS become due dates with countdowns and reminders
@@ -39,15 +41,14 @@ SUBSCRIPTIONS, EXPOSED
 
 UNDERSTAND YOUR MONEY
 • Budgets with overspend warnings
-• Insights in plain language: "At today's pace you'll spend about AED 14,000
-  this month"
+• Insights explain the change in plain language, not just as a chart
 • Cashflow, category and weekday charts — with the numbers on them
 • Month can start on your salary day, not the 1st
 
-MADE FOR THE UAE
-• AED-first, with automatic conversion for USD/EUR charges
-• DEWA, Etisalat, du, Salik and local merchants understood
-• English and Arabic
+BUILT FOR REAL MONEY ROUTINES
+• Salary-day reporting months, instead of forcing every month to start on the 1st
+• Original foreign-currency amounts stay beside supported conversions
+• English and Arabic interface
 
 YOUR DATA STAYS YOUR BUSINESS
 • No sign-up — no email, no phone number, no account
@@ -59,10 +60,10 @@ YOUR DATA STAYS YOUR BUSINESS
 • One-tap backup to a file you own
 
 WHY WAFRA NEEDS SMS PERMISSION
-On Android, SMS permission is optional and used only for automatic tracking: banks send
-an SMS for every transaction, statement and bill, and Wafra reads these
-messages on your device to log them. Messages never leave your phone, and
-non-bank messages are ignored. You can also use Wafra with manual entry.
+On Android, SMS permission is optional and used only after you choose automatic
+tracking with a supported bank pack. Wafra reads matching bank alerts on your
+device to log transactions. Messages never leave your phone, non-bank messages
+are ignored, and manual entry remains available without this permission.
 
 Try everything free for 3 days. Wafra Pro keeps automatic tracking running
 after that — a small subscription that funds an app with no ads and no sale
@@ -73,23 +74,27 @@ of financial data.
 ## Arabic (ar)
 
 **App name:**
-وفرة: متتبع مصاريفك في الإمارات
+وفرة: ميزانية ومصاريف
 
 **Short description:**
-تتبع تلقائي لمصاريفك من تنبيهات البنك، مصمم للإمارات.
+تتبّع المصاريف والميزانية والفواتير والأهداف بخصوصية.
 
 **Full description:**
 
-وفرة يقرأ رسائل التنبيه التي ترسلها بنوكك أصلاً ويحوّلها إلى صورة حيّة
-لأموالك — كل بطاقة، كل استحقاق بطاقة ائتمان، كل اشتراك. بدون تسجيل دخول
-للبنك، ودون كتابة العمليات يدوياً.
+يجمع وفرة المصروفات والفواتير والاشتراكات وأهداف الادخار في سجل خاص وواضح.
+ابدأ يدوياً، أو استكشف البيانات التجريبية، أو اربط حزمة تنبيهات بنك مدعومة.
+لا يحتاج إلى بيانات دخولك البنكي.
 
-تتبع تلقائي
-• على أندرويد تُحلَّل رسائل البنك على الجهاز ويُستورد السجل من أول فحص
-• على الآيفون يمرّر اختصار شخصي تنبيهات مرسلي البنوك الذين تختارهم فقط
-• صيغ بأمثلة عامة للإمارات دبي الوطني وأبوظبي التجاري وأبوظبي الأول والمشرق
-  ومصرف أبوظبي الإسلامي وLiv وWio
-• دعم راك بنك حالياً اختبار نحوي اصطناعي موضّح إلى أن يتوفر مثال رسالة موثّق
+ابدأ بطريقتك
+• أضف المصروفات والدخل بنفسك
+• تتبّع الميزانيات والفواتير والاشتراكات والبطاقات وأهداف الادخار
+• استورد التنبيهات الملصقة أو البريد أو كشوف PDF عندما تكون الصيغة مدعومة
+
+استيراد تنبيهات البنك اختياري
+• تتوفر حزم لصيغ بنوك مدعومة في الإمارات والسعودية
+• يمكن لأندرويد تحليل التنبيهات المدعومة على الجهاز
+• يستخدم الآيفون اختصاراً شخصياً لمرسلي البنوك الذين تختارهم
+• يختلف الدعم حسب البنك وصيغة الرسالة؛ راجع القائمة داخل التطبيق
 
 لا تفوّت دفعة بطاقة
 • كشوف الحساب تتحول إلى تواريخ استحقاق مع عدّاد وتذكيرات
@@ -106,7 +111,7 @@ of financial data.
 
 خصوصيتك أولاً
 • بدون تسجيل — لا بريد ولا رقم هاتف ولا حساب
-• لا تغادر تنبيهات البنك جهاز أندرويد
+• لا تغادر تنبيهات البنك المدعومة جهاز أندرويد
 • على الآيفون يُحذف النص الخام فور تحليله، ولا تبقى سوى العملية المنظمة
   المشفّرة لهذا الآيفون حتى الاستلام ولمدة لا تتجاوز ٣٠ يوماً
 • يُبقي الوضع الخاص المعالجة محلية ويوقف ترحيل الآيفون
@@ -135,8 +140,10 @@ of financial data.
   iOS Keychain.
 - **Ads:** No ads.
 - **Target audience:** 18+ (finance).
-- **Countries:** United Arab Emirates first (add Saudi Arabia when the SA
-  pack is field-tested).
+- **Countries:** publish in every territory where the paid-app agreements,
+  tax, banking, support and privacy obligations are complete. Bank-alert
+  automation remains limited to the explicitly supported UAE/Saudi packs and
+  must not be described as worldwide bank coverage.
 - **Contact email:** [business email — pending]
 - **Privacy policy URL:** [host the landing page privacy section on the
   real domain — pending]

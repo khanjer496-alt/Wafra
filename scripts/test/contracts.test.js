@@ -228,18 +228,33 @@ function ktSources(dir) {
  * The screen that sells the product, so its mistakes are the expensive kind.
  * All three of these were live: a sentence assembled from English fragments
  * that stayed English in Arabic, a discount claim that disagreed with the
- * prices beside it, and a single long-press on the icon that granted Pro for
- * free — on the paywall itself. */
+ * prices beside it, and hidden gestures that granted Pro for free. */
 {
   const pro = fs.readFileSync(path.join(ROOT, 'src/app/pro.tsx'), 'utf8');
 
   ok('the paywall gives away no free unlock',
     !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
 
-  // Seven taps on the Settings version row stays — deliberate, unreachable
-  // by accident, and the only unlock the code documents.
   const settings = fs.readFileSync(path.join(ROOT, 'src/app/settings.tsx'), 'utf8');
-  ok('the deliberate founder unlock still exists', /tapCount\.current >= 7/.test(settings));
+  ok('Settings contains no hidden entitlement bypass',
+    !/\bsetPro\b/.test(settings) &&
+      !/tapCount\.current >= 7/.test(settings) &&
+      !/onVersionTap/.test(settings));
+
+  ok('the paywall renders the storefront price instead of ledger Money',
+    /storePrices\?\.\[p\]\?\.priceString/.test(pro) &&
+      /loadStorePrices/.test(pro) &&
+      !/<Money[^>]*PRO_PRICES/.test(pro));
+  ok('native pricing never falls back to an unlabeled USD reference',
+    /Platform\.OS === 'web'[\s\S]{0,100}PRO_REFERENCE_PRICE_STRINGS/.test(pro) &&
+      /disabled=\{billingAvailable && !storePrices\?\.\[plan\]\}/.test(pro));
+  ok('a failed catalog load can be retried without reopening the paywall',
+    /priceStatus === 'failed'/.test(pro) &&
+      /setPriceRequest\(\(request\) => request \+ 1\)/.test(pro));
+  ok('the paywall discloses renewal and reaches store subscription management',
+    /subscriptionRenewalTerms/.test(pro) &&
+      /subscriptionManagementUrl/.test(pro) &&
+      /manageSubscription/.test(pro));
 
   // No English sentence built inline: every user-visible string goes through
   // t() or tf(), so Arabic gets Arabic.
@@ -257,6 +272,11 @@ function ktSources(dir) {
     { months, saved });
   ok('no hard-coded month count survives in the copy',
     !/\d+ months free/.test(fs.readFileSync(path.join(ROOT, 'src/lib/i18n.ts'), 'utf8')));
+
+  const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
+  ok('an editable ledger backup cannot grant Pro or restart the trial',
+    /pro: _pro, trialStartTs: _trial/.test(store) &&
+      /pro: state\.pro, trialStartTs: state\.trialStartTs/.test(store));
 }
 
 
@@ -371,11 +391,13 @@ function ktSources(dir) {
   ok('billing is unavailable without a key', /apiKey\(\) !== null/.test(sdk));
   ok('billing is unavailable on web', /Platform\.OS !== 'web'/.test(sdk));
 
-  // The prices and the SKUs are what Play Console has to match.
-  const { PRO_SKUS, PRO_PRICES } = require('./build/purchases');
-  ok('both plans have a product id and a price',
-    Object.keys(PRO_SKUS).every((k) => PRO_SKUS[k] && PRO_PRICES[k]?.fils > 0),
-    { PRO_SKUS, PRO_PRICES });
+  // Product ids are store configuration; native prices come back localized.
+  const { PRO_SKUS, PRO_REFERENCE_PRICE_STRINGS } = require('./build/purchases');
+  ok('both plans have a product id and an explicit USD preview reference',
+    Object.keys(PRO_SKUS).every(
+      (k) => PRO_SKUS[k] && /^US\$/.test(PRO_REFERENCE_PRICE_STRINGS[k]),
+    ),
+    { PRO_SKUS, PRO_REFERENCE_PRICE_STRINGS });
   ok('the setup doc names the same product ids',
     Object.values(PRO_SKUS).every((sku) => read('docs/billing.md').includes(sku)));
 }

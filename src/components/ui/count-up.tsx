@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ThemedText, type ThemedTextProps } from '@/components/themed-text';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { formatAmount } from '@/lib/format';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 interface CountUpAmountProps extends Omit<ThemedTextProps, 'children'> {
   fils: number;
@@ -11,7 +12,12 @@ interface CountUpAmountProps extends Omit<ThemedTextProps, 'children'> {
 }
 
 /** Animates a money figure from its previous value to the new one. */
-export function CountUpAmount({ fils, prefix = 'AED ', durationMs = 700, ...rest }: CountUpAmountProps) {
+export function CountUpAmount({
+  fils,
+  prefix = `${ledgerCurrencyDisplay()} `,
+  durationMs = 700,
+  ...rest
+}: CountUpAmountProps) {
   const [display, setDisplay] = useState(fils);
   const fromRef = useRef(fils);
   const frame = useRef<number | null>(null);

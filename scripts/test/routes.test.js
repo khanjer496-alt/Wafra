@@ -224,12 +224,10 @@ function sources(dir = SRC) {
     !/chargeAlertsSetting/.test(settings) &&
       (settings.match(/t\('alertEveryCharge'\)/g) ?? []).length === 2);
 
-  // pro.tsx documents the unlock as "seven taps on the version row in
-  // Settings, which nobody reaches by accident". It had drifted onto the
-  // brand mark, announced to VoiceOver as a button.
-  ok('the founder unlock is on the version row, not the logo',
-    /tapCount\.current >= 7/.test(settings) &&
-      /<Pressable onPress=\{onVersionTap\}[\s\S]{0,120}Wafra \{version\}/.test(settings) &&
+  ok('the version label and logo contain no hidden Pro unlock gesture',
+    !/\bsetPro\b/.test(settings) &&
+      !/tapCount\.current >= 7/.test(settings) &&
+      !/onVersionTap/.test(settings) &&
       !/<Pressable[^>]*>\s*<WafraMark/.test(settings));
 
   // A toggle row whose label and sub-line are dead text, beside link rows that
@@ -287,8 +285,7 @@ function sources(dir = SRC) {
   function alertCalls(text) {
     const out = [];
     const re = /\bAlert\.alert\s*\(/g;
-    let m;
-    while ((m = re.exec(text))) {
+    while (re.exec(text)) {
       let depth = 1;
       let i = re.lastIndex;
       let quote = null;

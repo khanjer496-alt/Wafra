@@ -54,8 +54,9 @@ Production submission must wait until all of these are true:
 - [ ] **Account:** Configure APNs credentials, Expo enhanced push security,
   and production notification delivery.
 - [ ] **Account:** Configure both stores and RevenueCat: two products per
-  store, entitlement `pro`, 3-day trials, public platform SDK keys, and store
-  server credentials.
+  store, entitlement `pro`, localized territory prices, public platform SDK
+  keys, and store server credentials. Do not add storefront introductory
+  trials while the app's local three-day trial is enabled.
 - [ ] **Repo + Account:** Complete legal decisions and counsel review, host
   privacy/terms/support pages on public HTTPS URLs, and add visible links in
   the app. The Settings screen currently has privacy copy but no links to the
@@ -71,6 +72,10 @@ Production submission must wait until all of these are true:
 - [ ] **Account:** Complete all App Store Connect and Play Console metadata,
   privacy/data safety, age/content, financial feature, billing, territory,
   tax, banking, and agreement forms.
+- [ ] **Account + Evidence:** Enable every intended storefront territory and
+  verify the paywall displays the store-supplied localized price in at least
+  one 0-decimal, one 2-decimal, and one 3-decimal currency territory. Ledger
+  currency must never be used as the purchase price label.
 - [ ] **Evidence:** Pass physical-device gates for iOS silent capture, Android
   SMS/notification capture, StoreKit/Play Billing, performance, accessibility,
   haptics, RTL, offline storage, and deletion.
@@ -239,7 +244,8 @@ curl --fail --show-error https://<production-relay>/v1/health
 - [ ] In App Store Connect create one subscription group and products with the
   exact IDs `wafra_pro_monthly` and `wafra_pro_yearly`; add localized display
   names/descriptions, UAE prices matching the approved commercial decision,
-  review screenshots, and 3-day introductory free trials.
+  and review screenshots. Do not add an introductory free trial while Wafra's
+  local three-day trial remains enabled; the clocks would stack.
 - [ ] Add the Apple app to RevenueCat, connect App Store credentials, create
   entitlement `pro`, attach both products, and place only the `appl_` public
   SDK key in app config.
@@ -247,6 +253,8 @@ curl --fail --show-error https://<production-relay>/v1/health
   manage/cancel routing is understandable, trial/renewal price copy matches the
   live storefront, lapsed/refunded entitlements update, and offline cached
   access behaves as intended.
+- [ ] Add working in-app links to the hosted Privacy Policy and Terms of Use on
+  the paywall before enabling either subscription product.
 - [ ] Do not promise cross-platform entitlement continuity without proof.
   Wafra has no login and RevenueCat anonymous customer IDs are normally
   installation-specific; an Android purchase does not automatically prove an
@@ -353,9 +361,10 @@ curl --fail --show-error https://<production-relay>/v1/health
 - [ ] Complete main store listing and Arabic localization, developer contact,
   support/privacy URLs, category/tags, countries, pricing, and distribution.
 - [ ] Create subscriptions `wafra_pro_monthly` and `wafra_pro_yearly`, base
-  plans/offers, AED pricing, localized descriptions, and a 3-day free trial on
-  each. Activate them, attach them to RevenueCat entitlement `pro`, and verify
-  the `goog_` public key in the release build.
+  plans/offers, localized prices and descriptions, with no introductory store
+  trial while the app's local three-day trial is enabled. Activate them, attach
+  them to RevenueCat entitlement `pro`, and verify the `goog_` public key in the
+  release build.
 - [ ] Connect RevenueCat to Play with a least-privilege Google service account.
   Separately upload a Play service account to EAS only if EAS Submit is the
   chosen submission lane.

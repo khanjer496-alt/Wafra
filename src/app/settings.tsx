@@ -105,7 +105,6 @@ export default function SettingsScreen() {
     setAppLock,
     setDailySummary,
     setPrivateMode,
-    setPro,
     setMarket,
     setUiLanguage,
     exportBackup,
@@ -183,34 +182,6 @@ export default function SettingsScreen() {
   const gated = (fn: () => void) => () => {
     if (proActive) fn();
     else router.push('/pro');
-  };
-
-  /**
-   * Founder unlock: 7 taps toggles Pro on side-load builds (Play builds grant
-   * it through Google Play billing instead).
-   *
-   * On the VERSION ROW, which is where pro.tsx says it lives — "seven taps on
-   * the version row in Settings, which nobody reaches by accident". It had
-   * drifted onto the Wafra mark, the largest and most idly-tapped thing in the
-   * section, announced to VoiceOver as a plain button that does nothing six
-   * times out of seven. pro.tsx rejected a long-press on its own icon for
-   * being "an ordinary thing to try"; poking a logo is no less ordinary.
-   */
-  const tapCount = React.useRef(0);
-  const tapTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onVersionTap = () => {
-    tapCount.current += 1;
-    if (tapTimer.current) clearTimeout(tapTimer.current);
-    tapTimer.current = setTimeout(() => (tapCount.current = 0), 1500);
-    if (tapCount.current >= 7) {
-      tapCount.current = 0;
-      const next = !state.pro;
-      setPro(next);
-      Alert.alert(
-        next ? t('founderMode') : t('founderModeOff'),
-        next ? t('founderOn') : t('founderOff'),
-      );
-    }
   };
 
   /* ── Privacy ────────────────────────────────────────────────────────── */
@@ -1085,11 +1056,9 @@ export default function SettingsScreen() {
             <ThemedText type="default" themeColor="textSecondary">
               {t('settingsTagline')}
             </ThemedText>
-            <Pressable onPress={onVersionTap} hitSlop={8}>
-              <ThemedText type="nano" themeColor="textTertiary">
-                Wafra {version}
-              </ThemedText>
-            </Pressable>
+            <ThemedText type="nano" themeColor="textTertiary">
+              Wafra {version}
+            </ThemedText>
           </Section>
 
           {/* Erase, alone.

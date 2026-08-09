@@ -881,6 +881,14 @@ ok('backup restore migrates old state before dispatching it',
   !!restoreBackupBody &&
     inOrder(restoreBackupBody, 'parseBackupForRestore(json)', "dispatch({ type: 'restore'"));
 
+const ledgerHoldsMoneyBody = bodyOf(store, 'function ledgerHoldsMoney');
+ok('account-only ledgers pin their accounting currency',
+  !!ledgerHoldsMoneyBody &&
+    /account\.openingFils !== 0/.test(ledgerHoldsMoneyBody) &&
+    /account\.snapshotFils/.test(ledgerHoldsMoneyBody) &&
+    /account\.creditLimitFils/.test(ledgerHoldsMoneyBody),
+  'an opening balance, bank snapshot, or card limit must not be relabelled from AED to SAR');
+
 const clearAllBody = bodyOf(store, 'const clearAll = useCallback');
 ok('a successful erase clears the latch BEFORE writing the blank store',
   !!clearAllBody &&

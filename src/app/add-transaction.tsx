@@ -22,6 +22,7 @@ import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } fro
 import { parseAmountToFils, toISODate } from '@/lib/format';
 import { committed } from '@/lib/haptics';
 import { t as tUi } from '@/lib/i18n';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
@@ -126,14 +127,14 @@ export default function AddTransactionScreen() {
             {/* Amount */}
             <View style={styles.amountWrap}>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
-                AED
+                {ledgerCurrencyDisplay()}
               </ThemedText>
               <TextInput
                 value={amountText}
                 onChangeText={setAmountText}
                 keyboardType="decimal-pad"
                 placeholder="0"
-                accessibilityLabel={tUi('amountInDirhams')}
+                accessibilityLabel={tUi('amountInLedgerCurrency')}
                 autoFocus
                 placeholderTextColor={theme.textSecondary}
                 style={[styles.amountInput, { color: theme.text }]}

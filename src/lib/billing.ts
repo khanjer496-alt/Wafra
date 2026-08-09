@@ -8,7 +8,11 @@
  */
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import Purchases, { LOG_LEVEL, type CustomerInfo } from 'react-native-purchases';
+import Purchases, {
+  LOG_LEVEL,
+  type CustomerInfo,
+  type PurchasesStoreProduct,
+} from 'react-native-purchases';
 
 import { ENTITLEMENT_ID, PRO_SKUS, type ProPlan } from '@/lib/purchases';
 
@@ -87,6 +91,70 @@ export async function refreshEntitlement(): Promise<boolean | null> {
  * said why. Backing out must stay silent; a broken store must not.
  */
 export type PurchaseOutcome = 'granted' | 'cancelled' | 'failed';
+
+export interface StorePrice {
+  /** Store-formatted price, including the storefront's currency and locale. */
+  priceString: string;
+  /** Numeric price in `currencyCode`, used only to calculate the annual saving. */
+  price: number;
+  currencyCode: string;
+}
+
+export type StorePrices = Partial<Record<ProPlan, StorePrice>>;
+
+function productForPlan(
+  products: PurchasesStoreProduct[],
+  plan: ProPlan,
+): PurchasesStoreProduct | undefined {
+  return products.find((product) => product.identifier === PRO_SKUS[plan]);
+}
+
+/**
+ * Localized prices from the App Store or Play storefront currently signed in
+ * on this device. `null` means there is no usable store response; callers must
+ * say the native price is unavailable, never substitute the ledger currency.
+ */
+export async function loadStorePrices(): Promise<StorePrices | null> {
+  if (!(await ready())) return null;
+  try {
+    const products = await Purchases.getProducts(Object.values(PRO_SKUS));
+    const monthly = productForPlan(products, 'monthly');
+    const yearly = productForPlan(products, 'yearly');
+    const prices: StorePrices = {};
+    if (monthly) {
+      prices.monthly = {
+        priceString: monthly.priceString,
+        price: monthly.price,
+        currencyCode: monthly.currencyCode,
+      };
+    }
+    if (yearly) {
+      prices.yearly = {
+        priceString: yearly.priceString,
+        price: yearly.price,
+        currencyCode: yearly.currencyCode,
+      };
+    }
+    return Object.keys(prices).length > 0 ? prices : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Store-owned page where the current customer can manage or cancel renewal. */
+export async function subscriptionManagementUrl(): Promise<string | null> {
+  if (!(await ready())) return null;
+  try {
+    const info = await Purchases.getCustomerInfo();
+    if (info.managementURL) return info.managementURL;
+  } catch {
+    // The store's generic subscription page is still useful when RevenueCat
+    // cannot refresh CustomerInfo, so fall through to the platform URL.
+  }
+  if (Platform.OS === 'ios') return 'https://apps.apple.com/account/subscriptions';
+  if (Platform.OS === 'android') return 'https://play.google.com/store/account/subscriptions';
+  return null;
+}
 
 /** Starts a purchase flow. See PurchaseOutcome for what the answers mean. */
 export async function purchasePro(plan: ProPlan): Promise<PurchaseOutcome> {

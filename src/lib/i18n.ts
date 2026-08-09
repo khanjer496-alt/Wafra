@@ -117,8 +117,8 @@ const S = {
   foreignActivity: { en: 'Foreign activity', ar: 'العمليات بالعملات الأجنبية' },
   foreignSpending: { en: 'Foreign spending', ar: 'الإنفاق بالعملات الأجنبية' },
   foreignSpendingSubtitle: {
-    en: 'Audit what you paid abroad in the original currency and AED.',
-    ar: 'راجع ما دفعته خارج الدولة بالعملة الأصلية وبالدرهم.',
+    en: 'Review what you paid abroad in the original and ledger currencies.',
+    ar: 'راجع ما دفعته خارج الدولة بالعملة الأصلية وعملة السجل.',
   },
   searchForeignSpending: { en: 'Search merchant or currency', ar: 'ابحث عن تاجر أو عملة' },
   foreignActivityCaption: {
@@ -126,12 +126,12 @@ const S = {
     ar: '{count} عملية · {currencies} عملة',
   },
   foreignConvertedTotal: {
-    en: 'AED total after conversion',
-    ar: 'الإجمالي بالدرهم بعد التحويل',
+    en: '{currency} total after conversion',
+    ar: 'الإجمالي بعملة {currency} بعد التحويل',
   },
   foreignOriginalsKept: {
-    en: 'Original amounts stay beside every AED conversion.',
-    ar: 'يبقى المبلغ الأصلي بجانب كل تحويل إلى الدرهم.',
+    en: 'Original amounts stay beside every {currency} conversion.',
+    ar: 'يبقى المبلغ الأصلي بجانب كل تحويل إلى {currency}.',
   },
   currencyBreakdown: { en: 'Currency breakdown', ar: 'تفصيل العملات' },
   conversionQuality: { en: 'Conversion quality', ar: 'جودة التحويل' },
@@ -217,8 +217,8 @@ const S = {
   cadenceExpectedAgo: { en: '{cadence} · expected {days}d ago', ar: '{cadence} · كان متوقعاً قبل {days} يوم' },
   perMonthShort: { en: '/mo', ar: 'شهرياً' },
   monthlyTotal: {
-    en: 'AED {amount} / month',
-    ar: '\u2066AED {amount}\u2069 · شهرياً',
+    en: '{amount} / month',
+    ar: '\u2066{amount}\u2069 · شهرياً',
   },
   perYearShort: { en: '/yr', ar: 'سنوياً' },
   perWeekShort: { en: '/wk', ar: 'أسبوعياً' },
@@ -426,8 +426,8 @@ const S = {
   },
   spentThisMonthCaption: { en: 'spent this month', ar: 'مصروف هذا الشهر' },
   cardSpentThisMonth: {
-    en: 'AED {amount} spent this month',
-    ar: 'مصروف الشهر \u2066AED {amount}\u2069',
+    en: '{amount} spent this month',
+    ar: 'مصروف الشهر \u2066{amount}\u2069',
   },
   longPressHint: { en: 'Long-press a card or account to hide or remove it', ar: 'اضغط مطولاً على بطاقة أو حساب لإخفائه أو حذفه' },
   walletCurrencies: { en: 'Currencies', ar: 'العملات' },
@@ -757,7 +757,7 @@ const S = {
   allExpenses: { en: 'All expenses', ar: 'كل المصروفات' },
   originalAmount: { en: 'Original amount', ar: 'المبلغ الأصلي' },
   exchangeRate: { en: 'Exchange rate', ar: 'سعر الصرف' },
-  bankQuotedRate: { en: 'Bank-quoted AED equivalent', ar: 'ما يعادله بالدرهم حسب البنك' },
+  bankQuotedRate: { en: 'Bank-quoted {currency} equivalent', ar: 'ما يعادله بعملة {currency} حسب البنك' },
   datedReferenceRate: { en: 'Dated reference rate · {date}', ar: 'سعر مرجعي بتاريخ {date}' },
   offlineFxEstimate: {
     en: 'Offline estimate · updates when online',
@@ -802,10 +802,6 @@ const S = {
   perMonth: { en: 'per month', ar: 'شهرياً' },
   transferLabel: { en: 'Transfer', ar: 'تحويل' },
   // ── strings screens used to write in English inline ──
-  founderMode: { en: 'Founder mode', ar: 'وضع المؤسس' },
-  founderModeOff: { en: 'Founder mode off', ar: 'تم إيقاف وضع المؤسس' },
-  founderOn: { en: 'Wafra Pro unlocked on this device.', ar: 'تم تفعيل وفرة برو على هذا الجهاز.' },
-  founderOff: { en: 'Wafra Pro disabled on this device.', ar: 'تم إيقاف وفرة برو على هذا الجهاز.' },
   noScreenLock: { en: 'No screen lock set up', ar: 'لا يوجد قفل شاشة' },
   noScreenLockBody: { en: 'Set up a fingerprint, face unlock, or PIN in your phone settings first.', ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN في إعدادات هاتفك أولاً.' },
   confirmAppLock: { en: 'Confirm to enable app lock', ar: 'أكّد لتفعيل قفل التطبيق' },
@@ -918,8 +914,8 @@ const S = {
   notRecurringQ: { en: 'Not a recurring charge?', ar: 'ليست عملية متكررة؟' },
   notifsAreOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
   onboardPrivacyBody: {
-    en: 'Only bank alerts become transactions; message text stays on this phone',
-    ar: 'تنبيهات البنك وحدها تصبح عمليات؛ ونص الرسائل يبقى على هذا الهاتف',
+    en: 'Add entries yourself or connect supported bank alerts',
+    ar: 'أضف العمليات بنفسك أو اربط تنبيهات البنوك المدعومة',
   },
   readMyInbox: { en: 'Read my inbox', ar: 'اقرأ رسائلي' },
   setCreditLimit: { en: 'Set credit limit', ar: 'تحديد حد الائتمان' },
@@ -992,10 +988,10 @@ const S = {
     en: 'The erase did not finish. Nothing on this device has been changed.',
     ar: 'لم يكتمل المحو. لم يتغيّر أي شيء على هذا الجهاز.',
   },
-  onboardHeadline: { en: 'Your bank already texts you. Wafra reads it.', ar: 'بنكك يراسلك أصلاً. وفرة يقرأ الرسائل.' },
+  onboardHeadline: { en: 'See your money clearly.', ar: 'شاهد أموالك بوضوح.' },
   onboardSub: {
-    en: 'Bank alerts become filed transactions. On device, in your currency, with no account to create.',
-    ar: 'تنبيهات البنك تصبح عمليات مسجّلة. على جهازك وبعملتك المحلية، دون إنشاء حساب.',
+    en: 'Track spending, bills, subscriptions and savings in one private ledger.',
+    ar: 'تتبّع المصروفات والفواتير والاشتراكات والادخار في سجل خاص واحد.',
   },
   onboardPersonalizeCta: { en: 'Personalise Wafra', ar: 'خصّص وفرة' },
   onboardStepOf: { en: 'Step {step} of {total}', ar: 'الخطوة {step} من {total}' },
@@ -1076,7 +1072,7 @@ const S = {
   onboardSummaryBudgets: { en: 'Category budgets', ar: 'ميزانيات التصنيفات' },
   onboardSummaryMonth: { en: 'Money month', ar: 'الشهر المالي' },
   onboardSummaryActive: { en: '{count} active', ar: '{count} مفعّلة' },
-  onboardReadsSms: { en: 'Reads SMS, files the spend', ar: 'يقرأ الرسائل ويسجّل المصروف' },
+  onboardReadsSms: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
   onboardWarnsDetail: { en: 'Card dues, utility bills, rent, and quiet subscriptions', ar: 'مستحقات البطاقات وفواتير الخدمات والإيجار والاشتراكات الصامتة' },
   onboardNoServerDetail: {
     en: 'Android bank-message text is never uploaded',
@@ -1090,17 +1086,17 @@ const S = {
     ar: 'قراءة الرسائل تعمل في تطبيق أندرويد. اختر نقطة البداية:',
   },
   iosOnboardHeadline: {
-    en: 'Your bank already texts you. Wafra keeps up.',
-    ar: 'بنكك يراسلك أصلاً. وفرة يتابع تلقائياً.',
+    en: 'See your money clearly.',
+    ar: 'شاهد أموالك بوضوح.',
   },
   iosOnboardSub: {
-    en: 'A one-time Shortcut turns each bank alert into a filed transaction—without giving Wafra your bank login.',
-    ar: 'اختصار يُضبط مرة واحدة يحوّل كل تنبيه بنكي إلى عملية مسجّلة — دون منح وفرة بيانات دخولك للبنك.',
+    en: 'Track spending, bills, subscriptions and savings in one private ledger.',
+    ar: 'تتبّع المصروفات والفواتير والاشتراكات والادخار في سجل خاص واحد.',
   },
-  iosOnboardAutomatic: { en: 'Set up once, capture automatically', ar: 'اضبطه مرة، والتقط تلقائياً' },
+  iosOnboardAutomatic: { en: 'Start your way', ar: 'ابدأ بطريقتك' },
   iosOnboardAutomaticBody: {
-    en: 'A personal Shortcut forwards alerts from only the bank senders you choose',
-    ar: 'اختصار شخصي يمرّر تنبيهات مرسلي البنوك الذين تختارهم فقط',
+    en: 'Add entries yourself or connect supported bank alerts',
+    ar: 'أضف العمليات بنفسك أو اربط تنبيهات البنوك المدعومة',
   },
   iosOnboardPrivate: { en: 'Raw messages are never kept', ar: 'نص الرسالة الخام لا يُحفظ أبداً' },
   iosOnboardPrivateBody: {
@@ -1132,17 +1128,34 @@ const S = {
   underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
   transferExplainer: { en: 'Kept in balances, excluded from income and spending', ar: 'يُحتسب في الأرصدة ويُستثنى من الدخل والمصروف' },
   perYear: { en: 'per year', ar: 'سنوياً' },
-  playOnlyTitle: { en: 'Available with the Play Store release', ar: 'متاح مع إصدار متجر Play' },
+  playOnlyTitle: { en: 'Purchases unavailable in this build', ar: 'الشراء غير متاح في هذا الإصدار' },
   playOnlyBody: {
-    en: 'Purchases go through Google Play billing, which only works when Wafra is installed from the Play Store. This build has every Pro feature unlockable from Settings.',
-    ar: 'تتم عمليات الشراء عبر فوترة Google Play، وهي تعمل فقط عند تثبيت وفرة من متجر Play. في هذا الإصدار يمكن تفعيل كل ميزات برو من الإعدادات.',
+    en: 'Install Wafra from the App Store or Google Play to purchase Pro.',
+    ar: 'ثبّت وفرة من App Store أو Google Play لشراء برو.',
+  },
+  priceLoading: { en: 'Loading price…', ar: 'جارٍ تحميل السعر…' },
+  priceUnavailable: { en: 'Price unavailable', ar: 'السعر غير متاح' },
+  priceUnavailableBody: {
+    en: 'The store did not return this plan. Check your connection and try loading prices again.',
+    ar: 'لم يُرجع المتجر هذه الخطة. تحقّق من الاتصال وحاول تحميل الأسعار مجدداً.',
+  },
+  retryPrices: { en: 'Try loading prices again', ar: 'إعادة تحميل الأسعار' },
+  manageSubscription: { en: 'Manage or cancel subscription', ar: 'إدارة الاشتراك أو إلغاؤه' },
+  manageSubscriptionFailed: { en: 'Could not open subscriptions', ar: 'تعذّر فتح الاشتراكات' },
+  manageSubscriptionFailedBody: {
+    en: 'Open your App Store or Google Play account to manage the subscription.',
+    ar: 'افتح حسابك في App Store أو Google Play لإدارة الاشتراك.',
+  },
+  subscriptionRenewalTerms: {
+    en: 'Payment is charged to your store account. Subscriptions renew automatically unless cancelled before the current billing period ends. You can manage or cancel renewal in your store account.',
+    ar: 'يُخصم المبلغ من حساب المتجر. يتجدد الاشتراك تلقائياً ما لم يُلغَ قبل نهاية فترة الفوترة الحالية. يمكنك إدارة التجديد أو إلغاؤه من حساب المتجر.',
   },
   nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
-  nothingToRestoreBody: { en: 'Purchases arrive with the Play Store release.', ar: 'ستتوفر عمليات الشراء مع إصدار متجر Play.' },
+  nothingToRestoreBody: { en: 'Install Wafra from the App Store or Google Play to restore a purchase.', ar: 'ثبّت وفرة من App Store أو Google Play لاستعادة عملية شراء.' },
   noPurchaseFound: { en: 'No purchase found', ar: 'لم يُعثر على عملية شراء' },
   noPurchaseFoundBody: {
-    en: 'No previous Wafra Pro purchase on this Google account.',
-    ar: 'لا توجد عملية شراء سابقة لوفرة برو على حساب Google هذا.',
+    en: 'No previous Wafra Pro purchase was found on this store account.',
+    ar: 'لم يُعثر على عملية شراء سابقة لوفرة برو في حساب المتجر هذا.',
   },
   // Deliberately NOT noPurchaseFound: the store was never reached, so nothing
   // is known about what this account has bought.
@@ -1178,7 +1191,7 @@ const S = {
 
   // Onboarding
   obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
-  obSubtitle: { en: 'Your money in AED, tracked automatically. Everything stays on this phone.', ar: 'أموالك تُتتبع تلقائياً. كل شيء يبقى على هاتفك.' },
+  obSubtitle: { en: 'Track an AED or SAR ledger privately.', ar: 'تتبّع سجلاً بالدرهم أو الريال بخصوصية.' },
   getStarted: { en: 'Get started', ar: 'ابدأ الآن' },
   exploreSample: { en: 'Explore with sample data', ar: 'جرّب ببيانات تجريبية' },
 
@@ -1690,7 +1703,8 @@ const S = {
 
   newTransaction: { en: 'New transaction', ar: 'عملية جديدة' },
   saveTransaction: { en: 'Save transaction', ar: 'حفظ العملية' },
-  amountInDirhams: { en: 'Amount in dirhams', ar: 'المبلغ بالدرهم' },
+  amountInDirhams: { en: 'Amount', ar: 'المبلغ' },
+  amountInLedgerCurrency: { en: 'Amount in your ledger currency', ar: 'المبلغ بعملة سجلك' },
   descriptionOptional: { en: 'Description (optional)', ar: 'الوصف (اختياري)' },
   descriptionOptionalA11y: { en: 'Description, optional', ar: 'الوصف، اختياري' },
   twoDaysAgo: { en: '2 days ago', ar: 'قبل يومين' },
@@ -1861,7 +1875,7 @@ const S = {
   deleteGoalTitle: { en: 'Delete goal?', ar: 'حذف الهدف؟' },
   walletSince: { en: 'since {date}', ar: 'منذ {date}' },
   addToGoal: { en: 'Add to {goal}', ar: 'أضف إلى {goal}' },
-  amountInAed: { en: 'Amount in AED', ar: 'المبلغ بالدرهم' },
+  amountInAed: { en: 'Amount', ar: 'المبلغ' },
   removeAccountTitle: { en: 'Remove account?', ar: 'إزالة الحساب؟' },
   removeAccountBody: {
     en: '“{name}” and all its transactions will be deleted. This cannot be undone.',

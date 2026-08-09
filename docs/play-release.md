@@ -41,16 +41,16 @@ scan → transactions appearing.
 
 ## Store listing (draft)
 
-**Title:** Wafra: Expense Tracker UAE
-**Short description:** Automatic expense tracker for UAE banks. SMS-based, private, AED-first.
+**Title:** Wafra: Budget & Money Tracker
+**Short description:** Private expense tracker for budgets, bills, subscriptions and savings goals.
 
 **Full description outline** (mirror FinArt's structure):
-- Expense tracker: automatic from bank SMS, no spreadsheets, no bank logins.
+- Expense tracker: start manually; optional supported bank-alert imports require no bank login.
 - Knows every card: limits, outstanding, statement due dates with reminders.
 - Subscriptions: detects recurring charges, price rises, stopped services.
 - Budgets, insights in plain language, net-worth trend, monthly report.
-- Made for the UAE: AED-first, DEWA/Etisalat/du understood, with tested
-  formats for 8 UAE banks.
+- Optional bank packs: supported UAE and Saudi formats, clearly separated from
+  manual budgeting and subscription features.
 - **Data privacy & security controls** section (the compliance argument):
   - No registration — no email, no phone number, no account.
   - Android bank alerts are processed on your phone, not by the iPhone relay.
@@ -179,10 +179,12 @@ these three facts.
 - [ ] Final app icon + adaptive icon + splash pass
 - [ ] Screenshots (phone, 1080×1920+) + feature graphic 1024×500
 - [ ] Content rating questionnaire (PEGI 3 expected)
-- [ ] Countries + pricing (UAE first; SA pack ready when expanding)
+- [ ] Territories + localized pricing (all intended territories; bank-alert
+      automation remains limited to supported UAE/Saudi formats)
 - [ ] YOUR STEPS: Play developer account ($25), upload wafra-aab to a
       closed test track, paste the SMS declaration, add privacy policy URL,
-      create the two Pro subscription SKUs (3-day free trial on each)
+      create the two Pro subscription SKUs (no introductory store trial while
+      the app's local three-day trial remains enabled)
 
 ## Monetization — Wafra Pro
 
@@ -190,20 +192,21 @@ these three facts.
   unlocked from first launch. After trial, SMS/notification importing
   pauses until subscribed (viewing existing data and manual entry keep
   working). Salary-day months and backup/restore are Pro-gated too.
-- Configure the same 3-day free trial on the Play subscription offers so
-  the store purchase button reads "3 days free".
+- Do not configure a Play introductory trial while the app grants three days
+  locally from first launch. The two clocks would stack. If the local trial is
+  removed later, the store offer and all paywall/listing copy must change in the
+  same release.
 - SKUs (create in Play Console → Monetize → Subscriptions):
-  `wafra_pro_monthly` (AED 9.99/mo), `wafra_pro_yearly` (AED 74.99/yr).
+  `wafra_pro_monthly`, `wafra_pro_yearly`. Use Google Play's territory price
+  tiers; the paywall renders the storefront's localized price string.
 - Code: paywall at `src/app/pro.tsx`; entitlement `state.pro`; RevenueCat store
   integration in `src/lib/billing.ts`. Production builds still require the
   public platform SDK keys plus the matching store products and `pro`
   entitlement described in `docs/billing.md`.
-- Play policy: digital subscriptions MUST use Play Billing (15% fee under
-  $1M/yr after joining the small-business program). Include manage/cancel
-  link (Play handles it), and price in AED via Play Console pricing.
-- Side-load builds: billing is unavailable by design (Play Billing only
-  works when installed from Play); founder unlock = 7 taps on the Settings
-  logo toggles Pro locally.
+- Play policy: digital subscriptions MUST use Play Billing. Include a
+  manage/cancel path and verify the current fee/program terms in Play Console.
+- Side-load builds are not valid billing evidence. A keyed build may initialize
+  the SDK, but purchase availability depends on a Play-installed test build.
 
 ## Roadmap notes borrowed from FinArt parity
 

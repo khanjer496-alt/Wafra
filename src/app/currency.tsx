@@ -19,7 +19,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { formatAED } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
-import { ledgerCurrencyCode } from '@/lib/markets';
+import { ledgerCurrencyCode, ledgerCurrencyDisplay } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 import { inPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -124,7 +124,7 @@ export default function CurrencyScreen() {
 
           <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(320)}>
             <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
-              {t('foreignConvertedTotal', language)}
+              {tf('foreignConvertedTotal', { currency: ledgerCurrencyDisplay() }, language)}
             </ThemedText>
             <ThemedText type="amount" tabular>
               {formatAED(summary.totalLocalFils, { decimals: false })}
@@ -133,7 +133,7 @@ export default function CurrencyScreen() {
               {caption}
             </ThemedText>
             <ThemedText type="meta" themeColor="textTertiary">
-              {t('foreignOriginalsKept', language)}
+              {tf('foreignOriginalsKept', { currency: ledgerCurrencyDisplay() }, language)}
             </ThemedText>
           </Animated.View>
 

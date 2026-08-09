@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -8,19 +8,25 @@ import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Row, ScreenHeader, Section } from '@/components/ui/layout';
-import { Money } from '@/components/ui/money';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { t, tf } from '@/lib/i18n';
 import {
   autoCaptureMethod,
-  PRO_PRICES,
+  PRO_REFERENCE_PRICE_STRINGS,
   TRIAL_DAYS,
   trialDaysLeft,
   yearlySavingMonths,
   type ProPlan,
 } from '@/lib/purchases';
-import { isBillingAvailable, purchasePro, restorePro } from '@/lib/billing';
+import {
+  isBillingAvailable,
+  loadStorePrices,
+  purchasePro,
+  restorePro,
+  subscriptionManagementUrl,
+  type StorePrices,
+} from '@/lib/billing';
 import { useStore } from '@/lib/store';
 
 type FeatureRow = {
@@ -28,6 +34,8 @@ type FeatureRow = {
   titleKey: Parameters<typeof t>[0];
   textKey: Parameters<typeof t>[0];
 };
+
+type PriceStatus = 'unavailable' | 'loading' | 'ready' | 'failed';
 
 /**
  * The list is built per platform, because the same feature is delivered two
@@ -51,8 +59,8 @@ function features(): FeatureRow[] {
 
 /**
  * Wafra Pro paywall. Purchases run through the platform's own billing on a
- * store build — Play Billing on Android, StoreKit on iPhone; side-load builds
- * explain that and stay functional via the founder unlock in Settings.
+ * store build — Play Billing on Android, StoreKit on iPhone. Side-load builds
+ * explain why a purchase cannot be completed there.
  *
  * The screen also states what is NOT behind this wall. Wafra sells the work it
  * does on its own; handing it a message yourself stays free on both platforms,
@@ -64,8 +72,48 @@ export default function ProScreen() {
   const router = useRouter();
   const { state, setPro } = useStore();
   const [plan, setPlan] = useState<ProPlan>('yearly');
+  const [storePrices, setStorePrices] = useState<StorePrices | null>(null);
+  const billingAvailable = isBillingAvailable();
+  const [priceStatus, setPriceStatus] = useState<PriceStatus>(
+    billingAvailable ? 'loading' : 'unavailable',
+  );
+  const [priceRequest, setPriceRequest] = useState(0);
+  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const trial = trialDaysLeft(state);
   const rows = features();
+
+  useEffect(() => {
+    if (!billingAvailable) return;
+    let live = true;
+    setPriceStatus('loading');
+    void loadStorePrices().then((prices) => {
+      if (!live) return;
+      setStorePrices(prices);
+      if (!prices) {
+        setPriceStatus('failed');
+        return;
+      }
+      setPriceStatus('ready');
+      setPlan((current) =>
+        prices[current] ? current : prices.yearly ? 'yearly' : 'monthly',
+      );
+    });
+    return () => {
+      live = false;
+    };
+  }, [billingAvailable, priceRequest]);
+
+  const savingMonths = useMemo(() => {
+    if (!storePrices) return Platform.OS === 'web' ? yearlySavingMonths() : null;
+    const monthly = storePrices.monthly;
+    const yearly = storePrices.yearly;
+    if (!monthly || !yearly || monthly.currencyCode !== yearly.currencyCode) return null;
+    const months = yearlySavingMonths({
+      monthly: { fils: Math.round(monthly.price * 100) },
+      yearly: { fils: Math.round(yearly.price * 100) },
+    });
+    return months > 0 ? months : null;
+  }, [storePrices]);
 
   /**
    * What the last tap on Get Pro or Restore had to say.
@@ -79,17 +127,14 @@ export default function ProScreen() {
    * outcomes asks the user to decide anything, so none of them has earned a
    * modal. What they have to do is be visible, which an alert was not.
    */
-  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
-
   const buy = async () => {
     setNotice(null);
-    if (!isBillingAvailable()) {
-      // Store-name copy stays in i18n rather than being assembled from
-      // billingStore(): contracts.test.js fails any English sentence written
-      // into a screen, and a template literal is still an English sentence.
-      // These keys read "Play Store", which is correct for this Android
-      // milestone; the App Store wording needs its own keys before iOS ships.
+    if (!billingAvailable) {
       setNotice({ title: t('playOnlyTitle'), body: t('playOnlyBody') });
+      return;
+    }
+    if (!storePrices?.[plan]) {
+      setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') });
       return;
     }
     const outcome = await purchasePro(plan);
@@ -119,6 +164,20 @@ export default function ProScreen() {
     else setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
   };
 
+  const manage = async () => {
+    setNotice(null);
+    const url = await subscriptionManagementUrl();
+    if (!url) {
+      setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
+      return;
+    }
+    try {
+      await Linking.openURL(url);
+    } catch {
+      setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
+    }
+  };
+
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -128,12 +187,6 @@ export default function ProScreen() {
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Section index={0} style={styles.hero}>
-            {/* No founder unlock here. There was one — a single long-press on
-                this icon toggled Pro — which put a free unlock on the most
-                discoverable surface in the app, the screen that sells it.
-                Long-pressing something is an ordinary thing to try. The
-                deliberate unlock is seven taps on the version row in
-                Settings, which nobody reaches by accident. */}
             <Icon name="diamond" size={30} color={theme.warning} />
             <ThemedText type="title">{t('wafraPro')}</ThemedText>
             <ThemedText type="default" themeColor="textSecondary">
@@ -209,7 +262,11 @@ export default function ProScreen() {
                     <Pressable
                       key={p}
                       accessibilityRole="button"
-                      accessibilityState={{ selected }}
+                      accessibilityState={{
+                        selected,
+                        disabled: billingAvailable && priceStatus === 'ready' && !storePrices?.[p],
+                      }}
+                      disabled={billingAvailable && priceStatus === 'ready' && !storePrices?.[p]}
                       onPress={() => setPlan(p)}
                       style={[
                         styles.plan,
@@ -221,32 +278,61 @@ export default function ProScreen() {
                       <ThemedText type="micro" themeColor="textTertiary">
                         {p === 'yearly' ? t('yearly') : t('monthly')}
                       </ThemedText>
-                      <Money fils={PRO_PRICES[p].fils} type="subtitle" decimals />
+                      <ThemedText type="subtitle" tabular>
+                        {storePrices?.[p]?.priceString ??
+                          (Platform.OS === 'web'
+                            ? PRO_REFERENCE_PRICE_STRINGS[p]
+                            : t(priceStatus === 'loading' ? 'priceLoading' : 'priceUnavailable'))}
+                      </ThemedText>
                       <ThemedText type="meta" themeColor="textTertiary">
                         {p === 'yearly'
-                          ? `${t('perYear')} ${tf('monthsFreeSuffix', { months: yearlySavingMonths() })}`
+                          ? savingMonths
+                            ? `${t('perYear')} ${tf('monthsFreeSuffix', { months: savingMonths })}`
+                            : t('perYear')
                           : t('perMonth')}
                       </ThemedText>
                     </Pressable>
                   );
                 })}
               </View>
-              <Button label={t('getPro')} onPress={buy} />
-              <Button variant="ghost" label={t('restorePurchase')} onPress={restore} />
-              {notice && (
-                <View
-                  accessibilityLiveRegion="polite"
-                  style={[
-                    styles.notice,
-                    { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
-                  ]}>
-                  <ThemedText type="small">{notice.title}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {notice.body}
-                  </ThemedText>
-                </View>
+              <Button
+                label={t('getPro')}
+                onPress={buy}
+                disabled={billingAvailable && !storePrices?.[plan]}
+              />
+              {billingAvailable && priceStatus === 'failed' && (
+                <Button
+                  variant="ghost"
+                  label={t('retryPrices')}
+                  onPress={() => setPriceRequest((request) => request + 1)}
+                />
               )}
+              <Button variant="ghost" label={t('restorePurchase')} onPress={restore} />
+              {billingAvailable && (
+                <Button variant="ghost" label={t('manageSubscription')} onPress={manage} />
+              )}
+              <ThemedText type="nano" themeColor="textTertiary">
+                {t('subscriptionRenewalTerms')}
+              </ThemedText>
             </Section>
+          )}
+          {state.pro && billingAvailable && (
+            <Section index={3} style={styles.buy}>
+              <Button variant="ghost" label={t('manageSubscription')} onPress={manage} />
+            </Section>
+          )}
+          {notice && (
+            <View
+              accessibilityLiveRegion="polite"
+              style={[
+                styles.notice,
+                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+              ]}>
+              <ThemedText type="small">{notice.title}</ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">
+                {notice.body}
+              </ThemedText>
+            </View>
           )}
         </ScrollView>
       </SafeAreaView>

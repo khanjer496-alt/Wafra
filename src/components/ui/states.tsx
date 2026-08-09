@@ -16,7 +16,7 @@ import { Icon } from '@/components/ui/icon';
 import { EASE, Fonts, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { getActiveMarket } from '@/lib/markets';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
@@ -135,7 +135,7 @@ export function EmptyMonth({
     <View style={[styles.dashed, { borderColor: theme.cardBorderStrong }]}>
       <View style={styles.zero}>
         <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-          {getActiveMarket().currency.display}
+          {ledgerCurrencyDisplay()}
         </ThemedText>
         <ThemedText type="amount">0</ThemedText>
       </View>
