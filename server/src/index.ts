@@ -1038,10 +1038,13 @@ export default {
       }
       // Optional, so a Shortcut built against the older two-field contract and
       // the manual setup test both keep working unchanged.
-      const sender = relaySender(body?.sender);
-      // The rejected value is never echoed: an error that quotes what it
-      // refused is a way to read data back out of a write-only endpoint.
-      if (sender === undefined) return json({ error: 'bad_sender' }, 400);
+      const validatedSender = relaySender(body?.sender);
+      // Sender identity improves account placement, but the transaction is the
+      // asset. A Message/Contact object that Shortcuts failed to convert to
+      // Text must not turn the whole alert into an invisible 400. Keep the
+      // validator strict, discard only the unusable optional label, and parse
+      // the message through the same safe no-sender path older Shortcuts use.
+      const sender = validatedSender === undefined ? null : validatedSender;
 
       const isTest = text.trim() === RELAY_TEST_MESSAGE;
       // Selecting the pack and parsing is ONE synchronous block on purpose.
@@ -1490,9 +1493,9 @@ export default {
         }
       })();
       const validated = validateFeedback(parsed);
-      // The rejected value is never echoed, for the same reason a refused
-      // sender is not: an error that quotes what it refused turns a write-only
-      // endpoint into a way to read data back out of it.
+      // The rejected value is never echoed: an error that quotes what it
+      // refused turns a write-only endpoint into a way to read data back out
+      // of it.
       if (isFeedbackReject(validated)) {
         return json({ error: validated.error }, validated.status);
       }

@@ -52,13 +52,14 @@ cards ending in the same four digits at two banks are indistinguishable, and a
 payment can settle the wrong card's statement. Android reads this off the inbox
 row it scans, so this field is a prerequisite for iOS parity.
 
-It is a label and nothing else. The relay rejects a `sender` that is not a
+It is a label and nothing else. The relay discards a `sender` that is not a
 string, contains control characters or bidi overrides, or is longer than 80
-characters, with `400 bad_sender` and no echo of the value — putting the
-message body in this field fails the request rather than storing eighty
-characters of it. Accepted senders are trimmed, sealed to the user's devices
-alongside the parsed row, and stored in D1 only inside device-sealed ciphertext,
-never as plaintext or a queryable sender column.
+characters. It still accepts and parses the transaction without bank identity:
+putting a Contact object or message body in this optional field must neither
+store it nor silently lose the whole alert. Accepted senders are trimmed,
+sealed to the user's devices alongside the parsed row, and stored in D1 only
+inside device-sealed ciphertext, never as plaintext or a queryable sender
+column.
 
 The message text is still parsed and dropped. `sender` does not change that.
 

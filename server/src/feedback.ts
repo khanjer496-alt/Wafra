@@ -94,10 +94,9 @@ const textEncoder = new TextEncoder();
  * a Windows-ish client and an iOS one produce the same stored text; every other
  * C0/C1 codepoint and the bidi overrides are dropped.
  *
- * Dropped rather than refused, unlike the sender label in ingest-row.ts, and
- * the difference is intentional: a sender that contains a control character is
- * a malformed field and refusing it loses nothing, whereas refusing a whole bug
- * report because the user's keyboard emitted a stray U+200E loses the report.
+ * Dropped rather than rejecting the whole report. The sender validator in
+ * ingest-row.ts follows the same fail-soft boundary for its optional label:
+ * malformed metadata must not cost the underlying transaction or report.
  */
 function scrubProse(value: string): string {
   let out = '';

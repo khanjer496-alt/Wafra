@@ -693,15 +693,25 @@ const CARD_PAYMENT_DEBIT =
       plain.card.kind === 'unknown' && plain.sender === undefined,
       JSON.stringify(plain.card));
 
-    // Refused, not trimmed. Truncating an over-long value would store the first
-    // eighty characters of a bank message in a field meant to hold a bank name.
-    const overLong = await call(env, 'POST', '/v1/ingest', {
-      token: me.ingestToken, body: { text: AE_PURCHASE, sender: 'A'.repeat(500) },
+    // A malformed optional label must never cost the transaction. This is the
+    // shape Shortcuts can produce when Get Details of Messages -> Sender is
+    // passed as a Contact object instead of explicitly converted to Text.
+    const malformedSender = await pairDevice(env);
+    const contactObject = await call(env, 'POST', '/v1/ingest', {
+      token: malformedSender.ingestToken,
+      body: { text: AE_PURCHASE, sender: { name: 'ADCB' }, eventId: nextEvent() },
     });
-    ok('ingest: an over-long sender is refused, never truncated into the row',
-      overLong.status === 400);
-    ok('ingest: the refusal does not echo what it refused',
-      !(await overLong.text()).includes('AAAA'));
+    const overLong = await call(env, 'POST', '/v1/ingest', {
+      token: malformedSender.ingestToken,
+      body: { text: AE_PURCHASE, sender: 'A'.repeat(500), eventId: nextEvent() },
+    });
+    const malformedRows = (await syncOpened(env, malformedSender)).rows;
+    ok('ingest: a Contact object loses only the optional sender, not the transaction',
+      contactObject.status === 202 && malformedRows.length === 2,
+      `status=${contactObject.status} rows=${malformedRows.length}`);
+    ok('ingest: malformed senders are never truncated or sealed into a row',
+      overLong.status === 202 && malformedRows.every((row) => row.sender === undefined),
+      JSON.stringify(malformedRows.map((row) => row.sender)));
 
     // ── Timestamps ──
     const when = '2026-07-02T09:15:00.000Z';
@@ -1725,8 +1735,8 @@ const CARD_PAYMENT_DEBIT =
         (await bad({ ...REPORT, diagnostic: 'everything is broken' })).error === 'bad_diagnostic');
       ok('feedback: nothing malformed reached the database', count(env.DB, 'feedback') === 0);
 
-      // Same rule as the refused sender on /v1/ingest: an error that quotes
-      // what it refused is a way to read data back out of a write-only path.
+      // An error that quotes what it refused is a way to read data back out of
+      // a write-only path.
       const echo = await call(env, 'POST', '/v1/feedback', {
         body: { ...REPORT, platform: 'SECRET-CANARY-VALUE' },
       });

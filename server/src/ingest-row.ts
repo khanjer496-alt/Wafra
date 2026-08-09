@@ -16,10 +16,12 @@
  * the only thing this accepts. It is not the message and is never stored or
  * logged in plaintext. It exists in the relay queue only inside device-sealed
  * ciphertext and goes no further than the user's own devices.
- * A caller that sends anything else is refused rather than trimmed into shape,
- * because the failure mode of quietly truncating an over-long value is storing
- * the first eighty characters of a bank message in a field that was supposed
- * to hold a bank name.
+ * A caller that sends anything else loses the optional label rather than the
+ * transaction. It is never trimmed into shape: quietly truncating an over-long
+ * value could store the first eighty characters of a bank message in a field
+ * that was supposed to hold a bank name. The ingest route treats `undefined`
+ * as "parse without sender identity", so a broken Shortcut cannot silently
+ * discard the underlying bank alert.
  */
 
 /**
@@ -58,7 +60,7 @@ function unsafeSenderCodePoint(codePoint: number): boolean {
  * uses: `null` for "nothing to attach" — the field is absent, or it is empty
  * once trimmed, which is what an older Shortcut and a manual text test both
  * produce — a normalized string to attach, or `undefined` for "malformed,
- * refuse the request".
+ * discard this optional label". The request itself remains usable.
  */
 export function relaySender(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return null;
@@ -66,7 +68,7 @@ export function relaySender(value: unknown): string | null | undefined {
   for (const character of value) {
     if (unsafeSenderCodePoint(character.codePointAt(0) as number)) return undefined;
   }
-  // Internal runs collapse rather than reject: iOS sender labels legitimately
+  // Internal runs collapse rather than invalidate: iOS sender labels legitimately
   // contain non-breaking spaces, and a bank name is a bank name either way.
   const normalized = value.trim().replace(/\s+/g, ' ');
   if (!normalized) return null;

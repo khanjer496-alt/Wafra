@@ -36,9 +36,11 @@ the service must not be able to read:
 | `receivedAt` | The app's strong duplicate guard fingerprints the message timestamp together with the amount. While this was the relay's own receipt time, a Shortcut that fired twice produced two different fingerprints and the same charge landed twice. | A timestamp column is a record of when each device receives bank messages. |
 | `market` | Which pack the row was parsed under, so a mis-set country is diagnosable from the phone rather than only from the wire. | It is a fact about the user's country, and it costs nothing to keep it sealed. |
 
-`sender` is validated by `src/ingest-row.ts` before it is used, and a malformed
-or over-long value is **refused, never truncated** — truncating would store the
-first eighty characters of a bank message in a field meant to hold a bank name.
+`sender` is validated by `src/ingest-row.ts` before it is used. A malformed or
+over-long value is **discarded, never truncated**, while the transaction is
+still parsed without bank identity — truncating could store the first eighty
+characters of a bank message in a field meant to hold a bank name, while
+rejecting the request would silently lose the whole alert.
 `receivedAt` is honoured only when it is plausible: further than a day ahead or
 a year behind falls back to now, because a hand-edited value would either park a
 row at the top of the ledger forever or trip the app's 45-day stale-due cutoff.
