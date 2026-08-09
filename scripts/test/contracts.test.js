@@ -1308,6 +1308,43 @@ ok('the spoken label agrees with the sign on screen',
       if (/(^|[^.\w])inputs\s*\./.test(expr)) offenders.push(`${file}: ${expr.trim()}`);
     }
   }
+  /**
+   * And `runner` before the steps that own it.
+   *
+   * The same failure a second time, from a different context. `WORK: ${{
+   * runner.temp }}/feedback` in a job-level `env:` block is not a runtime
+   * error — `runner` exists only inside a step, so GitHub refused the whole
+   * file and the workflow never registered. The dispatch was accepted and
+   * matched nothing, exactly as before, and a schema validator passes it
+   * happily because the shape is fine and only the context is wrong.
+   *
+   * Checked positionally: a `runner.` expression must come after the `steps:`
+   * that introduces the scope it lives in. That under-reports in a file whose
+   * SECOND job declares env after the first job's steps — it would be missed —
+   * and it is still worth having, because the shape it does catch is the one
+   * that has now cost two deploys.
+   */
+  const earlyRunner = [];
+  for (const file of files) {
+    const lines = fs.readFileSync(path.join(dir, file), 'utf8').split('\n');
+    let stepsAt = -1;
+    lines.forEach((raw, n) => {
+      // Comments stripped first — a whole-line one, and a trailing one. The
+      // comment on the very line this check exists to protect NAMES the thing
+      // it forbids, and a scan that cannot tell prose from code would force
+      // that explanation to be deleted to stay green. The SQLCipher step-order
+      // check in db.test.js was broken the same way, by the same author, an
+      // hour earlier.
+      const line = /^\s*#/.test(raw) ? '' : raw.replace(/\s+#.*$/, '');
+      if (stepsAt < 0 && /^\s{4}steps:\s*$/.test(line)) stepsAt = n;
+      if (!/\$\{\{[^}]*(^|[^.\w])runner\s*\./.test(line)) return;
+      if (stepsAt < 0 || n < stepsAt) earlyRunner.push(`${file}:${n + 1}`);
+    });
+  }
+  ok('no workflow reads the runner context outside a step',
+    earlyRunner.length === 0,
+    earlyRunner.slice(0, 3).join(' | '));
+
   ok(`no workflow reads the bare inputs context (${files.length} files)`,
     offenders.length === 0,
     offenders.slice(0, 3).join(' | '));

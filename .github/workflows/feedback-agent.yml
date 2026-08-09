@@ -81,7 +81,14 @@ jobs:
       # https://code.claude.com/docs/en/authentication#generate-a-long-lived-token
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       GH_TOKEN: ${{ github.token }}
-      WORK: ${{ runner.temp }}/feedback
+      # NOT `${{ runner.temp }}`. The `runner` context exists only inside a
+      # step, and an expression using it in a job-level `env:` block is not a
+      # runtime error — GitHub refuses to LOAD the whole workflow, which means
+      # the file never registers and the repository_dispatch it exists for
+      # matches nothing. `RUNNER_TEMP` is the same value as an ordinary
+      # environment variable, available to every `run:` block, and needs no
+      # expression at all.
+      WORK: ${RUNNER_TEMP}/feedback
       # The agent CLI's flags live here so correcting them is one line rather
       # than an edit inside a shell step. See "Run the agent" for what about
       # them could not be verified.
