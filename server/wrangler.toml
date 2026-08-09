@@ -15,7 +15,7 @@ database_name = "wafra"
 # `npm run setup` (scripts/d1.mjs), which creates or finds the database and
 # applies schema.sql. `npm run deploy` refuses to run while this is still the
 # placeholder, so the failure is a sentence rather than a Cloudflare API error.
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "e0fcaf90-5eb3-4e5f-9b31-c4ed59803154"
 
 # Retry wake-only delivery twice an hour; the same job also sweeps expired rows.
 [triggers]
