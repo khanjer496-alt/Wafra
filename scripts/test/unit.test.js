@@ -4826,5 +4826,85 @@ eq('analytics: the category trend follows the split too',
   }
 }
 
+/* ── comparing this period against the last one, fairly ─────────────────────
+ *
+ * `categoryMovers` compared the elapsed part of the current period against the
+ * WHOLE of the previous one. That is not a comparison, it is a subtraction of
+ * two different-sized things, and it always leans the same way.
+ *
+ * The demonstration below is the one that made it undeniable: a ledger that
+ * spends an identical AED 100 every single day of both months, which any
+ * person would describe as "no change". On day sixteen the screen reported
+ * groceries DOWN AED 1,500 — and it said so every day of every month until the
+ * final one, when the bias silently vanished and the number jumped back.
+ *
+ * So the honest reading of "am I spending more than last month" was available
+ * exactly one day in thirty-one.
+ */
+{
+  const analytics = require('./build/analytics');
+  const period = require('./build/period');
+
+  const day = (m, d) => `2026-${m}-${String(d).padStart(2, '0')}`;
+  const flat = [];
+  let n = 0;
+  for (const m of ['07', '08']) {
+    for (let d = 1; d <= 31; d += 1) {
+      flat.push({
+        id: `t${(n += 1)}`,
+        type: 'expense',
+        amountFils: 10000, // AED 100, every day, both months
+        category: 'groceries',
+        accountId: 'a1',
+        title: `SHOP ${n}`,
+        date: day(m, d),
+      });
+    }
+  }
+  // Sixteen days into August, which is where the old comparison was worst.
+  const midAugust = flat.filter((t) => t.date <= day('08', 16));
+  const on16 = new Date(2026, 7, 16);
+
+  const movers = analytics.categoryMovers(flat.filter((t) => t.date <= day('08', 16)),
+    '2026-08', 4, undefined, undefined, on16);
+  const groceries = movers.find((m) => m.category === 'groceries');
+  eq('an identical month is not reported as a fall', groceries, undefined);
+
+  // And the like-for-like window itself: sixteen days of August compares
+  // against the FIRST sixteen days of July, not all thirty-one.
+  const window = period.comparablePreviousPeriod('2026-08', on16, midAugust);
+  eq('the comparison window starts where the previous period starts',
+    window && window.from, '2026-07-01');
+  eq('the comparison window is the same length as the elapsed period',
+    window && window.to, '2026-07-16');
+
+  // A period that has finished compares whole against whole.
+  const afterAugust = period.comparablePreviousPeriod('2026-08', new Date(2026, 8, 20), flat);
+  eq('a finished period compares against the whole previous one',
+    afterAugust && afterAugust.mode, 'month');
+
+  // A real change still reads as a change: double August's daily rate.
+  const doubled = midAugust.map((t) =>
+    t.date >= day('08', 1) ? { ...t, amountFils: 20000 } : t);
+  const up = analytics.categoryMovers(doubled, '2026-08', 4, undefined, undefined, on16);
+  const upGroceries = up.find((m) => m.category === 'groceries');
+  eq('doubling the daily rate is reported as a rise',
+    upGroceries && upGroceries.deltaFils, 160000);
+
+  /* ── and the case that must show nothing at all ── */
+
+  // One month of history. There is no previous period, and "+100% vs nothing"
+  // would be the app's loudest claim on its thinnest evidence.
+  const firstMonthOnly = flat.filter((t) => t.date >= day('08', 1) && t.date <= day('08', 16));
+  eq('a ledger with no history has no comparison',
+    analytics.periodComparison(firstMonthOnly, '2026-08', undefined, undefined, on16), null);
+
+  const cmp = analytics.periodComparison(midAugust, '2026-08', undefined, undefined, on16);
+  eq('a like-for-like comparison of identical months is zero', cmp && cmp.deltaFils, 0);
+  eq('and its ratio is zero, not null', cmp && cmp.ratio, 0);
+  eq('it knows it is comparing part of a period', cmp && cmp.partial, true);
+  eq('it names the previous period, not the date range', cmp && cmp.previousLabel, 'Jul 2026');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

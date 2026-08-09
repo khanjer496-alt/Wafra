@@ -47,6 +47,7 @@ import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
+import { periodComparison, type PeriodComparison } from '@/lib/analytics';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { getActiveMarket } from '@/lib/markets';
@@ -242,6 +243,28 @@ function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }
 }
 
 
+/**
+ * The comparison, as a sentence rather than a signed number.
+ *
+ * A bare "+4,890" needs the reader to work out the sign convention before it
+ * means anything, and on a spending figure the intuitive reading of a plus is
+ * backwards — more out is worse. The word does that work: "more out than Jul".
+ *
+ * Rounded to whole dirhams before the zero test, so a difference of eleven
+ * fils reads as "the same" rather than as a change nobody can see. The colour
+ * follows the same rule the rest of the app uses for money leaving.
+ */
+function comparisonSentence(c: PeriodComparison): string {
+  const amount = formatAmount(Math.abs(c.deltaFils), { decimals: false });
+  const period = c.previousLabel;
+  const same = Math.round(Math.abs(c.deltaFils) / 100) === 0;
+  if (same) return t(c.partial ? 'homeVsSamePartial' : 'homeVsSameWhole').replace('{period}', period);
+  const key = c.deltaFils > 0
+    ? (c.partial ? 'homeVsMorePartial' : 'homeVsMoreWhole')
+    : (c.partial ? 'homeVsLessPartial' : 'homeVsLessWhole');
+  return tf(key, { amount, period });
+}
+
 /* ── Hero ─────────────────────────────────────────────────────────────── */
 
 function Hero({
@@ -250,12 +273,14 @@ function Hero({
   netFils,
   incomeFils,
   expenseFils,
+  comparison,
 }: {
   period: Period;
   live: boolean;
   netFils: number;
   incomeFils: number;
   expenseFils: number;
+  comparison: PeriodComparison | null;
 }) {
   const theme = useTheme();
   const router = useRouter();
@@ -280,6 +305,30 @@ function Hero({
       <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
+
+      {/* The same period before this one, over the same number of days.
+          Rendered only when there is something honest to compare against —
+          `periodComparison` returns null for a ledger with no prior history,
+          and "+100% vs nothing" would be the loudest claim this screen makes
+          resting on the least evidence it has. Nothing is not a dash and not
+          a 0%; it is nothing. */}
+      {comparison && (
+        <ThemedText
+          type="meta"
+          style={[
+            styles.heroCompare,
+            {
+              color:
+                comparison.deltaFils === 0
+                  ? theme.textSecondary
+                  : comparison.deltaFils > 0
+                    ? theme.expense
+                    : theme.income,
+            },
+          ]}>
+          {comparisonSentence(comparison)}
+        </ThemedText>
+      )}
 
       {/* No card, no background. The figure IS the top of the screen. */}
       {Math.abs(netFils) >= 1_000_000_000 ? (
@@ -637,6 +686,16 @@ export default function HomeScreen() {
    * dirhams first and subtracting those is the only way the caption under them
    * can be checked by eye — which is the entire point of showing all three.
    */
+  /**
+   * Computed beside the hero and from the same ledger, so the sentence under
+   * the figure can never describe a different set of rows than the figure
+   * does. `isSpending` exclusions are passed through for the same reason.
+   */
+  const comparison = useMemo(
+    () => periodComparison(state.transactions, period, liveAccounts, internal),
+    [state.transactions, period, liveAccounts, internal],
+  );
+
   const hero = useMemo(() => {
     const expenseFils = composition(summary).totalFils;
     const incomeFils = Math.round(summary.incomeFils / 100) * 100;
@@ -737,6 +796,7 @@ export default function HomeScreen() {
           <Hero
             period={period}
             live={live}
+            comparison={comparison}
             // All three figures from one arithmetic, so the hero equals its
             // own two cells. It read "63,039 in, 8,815 out, saved 54,223" —
             // a subtraction that is off by one, in 40px type, at the top of
@@ -918,6 +978,7 @@ const styles = StyleSheet.create({
   liveDot: { width: 6, height: 6, borderRadius: 3 },
 
   heroLabel: { marginBottom: Spacing.two },
+  heroCompare: { marginTop: Spacing.two },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
   split: { flexDirection: 'row', marginTop: Spacing.four },
