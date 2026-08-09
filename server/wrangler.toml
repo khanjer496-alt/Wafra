@@ -61,19 +61,14 @@ head_sampling_rate = 0.1
 #     person who can, since the Worker secret is write-only after it is set.
 #
 # EXPO_PROJECT_ID, EMAIL_DOMAIN and GITHUB_REPOSITORY are not secret — they
-# belong in a [vars] block here, which is where the Worker reads them from.
-# They are commented out rather than left empty because each is a per-owner
-# value with no sensible default, and an empty string would deploy a Worker
-# that looks configured and silently registers no push tokens. Uncomment and
-# fill in:
+# belong in the [vars] block at the end of this file, which is where the
+# Worker reads them from. An empty string is worse than an absent key for all
+# three: it deploys a Worker that looks configured and silently does nothing.
 #
-# EXPO_PROJECT_ID = "00000000-0000-0000-0000-000000000000"  # the EAS project UUID the app uses
-# EMAIL_DOMAIN = "mail.example.com"                          # only if Email Routing is set up
+# EXPO_PROJECT_ID and GITHUB_REPOSITORY are now set there. EMAIL_DOMAIN stays
+# commented out until Email Routing is actually configured:
 #
-# GITHUB_REPOSITORY is set in the [vars] block at the end of this file. The
-# other two stay commented out until push wakes and Email Routing are actually
-# configured, because an empty string deploys a Worker that looks configured
-# and silently registers no push tokens.
+# EMAIL_DOMAIN = "mail.example.com"   # only once Email Routing points here
 #
 # Without EXPO_PROJECT_ID (or PUSH_TOKEN_KEY) the Worker refuses push
 # registration and sends no wakes; capture still works on foreground and
@@ -103,3 +98,15 @@ head_sampling_rate = 0.1
 # had nothing to point at.
 [vars]
 GITHUB_REPOSITORY = "khanjer496-alt/Wafra"
+# The EAS project the app is built against — the same UUID as
+# expo.extra.eas.projectId in app.json, and it must stay the same as it:
+# Expo's push service scopes a token to a project, so two values here and
+# there means every wake is addressed to a project the device is not
+# registered under, and nothing arrives.
+#
+# It was commented out until now, which is why the block above describes what
+# happens without it. That was the live state: the deployed Worker refused
+# push registration and sent no wakes at all. Nothing errored — capture kept
+# working on foreground and background sync, so the only symptom was alerts
+# arriving later than they should have, on a schedule nobody had chosen.
+EXPO_PROJECT_ID = "fa920e7b-c661-4517-917d-26e8b4878721"

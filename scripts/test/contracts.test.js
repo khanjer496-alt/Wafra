@@ -1304,6 +1304,76 @@ ok('the spoken label agrees with the sign on screen',
     'the relay wake is a remote-notification task; that is the mode it needs');
 }
 
+/* ── the one line without which neither platform can be built ───────────────
+ *
+ * `expo.extra.eas.projectId` is the UUID tying this checkout to a project on
+ * EAS servers. EAS CLI reads it from the app config and no environment
+ * variable substitutes for it, so without it `eas build --non-interactive`
+ * cannot resolve what it is building.
+ *
+ * It was added by "Link the app to an EAS project so it can be built", and it
+ * has never been on main: it lives on `integration/combine-prs` and was lost
+ * in the merge that rebuilt app.json. `ios-testflight.yml` therefore could
+ * never have worked from main, and the first run to get past its EXPO_TOKEN
+ * check died fourteen seconds later on this instead.
+ *
+ * Nothing in `npm test` covered it. `scripts/check-release-config.mjs` does,
+ * but that is `npm run release:check` — a command someone has to remember, at
+ * release time, which is months after the line goes missing. This is the same
+ * shape as the Info.plist rejection: a config value no test read, whose
+ * absence only ever surfaced from a build service.
+ *
+ * Its reach is wider than iOS. `EXPO_PROJECT_ID` in server/wrangler.toml is
+ * the relay's copy of this same UUID, and the Worker refuses push
+ * registration without it — so a missing projectId also means silent
+ * no-op push on both platforms.
+ */
+{
+  const app = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../../app.json'), 'utf8'),
+  ).expo ?? {};
+  const projectId = app.extra?.eas?.projectId ?? '';
+  ok('app.json links the app to an EAS project',
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId),
+    `expo.extra.eas.projectId is ${projectId ? `"${projectId}"` : 'missing'}`);
+  // The bundle identifier is the other half a build cannot start without, and
+  // unlike the UUID it can never be changed after the first submission.
+  ok('app.json declares the iOS bundle identifier',
+    app.ios?.bundleIdentifier === 'app.wafra.ios',
+    `expo.ios.bundleIdentifier is ${app.ios?.bundleIdentifier ?? 'missing'}`);
+
+  /**
+   * And the relay's copy of the same UUID is the same UUID.
+   *
+   * Expo's push service scopes a token to a project. The app registers under
+   * `expo.extra.eas.projectId`; the Worker addresses wakes using
+   * `EXPO_PROJECT_ID` from server/wrangler.toml. Two different values means
+   * every wake is sent to a project the device is not registered under —
+   * accepted by the API, delivered to nobody.
+   *
+   * There is no error to see. Capture keeps working on foreground and
+   * background sync, so the only symptom is alerts arriving later than they
+   * should, on a schedule nobody chose. Nothing on either side can notice,
+   * because neither file can see the other; a test is the only place the two
+   * are ever compared.
+   */
+  const wrangler = fs.readFileSync(
+    path.join(__dirname, '../../server/wrangler.toml'),
+    'utf8',
+  );
+  // The [vars] assignment, not the prose above it — the comment block there
+  // spells out a placeholder UUID, and a scan that could not tell them apart
+  // would pass on the documentation rather than the configuration.
+  const relayId = wrangler
+    .split('\n')
+    .filter((line) => !/^\s*#/.test(line))
+    .map((line) => line.match(/^\s*EXPO_PROJECT_ID\s*=\s*"([^"]+)"/)?.[1])
+    .find(Boolean) ?? '';
+  ok('the relay is pointed at the same EAS project as the app',
+    relayId === projectId,
+    `wrangler.toml has ${relayId || '(unset — the Worker registers no push tokens)'}, app.json has ${projectId}`);
+}
+
 /* ── a workflow that GitHub cannot load fails silently ──────────────────────
  *
  * `feedback-agent.yml` answers `repository_dispatch`, and it referenced the
@@ -1437,6 +1507,110 @@ ok('the spoken label agrees with the sign on screen',
   ok(`no workflow reads the bare inputs context (${files.length} files)`,
     offenders.length === 0,
     offenders.slice(0, 3).join(' | '));
+}
+
+/* ── what the prompt demands, the flags must permit ─────────────────────────
+ *
+ * feedback-agent.yml hands the agent a prompt that requires it to run
+ * `npm test` and to write `$RUNNER_TEMP/feedback/SUMMARY.md`. The flags it ran
+ * under granted neither: `--permission-mode acceptEdits` allows unprompted
+ * file edits inside the checkout and nothing more — no shell, and nothing
+ * outside the workspace — and `--print` means there is no human to approve
+ * either one, so both were refused mid-turn.
+ *
+ * Nothing about that looked like a misconfiguration. The agent found a real
+ * defect, added a real failing test, wrote a real fix, and the red-then-green
+ * gate went green on all of it. The run then died at the summary gate, seven
+ * minutes and two full suite runs later, and the only account of why was one
+ * sentence of the agent's own prose in the log.
+ *
+ * These two files are edited independently — one is YAML, one is a template
+ * string — and the coupling between them is invisible in either. So it is
+ * asserted: read what the prompt asks for out of the prompt, and require the
+ * workflow to grant exactly that.
+ */
+{
+  const root = path.join(__dirname, '../..');
+  const wfPath = '.github/workflows/feedback-agent.yml';
+  const promptPath = '.github/scripts/feedback-prompt.mjs';
+  const prompt = fs.readFileSync(path.join(root, promptPath), 'utf8');
+  // Whole-line comments dropped before anything is matched. The comment block
+  // above this check, and the one in the workflow, both NAME the flags at
+  // issue; a scan that cannot tell prose from code would force the
+  // explanations to be deleted to stay green. Third time this file has had to
+  // learn that.
+  const wf = fs.readFileSync(path.join(root, wfPath), 'utf8')
+    .split('\n')
+    .map((line) => (/^\s*#/.test(line) ? '' : line))
+    .join('\n');
+
+  // Anchored on the invocation itself, not on the flags appearing anywhere in
+  // the file, so a flag mentioned in prose cannot satisfy it.
+  const invocation = (wf.match(/^\s*claude \$CLAUDE_ARGS\b.*$/m) ?? [''])[0];
+  const args = (wf.match(/^\s*CLAUDE_ARGS:\s*'([^']*)'/m) ?? [null, ''])[1];
+  ok('the agent is actually invoked', invocation.length > 0 && args.length > 0, wfPath);
+
+  // The prompt names the summary as a path under the work directory it is
+  // given. A path outside the checkout needs --add-dir; the CLI refuses to
+  // write there otherwise, and refuses quietly enough that the first sign is
+  // a missing file two steps later.
+  const writesOutsideCheckout = /\$\{workDir\}\/SUMMARY\.md/.test(prompt);
+  ok('the prompt asks for a summary outside the checkout', writesOutsideCheckout, promptPath);
+  ok('the agent is given access to the directory the prompt tells it to write into',
+    !writesOutsideCheckout || /--add-dir\s+"\$WORK"/.test(invocation),
+    `${wfPath}: claude ... --add-dir "$WORK"`);
+
+  // Same shape for the shell. `acceptEdits` is not a superset of Bash.
+  const bypass = /--permission-mode\s+bypassPermissions|--dangerously-skip-permissions/.test(args);
+  // Variadic, so the list runs from the flag to the next one. Commas are split
+  // as well as spaces: the CLI accepts both spellings, and a guard that
+  // understood only one would fail a correct file.
+  const allowed = [];
+  for (const token of ((args.match(/--allowed-tools\s+(.*)$/) ?? [null, ''])[1]).split(/[\s,]+/)) {
+    if (!token) continue;
+    if (token.startsWith('--')) break;
+    allowed.push(token);
+  }
+  const needsShell = /npm test/.test(prompt);
+  ok('the prompt requires the agent to run the suite', needsShell, promptPath);
+  ok('the agent is permitted the shell the prompt requires',
+    !needsShell || bypass || allowed.includes('Bash'),
+    `${wfPath}: CLAUDE_ARGS = ${args}`);
+  // Write is separately gated from Edit, and SUMMARY.md is a new file.
+  ok('the agent is permitted to create files, not only edit them',
+    bypass || (allowed.includes('Write') && allowed.includes('Edit')),
+    `${wfPath}: CLAUDE_ARGS = ${args}`);
+
+  /**
+   * And the agent's own prose stays off the public log.
+   *
+   * Rule 1 at the top of that workflow is that the user's words do not leave
+   * the runner, and the file broke it: the agent's stdout was `| tee`'d, so
+   * every sentence it wrote after reading a bank alert went straight into an
+   * Actions log that is as public as the repository. The verbatim gate cannot
+   * help — it guards the pull request body and the diff, both of which come
+   * later. Redirect, never tee.
+   */
+  ok('the agent output is captured, not published',
+    />\s*"\$WORK\/agent\.log"/.test(invocation) && !/\btee\b/.test(invocation),
+    `${wfPath}: ${invocation.trim()}`);
+
+  /**
+   * And a refused pull request does not take the summary down with it.
+   *
+   * `gh pr create` is the last call of the run. On a repository with "Allow
+   * GitHub Actions to create and approve pull requests" turned off it answers
+   * `not permitted`, and under `set -e` that ended the step — after the agent
+   * turn, two full suite runs and the verbatim gate had all passed, and with
+   * the branch already on the remote. Everything of value survived except the
+   * one thing that only existed in $RUNNER_TEMP: the body.
+   *
+   * It is safe to print at that point and only at that point, because the
+   * verbatim gate two steps earlier has already cleared it.
+   */
+  ok('a refused pull request still publishes the body it would have used',
+    /cat "\$WORK\/pr-body\.md"/.test(wf) && /compare\/\$\{branch\}/.test(wf),
+    `${wfPath}: the gh failure path must survive to write the summary`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
