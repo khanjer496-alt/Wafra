@@ -1436,6 +1436,43 @@ ok('the spoken label agrees with the sign on screen',
     `wrangler.toml has ${relayId || '(unset — the Worker registers no push tokens)'}, app.json has ${projectId}`);
 }
 
+/* ── weight comes from the face, not from fontWeight ────────────────────────
+ *
+ * The two platforms disagree about what `fontWeight` means on top of a named
+ * font family, and the disagreement is visible rather than theoretical.
+ *
+ * iOS applies it: CoreText synthesises a heavier rendering over the pinned
+ * face. Android matches a font by family NAME only, and each Geist cut is
+ * registered as its own family with no weight variants, so the same declaration
+ * is ignored. Thirteen call sites carried one, across Transactions, Bills,
+ * Wallet and Add transaction, and every one of them drew heavier on iOS than
+ * on Android from the same commit.
+ *
+ * Eight of the thirteen were worse than that: they were TextInput styles with
+ * no fontFamily at all, so they rendered in the SYSTEM face — San Francisco on
+ * one platform, Roboto on the other — rather than in Geist on either.
+ *
+ * A pinned family is also the only form `arabicRescue` in themed-text.tsx can
+ * see. It swaps a Latin face for the Arabic one when the string needs it,
+ * because the bundled Geist cuts have no Arabic coverage and draw empty boxes;
+ * `fontWeight` gives it nothing to act on.
+ */
+{
+  const offenders = [];
+  for (const file of sources('src')) {
+    const rel = path.relative(ROOT, file);
+    const text = fs.readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+    for (const m of text.matchAll(/fontWeight\s*:/g)) {
+      offenders.push(`${rel}:${text.slice(0, m.index).split('\n').length}`);
+    }
+  }
+  ok('no style sets fontWeight; weight is a named Geist face',
+    offenders.length === 0,
+    offenders.slice(0, 4).join(' | '));
+}
+
 /* ── a workflow that GitHub cannot load fails silently ──────────────────────
  *
  * `feedback-agent.yml` answers `repository_dispatch`, and it referenced the

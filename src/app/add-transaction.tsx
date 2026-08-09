@@ -15,7 +15,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Fonts, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   },
   amountInput: {
     fontSize: 52,
-    fontWeight: '800',
+    fontFamily: Fonts.monoSemi,
     minWidth: 120,
     textAlign: 'center',
     padding: 0,
@@ -391,7 +391,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 15,
-    fontWeight: '500',
+    fontFamily: Fonts.sansMedium,
   },
   footer: {
     padding: Spacing.three,
