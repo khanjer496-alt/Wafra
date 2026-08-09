@@ -1614,7 +1614,14 @@ if (!workflow) {
 } else {
   const prebuildAt = workflow.indexOf('expo prebuild');
   const guardAt = workflow.search(/expo\\?\.sqlite\\?\.useSQLCipher=true/);
-  const gradleAt = workflow.indexOf('assembleRelease');
+  // The invocation, not the word. This was `indexOf('assembleRelease')`, which
+  // takes the first occurrence ANYWHERE — so a comment further up the file
+  // that merely named the step moved `gradleAt` above the guard and failed
+  // this assertion, reporting a plaintext-ledger risk that did not exist. A
+  // security check that cries wolf at prose is one people learn to re-run
+  // until it passes. The property is unchanged: the guard must sit between
+  // prebuild and the command that actually builds.
+  const gradleAt = workflow.search(/^\s*run:\s*\.\/gradlew\s+assembleRelease/m);
 
   ok('the release workflow verifies SQLCipher after prebuild',
     guardAt !== -1,

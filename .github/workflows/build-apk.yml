@@ -38,7 +38,7 @@ jobs:
       # launches a browser, so skip the browser download during npm ci.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
       # Expo INLINES every EXPO_PUBLIC_* value at bundle time, and Metro bundles
-      # inside `gradlew assembleRelease` below — so a value absent from this
+      # inside the Gradle release step below — so a value absent from this
       # environment is absent from the APK, with no build error to say so.
       #
       # eas.json sets this for EAS builds and nothing set it here, so every APK
