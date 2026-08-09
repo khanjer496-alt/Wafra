@@ -114,9 +114,9 @@ const enc = new TextEncoder();
  * look like it changed nothing, and the suite would go green for the wrong
  * reason — the queue would simply always appear empty.
  */
-function makeDb() {
+function makeDb(transformSchema = (sql) => sql) {
   const db = new DatabaseSync(':memory:');
-  db.exec(fs.readFileSync(path.join(repoRoot, 'server', 'schema.sql'), 'utf8'));
+  db.exec(transformSchema(fs.readFileSync(path.join(repoRoot, 'server', 'schema.sql'), 'utf8')));
   const statement = (sql, params = []) => ({
     bind: (...values) => statement(sql, values),
     first: async () => db.prepare(sql).get(...params) ?? null,
@@ -1853,6 +1853,43 @@ const CARD_PAYMENT_DEBIT =
     const env = { DB: makeDb() };
     const health = await call(env, 'GET', '/v1/health');
     ok('health: 200 and ok', health.status === 200 && (await health.json()).ok === true);
+
+    /* ── and it has to be able to say no ──────────────────────────────────
+     *
+     * `/v1/health` used to be `return json({ ok: true })` with no database in
+     * it, so it reported healthy while production could not pair a single new
+     * device: the remote D1 was two additive columns behind schema.sql and
+     * `POST /v1/pair` threw Cloudflare's 500 HTML. The deploy runbook's
+     * verification step is to curl this endpoint, so the drift passed both the
+     * deploy and its own check.
+     *
+     * Drop each column the request path needs and the endpoint must refuse.
+     * Named columns rather than `SELECT 1`, because the outage was columns and
+     * `SELECT 1` would have passed then too.
+     */
+    //
+    // Built from a schema.sql with the column removed rather than by ALTER
+    // TABLE DROP COLUMN, which SQLite refuses for the last column of a table.
+    // It is also the truer reproduction: production was not a dropped column,
+    // it was a database created before the column was added.
+    const withoutColumn = (column) => (sql) =>
+      sql
+        .split('\n')
+        .filter((line) => !new RegExp(`^\\s*${column}\\s`).test(line))
+        .join('\n')
+        // The removed line may have been the last in its table, leaving the
+        // previous line's comma dangling before the closing bracket — with the
+        // column's own explanatory comment still sitting between the two.
+        .replace(/,(\s*(?:--[^\n]*\n\s*)*\))/g, '$1');
+
+    for (const [table, column] of [['devices', 'market'], ['push_registrations', 'push_sent_at']]) {
+      const drifted = makeDb(withoutColumn(column));
+      const res = await call({ DB: drifted }, 'GET', '/v1/health');
+      const body = await res.json();
+      ok(`health: refuses when ${table}.${column} is missing`,
+        res.status === 503 && body.ok === false && body.error === 'schema_drift',
+        `${res.status} ${JSON.stringify(body)}`);
+    }
     ok('routing: an unknown path is 404', (await call(env, 'GET', '/v1/nope')).status === 404);
     ok('routing: the right path with the wrong method is 404',
       (await call(env, 'GET', '/v1/pair')).status === 404);
