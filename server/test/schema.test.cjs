@@ -33,9 +33,9 @@
 //   * imports.ts and ingest-row.ts contain no console.*, no D1, no writeFile,
 //     no INSERT — i.e. the parsing modules have no persistence or logging
 //     SURFACE. There is no request that makes a console.log observable.
-//   * a refused sender is never echoed back in any 4xx body. The behavioural
-//     suite checks the responses it provokes; this checks every response shape
-//     the file can produce.
+//   * a malformed sender is never serialized or echoed. The behavioural suite
+//     checks the response and opened row; this checks every response shape the
+//     file can produce.
 //   * `raw` leaves the parsed row by SPREAD rather than by allow-list, so a
 //     field the parser gains later still reaches the phone. The failure mode
 //     is a field that does not exist yet, so nothing can drive it.
@@ -150,10 +150,10 @@ ok('the last owner requires explicit vault deletion',
 ok('the Shortcut sender is validated by one module, not inline in the route',
   /import \{ relaySender \} from '\.\/ingest-row';/.test(worker) &&
     /export function relaySender\(value: unknown\): string \| null \| undefined/.test(ingestRow));
-ok('a malformed sender is refused before the row is built',
-  /const sender = relaySender\(body\?\.sender\);/.test(ingest) &&
-    /if \(sender === undefined\) return json\(\{ error: 'bad_sender' \}, 400\);/.test(ingest) &&
-    ingest.indexOf("error: 'bad_sender'") < ingest.indexOf('const rowWithReceipt'));
+ok('a malformed sender is dropped before the row is built, not the transaction',
+  /const validatedSender = relaySender\(body\?\.sender\);/.test(ingest) &&
+    /const sender = validatedSender === undefined \? null : validatedSender;/.test(ingest) &&
+    !/bad_sender/.test(ingest));
 ok('sender stays optional, so older Shortcut payloads still ingest',
   /sender\?: unknown/.test(worker) && /if \(value === undefined \|\| value === null\) return null;/.test(ingestRow));
 ok('the sender is bounded and never truncated into the row',
@@ -163,7 +163,7 @@ ok('the sender reaches the sealed row and nothing else',
   /\.\.\.\(!isTest && sender \? \{ sender \} : \{\}\),/.test(ingest) &&
     !/\.bind\([^)]*\bsender\b/.test(worker) &&
     !/\bsender\w*\s+(?:TEXT|BLOB|INTEGER)\b/i.test(schema));
-ok('a refused sender is not echoed back to the caller',
+ok('a malformed sender is not echoed back to the caller',
   !/json\(\{[^}]*\bsender\b[^}]*\}, 4\d\d\)/.test(worker));
 ok('the sender module has no persistence or logging surface',
   !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(ingestRow));
