@@ -355,7 +355,15 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
     '@/lib/theme-preference': { setThemePreference() {} },
     '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
-    '@/lib/markets': { detectMarketId: () => 'AE', setActiveMarket() {} },
+    // `setActiveMarket` returns whether the pack was applied: it refuses a pack
+    // denominated differently from money the ledger already holds. The stub
+    // says yes, which is the empty-ledger answer these fixtures start from.
+    '@/lib/markets': {
+      detectMarketId: () => 'AE',
+      setActiveMarket: () => true,
+      setLedgerCurrency() {},
+      marketCurrencyCode: (id) => (id === 'SA' ? 'SAR' : 'AED'),
+    },
     '@/lib/seed': { generateSeedTransactions: () => [], SEED_ACCOUNTS: [], SEED_BUDGETS: [] },
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
@@ -765,9 +773,16 @@ const tx = (id, extra = {}) => ({
   const editedBefore = JSON.stringify(edited);
   const migrated = hydration.migratePersistedState({ transactions: [stale, ...neighbours] });
   const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
-  ok('hydration clears only the stale rawless SMS inward-remittance transfer flag',
+  // A raw-bearing row used to be left alone here, on the reasoning that it
+  // could reparse its way out. It could not: healing only ever ADDS the
+  // transfer flag and never clears it, so those rows stayed stranded and their
+  // income never counted. The parser no longer flags a remittance at all — the
+  // ledger pairs it or keeps it as income — so every SMS row of this shape is
+  // released. What must still be protected is unchanged: a row the user edited,
+  // a manual entry, and a differently-titled "Incoming transfer".
+  ok('hydration clears the stale SMS inward-remittance transfer flag, raw or not',
     byId.has(stale.id) && !('isTransfer' in byId.get(stale.id)) &&
-      byId.get('raw-remittance')?.isTransfer === true &&
+      !('isTransfer' in byId.get('raw-remittance')) &&
       byId.get('manual-remittance')?.isTransfer === true &&
       byId.get('incoming-transfer')?.isTransfer === true);
   ok('the inward-remittance migration keeps userEdited rows byte-for-byte',
@@ -1599,7 +1614,14 @@ if (!workflow) {
 } else {
   const prebuildAt = workflow.indexOf('expo prebuild');
   const guardAt = workflow.search(/expo\\?\.sqlite\\?\.useSQLCipher=true/);
-  const gradleAt = workflow.indexOf('assembleRelease');
+  // The invocation, not the word. This was `indexOf('assembleRelease')`, which
+  // takes the first occurrence ANYWHERE — so a comment further up the file
+  // that merely named the step moved `gradleAt` above the guard and failed
+  // this assertion, reporting a plaintext-ledger risk that did not exist. A
+  // security check that cries wolf at prose is one people learn to re-run
+  // until it passes. The property is unchanged: the guard must sit between
+  // prebuild and the command that actually builds.
+  const gradleAt = workflow.search(/^\s*run:\s*\.\/gradlew\s+assembleRelease/m);
 
   ok('the release workflow verifies SQLCipher after prebuild',
     guardAt !== -1,
@@ -1650,10 +1672,11 @@ if (!workflow) {
     '@/lib/sms-parser': require('./build/sms-parser'),
     '@/lib/heal': require('./build/heal'),
     '@/lib/ledger': require('./build/ledger'),
-    '@/lib/markets': {
-      detectMarketId: () => 'AE',
-      setActiveMarket: require('./build/markets').setActiveMarket,
-    },
+    // The real pack module, with only the device-locale probe pinned. Naming
+    // its exports one at a time here meant every export the hydration path
+    // later reached for — the ledger-currency pin among them — arrived as
+    // `undefined` at call time rather than as a missing-stub failure.
+    '@/lib/markets': { ...require('./build/markets'), detectMarketId: () => 'AE' },
   });
   const { parserCoverage } = require('./build/accuracy');
   const { normalizeServiceName } = require('./build/sms-parser');

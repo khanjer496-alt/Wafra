@@ -39,6 +39,68 @@ export function crossChannelKey(date: string, amountFils: number, type: string):
   return `${date}|${amountFils}|${type}`;
 }
 
+/**
+ * Titles a capture can carry that name no merchant at all.
+ *
+ * A bank push often says only "Card purchase"; the SMS about that same charge
+ * says "COSTA COFFEE". Those two legitimately describe one event, which is why
+ * the cross-channel fingerprint drops the title. But dropping it entirely made
+ * every AED 25 charge within two minutes of another AED 25 charge the same
+ * event, and the loser was deleted rather than shown — so the title is ignored
+ * only when one side does not state one.
+ */
+const GENERIC_CAPTURE_TITLES = new Set([
+  'card purchase',
+  'card transaction',
+  'purchase',
+  'transaction',
+  // Below this line: sms-parser's STRUCTURAL_TITLES, lowercased — every title
+  // the parser assigns from the SHAPE of a message rather than from a merchant
+  // it read. The salary SMS says "Incoming transfer" and the bank's push about
+  // it says "Salary credited"; neither names a party, so neither can be
+  // compared to one.
+  //
+  // Restated rather than imported ON PURPOSE: this module has no dependencies
+  // beyond types, which db.test.js asserts by loading it with a require() that
+  // throws. import-plan.test.js pins the two lists in sync instead. Drift here
+  // fails safe — a title that stops being treated as generic under-merges, and
+  // a visible duplicate is always better than a charge that disappears.
+  'atm withdrawal',
+  'bank fee',
+  'vat fee',
+  'cash deposit',
+  'cheque',
+  'parking',
+  'outgoing transfer',
+  'incoming transfer',
+  'refund',
+  'inward remittance',
+  'bank transfer',
+  'card payment',
+  'account debit',
+  'telegraphic transfer',
+  'outward remittance',
+  'mobile recharge',
+]);
+
+/**
+ * Whether a push title and an SMS title can be describing one merchant.
+ *
+ * Deliberately generous in one direction only: the two channels truncate the
+ * same trade name differently ("The One" / "The One Home"), so a whole-word
+ * prefix counts, but two names that share no prefix are two merchants and
+ * must stay two rows.
+ */
+export function sameMerchantCapture(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (!x || !y) return true;
+  if (x === y) return true;
+  if (GENERIC_CAPTURE_TITLES.has(x) || GENERIC_CAPTURE_TITLES.has(y)) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return long.startsWith(`${short} `);
+}
+
 export type CaptureChannel = 'inbox' | 'delivery' | 'push';
 
 export interface DuplicateCandidate {
@@ -74,6 +136,17 @@ export interface DuplicateGuard {
    * shortly after notification access was granted.
    */
   supersedes(c: DuplicateCandidate): string | null;
+  /**
+   * Mark a superseded push row as spent.
+   *
+   * `supersedes` is a QUESTION and is asked twice about the same message, so
+   * it cannot consume anything itself. The caller says so once it has acted.
+   * Without this, one push row answered every SMS of the same value in the
+   * next two minutes: each SMS queued a patch against the SAME id, the store
+   * keyed those patches by id and kept the last, and two genuine charges
+   * became one row — with the first message's money simply gone.
+   */
+  consume(id: string): void;
   /** Record it, so the rest of this same batch dedupes against it too. */
   add(c: DuplicateCandidate): void;
 }
@@ -105,6 +178,30 @@ interface SeenEvent {
   ts: number | null;
   channel: CaptureChannel;
   id?: string;
+  /** What this capture called the merchant, for the compatibility test above. */
+  title: string;
+  /** A title the user typed says nothing about the merchant; skip the test. */
+  userEdited?: boolean;
+  /** One capture explains one event on the other channel, not every one. */
+  consumed?: boolean;
+}
+
+/**
+ * Whether a stored capture and an incoming one can be one event, merchant-wise.
+ *
+ * A title the user typed is not a merchant name at all — the ledger row may
+ * read "Weekly shop" — so an edited row is held to the money and the clock
+ * only, exactly as before.
+ */
+function crossChannelPair(row: SeenEvent, title: string): boolean {
+  return row.userEdited === true || sameMerchantCapture(row.title, title);
+}
+
+/** One occurrence filed under a day/amount/title fingerprint. */
+interface SeenOccurrence {
+  ts: number | null;
+  /** A row with no event clock explains one later capture, not all of them. */
+  consumed: boolean;
 }
 
 interface SeenCardPayment {
@@ -137,11 +234,11 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
 
 export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
   /** dedupeKey → the capture times filed under it. */
-  const seen = new Map<string, (number | null)[]>();
+  const seen = new Map<string, SeenOccurrence[]>();
   const note = (key: string, ts: number | null) => {
     const at = seen.get(key);
-    if (at) at.push(ts);
-    else seen.set(key, [ts]);
+    if (at) at.push({ ts, consumed: false });
+    else seen.set(key, [{ ts, consumed: false }]);
   };
   for (const t of existing) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
@@ -152,10 +249,13 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
   const seenSms = new Set(existing.map((t) => t.smsKey).filter(Boolean) as string[]);
   /** A day/amount/direction key still needs a capture time to identify an event. */
   const crossChannel = new Map<string, SeenEvent[]>();
+  /** Ledger rows by id, so `consume` does not have to scan every bucket. */
+  const crossById = new Map<string, SeenEvent>();
   const noteCross = (key: string, event: SeenEvent) => {
     const rows = crossChannel.get(key);
     if (rows) rows.push(event);
     else crossChannel.set(key, [event]);
+    if (event.id) crossById.set(event.id, event);
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
   const cardPayments = new Map<string, SeenCardPayment[]>();
@@ -176,6 +276,8 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
         channel: t.viaPush ? 'push' : 'inbox',
         id: t.id,
+        title: t.title,
+        userEdited: t.userEdited,
       });
     }
     if (t.cardPaymentSide) {
@@ -226,7 +328,12 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           rows.some(
             (row) =>
               row.side === c.cardPaymentSide &&
-              row.date === c.date &&
+              // Seconds apart, but either side of midnight: the provider
+              // stamped 23:59:58 and the delivery receiver 00:00:03, so an
+              // exact date test filed one settlement as two. The event window
+              // is what separates the copies from a genuine repeat — a real
+              // second payment is minutes away, not seconds.
+              sameOrAdjacentDate(row.date, c.date) &&
               row.title.toLowerCase() === c.title.toLowerCase() &&
               closeEnough(row.ts, mine, SAME_EVENT_MS),
           )
@@ -239,7 +346,18 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           // to be two separate visits. Without this the second identical charge
           // of the day was silently dropped and the user's spending under-read
           // — the comment here claimed both rows survived; the code kept one.
-          if (mine === null || at.some((t) => t === null || Math.abs(t - mine) <= SAME_EVENT_MS)) {
+          if (mine === null) return true;
+          if (at.some((o) => o.ts !== null && Math.abs(o.ts - mine) <= SAME_EVENT_MS)) {
+            return true;
+          }
+          // A row with no event clock at all — every manually added row, since
+          // add-transaction and the card-payment sheet write no `ts`. It does
+          // explain the bank's message about it, but only ONE of them: treating
+          // it as a permanent day-long veto meant a user who logged an AED 400
+          // Salik top-up by hand lost the genuine second one nine hours later.
+          const timeless = at.find((o) => o.ts === null && !o.consumed);
+          if (timeless) {
+            timeless.consumed = true;
             return true;
           }
         }
@@ -250,11 +368,20 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       // second, `supersedes` replaces the push row instead of dropping this.
       if (c.channel === 'push') {
         const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
-        if (
-          rows.some(
-            (row) => row.channel !== 'push' && closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
-          )
-        ) return true;
+        const match = rows.find(
+          (row) =>
+            row.channel !== 'push' &&
+            !row.consumed &&
+            crossChannelPair(row, c.title) &&
+            closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
+        );
+        if (match) {
+          // One SMS row accounts for one notification. Left uncounted, a
+          // single AED 25 SMS silenced every AED 25 push in the next two
+          // minutes, and the second real charge was never imported at all.
+          match.consumed = true;
+          return true;
+        }
       }
       return false;
     },
@@ -264,12 +391,22 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
       let best: SeenEvent | null = null;
       for (const row of rows) {
-        if (row.channel !== 'push' || !row.id || !closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS)) {
+        if (
+          row.channel !== 'push' ||
+          !row.id ||
+          row.consumed ||
+          !crossChannelPair(row, c.title) ||
+          !closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS)
+        ) {
           continue;
         }
         if (!best || Math.abs(row.ts! - mine!) < Math.abs(best.ts! - mine!)) best = row;
       }
       return best?.id ?? null;
+    },
+    consume(id) {
+      const row = crossById.get(id);
+      if (row) row.consumed = true;
     },
     add(c) {
       const ts = candidateTime(c);
@@ -279,6 +416,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         ts,
         channel: c.channel ?? 'inbox',
         id: c.id,
+        title: c.title,
       });
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
         noteCardPayment(`${c.amountFils}|${c.accountId}`, {
@@ -400,7 +538,17 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       ) return false;
       const priorTime = timeOf(prior);
       if (row.viaPush !== prior.viaPush && (row.viaPush || prior.viaPush)) {
-        return !bothEdited && closeEnough(rowTime, priorTime, CROSS_CHANNEL_EVENT_MS);
+        return (
+          !bothEdited &&
+          // Money, day and direction are not an event identity on their own.
+          // A push that says only "Card purchase" pairs with any SMS title,
+          // but two rows that each NAME a different merchant are two charges,
+          // and this branch was deleting one of them on every hydrate.
+          (Boolean(row.userEdited) ||
+            Boolean(prior.userEdited) ||
+            sameMerchantCapture(row.title, prior.title)) &&
+          closeEnough(rowTime, priorTime, CROSS_CHANNEL_EVENT_MS)
+        );
       }
       return (
         !row.userEdited &&
@@ -430,6 +578,16 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     kept[duplicateAt] = {
       ...secondary,
       ...preferred,
+      // `viaPush` has to be assigned, not spread.
+      //
+      // A persisted SMS row has NO viaPush key — it is written as
+      // `p.channel === 'push' || undefined` and JSON.stringify drops
+      // undefined-valued keys — so spreading the preferred SMS row over the
+      // push row could not clear `viaPush: true`. The merged row therefore
+      // came back from storage still looking like a push capture, took the
+      // cross-channel branch above on the NEXT hydrate, and ate another
+      // genuine charge. Every launch, compounding.
+      viaPush: preferred.viaPush,
       // Preserve optional user-facing detail if only the poorer capture had
       // it; neither row is userEdited, but old builds could attach a note.
       ...(preferred.userEdited

@@ -54,7 +54,7 @@ Module._resolveFilename = function (request, ...rest) {
 //    instead of like the coverage hole it is. When run.sh supplies them this
 //    loop does nothing.
 if (fs.existsSync(buildDir)) {
-  for (const name of ['ingest-row', 'imports', 'push']) {
+  for (const name of ['ingest-row', 'imports', 'push', 'feedback']) {
     const compiled = path.join(buildDir, `${name}.js`);
     if (fs.existsSync(compiled)) continue;
     const source = path.join(repoRoot, 'server', 'src', `${name}.ts`);
@@ -140,6 +140,7 @@ function makeDb() {
 const ALL_TABLES = [
   'vaults', 'devices', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
+  'feedback', 'feedback_limits',
 ];
 
 /** Every byte the database holds, for the "nothing readable is stored" checks. */
@@ -1500,6 +1501,340 @@ const CARD_PAYMENT_DEBIT =
       old.receivedAt.slice(0, 10) === '2019-05-06', old.receivedAt);
     ok('statement: a future-dated row is clamped to now rather than poisoning lastScanTs',
       Date.parse(future.receivedAt) <= Date.now(), future.receivedAt);
+  }
+
+  /* ═══════════ Feedback: the transport half of feedback → agent → PR ═══════════
+   *
+   * The only write path on this service with no bearer token in front of it,
+   * and the only table that stores prose. Both of those are deliberate and both
+   * are paid for — so what is asserted here is mostly the PRICE: the ceilings,
+   * the two separate budgets, the fourteen-day expiry, and the rule that the
+   * repository_dispatch carries an id and never the payload.
+   *
+   * The dispatch itself is a real `fetch` from the real route. It is stubbed at
+   * the global rather than inside the Worker, so the URL, the headers and the
+   * body asserted below are exactly what api.github.com would have received.
+   */
+
+  {
+    const {
+      MAX_FEEDBACK_TEXT_LENGTH, MAX_DIAGNOSTIC_BYTES, MAX_FEEDBACK_BYTES,
+      FEEDBACK_RETENTION_SECONDS, FEEDBACK_DISPATCH_EVENT,
+    } = require('./build/feedback');
+
+    /** Swap globalThis.fetch for the duration of one assertion group. */
+    function stubFetch(respond) {
+      const original = globalThis.fetch;
+      const calls = [];
+      globalThis.fetch = async (input, init) => {
+        calls.push({ url: String(input), init });
+        return respond ? respond(input, init) : new Response(null, { status: 204 });
+      };
+      return { calls, restore: () => { globalThis.fetch = original; } };
+    }
+
+    const REPORT = {
+      text: 'The ADCB refund from yesterday shows as a purchase, not a credit.',
+      appVersion: '1.4.2',
+      platform: 'ios',
+      locale: 'en-AE',
+      diagnostic: { parserVersion: 9, transactions: 412, unrecognised: 3 },
+    };
+    const feedbackRow = (env, id) =>
+      env.DB.handle.prepare('SELECT * FROM feedback WHERE id = ?').get(id);
+
+    /* ── The happy path, with GitHub wired up ── */
+    {
+      const env = {
+        DB: makeDb(),
+        GITHUB_REPOSITORY: 'wafra/wafra',
+        GITHUB_DISPATCH_TOKEN: 'ghp_dispatch',
+        FEEDBACK_READ_TOKEN: 'read-token-abcdefghijklmnop',
+      };
+      const github = stubFetch();
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', { body: REPORT, ctx: wake.ctx });
+      const body = await res.json();
+      ok('feedback: an ordinary report is accepted', res.status === 202, String(res.status));
+      ok('feedback: the caller is handed an id it can quote',
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.id));
+      ok('feedback: and told that an agent run was requested', body.dispatched === true);
+
+      await wake.settled();
+      github.restore();
+
+      ok('feedback: exactly one repository_dispatch is fired', github.calls.length === 1);
+      const [dispatch] = github.calls;
+      ok('feedback: aimed at the configured repository',
+        dispatch.url === 'https://api.github.com/repos/wafra/wafra/dispatches', dispatch.url);
+      ok('feedback: authenticated with the dispatch token, not with a user credential',
+        dispatch.init.headers.authorization === 'Bearer ghp_dispatch' &&
+          dispatch.init.headers['x-github-api-version'] === '2022-11-28' &&
+          typeof dispatch.init.headers['user-agent'] === 'string');
+      const payload = JSON.parse(dispatch.init.body);
+      ok('feedback: the dispatch names the event the workflow listens for',
+        payload.event_type === FEEDBACK_DISPATCH_EVENT, payload.event_type);
+      // THE assertion of this section. A client_payload is readable by anyone
+      // with access to the repository's Actions data and is kept in the run
+      // record forever; the feedback is not, so it must not travel in it.
+      ok('feedback: the dispatch carries the id and NOTHING else',
+        payload.client_payload.feedbackId === body.id &&
+          Object.keys(payload.client_payload).length === 1 &&
+          !dispatch.init.body.includes('ADCB') &&
+          !dispatch.init.body.includes('parserVersion'), dispatch.init.body);
+
+      const stored = feedbackRow(env, body.id);
+      ok('feedback: the row records that the dispatch went out',
+        stored.dispatch_status === 'sent' && stored.dispatched_at > 0,
+        JSON.stringify(stored));
+      ok('feedback: retention is stamped on the row at insert, not derived at read',
+        stored.expires_at - stored.created_at === FEEDBACK_RETENTION_SECONDS);
+      ok('feedback: no device id, token or ip is recorded against the report',
+        !('device_id' in stored) && !('ip' in stored) && !('token_hash' in stored));
+      ok('feedback: the read secret is never written to the database',
+        !dumpDb(env.DB).includes('read-token-abcdefghijklmnop'));
+
+      /* ── The read path an agent uses ── */
+      const unauth = await call(env, 'GET', `/v1/feedback/${body.id}`);
+      ok('feedback read: no bearer is 401', unauth.status === 401);
+      const wrong = await call(env, 'GET', `/v1/feedback/${body.id}`, { token: 'nope' });
+      ok('feedback read: the wrong bearer is 401', wrong.status === 401);
+      const read = await call(env, 'GET', `/v1/feedback/${body.id}`, {
+        token: 'read-token-abcdefghijklmnop',
+      });
+      const item = await read.json();
+      ok('feedback read: the scoped token fetches the item', read.status === 200);
+      ok('feedback read: the agent gets the words, the version and the platform',
+        item.text === REPORT.text && item.appVersion === '1.4.2' &&
+          item.platform === 'ios' && item.locale === 'en-AE', JSON.stringify(item));
+      ok('feedback read: the diagnostic comes back as JSON, not as a string',
+        item.diagnostic.parserVersion === 9 && item.diagnostic.transactions === 412);
+      const missing = await call(env, 'GET', '/v1/feedback/00000000-0000-4000-8000-000000000000', {
+        token: 'read-token-abcdefghijklmnop',
+      });
+      ok('feedback read: an unknown id is 404', missing.status === 404);
+      const malformedId = await call(env, 'GET', '/v1/feedback/not-a-uuid', {
+        token: 'read-token-abcdefghijklmnop',
+      });
+      ok('feedback read: a malformed id is 400, not a query',
+        malformedId.status === 400 && (await malformedId.json()).error === 'bad_feedback_id');
+      ok('feedback read: there is no route that lists what users have written',
+        (await call(env, 'GET', '/v1/feedback', {
+          token: 'read-token-abcdefghijklmnop',
+        })).status === 404);
+
+      /* ── Retention, enforced at the read as well as by the sweep ── */
+      env.DB.handle.prepare('UPDATE feedback SET expires_at = unixepoch() - 1').run();
+      const expired = await call(env, 'GET', `/v1/feedback/${body.id}`, {
+        token: 'read-token-abcdefghijklmnop',
+      });
+      ok('feedback: an expired item is unreadable before the sweep runs',
+        expired.status === 404);
+      await worker.scheduled({ scheduledTime: Date.now(), cron: '17 3 * * *' }, env);
+      ok('feedback: and the cron actually deletes it', count(env.DB, 'feedback') === 0);
+    }
+
+    /* ── GitHub not configured: store it, skip the dispatch, do not 500 ── */
+    {
+      const env = { DB: makeDb() };
+      const github = stubFetch();
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', { body: REPORT, ctx: wake.ctx });
+      const body = await res.json();
+      await wake.settled();
+      github.restore();
+      ok('feedback: a missing GitHub token still accepts the report', res.status === 202);
+      ok('feedback: and says plainly that no agent run was requested',
+        body.dispatched === false);
+      ok('feedback: nothing is sent to GitHub at all', github.calls.length === 0);
+      ok('feedback: the row explains why no PR will appear',
+        feedbackRow(env, body.id).dispatch_status === 'skipped_unconfigured');
+
+      const noRead = await call(env, 'GET', `/v1/feedback/${body.id}`, { token: 'anything' });
+      ok('feedback read: an unset read secret is 503, not an open door',
+        noRead.status === 503 && (await noRead.json()).error === 'feedback_read_not_configured');
+    }
+
+    /* ── A repository var that is not `owner/repo` counts as unconfigured ── */
+    {
+      const env = { DB: makeDb(), GITHUB_REPOSITORY: '../../evil', GITHUB_DISPATCH_TOKEN: 'x' };
+      const github = stubFetch();
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', { body: REPORT, ctx: wake.ctx });
+      await wake.settled();
+      github.restore();
+      ok('feedback: a repository that could escape the API path is refused, not interpolated',
+        res.status === 202 && github.calls.length === 0 &&
+          (await res.json()).dispatched === false);
+    }
+
+    /* ── GitHub answers with an error: the report survives it ── */
+    {
+      const env = { DB: makeDb(), GITHUB_REPOSITORY: 'w/w', GITHUB_DISPATCH_TOKEN: 'bad' };
+      const github = stubFetch(async () => new Response('{"message":"Bad credentials"}', {
+        status: 401,
+      }));
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', { body: REPORT, ctx: wake.ctx });
+      const { id } = await res.json();
+      await wake.settled();
+      github.restore();
+      ok('feedback: a rejected dispatch does not reject the user', res.status === 202);
+      ok('feedback: the failure is recorded on the row',
+        feedbackRow(env, id).dispatch_status === 'failed');
+    }
+    {
+      const env = { DB: makeDb(), GITHUB_REPOSITORY: 'w/w', GITHUB_DISPATCH_TOKEN: 'x' };
+      const github = stubFetch(async () => { throw new Error('ECONNRESET'); });
+      const wake = collector();
+      const res = await call(env, 'POST', '/v1/feedback', { body: REPORT, ctx: wake.ctx });
+      const { id } = await res.json();
+      await wake.settled();
+      github.restore();
+      ok('feedback: a network failure reaching GitHub does not reject the user',
+        res.status === 202 && feedbackRow(env, id).dispatch_status === 'failed');
+    }
+
+    /* ── Malformed and invalid bodies ── */
+    {
+      const env = { DB: makeDb() };
+      const bad = async (body, headers) =>
+        (await call(env, 'POST', '/v1/feedback', { body, headers })).json();
+      ok('feedback: a body that is not JSON is bad_json',
+        (await bad('{ this is not json')).error === 'bad_json');
+      ok('feedback: a JSON array is bad_json, not an object with no fields',
+        (await bad([1, 2, 3])).error === 'bad_json');
+      ok('feedback: a bare JSON string is bad_json — there is no text fallback here',
+        (await bad('"just some words"')).error === 'bad_json');
+      ok('feedback: no text is empty', (await bad({ ...REPORT, text: undefined })).error === 'empty');
+      ok('feedback: whitespace-only text is empty',
+        (await bad({ ...REPORT, text: '   \n\t ' })).error === 'empty');
+      ok('feedback: a non-string text is empty rather than stringified',
+        (await bad({ ...REPORT, text: { a: 1 } })).error === 'empty');
+      ok('feedback: an unknown platform is refused',
+        (await bad({ ...REPORT, platform: 'windows-phone' })).error === 'bad_platform');
+      ok('feedback: a missing app version is refused',
+        (await bad({ ...REPORT, appVersion: undefined })).error === 'bad_app_version');
+      ok('feedback: an app version that is really a sentence is refused',
+        (await bad({ ...REPORT, appVersion: 'v1.0 (built by hand)' })).error === 'bad_app_version');
+      ok('feedback: a locale that is not a language tag is refused',
+        (await bad({ ...REPORT, locale: 'en_AE; DROP TABLE' })).error === 'bad_locale');
+      ok('feedback: a diagnostic that is an array is refused',
+        (await bad({ ...REPORT, diagnostic: [1, 2] })).error === 'bad_diagnostic');
+      ok('feedback: a diagnostic that is a string is refused, not wrapped',
+        (await bad({ ...REPORT, diagnostic: 'everything is broken' })).error === 'bad_diagnostic');
+      ok('feedback: nothing malformed reached the database', count(env.DB, 'feedback') === 0);
+
+      // Same rule as the refused sender on /v1/ingest: an error that quotes
+      // what it refused is a way to read data back out of a write-only path.
+      const echo = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, platform: 'SECRET-CANARY-VALUE' },
+      });
+      ok('feedback: a refused value is not echoed back to the caller',
+        !(await echo.text()).includes('SECRET-CANARY-VALUE'));
+    }
+
+    /* ── The size ceilings, refused rather than truncated ── */
+    {
+      const env = { DB: makeDb() };
+      const over = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, text: 'x'.repeat(MAX_FEEDBACK_BYTES + 1_000) },
+      });
+      ok('feedback: a body past the whole-request ceiling is 413',
+        over.status === 413 && (await over.json()).error === 'too_large');
+
+      const longText = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, text: 'x'.repeat(MAX_FEEDBACK_TEXT_LENGTH + 1) },
+      });
+      ok('feedback: text one character past the ceiling is refused, not trimmed',
+        longText.status === 400 && (await longText.json()).error === 'text_too_long');
+
+      const atLimit = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, text: 'x'.repeat(MAX_FEEDBACK_TEXT_LENGTH) },
+      });
+      ok('feedback: text exactly at the ceiling is accepted', atLimit.status === 202);
+
+      // The one the brief names: a diagnostic built from a 14,000-row ledger.
+      // It is refused at the wire with a name that says which field was wrong,
+      // rather than stored with the rows silently cut off.
+      const fatDiagnostic = { rows: [] };
+      while (JSON.stringify(fatDiagnostic).length <= MAX_DIAGNOSTIC_BYTES) {
+        fatDiagnostic.rows.push({ m: 'CARREFOUR DUBAI', a: 4_250, c: 'groceries' });
+      }
+      const fat = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, diagnostic: fatDiagnostic },
+      });
+      ok('feedback: an oversized diagnostic is 413 with its own error name',
+        fat.status === 413 && (await fat.json()).error === 'diagnostic_too_large');
+      ok('feedback: and no half-stored row is left behind',
+        count(env.DB, 'feedback') === 1);
+    }
+
+    /* ── Control characters in prose: scrubbed, but newlines survive ── */
+    {
+      const env = { DB: makeDb(), FEEDBACK_READ_TOKEN: 'read' };
+      const res = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, text: 'line one\r\nline two‮reversed\ttabbed' },
+      });
+      const { id } = await res.json();
+      const item = await (await call(env, 'GET', `/v1/feedback/${id}`, { token: 'read' })).json();
+      ok('feedback: newlines survive — a bug report is prose',
+        item.text.includes('line one\nline two'), JSON.stringify(item.text));
+      ok('feedback: bell characters and bidi overrides do not',
+        !item.text.includes('') && !item.text.includes('‮') &&
+          item.text.includes('\ttabbed'), JSON.stringify(item.text));
+    }
+
+    /* ── The write budget ── */
+    {
+      const env = { DB: makeDb() };
+      let firstRefusal = -1;
+      for (let i = 0; i < 70; i++) {
+        const res = await call(env, 'POST', '/v1/feedback', {
+          body: { ...REPORT, text: `report ${i}` },
+        });
+        if (res.status === 429) {
+          if (firstRefusal < 0) firstRefusal = i;
+          ok(`feedback: refusal ${i} names the reason`,
+            (await res.json()).error === 'rate_limited');
+          break;
+        }
+      }
+      ok('feedback: an unauthenticated write path is not unbounded',
+        firstRefusal > 0, `first refusal at ${firstRefusal}`);
+      ok('feedback: the window bounds what a flood can put in the table',
+        count(env.DB, 'feedback') === firstRefusal);
+      ok('feedback: the limiter stores a counter, not an address or a fingerprint',
+        !('device_id' in env.DB.handle.prepare('SELECT * FROM feedback_limits').get()));
+    }
+
+    /* ── The agent-run budget, which is the one that costs money ── */
+    {
+      const env = { DB: makeDb(), GITHUB_REPOSITORY: 'w/w', GITHUB_DISPATCH_TOKEN: 'x' };
+      const github = stubFetch();
+      const wake = collector();
+      const statuses = [];
+      for (let i = 0; i < 12; i++) {
+        const res = await call(env, 'POST', '/v1/feedback', {
+          body: { ...REPORT, text: `report ${i}` }, ctx: wake.ctx,
+        });
+        statuses.push((await res.json()).dispatched);
+      }
+      await wake.settled();
+      github.restore();
+      ok('feedback: a flood is still accepted and still stored in full',
+        statuses.length === 12 && count(env.DB, 'feedback') === 12);
+      ok('feedback: but only the budgeted number of agent runs are fired',
+        github.calls.length === statuses.filter(Boolean).length &&
+          github.calls.length > 0 && github.calls.length < 12,
+        `${github.calls.length} dispatches`);
+      ok('feedback: the write budget and the agent budget are separate counters',
+        env.DB.handle.prepare('SELECT COUNT(*) AS n FROM feedback_limits').get().n === 2);
+      ok('feedback: a report past the budget says why no agent will look at it',
+        env.DB.handle
+          .prepare(`SELECT COUNT(*) AS n FROM feedback WHERE dispatch_status = 'skipped_budget'`)
+          .get().n === 12 - github.calls.length);
+    }
   }
 
   /* ═════════════════ Routing, and the scheduled sweep ═════════════════ */

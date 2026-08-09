@@ -75,28 +75,61 @@ export async function refreshEntitlement(): Promise<boolean | null> {
   }
 }
 
-/** Starts a purchase flow. Resolves true when the entitlement was granted. */
-export async function purchasePro(plan: ProPlan): Promise<boolean> {
-  if (!(await ready())) return false;
+/**
+ * How a purchase attempt ended.
+ *
+ * Three outcomes and not a boolean, for the same reason `refreshEntitlement`
+ * has three: `false` was carrying both "the user changed their mind" and
+ * "this cannot work" — a missing SKU in Play Console, an SDK that never
+ * configured, a throw out of getProducts. The paywall could only do one thing
+ * with that, and the thing it did was nothing, so a build whose products were
+ * not yet activated had a "Get Pro" button that did not respond and never
+ * said why. Backing out must stay silent; a broken store must not.
+ */
+export type PurchaseOutcome = 'granted' | 'cancelled' | 'failed';
+
+/** Starts a purchase flow. See PurchaseOutcome for what the answers mean. */
+export async function purchasePro(plan: ProPlan): Promise<PurchaseOutcome> {
+  if (!(await ready())) return 'failed';
+  let product;
   try {
     const products = await Purchases.getProducts([PRO_SKUS[plan]]);
-    const product = products[0];
-    if (!product) return false;
-    const { customerInfo } = await Purchases.purchaseStoreProduct(product);
-    return entitled(customerInfo);
+    product = products[0];
   } catch {
-    // Includes the user simply backing out of the sheet, which is not an
-    // error worth showing them.
-    return false;
+    return 'failed';
+  }
+  // No such product on this store — the SKU is not activated yet, or is named
+  // differently in the console. Nothing the user did, and nothing they can fix.
+  if (!product) return 'failed';
+  try {
+    const { customerInfo } = await Purchases.purchaseStoreProduct(product);
+    // A completed flow that did not grant the entitlement is a failure, not a
+    // purchase: RevenueCat and the store disagree, and silently returning
+    // would leave a charged customer locked out.
+    return entitled(customerInfo) ? 'granted' : 'failed';
+  } catch (error) {
+    // The one case that is not an error: the user simply closed the sheet.
+    // The SDK flags it rather than making callers match on a message.
+    return (error as { userCancelled?: boolean } | null)?.userCancelled
+      ? 'cancelled'
+      : 'failed';
   }
 }
 
-/** Restores a previous purchase. Resolves true when Pro should be granted. */
-export async function restorePro(): Promise<boolean> {
-  if (!(await ready())) return false;
+/**
+ * Restores a previous purchase.
+ *
+ * true — restored. false — this account has never bought Pro. NULL — the
+ * store could not be reached, which IS NOT FALSE; see refreshEntitlement
+ * above. Collapsing the last two told a paying subscriber reinstalling on bad
+ * connectivity that no purchase existed, which is the sentence most likely to
+ * end in a refund request.
+ */
+export async function restorePro(): Promise<boolean | null> {
+  if (!(await ready())) return null;
   try {
     return entitled(await Purchases.restorePurchases());
   } catch {
-    return false;
+    return null;
   }
 }

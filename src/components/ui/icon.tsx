@@ -76,6 +76,14 @@ interface IconProps {
  * mirrored layout both of those are the other way round. Every other icon —
  * a house, a trash can, a chart — means the same thing in both directions and
  * would look wrong reversed.
+ *
+ * So the NAME a call site passes is the one it wants in English, and this
+ * mirrors it. A call site that picks the glyph by language itself — `lang ===
+ * 'ar' ? 'chevron-left' : 'chevron-right'` — flips it a second time and ends
+ * up pointing back the way it came, which is what three Settings rows do
+ * today while every other disclosure row in the app points the other way.
+ * There is no signal here that can tell that apart from a genuine back
+ * button, so it can only be fixed at the call site.
  */
 const DIRECTIONAL = new Set<IconName>(['chevron-right', 'chevron-left', 'arrow-up-right', 'arrow-down-right']);
 

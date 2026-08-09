@@ -340,9 +340,14 @@ await pressEverything('bills · fixed', async () => { await bills(); await tapKe
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'See all'); await page.waitForTimeout(1200); });
 await pressEverything('settings', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1300); },
-  // Erasing the ledger and cycling the language both make every later
-  // control on the screen a different control; they get their own passes.
-  { skip: ['Erase everything on this phone', 'Language', 'Country pack'] });
+  // Erasing the ledger is the one control here the sweep must not press.
+  // Country and Language are back in: they used to be one-tap cycles that
+  // relabelled every later control on the screen, and are now chooser sheets
+  // that change nothing until an option inside them is picked — so the sweep
+  // covers them, and the closable-sheet assertion covers them too. That is
+  // worth having, because the bug this replaced was a row that opened
+  // nothing at all.
+  { skip: ['Erase everything on this phone'] });
 
 /**
  * Put the settings back.
@@ -575,6 +580,13 @@ for (const [name, enter] of [
   await tapKey(page, 'Settings');
   await page.waitForTimeout(1300);
   ok('settings: the language row is there', (await tapKey(page, 'Language', 5000)) === true);
+  await page.waitForTimeout(900);
+  // The row opens a chooser; it does not switch anything by itself. That is
+  // the point of it — the one-tap cycle it replaced could flip a mis-tap into
+  // a mirrored Arabic UI the user could not read their way back out of.
+  ok('settings: the language row opens a chooser rather than switching',
+    (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language ?? 'en')) === 'en');
+  ok('settings: the chooser names both languages', (await tapKey(page, 'العربية', 5000)) === true);
   await page.waitForTimeout(1200);
   ok('settings: the language switch is written down',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'ar');
@@ -628,6 +640,8 @@ for (const [name, enter] of [
   await tapKey(page, 'الإعدادات', 5000);
   await page.waitForTimeout(1300);
   await tapKey(page, 'اللغة', 5000);
+  await page.waitForTimeout(900);
+  await tapKey(page, 'English', 5000);
   await page.waitForTimeout(1200);
   ok('settings: switching back returns the app to English',
     (await page.evaluate(() => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').language)) === 'en');
@@ -658,6 +672,64 @@ for (const [name, enter] of [
 
   ok('no text is clipped by the right edge of the screen', overflow.length === 0,
     overflow.slice(0, 3).join(' | '));
+}
+
+/* ── the OS theme changes while the app is open ───────────────────────────
+ *
+ * Not a reload. Someone turns on dark mode from the notification shade with
+ * Wafra in the foreground, and every colour the app computes has to follow.
+ *
+ * This was broken and nothing noticed, because the failure is nearly
+ * invisible: SOME text repainted — its colour came from a CSS rule answering
+ * the media query directly, with a class list that never changed — while
+ * every colour React computes stayed on the old palette. The result was a
+ * half-flipped screen: dark cards under light text, unreadable, until the app
+ * was killed and reopened. Leaving the tab and coming back did not fix it.
+ *
+ * So this samples a SURFACE (a computed background, which only React can set)
+ * as well as ink, and it switches back, because a hook that only ever moves
+ * one way would pass a one-directional test.
+ */
+{
+  const sample = () => page.evaluate(() => {
+    const leaf = (t) => [...document.querySelectorAll('*')].find(
+      (n) => n.children.length === 0 && n.textContent?.trim() === t,
+    );
+    const surfaceAbove = (el) => {
+      for (let n = el?.parentElement; n; n = n.parentElement) {
+        const c = getComputedStyle(n).backgroundColor;
+        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
+      }
+      return null;
+    };
+    const tab = leaf('Bills');
+    return {
+      card: surfaceAbove(leaf('Total out')),
+      ink: tab ? getComputedStyle(tab).color : null,
+    };
+  });
+
+  await reload();
+  await tapTab(page, 'Flow');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(900);
+  const dark = await sample();
+
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.waitForTimeout(900);
+  const light = await sample();
+
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.waitForTimeout(900);
+  const back = await sample();
+
+  ok('the palette follows a live OS theme change, without a reload',
+    !!dark.card && dark.card !== light.card && dark.ink !== light.ink,
+    `dark ${dark.card}/${dark.ink} vs light ${light.card}/${light.ink}`);
+  ok('and follows it back again',
+    back.card === dark.card && back.ink === dark.ink,
+    `${back.card}/${back.ink}`);
+  await page.emulateMedia({ colorScheme: 'dark' });
 }
 
 ok('no page errors across the sweep', errors.length === 0, errors.slice(0, 2).join(' | '));

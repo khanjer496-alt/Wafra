@@ -13,12 +13,19 @@ import {
   markCardsDistinct,
   mergeDuplicateAccounts,
   mergeRenewedCard,
+  removeDeclinedTransactions,
   repairCardPaymentAccounts,
+  repairDuplicateStatements,
 } from '@/lib/accounts';
 import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
-import { detectMarketId, setActiveMarket } from '@/lib/markets';
+import {
+  detectMarketId,
+  marketCurrencyCode,
+  setActiveMarket,
+  setLedgerCurrency,
+} from '@/lib/markets';
 import {
   generateSeedAccounts,
   generateSeedCardDues,
@@ -352,13 +359,18 @@ export function migratePersistedState(
       })
       // Older imports marked every inward remittance as a transfer. An
       // unpaired arrival is real income; only ledger pairing can prove it
-      // moved between the user's own accounts. Raw-bearing rows can reparse,
-      // so migrate only the exact stranded legacy shape.
+      // moved between the user's own accounts.
+      //
+      // This used to skip raw-bearing rows, on the reasoning that they could
+      // reparse their way out. They could not: healing only ever ADDS the
+      // transfer flag (`if (p.transferHint && !prior.isTransfer)`) and never
+      // clears it, so those rows stayed stranded no matter how often they were
+      // re-read. The parser no longer sets the flag at all, so every stored
+      // row of this exact shape is now safe to release.
       .map((t) => {
         if (
           t.userEdited ||
           t.source !== 'sms' ||
-          t.raw !== undefined ||
           t.type !== 'income' ||
           t.title !== 'Inward remittance' ||
           t.isTransfer !== true
@@ -389,6 +401,10 @@ export function migratePersistedState(
     // Rows that kept their raw SMS re-parse under the CURRENT grammar on
     // every launch. A hand-corrected row is the user's answer, not the
     // parser's, so it remains the exact object supplied to this migration.
+    // Released first for the same reason the hydrate branch releases it: this
+    // runs over a backup being restored, whose pack is a property of the state
+    // arriving, not of the one it replaces.
+    setLedgerCurrency(null);
     if (parsed.marketId) setActiveMarket(parsed.marketId);
     parsed.transactions = parsed.transactions.flatMap((t) => {
       if (t.userEdited || !t.raw || t.source !== 'sms') return [t];
@@ -512,7 +528,42 @@ type Action =
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'clearAll' };
 
+/**
+ * Money already recorded, as opposed to plans that can be retyped.
+ *
+ * Transactions, bills and card dues all store fils that came out of a real
+ * statement or a real charge; relabelling them in another currency is the
+ * defect this guards. Budgets and goals are deliberately NOT here: they are
+ * targets the user set, the onboarding presets are already chosen per market
+ * (`limitsByMarket`), and counting them would refuse a country change to
+ * someone still stepping back and forth through onboarding, who has no
+ * recorded money at all.
+ */
+function ledgerHoldsMoney(s: AppState): boolean {
+  return s.transactions.length > 0 || s.bills.length > 0 || s.cardDues.length > 0;
+}
+
+/**
+ * Pin (or release) the ledger's accounting currency from the state that now
+ * exists — see `ledgerCurrency` in markets.ts for why the pin exists at all.
+ *
+ * Derived rather than persisted: the currency of record IS `marketId`, and the
+ * pin is what stops `marketId` drifting once there is money it would relabel.
+ * Recomputing it after every action is what makes `clearAll` and `restore`
+ * release or re-pin it on the same tick, with no field to migrate.
+ */
+function syncLedgerCurrency(next: AppState): AppState {
+  setLedgerCurrency(
+    next.marketId && ledgerHoldsMoney(next) ? marketCurrencyCode(next.marketId) : null,
+  );
+  return next;
+}
+
 function reducer(state: AppState, action: Action): AppState {
+  return syncLedgerCurrency(reduceState(state, action));
+}
+
+function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'hydrate':
     case 'loadDemo':
@@ -527,17 +578,35 @@ function reducer(state: AppState, action: Action): AppState {
       if (!next.trialStartTs) next.trialStartTs = Date.now();
       // Localize automatically: country pack from the device locale, once.
       if (!next.marketId) next.marketId = detectMarketId();
+      // The incoming state brings its own accounting currency with it, so any
+      // pin held by the state being replaced must not veto its pack. A restore
+      // of an SAR backup over an AED ledger is exactly that case.
+      setLedgerCurrency(null);
       setActiveMarket(next.marketId);
       if (!next.language) next.language = detectLanguage();
       setLanguage(next.language === 'ar' ? 'ar' : 'en');
       // Older states can carry two rows for one card. Collapse on the way in,
       // once, rather than teaching every screen to tolerate it.
       const accountsMerged = mergeDuplicateAccounts(next);
-      const paymentsRepaired = repairCardPaymentAccounts(accountsMerged);
+      // Before mergeImportedCardDues, which collapses per (account, due date):
+      // moving a phantom copy onto the real card is what lets that collapse
+      // see the two rows as the one statement they are.
+      const paymentsRepaired = repairDuplicateStatements(
+        repairCardPaymentAccounts(accountsMerged),
+      );
+      // A declined transaction moved no money, and no rescan can take one
+      // back: healing only ever adds information to a row, and a message the
+      // parser now suppresses never reaches the import planner to be swept.
+      // Runs AFTER the account repairs (which read `state.transactions` to
+      // decide which card has history) and BEFORE finalizeHydrationTransactions,
+      // so nothing downstream ever sees a row this proves never happened.
+      // Requires the market pack to be live, which setActiveMarket did above:
+      // it re-parses stored SMS text.
+      const declinesRemoved = removeDeclinedTransactions(paymentsRepaired);
       return {
-        ...paymentsRepaired,
-        transactions: finalizeHydrationTransactions(paymentsRepaired.transactions, next.transactions),
-        cardDues: mergeImportedCardDues([], paymentsRepaired.cardDues, paymentsRepaired.accounts),
+        ...declinesRemoved,
+        transactions: finalizeHydrationTransactions(declinesRemoved.transactions, next.transactions),
+        cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
       };
     }
     case 'markParserVersion':
@@ -550,7 +619,12 @@ function reducer(state: AppState, action: Action): AppState {
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'setMarket':
-      setActiveMarket(action.id);
+      // Refused outright once the ledger holds money: the pack change would
+      // relabel every stored figure in a currency it was never recorded in,
+      // and nothing here converts. markets.ts owns that judgement so it holds
+      // for onboarding and Settings alike; `marketId` must not move when the
+      // pack did not.
+      if (!setActiveMarket(action.id)) return state;
       return { ...state, marketId: action.id };
     case 'setUiLanguage':
       setLanguage(action.language === 'ar' ? 'ar' : 'en');
@@ -652,8 +726,17 @@ function reducer(state: AppState, action: Action): AppState {
         lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
         parserVersion: PARSER_VERSION,
       }));
+      // A statement the bank named by a number that is not the card's is only
+      // recognisable once the batch's own dues are in state beside the ones
+      // already there. Moving it changes which (account, due date) pairs exist,
+      // so the per-statement collapse has to run again over the result.
+      const repaired = repairDuplicateStatements(merged);
       return {
-        ...merged,
+        ...repaired,
+        cardDues:
+          repaired === merged
+            ? merged.cardDues
+            : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
         transactions: sortTxs(reconcileCaptureDuplicates(merged.transactions)),
       };
     }
@@ -972,12 +1055,58 @@ const TX_CHUNK_SIZE = 400;
 const SAVE_DEBOUNCE_MS = 700;
 const txChunkKey = (i: number) => `${STORAGE_KEY}:tx:${i}`;
 
-type PersistedMeta = Partial<Omit<AppState, 'hydrated'>> & { txChunks?: number };
+/**
+ * Which end of the ledger chunk 0 is measured from.
+ *
+ * Chunks exist so a save writes only what changed, and the diff that decides
+ * that is BY INDEX. Cutting the array from the head — chunk i is rows
+ * [400i, 400i+400) — makes the index of every row a function of how many rows
+ * are newer than it, and `sortTxs` keeps the ledger newest-first, so every new
+ * transaction lands at index 0 and shifts the entire history down by one.
+ * Every chunk body then differs from its stored twin and the whole ledger is
+ * rewritten. Measured on a 10,000-row ledger: one captured SMS rewrote 26 of
+ * 26 chunks, 1.8MB through SQLCipher, for one 180-byte row.
+ *
+ * Measuring from the OLDEST row instead — chunk i is the i-th block of 400
+ * counting back from the end — makes a row's chunk a function of how many rows
+ * are OLDER than it, which an arrival at the head does not change. The same
+ * insertion now rewrites one chunk. Everything else about the contract is
+ * unchanged: same keys, same size, same count, same meta record.
+ *
+ * `txChunkOrder` in meta says which layout the chunks on disk are in. Absent
+ * means the old head-anchored one — a ledger written by a build before this
+ * change — and it is read back in its own layout rather than reinterpreted,
+ * so no upgrade re-orders anyone's rows on the way in. The first save that
+ * touches transactions rewrites them in the new layout and stamps the marker.
+ */
+const TX_CHUNK_ORDER = 'oldest-first';
+type TxChunkOrder = typeof TX_CHUNK_ORDER | 'newest-first';
+
+/**
+ * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
+ *
+ * Exported for the perf suite, which asserts the property the whole scheme
+ * rests on: prepending a row leaves every existing body byte-identical.
+ */
+export function chunkTransactions(transactions: Transaction[]): string[] {
+  const bodies: string[] = [];
+  for (let end = transactions.length; end > 0; end -= TX_CHUNK_SIZE) {
+    bodies.push(JSON.stringify(transactions.slice(Math.max(0, end - TX_CHUNK_SIZE), end)));
+  }
+  return bodies;
+}
+
+type PersistedMeta = Partial<Omit<AppState, 'hydrated'>> & {
+  txChunks?: number;
+  txChunkOrder?: string;
+};
 
 interface LoadedState {
   state: Partial<Omit<AppState, 'hydrated'>>;
   /** The chunk bodies exactly as they were on disk, to seed the write cache. */
   chunkBodies: string[];
+  /** The layout those bodies are in, so a meta-only save cannot mislabel them. */
+  chunkOrder: TxChunkOrder;
 }
 
 async function loadPersisted(): Promise<LoadedState | null> {
@@ -988,11 +1117,15 @@ async function loadPersisted(): Promise<LoadedState | null> {
   if (!raw) return null;
   const parsed = JSON.parse(raw) as PersistedMeta;
   const chunkBodies: string[] = [];
+  // Absent means a ledger written before chunks were anchored to the oldest
+  // row. It is read in the layout it was written in — see TX_CHUNK_ORDER.
+  const chunkOrder: TxChunkOrder =
+    parsed.txChunkOrder === TX_CHUNK_ORDER ? TX_CHUNK_ORDER : 'newest-first';
   /** Any gap makes the index-aligned body cache unusable — see below. */
   let corrupt = false;
   if (!Array.isArray(parsed.transactions)) {
     const count = Number(parsed.txChunks) || 0;
-    const txs: Transaction[] = [];
+    const blocks: Transaction[][] = [];
     if (count > 0) {
       const pairs = await stateStorage.multiGet(
         Array.from({ length: count }, (_, i) => txChunkKey(i)),
@@ -1011,7 +1144,7 @@ async function loadPersisted(): Promise<LoadedState | null> {
         try {
           const rows = JSON.parse(v) as Transaction[];
           if (Array.isArray(rows)) {
-            txs.push(...rows);
+            blocks.push(rows);
             // Seeds the save-time diff, so the first write after launch does
             // not rewrite every chunk it just read.
             chunkBodies.push(v);
@@ -1028,10 +1161,16 @@ async function loadPersisted(): Promise<LoadedState | null> {
         }
       }
     }
+    // Oldest-first chunks reassemble back to front, which is what puts the
+    // ledger back in the newest-first order it was cut from.
+    if (chunkOrder === TX_CHUNK_ORDER) blocks.reverse();
+    const txs: Transaction[] = [];
+    for (const rows of blocks) txs.push(...rows);
     parsed.transactions = txs;
   }
   delete parsed.txChunks;
-  return { state: parsed, chunkBodies: corrupt ? [] : chunkBodies };
+  delete parsed.txChunkOrder;
+  return { state: parsed, chunkBodies: corrupt ? [] : chunkBodies, chunkOrder };
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -1051,6 +1190,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const prevChunkCount = useRef(0);
   /** Last successfully written body per chunk, so unchanged ones are skipped. */
   const prevChunks = useRef<string[]>([]);
+  /**
+   * The layout the chunks on disk are actually in. A fresh store has none, so
+   * it starts at the current one; a load of an older ledger moves it back. It
+   * exists because meta is written on saves that do NOT touch transactions,
+   * and such a save must not stamp a layout marker over chunks still written
+   * in the other one.
+   */
+  const chunkOrder = useRef<TxChunkOrder>(TX_CHUNK_ORDER);
   /**
    * The transactions array as of the last save. Reducers return a NEW array
    * only when they actually touch transactions, so an identity check here is
@@ -1130,6 +1277,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // written and rewrites the entire history — about a megabyte on a
         // heavy ledger, for no change at all.
         prevChunks.current = loaded.chunkBodies;
+        chunkOrder.current = loaded.chunkOrder;
         prevTransactions.current = parsed.transactions ?? [];
         // Pre-onboarding builds stored data without the flag; count them as onboarded.
         if (parsed.onboarded === undefined) parsed.onboarded = true;
@@ -1227,17 +1375,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const { hydrated: _hydrated, transactions, ...meta } = snapshot;
     const txChanged = prevTransactions.current !== transactions;
 
-    let chunks: [string, string][] | null = null;
-    if (txChanged) {
-      chunks = [];
-      for (let i = 0; i * TX_CHUNK_SIZE < transactions.length; i++) {
-        chunks.push([
-          txChunkKey(i),
-          JSON.stringify(transactions.slice(i * TX_CHUNK_SIZE, (i + 1) * TX_CHUNK_SIZE)),
-        ]);
-      }
-    }
+    const chunks: [string, string][] | null = txChanged
+      ? chunkTransactions(transactions).map((body, i): [string, string] => [txChunkKey(i), body])
+      : null;
     const chunkCount = chunks ? chunks.length : prevChunkCount.current;
+    // A save that rewrites the chunks writes them in the current layout, and
+    // its meta has to say so in the SAME record. A meta-only save repeats
+    // whatever is already on disk.
+    const order = chunks ? TX_CHUNK_ORDER : chunkOrder.current;
 
     // Saves run ONE AT A TIME, chained onto whatever is still in flight.
     //
@@ -1261,7 +1406,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ? chunks.filter(([, body], i) => prevChunks.current[i] !== body)
           : [];
         await stateStorage.multiSet([
-          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunkCount })],
+          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunkCount, txChunkOrder: order })],
           ...changed,
         ]);
         if (chunks && prevChunkCount.current > chunks.length) {
@@ -1274,6 +1419,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (chunks) {
           prevChunkCount.current = chunks.length;
           prevChunks.current = chunks.map(([, body]) => body);
+          chunkOrder.current = TX_CHUNK_ORDER;
         }
         prevTransactions.current = transactions;
         return true;
@@ -1670,6 +1816,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       throw error;
     }
 
+    // `chunkOrder` needs no reset here: clearing `prevTransactions` makes the
+    // blank write below a transactions write, and every transactions write
+    // stamps the current layout by construction.
     prevChunkCount.current = 0;
     prevChunks.current = [];
     prevTransactions.current = null;

@@ -2,7 +2,6 @@ import * as Device from 'expo-device';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   Platform,
   Pressable,
   RefreshControl,
@@ -17,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
@@ -38,7 +38,7 @@ import {
   revokeTrustedDevice,
   type RelayConfig,
 } from '@/lib/relay';
-import { promptDeleteShortcut, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
+import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import {
   MAX_TRUSTED_DEVICES,
@@ -136,6 +136,32 @@ export default function TrustedDevicesScreen() {
   const [joinName, setJoinName] = useState(suggestedName);
   const [selected, setSelected] = useState<TrustedDevice | null>(null);
   const [rename, setRename] = useState('');
+  /**
+   * What the relay just refused, drawn on the screen that asked.
+   *
+   * Every one of these went through `Alert.alert(title, body)`, which is an
+   * empty method on react-native-web — so a rejected invite, a device limit, a
+   * revoked bearer and a rate limit all produced a spinner that stopped and
+   * nothing else. `errorCopy` already returns exactly the two lines a notice
+   * needs, so the mapping is unchanged; only the surface is.
+   */
+  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  /**
+   * Revoking is destructive and cannot be undone for that device, so it is
+   * still gated — by a sheet this screen draws rather than by an alert whose
+   * button array the web export never renders. `removing` is nested inside the
+   * manage sheet (a Modal presented from within the presented one stacks);
+   * `deletingVault` is a screen-level action and sits beside them.
+   */
+  const [removing, setRemoving] = useState(false);
+  const [deletingVault, setDeletingVault] = useState(false);
+  /**
+   * The Shortcut this phone built is still installed, and still putting bank
+   * text on the network — see shortcut-cleanup.ts. Raised after a revoke that
+   * covers THIS device, and answered by opening Apple's Shortcuts app, which
+   * is the only door either side of this app can reach.
+   */
+  const [shortcutLeft, setShortcutLeft] = useState(false);
 
   const load = useCallback(async (spinner = true) => {
     if (spinner) setLoading(true);
@@ -195,12 +221,12 @@ export default function TrustedDevicesScreen() {
 
   const showError = (error: unknown) => {
     failed();
-    const copy = errorCopy(error, language);
-    Alert.alert(copy.title, copy.body);
+    setNotice(errorCopy(error, language));
   };
 
   const createVault = async () => {
     if (!DEFAULT_RELAY_URL || privateModeBlocksRelay) return;
+    setNotice(null);
     setBusy(true);
     try {
       const next = await pairDevice(DEFAULT_RELAY_URL, suggestedName);
@@ -217,6 +243,7 @@ export default function TrustedDevicesScreen() {
 
   const join = async () => {
     if (!DEFAULT_RELAY_URL || privateModeBlocksRelay) return;
+    setNotice(null);
     const parsed = parseTrustedDeviceInvite(joinCode, DEFAULT_RELAY_URL);
     if (!parsed || parsed.relayUrl !== DEFAULT_RELAY_URL) {
       showError(new RelayError('Invalid invite', false, 'bad_invite'));
@@ -244,6 +271,7 @@ export default function TrustedDevicesScreen() {
 
   const makeInvite = async () => {
     if (!config || !owner) return;
+    setNotice(null);
     setBusy(true);
     try {
       const created = await createTrustedDeviceInvite(config);
@@ -272,12 +300,22 @@ export default function TrustedDevicesScreen() {
   const openDevice = (device: TrustedDevice) => {
     if (isPreview) return;
     tapped();
+    setNotice(null);
+    setRemoving(false);
     setSelected(device);
     setRename(device.name ?? suggestedName);
   };
 
+  /** Closing the manage sheet takes its confirmation and its refusal with it. */
+  const closeSelected = () => {
+    setRemoving(false);
+    setNotice(null);
+    setSelected(null);
+  };
+
   const saveName = async () => {
     if (!config || !selected || !validTrustedDeviceName(rename)) return;
+    setNotice(null);
     setBusy(true);
     try {
       await renameTrustedDevice(config, selected.id, rename);
@@ -302,79 +340,93 @@ export default function TrustedDevicesScreen() {
    */
   const removeSelected = () => {
     if (!config || !selected) return;
+    setNotice(null);
+    setRemoving(true);
+  };
+
+  /**
+   * The revocation itself. Reachable from the confirmation sheet and from
+   * nowhere else — it used to live inside an alert button's `onPress`, which
+   * on the web export is code no tap can reach.
+   */
+  const performRemove = async () => {
+    if (!config || !selected) return;
     const isSelf = selected.isCurrent;
-    const removedName = selected.name ?? t('trustedUnnamed', language);
-    Alert.alert(
-      isSelf ? t('trustedLeaveTitle', language) : t('trustedRemoveTitle', language),
-      isSelf
-        ? t('trustedLeaveBody', language)
-        : `${tf('trustedRemoveBody', { name: removedName }, language)}\n\n${t('trustedRemoveShortcutNote', language)}`,
-      [
-        { text: t('cancel', language), style: 'cancel' },
-        {
-          text: isSelf ? t('trustedLeaveAction', language) : t('trustedRemoveAction', language),
-          style: 'destructive',
-          onPress: async () => {
-            setBusy(true);
-            try {
-              await revokeTrustedDevice(config, selected.id);
-              setSelected(null);
-              if (isSelf) {
-                setConfig(null);
-                setDevices([]);
-              } else {
-                setDevices((list) => list.filter((device) => device.id !== selected.id));
-              }
-              committed();
-              // Only for this phone. Another device's Shortcut lives on that
-              // phone, and telling this user to go delete it here would send
-              // them looking for something that is not on their device.
-              if (isSelf && shortcutCleanupApplies(true)) {
-                promptDeleteShortcut(t('shortcutCleanupLeft', language), language);
-              }
-            } catch (error) {
-              showError(error);
-            } finally {
-              setBusy(false);
-            }
-          },
-        },
-      ],
-    );
+    const id = selected.id;
+    setBusy(true);
+    try {
+      await revokeTrustedDevice(config, id);
+      setSelected(null);
+      if (isSelf) {
+        setConfig(null);
+        setDevices([]);
+      } else {
+        setDevices((list) => list.filter((device) => device.id !== id));
+      }
+      committed();
+      // Only for this phone. Another device's Shortcut lives on that phone,
+      // and telling this user to go delete it here would send them looking
+      // for something that is not on their device.
+      if (isSelf && shortcutCleanupApplies(true)) setShortcutLeft(true);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const confirmDeleteVault = () => {
     if (!config || !owner) return;
-    Alert.alert(t('trustedDeleteVaultTitle', language), t('trustedDeleteVaultBody', language), [
-      { text: t('cancel', language), style: 'cancel' },
-      {
-        text: t('trustedDeleteVaultAction', language),
-        style: 'destructive',
-        onPress: async () => {
-          setBusy(true);
-          try {
-            await deleteTrustedVault(config);
-            setConfig(null);
-            setDevices([]);
-            setInvite(null);
-            committed();
-            // Every device in the vault is revoked, including this one. This
-            // is the only one whose Shortcut this screen can speak to.
-            if (shortcutCleanupApplies(true)) {
-              promptDeleteShortcut(t('shortcutCleanupLeft', language), language);
-            }
-          } catch (error) {
-            showError(error);
-          } finally {
-            setBusy(false);
-          }
-        },
-      },
-    ]);
+    setNotice(null);
+    setDeletingVault(true);
+  };
+
+  const performDeleteVault = async () => {
+    if (!config) return;
+    setBusy(true);
+    try {
+      await deleteTrustedVault(config);
+      setConfig(null);
+      setDevices([]);
+      setInvite(null);
+      committed();
+      // Every device in the vault is revoked, including this one. This is the
+      // only one whose Shortcut this screen can speak to.
+      if (shortcutCleanupApplies(true)) setShortcutLeft(true);
+    } catch (error) {
+      showError(error);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const canManageSelected = !!selected && !!current && (owner || selected.isCurrent);
   const ownerIsProtected = selected?.role === 'owner';
+
+  /**
+   * Rendered wherever the refusal can arrive: the screen for pairing and
+   * invites, the join sheet for a bad code, the manage sheet for a rename or
+   * a revoke. A sheet covers the screen while it is open, so at most one of
+   * these is ever on show, and both sheets clear it on the way in and out.
+   */
+  const noticeBlock = notice ? (
+    <View accessibilityLiveRegion="polite">
+      <Block tone="expense" style={styles.noticeRow}>
+        <Icon name="alert" size={16} color={theme.expense} />
+        <View style={styles.flex}>
+          <ThemedText type="smallBold" style={{ color: theme.expense }}>
+            {notice.title}
+          </ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {notice.body}
+          </ThemedText>
+        </View>
+      </Block>
+    </View>
+  ) : null;
+
+  const removeIsSelf = selected?.isCurrent === true;
+  const removedName = selected?.name ?? t('trustedUnnamed', language);
 
   return (
     <ThemedView style={styles.root}>
@@ -426,6 +478,8 @@ export default function TrustedDevicesScreen() {
               </View>
             </Block>
           </Section>
+
+          {noticeBlock && <Section index={1}>{noticeBlock}</Section>}
 
           {isPreview && (
             <Section index={1}>
@@ -604,7 +658,13 @@ export default function TrustedDevicesScreen() {
         </ScrollView>
       </SafeAreaView>
 
-      <BottomSheet visible={joinVisible} onClose={() => setJoinVisible(false)} title={t('trustedJoinSheetTitle', language)}>
+      <BottomSheet
+        visible={joinVisible}
+        onClose={() => {
+          setNotice(null);
+          setJoinVisible(false);
+        }}
+        title={t('trustedJoinSheetTitle', language)}>
         <ThemedText type="default" themeColor="textSecondary">
           {t('trustedJoinSheetBody', language)}
         </ThemedText>
@@ -635,6 +695,7 @@ export default function TrustedDevicesScreen() {
             style={[styles.input, styles.codeInput, { color: theme.text, borderColor: theme.cardBorderStrong, backgroundColor: theme.backgroundElement }]}
           />
         </View>
+        {noticeBlock}
         <Button
           label={busy ? t('trustedJoining', language) : t('trustedJoinAction', language)}
           disabled={busy || !joinCode.trim() || !validTrustedDeviceName(joinName)}
@@ -642,7 +703,10 @@ export default function TrustedDevicesScreen() {
         />
       </BottomSheet>
 
-      <BottomSheet visible={!!selected} onClose={() => setSelected(null)} title={t('trustedManageDevice', language)}>
+      <BottomSheet
+        visible={!!selected}
+        onClose={closeSelected}
+        title={t('trustedManageDevice', language)}>
         {selected && (
           <>
             <View style={styles.selectedHero}>
@@ -691,9 +755,60 @@ export default function TrustedDevicesScreen() {
                 onPress={removeSelected}
               />
             ) : null}
+            {noticeBlock}
+            {/* Nested inside this sheet rather than beside it: a Modal
+                presented from within the presented one stacks, where
+                dismissing this sheet and presenting another in the same frame
+                does not. */}
+            {removing && (
+              <ConfirmSheet
+                visible
+                onClose={() => setRemoving(false)}
+                question={
+                  removeIsSelf
+                    ? t('trustedLeaveTitle', language)
+                    : t('trustedRemoveTitle', language)
+                }
+                body={
+                  removeIsSelf
+                    ? t('trustedLeaveBody', language)
+                    : `${tf('trustedRemoveBody', { name: removedName }, language)}\n\n${t('trustedRemoveShortcutNote', language)}`
+                }
+                confirmLabel={
+                  removeIsSelf
+                    ? t('trustedLeaveAction', language)
+                    : t('trustedRemoveAction', language)
+                }
+                destructive
+                onConfirm={() => void performRemove()}
+              />
+            )}
           </>
         )}
       </BottomSheet>
+
+      {deletingVault && (
+        <ConfirmSheet
+          visible
+          onClose={() => setDeletingVault(false)}
+          question={t('trustedDeleteVaultTitle', language)}
+          body={t('trustedDeleteVaultBody', language)}
+          confirmLabel={t('trustedDeleteVaultAction', language)}
+          destructive
+          onConfirm={() => void performDeleteVault()}
+        />
+      )}
+      {shortcutLeft && (
+        <ConfirmSheet
+          visible
+          onClose={() => setShortcutLeft(false)}
+          question={t('shortcutStillInstalledTitle', language)}
+          body={t('shortcutCleanupLeft', language)}
+          confirmLabel={t('iosOpenShortcutsApp', language)}
+          cancelLabel={t('iosDone', language)}
+          onConfirm={openShortcutsApp}
+        />
+      )}
     </ThemedView>
   );
 }
@@ -712,6 +827,7 @@ const styles = StyleSheet.create({
   notice: { gap: Spacing.two },
   noticeTitle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.two },
   privateNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, marginBottom: Spacing.three },
+  noticeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   actions: { gap: Spacing.two, marginBottom: Spacing.two },
   offline: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three, marginBottom: Spacing.two },
   deviceList: { borderWidth: 1, borderRadius: Radius.sheet, overflow: 'hidden' },

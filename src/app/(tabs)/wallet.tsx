@@ -2,7 +2,6 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   Modal,
   Platform,
   Pressable,
@@ -20,6 +19,9 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { TrendCurve } from '@/components/ui/charts';
+import { AmountSheet } from '@/components/ui/amount-sheet';
+import { ChoiceSheet } from '@/components/ui/choice-sheet';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { AccountTile } from '@/components/ui/tile';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, SectionHeader } from '@/components/ui/period-pill';
@@ -73,6 +75,27 @@ function relativeSince(ts: number, now: Date): string {
   return days === 1 ? t('yesterday') : tf('daysAgo', { count: days });
 }
 
+/**
+ * A confirmation waiting on the user, or null.
+ *
+ * Removing an account and deleting a goal were both gated by `Alert.alert`
+ * with the store call inside a button's `onPress`. On react-native-web that
+ * method is `static alert() {}` — an empty method, no dialog, no warning, no
+ * throw — so the alert never drew and `deleteAccount`/`deleteGoal` sat as
+ * unreachable code: a long press that did nothing at all, in silence. The
+ * work lives in `onConfirm` and is handed to a sheet that is actually drawn.
+ */
+type Confirmation = {
+  question: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+};
+
+/** The two things a long press on an account row offers. */
+type AccountAction = 'visibility' | 'delete';
+
 export default function WalletScreen() {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
@@ -107,13 +130,42 @@ export default function WalletScreen() {
   const [goalTarget, setGoalTarget] = useState('');
   const [goalIcon, setGoalIcon] = useState(GOAL_ICONS[0]);
 
+  // The account a long press is asking about, and the confirmation that a
+  // destructive answer to it opens second.
+  const [optionsFor, setOptionsFor] = useState<Account | null>(null);
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+
   // The curve is an SVG, so it needs a pixel width rather than a percentage.
   // Measured once from the row it sits in, which is what keeps it correct on a
   // tablet and under RTL.
   const [curveWidth, setCurveWidth] = useState(0);
 
-  // Scans every transaction once per account, so it is kept off the render path.
-  const total = useMemo(() => netWorthFils(state), [state]);
+  /**
+   * The headline figure, and how much of this screen it can actually speak for.
+   *
+   * Scans every transaction once per account, so it is kept off the render
+   * path — and it counts as well as sums, because the sum alone lies.
+   * `netWorthFils` adds up only balances the bank has quoted; an account whose
+   * balance cannot be known contributes nothing (balances.ts), which makes
+   * "unknown" and "zero" the same output. A phone whose cards have never sent
+   * a statement SMS was therefore told, in display type, that its net worth
+   * was AED 0 — directly above rows that each said "no balance SMS yet".
+   *
+   * So the headline gets the same three-state vocabulary those rows already
+   * use: nothing knowable is a dash, not a zero, and a partial answer says how
+   * many accounts it had to leave out so it can be reconciled against them.
+   */
+  const worth = useMemo(() => {
+    let known = 0;
+    let unknown = 0;
+    for (const account of state.accounts) {
+      // Archived accounts are out of the sum, so they are out of the count.
+      if (account.archived) continue;
+      if (reliableBalanceFils(state, account) === null) unknown += 1;
+      else known += 1;
+    }
+    return { fils: netWorthFils(state), known, unknown };
+  }, [state]);
 
   /**
    * Movement since the start of the six-month window. A single figure with no
@@ -233,51 +285,36 @@ export default function WalletScreen() {
     setGoalVisible(false);
   };
 
-  const addToGoal = (goalId: string, goalTitle2: string) => {
-    if (Platform.OS === 'web') return;
-    Alert.prompt?.(
-      tf('addToGoal', { goal: goalTitle2 }),
-      t('amountInAed'),
-      (text) => {
-        const fils = parseAmountToFils(text ?? '');
-        const goal = state.goals.find((g) => g.id === goalId);
-        if (fils && goal) editGoal(goalId, { savedFils: goal.savedFils + fils });
-      },
-      'plain-text',
-      '',
-      'numeric',
-    ) ??
-      // Android has no Alert.prompt: quick +100 with long-press hint
-      (() => {
-        const goal = state.goals.find((g) => g.id === goalId);
-        if (goal) editGoal(goalId, { savedFils: goal.savedFils + 10_000 });
-      })();
+  /**
+   * Ask, on every platform, instead of guessing on one.
+   *
+   * This was `Alert.prompt?.(…) ?? (+100)`: an iOS prompt, an early return on
+   * web, and on Android — which has no `Alert.prompt` — a silent AED 100
+   * added to the goal on a bare tap. Three behaviours, one of them correct,
+   * and the wrong one moved money without asking. See AmountSheet.
+   */
+  const [goalTopUp, setGoalTopUp] = useState<{ id: string; title: string } | null>(null);
+
+  const addToGoal = (fils: number) => {
+    const goal = state.goals.find((g) => g.id === goalTopUp?.id);
+    if (goal) editGoal(goal.id, { savedFils: goal.savedFils + fils });
   };
 
   const confirmDeleteAccount = (id: string, accName: string) => {
-    Alert.alert(
-      t('removeAccountTitle'),
-      tf('removeAccountBody', { name: accName }),
-      [
-        { text: t('cancel'), style: 'cancel' },
-        { text: t('delete'), style: 'destructive', onPress: () => deleteAccount(id) },
-      ],
-    );
+    setConfirmation({
+      question: t('removeAccountTitle'),
+      body: tf('removeAccountBody', { name: accName }),
+      confirmLabel: t('delete'),
+      destructive: true,
+      onConfirm: () => deleteAccount(id),
+    });
   };
 
-  const accountOptions = (account: Account) => {
-    Alert.alert(account.name, account.archived ? t('hiddenFromLists') : undefined, [
-      {
-        text: account.archived ? t('unhide') : t('hideFromLists'),
-        onPress: () => editAccount(account.id, { archived: !account.archived }),
-      },
-      {
-        text: t('delete'),
-        style: 'destructive',
-        onPress: () => confirmDeleteAccount(account.id, account.name),
-      },
-      { text: t('cancel'), style: 'cancel' },
-    ]);
+  // Hide/unhide applies straight away; delete asks first, exactly as the two
+  // stacked alerts did.
+  const onAccountAction = (account: Account, action: AccountAction) => {
+    if (action === 'visibility') editAccount(account.id, { archived: !account.archived });
+    else confirmDeleteAccount(account.id, account.name);
   };
 
   return (
@@ -319,9 +356,18 @@ export default function WalletScreen() {
                 AED
               </ThemedText>
               <ThemedText type="amount" tabular>
-                {formatAmount(total, { decimals: false })}
+                {worth.known > 0 ? formatAmount(worth.fils, { decimals: false }) : '—'}
               </ThemedText>
             </View>
+            {worth.unknown > 0 && (
+              <ThemedText type="micro" themeColor="textSecondary">
+                {/* "label · count" is this screen's own idiom for a qualifier
+                    with a number on it — the bank group headings below read
+                    the same way — so the caption needs no sentence of its own
+                    to say WHICH rows the figure could not include. */}
+                {worth.known > 0 ? `${t('noBalanceYet')} · ${worth.unknown}` : t('noBalanceYet')}
+              </ThemedText>
+            )}
           </View>
 
           {/* The shape behind that figure — a line, not bars.
@@ -515,7 +561,7 @@ export default function WalletScreen() {
                 return (
                   <Pressable
                     accessibilityLabel={`${featuredCard.name} ${featuredCard.last4 ?? ''}`}
-                    onLongPress={() => accountOptions(featuredCard)}
+                    onLongPress={() => setOptionsFor(featuredCard)}
                     style={({ pressed }) => [
                       styles.featuredCard,
                       {
@@ -620,7 +666,7 @@ export default function WalletScreen() {
                     return (
                       <Pressable
                         key={account.id}
-                        onLongPress={() => accountOptions(account)}
+                        onLongPress={() => setOptionsFor(account)}
                         accessibilityLabel={`${account.name} ${account.last4 ?? ''}`}
                         style={[
                           styles.accountRow,
@@ -690,7 +736,7 @@ export default function WalletScreen() {
                 return (
                   <Pressable
                     key={account.id}
-                    onLongPress={() => accountOptions(account)}
+                    onLongPress={() => setOptionsFor(account)}
                     style={[
                       styles.accountRow,
                       i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
@@ -751,7 +797,7 @@ export default function WalletScreen() {
                   {inactiveAccounts.map((account, i) => (
                     <Pressable
                       key={account.id}
-                      onLongPress={() => accountOptions(account)}
+                      onLongPress={() => setOptionsFor(account)}
                       style={[
                         styles.accountRow,
                         styles.inactiveRow,
@@ -788,12 +834,15 @@ export default function WalletScreen() {
               return (
                 <Pressable
                   key={goal.id}
-                  onPress={() => addToGoal(goal.id, goal.title)}
+                  onPress={() => setGoalTopUp({ id: goal.id, title: goal.title })}
                   onLongPress={() =>
-                    Alert.alert(t('deleteGoalTitle'), goal.title, [
-                      { text: t('cancel'), style: 'cancel' },
-                      { text: t('delete'), style: 'destructive', onPress: () => deleteGoal(goal.id) },
-                    ])
+                    setConfirmation({
+                      question: t('deleteGoalTitle'),
+                      body: goal.title,
+                      confirmLabel: t('delete'),
+                      destructive: true,
+                      onConfirm: () => deleteGoal(goal.id),
+                    })
                   }
                   style={styles.goalRow}>
                   <View style={styles.goalTop}>
@@ -1032,6 +1081,48 @@ export default function WalletScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
+          inherits its clipping and its scroll offset on web. */}
+      {optionsFor && (
+        <ChoiceSheet
+          visible
+          onClose={() => setOptionsFor(null)}
+          title={optionsFor.name}
+          body={optionsFor.archived ? t('hiddenFromLists') : undefined}
+          options={[
+            {
+              value: 'visibility' as AccountAction,
+              label: optionsFor.archived ? t('unhide') : t('hideFromLists'),
+            },
+            { value: 'delete' as AccountAction, label: t('delete') },
+          ]}
+          onSelect={(action) => onAccountAction(optionsFor, action)}
+        />
+      )}
+      {/* Mounted only while there is something to confirm, so the entry
+          animation runs on every open rather than once per screen. */}
+      {confirmation && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmation(null)}
+          question={confirmation.question}
+          body={confirmation.body}
+          confirmLabel={confirmation.confirmLabel}
+          destructive={confirmation.destructive}
+          onConfirm={confirmation.onConfirm}
+        />
+      )}
+      {goalTopUp && (
+        <AmountSheet
+          visible
+          onClose={() => setGoalTopUp(null)}
+          title={t('goalsHeader')}
+          question={tf('addToGoal', { goal: goalTopUp.title })}
+          placeholder={t('amountInAed')}
+          onSubmit={addToGoal}
+        />
+      )}
     </ThemedView>
   );
 }

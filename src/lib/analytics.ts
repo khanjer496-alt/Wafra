@@ -133,7 +133,12 @@ export function netWorthSeries(state: AppState, months = 6): { key: string; fils
   // transfer; the arriving side is worded exactly like being paid and carries
   // no flag. Excluding one and counting the other made net worth rise every
   // time the user shifted their own money.
-  const internal = internalTransferIds(state.transactions, live);
+  //
+  // Paired over ALL accounts, not `live`: the leaving leg is very often on the
+  // account being retired, and pairing over the live set alone meant hiding
+  // that account restored the arrival to the series as fresh money. Whether an
+  // account is shown is a separate question, asked below on `live`.
+  const internal = internalTransferIds(state.transactions, state.accounts);
 
   return keys.map((key) => {
     let fils = opening;

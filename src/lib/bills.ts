@@ -2,6 +2,35 @@ import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
 import { isSpending } from '@/lib/ledger';
 import type { Bill, Transaction } from '@/lib/types';
 
+function isLeapYear(y: number): boolean {
+  return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+}
+
+/**
+ * Where a YEARLY bill falls inside a given money month, or null when its
+ * anniversary is not in this month at all.
+ *
+ * The year in `anchorISO` is ignored on purpose — it records which anniversary
+ * was observed, not the only one that counts — so an anchor from a charge that
+ * already happened still places the bill correctly next year.
+ *
+ * A money month can span two calendar years (Dec 25 – Jan 24), so both are
+ * tried. 29 February falls back to the 28th in the years that have no 29th,
+ * the same clamping `dueDateInMonth` does for a monthly bill on the 31st.
+ */
+export function yearlyDueInMonth(key: string, anchorISO: string): string | null {
+  const startISO = monthStartISO(key);
+  const endISO = monthEndISO(key);
+  const month = anchorISO.slice(5, 7);
+  const day = anchorISO.slice(8, 10);
+  for (const year of new Set([Number(startISO.slice(0, 4)), Number(endISO.slice(0, 4))])) {
+    const clamped = month === '02' && day === '29' && !isLeapYear(year) ? '28' : day;
+    const iso = `${year}-${month}-${clamped}`;
+    if (iso >= startISO && iso <= endISO) return iso;
+  }
+  return null;
+}
+
 /**
  * The calendar date a monthly bill falls due inside a given money month.
  *
@@ -93,13 +122,25 @@ function payeeTokens(title: string): Set<string> {
  * claims the same transaction. Marking a bill paid that was not is the
  * expensive direction of this error: the user stops looking at it.
  */
-function candidatePayments(bill: Bill, transactions: Transaction[], key: string): Transaction[] {
+function candidatePayments(
+  bill: Bill,
+  transactions: Transaction[],
+  key: string,
+  live?: Set<string>,
+  internal?: Set<string>,
+): Transaction[] {
   const billTitle = normalize(bill.title);
   if (!billTitle) return [];
   const billTokens = payeeTokens(bill.title);
   const out: Transaction[] = [];
   for (const t of transactions) {
-    if (!isSpending(t) || monthKey(t.date) !== key) continue;
+    // `live`/`internal` are what stop a bill settling against money the rest
+    // of the app does not count. Without them a charge on an archived card
+    // flipped a bill to "Paid" while Flow's Total out never moved — the user
+    // stops looking at a bill that says paid, which is the expensive direction
+    // of this error. Optional, so a caller with no accounts to hand (tests,
+    // the importer) still gets the transfer rule; see ledger.ts.
+    if (!isSpending(t, live, internal) || monthKey(t.date) !== key) continue;
     if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
     const txTitle = normalize(t.title);
     // Every string contains "", so a title that normalizes to nothing (a row
@@ -131,9 +172,29 @@ export function billsForMonth(
   bills: Bill[],
   transactions: Transaction[],
   today: Date,
+  live?: Set<string>,
+  internal?: Set<string>,
 ): BillWithStatus[] {
   const key = monthKey(today);
   const todayISO = toISODate(today);
+
+  /**
+   * The bills that fall due inside THIS money month, and where.
+   *
+   * A yearly bill is due in one month of twelve. It used to be due in all of
+   * them, because `Bill` had no way to say otherwise and every bill was run
+   * through `dueDateInMonth` — so an Amazon Prime renewal of AED 310 a YEAR
+   * was listed, and notified, as AED 310 every month.
+   */
+  const scheduled: { bill: Bill; dueISO: string }[] = [];
+  for (const bill of bills) {
+    if (bill.yearlyOnISO) {
+      const iso = yearlyDueInMonth(key, bill.yearlyOnISO);
+      if (iso) scheduled.push({ bill, dueISO: iso });
+      continue;
+    }
+    scheduled.push({ bill, dueISO: dueDateInMonth(key, bill.dueDay) });
+  }
 
   /**
    * How many bills a given transaction could be the payment for.
@@ -148,21 +209,20 @@ export function billsForMonth(
    * bill that says paid while the money is still owed.
    */
   const claims = new Map<string, number>();
-  for (const bill of bills) {
-    for (const t of candidatePayments(bill, transactions, key)) {
+  for (const { bill } of scheduled) {
+    for (const t of candidatePayments(bill, transactions, key, live, internal)) {
       claims.set(t.id, (claims.get(t.id) ?? 0) + 1);
     }
   }
 
-  const rows = bills.map((bill) => {
+  const rows = scheduled.map(({ bill, dueISO }) => {
     // The paid flag is keyed to the MONEY month, so the date has to be found
     // inside that same month. It was calendar arithmetic — `bill.dueDay -
     // today.getDate()` — which describes a different month entirely once the
     // month starts on a salary day. With a start of the 25th, a bill due on
     // the 28th and paid on 28 June read "Paid" all through July while its
     // countdown talked about 28 July, and the July payment stayed invisible
-    // until the 25th.
-    const dueISO = dueDateInMonth(key, bill.dueDay);
+    // until the 25th. `dueISO` is settled above, per cadence.
     const daysLeft = Math.round(
       (new Date(`${dueISO}T12:00:00`).getTime() - new Date(`${todayISO}T12:00:00`).getTime()) /
         86400000,
@@ -170,7 +230,7 @@ export function billsForMonth(
     const manuallyPaid = bill.paidMonths.includes(key);
     const autoReconciled =
       !manuallyPaid &&
-      candidatePayments(bill, transactions, key).some(
+      candidatePayments(bill, transactions, key, live, internal).some(
         (t) => nests(bill, t) || (claims.get(t.id) ?? 0) === 1,
       );
     let status: BillStatus;

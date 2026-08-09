@@ -4,8 +4,8 @@ import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type RawSms } from '../../modules/sms-reader';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { parseSms, type ParsedSms } from '@/lib/sms-parser';
-import type { ScannedSms } from '@/lib/import-plan';
+import { isDeclinedMessage, parseSms, type ParsedSms } from '@/lib/sms-parser';
+import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 40; // 40k messages is far beyond any real inbox
@@ -48,11 +48,23 @@ export async function requestSmsPermission(): Promise<boolean> {
 
 export type { CaptureChannel } from '@/lib/dedupe';
 
-export type { ScannedSms, ImportPlan } from '@/lib/import-plan';
+export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
 export interface ScanResult {
   parsed: ScannedSms[];
+  /**
+   * Fingerprints of the messages this scan refused as DECLINES.
+   *
+   * A suppressed message yields no ParsedSms and used to end here: the `if (p)`
+   * below dropped it, and with it the only proof left anywhere that the alert
+   * an older parser had booked as a real expense says the money never moved.
+   * `raw` on the stored row cannot substitute — retention is recent, and the
+   * user this was written for has 59 such rows and no bodies. So the timestamp
+   * (and nothing else) is carried to buildImportPlan, which uses it to retire
+   * the row. See DeclinedSms in import-plan.ts for the guards on that.
+   */
+  declined: DeclinedSms[];
   /** Timestamp of the newest message seen, for incremental scans. */
   newestTs: number;
   scannedCount: number;
@@ -68,10 +80,22 @@ export async function scanInbox(
   onProgress?: (scanned: number, found: number) => void,
 ): Promise<ScanResult> {
   if (!isSmsScanningAvailable() || !SmsReader) {
-    return { parsed: [], newestTs: sinceMs, scannedCount: 0 };
+    return { parsed: [], declined: [], newestTs: sinceMs, scannedCount: 0 };
   }
 
   const parsed: (ParsedSms & { smsTs: number; sender: string; channel: CaptureChannel })[] = [];
+  const declined: DeclinedSms[] = [];
+  /**
+   * Called only where a parse returned null, and only the REFUSAL half of that
+   * is kept. `parseSms` answers null for a dozen reasons — an OTP, an offer, a
+   * spend summary, a pre-auth hold, a figure the bank masked — and "the parser
+   * no longer reads this" is emphatically not evidence that a charge did not
+   * happen. `isDeclinedMessage` is the parser's OWN suppression predicate,
+   * exported so the two cannot drift, and it is the affirmative half.
+   */
+  const noteIfDeclined = (body: string, ts: number, sender: string, channel: CaptureChannel) => {
+    if (isDeclinedMessage(body)) declined.push({ smsTs: ts, sender, channel });
+  };
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
   let newestTs = sinceMs;
@@ -102,6 +126,8 @@ export async function scanInbox(
           sender: sms.address,
           channel: 'inbox',
         });
+      } else {
+        noteIfDeclined(sms.body, sms.date, sms.address, 'inbox');
       }
       // The native inbox query is already asynchronous; the expensive part is
       // the regex grammar above after the 1,000 bodies cross the bridge. A
@@ -141,6 +167,8 @@ export async function scanInbox(
               sender: sms.address,
               channel: 'delivery',
             });
+          } else {
+            noteIfDeclined(sms.body, sms.date, sms.address, 'delivery');
           }
         }
         if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < received.length) {
@@ -175,6 +203,8 @@ export async function scanInbox(
             sender: `${n.pkg} ${n.title}`,
             channel: 'push',
           });
+        } else {
+          noteIfDeclined(`${n.title} ${n.text}`.trim(), n.ts, `${n.pkg} ${n.title}`, 'push');
         }
         if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < captured.length) {
           await yieldToUi();
@@ -188,5 +218,5 @@ export async function scanInbox(
 
   // Oldest-first so account auto-creation sees the earliest occurrence first.
   parsed.sort((a, b) => a.smsTs - b.smsTs);
-  return { parsed, newestTs, scannedCount };
+  return { parsed, declined, newestTs, scannedCount };
 }

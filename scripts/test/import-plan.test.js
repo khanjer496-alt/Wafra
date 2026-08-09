@@ -11,7 +11,7 @@
 // close the app, open it again, and the same messages are read a second time.
 
 const { buildImportPlan } = require('./build/import-plan.js');
-const { parseSms } = require('./build/sms-parser.js');
+const { parseSms, isDeclinedMessage } = require('./build/sms-parser.js');
 
 let pass = 0;
 let fail = 0;
@@ -34,14 +34,27 @@ const BASE = {
   parserVersion: 0,
 };
 
-/** A scan result, the way scanInbox would hand it over. */
+/**
+ * A scan result, the way scanInbox would hand it over.
+ *
+ * `declined` mirrors auto-import.ts exactly, including the part that is easy
+ * to get wrong: a message only reaches it when the parse returned null AND the
+ * parser's own `isDeclinedMessage` says the text is a refusal. "No longer
+ * parses" on its own is not evidence a charge did not happen — an OTP, an
+ * offer and a bank-masked figure all parse to null, and one of those is a real
+ * purchase. The scan's own newestTs advances over suppressed messages too.
+ */
 function scan(messages, channel = 'inbox') {
   const parsed = [];
+  const declined = [];
   let newestTs = 0;
   for (const { body, ts, sender } of messages) {
-    const p = parseSms(body);
-    if (!p) continue;
     if (ts > newestTs) newestTs = ts;
+    const p = parseSms(body);
+    if (!p) {
+      if (isDeclinedMessage(body)) declined.push({ smsTs: ts, sender: sender ?? 'ENBD', channel });
+      continue;
+    }
     parsed.push({
       ...p,
       date: p.date ?? new Date(ts).toISOString().slice(0, 10),
@@ -50,7 +63,7 @@ function scan(messages, channel = 'inbox') {
       channel,
     });
   }
-  return { parsed, newestTs };
+  return { parsed, declined, newestTs };
 }
 
 /** Apply a plan to a state the way the store's importBatch does. */
@@ -467,6 +480,154 @@ const afterFirst = apply(BASE, first);
   ok('a reminder rescan never removes a user-edited matching row',
     !plan.batch.updates.some((u) => u.id === 'edited-reminder' && u.remove),
     plan.batch.updates);
+}
+
+/* ── Declines: rows for money that never moved ────────────────────────────
+ *
+ * A user's ledger held 59 rows titled "Insufficient Funds" totalling
+ * AED 89,897, counted as real spending. The parser already refuses those
+ * messages, and accounts.ts already deletes such rows — but only on the
+ * evidence of the row's STORED body, and 14,169 of that ledger's 14,314 rows
+ * have none. All 59 were among them.
+ *
+ * The evidence exists at SCAN time and was being thrown away: parseSms returns
+ * null for a decline, so scanInbox's `if (p)` dropped the message and its
+ * timestamp never reached the planner. It reaches it now, and the join is the
+ * timestamp alone — a decline has no parsed amount, so the `s{ts}-{amount}`
+ * key cannot be rebuilt from it. Everything below is a guard on that join. */
+const DECLINE_TS = T0 + 5_000_000;
+const DECLINED_ROW = {
+  id: 'declined-1108', type: 'expense', amountFils: 110800, category: 'other',
+  accountId: 'acc-main', title: 'Insufficient Funds',
+  date: new Date(DECLINE_TS).toISOString().slice(0, 10),
+  source: 'sms', ts: DECLINE_TS, smsKey: `s${DECLINE_TS}-110800`,
+};
+const DECLINE_SMS = [{
+  body: 'Your transaction of AED 1,108.00 at NOON was declined due to insufficient funds.',
+  ts: DECLINE_TS,
+}];
+
+{
+  const s = scan(DECLINE_SMS);
+  ok('the scan carries the decline it refused to parse',
+    s.parsed.length === 0 && s.declined.length === 1 && s.declined[0].smsTs === DECLINE_TS,
+    s);
+  const state = { ...BASE, transactions: [DECLINED_ROW] };
+  const plan = buildImportPlan(s.parsed, state, s.newestTs, new Date(2026, 7, 2), s.declined);
+  ok('a re-read removes the expense a decline alert had created',
+    plan.batch.updates.filter((u) => u.remove).map((u) => u.id).join() === 'declined-1108',
+    plan.batch.updates);
+  ok('...and imports nothing in its place', plan.txCount === 0, plan.batch.transactions);
+
+  // Once it is gone there is nothing to find, so a later scan is a no-op.
+  const healed = { ...state, transactions: [] };
+  ok('the sweep is idempotent',
+    buildImportPlan(s.parsed, healed, s.newestTs, new Date(2026, 7, 2), s.declined)
+      .batch.updates.length === 0);
+}
+
+/* Callers that cannot supply declines get the old behaviour, not a guess.
+ * The relay is the real one: the Worker discards Message Content before
+ * sealing a row, so no body ever reaches this device to be tested. */
+{
+  const state = { ...BASE, transactions: [DECLINED_ROW] };
+  const plan = buildImportPlan([], state, DECLINE_TS);
+  ok('with no declines carried, nothing is swept',
+    plan.batch.updates.length === 0, plan.batch.updates);
+}
+
+/* The guards, one at a time. Each one is a way a timestamp could point at a
+ * row that did NOT come from the decline. */
+{
+  const s = scan(DECLINE_SMS);
+  const plan = (transactions) =>
+    buildImportPlan(s.parsed, { ...BASE, transactions }, s.newestTs, new Date(2026, 7, 2), s.declined);
+  const swept = (transactions) => plan(transactions).batch.updates.some((u) => u.remove);
+
+  ok('never a row the user edited',
+    !swept([{ ...DECLINED_ROW, userEdited: true }]));
+  ok('never a transfer',
+    !swept([{ ...DECLINED_ROW, isTransfer: true }]));
+  ok('never a split row, whose parts are rows of their own',
+    !swept([{ ...DECLINED_ROW, splits: [{ category: 'dining', amountFils: 110800 }] }]));
+  ok('never a row this device did not import from a message',
+    !swept([{ ...DECLINED_ROW, source: 'manual' }]));
+  ok('never a row dated nowhere near the message',
+    !swept([{ ...DECLINED_ROW, date: '2025-01-04' }]));
+
+  // Two rows on one millisecond cannot both have come from one decline, and
+  // nothing here can say which did.
+  ok('never when two rows share the timestamp',
+    !swept([DECLINED_ROW, { ...DECLINED_ROW, id: 'other-1108', amountFils: 4200, smsKey: `s${DECLINE_TS}-4200` }]));
+
+  // A row that predates the `ts` column is still reachable: dedupe.ts reads the
+  // timestamp out of `s{ts}-{amount}`, and so does this.
+  const legacy = { ...DECLINED_ROW, ts: undefined };
+  ok('a legacy row with no ts column is matched through its smsKey',
+    swept([legacy]));
+}
+
+/* The timestamp of a message the parser can still read is off limits. On the
+ * full re-read a version bump forces, `parsed` is the whole inbox, so a real
+ * charge sharing a millisecond with a decline takes its own row out of play. */
+{
+  const s = scan([
+    ...DECLINE_SMS,
+    { body: 'Purchase of AED 42.00 with Debit Card ending 1234 at SPINNEYS, DUBAI.', ts: DECLINE_TS },
+  ]);
+  const real = {
+    id: 'real-42', type: 'expense', amountFils: 4200, category: 'groceries',
+    accountId: 'acc-main', title: 'Spinneys',
+    date: new Date(DECLINE_TS).toISOString().slice(0, 10),
+    source: 'sms', ts: DECLINE_TS, smsKey: `s${DECLINE_TS}-4200`,
+  };
+  const plan = buildImportPlan(s.parsed, { ...BASE, transactions: [real] }, s.newestTs,
+    new Date(2026, 7, 2), s.declined);
+  ok('a timestamp this scan still parses is never swept',
+    !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
+}
+
+/* The class this whole guardrail exists for.
+ *
+ * A naive "delete anything that no longer parses" rule would have deleted two
+ * GENUINE purchases from the same ledger — AED 3,366.95 and AED 2,787.97 —
+ * whose stored bodies carry a figure the bank masked (`THB ····9260.00`) and
+ * the parser refuses on purpose. Neither is a refusal, so neither is ever
+ * carried as one; and if such a row were somehow reached by a colliding
+ * timestamp, its own retained text vetoes the removal. */
+{
+  const masked = 'Purchase of THB ····9260.00 at PLENARY WELLNESS PHUKET THA with Credit Card ending 8575.';
+  ok('a bank-masked figure parses to null but is NOT a decline',
+    parseSms(masked) === null && !isDeclinedMessage(masked));
+  const s = scan([{ body: masked, ts: DECLINE_TS }]);
+  ok('...so the scan carries no decline for it',
+    s.declined.length === 0, s.declined);
+
+  // And the veto, driven by the decline at the same millisecond.
+  const genuine = {
+    id: 'plenary', type: 'expense', amountFils: 336695, category: 'other',
+    accountId: 'acc-main', title: 'Plenary Wellness Phuket',
+    date: new Date(DECLINE_TS).toISOString().slice(0, 10),
+    source: 'sms', ts: DECLINE_TS, smsKey: `s${DECLINE_TS}-336695`, raw: masked,
+  };
+  const withDecline = scan(DECLINE_SMS);
+  const plan = buildImportPlan([], { ...BASE, transactions: [genuine] }, DECLINE_TS,
+    new Date(2026, 7, 2), withDecline.declined);
+  ok('a row whose own stored text is not a refusal is never swept',
+    !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
+}
+
+/* Suppression is not refusal. Everything else parseSms drops — OTPs, offers,
+ * spend summaries, pre-auth holds — must never become deletion evidence. */
+{
+  const notDeclines = [
+    'Your OTP for the transaction of AED 250.00 at NOON is 448120. Do not share it.',
+    'Get 20% off at CARREFOUR when you pay with your Card ending 1234.',
+    'You spent AED 3,420.00 this month with Card ending 1234.',
+  ];
+  const s = scan(notDeclines.map((body, i) => ({ body, ts: DECLINE_TS + i })));
+  ok('suppressed-but-not-declined messages are carried as neither',
+    s.parsed.length === 0 && s.declined.length === 0, s.declined);
 }
 
 /* ── what must STILL import ──────────────────────────────────────────── */
@@ -1237,6 +1398,420 @@ const afterFirst = apply(BASE, first);
   ]).parsed, state, newestTs, new Date('2026-08-07T12:00:00Z'));
   ok('a rescan adds no second copy of either', again.txCount === 0 && again.dueCount === 0,
     { tx: again.txCount, dues: again.dueCount });
+}
+
+// ── One card payment, two SMS, hours apart ──────────────────────────────
+//
+// The bank confirms a card payment twice: once against the account the money
+// left, once against the card it arrived on. dedupe.ts pairs the two only if
+// they land within 30 minutes of each other, and banks do not promise that —
+// a receipt posted the next morning is ordinary. Both rows then allocate, and
+// because a statement can only absorb what it owes, the surplus pours into the
+// NEXT statement and marks a bill paid that nobody paid.
+//
+// So the assertion is not "one row in the ledger" — the phantom row is
+// dedupe.ts's to prevent, and a ledger already holding one cannot re-scan its
+// way out. It is that the money is counted ONCE wherever it is counted: the
+// September statement must still be owed, at every gap.
+{
+  const cardMath = require('./build/cards.js');
+  const dedupe = require('./build/dedupe.js');
+  const AUG = 'Your FAB Credit Card ending 1234 statement for Aug 2026: Total Amount Due AED 1,000.00, Minimum Amount Due AED 50.00. Payment Due Date 26/08/2026.';
+  const SEP = 'Your FAB Credit Card ending 1234 statement for Sep 2026: Total Amount Due AED 800.00, Minimum Amount Due AED 40.00. Payment Due Date 26/09/2026.';
+  const DEBIT_LEG = 'Dear Customer, AED 1,000.00 has been debited from your account XXX0004 towards the payment of your Credit Card 1234.';
+  const RECEIPT_LEG = 'FAB: Payment of AED 1,000.00 received towards your Credit Card ending 1234. Thank you.';
+  const DEBIT_AT = Date.parse('2026-08-26T15:00:00Z');
+  const NOW = new Date('2026-09-05T12:00:00Z');
+
+  /** Both statements imported, the way a user's inbox delivers them. */
+  const withStatements = () => {
+    let state = BASE;
+    for (const [body, ts] of [
+      [AUG, Date.parse('2026-08-01T06:00:00Z')],
+      [SEP, Date.parse('2026-09-01T06:00:00Z')],
+    ]) {
+      const s = scan([{ body, ts, sender: 'FAB' }]);
+      state = apply(state, buildImportPlan(s.parsed, state, s.newestTs, NOW));
+    }
+    return state;
+  };
+
+  const settle = (gapMs) => {
+    const s = scan([
+      { body: DEBIT_LEG, ts: DEBIT_AT, sender: 'FAB' },
+      { body: RECEIPT_LEG, ts: DEBIT_AT + gapMs, sender: 'FAB' },
+    ]);
+    let state = apply(withStatements(), buildImportPlan(s.parsed, withStatements(), s.newestTs, NOW));
+    // The store reconciles captures after every import; do the same here so
+    // this measures what survives the real pipeline, not the plan alone.
+    state = { ...state, transactions: dedupe.reconcileCaptureDuplicates(state.transactions) };
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    const sep = state.cardDues.find((d) => d.dueDate === '2026-09-26');
+    return {
+      sepAllocated: cardMath.duePaidFils(state, sep),
+      open: cardMath.openDues(state, NOW).map((d) => `${d.due.dueDate}:${d.remainingFils}`),
+      paidTotal: cardMath.cardStatementView(state, card.id).paidTotalFils,
+    };
+  };
+
+  const base = settle(5 * 60_000);
+  ok('settlement legs 5 minutes apart: September is untouched',
+    base.sepAllocated === 0 && base.open.join() === '2026-09-26:80000', base);
+
+  for (const [label, gapMs] of [
+    ['31 minutes', 31 * 60_000],
+    ['four hours', 4 * 3_600_000],
+    ['the next morning', 17 * 3_600_000],
+  ]) {
+    const out = settle(gapMs);
+    ok(`settlement legs ${label} apart do not also settle September`,
+      out.sepAllocated === 0 && out.open.join() === '2026-09-26:80000', out);
+    ok(`settlement legs ${label} apart are one AED 1,000 payment on the sheet`,
+      out.paidTotal === 100000, out);
+  }
+
+  // "Mark paid" is a claim about a payment the bank is about to confirm. It is
+  // stamped with the device's today; the receipt carries the provider's date,
+  // so an evening payment routinely skews the two by a day. dedupe.ts matches
+  // a manual row on its exact date only, and that one day of skew used to buy
+  // the user a second AED 1,000 payment.
+  const markedPaid = () => {
+    const state = withStatements();
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    return {
+      ...state,
+      // payCardDue (store.tsx) records the transfer and leaves paidFils alone.
+      transactions: [
+        { id: 'manual-paid', type: 'income', amountFils: 100000, category: 'other',
+          accountId: card.id, title: 'FAB Credit Card •1234 payment',
+          date: '2026-08-26', source: 'manual', isTransfer: true },
+        ...state.transactions,
+      ],
+      cardDues: state.cardDues.map((d) =>
+        d.dueDate === '2026-08-26' ? { ...d, settledAt: '2026-08-26T20:00:00.000Z' } : d),
+    };
+  };
+
+  for (const [label, at] of [
+    ['the same evening', '2026-08-26T18:00:00Z'],
+    ['the next morning', '2026-08-27T08:00:00Z'],
+  ]) {
+    const before = markedPaid();
+    const s = scan([{ body: RECEIPT_LEG, ts: Date.parse(at), sender: 'FAB' }]);
+    const state = apply(before, buildImportPlan(s.parsed, before, s.newestTs, NOW));
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    const sep = state.cardDues.find((d) => d.dueDate === '2026-09-26');
+    const view = cardMath.cardStatementView(state, card.id);
+    ok(`Mark paid plus the bank's receipt ${label} is one payment, not two`,
+      cardMath.duePaidFils(state, sep) === 0 && view.paidTotalFils === 100000,
+      { sep: cardMath.duePaidFils(state, sep), paidTotal: view.paidTotalFils,
+        payments: view.payments.map((t) => `${t.date}|${t.source}`) });
+  }
+
+  // The other direction: two genuine payments of the same size, each split
+  // across a debit and a receipt leg, are still two payments.
+  const twoGenuine = (() => {
+    const state = withStatements();
+    const card = state.accounts.find((a) => a.cardType === 'credit');
+    const leg = (id, date, side) => ({
+      id, type: 'income', amountFils: 100000, category: 'other', accountId: card.id,
+      title: 'Card payment', date, source: 'sms', isTransfer: true, cardPaymentSide: side,
+      ts: Date.parse(`${date}T12:00:00Z`),
+    });
+    const full = { ...state, transactions: [
+      leg('a-debit', '2026-08-26', 'debit'), leg('a-receipt', '2026-08-26', 'receipt'),
+      leg('b-debit', '2026-08-27', 'debit'), leg('b-receipt', '2026-08-27', 'receipt'),
+    ] };
+    return cardMath.cardStatementView(full, card.id).paidTotalFils;
+  })();
+  ok('two same-size payments, each in two legs, are still AED 2,000',
+    twoGenuine === 200000, twoGenuine);
+}
+
+// ── A minimum the bank restates ─────────────────────────────────────────
+//
+// Math.max between two figures the bank BOTH stated meant a correction
+// downward never landed, and `belowMinimum` went on accusing the user of
+// underpaying against a figure the bank itself had superseded. Between two
+// guesses there is no newer and no better, so the larger still wins.
+{
+  const cardMath = require('./build/cards.js');
+  const card = { id: 'C', name: 'FAB Credit Card •1234', kind: 'card', cardType: 'credit',
+    last4: '1234', bankName: 'FAB', openingFils: 0, color: '#fff' };
+  const due = (id, minDueFils, extra) => ({ id, accountId: 'C', totalDueFils: 100000,
+    minDueFils, dueDate: '2026-08-26', paidFils: 0, ...extra });
+  const minOf = (a, b) => cardMath.mergeImportedCardDues([a], [b], [card])[0].minDueFils;
+
+  ok('a minimum the bank revises down replaces the one it revised',
+    minOf(due('d1', 20000), due('d2', 5000)) === 5000);
+  ok('a minimum the bank revises up replaces it too',
+    minOf(due('d1', 5000), due('d2', 20000)) === 20000);
+  ok('a stated minimum still beats an estimate, whichever arrived first',
+    minOf(due('d1', 20000), due('d2', 5000, { minDueEstimated: true })) === 20000 &&
+      minOf(due('d1', 5000, { minDueEstimated: true }), due('d2', 20000)) === 20000);
+  ok('two estimates still take the larger',
+    minOf(due('d1', 5000, { minDueEstimated: true }),
+      due('d2', 7000, { minDueEstimated: true })) === 7000);
+
+  // The whole point of the estimate flag: a guess must never be quoted back
+  // as the bank's figure, and must never make the user look delinquent.
+  const stated = cardMath.mergeImportedCardDues(
+    [due('d1', 20000)], [due('d2', 5000)], [card])[0];
+  ok('the merged row is still marked as a figure, not a guess',
+    stated.minDueEstimated === undefined, stated);
+}
+
+/* ── one push row can only ever be ONE charge ──────────────────────────
+ *
+ * Five defects, all of which end the same way: two real charges become one
+ * row and the money silently leaves the ledger. The constraint every case
+ * below encodes is that under-merging (a visible duplicate the user can
+ * delete) is always preferable to over-merging (a charge that vanishes).
+ */
+{
+  const { duplicateGuard, reconcileCaptureDuplicates } = require('./build/dedupe.js');
+
+  const D0 = Date.parse('2026-07-10T09:00:00Z');
+  const pushRow = (extra) => ({
+    id: 'push-1', type: 'expense', amountFils: 2500, category: 'other',
+    accountId: 'fab', title: 'Card purchase', date: '2026-07-10',
+    source: 'sms', viaPush: true, smsKey: `s${D0}-2500`, ts: D0, ...extra,
+  });
+
+  /* 1 — a push row supersedes ONCE. It described one charge, not every
+   *     charge of that value in the next two minutes. */
+  {
+    const guard = duplicateGuard([pushRow()]);
+    const starbucks = {
+      date: '2026-07-10', amountFils: 2500, title: 'Starbucks', type: 'expense',
+      smsKey: `s${D0 + 10_000}-2500`, ts: D0 + 10_000, channel: 'inbox',
+    };
+    ok('supersession: the first SMS claims the push row',
+      guard.supersedes(starbucks) === 'push-1', guard.supersedes(starbucks));
+    guard.consume('push-1');
+    guard.add(starbucks);
+    const costa = {
+      date: '2026-07-10', amountFils: 2500, title: 'Costa', type: 'expense',
+      smsKey: `s${D0 + 90_000}-2500`, ts: D0 + 90_000, channel: 'inbox',
+    };
+    ok('supersession: a consumed push row cannot be superseded a second time',
+      guard.supersedes(costa) === null, guard.supersedes(costa));
+    ok('supersession: the second genuine charge is not a duplicate either',
+      !guard.has(costa));
+  }
+
+  /* 1b — the same thing through the real import path. Two AED 25 charges
+   *      must not collapse into one patch against a single push row. */
+  {
+    const state = {
+      ...BASE,
+      accounts: [{
+        id: 'fab', name: 'FAB Debit •1234', kind: 'card', cardType: 'debit',
+        last4: '1234', bankName: 'FAB', openingFils: 0, color: '#fff',
+      }],
+      accountHints: { 1234: 'fab' },
+      transactions: [pushRow()],
+    };
+    const incoming = scan([
+      { body: 'Purchase of AED 25.00 with Debit Card ending 1234 at STARBUCKS, DUBAI.', ts: D0 + 10_000 },
+      { body: 'Purchase of AED 25.00 with Debit Card ending 1234 at COSTA COFFEE, DUBAI.', ts: D0 + 90_000 },
+    ]);
+    const plan = buildImportPlan(incoming.parsed, state, incoming.newestTs);
+    ok('supersession: two SMS charges over one push row leave one new row plus one patch',
+      plan.txCount === 1 && plan.batch.updates.length === 1,
+      { txCount: plan.txCount, updates: plan.batch.updates, txs: plan.batch.transactions });
+    const after = apply(state, plan);
+    const total = after.transactions
+      .filter((t) => t.type === 'expense')
+      .reduce((n, t) => n + t.amountFils, 0);
+    ok('supersession: both AED 25 charges survive the import',
+      after.transactions.length === 2 && total === 5000,
+      after.transactions.map((t) => [t.title, t.amountFils]));
+  }
+
+  /* 2 — a merged push/SMS pair must stop being a push row. A persisted SMS
+   *     row has NO viaPush key at all (JSON drops undefined), so the spread
+   *     that built the merged row could not clear the push row's `true`, and
+   *     the resurrected row went on eating charges on every later hydrate. */
+  {
+    const push = pushRow({ id: 'p1', title: 'Coffee' });
+    // exactly what AsyncStorage hands back: no viaPush key
+    const sms = JSON.parse(JSON.stringify({
+      ...push, id: 's1', viaPush: undefined, title: 'Coffee',
+      smsKey: `s${D0 + 5_000}-2500`, ts: D0 + 5_000,
+    }));
+    const merged = reconcileCaptureDuplicates([push, sms]);
+    ok('hydrate: a push/SMS pair still becomes one row',
+      merged.length === 1 && merged[0].id === 's1', merged);
+    ok('hydrate: the merged row no longer claims to be a push capture',
+      merged[0].viaPush !== true, merged[0]);
+    const genuine = {
+      ...sms, id: 's2', title: 'Costa', amountFils: 2500,
+      ts: D0 + 65_000, smsKey: `s${D0 + 65_000}-2500`,
+    };
+    ok('hydrate: the merged row does not swallow a later genuine charge',
+      reconcileCaptureDuplicates([...merged, genuine]).length === 2,
+      reconcileCaptureDuplicates([...merged, genuine]));
+  }
+
+  /* 3 — cross-channel pairing may ignore the merchant only when one side
+   *     names none. Two SPECIFIC titles are two merchants. */
+  {
+    const guard = duplicateGuard([pushRow({ id: 'generic', title: 'Card purchase' })]);
+    ok('cross-channel: a generic push title still pairs with a specific SMS',
+      guard.supersedes({
+        date: '2026-07-10', amountFils: 2500, title: 'Costa', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'inbox',
+      }) === 'generic');
+
+    const named = duplicateGuard([pushRow({ id: 'named', title: 'Starbucks' })]);
+    ok('cross-channel: two different named merchants never pair',
+      named.supersedes({
+        date: '2026-07-10', amountFils: 2500, title: 'Costa', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'inbox',
+      }) === null);
+
+    // and the same asymmetry the other way: an SMS row must not silently
+    // absorb the push about a DIFFERENT merchant of the same value.
+    const smsFirst = duplicateGuard([{
+      id: 'sms-first', type: 'expense', amountFils: 2500, category: 'dining',
+      accountId: 'fab', title: 'Costa', date: '2026-07-10', source: 'sms',
+      smsKey: `s${D0}-2500`, ts: D0,
+    }]);
+    ok('cross-channel: a push naming another merchant is not dropped',
+      !smsFirst.has({
+        date: '2026-07-10', amountFils: 2500, title: 'Starbucks', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'push',
+      }));
+    ok('cross-channel: a push about the same merchant is still dropped',
+      duplicateGuard([{
+        id: 'sms-first', type: 'expense', amountFils: 2500, category: 'dining',
+        accountId: 'fab', title: 'Costa', date: '2026-07-10', source: 'sms',
+        smsKey: `s${D0}-2500`, ts: D0,
+      }]).has({
+        date: '2026-07-10', amountFils: 2500, title: 'Costa Coffee', type: 'expense',
+        smsKey: `s${D0 + 60_000}-2500`, ts: D0 + 60_000, channel: 'push',
+      }));
+  }
+
+  /* 3b — dedupe.ts restates sms-parser's STRUCTURAL_TITLES rather than
+   *      importing it (db.test.js pins that it has no dependencies), so the
+   *      copy has to be held to the original. A title the parser assigns from
+   *      the shape of a message names no merchant and must never be compared
+   *      to one. */
+  {
+    const { STRUCTURAL_TITLES } = require('./build/sms-parser.js');
+    const { sameMerchantCapture } = require('./build/dedupe.js');
+    const missed = [...STRUCTURAL_TITLES].filter(
+      (t) => !sameMerchantCapture(t, 'Some Specific Merchant'),
+    );
+    ok('cross-channel: every structural parser title counts as naming no merchant',
+      missed.length === 0, missed);
+    ok('cross-channel: a real merchant name is still not generic',
+      !sameMerchantCapture('Starbucks', 'Costa'));
+  }
+
+  /* 4 — a manually logged row carries no event clock. It explains the ONE
+   *     message about it, not every identical charge for the rest of the day. */
+  {
+    const manual = {
+      id: 'manual-salik', type: 'expense', amountFils: 40000, category: 'transport',
+      accountId: 'fab', title: 'Salik', date: '2026-07-10', source: 'manual',
+    };
+    const guard = duplicateGuard([manual]);
+    const topUp = (ts) => ({
+      date: '2026-07-10', amountFils: 40000, title: 'Salik', type: 'expense',
+      smsKey: `s${ts}-40000`, ts, channel: 'inbox',
+    });
+    ok('timeless: the SMS for a manually logged charge is still dropped',
+      guard.has(topUp(D0)));
+    ok('timeless: a genuine repeat nine hours later is NOT dropped',
+      !guard.has(topUp(D0 + 9 * 3_600_000)),
+      'a manual row with no timestamp blocked every later identical charge');
+  }
+
+  /* 5 — the two captures of one settlement can straddle midnight. Seconds
+   *     apart is one event whichever calendar day each landed on; minutes
+   *     apart is still two (unit.test.js pins the 3-minute case). */
+  {
+    const midnight = Date.parse('2026-07-11T00:00:00Z');
+    const side = (ts, date) => ({
+      date, amountFils: 400000, title: 'Card •3749 payment', type: 'income',
+      smsKey: `s${ts}-400000`, ts, channel: 'inbox', accountId: 'fab-3749',
+      eventKind: 'cardPayment', cardPaymentSide: 'receipt',
+    });
+    const guard = duplicateGuard([]);
+    guard.add(side(midnight - 2_000, '2026-07-10'));
+    ok('midnight: the second capture of one settlement is not a second payment',
+      guard.has(side(midnight + 3_000, '2026-07-11')));
+
+    const apart = duplicateGuard([]);
+    apart.add(side(midnight - 2_000, '2026-07-10'));
+    ok('midnight: two settlements three minutes apart stay two payments',
+      !apart.has(side(midnight + 178_000, '2026-07-11')));
+  }
+}
+
+/* ── FAB: two messages, one statement, two card identities ───────────────
+ *
+ * The whole path, from the bank's own wording through the real parser and the
+ * real planner to the figure a user reads on Home. FAB sends this statement
+ * twice: once naming the card, once in a reminder that quotes a number which
+ * is not the card's last four. The second one mints a card that has never had
+ * a transaction of any kind and books the statement against it a second time,
+ * so the payment settles the real copy and the phantom copy is still billed.
+ *
+ * This is not a parser bug — both messages are read correctly, and each names
+ * the digits it names. It is decided after the batch lands, which is why the
+ * repair is in accounts.ts and this test drives the store's own sequence. */
+{
+  const acc = require('./build/accounts.js');
+  const cardsLib = require('./build/cards.js');
+
+  const T = (iso) => Date.parse(iso);
+  const FAB_INBOX = [
+    { body: 'Credit Card Purchase \nCard No XXXX3749 \nAED 12.64 \nALLDEBRID DUBAI ARE \n02/08/26 11:16 \nAvl Bal AED 4142.86',
+      ts: T('2026-08-02T11:16:00Z'), sender: 'FAB' },
+    { body: 'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26',
+      ts: T('2026-08-01T06:00:00Z'), sender: 'FAB' },
+    { body: 'Dear Customer, the payment due date of your FAB Credit Card ending with 5793 is 26-08-2026. The total amount due is AED 5,645.07 and the Minimum due amount is AED 282.25. Please ignore the message, if already paid.',
+      ts: T('2026-08-03T06:00:00Z'), sender: 'FAB' },
+    { body: 'Your payment instructions of AED 5,645.07 to 5492********3749 has been processed',
+      ts: T('2026-08-05T09:00:00Z'), sender: 'FAB' },
+  ];
+
+  const s = scan(FAB_INBOX);
+  const imported = apply(BASE, buildImportPlan(s.parsed, BASE, s.newestTs));
+  const named = (state, id) => state.accounts.find((a) => a.id === id)?.name;
+
+  ok('FAB: the reminder mints a second card row for one statement',
+    imported.accounts.length === 2 &&
+      imported.accounts.map((a) => a.last4).sort().join(',') === '3749,5793',
+    imported.accounts.map((a) => a.name));
+  ok('FAB: and a second copy of the statement against it',
+    imported.cardDues.length === 2 &&
+      imported.cardDues.every((d) => d.totalDueFils === 564507 && d.dueDate === '2026-08-26'),
+    imported.cardDues);
+  ok('FAB: the payment is read as a card payment and lands on the real card',
+    imported.transactions.some(
+      (t) => t.isTransfer && t.amountFils === 564507 && named(imported, t.accountId) === 'FAB Credit Card •3749'),
+    imported.transactions.map((t) => [t.title, named(imported, t.accountId)]));
+
+  const before = cardsLib.openDues(imported, new Date('2026-08-08T09:00:00Z'));
+  ok('FAB repro: the paid statement is billed a second time on a card with no history',
+    before.length === 1 &&
+      before[0].remainingFils === 564507 &&
+      named(imported, before[0].due.accountId) === 'FAB Credit Card •5793',
+    before.map((d) => [named(imported, d.due.accountId), d.remainingFils]));
+
+  // What store.tsx does with the batch once it has landed.
+  const repaired = acc.repairDuplicateStatements(imported);
+  const after = cardsLib.openDues(repaired, new Date('2026-08-08T09:00:00Z'));
+  ok('FAB fixed: nothing is owed, because the payment covered the statement',
+    after.length === 0, after.map((d) => [named(repaired, d.due.accountId), d.remainingFils]));
+  ok('FAB fixed: both card rows are still there for the user to reconcile',
+    repaired.accounts.length === 2 && repaired.cardDues.length === 2,
+    repaired.accounts.map((a) => a.name));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

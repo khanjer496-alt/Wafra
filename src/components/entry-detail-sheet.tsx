@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { ChoiceSheet } from '@/components/ui/choice-sheet';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Chip, Toggle } from '@/components/ui/controls';
 import { Block, LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
@@ -44,9 +46,26 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   const [dateText, setDateText] = useState('');
   const [isTransfer, setIsTransfer] = useState(false);
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  /**
+   * The merchant-rule question, frozen at the moment Save was pressed.
+   *
+   * It is a snapshot rather than a read of the live fields because the edit has
+   * already been filed by then: `sameMerchantCount` recomputes off the new
+   * store, and the sheet would be offering to move a number that had already
+   * moved underneath it.
+   */
+  const [ruleAsk, setRuleAsk] = useState<{
+    merchant: string;
+    category: CategoryId;
+    count: number;
+  } | null>(null);
+
   useEffect(() => {
     if (!transaction) return;
     setEditing(false);
+    setConfirmingDelete(false);
+    setRuleAsk(null);
     setTitle(transaction.title);
     // The FULL amount, fils included. Seeding the field from the display
     // string — which hides the fils — meant opening an entry and saving any
@@ -119,42 +138,27 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     });
     const merchant = title.trim();
     if (categoryChanged && merchant.length > 2) {
-      Alert.alert(
-        tf('rememberForMerchant', { merchant }),
-        sameMerchantCount > 0
-          ? tf('merchantRuleAlso', {
-              merchant,
-              n: sameMerchantCount,
-              entries: sameMerchantCount === 1 ? 'entry' : 'entries',
-            })
-          : tf('merchantRuleOnly', { merchant }),
-        sameMerchantCount > 0
-          ? [
-              { text: t('no'), style: 'cancel' },
-              { text: t('justFuture'), onPress: () => setMerchantOverride(merchant, category, false) },
-              { text: t('yesUpdateAll'), onPress: () => setMerchantOverride(merchant, category, true) },
-            ]
-          : [
-              { text: t('no'), style: 'cancel' },
-              { text: t('remember'), onPress: () => setMerchantOverride(merchant, category, false) },
-            ],
-      );
+      // The rule question is drawn from inside this sheet now, so the sheet
+      // cannot close first the way it did when the question was an OS dialog
+      // that outlived it. It closes when the question is answered — or
+      // dismissed, which is the "No" the alert used to spell out.
+      setRuleAsk({ merchant, category, count: sameMerchantCount });
+      return;
     }
     onClose();
   };
 
-  const remove = () => {
-    Alert.alert(t('deleteThisEntry'), `${transaction.title} · ${formatAmount(transaction.amountFils)}`, [
-      { text: t('cancel'), style: 'cancel' },
-      {
-        text: t('delete'),
-        style: 'destructive',
-        onPress: () => {
-          deleteTransaction(transaction.id);
-          onClose();
-        },
-      },
-    ]);
+  // Answering the rule question — either way — finishes the save, so it closes
+  // the whole sheet. ChoiceSheet and ConfirmSheet both run `onClose` before
+  // they commit, so the store call lands after this sheet is on its way out.
+  const closeRule = () => {
+    setRuleAsk(null);
+    onClose();
+  };
+
+  const removeEntry = () => {
+    deleteTransaction(transaction.id);
+    onClose();
   };
 
   const sourceLabel = transaction.source === 'sms' ? t('bankSmsSource') : t('addedByHand');
@@ -402,9 +406,66 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
           <View style={styles.actions}>
             <Button inline label={t('editEntry')} onPress={() => setEditing(true)} />
-            <Button inline variant="danger" label={t('delete')} onPress={remove} />
+            <Button
+              inline
+              variant="danger"
+              label={t('delete')}
+              onPress={() => setConfirmingDelete(true)}
+            />
           </View>
         </>
+      )}
+
+      {/* Both of these are nested inside this sheet rather than rendered beside
+          it: a Modal presented from within the presented one stacks, where
+          dismissing this sheet and presenting another in the same frame does
+          not. Each is mounted only while it has something to ask, so the entry
+          animation runs on every open. */}
+      {confirmingDelete && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmingDelete(false)}
+          question={t('deleteThisEntry')}
+          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}`}
+          confirmLabel={t('delete')}
+          destructive
+          onConfirm={removeEntry}
+        />
+      )}
+
+      {/* Two shapes, because the alert had two: with other entries to move it
+          is a choice between two rules, and with none it is a plain yes/no. */}
+      {ruleAsk && ruleAsk.count > 0 && (
+        <ChoiceSheet
+          visible
+          onClose={closeRule}
+          // The caps header names the thing being decided; the question goes
+          // in sentence case underneath. Passed as `title` it rendered as
+          // "REMEMBER FOR CARREFOUR?", which the copy never asked to be.
+          title={t('remember')}
+          question={tf('rememberForMerchant', { merchant: ruleAsk.merchant })}
+          body={tf('merchantRuleAlso', {
+            merchant: ruleAsk.merchant,
+            n: ruleAsk.count,
+            entries: ruleAsk.count === 1 ? 'entry' : 'entries',
+          })}
+          options={[
+            { value: 'future', label: t('justFuture') },
+            { value: 'all', label: t('yesUpdateAll') },
+          ]}
+          onSelect={(scope) => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, scope === 'all')}
+        />
+      )}
+      {ruleAsk && ruleAsk.count === 0 && (
+        <ConfirmSheet
+          visible
+          onClose={closeRule}
+          question={tf('rememberForMerchant', { merchant: ruleAsk.merchant })}
+          body={tf('merchantRuleOnly', { merchant: ruleAsk.merchant })}
+          confirmLabel={t('remember')}
+          cancelLabel={t('no')}
+          onConfirm={() => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, false)}
+        />
       )}
     </BottomSheet>
   );

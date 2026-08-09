@@ -39,6 +39,33 @@ export function amountInCategory(t: Transaction, category: CategoryId): number {
   return total;
 }
 
+/**
+ * What this transaction contributes to a SET of categories.
+ *
+ * The set form exists because that is how a drill-down arrives: Flow's pooled
+ * "5 more" slice hands over five category ids at once, and the list behind it
+ * has to add up to the figure that was tapped. Reading `t.category` instead
+ * counts a split charge at its full amount under its headline category — a
+ * AED 500 Carrefour swipe split 100 groceries / 400 dining showed up whole in
+ * both drill-downs, so one of them was AED 400 over.
+ */
+export function amountInCategories(t: Transaction, categories: Set<CategoryId>): number {
+  let total = 0;
+  for (const a of allocationsOf(t)) if (categories.has(a.category)) total += a.amountFils;
+  return total;
+}
+
+/**
+ * Whether ANY part of this transaction falls in one of these categories — the
+ * matching rule for a category filter, so a split row is not judged solely by
+ * its headline. The 100-fils groceries part of a mostly-dining charge belongs
+ * in the groceries list, at 100.
+ */
+export function touchesCategories(t: Transaction, categories: Set<CategoryId>): boolean {
+  for (const a of allocationsOf(t)) if (categories.has(a.category)) return true;
+  return false;
+}
+
 export function isSplit(t: Transaction): boolean {
   return !!t.splits && t.splits.length > 1;
 }

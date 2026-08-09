@@ -1,8 +1,10 @@
-import { StyleSheet, Text, type TextProps, type TextStyle } from 'react-native';
+import { isValidElement, type ReactNode } from 'react';
+import { StyleSheet, Text, type StyleProp, type TextProps, type TextStyle } from 'react-native';
 
 import { Fonts, ThemeColor } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
+import { hasArabicScript } from '@/lib/i18n';
 
 export type TextType =
   | 'default'
@@ -62,10 +64,59 @@ export function ThemedText({
         tabular && styles.tabular,
         tabular && { fontFamily: MONO_FOR_WEIGHT[WEIGHT_OF[type]] },
         style,
+        // LAST, because the caller's `style` is the thing it is answering.
+        language === 'ar' && arabicRescue(style, rest.children, type),
       ]}
       {...rest}
     />
   );
+}
+
+/**
+ * The Arabic face put back over a call site that pinned a Latin one.
+ *
+ * `style` is applied after everything above it, which is the right rule for
+ * colour and size and a silent disaster for the family: the bundled Geist cuts
+ * have NO Arabic coverage — every codepoint in the block maps to .notdef — so
+ * `style={{ fontFamily: Fonts.sansSemi }}` on a translated string does not
+ * merely look off-house, it draws empty boxes. Onboarding and the storage
+ * recovery screen both do this, in their own StyleSheets, which means the FIRST
+ * screen an Arabic phone ever shows was unreadable.
+ *
+ * Reapplying the Arabic face unconditionally would be the wrong cure: the
+ * wordmark ("Wafra", pinned to Geist SemiBold) and the currency prefix (pinned
+ * to Geist Mono beside a figure) are Latin text that should stay in a Latin
+ * face even on an Arabic phone. So the question this asks is not "is the app in
+ * Arabic" but "is THIS string Arabic in a font that cannot draw it".
+ *
+ * The negative tracking goes with it. Geist's display sizes carry up to -1.4px
+ * of letter-spacing; Arabic is cursive, and tracking pulls the joins apart.
+ */
+function arabicRescue(
+  style: StyleProp<TextStyle>,
+  children: ReactNode,
+  type: TextType,
+): TextStyle | false {
+  const pinned = StyleSheet.flatten(style) as TextStyle | undefined;
+  if (!pinned) return false;
+  const family = typeof pinned.fontFamily === 'string' ? pinned.fontFamily : undefined;
+  const latinFace = family !== undefined && family.startsWith('Geist');
+  const tracked = typeof pinned.letterSpacing === 'number' && pinned.letterSpacing !== 0;
+  if (!latinFace && !tracked) return false;
+  if (!holdsArabic(children)) return false;
+  const fix: TextStyle = { letterSpacing: 0 };
+  if (latinFace) fix.fontFamily = ARABIC_FOR_FACE[family] ?? ARABIC_FOR_WEIGHT[WEIGHT_OF[type]];
+  return fix;
+}
+
+/** Is any of this node's own text Arabic? */
+function holdsArabic(node: ReactNode): boolean {
+  if (typeof node === 'string') return hasArabicScript(node);
+  if (Array.isArray(node)) return node.some(holdsArabic);
+  if (isValidElement(node)) {
+    return holdsArabic((node.props as { children?: ReactNode }).children);
+  }
+  return false;
 }
 
 /**
@@ -102,6 +153,19 @@ const ARABIC_FOR_WEIGHT = {
   medium: Fonts.arabic,
   semi: Fonts.arabicBold,
 } as const;
+
+/**
+ * The Arabic cut that stands in for a pinned Latin one, weight for weight, so
+ * a rescued heading is still heavier than the sentence under it.
+ */
+const ARABIC_FOR_FACE: Record<string, string> = {
+  [Fonts.sans]: Fonts.arabic,
+  [Fonts.sansMedium]: Fonts.arabic,
+  [Fonts.sansSemi]: Fonts.arabicBold,
+  [Fonts.mono]: Fonts.arabic,
+  [Fonts.monoMedium]: Fonts.arabic,
+  [Fonts.monoSemi]: Fonts.arabicBold,
+};
 
 /**
  * Dynamic Type stays on everywhere. Large money figures and dense utility

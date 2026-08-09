@@ -661,14 +661,20 @@ await tapText(page, 'Wafra Pro', 1400);
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
 ok('paywall shows the trial chip', !!(await visibleText(page, /FREE TRIAL ACTIVE/i)));
 
-// ── Founder unlock: 7 taps on the mark in Settings' About block ────────
+// ── Founder unlock: 7 taps on the VERSION row in Settings' About block ──
+//
+// It used to be the logo. The logo is the first thing in the About block and
+// VoiceOver announced it as a plain button that does nothing six times out of
+// seven, so the gesture moved to the version line — which is what a user
+// hunting for a build number would poke anyway. This test follows it there.
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 await tapLabel(page, 'Settings', 1400);
 const about = await visibleText(page, 'Know where it goes');
 if (about) await about.scrollIntoViewIfNeeded();
 await page.waitForTimeout(400);
-const mark = page.getByLabel('Wafra', { exact: true }).last();
+const mark = page.getByText(/^Wafra\s+\d/).last();
+await mark.scrollIntoViewIfNeeded().catch(() => {});
 for (let i = 0; i < 7; i++) {
   await mark.click({ timeout: 4000 }).catch(() => {});
   await page.waitForTimeout(140);
