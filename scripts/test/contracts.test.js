@@ -1304,6 +1304,45 @@ ok('the spoken label agrees with the sign on screen',
     'the relay wake is a remote-notification task; that is the mode it needs');
 }
 
+/* ── the one line without which neither platform can be built ───────────────
+ *
+ * `expo.extra.eas.projectId` is the UUID tying this checkout to a project on
+ * EAS servers. EAS CLI reads it from the app config and no environment
+ * variable substitutes for it, so without it `eas build --non-interactive`
+ * cannot resolve what it is building.
+ *
+ * It was added by "Link the app to an EAS project so it can be built", and it
+ * has never been on main: it lives on `integration/combine-prs` and was lost
+ * in the merge that rebuilt app.json. `ios-testflight.yml` therefore could
+ * never have worked from main, and the first run to get past its EXPO_TOKEN
+ * check died fourteen seconds later on this instead.
+ *
+ * Nothing in `npm test` covered it. `scripts/check-release-config.mjs` does,
+ * but that is `npm run release:check` — a command someone has to remember, at
+ * release time, which is months after the line goes missing. This is the same
+ * shape as the Info.plist rejection: a config value no test read, whose
+ * absence only ever surfaced from a build service.
+ *
+ * Its reach is wider than iOS. `EXPO_PROJECT_ID` in server/wrangler.toml is
+ * the relay's copy of this same UUID, and the Worker refuses push
+ * registration without it — so a missing projectId also means silent
+ * no-op push on both platforms.
+ */
+{
+  const app = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '../../app.json'), 'utf8'),
+  ).expo ?? {};
+  const projectId = app.extra?.eas?.projectId ?? '';
+  ok('app.json links the app to an EAS project',
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId),
+    `expo.extra.eas.projectId is ${projectId ? `"${projectId}"` : 'missing'}`);
+  // The bundle identifier is the other half a build cannot start without, and
+  // unlike the UUID it can never be changed after the first submission.
+  ok('app.json declares the iOS bundle identifier',
+    app.ios?.bundleIdentifier === 'app.wafra.ios',
+    `expo.ios.bundleIdentifier is ${app.ios?.bundleIdentifier ?? 'missing'}`);
+}
+
 /* ── a workflow that GitHub cannot load fails silently ──────────────────────
  *
  * `feedback-agent.yml` answers `repository_dispatch`, and it referenced the
