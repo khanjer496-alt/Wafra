@@ -1255,6 +1255,55 @@ ok('the spoken label agrees with the sign on screen',
     /outcome === 'failed'/.test(code(pro)) && !/outcome === 'cancelled'/.test(code(pro)));
 }
 
+/* ── a background mode Apple will reject the binary for ─────────────────────
+ *
+ * App Store Connect refused build 1.0.0 (6) with error 90771: declaring
+ * `processing` in UIBackgroundModes obliges the app to list
+ * `BGTaskSchedulerPermittedIdentifiers`, and it did not.
+ *
+ * The honest fix was to remove the mode, not invent an identifier. `processing`
+ * was added speculatively — the commit that added it called it "the
+ * precondition for the relay's sync-back leg reaching the device" — but nothing
+ * in this app ever calls BGTaskScheduler. The relay's wake is
+ * `Notifications.registerTaskAsync`, which is a REMOTE NOTIFICATION task and
+ * needs `remote-notification` alone. There is no BGTask to permit.
+ *
+ * Nothing local could have caught it: typecheck, lint, 3,296 assertions and a
+ * web export never touch Info.plist, and the Android APK never reads
+ * UIBackgroundModes. The first signal was an upload rejected 40 minutes after
+ * a build finished.
+ *
+ * So the invariant is the pair, in both directions: `processing` obliges the
+ * identifier list, and a background mode must correspond to something the app
+ * actually does.
+ */
+{
+  const app = JSON.parse(fs.readFileSync(path.join(__dirname, '../../app.json'), 'utf8'));
+  const info = app.expo?.ios?.infoPlist ?? {};
+  const modes = info.UIBackgroundModes ?? [];
+  const ids = info.BGTaskSchedulerPermittedIdentifiers ?? [];
+
+  ok('`processing` is declared only with the identifiers Apple demands for it',
+    !modes.includes('processing') || (Array.isArray(ids) && ids.length > 0),
+    'App Store Connect error 90771 — either list BGTaskSchedulerPermittedIdentifiers ' +
+      'or drop the mode');
+
+  // The other direction: identifiers listed for a mode that is not declared are
+  // dead config that reads as though a scheduler is running.
+  ok('no BGTaskScheduler identifiers without the mode that uses them',
+    ids.length === 0 || modes.includes('processing'));
+
+  // And a mode nothing uses is a capability claimed for nothing. This is the
+  // one the rejection was really about.
+  const src = fs.readFileSync(
+    path.join(__dirname, '../../src/lib/background-relay.ts'),
+    'utf8',
+  );
+  ok('the declared background mode matches how the app actually wakes',
+    modes.includes('remote-notification') && /registerTaskAsync/.test(src),
+    'the relay wake is a remote-notification task; that is the mode it needs');
+}
+
 /* ── a workflow that GitHub cannot load fails silently ──────────────────────
  *
  * `feedback-agent.yml` answers `repository_dispatch`, and it referenced the

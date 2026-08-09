@@ -15,8 +15,7 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
-          "remote-notification",
-          "processing"
+          "remote-notification"
         ]
       }
     },
