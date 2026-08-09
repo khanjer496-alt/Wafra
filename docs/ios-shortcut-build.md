@@ -9,7 +9,45 @@ developer and is not consumer onboarding.
 satisfy, and why each part is there. It is the authority if the two documents
 ever disagree. This file is the **procedure**: which buttons, in which order.
 
-Roughly 20 minutes on an iPhone. A Mac works too and is easier to type in.
+Roughly 20 minutes. **A Mac is enough to build and publish it** — you do not
+need an iPhone for that part. Read the next section before starting if you do
+not have one, because it changes which steps are yours.
+
+---
+
+## If you do not have an iPhone
+
+You can still do the part that unblocks everyone else. Authoring and publishing
+both work in Shortcuts on Mac; Apple's own Mac guide documents the link:
+
+> "Choose Copy iCloud Link from the pop-up menu, then click Share. The link is
+> copied to your Clipboard, ready for you to paste into an email, message, or
+> text document."
+> — <https://support.apple.com/guide/shortcuts-mac/share-shortcuts-apdf01f8c054/mac>
+
+What you cannot do from a Mac is **verify** it, for a reason that has nothing
+to do with Shortcuts: Messages on a Mac only receives SMS through Text Message
+Forwarding from an iPhone. With no iPhone there is no bank alert to trigger on
+and nothing to test against. (Separately, the **Message** automation trigger
+appears to be iPhone/iPad-only — every Apple page for it is scoped "on iPhone
+or iPad" — but the missing messages are the decisive part.)
+
+You also do not need a setup code to publish. The graph asks for one on first
+run and stores it on the user's own iCloud Drive, so a copy that has never been
+run is already credential-free. Step 5's deletion only applies if you tested it.
+
+So the split is: **you publish, one tester verifies.**
+
+Pick a single iPhone tester as the designated verifier and do not tell anyone
+else iPhone capture works until they have finished:
+
+1. Install the published Shortcut from your link.
+2. Paste the setup code from their own copy of Wafra.
+3. Run it with `WAFRA_CAPTURE_TEST_V1` — Wafra should reach "pipe ready".
+4. Do step 8 below, the real locked-phone alert.
+
+Publishing something you could not run is a real risk, and this is the way to
+carry it honestly rather than pretend it is not there.
 
 ---
 
