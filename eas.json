@@ -36,7 +36,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
-        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://github.com/khanjer496-alt/Wafra/releases/download/ios-capture-beta-v2/Wafra-Capture.shortcut",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://github.com/khanjer496-alt/Wafra/releases/download/ios-capture-beta-v3/Wafra-Capture.shortcut",
         "EXPO_PUBLIC_WAFRA_SHORTCUT_FILE_BETA": "1"
       }
     },
