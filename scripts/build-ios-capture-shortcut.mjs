@@ -10,6 +10,7 @@ const uuids = {
   setupDictionary: "9445E194-BFE5-4BE0-AD79-A34A74B9D6E5",
   messageText: "DFC36902-E4D8-48D8-8219-C80846C6D585",
   senderText: "7305B385-1A7A-4B99-AF2E-4FFBEE113C23",
+  eventId: "E0F97C1D-13CE-45BF-8B20-892FB97C9A52",
   missingInputGroup: "AF2EDC3A-16C7-4E72-80C9-6A53B2EA2D78",
   readyNotification: "7F2CB6A7-FF85-43D9-A907-A4B2D8D2417B",
   url: "3FB9D81E-54AC-444C-9E7D-E06F70F4F147",
@@ -41,6 +42,7 @@ const dictionaryItem = (key, value) => ({
 });
 
 const shortcut = {
+  WFWorkflowName: "Wafra Capture",
   WFWorkflowMinimumClientVersionString: "1106",
   WFWorkflowMinimumClientVersion: 1106,
   WFWorkflowIcon: {
@@ -85,6 +87,14 @@ const shortcut = {
   WFQuickActionSurfaces: [],
   WFWorkflowHasShortcutInputVariables: true,
   WFWorkflowActions: [
+    {
+      WFWorkflowActionIdentifier: "is.workflow.actions.number.random",
+      WFWorkflowActionParameters: {
+        UUID: uuids.eventId,
+        WFRandomNumberMinimum: 100000000000,
+        WFRandomNumberMaximum: 999999999999,
+      },
+    },
     {
       WFWorkflowActionIdentifier: "is.workflow.actions.gettext",
       WFWorkflowActionParameters: {
@@ -238,6 +248,17 @@ const shortcut = {
                 }),
               },
               {
+                WFKey: textToken("eventId"),
+                WFItemType: 0,
+                WFValue: textToken("\ufffc", {
+                  "{0, 1}": {
+                    OutputUUID: uuids.eventId,
+                    Type: "ActionOutput",
+                    OutputName: "Random Number",
+                  },
+                }),
+              },
+              {
                 WFKey: textToken("receivedAt"),
                 WFItemType: 0,
                 WFValue: textToken("\ufffc", {
@@ -264,7 +285,7 @@ const shortcut = {
 };
 
 const authorizationValue =
-  shortcut.WFWorkflowActions[11].WFWorkflowActionParameters.WFHTTPHeaders.Value
+  shortcut.WFWorkflowActions[12].WFWorkflowActionParameters.WFHTTPHeaders.Value
     .WFDictionaryFieldValueItems[0].WFValue;
 authorizationValue.Value.attachmentsByRange = {
   "{7, 1}": {

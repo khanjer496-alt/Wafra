@@ -189,7 +189,7 @@ async function queueItem(id, row, publicKey) {
   {
     const icloud = 'https://www.icloud.com/shortcuts/0000000000000000000000000000abcd';
     const betaFile =
-      'https://github.com/khanjer496-alt/Wafra/releases/download/ios-capture-beta-v3/Wafra-Capture.shortcut';
+      'https://github.com/khanjer496-alt/Wafra/releases/download/ios-capture-beta-v4/Wafra%20Capture.shortcut';
 
     eq('shortcut URL: public iCloud links remain the production format',
       relay.normalizeShortcutInstallUrl(icloud), icloud);
@@ -199,7 +199,7 @@ async function queueItem(id, row, publicKey) {
       relay.normalizeShortcutInstallUrl(betaFile, true), betaFile);
     eq('shortcut URL: the beta gate does not accept arbitrary GitHub files',
       relay.normalizeShortcutInstallUrl(
-        'https://github.com/other/repo/releases/download/ios-capture-beta-v3/Wafra-Capture.shortcut',
+        'https://github.com/other/repo/releases/download/ios-capture-beta-v4/Wafra%20Capture.shortcut',
         true,
       ), null);
   }

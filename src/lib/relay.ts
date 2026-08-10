@@ -226,7 +226,7 @@ export function normalizeShortcutInstallUrl(
     const isSignedBetaFile =
       allowSignedFileBeta &&
       url.hostname === 'github.com' &&
-      /^\/khanjer496-alt\/Wafra\/releases\/download\/ios-capture-beta-v[0-9]+\/Wafra-Capture\.shortcut$/.test(
+      /^\/khanjer496-alt\/Wafra\/releases\/download\/ios-capture-beta-v[0-9]+\/Wafra%20Capture\.shortcut$/.test(
         url.pathname,
       );
     if (
