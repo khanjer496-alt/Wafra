@@ -18,7 +18,7 @@ import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
@@ -735,7 +735,7 @@ export default function BillsScreen() {
                         onPress={() =>
                           onPayDue(due.id, remainingFils, due.accountId, account?.name ?? t('card'))
                         }>
-                        <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                        <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                           {t('markPaid')}
                         </ThemedText>
                       </Pressable>
@@ -925,7 +925,7 @@ export default function BillsScreen() {
                         </ThemedText>
                         {status !== 'paid' ? (
                           <Pressable onPress={() => onPay(bill.id)}>
-                            <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                            <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                               {t('markPaid')}
                             </ThemedText>
                           </Pressable>
@@ -1450,7 +1450,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansSemi,
   },
   inputRow: {
     flexDirection: 'row',
@@ -1470,7 +1470,7 @@ const styles = StyleSheet.create({
   amountInput: {
     flex: 1,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.monoSemi,
     paddingVertical: Spacing.three,
   },
   catPicker: {

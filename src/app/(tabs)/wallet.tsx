@@ -26,7 +26,7 @@ import { AccountTile } from '@/components/ui/tile';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
@@ -1442,7 +1442,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.sansSemi,
   },
   kindRow: {
     flexDirection: 'row',
@@ -1465,7 +1465,7 @@ const styles = StyleSheet.create({
   amountInput: {
     flex: 1,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.monoSemi,
     paddingVertical: Spacing.three,
   },
   colorRow: {

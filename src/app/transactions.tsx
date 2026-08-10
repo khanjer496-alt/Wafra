@@ -20,7 +20,7 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Button, Chip } from '@/components/ui/controls';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Fonts, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
@@ -479,7 +479,7 @@ export default function TransactionsScreen() {
                   accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
                   onPress={() => setMerchantFilter(null)}
                   style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                     {merchantFilter}
                   </ThemedText>
                   <Icon name="close" size={13} color={theme.primary} />
@@ -491,7 +491,7 @@ export default function TransactionsScreen() {
                   accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
                   onPress={() => setSmsOnly(false)}
                   style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                     {tr('smsImportsOnly')}
                   </ThemedText>
                   <Icon name="close" size={13} color={theme.primary} />
@@ -548,7 +548,7 @@ export default function TransactionsScreen() {
                   accessibilityLabel={tr('clearAllFilters')}
                   hitSlop={8}
                   onPress={clearFilters}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                  <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
                     {tr('clearFilter')}
                   </ThemedText>
                 </Pressable>
@@ -887,7 +887,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingVertical: Spacing.two + 4,
     fontSize: 14,
-    fontWeight: '500',
+    fontFamily: Fonts.sansMedium,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -961,7 +961,7 @@ const styles = StyleSheet.create({
   },
   rangeTextInput: {
     fontSize: 14,
-    fontWeight: '500',
+    fontFamily: Fonts.sansMedium,
   },
   rangeClear: {
     minHeight: 44,
