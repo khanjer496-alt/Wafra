@@ -86,6 +86,7 @@ export const DEFAULT_RELAY_URL = normalizeRelayBaseUrl(
 /** The published, credential-free Shortcut skeleton. */
 export const DEFAULT_SHORTCUT_URL = normalizeShortcutInstallUrl(
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
+  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_FILE_BETA === '1',
 );
 
 const KEY = 'wafra.relay.v1';
@@ -212,14 +213,25 @@ export function normalizeRelayBaseUrl(value: string | null | undefined): string 
   }
 }
 
-export function normalizeShortcutInstallUrl(value: string | null | undefined): string | null {
+export function normalizeShortcutInstallUrl(
+  value: string | null | undefined,
+  allowSignedFileBeta = false,
+): string | null {
   if (!value?.trim()) return null;
   try {
     const url = new URL(value.trim());
+    const isICloudShortcut =
+      (url.hostname === 'www.icloud.com' || url.hostname === 'icloud.com') &&
+      /^\/shortcuts\/[A-Za-z0-9_-]+\/?$/.test(url.pathname);
+    const isSignedBetaFile =
+      allowSignedFileBeta &&
+      url.hostname === 'github.com' &&
+      /^\/khanjer496-alt\/Wafra\/releases\/download\/ios-capture-beta-v[0-9]+\/Wafra-Capture\.shortcut$/.test(
+        url.pathname,
+      );
     if (
       url.protocol !== 'https:' ||
-      (url.hostname !== 'www.icloud.com' && url.hostname !== 'icloud.com') ||
-      !/^\/shortcuts\/[A-Za-z0-9_-]+\/?$/.test(url.pathname) ||
+      (!isICloudShortcut && !isSignedBetaFile) ||
       url.search ||
       url.hash
     ) {
