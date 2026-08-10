@@ -78,7 +78,7 @@ const shortcut = {
     {
       Category: "Parameter",
       ParameterKey: "WFTextActionText",
-      ActionIndex: 0,
+      ActionIndex: 1,
       Text: "Paste the setup code shown in Wafra. It connects this Shortcut only to your Wafra account.",
       DefaultValue: "",
     },
