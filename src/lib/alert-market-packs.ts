@@ -2,7 +2,7 @@ import { INDIA_ME_ALERT_MARKET_PACKS } from '@/lib/alert-market-packs.india-me';
 import type { AlertMarketPack, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { US_EU_ALERT_MARKET_PACKS } from '@/lib/alert-market-packs.us-eu';
 
-export const ALERT_MARKET_PACKS = {
+const ALERT_MARKET_PACKS = {
   ...US_EU_ALERT_MARKET_PACKS,
   ...INDIA_ME_ALERT_MARKET_PACKS,
 } as const satisfies Record<UniversalMarket, AlertMarketPack>;

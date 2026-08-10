@@ -2237,6 +2237,12 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('paid card: a rescan corrects the direction', !!patch && patch.type === 'income');
 
   const fixed = heal.applyHealPatch(wrong, patch);
+  const editedDuringScan = { ...wrong, title: 'My corrected payment', userEdited: true };
+  ok('paid card: a stale rescan patch cannot overwrite an edit made while capture was waiting',
+    JSON.stringify(heal.applyHealPatch(editedDuringScan, patch)) === JSON.stringify(editedDuringScan));
+  ok('paid card: a stale rescan removal cannot delete an edit made while capture was waiting',
+    heal.applyHealUpdates([editedDuringScan], [{ id: editedDuringScan.id, remove: true }])[0] ===
+      editedDuringScan);
   const settled = {
     accounts: [{ id: 'cc', name: 'ENBD Credit Card •8575', kind: 'card', cardType: 'credit', last4: '8575', bankName: 'Emirates NBD', openingFils: 0, color: '#fff' }],
     transactions: [fixed],

@@ -868,6 +868,22 @@ const S = {
     en: 'Wafra disconnected the relay and revoked this iPhone’s tokens, but the encrypted ledger on this phone could not be deleted. Restart Wafra and erase again.',
     ar: 'فصلت وفرة المرحّل وألغت رموز هذا الآيفون، لكن تعذّر حذف السجل المشفّر الموجود على هذا الهاتف. أعد تشغيل وفرة ثم امسح مرة أخرى.',
   },
+  eraseLocalInitializeFailedTitle: {
+    en: 'Your data was erased',
+    ar: 'تم محو بياناتك',
+  },
+  eraseLocalInitializeFailedBody: {
+    en: 'The ledger was deleted, but Wafra could not restart secure storage. Saving is paused so new changes are not lost. Use Try again on the recovery screen.',
+    ar: 'حُذف السجل، لكن تعذّر على وفرة إعادة تشغيل التخزين الآمن. أُوقف الحفظ كي لا تضيع تغييرات جديدة. استخدم «إعادة المحاولة» في شاشة الاسترداد.',
+  },
+  eraseQueueCleanupFailedTitle: {
+    en: 'Your ledger was erased',
+    ar: 'تم محو سجلك',
+  },
+  eraseQueueCleanupFailedBody: {
+    en: 'Wafra erased the ledger, but could not delete encrypted captured messages still waiting on this phone. Import and saving are paused. Use Try again on the recovery screen.',
+    ar: 'محَت وفرة السجل، لكن تعذّر حذف رسائل بنكية مشفّرة ما زالت بانتظار الاستيراد على هذا الهاتف. أُوقف الاستيراد والحفظ. استخدم «إعادة المحاولة» في شاشة الاسترداد.',
+  },
   shortcutStillInstalledTitle: {
     en: 'One thing left: your Shortcut',
     ar: 'بقي شيء واحد: اختصارك',
@@ -965,6 +981,18 @@ const S = {
     en: 'Wafra could not read the encrypted ledger on this device. Nothing has been changed or deleted — your entries are still here, and saving is paused so nothing can write over them.',
     ar: 'تعذّر على وفرة قراءة السجل المشفّر على هذا الجهاز. لم يُغيَّر أو يُحذف أي شيء — عملياتك ما زالت موجودة، وأُوقف الحفظ مؤقتاً كي لا يُكتب فوقها شيء.',
   },
+  storageRecoveryInitializeTitle: {
+    en: 'Your data was erased',
+    ar: 'تم محو بياناتك',
+  },
+  storageRecoveryInitializeBody: {
+    en: 'Wafra deleted the old ledger, but secure storage did not restart. Saving is paused so new changes cannot appear successful and then disappear. Try again to finish creating the empty encrypted ledger.',
+    ar: 'حذفت وفرة السجل القديم، لكن التخزين الآمن لم يُعَد تشغيله. أُوقف الحفظ كي لا تبدو التغييرات الجديدة ناجحة ثم تختفي. أعد المحاولة لإكمال إنشاء السجل المشفّر الفارغ.',
+  },
+  storageRecoveryCleanupBody: {
+    en: 'The ledger was erased, but encrypted captured messages are still waiting on this phone. Import and saving are paused so those entries cannot return. Try again to delete them and durably create the empty ledger.',
+    ar: 'تم محو السجل، لكن ما زالت رسائل بنكية مشفّرة بانتظار الاستيراد على هذا الهاتف. أُوقف الاستيراد والحفظ كي لا تعود تلك العمليات. أعد المحاولة لحذفها وإنشاء السجل الفارغ بشكل دائم.',
+  },
   // The one failure where "try again" would be a lie: the file is intact and
   // the key that opens it is gone, so no number of retries can decrypt it.
   storageRecoveryKeyBody: {
@@ -981,17 +1009,25 @@ const S = {
     en: 'Still could not open your ledger. Nothing has been changed.',
     ar: 'ما زال تعذّر فتح سجلك. لم يُغيَّر أي شيء.',
   },
+  storageRecoveryInitializeRetryFailed: {
+    en: 'Secure storage still could not restart. Saving remains paused.',
+    ar: 'ما زال تعذّر إعادة تشغيل التخزين الآمن. سيبقى الحفظ متوقفاً.',
+  },
+  storageRecoveryCleanupRetryFailed: {
+    en: 'Captured messages still could not be deleted. Import and saving remain paused.',
+    ar: 'ما زال تعذّر حذف الرسائل الملتقطة. سيبقى الاستيراد والحفظ متوقفين.',
+  },
   storageRecoveryEraseCta: { en: 'Erase and start over', ar: 'محو والبدء من جديد' },
   storageRecoveryEraseTitle: { en: 'Erase everything on this device?', ar: 'محو كل شيء على هذا الجهاز؟' },
   storageRecoveryEraseBody: {
-    en: 'This destroys the encrypted ledger and its key. Every entry, account and budget on this phone is gone permanently. It cannot be undone and there is no copy anywhere else.',
-    ar: 'سيؤدي هذا إلى إتلاف السجل المشفّر ومفتاحه. كل عملية وحساب وميزانية على هذا الهاتف ستزول نهائياً. لا يمكن التراجع، ولا توجد نسخة في أي مكان آخر.',
+    en: 'This destroys Wafra’s encrypted ledger and any captured messages waiting inside Wafra. It cannot be undone. Bank SMS remain in Messages, and on iPhone you must separately delete the Wafra Shortcut automation.',
+    ar: 'سيؤدي هذا إلى إتلاف سجل وفرة المشفّر وأي رسائل ملتقطة تنتظر داخل وفرة. لا يمكن التراجع. ستبقى رسائل البنك في تطبيق الرسائل، وعلى الآيفون يجب حذف أتمتة اختصار وفرة بشكل منفصل.',
   },
   storageRecoveryEraseConfirm: { en: 'Erase permanently', ar: 'محو نهائي' },
   storageRecoveryEraseKeep: { en: 'Keep my data', ar: 'احتفظ ببياناتي' },
   storageRecoveryEraseFailed: {
-    en: 'The erase did not finish. Nothing on this device has been changed.',
-    ar: 'لم يكتمل المحو. لم يتغيّر أي شيء على هذا الجهاز.',
+    en: 'The erase did not finish. Wafra is keeping recovery open and saving paused until you try again.',
+    ar: 'لم تكتمل عملية المحو. ستُبقي وفرة شاشة الاسترداد مفتوحة والحفظ متوقفاً حتى تعيد المحاولة.',
   },
   onboardHeadline: { en: 'See your money clearly.', ar: 'شاهد أموالك بوضوح.' },
   onboardSub: {

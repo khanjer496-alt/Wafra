@@ -262,61 +262,92 @@ function revokedAt(cfg: { revokedAt?: unknown }): number | null {
     : null;
 }
 
+function decodeStoredRelayConfig(raw: string, includeRevoked = false): RelayConfig | null {
+  const cfg = JSON.parse(raw) as Partial<RelayConfig>;
+  // Refused by the relay: still on disk, deliberately, but not a pairing.
+  // Answering with it would let Home keep claiming capture is live and would
+  // send /ios-setup to its "finish the test" step, where the poll can only
+  // 401 forever. Null is what puts the pair-again path back in front of the
+  // user; getRelayRevokedAt() is how a caller tells this apart from a phone
+  // that was never set up.
+  if (revokedAt(cfg) !== null && !includeRevoked) return null;
+  const baseUrl = normalizeRelayBaseUrl(cfg.baseUrl);
+  const setupState =
+    cfg.setupState === 'configured' || cfg.setupState === 'verified'
+      ? cfg.setupState
+      : 'paired';
+  const emailToken =
+    typeof cfg.emailToken === 'string' && cfg.emailToken.length >= 40 && cfg.emailToken.length <= 128
+      ? cfg.emailToken
+      : undefined;
+  // A device paired before market selection existed has no `market` at all.
+  // Defaulting is deliberate: rejecting the config here would read as "not
+  // paired", and the app would offer to pair again — minting a token the
+  // user's Shortcut does not carry and killing capture on a working setup.
+  const market = validRelayMarket(cfg.market) ?? DEFAULT_MARKET;
+  const forwardingAddress =
+    typeof cfg.forwardingAddress === 'string' &&
+    cfg.forwardingAddress.length <= 320 &&
+    !/[\s\r\n]/.test(cfg.forwardingAddress) &&
+    cfg.forwardingAddress.includes('@')
+      ? cfg.forwardingAddress
+      : undefined;
+  if (
+    !baseUrl ||
+    typeof cfg.deviceId !== 'string' ||
+    !/^[0-9a-f-]{36}$/i.test(cfg.deviceId) ||
+    typeof cfg.ingestToken !== 'string' ||
+    cfg.ingestToken.length < 40 ||
+    cfg.ingestToken.length > 128 ||
+    typeof cfg.adminToken !== 'string' ||
+    cfg.adminToken.length < 40 ||
+    cfg.adminToken.length > 128 ||
+    typeof cfg.syncToken !== 'string' ||
+    cfg.syncToken.length < 40 ||
+    cfg.syncToken.length > 128 ||
+    typeof cfg.privateKey !== 'string' ||
+    decodeKey(cfg.privateKey).length !== 32 ||
+    cfg.ingestUrl !== `${baseUrl}/v1/ingest` ||
+    typeof cfg.pairedAt !== 'number' ||
+    !Number.isFinite(cfg.pairedAt)
+  ) {
+    throw new Error('Invalid stored relay credentials');
+  }
+  return { ...cfg, baseUrl, market, setupState, emailToken, forwardingAddress } as RelayConfig;
+}
+
+/**
+ * Read relay credentials for an irreversible operation.
+ *
+ * Unlike the ordinary UI accessor below, this distinguishes proven absence
+ * from a Keychain/decoding failure. Erase must stop on the latter: otherwise
+ * it could delete the local ledger while leaving a live remote queue and
+ * Shortcut credential behind.
+ */
+export async function getRelayConfigStrict(): Promise<RelayConfig | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(KEY);
+    if (!raw) return null;
+    // A revocation marker means ordinary capture must stop; it does not prove
+    // the remote device was deleted. Destructive callers still need the
+    // validated admin credential so they can demand authenticated deletion.
+    return decodeStoredRelayConfig(raw, true);
+  } catch {
+    // Never carry native Keychain text or stored credential material across
+    // this interface. Destructive callers need only the closed failure code.
+    throw new RelayError(
+      'Stored relay credentials could not be verified.',
+      true,
+      'local_credentials_unavailable',
+    );
+  }
+}
+
 export async function getRelayConfig(): Promise<RelayConfig | null> {
   try {
     const raw = await SecureStore.getItemAsync(KEY);
     if (!raw) return null;
-    const cfg = JSON.parse(raw) as Partial<RelayConfig>;
-    // Refused by the relay: still on disk, deliberately, but not a pairing.
-    // Answering with it would let Home keep claiming capture is live and would
-    // send /ios-setup to its "finish the test" step, where the poll can only
-    // 401 forever. Null is what puts the pair-again path back in front of the
-    // user; getRelayRevokedAt() is how a caller tells this apart from a phone
-    // that was never set up.
-    if (revokedAt(cfg) !== null) return null;
-    const baseUrl = normalizeRelayBaseUrl(cfg.baseUrl);
-    const setupState =
-      cfg.setupState === 'configured' || cfg.setupState === 'verified'
-        ? cfg.setupState
-        : 'paired';
-    const emailToken =
-      typeof cfg.emailToken === 'string' && cfg.emailToken.length >= 40 && cfg.emailToken.length <= 128
-        ? cfg.emailToken
-        : undefined;
-    // A device paired before market selection existed has no `market` at all.
-    // Defaulting is deliberate: rejecting the config here would read as "not
-    // paired", and the app would offer to pair again — minting a token the
-    // user's Shortcut does not carry and killing capture on a working setup.
-    const market = validRelayMarket(cfg.market) ?? DEFAULT_MARKET;
-    const forwardingAddress =
-      typeof cfg.forwardingAddress === 'string' &&
-      cfg.forwardingAddress.length <= 320 &&
-      !/[\s\r\n]/.test(cfg.forwardingAddress) &&
-      cfg.forwardingAddress.includes('@')
-        ? cfg.forwardingAddress
-        : undefined;
-    if (
-      !baseUrl ||
-      typeof cfg.deviceId !== 'string' ||
-      !/^[0-9a-f-]{36}$/i.test(cfg.deviceId) ||
-      typeof cfg.ingestToken !== 'string' ||
-      cfg.ingestToken.length < 40 ||
-      cfg.ingestToken.length > 128 ||
-      typeof cfg.adminToken !== 'string' ||
-      cfg.adminToken.length < 40 ||
-      cfg.adminToken.length > 128 ||
-      typeof cfg.syncToken !== 'string' ||
-      cfg.syncToken.length < 40 ||
-      cfg.syncToken.length > 128 ||
-      typeof cfg.privateKey !== 'string' ||
-      decodeKey(cfg.privateKey).length !== 32 ||
-      cfg.ingestUrl !== `${baseUrl}/v1/ingest` ||
-      typeof cfg.pairedAt !== 'number' ||
-      !Number.isFinite(cfg.pairedAt)
-    ) {
-      return null;
-    }
-    return { ...cfg, baseUrl, market, setupState, emailToken, forwardingAddress } as RelayConfig;
+    return decodeStoredRelayConfig(raw);
   } catch {
     // A Keychain read can fail on a locked device. Treat it as "not paired
     // yet" rather than throwing into whatever screen asked.
@@ -324,7 +355,19 @@ export async function getRelayConfig(): Promise<RelayConfig | null> {
   }
 }
 
-async function putRelayConfig(cfg: RelayConfig): Promise<void> {
+let credentialMutationTail: Promise<void> = Promise.resolve();
+let credentialPairingGeneration = 0;
+
+const enqueueCredentialMutation = <T,>(task: () => Promise<T>): Promise<T> => {
+  const operation = credentialMutationTail.then(task, task);
+  credentialMutationTail = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
+};
+
+async function writeRelayConfig(cfg: RelayConfig): Promise<void> {
   await SecureStore.setItemAsync(KEY, JSON.stringify(cfg), {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
@@ -340,6 +383,34 @@ async function putRelayConfig(cfg: RelayConfig): Promise<void> {
   };
   await SecureStore.setItemAsync(BACKGROUND_KEY, JSON.stringify(background), {
     keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+  });
+}
+
+async function publishRelayConfig(
+  cfg: RelayConfig,
+  pairingGeneration: number,
+): Promise<boolean> {
+  return enqueueCredentialMutation(async () => {
+    if (pairingGeneration !== credentialPairingGeneration) return false;
+    await writeRelayConfig(cfg);
+    return true;
+  });
+}
+
+async function updateRelayConfigIfCurrent(
+  expected: Pick<RelayConfig, 'deviceId' | 'syncToken'>,
+  update: (current: RelayConfig) => RelayConfig,
+): Promise<RelayConfig | null> {
+  return enqueueCredentialMutation(async () => {
+    const current = await getRelayConfig();
+    if (
+      !current ||
+      current.deviceId !== expected.deviceId ||
+      current.syncToken !== expected.syncToken
+    ) return null;
+    const next = update(current);
+    await writeRelayConfig(next);
+    return next;
   });
 }
 
@@ -382,6 +453,42 @@ async function deleteRelayCredentials(): Promise<void> {
   ]);
 }
 
+async function deleteRelayCredentialsIfCurrent(
+  expected: Pick<RelayConfig, 'deviceId' | 'syncToken'>,
+): Promise<'deleted' | 'replaced' | 'unavailable'> {
+  return enqueueCredentialMutation(async () => {
+    let current: { deviceId?: unknown; syncToken?: unknown } | null = null;
+    try {
+      const raw = await SecureStore.getItemAsync(KEY);
+      current = raw ? JSON.parse(raw) as { deviceId?: unknown; syncToken?: unknown } : null;
+    } catch {
+      return 'unavailable';
+    }
+    if (
+      current?.deviceId !== expected.deviceId ||
+      current.syncToken !== expected.syncToken
+    ) return 'replaced';
+    try {
+      await deleteRelayCredentials();
+      return 'deleted';
+    } catch {
+      return 'unavailable';
+    }
+  });
+}
+
+async function requireLocalRelayCredentialCleanup(cfg: RelayConfig): Promise<void> {
+  const cleanup = await deleteRelayCredentialsIfCurrent(cfg);
+  if (cleanup === 'deleted') return;
+  throw new RelayError(
+    cleanup === 'replaced'
+      ? 'A newer relay connection replaced the device being erased.'
+      : 'The relay device was erased, but local credentials could not be cleared.',
+    cleanup === 'unavailable',
+    cleanup === 'replaced' ? 'local_credentials_replaced' : 'local_cleanup_unavailable',
+  );
+}
+
 /** The relay refused this credential; the pairing is over, not merely stalled. */
 export const RELAY_REVOKED = 'device_revoked';
 
@@ -416,10 +523,12 @@ export function isRelayRevokedError(error: unknown): boolean {
  * before the user re-paired must never stamp the pairing that replaced it.
  */
 export async function markRelayRevoked(syncToken: string, at = Date.now()): Promise<void> {
-  await Promise.all([
-    stampRevoked(KEY, syncToken, at, SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY),
-    stampRevoked(BACKGROUND_KEY, syncToken, at, SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY),
-  ]);
+  await enqueueCredentialMutation(async () => {
+    await Promise.all([
+      stampRevoked(KEY, syncToken, at, SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY),
+      stampRevoked(BACKGROUND_KEY, syncToken, at, SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY),
+    ]);
+  });
 }
 
 async function stampRevoked(
@@ -467,17 +576,33 @@ export async function getRelayRevokedAt(): Promise<number | null> {
  * stronger proof is written exclusively by the headless notification task
  * after it stages a parsed bank transaction while the UI is not involved.
  */
-export async function recordRelayAutomationProof(at = Date.now()): Promise<void> {
-  await SecureStore.setItemAsync(AUTOMATION_PROOF_KEY, String(at), {
-    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+export async function recordRelayAutomationProof(
+  cfg: Pick<BackgroundRelayConfig, 'deviceId' | 'syncToken'>,
+  at = Date.now(),
+): Promise<void> {
+  await enqueueCredentialMutation(async () => {
+    const current = await getBackgroundRelayConfig();
+    if (
+      !current ||
+      current.deviceId !== cfg.deviceId ||
+      current.syncToken !== cfg.syncToken
+    ) return;
+    await SecureStore.setItemAsync(
+      AUTOMATION_PROOF_KEY,
+      JSON.stringify({ deviceId: cfg.deviceId, at }),
+      { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
+    );
   });
 }
 
-export async function getRelayAutomationProof(): Promise<number | null> {
+export async function getRelayAutomationProof(deviceId: string | null): Promise<number | null> {
+  if (!deviceId) return null;
   try {
     const raw = await SecureStore.getItemAsync(AUTOMATION_PROOF_KEY);
-    const at = raw ? Number(raw) : NaN;
-    return Number.isFinite(at) && at > 0 ? at : null;
+    const proof = raw ? JSON.parse(raw) as { deviceId?: unknown; at?: unknown } : null;
+    return proof?.deviceId === deviceId && Number.isFinite(proof.at) && Number(proof.at) > 0
+      ? Number(proof.at)
+      : null;
   } catch {
     return null;
   }
@@ -563,6 +688,7 @@ export async function pairDevice(
   }
   const keys = createDeviceKeypair();
   const pack = validRelayMarket(market) ?? DEFAULT_MARKET;
+  const pairingGeneration = ++credentialPairingGeneration;
   let res: Response;
   try {
     res = await request(`${base}/v1/pair`, {
@@ -605,7 +731,12 @@ export async function pairDevice(
     pairedAt: Date.now(),
     setupState: 'paired',
   };
-  await putRelayConfig(cfg);
+  if (!(await publishRelayConfig(cfg, pairingGeneration))) {
+    // A newer screen/session started pairing while this request was in flight.
+    // Retire the abandoned remote identity without touching the newer local one.
+    await unpairDevice(cfg).catch(() => {});
+    throw new RelayError('A newer connection replaced this pairing attempt.', false, 'stale_pairing');
+  }
   return cfg;
 }
 
@@ -628,6 +759,7 @@ export async function joinTrustedVault(
   if (!validTrustedDeviceName(name)) {
     throw new RelayError('Enter a device name between 1 and 40 characters.', false, 'bad_device_name');
   }
+  const pairingGeneration = ++credentialPairingGeneration;
   if (await getRelayConfig()) {
     throw new RelayError('This phone is already connected to a vault.', false, 'already_paired');
   }
@@ -668,7 +800,10 @@ export async function joinTrustedVault(
   };
   // The new phone's long-lived tokens and X25519 private key never touch
   // AsyncStorage. SecureStore maps to Keychain / Android Keystore storage.
-  await putRelayConfig(cfg);
+  if (!(await publishRelayConfig(cfg, pairingGeneration))) {
+    await unpairDevice(cfg).catch(() => {});
+    throw new RelayError('A newer connection replaced this enrollment attempt.', false, 'stale_pairing');
+  }
   return cfg;
 }
 
@@ -698,8 +833,8 @@ export async function setRelayMarket(cfg: RelayConfig, market: string): Promise<
   // Written only after the relay confirms. Storing it first would leave the app
   // showing a market the relay is not parsing under, which looks like a parser
   // bug and is invisible from either side.
-  const next = { ...cfg, market: pack };
-  await putRelayConfig(next);
+  const next = await updateRelayConfigIfCurrent(cfg, (current) => ({ ...current, market: pack }));
+  if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
   return next;
 }
 
@@ -788,7 +923,7 @@ export async function revokeTrustedDevice(
     throw new RelayError('Could not reach Wafra.', true, 'unavailable');
   }
   if (!res.ok) throw await responseError(res, `Device removal failed (${res.status}).`);
-  if (deviceId === cfg.deviceId) await deleteRelayCredentials();
+  if (deviceId === cfg.deviceId) await requireLocalRelayCredentialCleanup(cfg);
 }
 
 /** Owner-only, explicit destruction of every device and queued relay item. */
@@ -803,22 +938,25 @@ export async function deleteTrustedVault(cfg: RelayConfig): Promise<void> {
     throw new RelayError('Could not reach Wafra.', true, 'unavailable');
   }
   if (!res.ok) throw await responseError(res, `Vault deletion failed (${res.status}).`);
-  await deleteRelayCredentials();
+  await requireLocalRelayCredentialCleanup(cfg);
 }
 
 export async function markRelayConfigured(cfg: RelayConfig): Promise<RelayConfig> {
-  const next = { ...cfg, setupState: 'configured' as const };
-  await putRelayConfig(next);
+  const next = await updateRelayConfigIfCurrent(cfg, (current) => ({
+    ...current,
+    setupState: 'configured' as const,
+  }));
+  if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
   return next;
 }
 
 export async function markRelayVerified(cfg: RelayConfig): Promise<RelayConfig> {
-  const next = {
-    ...cfg,
+  const next = await updateRelayConfigIfCurrent(cfg, (current) => ({
+    ...current,
     setupState: 'verified' as const,
     verifiedAt: Date.now(),
-  };
-  await putRelayConfig(next);
+  }));
+  if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
   return next;
 }
 
@@ -828,16 +966,22 @@ export async function saveRelayEmailCredential(
   emailToken: string,
   forwardingAddress: string,
 ): Promise<RelayConfig> {
-  const next = { ...cfg, emailToken, forwardingAddress };
-  await putRelayConfig(next);
+  const next = await updateRelayConfigIfCurrent(cfg, (current) => ({
+    ...current,
+    emailToken,
+    forwardingAddress,
+  }));
+  if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
   return next;
 }
 
 /** Forget a revoked email address without disturbing Shortcut capture. */
 export async function clearRelayEmailCredential(cfg: RelayConfig): Promise<RelayConfig> {
-  const { emailToken: _token, forwardingAddress: _address, ...rest } = cfg;
-  const next = rest as RelayConfig;
-  await putRelayConfig(next);
+  const next = await updateRelayConfigIfCurrent(cfg, (current) => {
+    const { emailToken: _token, forwardingAddress: _address, ...rest } = current;
+    return rest as RelayConfig;
+  });
+  if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
   return next;
 }
 
@@ -1351,10 +1495,14 @@ export async function unpairDevice(cfg: RelayConfig): Promise<void> {
     // the remote device impossible to delete until its retention timers fire.
     throw new RelayError('Could not reach the relay to erase this device.', true, 'unavailable');
   }
-  if (!res.ok && res.status !== 401 && res.status !== 404) {
+  // Only the authenticated 204 response proves this relay deleted the device,
+  // its queue and the row that authenticates the Shortcut. A 401 can come from
+  // a proxy or a lost server token row, and this route has no idempotent 404
+  // contract. Preserve the only deletion credential on every non-success.
+  if (res.status !== 204) {
     throw await responseError(res, `Could not erase the relay device (${res.status}).`);
   }
-  await deleteRelayCredentials();
+  await requireLocalRelayCredentialCleanup(cfg);
 }
 
 /** Liveness probe for the "send a test message" onboarding step. */

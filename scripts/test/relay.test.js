@@ -286,6 +286,71 @@ async function queueItem(id, row, publicKey) {
 
   {
     freshDevice();
+    const firstIssued = credentials();
+    const replacementIssued = credentials();
+    const issued = [firstIssued, replacementIssued];
+    const net = transport().install()
+      .on('POST /v1/pair', () => json(200, issued.shift()))
+      .on('DELETE /v1/device', () => json(204));
+    const first = await relay.pairDevice(BASE, 'First pairing', 'AE');
+    const replacement = await relay.pairDevice(BASE, 'Replacement pairing', 'AE');
+
+    let staleWriteRefused = false;
+    try {
+      await relay.markRelayVerified(first);
+    } catch (error) {
+      staleWriteRefused = error?.code === 'stale_pairing';
+    }
+    ok('credentials: an old setup poll cannot overwrite a replacement pairing',
+      staleWriteRefused && storedConfig().syncToken === replacement.syncToken);
+
+    let replacedCleanup = null;
+    try {
+      await relay.unpairDevice(first);
+    } catch (error) {
+      replacedCleanup = error;
+    }
+    ok('credentials: cleaning up an abandoned device cannot delete its replacement',
+      replacedCleanup?.code === 'local_credentials_replaced' &&
+        storedConfig().syncToken === replacement.syncToken &&
+        net.last('DELETE /v1/device').auth === `Bearer ${first.adminToken}`,
+      JSON.stringify({ code: replacedCleanup?.code, stored: storedConfig()?.syncToken }));
+  }
+
+  {
+    freshDevice();
+    const firstIssued = credentials();
+    const replacementIssued = credentials();
+    let finishFirst;
+    let finishReplacement;
+    const net = transport().install()
+      .on('POST /v1/pair', (call) => new Promise((resolve) => {
+        if (call.body.deviceName === 'First pairing') finishFirst = resolve;
+        else finishReplacement = resolve;
+      }))
+      .on('DELETE /v1/device', () => json(204));
+
+    const firstPending = relay.pairDevice(BASE, 'First pairing', 'AE');
+    const replacementPending = relay.pairDevice(BASE, 'Replacement pairing', 'AE');
+    finishReplacement(json(200, replacementIssued));
+    const replacement = await replacementPending;
+    finishFirst(json(200, firstIssued));
+    let firstError = null;
+    try {
+      await firstPending;
+    } catch (error) {
+      firstError = error;
+    }
+
+    ok('credentials: a late abandoned pairing cannot overwrite a newer completion',
+      firstError?.code === 'stale_pairing' &&
+        storedConfig().syncToken === replacement.syncToken);
+    ok('credentials: the late remote identity is retired with its own admin token',
+      net.last('DELETE /v1/device').auth === `Bearer ${firstIssued.adminToken}`);
+  }
+
+  {
+    freshDevice();
     transport().install();
     let message = '';
     try {
@@ -316,6 +381,10 @@ async function queueItem(id, row, publicKey) {
 
   {
     freshDevice();
+    eq('config: a strict destructive read distinguishes proven absence',
+      await relay.getRelayConfigStrict(), null);
+
+    freshDevice();
     const net = transport().install();
     net.on('POST /v1/pair', () => json(200, credentials()));
     await relay.pairDevice(BASE);
@@ -329,10 +398,21 @@ async function queueItem(id, row, publicKey) {
     secure.__keychain.items.set(KEY, JSON.stringify(legacy));
     const healed = await relay.getRelayConfig();
     eq('config: a pairing made before market selection still loads', healed?.market, 'AE');
+    eq('config: a strict destructive read returns a verified pairing',
+      (await relay.getRelayConfigStrict())?.deviceId, stored.deviceId);
 
     secure.__keychain.items.set(KEY, JSON.stringify({ ...stored, syncToken: 'short' }));
     eq('config: a credential that is not credential-shaped fails closed',
       await relay.getRelayConfig(), null);
+    let strictInvalid = null;
+    try {
+      await relay.getRelayConfigStrict();
+    } catch (error) {
+      strictInvalid = error;
+    }
+    ok('config: a destructive read refuses malformed stored credentials',
+      strictInvalid?.code === 'local_credentials_unavailable' &&
+        !strictInvalid.message.includes('short'));
     secure.__keychain.items.set(KEY, JSON.stringify({ ...stored, privateKey: 'AAAA' }));
     eq('config: so does a private key that is not 32 bytes',
       await relay.getRelayConfig(), null);
@@ -345,6 +425,15 @@ async function queueItem(id, row, publicKey) {
     secure.__keychain.failReads = true;
     eq('config: a keychain that refuses to answer reads as "not paired", not as a crash',
       await relay.getRelayConfig(), null);
+    let strictUnavailable = null;
+    try {
+      await relay.getRelayConfigStrict();
+    } catch (error) {
+      strictUnavailable = error;
+    }
+    ok('config: a destructive read stops on an unavailable keychain without leaking native text',
+      strictUnavailable?.code === 'local_credentials_unavailable' &&
+        !strictUnavailable.message.includes('keychain'));
     secure.__keychain.failReads = false;
   }
 
@@ -552,6 +641,11 @@ async function queueItem(id, row, publicKey) {
       kept?.privateKey === before.privateKey && decodeKey(kept.privateKey).length === 32);
     ok('lost pairing: so does the credential that can still erase this device',
       kept?.adminToken === before.adminToken);
+    const strictMarked = await relay.getRelayConfigStrict();
+    ok('lost pairing: destructive erase can still authenticate a marked device',
+      strictMarked?.deviceId === cfg.deviceId &&
+        strictMarked?.adminToken === cfg.adminToken &&
+        strictMarked?.revokedAt === kept.revokedAt);
     const backgroundWrite = [...secure.__keychain.writes].reverse()
       .find((w) => w.key === BACKGROUND_KEY);
     ok('lost pairing: the locked-phone item is stamped at its own accessibility class',
@@ -570,6 +664,46 @@ async function queueItem(id, row, publicKey) {
     }
     ok('offline: a dead network is retryable, not a reason to unpair',
       offline?.name === 'RelayError' && offline.retryable === true);
+  }
+
+  for (const status of [200, 401, 404]) {
+    const { net, cfg } = await paired();
+    net.on('DELETE /v1/device', () => json(status, {
+      error: status === 401 ? 'unauthorized' : 'not_found',
+    }));
+    let thrown = null;
+    try {
+      await relay.unpairDevice(cfg);
+    } catch (error) {
+      thrown = error;
+    }
+    ok(`unpair: ${status} is not accepted as proof of remote deletion`,
+      thrown?.status === status && storedConfig()?.adminToken === cfg.adminToken);
+  }
+
+  {
+    const { net, cfg } = await paired();
+    let attempts = 0;
+    net.on('DELETE /v1/device', () => {
+      attempts += 1;
+      if (attempts === 1) secure.__keychain.failReads = true;
+      return json(204);
+    });
+    let thrown = null;
+    try {
+      await relay.unpairDevice(cfg);
+    } catch (error) {
+      thrown = error;
+    }
+    secure.__keychain.failReads = false;
+    ok('unpair: remote success cannot hide a failed local credential cleanup',
+      thrown?.code === 'local_cleanup_unavailable' &&
+        thrown?.retryable === true &&
+        storedConfig()?.adminToken === cfg.adminToken,
+      JSON.stringify({ code: thrown?.code, retryable: thrown?.retryable, stored: storedConfig() }));
+    await relay.unpairDevice(cfg);
+    ok('unpair: an idempotent remote retry can finish the pending local cleanup',
+      attempts === 2 && storedConfig() === null);
   }
 
   {
@@ -632,16 +766,37 @@ async function queueItem(id, row, publicKey) {
   {
     const { cfg } = await paired();
     eq('proof: a fresh pairing has never seen a real bank row',
-      await relay.getRelayAutomationProof(), null);
-    await relay.recordRelayAutomationProof(1_800_000_000_000);
+      await relay.getRelayAutomationProof(cfg.deviceId), null);
+    await relay.recordRelayAutomationProof(cfg, 1_800_000_000_000);
     eq('proof: the headless task can record one',
-      await relay.getRelayAutomationProof(), 1_800_000_000_000);
+      await relay.getRelayAutomationProof(cfg.deviceId), 1_800_000_000_000);
     const write = [...secure.__keychain.writes].reverse().find((w) => w.key === PROOF_KEY);
     eq('proof: written where a locked-phone wake can write it',
       write.options.keychainAccessible, secure.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
     const marked = await relay.markRelayVerified(cfg);
     eq('proof: the synthetic pipe test stays a separate, weaker claim',
       marked.setupState, 'verified');
+  }
+
+  {
+    freshDevice();
+    const firstIssued = credentials();
+    const replacementIssued = credentials();
+    const issued = [firstIssued, replacementIssued];
+    transport().install()
+      .on('POST /v1/pair', () => json(200, issued.shift()))
+      .on('DELETE /v1/device', () => json(204));
+    const first = await relay.pairDevice(BASE, 'First pairing', 'AE');
+    await relay.recordRelayAutomationProof(first, 1_800_000_000_000);
+    const replacement = await relay.pairDevice(BASE, 'Replacement pairing', 'AE');
+    eq('proof: an old device marker cannot activate its replacement',
+      await relay.getRelayAutomationProof(replacement.deviceId), null);
+    await relay.recordRelayAutomationProof(first, 1_800_000_000_001);
+    eq('proof: a late old headless wake cannot stamp the replacement',
+      await relay.getRelayAutomationProof(replacement.deviceId), null);
+    await relay.recordRelayAutomationProof(replacement, 1_800_000_000_002);
+    eq('proof: the replacement becomes active only after its own wake',
+      await relay.getRelayAutomationProof(replacement.deviceId), 1_800_000_000_002);
   }
 
   /* ═════════════════ The sealed row's own contract ═════════════════
@@ -1256,6 +1411,550 @@ async function queueItem(id, row, publicKey) {
         staged(), ['NOON']);
       eq('staging: while its own relay rows are still acknowledged',
         acked, ['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+    }
+
+    /* The executor is the durability seam used by every non-setup collector.
+     * Failures are injected at that interface so these tests survive moving the
+     * implementation between capture, store, and relay modules. */
+    {
+      const emptyPlan = {
+        batch: {}, txCount: 0, dueCount: 0, healedCount: 0,
+        newAccountCount: 0, billDues: [],
+      };
+      const changedPlan = { ...emptyPlan, txCount: 1 };
+      const executorModule = execute('src/lib/capture-executor.ts', (id) => {
+        if (id === '@/lib/auto-import') return { buildImportPlan: () => emptyPlan };
+        if (id === '@/lib/capture') {
+          return {
+            collectNewMessages: async () => ({
+              parsed: [], declined: [], newestTs: 0,
+              source: 'none', needsSetup: false, commit: async () => {},
+            }),
+          };
+        }
+        if (id === '@/lib/relay') {
+          return {
+            ackRelay: async () => {},
+            getBackgroundRelayConfig: async () => null,
+            getRelayConfig: async () => null,
+            markRelayVerified: async (cfg) => ({ ...cfg, setupState: 'verified', verifiedAt: 1 }),
+            syncRelay: async () => ({
+              parsed: [], ids: [], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 0, shortcutRowsWithBank: 0,
+            }),
+          };
+        }
+        throw new Error(`unexpected capture executor dependency ${id}`);
+      });
+      const hydrated = { hydrated: true, lastScanTs: 0 };
+      const ledger = (durable, events) => ({
+        getState: () => hydrated,
+        importBatch: () => {
+          events.push('persist');
+          return { ids: ['tx_1'], durable };
+        },
+        ensureDurable: async () => void events.push('flush'),
+        markParserVersion: () => void events.push('parser'),
+      });
+
+      {
+        const events = [];
+        const failed = Promise.reject(new Error('SQLCipher write failed'));
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(failed, events),
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [row(1, 'SHOP')], declined: [], newestTs: 1,
+              source: 'relay',
+              needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+            planRows: () => changedPlan,
+          },
+        });
+        let threw = false;
+        try {
+          await executor.execute('routine');
+        } catch {
+          threw = true;
+        }
+        ok('capture executor: a failed ledger write rejects the routine import', threw);
+        eq('capture executor: routine acknowledgement never crosses a failed durability barrier',
+          events, ['persist']);
+      }
+
+      {
+        const events = [];
+        let release;
+        const durable = new Promise((resolve) => { release = resolve; });
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(durable, events),
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [row(1, 'SHOP')], declined: [], newestTs: 1,
+              source: 'relay',
+              needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+            planRows: () => changedPlan,
+          },
+        });
+        const running = executor.execute('routine');
+        await Promise.resolve();
+        eq('capture executor: routine acknowledgement waits while durability is pending',
+          events, ['persist']);
+        release();
+        await running;
+        eq('capture executor: routine acknowledgement follows durable persistence',
+          events, ['persist', 'ack']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [row(1, 'SHOP')], declined: [], newestTs: 1,
+              source: 'relay',
+              needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+          },
+        });
+        await executor.execute('routine');
+        eq('capture executor: a deduplicated relay row flushes the ledger before acknowledgement',
+          events, ['parser', 'flush', 'ack']);
+      }
+
+      {
+        let current = { hydrated: true, lastScanTs: 1 };
+        let plannedAt = 0;
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => ({ ids: [], durable: Promise.resolve() }),
+            ensureDurable: async () => {},
+            markParserVersion: () => {},
+          },
+          dependencies: {
+            collectRoutine: async () => {
+              current = { hydrated: true, lastScanTs: 900 };
+              return {
+                parsed: [], declined: [], newestTs: 900,
+                source: 'sms', needsSetup: false, commit: async () => {},
+              };
+            },
+            planRows: (_rows, stateAtPlan) => {
+              plannedAt = stateAtPlan.lastScanTs;
+              return emptyPlan;
+            },
+          },
+        });
+        await executor.execute('routine');
+        eq('capture executor: routine planning re-reads the ledger after inbox collection',
+          plannedAt, 900);
+      }
+
+      {
+        const events = [];
+        const cfg = { baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k' };
+        const queued = {
+          parsed: [row(20, 'ADNOC')],
+          ids: ['bank-row', 'setup-probe'],
+          testIds: ['setup-probe'],
+          unreadable: 0, testReceived: 1, shortcutRows: 0, shortcutRowsWithBank: 0,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => queued,
+            planRows: () => changedPlan,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+          },
+        });
+        await executor.execute('supplemental');
+        eq('capture executor: supplemental persistence precedes acknowledgement and reserves probes',
+          events, ['persist', 'ack:bank-row']);
+      }
+
+      {
+        const events = [];
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'configured',
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [row(22, 'CARREFOUR')], ids: ['bank-row', 'setup-probe'],
+              testIds: ['setup-probe'], unreadable: 0, testReceived: 1,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+            markVerified: async (active) => {
+              events.push('verified');
+              return { ...active, setupState: 'verified', verifiedAt: 77 };
+            },
+          },
+        });
+        const outcome = await executor.execute('setup-verification');
+        eq('capture executor: setup owns its probe and verifies only after durable persistence',
+          events, ['persist', 'verified', 'ack:bank-row,setup-probe']);
+        ok('capture executor: setup returns only safe proof facts',
+          outcome.kind === 'setup-observed' && outcome.isTest === true &&
+            outcome.merchant === 'Wafra Capture' && outcome.verifiedAt === 77,
+          JSON.stringify(outcome));
+      }
+
+      {
+        const events = [];
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'configured',
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [{ ...row(22, 'STATEMENT ROW'), captureSource: 'pdf' }],
+              ids: ['pdf-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 0, shortcutRowsWithBank: 0,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+            markVerified: async (active) => {
+              events.push('verified');
+              return active;
+            },
+          },
+        });
+        const outcome = await executor.execute('setup-verification');
+        eq('capture executor: setup safely drains PDF rows without treating them as Shortcut proof',
+          events, ['persist', 'ack:pdf-row']);
+        ok('capture executor: a PDF-only page keeps setup waiting', outcome.kind === 'setup-waiting');
+      }
+
+      {
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'configured',
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), []),
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [
+                { ...row(20, 'OLDER EMAIL'), captureSource: 'email' },
+                { ...row(21, 'SHORTCUT MERCHANT'), captureSource: 'shortcut' },
+              ],
+              ids: ['email-row', 'shortcut-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => {},
+            markVerified: async (active) => ({ ...active, setupState: 'verified', verifiedAt: 88 }),
+          },
+        });
+        const outcome = await executor.execute('setup-verification');
+        ok('capture executor: setup proof names the Shortcut row rather than an older shared-queue row',
+          outcome.kind === 'setup-observed' && outcome.merchant === 'SHORTCUT MERCHANT' &&
+            outcome.isTest === false && outcome.verifiedAt === 88,
+          JSON.stringify(outcome));
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.reject(new Error('SQLCipher write failed')), events),
+          dependencies: {
+            getRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+            }),
+            sync: async () => ({
+              parsed: [row(23, 'NOON')], ids: ['bank-row', 'setup-probe'],
+              testIds: ['setup-probe'], unreadable: 0, testReceived: 1,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => void events.push('ack'),
+            markVerified: async (active) => {
+              events.push('verified');
+              return active;
+            },
+          },
+        });
+        let threw = false;
+        try {
+          await executor.execute('setup-verification');
+        } catch {
+          threw = true;
+        }
+        ok('capture executor: failed setup persistence rejects verification', threw);
+        eq('capture executor: failed setup persistence keeps bank rows and probes on the relay',
+          events, ['persist']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            getRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+            }),
+            sync: async () => ({
+              parsed: [], ids: ['setup-probe'], testIds: ['setup-probe'],
+              unreadable: 0, testReceived: 1, shortcutRows: 0, shortcutRowsWithBank: 0,
+            }),
+            acknowledge: async () => void events.push('ack'),
+            markVerified: async () => {
+              events.push('verified');
+              throw new Error('Keychain unavailable');
+            },
+          },
+        });
+        let threw = false;
+        try {
+          await executor.execute('setup-verification');
+        } catch {
+          threw = true;
+        }
+        ok('capture executor: a failed verification write keeps its proof available for retry',
+          threw && events.join(',') === 'verified', events.join(','));
+      }
+
+      {
+        let current = { hydrated: true, lastScanTs: 1 };
+        let plannedAt = 0;
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => ({ ids: [], durable: Promise.resolve() }),
+            ensureDurable: async () => {},
+            markParserVersion: () => {},
+          },
+          dependencies: {
+            getRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+            }),
+            sync: async () => {
+              current = { hydrated: true, lastScanTs: 900 };
+              return {
+                parsed: [], ids: [], testIds: [], unreadable: 0, testReceived: 0,
+                shortcutRows: 0, shortcutRowsWithBank: 0,
+              };
+            },
+            planRows: (_rows, stateAtPlan) => {
+              plannedAt = stateAtPlan.lastScanTs;
+              return emptyPlan;
+            },
+          },
+        });
+        await executor.execute('supplemental');
+        eq('capture executor: supplemental planning re-reads the ledger after network collection',
+          plannedAt, 900);
+      }
+
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.reject(new Error('SQLCipher write failed')), events),
+          dependencies: {
+            getRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+            }),
+            sync: async () => ({
+              parsed: [row(25, 'CAREEM')], ids: ['bank-row'], testIds: [],
+              unreadable: 0, testReceived: 0, shortcutRows: 0, shortcutRowsWithBank: 0,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        let threw = false;
+        try {
+          await executor.execute('supplemental');
+        } catch {
+          threw = true;
+        }
+        ok('capture executor: a failed supplemental ledger write rejects the drain', threw);
+        eq('capture executor: supplemental acknowledgement never crosses a failed durability barrier',
+          events, ['persist']);
+      }
+
+      {
+        const events = [];
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
+        };
+        const queued = {
+          parsed: [{ ...row(30, 'LULU'), captureSource: 'shortcut' }],
+          ids: ['bank-row', 'setup-probe'],
+          testIds: ['setup-probe'],
+          unreadable: 0, testReceived: 1, shortcutRows: 1, shortcutRowsWithBank: 1,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          background: {
+            stage: async (rows) => {
+              events.push('stage');
+              return rows;
+            },
+            announce: async () => void events.push('announce'),
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+          dependencies: {
+            getBackgroundRelay: async () => cfg,
+            sync: async () => queued,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+          },
+        });
+        await executor.execute('background');
+        eq('capture executor: background staging and proof precede ack while probes remain reserved',
+          events, ['stage', 'announce', 'proof', 'ack:bank-row']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          background: {
+            stage: async (rows) => {
+              events.push('stage');
+              return rows;
+            },
+            announce: async () => {
+              events.push('announce');
+              throw new Error('notifications unavailable');
+            },
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+          dependencies: {
+            getBackgroundRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
+            }),
+            sync: async () => ({
+              parsed: [row(35, 'ADCB')], ids: ['bank-row'], testIds: [],
+              unreadable: 0, testReceived: 0, shortcutRows: 0, shortcutRowsWithBank: 0,
+            }),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        await executor.execute('background');
+        eq('capture executor: a failed notification cannot strand an encrypted row',
+          events, ['stage', 'announce', 'ack']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          background: {
+            stage: async () => {
+              events.push('stage');
+              throw new Error('encrypted inbox write failed');
+            },
+            announce: async () => void events.push('announce'),
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+          dependencies: {
+            getBackgroundRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
+            }),
+            sync: async () => ({
+              parsed: [row(40, 'NOON')], ids: ['bank-row'], testIds: [],
+              unreadable: 0, testReceived: 0, shortcutRows: 0, shortcutRowsWithBank: 0,
+            }),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        let threw = false;
+        try {
+          await executor.execute('background');
+        } catch {
+          threw = true;
+        }
+        ok('capture executor: a failed encrypted staging write rejects the background import', threw);
+        eq('capture executor: background acknowledgement never crosses a failed staging barrier',
+          events, ['stage']);
+      }
+
+      {
+        let active = 0;
+        let maximumActive = 0;
+        let started = 0;
+        let releaseFirst;
+        const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+        let releaseThird;
+        const thirdGate = new Promise((resolve) => { releaseThird = resolve; });
+        const storageCalls = [];
+        const backgroundModule = execute('src/lib/background-relay.ts', (id) => {
+          if (id === 'expo-constants') return { __esModule: true, default: {} };
+          if (id === 'expo-notifications') return {};
+          if (id === 'expo-task-manager') return { defineTask() {} };
+          if (id === 'react-native') return { Platform: { OS: 'web' } };
+          if (id === '@/lib/capture-executor') return {
+            createCaptureExecutor: () => ({
+              execute: async () => {
+                started += 1;
+                const sequence = started;
+                active += 1;
+                maximumActive = Math.max(maximumActive, active);
+                if (sequence === 1) await firstGate;
+                if (sequence === 3) await thirdGate;
+                active -= 1;
+                return { kind: 'background', received: sequence, fresh: sequence };
+              },
+            }),
+          };
+          if (id === '@/lib/charge-alert') return { buildChargeAlert: () => null };
+          if (id === '@/lib/i18n') return {
+            detectLanguage: () => 'en', getLanguage: () => 'en',
+          };
+          if (id === '@/lib/notifications') return {
+            ensureNotificationHandler() {}, notificationsAllowed: () => false,
+          };
+          if (id === '@/lib/relay') return {
+            getRelayConfig: async () => null,
+            recordRelayAutomationProof: async () => {},
+            registerRelayPush: async () => {},
+            unregisterRelayPush: async () => {},
+          };
+          if (id === '@/lib/background-relay-storage') return {
+            BACKGROUND_RELAY_ERASE_PENDING_KEY: 'erase-pending',
+            backgroundRelayStorage: {
+              getItem: async () => null,
+              setItem: async (key) => void storageCalls.push(`set:${key}`),
+              removeItem: async (key) => void storageCalls.push(`remove:${key}`),
+            },
+          };
+          throw new Error(`unexpected background relay dependency ${id}`);
+        });
+        const first = backgroundModule.syncRelayInBackground();
+        const second = backgroundModule.syncRelayInBackground();
+        await Promise.resolve();
+        ok('background capture: overlapping wakes do not start a second drain',
+          started === 1 && maximumActive === 1);
+        releaseFirst();
+        eq('background capture: queued wakes execute serially after the first finishes',
+          await Promise.all([first, second]), [1, 2]);
+
+        const third = backgroundModule.syncRelayInBackground();
+        await Promise.resolve();
+        const clear = backgroundModule.clearBackgroundRelayRows();
+        await Promise.resolve();
+        eq('background erase: intent is durable while clear waits behind an existing wake',
+          storageCalls, ['set:erase-pending']);
+        releaseThird();
+        await Promise.all([third, clear]);
+        eq('background erase: durable intent brackets queue deletion', storageCalls, [
+          'set:erase-pending',
+          'remove:wafra/background-relay/v1',
+          'remove:erase-pending',
+        ]);
+      }
     }
   }
 

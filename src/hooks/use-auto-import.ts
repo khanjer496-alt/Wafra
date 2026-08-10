@@ -20,13 +20,14 @@
  *    launch, not once per screen that mounts.
  */
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState as RNAppState, Platform } from 'react-native';
 
 import { useToast } from '@/components/ui/toast';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { enableRelayBackgroundSync } from '@/lib/background-relay';
-import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
+import { isCaptureAvailable } from '@/lib/capture';
+import { createCaptureExecutor } from '@/lib/capture-executor';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
@@ -116,6 +117,20 @@ export type AutoImport = {
  */
 export function useAutoImport(watchForeground = false): AutoImport {
   const { state, importBatch, undoBatch, ensureDurable, markParserVersion } = useStore();
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const captureExecutor = useMemo(
+    () =>
+      createCaptureExecutor({
+        ledger: {
+          getState: () => stateRef.current,
+          importBatch,
+          ensureDurable,
+          markParserVersion,
+        },
+      }),
+    [ensureDurable, importBatch, markParserVersion],
+  );
   const toast = useToast();
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
@@ -134,11 +149,11 @@ export function useAutoImport(watchForeground = false): AutoImport {
       let current = true;
       void (async () => {
         if (Platform.OS === 'ios') {
-          const [cfg, automationProof, revokedAt] = await Promise.all([
+          const [cfg, revokedAt] = await Promise.all([
             getRelayConfig(),
-            getRelayAutomationProof(),
             getRelayRevokedAt(),
           ]);
+          const automationProof = await getRelayAutomationProof(cfg?.deviceId ?? null);
           if (!current) return;
           // The revocation check comes first and is not derived from `cfg`,
           // because a revoked credential reads as no config at all. It also
@@ -205,8 +220,12 @@ export function useAutoImport(watchForeground = false): AutoImport {
         setCaptureState('active');
       }
 
-      const { plan, source, commit, needsSetup } = await planNewMessages(state);
-      if (needsSetup) {
+      const outcome = await captureExecutor.execute('routine');
+      if (outcome.kind === 'not-hydrated') {
+        if (interactive) toast.show(t('stillLoading'));
+        return 'not-hydrated';
+      }
+      if (outcome.kind === 'needs-setup') {
         // The relay is not paired yet, so silence here means "not connected",
         // not "nothing new". Only say so when the user actually asked.
         //
@@ -221,46 +240,32 @@ export function useAutoImport(watchForeground = false): AutoImport {
         if (interactive) router.push('/ios-setup');
         return 'needs-setup';
       }
-      // healedCount belongs in this test. A re-read that only CORRECTS rows —
-      // exactly what a parser fix produces — was being thrown away here, so the
-      // corrections never reached the store.
-      if (plan.txCount === 0 && plan.dueCount === 0 && plan.healedCount === 0) {
-        markParserVersion();
-        // Nothing arrived, so nothing is owed — but acking is still correct:
-        // the relay may have queued rows that deduped against an earlier
-        // in-memory import whose first disk write failed. Flush the current
-        // authoritative ledger before dropping those server rows.
-        if (source === 'relay') await ensureDurable();
-        await commit();
+      if (outcome.kind === 'up-to-date') {
         if (interactive) toast.show(t('upToDateNoNew'));
         return 'up-to-date';
       }
-      const receipt = importBatch(plan.batch);
-      // A React dispatch is not a disk commit. Wait for the encrypted SQLite
-      // transaction; only then is it safe to drop the relay's sealed copy.
-      await receipt.durable;
-      await commit();
+      if (outcome.kind !== 'imported') return 'up-to-date';
       committed();
       toast.show(
         tf('importedTransactions', {
-          count: plan.txCount,
-          s: plan.txCount === 1 ? '' : 's',
+          count: outcome.transactions,
+          s: outcome.transactions === 1 ? '' : 's',
           cards:
-            plan.newAccountCount > 0
+            outcome.newAccounts > 0
               ? tf('importedNewCards', {
-                  count: plan.newAccountCount,
-                  s: plan.newAccountCount === 1 ? '' : 's',
+                  count: outcome.newAccounts,
+                  s: outcome.newAccounts === 1 ? '' : 's',
                 })
               : '',
         }),
         [
-          { label: t('undo'), onPress: () => undoBatch(receipt.ids) },
+          { label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) },
           { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
         ],
       );
       return 'imported';
     },
-    [state, importBatch, ensureDurable, undoBatch, markParserVersion, toast, router],
+    [captureExecutor, state, undoBatch, toast, router],
   );
 
   // The single owner of `importInFlight`. Always starts a fresh scan — callers

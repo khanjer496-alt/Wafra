@@ -34,7 +34,7 @@ import {
   SEED_BILLS,
   SEED_BUDGETS,
 } from '@/lib/seed';
-import { applyHealPatch, healPatch } from '@/lib/heal';
+import { applyHealPatch, applyHealUpdates, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
@@ -43,6 +43,11 @@ import {
   PARSER_VERSION,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
+import {
+  createLedgerPersistence,
+  LedgerResetError,
+  type LedgerPersistence,
+} from '@/lib/ledger-persistence';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
@@ -64,6 +69,28 @@ import type {
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
+
+export class ClearAllError extends Error {
+  readonly stage: 'erase' | 'initialize' | 'cleanup';
+  readonly original: unknown;
+
+  constructor(stage: 'erase' | 'initialize' | 'cleanup', original: unknown) {
+    super(stage === 'erase'
+      ? 'The encrypted ledger could not be erased.'
+      : stage === 'initialize'
+        ? 'The ledger was erased but secure storage could not be reinitialized.'
+        : 'The ledger was erased but auxiliary captured data could not be cleared.');
+    this.name = 'ClearAllError';
+    this.stage = stage;
+    this.original = original;
+  }
+}
+
+export type StorageRecoveryState =
+  | 'preserved'
+  | 'erased-initialize'
+  | 'erased-cleanup'
+  | null;
 
 const STORAGE_KEY = 'wafra/state/v1';
 
@@ -526,7 +553,8 @@ type Action =
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
-  | { type: 'clearAll' };
+  | { type: 'clearAll' }
+  | { type: 'blockPersistence' };
 
 /**
  * Money already recorded, as opposed to plans that can be retyped.
@@ -718,16 +746,7 @@ function reduceState(state: AppState, action: Action): AppState {
       });
       const dues = mergeImportedCardDues(state.cardDues, action.newDues, accounts);
       // Heal existing rows the parser now reads better.
-      const patches = new Map(action.updates.map((u) => [u.id, u]));
-      const existing =
-        patches.size > 0
-          ? state.transactions
-              .filter((t) => !patches.get(t.id)?.remove)
-              .map((t) => {
-                const u = patches.get(t.id);
-                return u ? applyHealPatch(t, u) : t;
-              })
-          : state.transactions;
+      const existing = applyHealUpdates(state.transactions, action.updates);
       const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
         ...state,
         transactions: [...action.transactions, ...existing],
@@ -915,6 +934,8 @@ function reduceState(state: AppState, action: Action): AppState {
         onboarded: true,
         accounts: [SEED_ACCOUNTS[2]],
       };
+    case 'blockPersistence':
+      return { ...state, hydrated: false };
     default:
       return state;
   }
@@ -943,6 +964,8 @@ interface StoreValue {
    * that shows onboarding needs to check this before it offers a fresh start.
    */
   storageFailure: StorageFailure | null;
+  /** Whether recovery protects an intact ledger or rebuilds after a completed erase. */
+  storageRecoveryState: StorageRecoveryState;
   /**
    * True when HYDRATION failed and writes are latched off.
    *
@@ -1011,7 +1034,7 @@ interface StoreValue {
   restoreBackup: (json: string) => boolean;
   loadDemoData: () => void;
   /** Cryptographically erase the SQLCipher file/key, then create a blank store. */
-  clearAll: () => Promise<void>;
+  clearAll: (afterErase?: () => Promise<void>) => Promise<void>;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
@@ -1064,7 +1087,6 @@ function demoState(): Partial<Omit<AppState, 'hydrated'>> {
 const TX_CHUNK_SIZE = 400;
 /** Collapses a burst of dispatches — import, rename, undo — into one write. */
 const SAVE_DEBOUNCE_MS = 700;
-const txChunkKey = (i: number) => `${STORAGE_KEY}:tx:${i}`;
 
 /**
  * Which end of the ledger chunk 0 is measured from.
@@ -1091,7 +1113,6 @@ const txChunkKey = (i: number) => `${STORAGE_KEY}:tx:${i}`;
  * touches transactions rewrites them in the new layout and stamps the marker.
  */
 const TX_CHUNK_ORDER = 'oldest-first';
-type TxChunkOrder = typeof TX_CHUNK_ORDER | 'newest-first';
 
 /**
  * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
@@ -1107,84 +1128,21 @@ export function chunkTransactions(transactions: Transaction[]): string[] {
   return bodies;
 }
 
-type PersistedMeta = Partial<Omit<AppState, 'hydrated'>> & {
-  txChunks?: number;
-  txChunkOrder?: string;
-};
-
-interface LoadedState {
-  state: Partial<Omit<AppState, 'hydrated'>>;
-  /** The chunk bodies exactly as they were on disk, to seed the write cache. */
-  chunkBodies: string[];
-  /** The layout those bodies are in, so a meta-only save cannot mislabel them. */
-  chunkOrder: TxChunkOrder;
-}
-
-async function loadPersisted(): Promise<LoadedState | null> {
-  let raw = await stateStorage.getItem(STORAGE_KEY);
-  if (!raw && (await migrateLegacyState(STORAGE_KEY))) {
-    raw = await stateStorage.getItem(STORAGE_KEY);
-  }
-  if (!raw) return null;
-  const parsed = JSON.parse(raw) as PersistedMeta;
-  const chunkBodies: string[] = [];
-  // Absent means a ledger written before chunks were anchored to the oldest
-  // row. It is read in the layout it was written in — see TX_CHUNK_ORDER.
-  const chunkOrder: TxChunkOrder =
-    parsed.txChunkOrder === TX_CHUNK_ORDER ? TX_CHUNK_ORDER : 'newest-first';
-  /** Any gap makes the index-aligned body cache unusable — see below. */
-  let corrupt = false;
-  if (!Array.isArray(parsed.transactions)) {
-    const count = Number(parsed.txChunks) || 0;
-    const blocks: Transaction[][] = [];
-    if (count > 0) {
-      const pairs = await stateStorage.multiGet(
-        Array.from({ length: count }, (_, i) => txChunkKey(i)),
-      );
-      for (const [, v] of pairs) {
-        if (!v) {
-          corrupt = true;
-          continue;
-        }
-        // Each chunk stands on its own. One throw here used to abort the
-        // whole load, and the caller turns a failed load into a blank
-        // onboarded=false state — so a single corrupt chunk presented as
-        // "your data is gone", accounts, settings and all, while the other
-        // chunks sat intact in storage. Losing 400 rows is bad; losing the
-        // app is worse, and it is the same one-line failure either way.
-        try {
-          const rows = JSON.parse(v) as Transaction[];
-          if (Array.isArray(rows)) {
-            blocks.push(rows);
-            // Seeds the save-time diff, so the first write after launch does
-            // not rewrite every chunk it just read.
-            chunkBodies.push(v);
-          } else {
-            corrupt = true;
-          }
-        } catch {
-          // Skip it. The next save rewrites every chunk from memory — and the
-          // body cache is dropped rather than left with a hole in it, because
-          // it is diffed BY INDEX. Keeping the surviving bodies would shift
-          // every chunk after the corrupt one against its stored twin and
-          // suppress writes that were genuinely needed.
-          corrupt = true;
-        }
-      }
-    }
-    // Oldest-first chunks reassemble back to front, which is what puts the
-    // ledger back in the newest-first order it was cut from.
-    if (chunkOrder === TX_CHUNK_ORDER) blocks.reverse();
-    const txs: Transaction[] = [];
-    for (const rows of blocks) txs.push(...rows);
-    parsed.transactions = txs;
-  }
-  delete parsed.txChunks;
-  delete parsed.txChunkOrder;
-  return { state: parsed, chunkBodies: corrupt ? [] : chunkBodies, chunkOrder };
+function createAppLedgerPersistence(): LedgerPersistence {
+  return createLedgerPersistence({
+    prefix: STORAGE_KEY,
+    chunkSize: TX_CHUNK_SIZE,
+    currentChunkOrder: TX_CHUNK_ORDER,
+    chunkTransactions,
+    storage: stateStorage,
+    migrateLegacyState,
+  });
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
+  const persistenceRef = useRef<LedgerPersistence | null>(null);
+  if (!persistenceRef.current) persistenceRef.current = createAppLedgerPersistence();
+  const persistence = persistenceRef.current;
   const [state, setState] = useState(EMPTY_STATE);
   /**
    * React may batch renders, but capture can deliver two relay batches in the
@@ -1192,52 +1150,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * the second batch always reduces over the first even before React renders.
    */
   const authoritativeState = useRef(EMPTY_STATE);
+  const authoritativeRevision = useRef(0);
   const dispatch = useCallback((action: Action): AppState => {
     const next = reducer(authoritativeState.current, action);
     authoritativeState.current = next;
+    authoritativeRevision.current += 1;
     setState(next);
     return next;
   }, []);
-  const prevChunkCount = useRef(0);
-  /** Last successfully written body per chunk, so unchanged ones are skipped. */
-  const prevChunks = useRef<string[]>([]);
-  /**
-   * The layout the chunks on disk are actually in. A fresh store has none, so
-   * it starts at the current one; a load of an older ledger moves it back. It
-   * exists because meta is written on saves that do NOT touch transactions,
-   * and such a save must not stamp a layout marker over chunks still written
-   * in the other one.
-   */
-  const chunkOrder = useRef<TxChunkOrder>(TX_CHUNK_ORDER);
-  /**
-   * The transactions array as of the last save. Reducers return a NEW array
-   * only when they actually touch transactions, so an identity check here is
-   * exact — and it is what lets a settings toggle skip re-serialising the
-   * whole ledger.
-   */
-  const prevTransactions = useRef<Transaction[] | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Serialises saves — see the comment where it is used. */
-  const writeQueue = useRef<Promise<void>>(Promise.resolve());
-  /**
-   * Latched when hydration failed. While it is set, `persist` refuses to write
-   * anything: the in-memory state was not read from disk, so saving it would
-   * overwrite a ledger we could not load. See the hydration catch above.
-   */
-  const storageBlocked = useRef(false);
   const [storageFailure, setStorageFailure] = useState<StorageFailure | null>(null);
+  const [storageRecoveryState, setStorageRecoveryState] = useState<StorageRecoveryState>(null);
+  const storageRecoveryStateRef = useRef<StorageRecoveryState>(null);
+  storageRecoveryStateRef.current = storageRecoveryState;
+  const eraseCleanupRetry = useRef<(() => Promise<void>) | null>(null);
+  const erasedBlankSnapshot = useRef<AppState | null>(null);
   /**
-   * The renderable half of `storageBlocked`.
-   *
-   * The ref is what `persist` reads, because that guard has to be exact on the
-   * same tick it is set; a ref does not re-render, and the recovery screen has
-   * to appear. They are set together and only together.
+   * The renderable half of ledger-persistence's internal write block.
    *
    * This is deliberately narrower than `storageFailure`, which is also set when
-   * a SAVE fails. A failed save happens mid-session over data that was read
-   * correctly, and taking the whole app away from someone at that point would
-   * be worse than the failure — only an unreadable ledger justifies the
-   * takeover, because only then is what is on screen not the user's data.
+   * an ordinary SAVE fails. The takeover is reserved for an unreadable ledger
+   * or an erase workflow that cannot yet prove every local bank-data store is
+   * empty and writable.
    */
   const [hydrationFailed, setHydrationFailed] = useState(false);
   const [retryingHydration, setRetryingHydration] = useState(false);
@@ -1277,19 +1211,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const hydrate = useCallback(async (): Promise<boolean> => {
     const run = ++hydrationRun.current;
     try {
-      const loaded = await loadPersisted();
+      const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
       let next: Partial<Omit<AppState, 'hydrated'>> = { onboarded: false };
       if (loaded) {
-        const parsed = loaded.state;
-        prevChunkCount.current = Math.ceil((parsed.transactions?.length ?? 0) / TX_CHUNK_SIZE);
-        // Seed the write cache with what is already on disk. Without this the
-        // first save after every launch believes no chunk has ever been
-        // written and rewrites the entire history — about a megabyte on a
-        // heavy ledger, for no change at all.
-        prevChunks.current = loaded.chunkBodies;
-        chunkOrder.current = loaded.chunkOrder;
-        prevTransactions.current = parsed.transactions ?? [];
+        const parsed = loaded;
         // Pre-onboarding builds stored data without the flag; count them as onboarded.
         if (parsed.onboarded === undefined) parsed.onboarded = true;
         next = migratePersistedState(parsed);
@@ -1298,9 +1224,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // `loaded === null` — a database that is genuinely empty — reaches it
       // exactly like a database full of rows, because "there is nothing here"
       // is a real answer and only a THROW means we failed to get one.
-      storageBlocked.current = false;
       setHydrationFailed(false);
       setStorageFailure(null);
+      setStorageRecoveryState(null);
       dispatch({ type: 'hydrate', state: next });
       return true;
     } catch (error) {
@@ -1309,7 +1235,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
        * A storage failure is NOT a first run, and this is the line that used
        * to say it was.
        *
-       * `loadPersisted` returns null when there is genuinely nothing stored
+       * `persistence.load()` returns null when there is genuinely nothing stored
        * and throws when the database could not be read. Both landed here and
        * both produced `onboarded: false` — so a phone whose ledger was
        * unreadable was shown onboarding, and then the first debounced save
@@ -1321,13 +1247,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
        * it. `hydrationFailed` puts the recovery screen over the top of it, so
        * the empty state dispatched here is never offered as onboarding.
        */
-      storageBlocked.current = true;
       setHydrationFailed(true);
       setStorageFailure(recordStorageFailure('read', error));
+      setStorageRecoveryState((current) => current?.startsWith('erased-')
+        ? current
+        : 'preserved');
       dispatch({ type: 'hydrate', state: { onboarded: false } });
       return false;
     }
-  }, [dispatch]);
+  }, [dispatch, persistence]);
 
   useEffect(() => {
     void hydrate();
@@ -1339,122 +1267,56 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [hydrate]);
 
   /**
-   * Try the read again, without relaunching.
+   * Retry the operation that can safely reopen the app, without relaunching.
    *
-   * Nothing is cleared on the way in. Writes stay latched and the recovery
-   * screen stays up for the whole attempt, so a retry that fails again changes
-   * nothing the user can see except the spinner, and a retry that succeeds
-   * moves straight from the recovery screen to the real ledger.
+   * A preserved ledger is read again. After an erase, auxiliary cleanup runs
+   * first and reset must durably initialize the blank encrypted ledger. The
+   * recovery screen stays up until the relevant operation succeeds.
    */
   const retryHydration = useCallback(async (): Promise<boolean> => {
     if (retryInFlight.current) return false;
     retryInFlight.current = true;
     setRetryingHydration(true);
     try {
+      if (storageRecoveryStateRef.current?.startsWith('erased-')) {
+        try {
+          const cleanup = eraseCleanupRetry.current;
+          if (cleanup) {
+            await cleanup();
+            eraseCleanupRetry.current = null;
+            setStorageRecoveryState('erased-initialize');
+          }
+          const blank = erasedBlankSnapshot.current;
+          if (!blank) throw new Error('Blank erase snapshot is unavailable');
+          await persistence.reset(() => ({ snapshot: blank, revision: 0 }));
+          const { hydrated: _hydrated, ...persistedBlank } = blank;
+          dispatch({ type: 'hydrate', state: persistedBlank });
+          setHydrationFailed(false);
+          setStorageFailure(null);
+          setStorageRecoveryState(null);
+          return true;
+        } catch (error) {
+          const cleanupPending = eraseCleanupRetry.current !== null;
+          setStorageFailure(recordStorageFailure(cleanupPending ? 'destroy' : 'write', error));
+          setStorageRecoveryState(cleanupPending ? 'erased-cleanup' : 'erased-initialize');
+          setHydrationFailed(true);
+          return false;
+        }
+      }
       return await hydrate();
     } finally {
       retryInFlight.current = false;
       setRetryingHydration(false);
     }
-  }, [hydrate]);
+  }, [dispatch, hydrate, persistence]);
 
-  /**
-   * Persist. Three guards, because this runs on EVERY dispatch.
-   *
-   * The first is that transactions are only re-serialised when the array
-   * identity changed. Chunk diffing already avoided rewriting unchanged
-   * chunks, but the JSON.stringify that produced the bodies to compare ran
-   * first — so flipping App Lock, editing a budget or dismissing a toast still
-   * built roughly a megabyte of string on the JS thread at 5,000 rows, and
-   * then threw it away. Those mutations now write the small meta key alone.
-   *
-   * The second is a debounce. An import batch, a rename and an undo arrive as
-   * separate dispatches within a few hundred milliseconds, and each used to be
-   * its own full write. They now collapse into one, flushed on the way to the
-   * background so nothing is lost when the app is swiped away.
-   *
-   * The third is the write queue below. Debouncing makes overlapping saves
-   * rarer but does not remove them — the background flush fires while a
-   * debounced write may still be in flight — and two overlapping saves is a
-   * data-loss bug, not a performance one.
-   */
+  /** Persist through the deep module; React owns only debounce and UI state. */
   const persist = useCallback((snapshot: AppState): Promise<boolean> => {
-    // Fail closed. Hydration could not read the ledger, so nothing derived
-    // from this session is allowed to replace it on disk.
-    if (storageBlocked.current) return Promise.resolve(false);
-
-    const { hydrated: _hydrated, transactions, ...meta } = snapshot;
-    const txChanged = prevTransactions.current !== transactions;
-
-    const chunks: [string, string][] | null = txChanged
-      ? chunkTransactions(transactions).map((body, i): [string, string] => [txChunkKey(i), body])
-      : null;
-    const chunkCount = chunks ? chunks.length : prevChunkCount.current;
-    // A save that rewrites the chunks writes them in the current layout, and
-    // its meta has to say so in the SAME record. A meta-only save repeats
-    // whatever is already on disk.
-    const order = chunks ? TX_CHUNK_ORDER : chunkOrder.current;
-
-    // Saves run ONE AT A TIME, chained onto whatever is still in flight.
-    //
-    // Two state changes in quick succession — an import followed by the
-    // parser-version stamp, say — used to start two overlapping writes. Each
-    // writes the meta record, and meta carries txChunks, the number of chunk
-    // keys the loader will ask for. If the smaller save's meta landed last,
-    // the count said 3 while 4 chunks existed on disk, and the loader read
-    // three of them: 400 transactions gone, silently, with the data still
-    // sitting in storage. The bookkeeping refs below have the same problem —
-    // they are read and written across an await.
-    //
-    // Chaining makes the last save's meta the one that survives, which is the
-    // only correct answer, and lets the diff be computed against a cache that
-    // is actually current.
-    const operation = writeQueue.current.then(async () => {
-      try {
-        // Computed in here, not outside: out here `prevChunks` may still be
-        // the value from before the write that is currently in flight.
-        const changed = chunks
-          ? chunks.filter(([, body], i) => prevChunks.current[i] !== body)
-          : [];
-        await stateStorage.multiSet([
-          [STORAGE_KEY, JSON.stringify({ ...meta, txChunks: chunkCount, txChunkOrder: order })],
-          ...changed,
-        ]);
-        if (chunks && prevChunkCount.current > chunks.length) {
-          await stateStorage.multiRemove(
-            Array.from({ length: prevChunkCount.current - chunks.length }, (_, i) =>
-              txChunkKey(chunks!.length + i),
-            ),
-          );
-        }
-        if (chunks) {
-          prevChunkCount.current = chunks.length;
-          prevChunks.current = chunks.map(([, body]) => body);
-          chunkOrder.current = TX_CHUNK_ORDER;
-        }
-        prevTransactions.current = transactions;
-        return true;
-      } catch (error) {
-        // Persistence is best-effort; the in-memory state stays authoritative.
-        // The caches are cleared so the next save rewrites every chunk rather
-        // than assuming a failed write landed.
-        //
-        // "Best-effort" used to mean the error vanished here, which is how a
-        // write path that failed on EVERY save on Android went unnoticed
-        // through two signed releases. It is recorded now, and the reason is
-        // readable both in logcat and from the device.
-        prevChunks.current = [];
-        prevTransactions.current = null;
-        setStorageFailure(recordStorageFailure('write', error));
-        return false;
-      }
+    return persistence.save(snapshot).catch((error) => {
+      setStorageFailure(recordStorageFailure('write', error));
+      return false;
     });
-    // Keep the shared queue non-rejecting so one failed device write cannot
-    // prevent every later save from running. Callers that require durability
-    // inspect `operation` separately.
-    writeQueue.current = operation.then(() => undefined);
-    return operation;
-  }, []);
+  }, [persistence]);
 
   useEffect(() => {
     if (!state.hydrated) return;
@@ -1498,6 +1360,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const importBatch = useCallback((input: ImportBatchInput): ImportReceipt => {
+    if (!authoritativeState.current.hydrated) {
+      return {
+        ids: [],
+        durable: Promise.reject(new Error('Ledger persistence is blocked')),
+      };
+    }
     const newAccounts: Account[] = input.newAccounts.map((a) => ({ ...a, id: makeId('acc') }));
     // Hints pointing at a numeric index refer to a just-created account.
     const newHints: Record<string, string> = {};
@@ -1753,127 +1621,92 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'loadDemo', state: demoState() });
   }, []);
 
-  const clearAll = useCallback(async () => {
+  const clearAll = useCallback(async (afterErase?: () => Promise<void>) => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
 
-    /**
-     * Latch writes off BEFORE the blank state exists anywhere.
-     *
-     * Cancelling the debounce above is not enough, and neither is the write
-     * queue. The dispatch below moves `authoritativeState` to blank and
-     * re-renders, which schedules a FRESH 700 ms save of that blank state —
-     * and every save reads the ref at fire time, so it is the blank state it
-     * will write. That is intended when the erase succeeds. It is data loss
-     * when the erase fails:
-     *
-     *   dispatch(clearAll)          → authoritative ref is blank, timer armed
-     *   destroy() rejects           → the ledger is STILL ON DISK, readable
-     *   writeQueue recovery resolves → the queue is deliberately non-rejecting
-     *   timer fires at t+700ms      → persist(blank) chains onto that queue
-     *   multiSet(blank)             → the retained ledger is overwritten
-     *
-     * The queue orders those writes correctly; correct ordering is exactly
-     * what lands the blank write on the surviving database. `destroy` can
-     * fail with the file and the key both intact — `state-storage.native.ts`
-     * records a key error and a database error and still throws — and those
-     * two failures are coupled in practice: expo-sqlite refuses to delete an
-     * open database when `closeAsync` failed, and SecureStore cannot delete a
-     * key while the Keystore is unavailable. The old database then reopens
-     * with its retained key and the blank write commits, while Settings is
-     * telling the user the erase failed.
-     *
-     * So the latch closes here, before the dispatch, and stays closed for the
-     * whole operation. It is reopened below only on the success path.
-     */
-    storageBlocked.current = true;
-
-    // What the ledger actually held before this call touched anything. The
-    // dispatch below overwrites `authoritativeState.current` with blank, so
-    // this has to be taken first — it is what gets put back on screen if the
-    // erase fails.
     const previousState = authoritativeState.current;
-
-    // Move the UI and authoritative ref to the blank state first. Any timer
-    // or mutation that arrives while the erase is in flight can therefore
-    // only write the blank/new state, never resurrect the old ledger.
+    // Supersede an initial/retry hydration before it can put the old ledger
+    // back after this reset has claimed the encrypted lifecycle.
+    hydrationRun.current += 1;
+    // reset() closes its internal write latch synchronously, before this
+    // dispatch can arm a fresh debounced save of the blank state.
+    // The erase target is fixed before destruction. The blocked hydrated flag
+    // below makes capture refuse work until reset and inbox cleanup complete.
+    const blankState = reducer(authoritativeState.current, { type: 'clearAll' });
+    erasedBlankSnapshot.current = blankState;
+    const resetOperation = persistence.reset(() => ({
+      snapshot: blankState,
+      revision: 0,
+    }));
     dispatch({ type: 'clearAll' });
+    dispatch({ type: 'blockPersistence' });
 
-    // All older encrypted writes finish before the cryptographic erase. The
-    // queue remains non-rejecting for future writes, while this caller keeps
-    // the real result so Settings cannot report success on failure.
-    const destroyOperation = writeQueue.current.then(() => stateStorage.destroy(STORAGE_KEY));
-    writeQueue.current = destroyOperation.then(
-      () => undefined,
-      () => undefined,
-    );
     try {
-      // Throws if the erase failed. A ledger we failed to erase is still on
-      // disk and still readable, and until the catch below runs, the screen
-      // is showing blank — a lie about what is actually retained.
-      await destroyOperation;
+      await resetOperation;
     } catch (error) {
-      // Put back what was on screen before this call, so a failed erase
-      // looks like a failed erase, not a successful one that also lost the
-      // ledger from view.
-      //
-      // The latch stays CLOSED here, not restored to whatever it was on
-      // entry: `destroy` can fail with the key or the database file only
-      // partially removed, and there is no way from here to tell which.
-      // Reopening writes onto a store in that state is the exact bug this
-      // latch exists to prevent. `hydrationFailed` goes up too, so the
-      // recovery screen blocks further unsaved edits until the app restarts
-      // or a backup is restored — the alternative is a user typing new
-      // transactions into a session that can never save them.
+      const resetError = error instanceof LedgerResetError ? error : null;
+      const original = resetError?.original ?? error;
+      if (resetError?.stage === 'initialize') {
+        // Erase succeeded, so restoring the old in-memory ledger would claim
+        // data still exists when its encryption key is already gone. Keep the
+        // intentional blank state and report only the failed initialization.
+        let cleanupError: unknown = null;
+        if (afterErase) {
+          try {
+            await afterErase();
+          } catch (error) {
+            cleanupError = error;
+            eraseCleanupRetry.current = afterErase;
+          }
+        }
+        setStorageFailure(recordStorageFailure(cleanupError ? 'destroy' : 'write', cleanupError ?? original));
+        // Persistence is still latched closed. Put the recovery surface over
+        // the app so no edit can appear successful while writes are refused.
+        setHydrationFailed(true);
+        setStorageRecoveryState(cleanupError ? 'erased-cleanup' : 'erased-initialize');
+        throw new ClearAllError(cleanupError ? 'cleanup' : 'initialize', cleanupError ?? original);
+      }
+
+      // Erase failed, so the previous ledger may still be intact. Restore the
+      // visible state and leave writes blocked until a successful reload or a
+      // later successful reset.
       dispatch({ type: 'restore', state: previousState });
-      setStorageFailure(recordStorageFailure('destroy', error));
+      setStorageFailure(recordStorageFailure('destroy', original));
       setHydrationFailed(true);
-      throw error;
+      setStorageRecoveryState('preserved');
+      eraseCleanupRetry.current = null;
+      throw new ClearAllError('erase', original);
     }
 
-    // `chunkOrder` needs no reset here: clearing `prevTransactions` makes the
-    // blank write below a transactions write, and every transactions write
-    // stamps the current layout by construction.
-    prevChunkCount.current = 0;
-    prevChunks.current = [];
-    prevTransactions.current = null;
+    if (afterErase) {
+      try {
+        await afterErase();
+      } catch (error) {
+        persistence.block();
+        eraseCleanupRetry.current = afterErase;
+        setStorageFailure(recordStorageFailure('destroy', error));
+        setStorageRecoveryState('erased-cleanup');
+        setHydrationFailed(true);
+        throw new ClearAllError('cleanup', error);
+      }
+    }
 
-    /**
-     * The erase SUCCEEDED, so the latch has nothing left to protect. This is
-     * the ONLY path that reopens writes during an erase — reached after the
-     * await, so a rejection can never arrive here.
-     *
-     * `storageBlocked` exists to stop this session's empty state from
-     * overwriting a ledger we failed to read. That ledger no longer exists:
-     * its file is deleted and its key is gone from the Keychain. Leaving the
-     * latch closed here was the bug — `destroy` really did erase everything,
-     * then `persist` returned false because the latch was still set, and
-     * `clearAll` threw "Blank encrypted store could not be created". Settings
-     * reported a failure for an erase that had completely succeeded, and the
-     * user was left with no ledger and a screen saying so.
-     *
-     * Cleared BEFORE the write, not after, because it is the write that the
-     * latch would otherwise refuse.
-     */
-    storageBlocked.current = false;
     setHydrationFailed(false);
     setStorageFailure(null);
-
-    // Recreate only the minimal blank state under a fresh random key. Waiting
-    // here makes "Erase" a completed operation, not a 700 ms intention. A
-    // failure here is a real one and is reported as such: `persist` records it
-    // and puts it back on `storageFailure`, so the screen shows what happened
-    // rather than a success it cannot back up.
-    const written = await persist(authoritativeState.current);
-    if (!written) throw new Error('Blank encrypted store could not be created');
-  }, [dispatch, persist]);
+    setStorageRecoveryState(null);
+    eraseCleanupRetry.current = null;
+    const { hydrated: _hydrated, ...persistedBlank } = blankState;
+    dispatch({ type: 'hydrate', state: persistedBlank });
+  }, [dispatch, persistence]);
 
   const value = useMemo(
     () => ({
       state,
       storageFailure,
+      storageRecoveryState,
       hydrationFailed,
       retryingHydration,
       retryHydration,
@@ -1920,6 +1753,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [
       state,
       storageFailure,
+      storageRecoveryState,
       hydrationFailed,
       retryingHydration,
       retryHydration,

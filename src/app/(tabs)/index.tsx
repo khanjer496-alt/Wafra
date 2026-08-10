@@ -36,28 +36,23 @@ import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
-import { REPORT_PROMPT_THRESHOLD, unreadFormatCount } from '@/lib/accuracy';
-import { uncategorisedMerchants, worthPrompting } from '@/lib/uncategorised';
-import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
+import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
 import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
-import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
+import type { ForeignActivitySummary } from '@/lib/fx-summary';
 import { tapped } from '@/lib/haptics';
-import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
-import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
 import { syncPaymentReminders } from '@/lib/notifications';
-import { inPeriod, isCurrentMonth, periodLabel, type Period } from '@/lib/period';
-import { periodComparison, type PeriodComparison } from '@/lib/analytics';
+import { periodLabel, type Period } from '@/lib/period';
+import type { PeriodComparison } from '@/lib/analytics';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { ledgerCurrencyCode, ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
-import type { AppState, CardDue, Transaction } from '@/lib/types';
+import type { CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
-
-/** How far ahead "leaving soon" looks. Beyond this it is not soon. */
-const HORIZON_DAYS = 9;
+import { projectDashboard } from '@/lib/dashboard-projection';
+import type { UncategorisedSummary } from '@/lib/uncategorised';
 
 /**
  * The product promise, above the fold. This is deliberately a live status and
@@ -397,18 +392,17 @@ function Hero({
  * answering it by dropping the user on Wallet made them find it again.
  */
 function LeavingSoon({
-  state,
-  now,
+  items,
+  withinDays,
   onOpen,
 }: {
-  state: AppState;
-  now: Date;
+  items: Outgoing[];
+  withinDays: number;
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
   const enter = useScreenEntering();
   const [expanded, setExpanded] = useState(false);
-  const items = useMemo(() => leavingSoon(state, now, { withinDays: HORIZON_DAYS }), [state, now]);
   if (items.length === 0) return null;
 
   // The heading used to say "Leaving in 9 days" over the total of everything
@@ -433,8 +427,8 @@ function LeavingSoon({
       <SectionHeader
         title={
           late > 0
-            ? tf('overdueAndLeaving', { days: HORIZON_DAYS })
-            : tf('leavingInDays', { days: HORIZON_DAYS })
+            ? tf('overdueAndLeaving', { days: withinDays })
+            : tf('leavingInDays', { days: withinDays })
         }
         right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
       />
@@ -509,16 +503,15 @@ function LeavingSoon({
  * once enough distinct formats have piled up to be worth a tap, and says how
  * many so the ask is concrete rather than a chore.
  */
-function UnreadFormatsPrompt({ state }: { state: AppState }) {
+function UnreadFormatsPrompt({ count, shouldPrompt }: { count: number; shouldPrompt: boolean }) {
   const theme = useTheme();
   const router = useRouter();
-  const formats = useMemo(() => unreadFormatCount(state), [state]);
-  if (formats < REPORT_PROMPT_THRESHOLD) return null;
+  if (!shouldPrompt) return null;
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={tf('reportUnreadFormatsA11y', { count: formats })}
+      accessibilityLabel={tf('reportUnreadFormatsA11y', { count })}
       onPress={() => router.push('/accuracy')}
       style={({ pressed }) => [
         styles.notice,
@@ -530,7 +523,7 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
       <Icon name="search" size={17} color={theme.warning} />
       <View style={styles.noticeText}>
         <ThemedText type="small">
-          {tf('unreadFormatCount', { count: formats, s: formats === 1 ? '' : 's' })}
+          {tf('unreadFormatCount', { count, s: count === 1 ? '' : 's' })}
         </ThemedText>
         <ThemedText type="meta" themeColor="textTertiary">
           {t('unreadMessageHint')}
@@ -566,12 +559,17 @@ function UnreadFormatsPrompt({ state }: { state: AppState }) {
  * six new shops have piled up. Coming back next launch IS the right behaviour
  * as long as the floor keeps it quiet the rest of the time.
  */
-function CategorisePrompt({ state }: { state: AppState }) {
+function CategorisePrompt({
+  summary,
+  shouldPrompt,
+}: {
+  summary: UncategorisedSummary;
+  shouldPrompt: boolean;
+}) {
   const theme = useTheme();
   const router = useRouter();
   const [dismissed, setDismissed] = useState(false);
-  const summary = useMemo(() => uncategorisedMerchants(state), [state]);
-  if (dismissed || !worthPrompting(summary)) return null;
+  if (dismissed || !shouldPrompt) return null;
 
   const count = summary.merchants.length;
   // The dismiss control is a sibling of the tappable area rather than a child
@@ -642,7 +640,6 @@ export default function HomeScreen() {
       : captureState;
 
   const now = useMemo(() => new Date(), []);
-  const live = isCurrentMonth(period, now);
   const [refreshing, setRefreshing] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
@@ -664,80 +661,21 @@ export default function HomeScreen() {
     [state.cardDues, router],
   );
 
-  // Archiving an account used to remove its balance from Wallet and its
-  // history from net worth, while its spending went on counting here. Hiding
-  // a card now hides what it spent too.
-  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  // Both halves of a move between the user's own accounts. Without this the
-  // arriving half reads exactly like being paid.
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
-  );
-
-  const summary = useMemo(
-    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
-    [state.transactions, period, liveAccounts, internal],
-  );
-
-  // One insight, not five. The rest are on Flow.
-  /**
-   * The hero's three figures, reconciled. Rounding each of in and out to whole
-   * dirhams first and subtracting those is the only way the caption under them
-   * can be checked by eye — which is the entire point of showing all three.
-   */
-  /**
-   * Computed beside the hero and from the same ledger, so the sentence under
-   * the figure can never describe a different set of rows than the figure
-   * does. `isSpending` exclusions are passed through for the same reason.
-   */
-  const comparison = useMemo(
-    () => periodComparison(state.transactions, period, liveAccounts, internal),
-    [state.transactions, period, liveAccounts, internal],
-  );
-
-  const hero = useMemo(() => {
-    const expenseFils = composition(summary).totalFils;
-    const incomeFils = Math.round(summary.incomeFils / 100) * 100;
-    return { incomeFils, expenseFils, netFils: incomeFils - expenseFils };
-  }, [summary]);
-
-  const insight = useMemo(() => {
-    const all = buildInsights(
-      state.transactions,
-      state.budgets,
-      period,
-      now,
-      state.notSubscriptions,
-      liveAccounts,
-      internal,
-    );
-    return all.find((i) => i.id !== dismissedInsight) ?? null;
-  }, [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal, dismissedInsight]);
-
-  const today = useMemo(
+  // Home's pure facts cross one seam. Account visibility, internal transfers,
+  // reconciled hero arithmetic, comparison, insights, prompts, and rows are
+  // projected together so adjacent figures cannot drift onto different ledger
+  // definitions while the screen stays focused on interactions and rendering.
+  const dashboard = useMemo(
     () =>
-      state.transactions
-        .filter(
-          (transaction) =>
-            !transaction.isTransfer &&
-            !internal.has(transaction.id) &&
-            liveAccounts.has(transaction.accountId) &&
-            inPeriod(transaction.date, period),
-        )
-        .slice(0, 6),
-    [state.transactions, period, internal, liveAccounts],
+      projectDashboard({
+        state,
+        period,
+        now,
+        dismissedInsightId: dismissedInsight,
+      }),
+    [state, period, now, dismissedInsight],
   );
-
-  const foreignActivity = useMemo(
-    () => summarizeForeignActivity(state.transactions, (tx) => inPeriod(tx.date, period)),
-    [state.transactions, period],
-  );
-
-  const lastAutomatic = useMemo(
-    () => state.transactions.find((tx) => tx.source === 'sms'),
-    [state.transactions],
-  );
+  const insight = dashboard.insight;
 
   // Foreign-only alerts arrive with an offline estimate so capture never
   // blocks on a network. Once the ledger is visible, replace only those
@@ -795,8 +733,8 @@ export default function HomeScreen() {
 
           <Hero
             period={period}
-            live={live}
-            comparison={comparison}
+            live={dashboard.live}
+            comparison={dashboard.comparison}
             // All three figures from one arithmetic, so the hero equals its
             // own two cells. It read "63,039 in, 8,815 out, saved 54,223" —
             // a subtraction that is off by one, in 40px type, at the top of
@@ -806,14 +744,14 @@ export default function HomeScreen() {
             // Out is the composition total, which Flow prints above the
             // category split; in is rounded the same way; and the net is the
             // difference between those two, not a third measurement.
-            netFils={hero.netFils}
-            incomeFils={hero.incomeFils}
-            expenseFils={hero.expenseFils}
+            netFils={dashboard.hero.netFils}
+            incomeFils={dashboard.hero.incomeFils}
+            expenseFils={dashboard.hero.expenseFils}
           />
 
           <AutomaticCapture
             status={captureStatus}
-            lastCaptureDate={lastAutomatic?.date}
+            lastCaptureDate={dashboard.lastAutomaticCaptureDate}
             onPress={() => {
               if (captureStatus === 'paused') router.push('/pro');
               // Only iOS states that still owe the user setup go to the
@@ -873,31 +811,41 @@ export default function HomeScreen() {
             </Animated.View>
           )}
 
-          <LeavingSoon state={state} now={now} onOpen={openOutgoing} />
+          <LeavingSoon
+            items={dashboard.upcoming.items}
+            withinDays={dashboard.upcoming.withinDays}
+            onOpen={openOutgoing}
+          />
 
           {/* Foreign-currency detail is useful but secondary on Home (and has
               a full destination in Wallet). Keeping it below the month's one
               insight and upcoming outgoings prevents four peer cards from
               competing directly under the hero. */}
-          <ForeignActivityPreview summary={foreignActivity} />
+          <ForeignActivityPreview summary={dashboard.foreignActivity} />
 
           {/* Above the unread-format row on purpose. This one the user can
               actually finish — one tap per merchant, and the entries move —
               while that one asks them to send a list off and wait for a
               release. The actionable ask goes first. */}
-          <CategorisePrompt state={state} />
+          <CategorisePrompt
+            summary={dashboard.uncategorised.summary}
+            shouldPrompt={dashboard.uncategorised.shouldPrompt}
+          />
 
-          <UnreadFormatsPrompt state={state} />
+          <UnreadFormatsPrompt
+            count={dashboard.unreadFormats.count}
+            shouldPrompt={dashboard.unreadFormats.shouldPrompt}
+          />
 
           <Animated.View
             entering={enter(FadeInDown.delay(120).duration(320))}
             style={styles.section}>
             <SectionHeader
-              title={live ? t('recentActivity') : periodLabel(period)}
+              title={dashboard.live ? t('recentActivity') : periodLabel(period)}
               right={t('allActivity')}
               onPressRight={() => router.push('/transactions')}
             />
-            {today.map((tx, i) => (
+            {dashboard.activityRows.map((tx, i) => (
               <View
                 key={tx.id}
                 style={
@@ -909,7 +857,7 @@ export default function HomeScreen() {
                   transaction={tx}
                   account={state.accounts.find((a) => a.id === tx.accountId)}
                   onPress={setEntry}
-                  internal={internal.has(tx.id)}
+                  internal={dashboard.internalTransactionIds.has(tx.id)}
                 />
               </View>
             ))}
@@ -919,8 +867,8 @@ export default function HomeScreen() {
                 AED 0 and then replacing it with a real month — telling the user
                 their data was gone, every cold start. Skeletons until the store
                 says it has looked. */}
-            {!state.hydrated && today.length === 0 && <SkeletonRows count={4} height={44} />}
-            {state.hydrated && today.length === 0 && (
+            {!state.hydrated && dashboard.activityRows.length === 0 && <SkeletonRows count={4} height={44} />}
+            {state.hydrated && dashboard.activityRows.length === 0 && (
               <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
                 <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
                   {ledgerCurrencyDisplay()} 0

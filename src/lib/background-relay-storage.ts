@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export const BACKGROUND_RELAY_ERASE_PENDING_KEY = 'wafra/background-relay/erase-pending/v1';
+
 /** Web is a QA surface; native resolution swaps in the encrypted SQLCipher inbox. */
 export const backgroundRelayStorage = {
   getItem: (key: string) => AsyncStorage.getItem(key),

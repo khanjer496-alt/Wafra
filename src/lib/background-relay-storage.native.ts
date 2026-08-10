@@ -9,6 +9,8 @@ import * as SecureStore from 'expo-secure-store';
 import * as SQLite from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+export const BACKGROUND_RELAY_ERASE_PENDING_KEY = 'wafra/background-relay/erase-pending/v1';
+
 const DATABASE_NAME = 'wafra-relay-inbox.db';
 const KEY_NAME = 'wafra.relay.inbox.key.v1';
 const TABLE = 'relay_inbox';

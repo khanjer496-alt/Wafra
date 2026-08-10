@@ -585,6 +585,7 @@ function fastest(fn, runs = 7) {
 // ---------------------------------------------------------------------------
 
 const storeSource = read('src/lib/store.tsx');
+const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.ts'));
 
 /** The body of a top-level declaration, brace-matched. */
 function bodyOf(source, header) {
@@ -681,17 +682,18 @@ function bodyOf(source, header) {
    * scrambled order, which is enough to change which of two duplicate rows
    * `reconcileCaptureDuplicates` keeps.
    */
-  const load = bodyOf(storeSource, 'async function loadPersisted');
+  const load = bodyOf(ledgerPersistenceSource, 'const readSnapshot = async');
   ok('the loader reads the stored chunk layout before reassembling',
     !!load &&
-      /parsed\.txChunkOrder === TX_CHUNK_ORDER/.test(load) &&
-      /if \(chunkOrder === TX_CHUNK_ORDER\) blocks\.reverse\(\)/.test(load),
+      /parsed\.txChunkOrder === currentChunkOrder/.test(load) &&
+      /if \(chunkOrder === currentChunkOrder\) blocks\.reverse\(\)/.test(load),
     'a ledger written by an older build carries no marker and must be read in the layout it ' +
       'was written in, not reinterpreted');
 
-  const persist = bodyOf(storeSource, 'const persist = useCallback');
+  const persist = bodyOf(ledgerPersistenceSource, 'const writeSnapshot = async');
   ok('every meta record says which layout the chunks on disk are in',
-    !!persist && /txChunkOrder: order/.test(persist) && /chunks \? TX_CHUNK_ORDER : chunkOrder\.current/.test(persist),
+    !!persist && /txChunkOrder: order/.test(persist) &&
+      /chunks \? currentChunkOrder : storedChunkOrder/.test(persist),
     'meta is written on saves that do not touch transactions too, and one of those stamping ' +
       'the new layout over old chunks is the same data-scrambling bug from the other side');
 }

@@ -81,6 +81,10 @@ ok('device-sealed queue retention is implemented at 30 days',
   /DELETE FROM queue WHERE created_at < unixepoch\(\) - 2592000/.test(worker));
 ok('device deletion also removes its push registration',
   /DELETE FROM push_registrations WHERE device_id = \?1/.test(worker));
+ok('authenticated deletion retries retain only an expiring token digest',
+  /CREATE TABLE IF NOT EXISTS admin_deletion_receipts/.test(schema) &&
+    /PRIMARY KEY \(token_hash, route\)/.test(schema) &&
+    /DELETE FROM admin_deletion_receipts WHERE expires_at <= unixepoch\(\)/.test(worker));
 ok('retained queue rows get scheduled wake retries',
   /SELECT DISTINCT q\.device_id AS id[\s\S]*JOIN push_registrations/.test(worker) &&
     /pending \?\? \[\][\s\S]*wakeDevice\(env, row\.id\)/.test(worker));

@@ -13,20 +13,21 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 
 import type { ScannedSms } from '@/lib/auto-import';
+import { createCaptureExecutor } from '@/lib/capture-executor';
 import { buildChargeAlert } from '@/lib/charge-alert';
 import { detectLanguage, getLanguage, type Lang } from '@/lib/i18n';
 import { ensureNotificationHandler, notificationsAllowed } from '@/lib/notifications';
 import {
-  ackRelay,
-  getBackgroundRelayConfig,
   getRelayConfig,
   recordRelayAutomationProof,
   registerRelayPush,
-  syncRelay,
   unregisterRelayPush,
   type RelayConfig,
 } from '@/lib/relay';
-import { backgroundRelayStorage } from '@/lib/background-relay-storage';
+import {
+  BACKGROUND_RELAY_ERASE_PENDING_KEY,
+  backgroundRelayStorage,
+} from '@/lib/background-relay-storage';
 
 const TASK_NAME = 'wafra-relay-background-sync-v1';
 const QUEUE_KEY = 'wafra/background-relay/v1';
@@ -212,33 +213,44 @@ export async function readBackgroundRelayRows(): Promise<ScannedSms[]> {
  * path uses capture.ts's compare-and-swap clear instead, and
  * contracts.test.js asserts the name does not appear there.
  */
+let backgroundSyncTail: Promise<void> = Promise.resolve();
+
+const enqueueBackgroundOperation = <T,>(operation: () => Promise<T>): Promise<T> => {
+  const result = backgroundSyncTail.then(operation, operation);
+  backgroundSyncTail = result.then(() => undefined, () => undefined);
+  return result;
+};
+
 export async function clearBackgroundRelayRows(): Promise<void> {
-  await backgroundRelayStorage.removeItem(QUEUE_KEY);
+  // Persist intent before waiting behind a wake that already owns the queue.
+  // Foreground capture is not on that tail, so writing this inside the queued
+  // operation would leave a window where it could still import staged rows.
+  await backgroundRelayStorage.setItem(BACKGROUND_RELAY_ERASE_PENDING_KEY, '1');
+  return enqueueBackgroundOperation(async () => {
+    await backgroundRelayStorage.removeItem(QUEUE_KEY);
+    await backgroundRelayStorage.removeItem(BACKGROUND_RELAY_ERASE_PENDING_KEY);
+  });
 }
 
-export async function syncRelayInBackground(): Promise<number> {
-  const cfg = await getBackgroundRelayConfig();
-  if (!cfg || cfg.setupState === 'paired') return 0;
-  const { parsed, ids, testIds } = await syncRelay(cfg);
-  const fresh = await appendDurable(parsed);
-  // The only thing on this phone that will tell the user a card was just used.
-  // Between the durable write and the ack on purpose: the rows survive a kill
-  // either way, and a banner must never be the reason a sync stops short of
-  // acknowledging what it stored.
-  await announceCharges(fresh);
-  // Email/PDF imports share this wake channel, but they prove nothing about
-  // Apple's Message automation. Only an alert entering through /v1/ingest may
-  // activate the "Shortcut connected" claim on Home.
-  if (parsed.some((row) => row.captureSource === 'shortcut')) {
-    await recordRelayAutomationProof();
-  }
-  // A later real bank alert can wake the app while a setup probe is still in
-  // the same queue. Never let that wake consume the proof marker; the setup
-  // screen is the only place allowed to acknowledge it.
-  const reserved = new Set(testIds);
-  const acknowledge = ids.filter((id) => !reserved.has(id));
-  if (acknowledge.length > 0) await ackRelay(cfg, acknowledge);
-  return parsed.length;
+async function performBackgroundSync(): Promise<number> {
+  const executor = createCaptureExecutor({
+    background: {
+      stage: appendDurable,
+      announce: announceCharges,
+      recordAutomationProof: (cfg) => recordRelayAutomationProof(cfg),
+    },
+  });
+  const outcome = await executor.execute('background');
+  return outcome.kind === 'background' ? outcome.received : 0;
+}
+
+/**
+ * TaskManager may deliver another silent wake before the first listener has
+ * finished. Serialize the whole collect → stage → acknowledge transaction so
+ * two read/merge/write cycles can never overwrite each other's staged rows.
+ */
+export function syncRelayInBackground(): Promise<number> {
+  return enqueueBackgroundOperation(performBackgroundSync);
 }
 
 if (Platform.OS !== 'web') {

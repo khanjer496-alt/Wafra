@@ -62,6 +62,7 @@ ok('email token: response injection is rejected',
 const root = path.resolve(__dirname, '../..');
 const transport = fs.readFileSync(path.join(root, 'src/lib/cloud-import.ts'), 'utf8');
 const surface = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
+const captureExecutor = fs.readFileSync(path.join(root, 'src/lib/capture-executor.ts'), 'utf8');
 ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
   /from 'expo-file-system'/.test(transport) &&
   /from 'expo\/fetch'/.test(transport) &&
@@ -70,9 +71,15 @@ ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
   /pickedFile\.delete\(\)/.test(surface));
+ok('forwarding credential is compare-and-cleared on timeout and screen exit',
+  /const current = await Clipboard\.getStringAsync\(\)/.test(surface) &&
+  /if \(current === address\) await Clipboard\.setStringAsync\(''\)/.test(surface) &&
+  /if \(address\) void clearCopiedAddress\(address\)/.test(surface) &&
+  /if \(disposed\.current\)[\s\S]{0,120}?clearCopiedAddress\(address\)/.test(surface));
 ok('queued imports persist to SQLCipher before relay acknowledgement',
-  surface.indexOf('await importBatch(plan.batch).durable') <
-    surface.indexOf('await ackRelay(active, acknowledge)'));
+  /execute\('supplemental'\)/.test(surface) &&
+  captureExecutor.indexOf('await receipt.durable') <
+    captureExecutor.indexOf('await dependencies.acknowledge(cfg, acknowledge)'));
 // This screen drains the same queue the iOS setup verifier is polling, and a
 // PDF upload or an email check is reachable while /ios-setup is still on its
 // test step. syncRelay() reports a setup probe's id in `ids` AND in `testIds`;
@@ -80,9 +87,15 @@ ok('queued imports persist to SQLCipher before relay acknowledgement',
 // the retry it offered was byte-identical, so the relay's replay receipt
 // refused it and pushed its own expiry out. Only /ios-setup may ack a probe.
 ok('a supplemental sync leaves the iOS setup probe for the screen waiting on it',
-  /const reserved = new Set\(queued\.testIds\)/.test(surface) &&
-  /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(surface) &&
-  !/ackRelay\(active, queued\.ids\)/.test(surface));
+  /execute\('supplemental'\)/.test(surface) &&
+  /const reserved = new Set\(queued\.testIds\)/.test(captureExecutor) &&
+  /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(captureExecutor) &&
+  !/acknowledge\(cfg, queued\.ids\)/.test(
+    captureExecutor.slice(
+      captureExecutor.indexOf('const executeSupplemental'),
+      captureExecutor.indexOf('const executeBackground'),
+    ),
+  ));
 ok('email forwarding has separate create and revoke actions',
   /method: 'POST'/.test(transport) && /method: 'DELETE'/.test(transport) &&
   /\/v1\/email-token/.test(transport));

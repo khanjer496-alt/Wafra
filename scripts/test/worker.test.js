@@ -140,7 +140,7 @@ function makeDb(transformSchema = (sql) => sql) {
 const ALL_TABLES = [
   'vaults', 'devices', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
-  'feedback', 'feedback_limits',
+  'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
 
 /** Every byte the database holds, for the "nothing readable is stored" checks. */
@@ -1032,6 +1032,11 @@ const CARD_PAYMENT_DEBIT =
     ok('devices: the owner revokes the second phone',
       (await call(env, 'DELETE', `/v1/devices/${member.deviceId}`, { token: owner.adminToken }))
         .status === 204);
+    ok('devices: revocation retry returns the authenticated deletion receipt',
+      (await call(env, 'DELETE', `/v1/devices/${member.deviceId}`, { token: owner.adminToken }))
+        .status === 204);
+    ok('devices: the revoked phone can prove deletion on its own cleanup route',
+      (await call(env, 'DELETE', '/v1/device', { token: member.adminToken })).status === 204);
     ok('devices: a revoked phone stops working immediately',
       (await call(env, 'GET', '/v1/sync', { token: member.syncToken })).status === 401);
     ok('devices: its queued rows go with it', count(env.DB, 'queue') === 1);
@@ -1041,8 +1046,13 @@ const CARD_PAYMENT_DEBIT =
 
     const wiped = await call(env, 'DELETE', '/v1/vault', { token: owner.adminToken });
     ok('vault: the owner can delete everything', wiped.status === 204);
-    ok('vault: nothing is left behind in any table',
-      ALL_TABLES.filter((t) => t !== 'pair_limits').every((t) => count(env.DB, t) === 0),
+    ok('vault: deletion retry remains provable after every device row is gone',
+      (await call(env, 'DELETE', '/v1/vault', { token: owner.adminToken })).status === 204);
+    ok('vault: every removed phone receives its own local-cleanup receipt',
+      (await call(env, 'DELETE', '/v1/device', { token: owner.adminToken })).status === 204);
+    ok('vault: no application data is left behind',
+      ALL_TABLES.filter((t) => t !== 'pair_limits' && t !== 'admin_deletion_receipts')
+        .every((t) => count(env.DB, t) === 0),
       JSON.stringify(ALL_TABLES.map((t) => [t, count(env.DB, t)])));
   }
 
@@ -1062,6 +1072,9 @@ const CARD_PAYMENT_DEBIT =
 
     const gone = await call(env, 'DELETE', '/v1/device', { token: me.adminToken });
     ok('unpair: returns 204', gone.status === 204);
+    ok('unpair: retry after local cleanup failure is authenticated and idempotent',
+      (await call(env, 'DELETE', '/v1/device', { token: me.adminToken })).status === 204 &&
+        count(env.DB, 'admin_deletion_receipts') === 1);
     ok('unpair: every one of that device\'s tokens stops working immediately',
       (await call(env, 'GET', '/v1/sync', { token: me.syncToken })).status === 401 &&
         (await call(env, 'POST', '/v1/ingest', {

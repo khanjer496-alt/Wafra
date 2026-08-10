@@ -1,5 +1,5 @@
 /**
- * What the app shows when it could not read the encrypted ledger.
+ * What the app shows when encrypted persistence cannot safely accept writes.
  *
  * This screen exists because of a specific, silent way to lose someone's data.
  * Hydration fails, `loadPersisted` throws, the store presents an empty state —
@@ -13,9 +13,9 @@
  *
  *   - No onboarding, no sample data, no fresh start. Nothing on this screen
  *     leads anywhere except a retry or an explicit, confirmed erase.
- *   - It says what is true: the encrypted ledger has not been changed. That is
- *     the single fact the user needs, and it is the one a generic error screen
- *     never gives them.
+ *   - It says what is true for the failure phase. A failed read preserves the
+ *     ledger; an initialization failure happens after erase and must never
+ *     claim the old entries remain.
  *   - No native error text, ever. The error that got us here may carry a
  *     merchant, an amount or the failing SQL. The store hands over a category
  *     from a closed vocabulary, which is enough to choose the right sentence
@@ -34,8 +34,10 @@ import { Icon } from '@/components/ui/icon';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { committed } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
+import { clearBackgroundRelayRows } from '@/lib/background-relay';
+import { getRelayConfigStrict, isRelayPlatform, unpairDevice } from '@/lib/relay';
 import type { StorageFailure } from '@/lib/storage-diagnostics';
-import { useStore } from '@/lib/store';
+import { useStore, type StorageRecoveryState } from '@/lib/store';
 
 /** Matches the onboarding surface it stands in for: night, whatever the OS says. */
 const night = Colors.dark;
@@ -45,7 +47,13 @@ const night = Colors.dark;
  * what decides this screen is warranted, so it is also what says which failure
  * it is showing. Only the ACTIONS are pulled from the store here.
  */
-export function StorageRecovery({ failure }: { failure: StorageFailure | null }) {
+export function StorageRecovery({
+  failure,
+  recoveryState,
+}: {
+  failure: StorageFailure | null;
+  recoveryState: StorageRecoveryState;
+}) {
   const { retryingHydration, retryHydration, clearAll } = useStore();
   const [confirmingErase, setConfirmingErase] = useState(false);
   const [erasing, setErasing] = useState(false);
@@ -60,6 +68,9 @@ export function StorageRecovery({ failure }: { failure: StorageFailure | null })
   // A key that no longer opens the file is not a transient failure, so the
   // screen does not imply that pressing the button again might help.
   const keyMismatch = failure?.category === 'key-mismatch';
+  const erasedButUninitialized = recoveryState === 'erased-initialize';
+  const erasedButUncleared = recoveryState === 'erased-cleanup';
+  const erased = erasedButUninitialized || erasedButUncleared;
 
   const onRetry = async () => {
     setRetriedInVain(false);
@@ -72,7 +83,9 @@ export function StorageRecovery({ failure }: { failure: StorageFailure | null })
     setErasing(true);
     setEraseFailed(false);
     try {
-      await clearAll();
+      const relay = isRelayPlatform() ? await getRelayConfigStrict() : null;
+      if (relay) await unpairDevice(relay);
+      await clearAll(isRelayPlatform() ? clearBackgroundRelayRows : undefined);
       committed();
     } catch {
       // `clearAll` throws when the erase or the blank-store write failed. The
@@ -134,15 +147,27 @@ export function StorageRecovery({ failure }: { failure: StorageFailure | null })
               <Icon name="lock" size={26} color={night.primary} />
             </View>
             <ThemedText style={styles.headline} accessibilityRole="header">
-              {t('storageRecoveryTitle')}
+              {t(erased ? 'storageRecoveryInitializeTitle' : 'storageRecoveryTitle')}
             </ThemedText>
             <ThemedText style={styles.sub} accessibilityLiveRegion="polite">
-              {keyMismatch ? t('storageRecoveryKeyBody') : t('storageRecoveryBody')}
+              {erasedButUncleared
+                ? t('storageRecoveryCleanupBody')
+                : erasedButUninitialized
+                ? t('storageRecoveryInitializeBody')
+                : keyMismatch
+                  ? t('storageRecoveryKeyBody')
+                  : t('storageRecoveryBody')}
             </ThemedText>
-            {!keyMismatch && <ThemedText style={styles.hint}>{t('storageRecoveryHint')}</ThemedText>}
+            {!keyMismatch && !erased && (
+              <ThemedText style={styles.hint}>{t('storageRecoveryHint')}</ThemedText>
+            )}
             {retriedInVain && (
               <ThemedText accessibilityLiveRegion="polite" style={[styles.note, { color: night.warning }]}>
-                {t('storageRecoveryRetryFailed')}
+                {t(erased
+                  ? erasedButUncleared
+                    ? 'storageRecoveryCleanupRetryFailed'
+                    : 'storageRecoveryInitializeRetryFailed'
+                  : 'storageRecoveryRetryFailed')}
               </ThemedText>
             )}
             {eraseFailed && (
@@ -163,14 +188,16 @@ export function StorageRecovery({ failure }: { failure: StorageFailure | null })
             {retryingHydration && <ActivityIndicator color={night.primary} />}
             {/* Erase never fires from here. It opens the question above, which
                 is the only place the destructive call exists. */}
-            <Button
-              variant="ghost"
-              label={t('storageRecoveryEraseCta')}
-              disabled={retryingHydration}
-              onPress={() => setConfirmingErase(true)}
-              labelColor={night.textSecondary}
-              style={styles.ghost}
-            />
+            {!erased && (
+              <Button
+                variant="ghost"
+                label={t('storageRecoveryEraseCta')}
+                disabled={retryingHydration}
+                onPress={() => setConfirmingErase(true)}
+                labelColor={night.textSecondary}
+                style={styles.ghost}
+              />
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>

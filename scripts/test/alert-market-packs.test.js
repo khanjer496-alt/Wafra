@@ -1,8 +1,6 @@
 const { inspectMarketAlert } = require('./build/alert-semantics.js');
-const { ALERT_MARKET_PACKS } = require('./build/alert-market-packs.js');
 const {
-  UNIVERSAL_AUTO_IMPORT_GATES,
-  evaluateMarketRollout,
+  runMarketBenchmark,
 } = require('./build/alert-rollout.js');
 
 let pass = 0;
@@ -17,9 +15,9 @@ const ok = (name, condition, detail) => {
   }
 };
 
-ok('all first-wave markets have isolated review packs',
-  Object.keys(ALERT_MARKET_PACKS).sort().join(',') ===
-    'BH,DE,EG,ES,FR,GB,IN,IT,JO,KW,NL,OM,QA,US');
+const firstWaveMarkets = ['BH', 'DE', 'EG', 'ES', 'FR', 'GB', 'IN', 'IT', 'JO', 'KW', 'NL', 'OM', 'QA', 'US'];
+ok('all first-wave markets are reachable through the review interface',
+  firstWaveMarkets.every((market) => inspectMarketAlert('Bank notice', market).market === market));
 
 {
   const result = inspectMarketAlert('Rs. 1,25,000.50 debited through UPI fund transfer to RAVI', 'IN');
@@ -176,87 +174,177 @@ for (const [label, market, text, family] of [
   const synthetic = [{
     id: 'synthetic-1', market: 'IN', institution: 'synthetic', provenance: 'synthetic',
     channel: 'sms', templateVersion: 'synthetic-v1', split: 'authoring',
-    expectedStatus: 'posted', expectedMoneyExact: true, expectedFamily: 'purchase',
-    actualStatus: 'posted', actualMoneyExact: true, actualFamily: 'purchase',
-    duplicate: false, forbiddenImport: false,
+    source: 'Card purchase INR 10.00 was debited at SHOP',
+    expected: {
+      decision: 'review', status: 'posted', family: 'purchase',
+      money: { currency: 'INR', minorUnits: '1000', direction: 'debit' },
+    },
   }];
-  const report = evaluateMarketRollout('IN', synthetic, 0);
+  const report = runMarketBenchmark('IN', synthetic);
   ok('synthetic fixtures can never unlock automatic import',
     report.stage === 'review' && report.blockers.includes('not-enough-consented-real-fixtures'));
 }
 
 {
-  const perfectReal = Array.from(
-    { length: UNIVERSAL_AUTO_IMPORT_GATES.minimumConsentedRealFixtures },
-    (_, index) => {
-      const families = [
-        'purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility',
-        'recurring-payment', 'statement', 'balance', 'authentication',
-      ];
-      const expectedFamily = families[index % families.length];
-      const expectedStatus = index < 20
-        ? 'failed'
-        : index < 40
-          ? 'future'
-          : ['statement', 'balance', 'authentication'].includes(expectedFamily)
-            ? 'informational'
-            : 'posted';
+  const postedCases = {
+    purchase: ['Card purchase GBP 10.00 was debited at SHOP', 'debit'],
+    transfer: ['GBP 10.00 was debited by bank transfer to RAVI', 'debit'],
+    'cash-withdrawal': ['Cash withdrawal GBP 10.00 was debited at an ATM', 'debit'],
+    refund: ['Refunded GBP 10.00 to your card', 'credit'],
+    fee: ['Annual fee GBP 10.00 was charged', 'debit'],
+    utility: ['GBP 10.00 was debited for an energy bill', 'debit'],
+    'recurring-payment': [
+      'Recurring automatic payment GBP 10.00 was debited to STREAMCO', 'debit',
+    ],
+  };
+  const informationalCases = {
+    statement: 'Statement amount due GBP 10.00',
+    balance: 'Available balance GBP 10.00',
+    authentication: 'OTP 445566 is your verification code. Do not share.',
+  };
+  const expectedFor = (family) => {
+    if (postedCases[family]) {
+      const [source, direction] = postedCases[family];
       return {
-        id: `real-${index}`, market: 'GB', institution: `bank-${index % 5}`,
-        channel: 'sms', templateVersion: `held-out-${index}`, split: 'held-out',
-        provenance: 'consented-redacted', expectedStatus, expectedMoneyExact: true,
-        expectedFamily, actualStatus: expectedStatus, actualMoneyExact: true,
-        actualFamily: expectedFamily, duplicate: false, forbiddenImport: false,
+        source,
+        expected: {
+          decision: 'review', status: 'posted', family,
+          money: { currency: 'GBP', minorUnits: '1000', direction },
+        },
       };
-    },
-  );
-  ok('automatic stage requires the complete measured gate, not a feature flag alone',
-    evaluateMarketRollout('GB', perfectReal, 0).stage === 'automatic');
+    }
+    return {
+      source: informationalCases[family],
+      expected: { decision: 'refuse', status: 'informational', family, money: null },
+    };
+  };
+  const families = [
+    'purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility',
+    'recurring-payment', 'statement', 'balance', 'authentication',
+  ];
+  const outcomes = [
+    ...Array.from({ length: 20 }, () => ({
+      source: 'Card purchase GBP 10.00 was declined',
+      expected: { decision: 'refuse', status: 'failed', family: 'purchase', money: null },
+    })),
+    ...Array.from({ length: 20 }, () => ({
+      source: 'Card payment GBP 10.00 will be debited tomorrow',
+      expected: { decision: 'refuse', status: 'future', family: 'purchase', money: null },
+    })),
+    ...Array.from({ length: 260 }, (_, index) => expectedFor(families[index % families.length])),
+  ];
+  const perfectReal = outcomes.map((outcome, index) => ({
+    id: `real-${index}`, market: 'GB', institution: `bank-${index % 5}`,
+    channel: 'sms', templateVersion: `held-out-${index}`, split: 'held-out',
+    provenance: 'consented-redacted', ...outcome,
+    source: `${outcome.source} Ref case-${index}`,
+  }));
+  const measured = runMarketBenchmark('GB', perfectReal);
+  ok('a complete corpus is measured by the shipping inspector, not caller-authored actuals',
+    measured.metrics.postedPrecision.ratio === 1 &&
+    measured.metrics.postedRecall.ratio === 1 &&
+    measured.metrics.statusAccuracy.ratio === 1 &&
+    measured.metrics.reviewDecisionRecall.ratio === 1 &&
+    measured.metrics.exactMoneyAndDirection.ratio === 1 &&
+    measured.metrics.familyPrecision.ratio === 1 &&
+    measured.metrics.subscriptionRecall.ratio === 1 &&
+    Object.values(measured.metrics.familyRecall).every((result) => result.ratio === 1),
+    JSON.stringify(measured));
+  ok('automatic import remains closed until the real dedupe path is benchmarked',
+    measured.stage === 'review' && measured.blockers.includes('duplicate-rate-unmeasured'));
   const positiveOnly = perfectReal.map((fixture) => ({
-    ...fixture, expectedStatus: 'posted', actualStatus: 'posted',
-    expectedFamily: 'purchase', actualFamily: 'purchase',
+    ...fixture,
+    source: `Card purchase GBP 10.00 was debited at SHOP Ref ${fixture.id}`,
+    expected: {
+      decision: 'review', status: 'posted', family: 'purchase',
+      money: { currency: 'GBP', minorUnits: '1000', direction: 'debit' },
+    },
   }));
   ok('an all-positive purchase corpus cannot unlock a market',
-    evaluateMarketRollout('GB', positiveOnly, 0).stage === 'review');
+    runMarketBenchmark('GB', positiveOnly).blockers.includes('not-enough-non-posted-fixtures'));
   const lowRecall = perfectReal.map((fixture, index) => ({
     ...fixture,
-    actualStatus: fixture.expectedStatus === 'posted' && index % 2 !== 0
-      ? 'unknown'
-      : fixture.actualStatus,
+    source: fixture.expected.status === 'posted' && index % 2 !== 0
+      ? `Bank notice GBP 10.00 Ref ${index}`
+      : fixture.source,
   }));
-  ok('missing most real posted alerts closes the recall gate',
-    evaluateMarketRollout('GB', lowRecall, 0).blockers.includes('posted-recall'));
+  const lowRecallReport = runMarketBenchmark('GB', lowRecall);
+  ok('source text, not a supplied actual field, can close the recall gate',
+    lowRecallReport.blockers.includes('posted-recall') &&
+    lowRecallReport.failures.some((failure) => failure.reasons.includes('status')));
+  const refusedReviews = perfectReal.map((fixture, index) =>
+    fixture.expected.decision === 'review'
+      ? {
+          ...fixture,
+          source: `Card charged GBP 10.00 at SHOP. Available balance GBP 800.00 Ref refuse-${index}`,
+        }
+      : fixture);
+  const refusedReviewReport = runMarketBenchmark('GB', refusedReviews);
+  ok('legitimate alerts cannot pass rollout while the reviewer refuses them',
+    refusedReviewReport.blockers.includes('review-decision-recall') &&
+      refusedReviewReport.metrics.reviewDecisionRecall.ratio < 0.95,
+    JSON.stringify(refusedReviewReport.metrics.reviewDecisionRecall));
   const noFailed = perfectReal.map((fixture) => ({
     ...fixture,
-    expectedStatus: fixture.expectedStatus === 'failed' ? 'informational' : fixture.expectedStatus,
-    actualStatus: fixture.actualStatus === 'failed' ? 'informational' : fixture.actualStatus,
+    expected: fixture.expected.status === 'failed'
+      ? { ...fixture.expected, status: 'informational' }
+      : fixture.expected,
   }));
   ok('failed and declined held-out examples are mandatory',
-    evaluateMarketRollout('GB', noFailed, 0).blockers.includes('not-enough-failed-fixtures'));
-  perfectReal[0].forbiddenImport = true;
-  ok('one forbidden import closes the automatic gate',
-    evaluateMarketRollout('GB', perfectReal, 0).blockers.includes('forbidden-import'));
-  perfectReal[0].forbiddenImport = false;
-  ok('one UAE/Saudi regression closes every new-market gate',
-    evaluateMarketRollout('GB', perfectReal, 1).blockers.includes('uae-saudi-regression'));
+    runMarketBenchmark('GB', noFailed).blockers.includes('not-enough-failed-fixtures'));
+  const forbidden = perfectReal.map((fixture, index) => index === 40 ? {
+    ...fixture,
+    expected: { ...fixture.expected, decision: 'refuse' },
+  } : fixture);
+  const forbiddenReport = runMarketBenchmark('GB', forbidden);
+  ok('forbidden review decisions are derived from the inspector result',
+    forbiddenReport.blockers.includes('forbidden-import') &&
+    forbiddenReport.failures.some((failure) =>
+      failure.fixtureRef === 'case-41' && failure.reasons.includes('forbidden-import')));
+
+  const missedRecurring = perfectReal.map((fixture, index) =>
+    fixture.expected.family === 'recurring-payment'
+      ? {
+          ...fixture,
+          source: `Card purchase GBP 10.00 was debited at SHOP Ref miss-${index}`,
+        }
+      : fixture);
+  const missedRecurringReport = runMarketBenchmark('GB', missedRecurring);
+  ok('recurring alerts need recall as well as precision',
+    missedRecurringReport.blockers.includes('subscription-recall') &&
+      missedRecurringReport.blockers.includes('family-recall:recurring-payment'),
+    JSON.stringify({ blockers: missedRecurringReport.blockers,
+      recall: missedRecurringReport.metrics.subscriptionRecall }));
 
   const contaminated = perfectReal.map((fixture) => ({ ...fixture }));
   contaminated.push({
     ...contaminated[0], id: 'authoring-copy', split: 'authoring',
   });
   ok('a template cannot appear in both authoring and held-out benchmark splits',
-    evaluateMarketRollout('GB', contaminated, 0).blockers.includes('template-split-leakage'));
+    runMarketBenchmark('GB', contaminated).blockers.includes('template-split-leakage') &&
+      runMarketBenchmark('GB', contaminated).blockers.includes('source-split-leakage'));
+
+  const duplicated = [...perfectReal, { ...perfectReal[0] }];
+  const duplicateReport = runMarketBenchmark('GB', duplicated);
+  ok('duplicate ids and evidence cannot pad benchmark counts',
+    duplicateReport.blockers.includes('duplicate-fixture-id') &&
+      duplicateReport.blockers.includes('duplicate-fixture-source') &&
+      duplicateReport.heldOutRealFixtureCount === perfectReal.length);
 
   const badReal = perfectReal.map((fixture) => ({
-    ...fixture, actualStatus: 'unknown', actualMoneyExact: false, actualFamily: 'unknown',
+    ...fixture, source: `Private bank notice GBP 10.00 marker-never-echo-this ${fixture.id}`,
   }));
-  const syntheticPadding = Array.from({ length: 10_000 }, (_, index) => ({
+  const syntheticPadding = Array.from({ length: 200 }, (_, index) => ({
     ...perfectReal[0], id: `padding-${index}`, institution: 'synthetic',
     templateVersion: `synthetic-${index}`, split: 'authoring', provenance: 'synthetic',
-    actualStatus: 'posted',
   }));
+  const badReport = runMarketBenchmark('GB', [...badReal, ...syntheticPadding]);
   ok('synthetic fixtures cannot dilute failures in the held-out real benchmark',
-    evaluateMarketRollout('GB', [...badReal, ...syntheticPadding], 0).stage === 'review');
+    badReport.blockers.includes('posted-recall') && badReport.metrics.postedRecall.ratio === 0);
+  ok('auditable reports identify failed fixtures without echoing financial source text',
+    badReport.failures.length > 0 &&
+    !JSON.stringify(badReport).includes('marker-never-echo-this') &&
+    !JSON.stringify(badReport).includes('real-'));
 }
 
 console.log(`\nalert-market-packs: ${pass} passed, ${fail} failed`);

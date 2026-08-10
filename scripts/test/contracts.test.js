@@ -390,7 +390,7 @@ function ktSources(dir) {
     extra.revenueCatIosKey === '' || /^appl_[A-Za-z0-9]+$/.test(extra.revenueCatIosKey));
   ok('no secret RevenueCat key is committed',
     !/sk_[A-Za-z0-9]{10}/.test(read('app.json') + src + sdk));
-  const releaseCheck = read('scripts/check-release-config.mjs');
+  const releaseCheck = read('scripts/lib/release-readiness.mjs');
   ok('the release gate rejects prefix-only RevenueCat placeholders',
     /\^goog_\[A-Za-z0-9\]\+\$/.test(releaseCheck) &&
       /\^appl_\[A-Za-z0-9\]\+\$/.test(releaseCheck));
@@ -427,14 +427,16 @@ function ktSources(dir) {
 
   const storage = read('src/lib/state-storage.native.ts');
   const store = read('src/lib/store.tsx');
+  const persistence = read('src/lib/ledger-persistence.ts');
   ok('the database key is generated on-device and kept device-only',
     /getRandomBytesAsync\(32\)/.test(storage) &&
       /WHEN_UNLOCKED_THIS_DEVICE_ONLY/.test(storage));
   ok('SQLCipher receives its key before the ledger table is touched',
     storage.indexOf('PRAGMA key') < storage.indexOf('CREATE TABLE'));
   ok('the active store persists through the encrypted adapter',
-    /stateStorage\.multiSet/.test(store) &&
-      /stateStorage\.multiGet/.test(store) &&
+    /storage: stateStorage/.test(store) &&
+      /storage\.multiSet/.test(persistence) &&
+      /storage\.multiGet/.test(persistence) &&
       !/AsyncStorage\./.test(store));
   ok('plaintext legacy data is removed only after encrypted migration succeeds',
     storage.indexOf('await encryptedStorage.multiSet(present)') <
@@ -470,20 +472,24 @@ function ktSources(dir) {
 /* ── relay acknowledgement follows encrypted durability ─────────────── */
 {
   const store = read('src/lib/store.tsx');
-  const home = read('src/hooks/use-auto-import.ts');
-  const setup = read('src/app/ios-setup.tsx');
-  const homeDurableAt = home.indexOf('await receipt.durable');
-  const setupDurableAt = setup.indexOf('await durable');
+  const executor = read('src/lib/capture-executor.ts');
+  const routineDurableAt = executor.indexOf('await receipt.durable');
+  const setupSlice = executor.slice(
+    executor.indexOf('const executeSetupVerification'),
+    executor.indexOf("return {\n    execute:"),
+  );
+  const setupDurableAt = setupSlice.indexOf("await activeLedger.importBatch(plan.batch).durable");
   ok('an import exposes an encrypted-write durability promise',
     /interface ImportReceipt[\s\S]*durable: Promise<void>/.test(store) &&
       /const next = dispatch\(action\)/.test(store) &&
       /persist\(next\)/.test(store));
   ok('routine relay sync waits for SQLCipher before commit',
-    homeDurableAt > home.indexOf('importBatch(plan.batch)') &&
-      home.indexOf('await commit()', homeDurableAt) > homeDurableAt);
+    routineDurableAt > executor.indexOf('importBatch(collected.plan.batch)') &&
+      executor.indexOf('await collected.commit()', routineDurableAt) > routineDurableAt);
   ok('setup test waits for SQLCipher before acknowledging',
-    setupDurableAt > setup.indexOf('importBatch(plan.batch).durable') &&
-      setup.indexOf('await ackRelay(active, ids)', setupDurableAt) > setupDurableAt);
+    setupDurableAt >= 0 &&
+      setupSlice.indexOf('await dependencies.acknowledge(cfg, queued.ids)', setupDurableAt) >
+        setupDurableAt);
 }
 
 /* ── iOS relay wakes the app without carrying financial data ───────── */
@@ -493,6 +499,8 @@ function ktSources(dir) {
     (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-notifications',
   );
   const background = read('src/lib/background-relay.ts');
+  const executor = read('src/lib/capture-executor.ts');
+  const capture = read('src/lib/capture.ts');
   const relay = read('src/lib/relay.ts');
   const home = read('src/hooks/use-auto-import.ts');
   const onboarding = read('src/components/onboarding-gate.tsx');
@@ -513,21 +521,26 @@ function ktSources(dir) {
     !/requestNotificationPermission/.test(home) &&
       !/requestNotificationPermission/.test(onboarding));
   ok('headless sync writes SQLCipher before relay acknowledgement',
-    background.indexOf('await appendDurable(parsed)') <
-      background.indexOf('await ackRelay(cfg, acknowledge)'));
+    executor.indexOf('await background.stage(queued.parsed)') <
+      executor.indexOf(
+        'await dependencies.acknowledge(cfg, acknowledge)',
+        executor.indexOf('const executeBackground'),
+      ));
   ok('background sync reserves setup proof markers for the foreground verifier',
-    /const reserved = new Set\(testIds\)/.test(background) &&
-      /ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(background));
+    /const reserved = new Set\(queued\.testIds\)/.test(executor) &&
+      /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
   ok('only a parsed Shortcut headless delivery records automation proof',
-    background.indexOf('await appendDurable(parsed)') <
-      background.indexOf('await recordRelayAutomationProof()') &&
-      /parsed\.some\(\(row\) => row\.captureSource === 'shortcut'\)/.test(background));
+    executor.indexOf('await background.stage(queued.parsed)') <
+      executor.indexOf('await background.recordAutomationProof(cfg)') &&
+      /queued\.parsed\.some\(\(row\) => row\.captureSource === 'shortcut'\)/.test(executor));
   ok('email and PDF headless delivery cannot impersonate the Message automation',
-    /captureSource === 'shortcut'/.test(background) &&
-      !/captureSource === 'email'[^}]*recordRelayAutomationProof/s.test(background) &&
-      !/captureSource === 'pdf'[^}]*recordRelayAutomationProof/s.test(background));
+    /captureSource === 'shortcut'/.test(executor) &&
+      !/executeSupplemental[\s\S]*recordAutomationProof/.test(
+        executor.slice(executor.indexOf('const executeSupplemental'), executor.indexOf('const executeBackground')),
+      ));
   ok('a synthetic relay probe cannot make Home claim automation is active',
     /AUTOMATION_PROOF_KEY/.test(relay) &&
+      /getRelayAutomationProof\(cfg\?\.deviceId \?\? null\)/.test(home) &&
       /cfg\?\.setupState === 'verified' && automationProof/.test(home) &&
       /\? 'active'[\s\S]*\? 'pipe-ready'/.test(home));
   ok('locked background credentials use the sync-only bearer',
@@ -536,6 +549,10 @@ function ktSources(dir) {
   ok('the durable local inbox is cleared only by the UI import commit',
     /commit: async \(\) => \{[\s\S]*clearStagedRows\(staged\.snapshot\)/.test(
       read('src/lib/capture.ts')));
+  ok('erase intent survives restart and prevents staged rows re-entering the ledger',
+    /BACKGROUND_RELAY_ERASE_PENDING_KEY/.test(background) &&
+      /getItem\(BACKGROUND_RELAY_ERASE_PENDING_KEY\)/.test(capture) &&
+      /return \{ rows: \[\], snapshot: null \}/.test(capture));
 }
 
 /* ── a revoked device is told, not shown a status that is false ──────── */
@@ -567,7 +584,9 @@ function ktSources(dir) {
   // Both keychain items, or the headless wake goes on re-authenticating
   // against a device the relay has already deleted, on every push, forever.
   ok('a stamped credential reads as "no pairing" on both keychain surfaces',
-    (relay.match(/if \(revokedAt\(cfg\) !== null\) return null;/g) || []).length === 2);
+    /revokedAt\(cfg\) !== null && !includeRevoked/.test(relay) &&
+      /return decodeStoredRelayConfig\(raw\);/.test(relay) &&
+      /if \(revokedAt\(cfg\) !== null\) return null;/.test(relay));
   ok('the capture surface has a state for it, ahead of the automation proof',
     /\| 'revoked'/.test(hook) &&
       /revokedAt\s*\?\s*'revoked'/.test(hook) &&
@@ -599,23 +618,27 @@ function ktSources(dir) {
 // supplement-imports.tsx did not, and neither failed any test. This is the
 // assertion that stops the fourth collector from repeating it.
 {
-  const collectors = [
-    ['src/lib/background-relay.ts', 'the headless push wake'],
-    ['src/lib/capture.ts', 'the foreground Home and pull-to-refresh scan'],
-    ['src/components/supplement-imports.tsx', 'the PDF and forwarded-email sync'],
-  ];
-  for (const [file, what] of collectors) {
-    const src = read(file);
-    ok(`${what} reserves setup probe ids rather than acking them`,
-      /new Set\((?:queued\.)?testIds\)/.test(src) &&
-        /(?:queued\.)?ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(src) &&
-        /ackRelay\([^,)]+, acknowledge\)/.test(src) &&
-        !/ackRelay\([^,)]+, (?:queued\.)?ids\)/.test(src),
-      file);
-  }
-  const setup = read('src/app/ios-setup.tsx');
-  ok('the setup screen is still the one place that does acknowledge a probe',
-    /ackRelay\(active, ids\)/.test(setup) && /testReceived/.test(setup));
+  const executor = read('src/lib/capture-executor.ts');
+  const capture = read('src/lib/capture.ts');
+  const background = read('src/lib/background-relay.ts');
+  const supplemental = read('src/components/supplement-imports.tsx');
+  ok('non-setup executor intents reserve setup probe ids',
+    /new Set\(queued\.testIds\)/.test(executor) &&
+      /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
+  ok('the foreground collector still reserves setup probe ids internally',
+    /new Set\(testIds\)/.test(capture) &&
+      /ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(capture));
+  ok('background and supplemental adapters no longer receive queue ids',
+    !/\backRelay\b/.test(background) && !/\backRelay\b/.test(supplemental) &&
+      /execute\('background'\)/.test(background) && /execute\('supplemental'\)/.test(supplemental));
+  ok('supplemental connect cannot replace an unread existing Shortcut identity',
+    /useState\(true\)/.test(supplemental) &&
+      /if \(loadingConfig \|\| busy !== null\) return/.test(supplemental) &&
+      supplemental.indexOf('const existing = await getRelayConfig()') <
+        supplemental.indexOf('const connected = await pairDevice(DEFAULT_RELAY_URL)'));
+  const setupSlice = executor.slice(executor.indexOf('const executeSetupVerification'));
+  ok('the setup intent is still the one place that acknowledges probe ids',
+    /acknowledge\(cfg, queued\.ids\)/.test(setupSlice) && /testReceived/.test(setupSlice));
 }
 
 /* ── the staging queue is cleared by snapshot, never by key ──────────── */
@@ -659,9 +682,10 @@ function ktSources(dir) {
 /* iOS Message automation forwards sender identity. */
 {
   const setup = read('src/app/ios-setup.tsx');
+  const setupWorkflow = read('src/lib/ios-capture-setup.ts');
   const copy = read('src/lib/i18n.ts');
   const shortcutSpec = read('docs/ios-shortcut-spec.md');
-  const releaseCheck = read('scripts/check-release-config.mjs');
+  const releaseCheck = read('scripts/lib/release-readiness.mjs');
   const testflight = read('.github/workflows/ios-testflight.yml');
   const actionAt = setup.indexOf("t('iosAutomationAction')");
   const inputAt = setup.indexOf("t('iosAutomationInput')");
@@ -684,9 +708,9 @@ function ktSources(dir) {
     !/AppState\.addEventListener/.test(setup) &&
       /Shortcut is ready — clear code & continue/.test(copy));
   ok('clearing the copied setup credential does not trigger an iOS paste read prompt',
-    /sensitiveCopyPending/.test(setup) &&
-      /Clipboard\.setStringAsync\(''\)/.test(setup) &&
-      !/Clipboard\.getStringAsync/.test(setup));
+    /sensitiveCopyPending/.test(setupWorkflow) &&
+      /writeClipboard\(''\)/.test(setupWorkflow) &&
+      !/Clipboard\.getStringAsync/.test(setupWorkflow));
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /الإدخال: «الرسالة المستلمة»/.test(copy) &&
       /الاختصار جاهز — امسح الرمز وتابع/.test(copy) &&
@@ -694,8 +718,8 @@ function ktSources(dir) {
       /اسم مرسل البنك/.test(copy));
   ok('the next production build rejects the exact broken public Shortcut snapshot',
     /85bd1e080e5849b591049eccffb9a3a1/.test(releaseCheck) &&
-      /retired file-path\/sender-blind Shortcut/.test(releaseCheck) &&
-      /brokenCaptureShortcut/.test(testflight));
+      /broken-capture-shortcut/.test(releaseCheck) &&
+      /scripts\/check-release-config\.mjs/.test(testflight));
   ok('the replacement Shortcut contract prohibits file-backed configuration',
     /no Get File, Save File, Move File or Folder/.test(shortcutSpec) &&
       /setup import question/.test(shortcutSpec));
@@ -832,8 +856,27 @@ function ktSources(dir) {
   ok('the staged relay inbox is a different database from the ledger',
     !!nameOf(staged) && nameOf(staged) !== nameOf(ledger));
   ok('erasing empties the staged relay inbox too',
-    /clearBackgroundRelayRows/.test(settings) &&
-      settings.indexOf('await clearAll()') < settings.indexOf('clearBackgroundRelayRows()'));
+    /await clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(settings));
+}
+
+{
+  const settings = read('src/app/settings.tsx');
+  const recovery = code(read('src/components/storage-recovery.tsx'));
+  const store = read('src/lib/store.tsx');
+  const copy = read('src/lib/i18n.ts');
+  ok('every erase keeps capture cleanup inside the blocked ledger transaction',
+    /await clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(settings) &&
+      /cfg = await getRelayConfigStrict\(\)/.test(settings) &&
+      /eraseLocalInitializeFailedTitle/.test(settings) &&
+      /recoveryState === 'erased-initialize'/.test(recovery) &&
+      /storageRecoveryInitializeBody/.test(recovery) &&
+      /!erased/.test(recovery) &&
+      /Your data was erased/.test(copy) &&
+      /isRelayPlatform\(\) \? await getRelayConfigStrict\(\) : null/.test(recovery) &&
+      /if \(relay\) await unpairDevice\(relay\)/.test(recovery) &&
+      /clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(recovery) &&
+      store.indexOf('await afterErase()') <
+        store.lastIndexOf("dispatch({ type: 'hydrate', state: persistedBlank })"));
 }
 
 /* ── the budget editor answers the same question as the budget bar ──── */
@@ -1584,7 +1627,8 @@ ok('the spoken label agrees with the sign on screen',
   const metadataConsumers = shipping
     .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`) &&
       !file.endsWith(`${path.sep}currency-metadata.ts`) &&
-      !file.endsWith(`${path.sep}alert-market-pack-types.ts`))
+      !file.endsWith(`${path.sep}alert-market-pack-types.ts`) &&
+      !file.endsWith(`${path.sep}alert-rollout.ts`))
     .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*currency-metadata['"]/.test(
       fs.readFileSync(file, 'utf8'),
     ));

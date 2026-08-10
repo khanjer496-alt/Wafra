@@ -10,22 +10,23 @@
  * buildImportPlan() — same deduplication, same card mapping, same transfer
  * detection, same rescan healing.
  *
- * The one thing callers must honour is `commit()`. Android has nothing to
+ * The one thing the durable capture executor must honour is `commit()`.
+ * Android has nothing to
  * commit — the inbox is still the inbox. On iOS the relay keeps a queue row
  * until the phone says it has it, so `commit()` is what stops the same
- * transaction arriving forever. Call it only once the batch is persisted; a
+ * transaction arriving forever. It calls this only once the batch is persisted; a
  * crash before that costs a duplicate sync, not a lost transaction.
  */
 import {
-  buildImportPlan,
   isSmsScanningAvailable,
   scanInbox,
   type DeclinedSms,
-  type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
-import { readBackgroundRelayRows } from '@/lib/background-relay';
-import { backgroundRelayStorage } from '@/lib/background-relay-storage';
+import {
+  BACKGROUND_RELAY_ERASE_PENDING_KEY,
+  backgroundRelayStorage,
+} from '@/lib/background-relay-storage';
 import {
   ackRelay,
   getRelayConfig,
@@ -82,7 +83,31 @@ interface StagedRows {
   snapshot: string | null;
 }
 
+function parseStagedRows(raw: string | null): ScannedSms[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (row): row is ScannedSms =>
+        !!row &&
+        typeof row === 'object' &&
+        typeof (row as Partial<ScannedSms>).merchant === 'string' &&
+        Number.isSafeInteger((row as Partial<ScannedSms>).amountFils),
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function readBackgroundRelayRows(): Promise<ScannedSms[]> {
+  return parseStagedRows(await backgroundRelayStorage.getItem(STAGED_ROWS_KEY));
+}
+
 async function readStagedRows(): Promise<StagedRows> {
+  if (await backgroundRelayStorage.getItem(BACKGROUND_RELAY_ERASE_PENDING_KEY)) {
+    return { rows: [], snapshot: null };
+  }
   // The snapshot is taken BEFORE the rows, never after. A push wake landing
   // between the two reads leaves `rows` a superset of `snapshot`, so the
   // compare-and-swap in the commit refuses and the queue survives to be
@@ -228,25 +253,6 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
   }
 
   return EMPTY;
-}
-
-export interface CapturePlan {
-  plan: ImportPlan;
-  source: CaptureSource;
-  commit: () => Promise<void>;
-  needsSetup: boolean;
-}
-
-/** collectNewMessages() + buildImportPlan(), which is all any caller wants. */
-export async function planNewMessages(state: AppState): Promise<CapturePlan> {
-  const { parsed, declined, newestTs, source, commit, needsSetup } =
-    await collectNewMessages(state);
-  return {
-    plan: buildImportPlan(parsed, state, newestTs, new Date(), declined),
-    source,
-    commit,
-    needsSetup,
-  };
 }
 
 /** True when this build can capture at all, configured or not. */

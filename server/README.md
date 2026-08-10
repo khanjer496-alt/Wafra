@@ -90,6 +90,12 @@ number has to agree in three places: `schema.sql`, the `DELETE FROM queue`
 in `src/index.ts`, and this paragraph. A device silent for a year with an empty
 queue is deleted outright.
 
+Destructive admin routes keep a 30-day idempotency receipt containing only the
+SHA-256 admin-token digest and exact route. This closes the failure window where
+the relay returns `204` but iOS cannot immediately clear Keychain: the same
+request can prove the completed deletion again without restoring the device,
+queue, or Shortcut authority. The cron deletes expired receipts.
+
 Note what those 30 days are *of*: rows nobody can read, including us. Services
 that keep full message bodies for a month can re-run a fixed parser over stored
 messages and repair a user's history retroactively, which we cannot — that is

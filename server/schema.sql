@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS device_invites (
   created_at INTEGER NOT NULL
 );
 
+-- An authenticated deletion can succeed remotely and then lose the phone
+-- before Keychain cleanup finishes. Keep only the admin-token digest and the
+-- exact destructive route long enough for that same request to retry as 204.
+-- This is not a bearer credential and contains no device or message data.
+CREATE TABLE IF NOT EXISTS admin_deletion_receipts (
+  token_hash TEXT NOT NULL,
+  route      TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (token_hash, route)
+);
+
 CREATE TABLE IF NOT EXISTS queue (
   id         TEXT PRIMARY KEY,
   device_id  TEXT NOT NULL,
@@ -180,6 +191,7 @@ CREATE INDEX IF NOT EXISTS devices_by_admin_token ON devices (admin_token_hash);
 CREATE INDEX IF NOT EXISTS devices_by_email_token ON devices (email_token_hash);
 CREATE INDEX IF NOT EXISTS devices_by_vault ON devices (vault_id);
 CREATE INDEX IF NOT EXISTS invites_by_expiry ON device_invites (expires_at);
+CREATE INDEX IF NOT EXISTS admin_deletion_receipts_by_expiry ON admin_deletion_receipts (expires_at);
 CREATE INDEX IF NOT EXISTS push_by_expiry ON push_registrations (expires_at);
 CREATE INDEX IF NOT EXISTS receipts_by_expiry ON ingest_receipts (expires_at);
 CREATE INDEX IF NOT EXISTS feedback_by_expiry ON feedback (expires_at);

@@ -210,10 +210,14 @@ async function authenticate(
   env: Env,
   scope: 'ingest' | 'email' | 'sync' | 'admin',
 ): Promise<Device | null> {
-  const header = req.headers.get('authorization') ?? '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const token = bearerToken(req);
   if (!token) return null;
   return authenticateSecret(token, env, scope);
+}
+
+function bearerToken(req: Request): string {
+  const header = req.headers.get('authorization') ?? '';
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
 
 async function authenticateSecret(
@@ -260,6 +264,53 @@ async function authenticateSecret(
     market: validMarket(row.market) ?? DEFAULT_MARKET,
     requestSecret: token,
   };
+}
+
+const ADMIN_DELETION_RECEIPT_TTL_SECONDS = 2_592_000;
+
+async function authorizeAdminDeletion(
+  req: Request,
+  env: Env,
+  route: string,
+): Promise<{ device: Device | null; tokenHash: string | null; replay: boolean }> {
+  const token = bearerToken(req);
+  if (!token) return { device: null, tokenHash: null, replay: false };
+  const tokenHash = await hashToken(token);
+  const receipt = await env.DB.prepare(
+    `SELECT token_hash FROM admin_deletion_receipts
+      WHERE token_hash = ?1 AND route = ?2 AND expires_at > unixepoch()`,
+  )
+    .bind(tokenHash, route)
+    .first<{ token_hash: string }>();
+  if (receipt && timingSafeEqual(receipt.token_hash, tokenHash)) {
+    return { device: null, tokenHash, replay: true };
+  }
+  return {
+    device: await authenticateSecret(token, env, 'admin'),
+    tokenHash,
+    replay: false,
+  };
+}
+
+function recordAdminDeletion(
+  env: Env,
+  tokenHash: string,
+  route: string,
+): D1PreparedStatement {
+  return env.DB.prepare(
+    `INSERT INTO admin_deletion_receipts (token_hash, route, expires_at)
+     VALUES (?1, ?2, unixepoch() + ?3)
+     ON CONFLICT(token_hash, route) DO UPDATE SET expires_at = excluded.expires_at`,
+  ).bind(tokenHash, route, ADMIN_DELETION_RECEIPT_TTL_SECONDS);
+}
+
+function recordVaultDeviceDeletions(env: Env, vaultId: string): D1PreparedStatement {
+  return env.DB.prepare(
+    `INSERT INTO admin_deletion_receipts (token_hash, route, expires_at)
+     SELECT admin_token_hash, '/v1/device', unixepoch() + ?1
+       FROM devices WHERE vault_id = ?2
+     ON CONFLICT(token_hash, route) DO UPDATE SET expires_at = excluded.expires_at`,
+  ).bind(ADMIN_DELETION_RECEIPT_TTL_SECONDS, vaultId);
 }
 
 /** A global fixed window prevents unbounded identity creation in the Worker. */
@@ -924,15 +975,17 @@ export default {
     }
 
     if (deviceRoute && req.method === 'DELETE') {
-      const device = await authenticate(req, env, 'admin');
-      if (!device) return json({ error: 'unauthorized' }, 401);
+      const authorization = await authorizeAdminDeletion(req, env, url.pathname);
+      if (authorization.replay) return empty(204);
+      const { device, tokenHash } = authorization;
+      if (!device || !tokenHash) return json({ error: 'unauthorized' }, 401);
       const targetId = deviceRoute[1];
       if (!UUID_RE.test(targetId)) return json({ error: 'bad_device_id' }, 400);
       const target = await env.DB.prepare(
-        'SELECT id, role FROM devices WHERE id = ?1 AND vault_id = ?2',
+        'SELECT id, role, admin_token_hash FROM devices WHERE id = ?1 AND vault_id = ?2',
       )
         .bind(targetId, device.vault_id)
-        .first<{ id: string; role: 'owner' | 'member' }>();
+        .first<{ id: string; role: 'owner' | 'member'; admin_token_hash: string }>();
       if (!target) return json({ error: 'device_not_found' }, 404);
       if (device.role !== 'owner' && target.id !== device.id) {
         return json({ error: 'owner_required' }, 403);
@@ -946,6 +999,8 @@ export default {
         if ((owners?.n ?? 0) <= 1) return json({ error: 'last_owner' }, 409);
       }
       await env.DB.batch([
+        recordAdminDeletion(env, tokenHash, url.pathname),
+        recordAdminDeletion(env, target.admin_token_hash, '/v1/device'),
         env.DB.prepare('DELETE FROM push_registrations WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(target.id),
@@ -956,10 +1011,14 @@ export default {
     }
 
     if (req.method === 'DELETE' && url.pathname === '/v1/vault') {
-      const device = await authenticate(req, env, 'admin');
-      if (!device) return json({ error: 'unauthorized' }, 401);
+      const authorization = await authorizeAdminDeletion(req, env, url.pathname);
+      if (authorization.replay) return empty(204);
+      const { device, tokenHash } = authorization;
+      if (!device || !tokenHash) return json({ error: 'unauthorized' }, 401);
       if (device.role !== 'owner') return json({ error: 'owner_required' }, 403);
       await env.DB.batch([
+        recordAdminDeletion(env, tokenHash, url.pathname),
+        recordVaultDeviceDeletions(env, device.vault_id),
         env.DB.prepare(
           'DELETE FROM push_registrations WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
         ).bind(device.vault_id),
@@ -1412,8 +1471,10 @@ export default {
 
     // ── Unpair: the user's delete button ──
     if (req.method === 'DELETE' && url.pathname === '/v1/device') {
-      const device = await authenticate(req, env, 'admin');
-      if (!device) return json({ error: 'unauthorized' }, 401);
+      const authorization = await authorizeAdminDeletion(req, env, url.pathname);
+      if (authorization.replay) return empty(204);
+      const { device, tokenHash } = authorization;
+      if (!device || !tokenHash) return json({ error: 'unauthorized' }, 401);
       if (device.role === 'owner') {
         const others = await env.DB.prepare(
           'SELECT COUNT(*) AS n FROM devices WHERE vault_id = ?1 AND id <> ?2',
@@ -1423,6 +1484,7 @@ export default {
         if ((others?.n ?? 0) > 0) return json({ error: 'last_owner' }, 409);
       }
       await env.DB.batch([
+        recordAdminDeletion(env, tokenHash, url.pathname),
         env.DB.prepare('DELETE FROM push_registrations WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(device.id),
@@ -1740,6 +1802,9 @@ export default {
     await env.DB.prepare('DELETE FROM feedback WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM push_registrations WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM device_invites WHERE expires_at <= unixepoch()').run();
+    await env.DB.prepare(
+      'DELETE FROM admin_deletion_receipts WHERE expires_at <= unixepoch()',
+    ).run();
     await env.DB.prepare(
       'DELETE FROM ingest_receipts WHERE expires_at <= unixepoch()',
     ).run();

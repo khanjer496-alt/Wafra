@@ -86,6 +86,10 @@ const gateSource = fs.readFileSync(
   'utf8',
 );
 const iosSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
+const iosControllerSource = fs.readFileSync(
+  path.join(__dirname, '../../src/lib/ios-capture-setup.ts'),
+  'utf8',
+);
 
 ok(
   'questionnaire plan is wired to persistent store actions',
@@ -211,11 +215,12 @@ const emptyLedger = {
  * product rests on, in an app that ships in Arabic. */
 {
   ok('iOS setup never renders a relay exception message',
-    !/\b(?:e|err|error)\.message\b/.test(iosSource));
+    !/\b(?:e|err|error)\.message\b/.test(iosSource) &&
+      !/\b(?:e|err|error)\.message\b/.test(iosControllerSource));
   ok('it maps the relay error to translated copy instead',
-    /error instanceof RelayError/.test(iosSource) &&
-      /case 'rate_limited':/.test(iosSource) &&
-      /error\.retryable/.test(iosSource));
+    /error instanceof RelayError/.test(iosControllerSource) &&
+      /error\.code === 'rate_limited'/.test(iosControllerSource) &&
+      /case 'connect-rate-limited':/.test(iosSource));
   ok('and the failure block has room for what to do next',
     /errorDetail && \(/.test(iosSource));
 }

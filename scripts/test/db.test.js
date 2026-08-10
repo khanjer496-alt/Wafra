@@ -370,6 +370,10 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/ledger': { internalTransferIds: () => new Set() },
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
     '@/lib/dedupe': dedupe,
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     // The REAL predicate, not a stub. It is what decides which rows a merchant
@@ -387,10 +391,11 @@ function loadHydrationExports(realModules = {}) {
 }
 
 const hydration = loadHydrationExports();
+const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.ts'));
 
 ok('a failed hydration latches writes off',
-  /storageBlocked\.current = true/.test(store) &&
-    /if \(storageBlocked\.current\) return Promise\.resolve\(false\)/.test(store),
+  /mode = 'blocked'/.test(ledgerPersistenceSource) &&
+    /if \(mode !== 'ready'\) return Promise\.resolve\(false\)/.test(ledgerPersistenceSource),
   'the state presented after a failed read was not read from disk. Saving it 700ms later is ' +
     'how an unreadable ledger becomes a destroyed one');
 
@@ -489,8 +494,8 @@ if (!gateSrc || !recoverySrc) {
   const confirmBranchAt = recovery.indexOf('if (confirmingErase)');
   ok('erase is behind a separate destructive confirmation',
     !!eraseBody &&
-      /clearAll\(\)/.test(eraseBody) &&
-      (recovery.match(/clearAll\(\)/g) ?? []).length === 1 &&
+      /clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(eraseBody) &&
+      (recovery.match(/clearAll\(/g) ?? []).length === 1 &&
       confirmBranchAt !== -1 &&
       confirmBranchAt < recovery.indexOf('onErase()') &&
       /storageRecoveryEraseCta[\s\S]{0,300}?setConfirmingErase\(true\)/.test(recovery) &&
@@ -521,8 +526,8 @@ ok('hydration clears the latch only AFTER a successful read',
   !!hydrateBody &&
     inOrder(
       hydrateBody,
-      'await loadPersisted()',
-      'storageBlocked.current = false',
+      'await persistence.load()',
+      'setHydrationFailed(false)',
       "dispatch({ type: 'hydrate'",
     ),
   'clearing it on the way in would reopen writes for the duration of a retry that is about ' +
@@ -531,7 +536,7 @@ ok('hydration clears the latch only AFTER a successful read',
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
     /let next: [^=]*= \{ onboarded: false \}/.test(hydrateBody) &&
-    (hydrateBody.match(/storageBlocked\.current = false/g) ?? []).length === 1,
+    (hydrateBody.match(/setHydrationFailed\(false\)/g) ?? []).length === 1,
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +
     'branch that leaves a genuinely new install latched off forever');
@@ -543,9 +548,8 @@ ok('the store exposes a retry that reruns hydration',
 
 ok('retry does not unlatch or clear the failure on its own',
   !!retryBody &&
-    !/storageBlocked\.current = false/.test(retryBody) &&
-    !/setStorageFailure\(null\)/.test(retryBody) &&
-    !/setHydrationFailed\(false\)/.test(retryBody),
+    retryBody.indexOf('await persistence.reset') < retryBody.indexOf('setStorageFailure(null)') &&
+    retryBody.indexOf('await persistence.reset') < retryBody.indexOf('setHydrationFailed(false)'),
   'clearing either one before the read resolves takes the recovery screen down and flickers ' +
     'onboarding into view mid-retry — with writes reopened while the outcome is unknown');
 
@@ -890,331 +894,400 @@ ok('account-only ledgers pin their accounting currency',
   'an opening balance, bank snapshot, or card limit must not be relabelled from AED to SAR');
 
 const clearAllBody = bodyOf(store, 'const clearAll = useCallback');
-ok('a successful erase clears the latch BEFORE writing the blank store',
+ok('StoreProvider starts reset before it exposes the blank state',
   !!clearAllBody &&
     inOrder(
       clearAllBody,
-      'await destroyOperation',
-      'storageBlocked.current = false',
-      'await persist(',
-    ),
-  'this is the bug: destroy really did erase everything, then persist() returned false ' +
-    'because the latch was still set, and clearAll threw "Blank encrypted store could not be ' +
-    'created". The user was left with no ledger AND an error saying the erase failed');
-
-ok('the erase latches writes off BEFORE it dispatches the blank state',
-  !!clearAllBody &&
-    inOrder(
-      clearAllBody,
-      'storageBlocked.current = true',
+      'hydrationRun.current += 1',
+      'const resetOperation = persistence.reset(() => ({',
       "dispatch({ type: 'clearAll' })",
-      'await destroyOperation',
-      'storageBlocked.current = false',
-      'await persist(',
+      'await resetOperation',
     ),
-  'the dispatch makes the authoritative ref blank and arms a fresh 700ms save of it. Latching ' +
-    'after the dispatch — or not at all — leaves that timer free to write blank over a ledger ' +
-    'whose erase then failed');
+  'reset closes the module latch synchronously; dispatching first recreates the erase race');
 
-ok('a failed erase leaves writes latched OFF',
+ok('StoreProvider restores visible state only when erase itself failed',
   !!clearAllBody &&
-    clearAllBody.indexOf('await destroyOperation') <
-      clearAllBody.indexOf('storageBlocked.current = false') &&
-    (clearAllBody.match(/storageBlocked\.current = false/g) ?? []).length === 1,
-  'destroyOperation throws on failure, so the single unlatch must sit after the await — the ' +
-    'ledger we failed to erase is still on disk, and the only state this session has left to ' +
-    'offer it is blank');
+    /resetError\?\.stage === 'initialize'/.test(clearAllBody) &&
+    clearAllBody.indexOf("resetError?.stage === 'initialize'") <
+      clearAllBody.indexOf("dispatch({ type: 'restore', state: previousState })") &&
+    /recordStorageFailure\('destroy', original\)/.test(clearAllBody) &&
+    /setHydrationFailed\(true\)/.test(clearAllBody),
+  'an initialize failure follows a successful cryptographic erase, so restoring old data would lie');
 
-ok('a failed blank write is still reported',
-  !!clearAllBody && /if \(!written\) throw/.test(clearAllBody),
-  '"erase and start over" that silently failed to create the new store would leave the app ' +
-    'writing nowhere for the rest of the session');
+const initializeFailureBody = clearAllBody?.slice(
+  clearAllBody.indexOf("if (resetError?.stage === 'initialize')"),
+  clearAllBody.indexOf("dispatch({ type: 'restore', state: previousState })"),
+);
+ok('post-erase initialization failure blocks the app and preserves its stage for truthful recovery',
+  !!initializeFailureBody &&
+    /setHydrationFailed\(true\)/.test(initializeFailureBody) &&
+    /setStorageRecoveryState\(cleanupError \? 'erased-cleanup' : 'erased-initialize'\)/.test(initializeFailureBody) &&
+    /throw new ClearAllError\(cleanupError \? 'cleanup' : 'initialize'/.test(initializeFailureBody) &&
+    !/dispatch\(\{ type: 'restore'/.test(initializeFailureBody),
+  'after cryptographic erase, ordinary editing must stay unavailable until storage reopens');
 
-ok('the pre-erase state is captured before the blank dispatch',
-  !!clearAllBody &&
-    inOrder(
-      clearAllBody,
-      'const previousState = authoritativeState.current',
-      "dispatch({ type: 'clearAll' })",
-    ),
-  '`authoritativeState.current` becomes blank the instant the dispatch runs — capturing it ' +
-    'after that point would capture blank, and there would be nothing left to restore on failure');
+function loadLedgerPersistenceExports() {
+  const ts = require('typescript');
+  const filename = path.join(ROOT, 'src/lib/ledger-persistence.ts');
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: filename,
+  }).outputText;
+  const loaded = { exports: {} };
+  Function('require', 'module', 'exports', '__filename', '__dirname', output)(
+    (id) => { throw new Error(`unexpected ledger-persistence dependency ${id}`); },
+    loaded,
+    loaded.exports,
+    filename,
+    path.dirname(filename),
+  );
+  return loaded.exports;
+}
 
-const catchStart = clearAllBody.indexOf('catch (error) {');
-const catchEnd = clearAllBody.indexOf('throw error;', catchStart);
-const catchBlock =
-  catchStart !== -1 && catchEnd !== -1 ? clearAllBody.slice(catchStart, catchEnd) : '';
+function memoryStorage(initial = {}) {
+  const data = new Map(Object.entries(initial));
+  const calls = [];
+  const control = {
+    readError: null,
+    failSetCount: 0,
+    destroyError: null,
+    destroyGate: null,
+    setGate: null,
+  };
+  const adapter = {
+    async getItem(key) {
+      calls.push({ op: 'get', key });
+      if (control.readError) throw control.readError;
+      return data.get(key) ?? null;
+    },
+    async multiGet(keys) {
+      calls.push({ op: 'multiGet', keys: [...keys] });
+      if (control.readError) throw control.readError;
+      return keys.map((key) => [key, data.get(key) ?? null]);
+    },
+    async multiSet(entries) {
+      const copied = entries.map(([key, value]) => [key, value]);
+      calls.push({ op: 'set', entries: copied });
+      const gate = control.setGate;
+      control.setGate = null;
+      if (gate) await gate;
+      if (control.failSetCount > 0) {
+        control.failSetCount -= 1;
+        throw new Error('injected write failure');
+      }
+      for (const [key, value] of entries) data.set(key, value);
+    },
+    async multiRemove(keys) {
+      calls.push({ op: 'remove', keys: [...keys] });
+      for (const key of keys) data.delete(key);
+    },
+    async destroy(prefix) {
+      calls.push({ op: 'destroy', prefix });
+      if (control.destroyError) throw control.destroyError;
+      if (control.destroyGate) await control.destroyGate;
+      for (const key of [...data.keys()]) {
+        if (key === prefix || key.startsWith(`${prefix}:`)) data.delete(key);
+      }
+    },
+  };
+  return { adapter, calls, control, data };
+}
 
-ok('a failed erase restores the previous state, surfaces recovery, and rethrows in that order',
-  catchBlock !== '' &&
-    inOrder(
-      catchBlock,
-      "dispatch({ type: 'restore', state: previousState })",
-      "setStorageFailure(recordStorageFailure('destroy', error))",
-      'setHydrationFailed(true)',
-    ) &&
-    catchEnd > catchStart,
-  'each step matters on its own: no restore leaves the UI showing blank over a ledger that is ' +
-    'still there; no storageFailure/hydrationFailed leaves the recovery screen down and the ' +
-    'user editing over data that can never be saved; and the throw has to survive all of it so ' +
-    'Settings still reports the failure');
-
-ok('the catch block never reopens writes',
-  catchBlock !== '' && !catchBlock.includes('storageBlocked.current = false'),
-  'destroy can fail with the key or the database file only partially removed — reopening writes ' +
-    'there is the exact bug the latch exists to prevent, so failure must not be the path that ' +
-    'clears it');
-
-// ---------------------------------------------------------------------------
-// 2c. The erase-failure race — RUN, not read.
-//
-// The assertions above pin the shape of clearAll. This section pins its
-// behaviour, because the failure it guards against is an interleaving and a
-// source-order check can be satisfied by code that still loses the ledger.
-//
-// The interleaving, which is reachable today:
-//
-//   dispatch({type:'clearAll'})  the reducer runs synchronously, so the
-//                               authoritative ref is blank the instant it
-//                               returns, and the re-render arms a 700ms save
-//                               that reads that ref AT FIRE TIME
-//   destroy() rejects           `state-storage.native.ts` throws with the key
-//                               AND the database file both retained — the two
-//                               failures are coupled, since expo-sqlite will
-//                               not delete an open database and SecureStore
-//                               cannot delete a key while the Keystore is
-//                               locked. The old ledger is still readable.
-//   writeQueue recovers         the shared queue is deliberately
-//                               non-rejecting, so it resolves anyway
-//   timer fires                 persist(blank) chains onto that queue and
-//                               commits over the surviving ledger, while
-//                               Settings tells the user the erase failed
-//
-// So the real body of clearAll is lifted out of store.tsx and run against
-// doubles, through exactly that sequence. On the old ordering (no latch, or a
-// latch set after the dispatch) the blank write lands and these fail.
-// ---------------------------------------------------------------------------
+const ledgerModule = loadLedgerPersistenceExports();
+const LEDGER_KEY = 'wafra/state/v1';
+const testChunkTransactions = (transactions) => {
+  const chunks = [];
+  for (let end = transactions.length; end > 0; end -= 2) {
+    chunks.push(JSON.stringify(transactions.slice(Math.max(0, end - 2), end)));
+  }
+  return chunks;
+};
+const createPersistence = (memory, migrateLegacyState = async () => false) =>
+  ledgerModule.createLedgerPersistence({
+    prefix: LEDGER_KEY,
+    chunkSize: 2,
+    currentChunkOrder: 'oldest-first',
+    chunkTransactions: testChunkTransactions,
+    storage: memory.adapter,
+    migrateLegacyState,
+  });
+const snapshot = (name, transactions = []) => ({
+  hydrated: true,
+  onboarded: true,
+  userName: name,
+  transactions,
+});
 
 const asyncSuites = [];
+asyncSuites.push((async () => {
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    memory.control.readError = new Error('injected read failure');
+    let loadFailed = false;
+    try { await persistence.load(); } catch { loadFailed = true; }
+    const setsBefore = memory.calls.filter((call) => call.op === 'set').length;
+    const blocked = await persistence.save(snapshot('must-not-write'));
+    ok('a failed load blocks every save without touching storage',
+      loadFailed && blocked === false &&
+        memory.calls.filter((call) => call.op === 'set').length === setsBefore);
 
-/** The real `clearAll` body, compiled with its dependencies as parameters. */
-function compileClearAll() {
-  if (!clearAllBody) return null;
-  try {
-    return new Function(
-      'saveTimer',
-      'dispatch',
-      'writeQueue',
-      'stateStorage',
-      'STORAGE_KEY',
-      'persist',
-      'storageBlocked',
-      'prevChunkCount',
-      'prevChunks',
-      'prevTransactions',
-      'setHydrationFailed',
-      'setStorageFailure',
-      'authoritativeState',
-      'recordStorageFailure',
-      `return (async () => {${clearAllBody}})();`,
-    );
-  } catch {
-    return null;
+    memory.control.readError = null;
+    const empty = await persistence.load();
+    const reopened = await persistence.save(snapshot('recovered'));
+    ok('a successful retry distinguishes empty storage and reopens writes',
+      empty === null && reopened === true &&
+        JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'recovered');
   }
-}
 
-/**
- * @param destroyFails  the erase throws with key and database both retained
- * @param latchedBefore true when hydration already failed — erase from the
- *                      recovery screen rather than from Settings
- */
-async function runErase({ destroyFails, latchedBefore }) {
-  const clearAll = compileClearAll();
-  if (!clearAll) return null;
-
-  const calls = [];
-  const dispatched = [];
-  const OLD = [{ id: 'tx-1', amount: 100 }];
-  const PREVIOUS_STATE = { hydrated: true, onboarded: true, transactions: OLD };
-  const storageBlocked = { current: latchedBefore };
-  const authoritativeState = {
-    current: PREVIOUS_STATE,
-  };
-  const saveTimer = { current: null };
-  const prevChunkCount = { current: 1 };
-  const prevChunks = { current: ['[]'] };
-  const prevTransactions = { current: OLD };
-  const writeQueue = { current: Promise.resolve() };
-  const armed = [];
-
-  const stateStorage = {
-    destroy: async () => {
-      calls.push('destroy');
-      if (destroyFails) throw new Error('key retained and database retained');
-    },
-    multiSet: async () => {
-      calls.push('multiSet');
-    },
-  };
-
-  // persist(), reduced to the two properties this contract is about: it
-  // refuses while the latch is closed, and otherwise it chains a real device
-  // write onto the same shared queue the erase uses.
-  const persist = (snapshot) => {
-    if (storageBlocked.current) {
-      calls.push('refused');
-      return Promise.resolve(false);
-    }
-    const op = writeQueue.current.then(() => stateStorage.multiSet(snapshot)).then(() => true);
-    writeQueue.current = op.then(
-      () => undefined,
-      () => undefined,
-    );
-    return op;
-  };
-
-  // Every dispatch re-renders in the real app, which is what arms the 700ms
-  // save — modelled here as a macrotask so it lands after every microtask
-  // clearAll is made of, whichever action armed it.
-  const dispatch = (action) => {
-    dispatched.push(action);
-    if (action.type === 'restore') {
-      authoritativeState.current = action.state;
-    } else {
-      authoritativeState.current = { hydrated: true, onboarded: false, transactions: [] };
-    }
-    armed.push(setTimeout(() => void persist(authoritativeState.current), 0));
-  };
-
-  let hydrationFailed = false;
-  let storageFailureRecorded = null;
-  const setHydrationFailed = (value) => {
-    hydrationFailed = value;
-  };
-  const setStorageFailure = (value) => {
-    storageFailureRecorded = value;
-  };
-  // The real function's shape, reduced to what these assertions need: a
-  // non-null record carrying the operation and the error that caused it.
-  const recordStorageFailure = (op, error) => ({ op, message: error && error.message });
-
-  let threw = false;
-  try {
-    await clearAll(
-      saveTimer,
-      dispatch,
-      writeQueue,
-      stateStorage,
-      'wafra:state:v1',
-      persist,
-      storageBlocked,
-      prevChunkCount,
-      prevChunks,
-      prevTransactions,
-      setHydrationFailed,
-      setStorageFailure,
-      authoritativeState,
-      recordStorageFailure,
-    );
-  } catch {
-    threw = true;
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    persistence.block();
+    ok('an explicit recovery block synchronously refuses every later save',
+      await persistence.save(snapshot('must-not-write')) === false &&
+        !memory.data.has(LEDGER_KEY));
   }
-  await new Promise((resolve) => setTimeout(resolve, 5));
-  armed.forEach(clearTimeout);
-  return {
-    calls,
-    threw,
-    blocked: storageBlocked.current,
-    dispatched,
-    hydrationFailed,
-    storageFailureRecorded,
-    finalState: authoritativeState.current,
-  };
-}
 
-asyncSuites.push(
-  (async () => {
-    const compiled = !!compileClearAll();
-    ok('the erase body can be run against doubles',
-      compiled,
-      'clearAll could not be lifted out of store.tsx — the behavioural assertions below did ' +
-        'not run, so treat them as failed rather than passed');
-    if (!compiled) return;
+  {
+    const memory = memoryStorage();
+    let releaseFirst;
+    let releaseSecond;
+    const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+    const secondGate = new Promise((resolve) => { releaseSecond = resolve; });
+    let reads = 0;
+    memory.adapter.getItem = async () => {
+      reads += 1;
+      if (reads === 1) {
+        await firstGate;
+        return null;
+      }
+      await secondGate;
+      throw new Error('newer load failed');
+    };
+    const persistence = createPersistence(memory);
+    const firstLoad = persistence.load();
+    const secondLoad = persistence.load();
+    releaseFirst();
+    await firstLoad;
+    const unsafeSave = persistence.save(snapshot('unsafe'));
+    releaseSecond();
+    try { await secondLoad; } catch {}
+    ok('an older successful load cannot admit a save ahead of a newer failing load',
+      await unsafeSave === false &&
+        memory.calls.filter((call) => call.op === 'set').length === 0);
+  }
 
-    const failedFromSettings = await runErase({ destroyFails: true, latchedBefore: false });
-    ok('a failed erase never writes the blank state to storage',
-      failedFromSettings.threw && !failedFromSettings.calls.includes('multiSet'),
-      'destroy rejected with the ledger still on disk and readable, and the debounced save of ' +
-        `the blank state committed anyway: ${JSON.stringify(failedFromSettings.calls)}. That is ` +
-        'the erase failing in the UI and succeeding on disk');
+  {
+    const memory = memoryStorage();
+    const events = [];
+    const originalGet = memory.adapter.getItem;
+    memory.adapter.getItem = async (key) => {
+      events.push('get');
+      return originalGet(key);
+    };
+    const persistence = createPersistence(memory, async () => {
+      events.push('migrate');
+      memory.data.set(LEDGER_KEY, JSON.stringify({ onboarded: true, transactions: [] }));
+      return true;
+    });
+    await persistence.load();
+    ok('load owns legacy migration and re-reads only after it succeeds',
+      events.join(',') === 'get,migrate,get', events.join(','));
+  }
 
-    ok('a failed erase leaves the session latched, whatever it started as',
-      failedFromSettings.blocked === true,
-      'this erase started from Settings with writes open. After the failure the only state ' +
-        'this session has is blank, so writes must stay refused for the rest of it');
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    let releaseDestroy;
+    memory.control.destroyGate = new Promise((resolve) => { releaseDestroy = resolve; });
+    let latest = snapshot('blank');
+    let revision = 0;
+    const reset = persistence.reset(() => ({ snapshot: latest, revision }));
+    latest = snapshot('captured-during-erase', [{ id: 'fresh' }]);
+    revision += 1;
+    releaseDestroy();
+    await reset;
+    ok('reset persists activity that lands while encrypted destruction is pending',
+      JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'captured-during-erase' &&
+        JSON.parse(memory.data.get(`${LEDGER_KEY}:tx:0`))[0].id === 'fresh');
+  }
 
-    ok('the latch is closed before the blank state is ever dispatched',
-      failedFromSettings.calls.includes('refused'),
-      'the save armed by the blank dispatch must be refused, not merely late. If it was never ' +
-        'refused the latch closed too late — or not at all');
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    let releaseInitialize;
+    memory.control.setGate = new Promise((resolve) => { releaseInitialize = resolve; });
+    let latest = snapshot('before-initialize');
+    let revision = 0;
+    const reset = persistence.reset(() => ({ snapshot: latest, revision }));
+    await Promise.resolve();
+    await Promise.resolve();
+    latest = snapshot('during-initialize', [{ id: 'fresh-during-write' }]);
+    revision += 1;
+    releaseInitialize();
+    await reset;
+    ok('reset reconciles activity that lands while blank initialization is pending',
+      JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'during-initialize' &&
+        JSON.parse(memory.data.get(`${LEDGER_KEY}:tx:0`))[0].id === 'fresh-during-write');
+  }
 
-    ok('every save armed while the erase is failing is refused, including the restore\'s own re-render',
-      failedFromSettings.calls.filter((c) => c === 'refused').length === 2,
-      'the blank dispatch arms one save and the restore dispatch arms another; both must be ' +
-        `refused by the still-closed latch. Calls: ${JSON.stringify(failedFromSettings.calls)}`);
+  {
+    const memory = memoryStorage();
+    let releaseLoad;
+    const loadGate = new Promise((resolve) => { releaseLoad = resolve; });
+    const originalGet = memory.adapter.getItem;
+    memory.adapter.getItem = async (key) => {
+      await loadGate;
+      return originalGet(key);
+    };
+    const persistence = createPersistence(memory);
+    const staleLoad = persistence.load();
+    const blank = snapshot('blank');
+    const reset = persistence.reset(() => ({ snapshot: blank, revision: 0 }));
+    releaseLoad();
+    await staleLoad;
+    const refused = await persistence.save(snapshot('resurrected'));
+    await reset;
+    ok('an older load cannot reopen writes after reset has claimed the lifecycle',
+      refused === false && JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'blank');
+  }
 
-    ok('a failed erase restores what was visibly on screen before it started',
-      failedFromSettings.dispatched.length === 2 &&
-        failedFromSettings.dispatched[0].type === 'clearAll' &&
-        failedFromSettings.dispatched[1].type === 'restore' &&
-        failedFromSettings.dispatched[1].state.transactions === failedFromSettings.finalState.transactions &&
-        failedFromSettings.finalState.onboarded === true,
-      'the blank dispatch made the screen show nothing; a failed erase must dispatch a restore ' +
-        'of the pre-erase state afterward so the user does not see their ledger vanish for an ' +
-        `erase that may not have deleted anything. Dispatched: ${JSON.stringify(failedFromSettings.dispatched.map((a) => a.type))}`);
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    let releaseDestroy;
+    memory.control.destroyGate = new Promise((resolve) => { releaseDestroy = resolve; });
+    const blank = snapshot('blank');
+    const reset = persistence.reset(() => ({ snapshot: blank, revision: 0 }));
+    const reload = persistence.load();
+    releaseDestroy();
+    await reset;
+    const between = await persistence.save(snapshot('too-early'));
+    await reload;
+    const after = await persistence.save(snapshot('after-reload'));
+    ok('a load requested during reset remains the only operation that can reopen writes',
+      between === false && after === true &&
+        JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'after-reload');
+  }
 
-    ok('a failed erase surfaces recovery so the user cannot keep editing over it',
-      failedFromSettings.hydrationFailed === true && !!failedFromSettings.storageFailureRecorded,
-      'without hydrationFailed the recovery screen never appears, and without storageFailure ' +
-        'there is nothing to show on it — either gap lets the user keep making edits that the ' +
-        'closed latch can never save');
+  {
+    const newer = [{ id: 'new-1' }, { id: 'new-2' }];
+    const older = [{ id: 'old-1' }, { id: 'old-2' }];
+    const current = memoryStorage({
+      [LEDGER_KEY]: JSON.stringify({ txChunks: 2, txChunkOrder: 'oldest-first' }),
+      [`${LEDGER_KEY}:tx:0`]: JSON.stringify(older),
+      [`${LEDGER_KEY}:tx:1`]: JSON.stringify(newer),
+    });
+    const legacy = memoryStorage({
+      [LEDGER_KEY]: JSON.stringify({ txChunks: 2 }),
+      [`${LEDGER_KEY}:tx:0`]: JSON.stringify(newer),
+      [`${LEDGER_KEY}:tx:1`]: JSON.stringify(older),
+    });
+    const currentLoaded = await createPersistence(current).load();
+    const legacyLoaded = await createPersistence(legacy).load();
+    ok('both chunk layouts reassemble byte-compatibly into newest-first rows',
+      currentLoaded.transactions.map((row) => row.id).join(',') === 'new-1,new-2,old-1,old-2' &&
+        legacyLoaded.transactions.map((row) => row.id).join(',') === 'new-1,new-2,old-1,old-2');
+  }
 
-    const failedFromRecovery = await runErase({ destroyFails: true, latchedBefore: true });
-    ok('a failed erase from the recovery screen still refuses writes',
-      failedFromRecovery.threw &&
-        failedFromRecovery.blocked === true &&
-        !failedFromRecovery.calls.includes('multiSet'),
-      'the ledger here was unreadable AND could not be erased; nothing derived from this ' +
-        'session may replace it');
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    let release;
+    memory.control.setGate = new Promise((resolve) => { release = resolve; });
+    const first = persistence.save(snapshot('first', [{ id: 'a' }]));
+    const second = persistence.save(snapshot('second', [{ id: 'b' }, { id: 'a' }]));
+    release();
+    await Promise.all([first, second]);
+    ok('serialized saves leave the latest snapshot and matching chunk count on disk',
+      JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'second' &&
+        JSON.parse(memory.data.get(LEDGER_KEY)).txChunks === 1 &&
+        memory.calls.filter((call) => call.op === 'set').length === 2);
+  }
 
-    ok('a failed erase from the recovery screen also restores state and stays surfaced',
-      failedFromRecovery.dispatched.some((a) => a.type === 'restore') &&
-        failedFromRecovery.hydrationFailed === true &&
-        !!failedFromRecovery.storageFailureRecorded,
-      'starting already latched must not skip the restore or the recovery surfacing — the user ' +
-        'is in the same "screen shows blank, ledger may still be intact" situation either way');
+  {
+    const rows = [{ id: 'n1' }, { id: 'n2' }, { id: 'o1' }, { id: 'o2' }];
+    const chunks = testChunkTransactions(rows);
+    const memory = memoryStorage({
+      [LEDGER_KEY]: JSON.stringify({ txChunks: 2, txChunkOrder: 'oldest-first' }),
+      [`${LEDGER_KEY}:tx:0`]: chunks[0],
+      [`${LEDGER_KEY}:tx:1`]: chunks[1],
+    });
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    const edited = snapshot('edited', [{ ...rows[0], changed: true }, ...rows.slice(1)]);
+    memory.control.failSetCount = 1;
+    try { await persistence.save(edited); } catch {}
+    await persistence.save(edited);
+    const sets = memory.calls.filter((call) => call.op === 'set');
+    ok('a failed save invalidates the diff cache so retry rewrites every chunk',
+      sets.at(-1).entries.length === 3,
+      `${sets.at(-1).entries.length} entries in retry`);
+  }
 
-    const succeeded = await runErase({ destroyFails: false, latchedBefore: true });
-    ok('a successful erase unlatches and writes the blank store',
-      succeeded !== null &&
-        !succeeded.threw &&
-        succeeded.blocked === false &&
-        succeeded.calls.indexOf('multiSet') > succeeded.calls.indexOf('destroy'),
-      'the latch may only be cleared by a destroy that actually succeeded — and it must be ' +
-        'cleared, or the deliberate blank write is refused and Settings reports a failure for ' +
-        `an erase that erased everything. Calls: ${JSON.stringify(succeeded?.calls)}`);
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    await persistence.save(snapshot('old', [{ id: 'old' }]));
+    memory.control.destroyError = new Error('injected destroy failure');
+    const blank = snapshot('blank');
+    const reset = persistence.reset(() => ({ snapshot: blank, revision: 0 }));
+    const during = await persistence.save(snapshot('must-not-land'));
+    let resetError = null;
+    try { await reset; } catch (error) { resetError = error; }
+    const after = await persistence.save(snapshot('also-blocked'));
+    ok('a failed destroy blocks saves before, during, and after the failed reset',
+      during === false && after === false &&
+        resetError instanceof ledgerModule.LedgerResetError &&
+        resetError.stage === 'destroy' &&
+        JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'old');
+  }
 
-    ok('a successful erase never dispatches a restore and leaves recovery clear',
-      succeeded !== null &&
-        succeeded.dispatched.length === 1 &&
-        succeeded.dispatched[0].type === 'clearAll' &&
-        succeeded.hydrationFailed === false &&
-        succeeded.storageFailureRecorded === null,
-      'restoring the old state or leaving recovery flags set after a SUCCESSFUL erase would ' +
-        `resurrect the just-cleared ledger or block the user for no reason. Dispatched: ` +
-        `${JSON.stringify(succeeded?.dispatched.map((a) => a.type))}`);
-  })(),
-);
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    let release;
+    memory.control.setGate = new Promise((resolve) => { release = resolve; });
+    const oldSave = persistence.save(snapshot('queued-old', [{ id: 'old' }]));
+    const blank = snapshot('blank');
+    const reset = persistence.reset(() => ({ snapshot: blank, revision: 0 }));
+    const refused = await persistence.save(snapshot('resurrected', [{ id: 'old' }]));
+    release();
+    const [oldWritten] = await Promise.all([oldSave, reset]);
+    const operations = memory.calls.filter((call) => call.op === 'set' || call.op === 'destroy');
+    ok('reset supersedes queued saves, refuses resurrection, then writes blank after destroy',
+      oldWritten === false && refused === false &&
+        operations.map((call) => call.op).join(',') === 'destroy,set' &&
+        JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'blank');
+  }
+
+  {
+    const memory = memoryStorage();
+    const persistence = createPersistence(memory);
+    await persistence.load();
+    memory.control.failSetCount = 1;
+    let resetError = null;
+    const blank = snapshot('blank');
+    try {
+      await persistence.reset(() => ({ snapshot: blank, revision: 0 }));
+    } catch (error) { resetError = error; }
+    const blocked = await persistence.save(snapshot('must-stay-blocked'));
+    await persistence.load();
+    const retry = await persistence.save(snapshot('blank-retry'));
+    ok('a blank initialization failure is distinct, blocks writes, and remains reload-retryable',
+      resetError instanceof ledgerModule.LedgerResetError &&
+        resetError.stage === 'initialize' && blocked === false && retry === true &&
+        JSON.parse(memory.data.get(LEDGER_KEY)).userName === 'blank-retry');
+  }
+})());
 
 // ---------------------------------------------------------------------------
 // 3. Diagnostics may never leak a key or a ledger row, and may never throw.

@@ -1111,6 +1111,20 @@ const DECLINE_SMS = [{
     plan.txCount === 0 && plan.newAccountCount === 0, plan.batch);
   ok('push supersession: corrected title/category/account receive no overwrite patch',
     !plan.batch.updates.some((u) => u.id === 'edited-push'), plan.batch.updates);
+
+  const eventId = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const retainedPlan = buildImportPlan(
+    incoming.map((row) => ({ ...row, sourceEventId: eventId })),
+    corrected,
+    smsTs,
+  );
+  const { applyHealUpdates } = require('./build/heal.js');
+  const [identified] = applyHealUpdates(corrected.transactions, retainedPlan.batch.updates);
+  ok('history identity promotes on an edited row without changing user-facing corrections',
+    identified.title === 'My corrected title' && identified.category === 'utilities' &&
+      identified.accountId === 'corrected-account' && identified.smsKey === `h${eventId}` &&
+      identified.ts === smsTs && identified.viaPush !== true,
+    { identified, updates: retainedPlan.batch.updates });
 }
 
 {

@@ -2,7 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -13,7 +13,7 @@ import { Block, SectionHeader } from '@/components/ui/layout';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { buildImportPlan } from '@/lib/auto-import';
+import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
   createEmailForwardingAddress,
   getImportCapabilities,
@@ -25,13 +25,11 @@ import {
   type ImportCapabilities,
 } from '@/lib/cloud-import-contract';
 import {
-  ackRelay,
   clearRelayEmailCredential,
   DEFAULT_RELAY_URL,
   getRelayConfig,
   pairDevice,
   saveRelayEmailCredential,
-  syncRelay,
   type RelayConfig,
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
@@ -48,12 +46,27 @@ export function SupplementImports() {
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
   const theme = useTheme();
-  const { state, importBatch, ensureDurable } = useStore();
+  const { state, importBatch, ensureDurable, markParserVersion } = useStore();
   const stateRef = useRef(state);
   stateRef.current = state;
+  const captureExecutor = useMemo(
+    () =>
+      createCaptureExecutor({
+        ledger: {
+          getState: () => stateRef.current,
+          importBatch,
+          ensureDurable,
+          markParserVersion,
+        },
+      }),
+    [ensureDurable, importBatch, markParserVersion],
+  );
   const clipboardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copiedAddress = useRef<string | null>(null);
+  const disposed = useRef(false);
 
   const [cfg, setCfg] = useState<RelayConfig | null>(null);
+  const [loadingConfig, setLoadingConfig] = useState(true);
   const [capabilities, setCapabilities] = useState<ImportCapabilities | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +88,17 @@ export function SupplementImports() {
     return copy.errUnexpected;
   }, [copy]);
 
+  const clearCopiedAddress = useCallback(async (address: string): Promise<void> => {
+    try {
+      const current = await Clipboard.getStringAsync();
+      if (current === address) await Clipboard.setStringAsync('');
+    } catch {
+      // Best effort: never replace a different clipboard value while cleaning.
+    } finally {
+      if (copiedAddress.current === address) copiedAddress.current = null;
+    }
+  }, []);
+
   const loadCapabilities = useCallback(async (active: RelayConfig) => {
     setBusy('capabilities');
     setError(null);
@@ -90,18 +114,27 @@ export function SupplementImports() {
 
   useEffect(() => {
     let live = true;
-    void getRelayConfig().then((existing) => {
-      if (!live) return;
-      setCfg(existing);
-      if (existing) void loadCapabilities(existing);
-    });
+    disposed.current = false;
+    void getRelayConfig()
+      .then((existing) => {
+        if (!live) return;
+        setCfg(existing);
+        if (existing) void loadCapabilities(existing);
+      })
+      .finally(() => {
+        if (live) setLoadingConfig(false);
+      });
     return () => {
       live = false;
+      disposed.current = true;
       if (clipboardTimer.current) clearTimeout(clipboardTimer.current);
+      const address = copiedAddress.current;
+      if (address) void clearCopiedAddress(address);
     };
-  }, [loadCapabilities]);
+  }, [clearCopiedAddress, loadCapabilities]);
 
   const connect = async () => {
+    if (loadingConfig || busy !== null) return;
     if (!DEFAULT_RELAY_URL) {
       setError(copy.unavailable);
       return;
@@ -110,6 +143,15 @@ export function SupplementImports() {
     setError(null);
     setStatus(null);
     try {
+      // Keychain is authoritative at the action boundary too: another screen
+      // may have connected while this surface was mounted. Never mint a new
+      // identity over the token already installed in the user's Shortcut.
+      const existing = await getRelayConfig();
+      if (existing) {
+        setCfg(existing);
+        await loadCapabilities(existing);
+        return;
+      }
       const connected = await pairDevice(DEFAULT_RELAY_URL);
       setCfg(connected);
       await loadCapabilities(connected);
@@ -121,30 +163,14 @@ export function SupplementImports() {
     }
   };
 
-  const syncQueued = useCallback(async (active: RelayConfig): Promise<number> => {
-    if (!stateRef.current.hydrated) throw new Error(copy.notHydrated);
-    const queued = await syncRelay(active);
-    const newestTs = queued.parsed.reduce(
-      (max, row) => Math.max(max, row.smsTs ?? 0),
-      stateRef.current.lastScanTs,
-    );
-    const plan = buildImportPlan(queued.parsed, stateRef.current, newestTs);
-    if (queued.parsed.length > 0) {
-      await importBatch(plan.batch).durable;
-    } else {
-      await ensureDurable();
-    }
-    // A PDF upload or an email check drains the whole queue, and a setup probe
-    // can be sitting in it — this screen is reachable while /ios-setup is still
-    // waiting for one. Acknowledging it here consumes the proof that screen is
-    // polling for, and the "Try again" it then offers sends a byte-identical
-    // probe that the relay's replay receipt refuses. Reserve them the way
-    // background-relay.ts and capture.ts do; only /ios-setup may ack a probe.
-    const reserved = new Set(queued.testIds);
-    const acknowledge = queued.ids.filter((id) => !reserved.has(id));
-    if (acknowledge.length > 0) await ackRelay(active, acknowledge);
-    return plan.txCount;
-  }, [copy.notHydrated, ensureDurable, importBatch]);
+  const syncQueued = useCallback(async (): Promise<number> => {
+    const outcome = await captureExecutor.execute('supplemental');
+    if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
+    if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
+    return outcome.kind === 'imported' || outcome.kind === 'up-to-date'
+      ? outcome.transactions
+      : 0;
+  }, [captureExecutor, copy.notHydrated, copy.unavailable]);
 
   const pickAndUpload = async () => {
     if (!cfg || !capabilities) return;
@@ -163,7 +189,7 @@ export function SupplementImports() {
       setBusy('pdf');
       const accepted = await uploadPdfStatement(cfg, asset, capabilities);
       try {
-        const imported = await syncQueued(cfg);
+        const imported = await syncQueued();
         setStatus(interpolate(imported > 0 ? copy.pdfSuccess : copy.pdfNoNew, {
           accepted: accepted.acceptedRows,
           pages: accepted.pages,
@@ -205,14 +231,17 @@ export function SupplementImports() {
   const copyAddress = async () => {
     if (!cfg?.forwardingAddress) return;
     const address = cfg.forwardingAddress;
+    copiedAddress.current = address;
     await Clipboard.setStringAsync(address);
+    if (disposed.current) {
+      await clearCopiedAddress(address);
+      return;
+    }
     setCopied(true);
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
     if (clipboardTimer.current) clearTimeout(clipboardTimer.current);
     clipboardTimer.current = setTimeout(() => {
-      void Clipboard.getStringAsync().then((current) => {
-        if (current === address) void Clipboard.setStringAsync('');
-      });
+      void clearCopiedAddress(address);
       setCopied(false);
     }, 60_000);
   };
@@ -223,7 +252,7 @@ export function SupplementImports() {
     setError(null);
     setStatus(null);
     try {
-      const imported = await syncQueued(cfg);
+      const imported = await syncQueued();
       setStatus(interpolate(imported > 0 ? copy.emailSuccess : copy.emailNoNew, { imported }));
     } catch (e) {
       setError(e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e));
@@ -274,6 +303,10 @@ export function SupplementImports() {
             <ThemedText type="small">{copy.privateTitle}</ThemedText>
           </View>
           <ThemedText type="meta" themeColor="textTertiary">{copy.privateBody}</ThemedText>
+        </Block>
+      ) : loadingConfig ? (
+        <Block>
+          <ThemedText type="meta" themeColor="textTertiary">{copy.checking}</ThemedText>
         </Block>
       ) : !cfg ? (
         <Block>

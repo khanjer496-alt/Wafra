@@ -246,6 +246,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const {
     state,
     storageFailure,
+    storageRecoveryState,
     hydrationFailed,
     importBatch,
     setOnboarded,
@@ -277,8 +278,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const capture = captureCopy();
 
   /**
-   * A failed read is not a first run, and this gate is where that distinction
-   * has to be made.
+   * A failed read is not a first run, and an incomplete erase is not a usable
+   * blank ledger. This gate is where both distinctions have to be made.
    *
    * `state.onboarded === false` means one of two completely different things:
    * this phone has never run the app, or the ledger could not be read and the
@@ -398,7 +399,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * this would be rendering an empty ledger as though it were the user's, and
    * `storageFailure` tells us it is not. Nothing reads better than nothing.
    */
-  if (showRecovery) return <StorageRecovery failure={storageFailure} />;
+  if (showRecovery) {
+    return <StorageRecovery failure={storageFailure} recoveryState={storageRecoveryState} />;
+  }
 
   if (!showOverlay) return <>{children}</>;
 

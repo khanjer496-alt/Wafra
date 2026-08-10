@@ -76,7 +76,8 @@ ok('client covers every trusted-device management endpoint',
 ok('joined credentials use device-only SecureStore persistence',
   /WHEN_UNLOCKED_THIS_DEVICE_ONLY/.test(relaySource) &&
   relaySource.indexOf('const cfg: RelayConfig', relaySource.indexOf('joinTrustedVault')) <
-    relaySource.indexOf('await putRelayConfig(cfg)', relaySource.indexOf('joinTrustedVault')));
+    relaySource.indexOf('await publishRelayConfig(cfg, pairingGeneration)',
+      relaySource.indexOf('joinTrustedVault')));
 ok('Settings links the real route and the screen exposes explicit vault deletion',
   /router\.push\('\/trusted-devices'\)/.test(settingsSource) &&
   /deleteTrustedVault\(config\)/.test(screenSource));

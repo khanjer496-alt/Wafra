@@ -72,6 +72,7 @@ import { isProActive, trialDaysLeft } from '@/lib/purchases';
 // points compiles on a good day and 401s on the device.
 import {
   getRelayConfig,
+  getRelayConfigStrict,
   isRelayPlatform,
   RelayError,
   unpairDevice,
@@ -82,7 +83,7 @@ import {
   buildExpenseReportHtml,
   reportExpenses,
 } from '@/lib/reimbursement-report';
-import { useStore } from '@/lib/store';
+import { ClearAllError, useStore } from '@/lib/store';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
@@ -581,15 +582,11 @@ export default function SettingsScreen() {
     // torn down.
     let cfg: RelayConfig | null = null;
     try {
-      cfg = await getRelayConfig();
+      cfg = await getRelayConfigStrict();
     } catch {
-      // Defensive: getRelayConfig() swallows its own Keychain errors and
-      // answers null today. If that ever changes, wiping locally on the way
-      // past would leave a live device row and a live ingest token behind
-      // while telling the user everything is gone. Stop instead.
-      //
-      // The null it returns for a Keychain it could not read is still
-      // indistinguishable from "never paired" — see the note in relay.ts.
+      // A locked or damaged Keychain is not proof that this phone was never
+      // paired. Stop rather than erase locally while a remote queue and the
+      // Shortcut's ingest credential may still be live.
       Alert.alert(t('eraseRelayFailedTitle'), t('eraseRelayFailedBody'));
       return;
     }
@@ -618,39 +615,31 @@ export default function SettingsScreen() {
     }
 
     try {
-      await clearAll();
-    } catch {
-      // The relay half really did succeed — the device row, its queue and its
-      // tokens are gone — and only the local ledger survived. Repeating the
-      // relay message here would claim the opposite.
-      Alert.alert(t('eraseLocalFailedTitle'), t('eraseLocalFailedBody'));
+      await clearAll(isRelayPlatform() ? clearBackgroundRelayRows : undefined);
+    } catch (error) {
+      if (!(error instanceof ClearAllError) || error.stage === 'erase') {
+        // The relay half really did succeed — the device row, its queue and its
+        // tokens are gone — and only the local ledger survived. Repeating the
+        // relay message here would claim the opposite.
+        Alert.alert(t('eraseLocalFailedTitle'), t('eraseLocalFailedBody'));
+        return;
+      }
+      const cleanupFailed = error.stage === 'cleanup';
+      const failureTitle = cleanupFailed
+        ? t('eraseQueueCleanupFailedTitle')
+        : t('eraseLocalInitializeFailedTitle');
+      const failureBody = cleanupFailed
+        ? t('eraseQueueCleanupFailedBody')
+        : t('eraseLocalInitializeFailedBody');
+      if (shortcutCleanupApplies(cfg !== null)) {
+        Alert.alert(
+          failureTitle,
+          `${failureBody}\n\n${t('shortcutCleanupErased')}`,
+        );
+      } else {
+        Alert.alert(failureTitle, failureBody);
+      }
       return;
-    }
-
-    /**
-     * The ledger is not the only bank data on this phone.
-     *
-     * A headless push wake parses relay rows and writes them to their OWN
-     * encrypted database — `wafra-relay-inbox.db`, under its own key — where
-     * they wait until a foreground import folds them into the ledger. Nothing
-     * above touches it: `stateStorage.destroy` erases `wafra-private.db`, and
-     * `unpairDevice` erases the relay credentials. Neither knows that file
-     * exists. So the sentence this screen shows before erasing — "this
-     * iPhone's relay queue will be permanently deleted" — was true of the
-     * copy on the relay and false of the copy on the phone, and already-parsed
-     * bank messages survived Erase Everything.
-     *
-     * After the ledger, not before: a failure here must never destroy staged
-     * rows that the RESTORED ledger has not imported, which is the state a
-     * failed erase leaves behind. And best-effort, because the alternative to
-     * a retained row here is not a lie — the next scan folds it into the fresh
-     * ledger, where the user can see it and delete it.
-     */
-    if (isRelayPlatform()) {
-      await clearBackgroundRelayRows().catch(() => {
-        // Staged rows outliving the erase is visible in the ledger a moment
-        // later; an alert about a queue the user has never heard of is not.
-      });
     }
 
     // Both halves are gone, and this is the moment the user believes nothing

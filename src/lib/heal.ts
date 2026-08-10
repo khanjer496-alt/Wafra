@@ -153,6 +153,28 @@ export function healPatch(
  * `remove` is not handled here; a caller drops those rows before applying.
  */
 export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transaction {
+  // Planning and applying are separated by inbox/relay I/O. A user can edit
+  // the row in that gap, so the apply boundary must enforce the pin again
+  // even when the patch was valid for the older snapshot.
+  if (tx.userEdited) {
+    // Exact retained-message identity is not a parser opinion and prevents a
+    // later history import from pairing another event to this same live row.
+    // Promote only those technical fields; every user-facing correction stays
+    // pinned byte-for-byte.
+    const nextViaPush = patch.viaPush === undefined ? tx.viaPush : patch.viaPush || undefined;
+    if (
+      (patch.ts === undefined || patch.ts === tx.ts) &&
+      (patch.smsKey === undefined || patch.smsKey === tx.smsKey) &&
+      nextViaPush === tx.viaPush
+    ) {
+      return tx;
+    }
+    const identified: Transaction = { ...tx };
+    if (patch.ts !== undefined) identified.ts = patch.ts;
+    if (patch.smsKey !== undefined) identified.smsKey = patch.smsKey;
+    if (patch.viaPush !== undefined) identified.viaPush = nextViaPush;
+    return identified;
+  }
   const next: Transaction = { ...tx };
   if (patch.title !== undefined) next.title = patch.title;
   if (patch.category !== undefined) next.category = patch.category;
@@ -168,4 +190,23 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     else next.raw = patch.raw;
   }
   return next;
+}
+
+/**
+ * Apply a planned rescan batch to the ledger as it exists now. Planning may
+ * have happened before a hand edit, so both destructive removals and ordinary
+ * patches re-check the current row's user pin at this boundary.
+ */
+export function applyHealUpdates(
+  transactions: Transaction[],
+  updates: TxHealUpdate[],
+): Transaction[] {
+  if (updates.length === 0) return transactions;
+  const patches = new Map(updates.map((update) => [update.id, update]));
+  return transactions
+    .filter((transaction) => transaction.userEdited || !patches.get(transaction.id)?.remove)
+    .map((transaction) => {
+      const patch = patches.get(transaction.id);
+      return patch ? applyHealPatch(transaction, patch) : transaction;
+    });
 }

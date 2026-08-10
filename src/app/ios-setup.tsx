@@ -27,12 +27,9 @@
  *    without tapping that button used to finish setup with push unregistered
  *    — capture that works only while the app is open, and says nothing.
  */
-import * as Clipboard from 'expo-clipboard';
-import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -50,28 +47,14 @@ import { Block, Row, ScreenHeader, SectionHeader } from '@/components/ui/layout'
 import { PulseDot } from '@/components/ui/states';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { buildImportPlan } from '@/lib/auto-import';
-import {
-  disableRelayBackgroundSync,
-  enableRelayBackgroundSync,
-} from '@/lib/background-relay';
 import { t, tf, type StringKey } from '@/lib/i18n';
-import { getActiveMarket } from '@/lib/markets';
-import { requestSilentCapturePermission } from '@/lib/notifications';
 import {
-  ackRelay,
-  DEFAULT_RELAY_URL,
-  DEFAULT_SHORTCUT_URL,
-  getRelayConfig,
-  markRelayConfigured,
-  markRelayVerified,
-  pairDevice,
-  RelayError,
-  syncRelay,
-  unpairDevice,
-  type RelayConfig,
-} from '@/lib/relay';
-import { shortcutSetupCode, shortcutTestUrl } from '@/lib/relay-protocol';
+  createIosCaptureSetup,
+  INITIAL_IOS_SETUP_MODEL,
+  type IosSetupFailure,
+  type IosSetupIntent,
+} from '@/lib/ios-capture-setup';
+import { getActiveMarket } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 
 /** Step names as keys, so the progress bar reads in the user's language. */
@@ -81,18 +64,6 @@ const STEPS: readonly StringKey[] = [
   'iosStepAutomation',
   'iosStepTest',
 ] as const;
-type Step = 0 | 1 | 2 | 3;
-
-/**
- * What the user can DO about a failure, rather than only what went wrong.
- * `null` means the message is its own instruction and the step's own buttons
- * are the recovery.
- */
-type Recovery = 'settings' | 'shortcut' | null;
-
-/** How long the test step waits for a message before offering help. */
-const TEST_TIMEOUT_MS = 120_000;
-const POLL_MS = 2_500;
 
 /**
  * A failed pairing, said in the user's language and as a next step.
@@ -109,22 +80,35 @@ const POLL_MS = 2_500;
  * The detail line carries what to DO. The step's own "Connect this iPhone"
  * button sits directly under this block and is the retry.
  */
-function connectFailure(error: unknown): { message: string; detail: string | null } {
-  if (!(error instanceof RelayError)) return { message: t('iosConnectFailed'), detail: null };
-  switch (error.code) {
-    case 'rate_limited':
+function failureCopy(failure: IosSetupFailure): { message: string; detail: string | null } {
+  switch (failure) {
+    case 'relay-unavailable':
+      return { message: t('iosRelayUnavailable'), detail: null };
+    case 'connect-rate-limited':
       return { message: t('trustedTryLater'), detail: t('trustedTryLaterBody') };
-    case 'unauthorized':
+    case 'connect-unauthorized':
       return { message: t('trustedAccessEnded'), detail: t('trustedAccessEndedBody') };
-    case 'device_limit':
+    case 'connect-device-limit':
       return { message: t('trustedLimitTitle'), detail: t('trustedLimitBody') };
+    case 'disconnect':
+      return { message: t('iosDisconnectFailed'), detail: null };
+    case 'shortcut-install':
+      return { message: t('iosShortcutInstallFailed'), detail: null };
+    case 'shortcuts-open':
+      return { message: t('iosShortcutsOpenFailed'), detail: null };
+    case 'shortcut-run':
+      return { message: t('iosShortcutRunFailed'), detail: null };
+    case 'push-permission':
+      return { message: t('iosPushPermissionRequired'), detail: null };
+    case 'push-registration':
+      return { message: t('iosPushSetupFailed'), detail: null };
+    case 'not-hydrated':
+      return { message: t('stillLoading'), detail: null };
+    case 'load':
+    case 'configure':
+    case 'connect':
     default:
-      // A dead network and a relay 5xx are both "try again"; anything else is
-      // the relay refusing, which is not the user's connection but is still
-      // "nothing was changed here".
-      return error.retryable
-        ? { message: t('iosConnectFailed'), detail: t('trustedUnavailableBody') }
-        : { message: t('trustedUnavailableTitle'), detail: t('trustedUnavailableBody') };
+      return { message: t('iosConnectFailed'), detail: t('trustedUnavailableBody') };
   }
 }
 
@@ -132,143 +116,63 @@ export default function IosSetupScreen() {
   const theme = useTheme();
   const router = useRouter();
   const params = useLocalSearchParams<{ fromOnboarding?: string }>();
-  const { state, importBatch, ensureDurable, setOnboarded, setPrivateMode } = useStore();
-
-  const [step, setStep] = useState<Step>(0);
-  const [cfg, setCfg] = useState<RelayConfig | null>(null);
-  const [pairing, setPairing] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  const [recovery, setRecovery] = useState<Recovery>(null);
-  // Most people should not have to tap eight banks before setup can begin.
-  // Start with every supported UAE sender and let privacy-conscious users
-  // narrow the list; the Shortcuts trigger remains editable later.
-  const [banks, setBanks] = useState<string[]>(() =>
-    getActiveMarket().banks.map((bank) => bank.name),
-  );
-  const [copied, setCopied] = useState<string | null>(null);
-  // Reading the pasteboard on return can trigger Apple's cross-app paste
-  // permission sheet. Track only values Wafra deliberately placed there and
-  // clear them on the user's explicit continue action without reading them
-  // back first.
-  const sensitiveCopyPending = useRef(false);
-  /**
-   * Private mode has to come off before this screen can pair, and that is the
-   * user's call, not the wizard's. It was an `Alert.alert` with the whole
-   * turn-it-off-and-connect sequence inside a button's `onPress` — code the
-   * web export never draws and therefore never runs, so "Connect this iPhone"
-   * did nothing at all for anyone in private mode. Drawn as a sheet instead.
-   */
-  const [askPrivateMode, setAskPrivateMode] = useState(false);
-
-  // Test step
-  const [listening, setListening] = useState(false);
-  const [captured, setCaptured] = useState<{ merchant: string; isTest: boolean } | null>(null);
-  const [timedOut, setTimedOut] = useState(false);
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startedAt = useRef(0);
-  // The polling loop closes over state; a ref keeps it reading the live one.
+  const {
+    state,
+    importBatch,
+    ensureDurable,
+    markParserVersion,
+    setOnboarded,
+    setPrivateMode,
+  } = useStore();
   const stateRef = useRef(state);
   stateRef.current = state;
-
-  /** The relay has answered at least once, so capture is live, not proposed. */
-  const captureOn = cfg?.setupState === 'verified';
-
-  const fail = useCallback((message: string, how: Recovery = null, detail: string | null = null) => {
-    setError(message);
-    setErrorDetail(detail);
-    setRecovery(how);
-  }, []);
-
-  const clearError = useCallback(() => {
-    setError(null);
-    setErrorDetail(null);
-    setRecovery(null);
-  }, []);
+  const controllerRef = useRef<ReturnType<typeof createIosCaptureSetup> | null>(null);
+  const [setup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
+  const banks = getActiveMarket().banks.map((bank) => bank.name);
 
   useEffect(() => {
-    (async () => {
-      const existing = await getRelayConfig();
-      if (existing) {
-        setCfg(existing);
-        setStep(existing.setupState === 'paired' ? 1 : 3);
-      }
-    })();
-  }, []);
+    const controller = createIosCaptureSetup({
+      ledger: {
+        getState: () => stateRef.current,
+        importBatch,
+        ensureDurable,
+        markParserVersion,
+      },
+      leavePrivateMode: () => setPrivateMode(false),
+    });
+    controllerRef.current = controller;
+    const unsubscribe = controller.subscribe(setSetup);
+    void controller.send({ type: 'load' });
+    return () => {
+      unsubscribe();
+      controller.dispose();
+      if (controllerRef.current === controller) controllerRef.current = null;
+    };
+  }, [ensureDurable, importBatch, markParserVersion, setPrivateMode]);
 
-  useEffect(
-    () => () => {
-      if (pollTimer.current) clearTimeout(pollTimer.current);
-    },
-    [],
+  const send = useCallback((intent: IosSetupIntent): Promise<void> =>
+    controllerRef.current?.send(intent) ?? Promise.resolve(), []);
+  const goToStep = useCallback((step: 0 | 1 | 2 | 3) => {
+    void send({ type: 'go-to-step', step });
+  }, [send]);
+  const connect = useCallback(() => void send({ type: 'connect' }), [send]);
+  const leavePrivateModeAndConnect = useCallback(
+    () => void send({ type: 'confirm-private-mode' }),
+    [send],
   );
-
-  /**
-   * Move within the wizard. Anything in flight on the step being left has to
-   * stop, or a poll started on the test step keeps running behind the
-   * automation instructions and lands a success on a screen that never asked.
-   */
-  const goToStep = useCallback(
-    (next: Step) => {
-      if (pollTimer.current) clearTimeout(pollTimer.current);
-      pollTimer.current = null;
-      setListening(false);
-      setTimedOut(false);
-      setCaptured(null);
-      clearError();
-      setStep(next);
-    },
-    [clearError],
+  const disconnect = useCallback(() => send({ type: 'disconnect' }), [send]);
+  const copy = useCallback(
+    (target: 'setup' | 'url' | 'token') => send({ type: 'copy', target }),
+    [send],
   );
-
-  const performConnect = useCallback(async () => {
-    if (!DEFAULT_RELAY_URL) {
-      fail(t('iosRelayUnavailable'));
-      return;
-    }
-    setPairing(true);
-    clearError();
-    try {
-      const paired = await pairDevice(DEFAULT_RELAY_URL);
-      setCfg(paired);
-      setStep(1);
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      }
-    } catch (e) {
-      const failure = connectFailure(e);
-      fail(failure.message, null, failure.detail);
-    } finally {
-      setPairing(false);
-    }
-  }, [clearError, fail]);
-
-  const connect = useCallback(() => {
-    if (!state.privateMode) {
-      void performConnect();
-      return;
-    }
-    setAskPrivateMode(true);
-  }, [performConnect, state.privateMode]);
-
-  /** The other side of that question. Reached only from the sheet. */
-  const leavePrivateModeAndConnect = useCallback(() => {
-    void (async () => {
-      try {
-        await setPrivateMode(false);
-        await performConnect();
-      } catch {
-        fail(t('iosConnectFailed'));
-      }
-    })();
-  }, [fail, performConnect, setPrivateMode]);
+  const installShortcut = useCallback(() => send({ type: 'install-shortcut' }), [send]);
+  const shortcutInstalled = useCallback(() => send({ type: 'shortcut-installed' }), [send]);
+  const openAutomation = useCallback(() => send({ type: 'open-automation' }), [send]);
+  const automationReady = useCallback(() => send({ type: 'automation-ready' }), [send]);
+  const startTest = useCallback(() => void send({ type: 'start-test' }), [send]);
 
   const finish = useCallback(() => {
     if (params.fromOnboarding === '1') {
-      // Return to the personalised onboarding summary. The query makes this
-      // resilient even if Expo Router remounted the gate while Shortcuts was
-      // in front of the app.
       router.replace('/?onboarding=complete');
       return;
     }
@@ -276,12 +180,6 @@ export default function IosSetupScreen() {
     router.replace('/');
   }, [params.fromOnboarding, router, setOnboarded]);
 
-  /**
-   * The header back button leaves the screen; the in-flow ghost buttons move
-   * between steps. `router.back()` alone is a no-op when this screen is the
-   * only entry in the stack — a cold launch straight into it left the user
-   * with a header chevron that did nothing and no way out but finishing.
-   */
   const leave = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
@@ -290,206 +188,27 @@ export default function IosSetupScreen() {
     finish();
   }, [finish, router]);
 
-  const disconnect = useCallback(async () => {
-    if (!cfg) return;
-    setDisconnecting(true);
-    clearError();
-    try {
-      await disableRelayBackgroundSync();
-      await unpairDevice(cfg);
-      setCfg(null);
-      setBanks(getActiveMarket().banks.map((bank) => bank.name));
-      goToStep(0);
-      if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      }
-    } catch {
-      fail(t('iosDisconnectFailed'));
-    } finally {
-      setDisconnecting(false);
-    }
-  }, [cfg, clearError, fail, goToStep]);
-
-  const copy = useCallback(async (label: string, value: string) => {
-    await Clipboard.setStringAsync(value);
-    sensitiveCopyPending.current = label === 'setup' || label === 'token';
-    setCopied(label);
-    if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
-    setTimeout(() => setCopied((c) => (c === label ? null : c)), 2000);
-  }, []);
-
-  /**
-   * The setup code carries the ingest bearer token. Take it off the pasteboard
-   * on the user's explicit continue action. Do not read it back first: iOS can
-   * show a cross-app paste permission sheet for that read, directly inside the
-   * setup path. The button copy tells the user that continuing clears it.
-   */
-  const clearSetupCodeFromPasteboard = useCallback(async () => {
-    if (!sensitiveCopyPending.current) return;
-    try {
-      await Clipboard.setStringAsync('');
-      sensitiveCopyPending.current = false;
-    } catch {
-      // Pasteboard cleanup is best-effort; the token also remains in Shortcut.
-    }
-  }, []);
-
-  const installShortcut = useCallback(async () => {
-    if (!cfg) return;
-    const code = shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken);
-    try {
-      await Clipboard.setStringAsync(code);
-      sensitiveCopyPending.current = true;
-      setCopied('setup');
-      if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
-      await Linking.openURL(DEFAULT_SHORTCUT_URL ?? 'shortcuts://');
-      clearError();
-    } catch {
-      fail(t('iosShortcutInstallFailed'));
-    }
-  }, [cfg, clearError, fail]);
-
-  const shortcutInstalled = useCallback(async () => {
-    await clearSetupCodeFromPasteboard();
-    setCopied(null);
-    goToStep(2);
-  }, [clearSetupCodeFromPasteboard, goToStep]);
-
-  /**
-   * Register the silent wake. This is what lets a bank alert file itself while
-   * Wafra is closed, so nothing may leave the automation step without it — and
-   * a denial has to point at the one place that can undo it, iPhone Settings.
-   */
-  const ensureSilentDelivery = useCallback(
-    async (active: RelayConfig): Promise<boolean> => {
-      const notificationAllowed = await requestSilentCapturePermission();
-      if (!notificationAllowed) {
-        fail(t('iosPushPermissionRequired'), 'settings');
-        return false;
-      }
-      const backgroundReady = await enableRelayBackgroundSync(active);
-      if (!backgroundReady) {
-        fail(t('iosPushSetupFailed'));
-        return false;
-      }
-      clearError();
-      return true;
-    },
-    [clearError, fail],
-  );
-
-  const openAutomation = useCallback(async () => {
-    if (!cfg) return;
-    if (!(await ensureSilentDelivery(cfg))) return;
-    try {
-      await Linking.openURL('shortcuts://');
-    } catch {
-      fail(t('iosShortcutsOpenFailed'));
-    }
-  }, [cfg, ensureSilentDelivery, fail]);
-
-  /**
-   * Poll the relay until the user's test message shows up, then file it for
-   * real — the transaction they see at the end of setup is a genuine one, not
-   * a mock. Any message works; most people just forward one they already have.
-   *
-   * The config is an argument rather than a closure read: the step that starts
-   * this test also writes a new config in the same tick, and a `cfg` read here
-   * was either stale or, once, null — which returned before scheduling the
-   * next tick and left the "Waiting for the Shortcut…" pulse running forever
-   * with no timeout and no way back.
-   */
-  const poll = useCallback(
-    async (active: RelayConfig) => {
-      try {
-        const { parsed, ids, testReceived } = await syncRelay(active);
-        if (parsed.length > 0 || testReceived > 0) {
-          const newestTs = parsed.reduce((m, p) => Math.max(m, p.smsTs ?? 0), 0);
-          // A redelivered row can dedupe against an import that reached React
-          // state but whose first SQLCipher write failed. Flush that state when
-          // the delivery makes no new changes; otherwise use the batch's own
-          // durability receipt.
-          let durable = Promise.resolve();
-          if (parsed.length > 0) {
-            const plan = buildImportPlan(parsed, stateRef.current, newestTs);
-            if (plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0) {
-              durable = importBatch(plan.batch).durable;
-            } else {
-              durable = ensureDurable();
-            }
-          }
-          await durable;
-          await ackRelay(active, ids);
-          const verified = await markRelayVerified(active);
-          setCfg(verified);
-          setCaptured({
-            merchant: testReceived > 0 ? 'Wafra Capture' : parsed[0].merchant,
-            isTest: testReceived > 0,
-          });
-          setListening(false);
-          if (Platform.OS !== 'web') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-          }
-          return;
-        }
-        // Corrupt/unreadable queue rows are unrecoverable and should not block a
-        // future valid test until their 30-day queue retention ends.
-        if (ids.length > 0) await ackRelay(active, ids);
-      } catch {
-        // Keep listening. A flaky minute on mobile data should not end the step.
-      }
-      if (Date.now() - startedAt.current > TEST_TIMEOUT_MS) {
-        setListening(false);
-        setTimedOut(true);
-        return;
-      }
-      pollTimer.current = setTimeout(() => void poll(active), POLL_MS);
-    },
-    [ensureDurable, importBatch],
-  );
-
-  const startTest = useCallback(
-    (active: RelayConfig) => {
-      if (pollTimer.current) clearTimeout(pollTimer.current);
-      clearError();
-      setCaptured(null);
-      setTimedOut(false);
-      setListening(true);
-      startedAt.current = Date.now();
-      void poll(active);
-      if (Platform.OS !== 'web') {
-        // A rejected run URL means the Shortcut is gone or renamed. That is a
-        // different problem from "nothing arrived", and it has a different
-        // fix, so it must not wait out a two-minute timeout to say so.
-        Linking.openURL(shortcutTestUrl()).catch(() => {
-          if (pollTimer.current) clearTimeout(pollTimer.current);
-          pollTimer.current = null;
-          setListening(false);
-          fail(t('iosShortcutRunFailed'), 'shortcut');
-        });
-      }
-    },
-    [clearError, fail, poll],
-  );
-
-  /**
-   * Confirming the automation and running the proof are one action.
-   *
-   * They were two buttons, and the first of them did nothing the user could
-   * see: it wrote 'configured' and advanced to a screen whose only content was
-   * another button. Merging them removes a tap without removing a decision —
-   * the decision is "I built the automation", and the test is what answers it.
-   */
-  const automationReady = useCallback(async () => {
-    if (!cfg) return;
-    if (!(await ensureSilentDelivery(cfg))) return;
-    await clearSetupCodeFromPasteboard();
-    const configured = await markRelayConfigured(cfg);
-    setCfg(configured);
-    setStep(3);
-    startTest(configured);
-  }, [cfg, clearSetupCodeFromPasteboard, ensureSilentDelivery, startTest]);
-
+  const {
+    step,
+    pairing,
+    disconnecting,
+    preparing,
+    listening,
+    captured,
+    timedOut,
+    copied,
+    captureOn,
+    paired,
+    loading,
+    relayAvailable,
+    shortcutAvailable,
+    askPrivateMode,
+    failure,
+    recovery,
+  } = setup;
+  const errorCopy = failure ? failureCopy(failure) : null;
+  const error = errorCopy?.message ?? null;
+  const errorDetail = errorCopy?.detail ?? null;
   const errorBlock = error ? (
     <View accessibilityLiveRegion="polite">
       <Block style={styles.note}>
@@ -511,9 +230,7 @@ export default function IosSetupScreen() {
         <Button
           label={t('openSettings')}
           variant="outline"
-          onPress={() => {
-            Linking.openSettings().catch(() => {});
-          }}
+          onPress={() => void send({ type: 'open-settings' })}
           style={styles.ctaSecondary}
         />
       )}
@@ -598,7 +315,7 @@ export default function IosSetupScreen() {
               {/* A build with no relay can never pair. Saying so before the
                   tap beats a disabled button with no explanation, and beats a
                   button that fails identically every time it is pressed. */}
-              {!DEFAULT_RELAY_URL && (
+              {!relayAvailable && (
                 <Block style={styles.note}>
                   <Icon name="alert" size={16} color={theme.warning} />
                   <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
@@ -610,8 +327,8 @@ export default function IosSetupScreen() {
               {errorBlock}
 
               <Button
-                label={pairing ? t('iosConnecting') : t('iosConnectCta')}
-                disabled={pairing || !DEFAULT_RELAY_URL}
+                label={pairing || loading ? t('iosConnecting') : t('iosConnectCta')}
+                disabled={pairing || loading || !relayAvailable}
                 onPress={connect}
                 style={styles.cta}
               />
@@ -624,7 +341,7 @@ export default function IosSetupScreen() {
             </Animated.View>
           )}
 
-          {step === 1 && cfg && (
+          {step === 1 && paired && (
             <Animated.View entering={FadeInDown.duration(240)}>
               <ThemedText type="title" accessibilityRole="header">
                 {t('iosShortcutTitle')}
@@ -633,7 +350,7 @@ export default function IosSetupScreen() {
                 {t('iosShortcutBody')}
               </ThemedText>
 
-              {DEFAULT_SHORTCUT_URL && (
+              {shortcutAvailable && (
                 <Block style={styles.note}>
                   <Icon name="alert" size={16} color={theme.warning} />
                   <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
@@ -642,15 +359,15 @@ export default function IosSetupScreen() {
                 </Block>
               )}
 
-              {DEFAULT_SHORTCUT_URL ? (
+              {shortcutAvailable ? (
                 <>
                   <SectionHeader title={t('iosSetupCode')} />
                   <Row
                     last
-                    onPress={() => copy('setup', shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken))}
+                    onPress={() => void copy('setup')}
                     accessibilityLabel={t('iosCopySetupCode')}>
                     <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
-                      WAFRA ··· {cfg.ingestToken.slice(-6)}
+                      WAFRA ··· {setup.tokenPreview?.slice(-6)}
                     </ThemedText>
                     <ThemedText type="nano" style={{ color: theme.primary }}>
                       {copied === 'setup' ? t('iosCopied') : t('iosCopy')}
@@ -667,10 +384,10 @@ export default function IosSetupScreen() {
                   </Block>
                   <SectionHeader title={t('iosYourAddress')} />
                   <Row
-                    onPress={() => copy('url', cfg.ingestUrl)}
+                    onPress={() => void copy('url')}
                     accessibilityLabel={t('iosCopyAddress')}>
                     <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
-                      {cfg.ingestUrl}
+                      {setup.ingestUrl}
                     </ThemedText>
                     <ThemedText type="nano" style={{ color: theme.primary }}>
                       {copied === 'url' ? t('iosCopied') : t('iosCopy')}
@@ -678,10 +395,10 @@ export default function IosSetupScreen() {
                   </Row>
                   <Row
                     last
-                    onPress={() => copy('token', cfg.ingestToken)}
+                    onPress={() => void copy('token')}
                     accessibilityLabel={t('iosCopyToken')}>
                     <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
-                      {cfg.ingestToken.slice(0, 10)}···{cfg.ingestToken.slice(-6)}
+                      {setup.tokenPreview}
                     </ThemedText>
                     <ThemedText type="nano" style={{ color: theme.primary }}>
                       {copied === 'token' ? t('iosCopied') : t('iosCopy')}
@@ -711,7 +428,7 @@ export default function IosSetupScreen() {
               {errorBlock}
 
               <Button
-                label={DEFAULT_SHORTCUT_URL ? t('iosOpenShortcut') : t('iosOpenShortcutsApp')}
+                label={shortcutAvailable ? t('iosOpenShortcut') : t('iosOpenShortcutsApp')}
                 icon="upload"
                 onPress={() => void installShortcut()}
                 style={styles.cta}
@@ -771,6 +488,7 @@ export default function IosSetupScreen() {
               <Button
                 label={t('iosAutomationReadyTest')}
                 variant="ghost"
+                disabled={preparing}
                 onPress={() => void automationReady()}
                 style={styles.ctaSecondary}
               />
@@ -842,19 +560,19 @@ export default function IosSetupScreen() {
                 <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
               ) : captureOn && !listening ? (
                 <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
-              ) : !listening && cfg ? (
+              ) : !listening && paired ? (
                 <Button
                   label={timedOut ? t('iosTryAgain') : t('iosStartListening')}
-                  onPress={() => startTest(cfg)}
+                  onPress={startTest}
                   style={styles.cta}
                 />
               ) : null}
 
-              {captureOn && !captured && !listening && cfg && (
+              {captureOn && !captured && !listening && paired && (
                 <Button
                   label={t('iosRunTestAgain')}
                   variant="ghost"
-                  onPress={() => startTest(cfg)}
+                  onPress={startTest}
                   style={styles.ctaSecondary}
                 />
               )}
@@ -891,7 +609,7 @@ export default function IosSetupScreen() {
       {askPrivateMode && (
         <ConfirmSheet
           visible
-          onClose={() => setAskPrivateMode(false)}
+          onClose={() => void send({ type: 'cancel-private-mode' })}
           question={t('iosPrivateModeTitle')}
           body={t('iosPrivateModeBody')}
           confirmLabel={t('iosTurnOffPrivateMode')}

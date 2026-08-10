@@ -70,6 +70,38 @@ else iPhone capture works until they have finished:
 The tester's setup token lives only in their customised local Shortcut. Never
 ask them to send that code to the Mac owner.
 
+### Fast path: send the tester a signed artifact
+
+The tester does not have to build the graph by hand. The repo generates the
+complete sender-aware graph, and macOS can sign it so any iPhone will import
+it. On this Mac:
+
+```bash
+node scripts/build-ios-capture-shortcut.mjs artifacts/shortcut/WafraCapture.json
+plutil -convert binary1 artifacts/shortcut/WafraCapture.json \
+  -o artifacts/shortcut/WafraCapture-unsigned.shortcut
+shortcuts sign --mode anyone \
+  --input artifacts/shortcut/WafraCapture-unsigned.shortcut \
+  --output artifacts/shortcut/WafraCapture.shortcut
+```
+
+`shortcuts sign` prints harmless `Unrecognized attribute string flag` noise;
+exit code 0 and an `AEA1`-magic output file mean it worked. The generated graph
+passes the same import-question, no-file-action, no-literal and
+sender/eventId/receivedAt assertions that
+`scripts/check-ios-shortcut-artifact.sh` applies to a published link.
+
+Send `WafraCapture.shortcut` to the tester by AirDrop, email or iMessage —
+never the unsigned file, and never a setup code. On the iPhone they tap the
+file, Shortcuts opens it, Apple asks the setup import question, they paste the
+setup code copied from **their own** Wafra app, and tap **Add Shortcut**. That
+replaces items 1 and 2 of the list above; verification items 3 through 6 —
+manual probe, locked-phone real alert, credential-free share check, and
+publishing the iCloud link from **their** iPhone — still apply unchanged,
+because a Mac-signed file proves nothing about what Apple's Message automation
+delivers on a real device. If iOS rejects the import or the automation
+misbehaves, fall back to the tap-by-tap build below.
+
 ---
 
 ## Before you start

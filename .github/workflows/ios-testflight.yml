@@ -130,12 +130,10 @@ jobs:
       #      distribution profile. The `preview` profile in eas.json is
       #      `"distribution": "internal"`, which is ad-hoc: the profile embeds
       #      an allow-list of device UDIDs, and Apple will not take it. It also
-      #      has no `autoIncrement`, so every preview build would carry
-      #      buildNumber 1 and App Store Connect rejects a build number it has
-      #      already seen. And eas.json has no `submit.preview` profile for
-      #      --auto-submit-with-profile to name.
+      #      has no `submit.preview` profile for --auto-submit-with-profile to
+      #      name.
       #
-      #      Three independent reasons, all of which surface as a confusing
+      #      Two independent reasons, both of which surface as a confusing
       #      failure thirty minutes in. Stop now instead.
       - name: Refuse a combination that cannot reach TestFlight
         if: inputs.submit_build_id == '' && inputs.submit && inputs.profile != 'production'
@@ -143,14 +141,12 @@ jobs:
           {
             echo "# Not started — \`preview\` builds cannot go to TestFlight"
             echo
-            echo "You chose **profile = \`${{ inputs.profile }}\`** with **submit = true**. That cannot work, for three"
+            echo "You chose **profile = \`${{ inputs.profile }}\`** with **submit = true**. That cannot work, for two"
             echo "separate reasons:"
             echo
             echo "1. \`preview\` is \`\"distribution\": \"internal\"\` in \`eas.json\` — an **ad-hoc** build. Its provisioning"
             echo "   profile carries an allow-list of device UDIDs. Apple does not accept ad-hoc binaries for TestFlight."
-            echo "2. \`preview\` has no \`autoIncrement\`, so it would build \`buildNumber\` 1 every time, and App Store"
-            echo "   Connect refuses a build number it has already seen."
-            echo "3. \`eas.json\` has no \`submit.preview\` profile, so there is nothing for the submission to use."
+            echo "2. \`eas.json\` has no \`submit.preview\` profile, so there is nothing for the submission to use."
             echo
             echo "## What you probably want"
             echo
@@ -181,163 +177,13 @@ jobs:
           PROFILE: ${{ inputs.profile }}
           WANT_SUBMIT: ${{ inputs.submit }}
         run: |
-          node -e '
-            const fs = require("node:fs");
-            const app = JSON.parse(fs.readFileSync("app.json", "utf8")).expo ?? {};
-            const eas = JSON.parse(fs.readFileSync("eas.json", "utf8"));
-            const profile = process.env.PROFILE;
-            const wantSubmit = process.env.WANT_SUBMIT === "true";
-            const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-            const out = [];
-            const fail = [];
-
-            const projectId = app.extra?.eas?.projectId ?? "";
-            if (!uuid.test(projectId)) fail.push("projectId");
-
-            const bundleId = app.ios?.bundleIdentifier ?? "";
-            if (!bundleId) fail.push("bundleId");
-
-            if (!eas.build?.[profile]) fail.push("buildProfile");
-            if (wantSubmit && !eas.submit?.[profile]) fail.push("submitProfile");
-
-            if (profile === "production") {
-              const env = eas.build?.[profile]?.env ?? {};
-              const shortcut = /^https:\/\/www\.icloud\.com\/shortcuts\/[A-Za-z0-9_-]+\/?$/;
-              const https = /^https:\/\/[^\s]+$/;
-              const captureUrl = env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL ?? "";
-              const historyUrl = env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ?? "";
-              if (!shortcut.test(captureUrl)) fail.push("captureShortcut");
-              if (!shortcut.test(historyUrl)) fail.push("historyShortcut");
-              if (captureUrl && historyUrl && captureUrl === historyUrl) fail.push("distinctShortcuts");
-              if (captureUrl.includes("85bd1e080e5849b591049eccffb9a3a1")) {
-                fail.push("brokenCaptureShortcut");
-              }
-              if (!/^appl_[A-Za-z0-9]+$/.test(app.extra?.revenueCatIosKey ?? "")) {
-                fail.push("revenueCatIosKey");
-              }
-              for (const key of ["privacyPolicyUrl", "termsOfUseUrl", "supportUrl"]) {
-                if (!https.test(app.extra?.[key] ?? "")) fail.push(key);
-              }
-            }
-
-            out.push("fail=" + fail.join(","));
-            out.push("bundle_id=" + bundleId);
-            out.push("slug=" + (app.slug ?? ""));
-            out.push("version=" + (app.version ?? ""));
-            out.push("project_id=" + projectId);
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n");
-          '
-
-      - name: Stop — the app config is not ready for an EAS build
-        if: steps.config.outputs.fail != ''
-        env:
-          FAIL: ${{ steps.config.outputs.fail }}
-          PROFILE: ${{ inputs.profile }}
-        run: |
-          {
-            echo "# Not started — the selected app configuration is not ready"
-            echo
-            case ",$FAIL," in
-              *,projectId,*)
-                echo "## \`expo.extra.eas.projectId\` is missing from \`app.json\`"
-                echo
-                echo "This is the UUID that ties this checkout to a project on EAS servers. \`eas build\` has no"
-                echo "other way to work out what it is building, and there is no environment variable that"
-                echo "substitutes for it — so this run stops before spending a build minute."
-                echo
-                echo "**It blocks more than this workflow.** The same UUID is what push notifications are keyed to"
-                echo "on *both* platforms: \`EXPO_PROJECT_ID\` in \`server/wrangler.toml\` is the relay's copy of it, and"
-                echo "\`scripts/check-release-config.mjs\` refuses a release build without it. Nothing pushes until"
-                echo "this exists."
-                echo
-                echo "### How to get it"
-                echo
-                echo "It is created by \`eas init\`, which is part of the one interactive session described in"
-                echo "**docs/testflight.md, step 4**. That session writes the UUID into \`app.json\` for you; commit"
-                echo "the change and this workflow will run."
-                echo
-                echo "You can also read it off <https://expo.dev> → your project → **Project settings**, and paste it"
-                echo "in by hand:"
-                echo
-                echo '```json'
-                echo '  "extra": {'
-                echo '    "eas": { "projectId": "00000000-0000-0000-0000-000000000000" },'
-                echo '    "revenueCatAndroidKey": "",'
-                echo '    "revenueCatIosKey": ""'
-                echo '  }'
-                echo '```'
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,bundleId,*)
-                echo "## \`expo.ios.bundleIdentifier\` is missing from \`app.json\`"
-                echo
-                echo "It should be \`app.wafra.ios\`. Apple identifies the app by this string and it cannot be changed"
-                echo "after the first submission."
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,captureShortcut,*|*,historyShortcut,*|*,distinctShortcuts,*)
-                echo "## The selected build profile does not contain two valid, distinct Shortcut links"
-                echo
-                echo "The real-time **Wafra Capture** graph and the user-run **Wafra History Import** graph"
-                echo "have different permissions and data paths. Set both public iCloud links in"
-                echo "\`eas.json → build.$PROFILE.env\`, and never reuse one link for both features."
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,brokenCaptureShortcut,*)
-                echo "## The production capture link is the retired broken Shortcut"
-                echo
-                echo "That iCloud snapshot uses Shortcut Input as a Get File directory, which causes"
-                echo "Apple's **Invalid file path** error during Wafra's text probe. It is also sender-blind."
-                echo "Publish and physically test the file-free import-question graph in"
-                echo "\`docs/ios-shortcut-build.md\`, then replace the production URL."
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,revenueCatIosKey,*)
-                echo "## \`expo.extra.revenueCatIosKey\` is not a RevenueCat Apple public SDK key"
-                echo
-                echo "A production build with no \`appl_…\` key cannot sell or restore Wafra Pro."
-                echo "Add the public platform key only after the App Store products, entitlement \`pro\`,"
-                echo "and current Offering are configured in RevenueCat."
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,privacyPolicyUrl,*|*,termsOfUseUrl,*|*,supportUrl,*)
-                echo "## Required HTTPS legal or support links are missing"
-                echo
-                echo "Set `privacyPolicyUrl`, `termsOfUseUrl`, and `supportUrl` in"
-                echo "`app.json → expo.extra`. The paywall and store review must reach the same hosted pages."
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,buildProfile,*)
-                echo "## \`eas.json\` has no \`build.$PROFILE\` profile"
-                echo
-                echo "Pick a profile that exists, or add it to \`eas.json\`."
-                echo
-                ;;
-            esac
-            case ",$FAIL," in
-              *,submitProfile,*)
-                echo "## \`eas.json\` has no \`submit.$PROFILE\` profile"
-                echo
-                echo "Submission needs one with the same name as the build profile, because this workflow uses"
-                echo "\`--auto-submit-with-profile $PROFILE\`. Re-run with **submit = false** to build only."
-                echo
-                ;;
-            esac
-            echo "Nothing was built and nothing was sent to Apple."
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+          node scripts/check-release-config.mjs \
+            --intent build \
+            --platform ios \
+            --profile "$PROFILE" \
+            --submit "$WANT_SUBMIT" \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-summary "$GITHUB_STEP_SUMMARY"
 
       # ---- The Apple credentials.
       #
