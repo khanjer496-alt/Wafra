@@ -1575,16 +1575,34 @@ ok('the spoken label agrees with the sign on screen',
 {
   const shipping = [...sources('src'), ...sources('server/src')];
   const alertConsumers = shipping
-    .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`))
-    .filter((file) => /from ['"][^'"]*alert-draft['"]/.test(fs.readFileSync(file, 'utf8')));
+    .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`) &&
+      !file.endsWith(`${path.sep}alert-market-pack-types.ts`) &&
+      !file.endsWith(`${path.sep}alert-semantics.ts`))
+    .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*alert-draft['"]/.test(
+      fs.readFileSync(file, 'utf8'),
+    ));
   const metadataConsumers = shipping
     .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`) &&
-      !file.endsWith(`${path.sep}currency-metadata.ts`))
-    .filter((file) => /from ['"][^'"]*currency-metadata['"]/.test(fs.readFileSync(file, 'utf8')));
+      !file.endsWith(`${path.sep}currency-metadata.ts`) &&
+      !file.endsWith(`${path.sep}alert-market-pack-types.ts`))
+    .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*currency-metadata['"]/.test(
+      fs.readFileSync(file, 'utf8'),
+    ));
+  const marketReviewConsumers = shipping
+    .filter((file) => !file.endsWith(`${path.sep}alert-semantics.ts`) &&
+      !file.endsWith(`${path.sep}alert-market-packs.ts`) &&
+      !file.endsWith(`${path.sep}alert-market-packs.us-eu.ts`) &&
+      !file.endsWith(`${path.sep}alert-market-packs.india-me.ts`) &&
+      !file.endsWith(`${path.sep}alert-rollout.ts`))
+    .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:alert-semantics|alert-market-packs|alert-rollout)['"]/.test(
+      fs.readFileSync(file, 'utf8'),
+    ));
   ok('the review-only alert inspector has no shipping importer',
     alertConsumers.length === 0, alertConsumers.join(' | '));
   ok('ISO draft metadata reaches shipping code only through the isolated inspector',
     metadataConsumers.length === 0, metadataConsumers.join(' | '));
+  ok('first-wave market review logic has no shipping importer',
+    marketReviewConsumers.length === 0, marketReviewConsumers.join(' | '));
 }
 
 /* ── a manual workflow run cannot bypass third-party-AI consent ─────────── */

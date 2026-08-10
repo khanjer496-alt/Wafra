@@ -110,6 +110,12 @@ for (const malformed of [
 }
 
 {
+  const draft = inspectAlertDraft('Card charged USD 20.00. Available balance USD 800.00');
+  ok('charged transaction wording prevents a trailing balance-only refusal',
+    draft.decision === 'review' && !draft.reasons.includes('balance-only'), JSON.stringify(draft));
+}
+
+{
   const source = 'تم خصم AED ١٢٣٫٤٥ من البطاقة';
   const { candidate } = one(source);
   ok('candidate spans slice the exact original-script source',

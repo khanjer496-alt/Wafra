@@ -42,6 +42,13 @@ export interface AlertDraft {
   candidates: MoneyCandidate[];
 }
 
+export type CurrencyAliasMap = Readonly<Record<string, readonly CurrencyCode[]>>;
+
+export interface AlertDraftContext {
+  /** Market-scoped aliases such as KD or ج.م. Never apply these globally. */
+  currencyAliases?: CurrencyAliasMap;
+}
+
 const DIGIT_ZEROES = [0x0660, 0x06f0, 0x0966, 0x09e6, 0x0e50, 0x1040, 0xff10] as const;
 
 /** Normalize common bank-alert digits/separators without changing string length. */
@@ -112,12 +119,19 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
     const locations = [...value.matchAll(new RegExp(`\\${separator}`, 'g'))].map((m) => m.index as number);
     const last = locations[locations.length - 1];
     const tail = value.length - last - 1;
-    if (exponent > 0 && tail === exponent) {
+    if (locations.length === 1 && exponent > 0 && tail > 0 && tail <= exponent) {
       decimalAt = last;
       // A single three-digit suffix can also be a thousands group. Preserve
       // the candidate but force review rather than pretending certainty.
-      ambiguous = exponent === 3;
-    } else if (tail !== 3 || locations.some((at, i) => i > 0 && at - locations[i - 1] !== 4)) {
+      ambiguous = exponent === 3 && tail === 3;
+    } else if (exponent === 3 && tail === 3 &&
+      validGroupedInteger(value.slice(0, last), separator)) {
+      // Even repeated separators are kept ambiguous for three-decimal
+      // currencies: bank templates must prove whether the last separator is
+      // decimal before an exact value can be selected.
+      decimalAt = last;
+      ambiguous = true;
+    } else if (!validGroupedInteger(value, separator)) {
       return null;
     }
   }
@@ -156,7 +170,37 @@ interface RawCandidate {
   evidence: DraftEvidence;
 }
 
-function collectRaw(normalized: string): RawCandidate[] {
+const collectAliasRaw = (normalized: string, aliases: CurrencyAliasMap): RawCandidate[] => {
+  const tokens = Object.keys(aliases).sort((a, b) => b.length - a.length);
+  if (!tokens.length) return [];
+  const currenciesByToken = new Map(
+    tokens.map((token) => [token.toLowerCase(), aliases[token]] as const),
+  );
+  const pattern = tokens.map(escapeRe).join('|');
+  const prefix = new RegExp(`(^|[^\\p{L}\\p{N}])(${pattern})${TOKEN_GAP}(${NUMBER})`, 'giu');
+  const suffix = new RegExp(`(${NUMBER})${TOKEN_GAP}(${pattern})(?=$|[^\\p{L}\\p{N}])`, 'giu');
+  const found: RawCandidate[] = [];
+  for (const [re, tokenAt, amountAt] of [[prefix, 2, 3], [suffix, 2, 1]] as const) {
+    re.lastIndex = 0;
+    for (const match of normalized.matchAll(re)) {
+      const leading = re === prefix ? match[1].length : 0;
+      const token = match[tokenAt];
+      const currencies = currenciesByToken.get(token.toLowerCase());
+      if (!currencies?.length) continue;
+      found.push({
+        start: (match.index as number) + leading,
+        end: (match.index as number) + match[0].length,
+        amount: match[amountAt],
+        token,
+        currencies,
+        evidence: currencies.length === 1 ? 'unique-symbol' : 'ambiguous-symbol',
+      });
+    }
+  }
+  return found;
+};
+
+function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCandidate[] {
   const found: RawCandidate[] = [];
   const scanIso = (re: RegExp, prefix: boolean): void => {
     re.lastIndex = 0;
@@ -199,6 +243,9 @@ function collectRaw(normalized: string): RawCandidate[] {
   };
   scanIso(ISO_PREFIX, true);
   scanIso(ISO_SUFFIX, false);
+  // A market-scoped alias is stronger evidence than the same token's global
+  // symbol ambiguity (for example Rs in India), but never outranks an ISO code.
+  found.push(...collectAliasRaw(normalized, aliases));
   scanSymbol(SYMBOL_PREFIX, true);
   scanSymbol(SYMBOL_SUFFIX, false);
   return found
@@ -214,7 +261,7 @@ const HARD_NEGATIVES: readonly [string, RegExp][] = [
   ['aggregate-or-summary', /\b(?:spend to date|spending summary|totaling|statement total|monthly total)\b|ملخص (?:الإنفاق|المصروفات)/i],
 ];
 
-const MOVEMENT_WORDS = /\b(?:spent|purchase|purchased|paid|debited|credited|received|sent|withdrawn|deposited|refund|reversal|transfer)\b|شراء|خصم|إيداع|تحويل|استرداد/i;
+const MOVEMENT_WORDS = /\b(?:spent|purchase|purchased|paid|charged|debited|credited|received|sent|withdrawn|deposited|refund|reversal|transfer)\b|شراء|خصم|إيداع|تحويل|استرداد/i;
 const BALANCE_ONLY = /\b(?:available balance|current balance|available limit|credit limit|outstanding balance)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
 
 /**
@@ -222,14 +269,14 @@ const BALANCE_ONLY = /\b(?:available balance|current balance|available limit|cre
  * refuse: it is intentionally impossible for this first worldwide slice to
  * write an unverified amount into the ledger.
  */
-export function inspectAlertDraft(source: string): AlertDraft {
+export function inspectAlertDraft(source: string, context: AlertDraftContext = {}): AlertDraft {
   const normalizedText = normalizeAlertText(source.slice(0, 4096));
   const reasons = HARD_NEGATIVES.filter(([, pattern]) => pattern.test(normalizedText)).map(([reason]) => reason);
   if (source.length > 4096) reasons.push('input-too-long');
   if (BALANCE_ONLY.test(normalizedText) && !MOVEMENT_WORDS.test(normalizedText)) reasons.push('balance-only');
 
   const candidates: MoneyCandidate[] = [];
-  const rawCandidates = collectRaw(normalizedText);
+  const rawCandidates = collectRaw(normalizedText, context.currencyAliases);
   if (rawCandidates.length > 16) reasons.push('too-many-money-candidates');
   for (const raw of rawCandidates.slice(0, 16)) {
     const interpretations: MoneyInterpretation[] = [];
