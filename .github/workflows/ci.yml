@@ -14,6 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-paths:
+    runs-on: ubuntu-latest
+    outputs:
+      ios: ${{ steps.filter.outputs.ios }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ios:
+              - 'app.json'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/ci.yml'
+              - 'modules/wafra-message-history/**'
+              - 'src/app/import-sms.tsx'
+              - 'src/lib/historical-import.ts'
+              - 'scripts/test/run.sh'
+              - 'scripts/test/native-history-store.*'
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -59,6 +80,56 @@ jobs:
       - name: Relay Worker dry run
         working-directory: server
         run: npm run build:check
+
+  native-ios:
+    needs: native-paths
+    if: needs.native-paths.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26.2 or newer
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          test -n "$BEST"
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          VER=$(xcodebuild -version | head -1 | awk '{print $2}')
+          MAJOR=${VER%%.*}
+          MINOR=$(printf '%s' "$VER" | cut -d. -f2)
+          if [ "$MAJOR" -lt 26 ] || { [ "$MAJOR" -eq 26 ] && [ "$MINOR" -lt 2 ]; }; then
+            echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate the native iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Test the protected history bridge and App Intent integration
+        run: bash scripts/test/native-history-store.sh
+
+      - name: Install CocoaPods dependencies
+        run: npx pod-install
+
+      - name: Compile the iOS app
+        run: |
+          xcodebuild \
+            -workspace ios/Wafra.xcworkspace \
+            -scheme Wafra \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
   # The browser suites catch what unit tests structurally cannot: a route that
   # resolves to nothing, a screen that renders blank, a total that disagrees

@@ -1,6 +1,14 @@
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -36,6 +44,19 @@ type FeatureRow = {
 };
 
 type PriceStatus = 'unavailable' | 'loading' | 'ready' | 'failed';
+type BillingAction = 'buy' | 'restore' | 'manage' | null;
+
+function configuredUrl(key: 'privacyPolicyUrl' | 'termsOfUseUrl'): string | null {
+  const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
+  const value = extra?.[key];
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The list is built per platform, because the same feature is delivered two
@@ -78,9 +99,13 @@ export default function ProScreen() {
     billingAvailable ? 'loading' : 'unavailable',
   );
   const [priceRequest, setPriceRequest] = useState(0);
+  const [billingAction, setBillingAction] = useState<BillingAction>(null);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const trial = trialDaysLeft(state);
   const rows = features();
+  const privacyPolicyUrl = configuredUrl('privacyPolicyUrl');
+  const termsOfUseUrl = configuredUrl('termsOfUseUrl');
+  const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;
 
   useEffect(() => {
     if (!billingAvailable) return;
@@ -128,53 +153,81 @@ export default function ProScreen() {
    * modal. What they have to do is be visible, which an alert was not.
    */
   const buy = async () => {
+    if (billingAction) return;
     setNotice(null);
     if (!billingAvailable) {
       setNotice({ title: t('playOnlyTitle'), body: t('playOnlyBody') });
+      return;
+    }
+    if (!legalReady) {
+      setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') });
       return;
     }
     if (!storePrices?.[plan]) {
       setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') });
       return;
     }
-    const outcome = await purchasePro(plan);
-    if (outcome === 'granted') setPro(true);
-    // 'cancelled' is the user closing the sheet, and gets no dialogue —
-    // telling someone their own decision failed is noise. 'failed' is the
-    // store: an unactivated SKU, an SDK that would not configure, a throw.
-    // Without this branch the button was simply inert forever, which reads as
-    // a broken app rather than a broken listing.
-    else if (outcome === 'failed')
-      setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
+    setBillingAction('buy');
+    try {
+      const outcome = await purchasePro(plan);
+      if (outcome === 'granted') setPro(true);
+      // 'cancelled' is the user closing the sheet, and gets no dialogue —
+      // telling someone their own decision failed is noise. 'failed' is the
+      // store: an unactivated SKU, an SDK that would not configure, a throw.
+      // Without this branch the button was simply inert forever, which reads as
+      // a broken app rather than a broken listing.
+      else if (outcome === 'failed')
+        setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
+    } finally {
+      setBillingAction(null);
+    }
   };
 
   const restore = async () => {
+    if (billingAction) return;
     setNotice(null);
     if (!isBillingAvailable()) {
       setNotice({ title: t('nothingToRestore'), body: t('nothingToRestoreBody') });
       return;
     }
-    const restored = await restorePro();
-    if (restored) setPro(true);
-    // null is "could not ask the store", NOT "never paid". A subscriber
-    // reinstalling on a bad connection must not be told their purchase does
-    // not exist — they should be told to try again.
-    else if (restored === null)
-      setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
-    else setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
+    setBillingAction('restore');
+    try {
+      const restored = await restorePro();
+      if (restored) setPro(true);
+      // null is "could not ask the store", NOT "never paid". A subscriber
+      // reinstalling on a bad connection must not be told their purchase does
+      // not exist — they should be told to try again.
+      else if (restored === null)
+        setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
+      else setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
+    } finally {
+      setBillingAction(null);
+    }
   };
 
   const manage = async () => {
+    if (billingAction) return;
+    setBillingAction('manage');
     setNotice(null);
-    const url = await subscriptionManagementUrl();
-    if (!url) {
-      setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
-      return;
-    }
     try {
+      const url = await subscriptionManagementUrl();
+      if (!url) {
+        setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
+        return;
+      }
       await Linking.openURL(url);
     } catch {
       setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
+    } finally {
+      setBillingAction(null);
+    }
+  };
+
+  const openLegal = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      setNotice({ title: t('legalLinkFailed'), body: t('legalLinkFailedBody') });
     }
   };
 
@@ -255,15 +308,15 @@ export default function ProScreen() {
 
           {!state.pro && (
             <Section index={3} style={styles.buy}>
-              <View style={styles.plans}>
+              <View style={styles.plans} accessibilityRole="radiogroup">
                 {(['yearly', 'monthly'] as ProPlan[]).map((p) => {
                   const selected = plan === p;
                   return (
                     <Pressable
                       key={p}
-                      accessibilityRole="button"
+                      accessibilityRole="radio"
                       accessibilityState={{
-                        selected,
+                        checked: selected,
                         disabled: billingAvailable && priceStatus === 'ready' && !storePrices?.[p],
                       }}
                       disabled={billingAvailable && priceStatus === 'ready' && !storePrices?.[p]}
@@ -296,9 +349,18 @@ export default function ProScreen() {
                 })}
               </View>
               <Button
-                label={t('getPro')}
+                label={
+                  billingAction === 'buy'
+                    ? t('purchaseInProgress')
+                    : storePrices?.[plan]
+                      ? tf('startPlanWithPrice', {
+                          plan: plan === 'yearly' ? t('yearly') : t('monthly'),
+                          price: storePrices[plan]?.priceString ?? '',
+                        })
+                      : t('getPro')
+                }
                 onPress={buy}
-                disabled={billingAvailable && !storePrices?.[plan]}
+                disabled={billingAction !== null || (billingAvailable && !storePrices?.[plan])}
               />
               {billingAvailable && priceStatus === 'failed' && (
                 <Button
@@ -307,22 +369,62 @@ export default function ProScreen() {
                   onPress={() => setPriceRequest((request) => request + 1)}
                 />
               )}
-              <Button variant="ghost" label={t('restorePurchase')} onPress={restore} />
-              {billingAvailable && (
-                <Button variant="ghost" label={t('manageSubscription')} onPress={manage} />
+              <Button
+                variant="ghost"
+                label={t('restorePurchase')}
+                disabled={billingAction !== null}
+                onPress={restore}
+              />
+              {Platform.OS !== 'web' && (
+                <Button
+                  variant="ghost"
+                  label={t('manageSubscription')}
+                  disabled={billingAction !== null}
+                  onPress={manage}
+                />
               )}
               <ThemedText type="nano" themeColor="textTertiary">
-                {t('subscriptionRenewalTerms')}
+                {t(Platform.OS === 'ios' ? 'subscriptionRenewalTermsIos' : 'subscriptionRenewalTermsAndroid')}
               </ThemedText>
             </Section>
           )}
-          {state.pro && billingAvailable && (
+          {state.pro && Platform.OS !== 'web' && (
             <Section index={3} style={styles.buy}>
-              <Button variant="ghost" label={t('manageSubscription')} onPress={manage} />
+              <Button
+                variant="ghost"
+                label={t('manageSubscription')}
+                disabled={billingAction !== null}
+                onPress={manage}
+              />
             </Section>
+          )}
+          {(privacyPolicyUrl || termsOfUseUrl) && (
+            <View style={styles.legalLinks}>
+              {privacyPolicyUrl && (
+                <Pressable
+                  accessibilityRole="link"
+                  hitSlop={8}
+                  onPress={() => void openLegal(privacyPolicyUrl)}>
+                  <ThemedText type="meta" style={{ color: theme.primary }}>
+                    {t('privacyPolicy')}
+                  </ThemedText>
+                </Pressable>
+              )}
+              {termsOfUseUrl && (
+                <Pressable
+                  accessibilityRole="link"
+                  hitSlop={8}
+                  onPress={() => void openLegal(termsOfUseUrl)}>
+                  <ThemedText type="meta" style={{ color: theme.primary }}>
+                    {t('termsOfUse')}
+                  </ThemedText>
+                </Pressable>
+              )}
+            </View>
           )}
           {notice && (
             <View
+              accessibilityRole="alert"
               accessibilityLiveRegion="polite"
               style={[
                 styles.notice,
@@ -385,6 +487,11 @@ const styles = StyleSheet.create({
   plans: {
     flexDirection: 'row',
     gap: Spacing.two + 2,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.three,
   },
   notice: {
     borderWidth: StyleSheet.hairlineWidth,

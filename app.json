@@ -95,7 +95,8 @@
           "enableBackgroundRemoteNotifications": true
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "./modules/wafra-message-history/plugin"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -106,7 +107,10 @@
         "projectId": "fa920e7b-c661-4517-917d-26e8b4878721"
       },
       "revenueCatAndroidKey": "",
-      "revenueCatIosKey": ""
+      "revenueCatIosKey": "",
+      "privacyPolicyUrl": "",
+      "termsOfUseUrl": "",
+      "supportUrl": ""
     }
   }
 }

@@ -126,6 +126,13 @@ export interface DuplicateGuard {
   /** True when the ledger already has this, by any of the three tests. */
   has(c: DuplicateCandidate): boolean;
   /**
+   * Existing row consumed by the most recent `has` call, when there was one.
+   * Reading clears the value. Import planning uses this to promote a live
+   * capture to an exact historical Message identity instead of dropping that
+   * identity before the reducer can preserve later, distinct history rows.
+   */
+  takeMatchedId(): string | null;
+  /**
    * The id of an existing PUSH row this SMS is the better version of, if any.
    *
    * A bank app posts its notification the instant the card is used and the
@@ -147,6 +154,8 @@ export interface DuplicateGuard {
    * became one row — with the first message's money simply gone.
    */
   consume(id: string): void;
+  /** Consume ordinary capture indexes while preserving card-settlement pairing capacity. */
+  consumeCapture(id: string): void;
   /** Record it, so the rest of this same batch dedupes against it too. */
   add(c: DuplicateCandidate): void;
 }
@@ -200,6 +209,9 @@ function crossChannelPair(row: SeenEvent, title: string): boolean {
 /** One occurrence filed under a day/amount/title fingerprint. */
 interface SeenOccurrence {
   ts: number | null;
+  id?: string;
+  /** A retained Apple Message has an exact, opaque GUID-derived identity. */
+  historyIdentity: boolean;
   /** A row with no event clock explains one later capture, not all of them. */
   consumed: boolean;
 }
@@ -209,6 +221,8 @@ interface SeenCardPayment {
   ts: number | null;
   side: 'debit' | 'receipt';
   title: string;
+  historyIdentity: boolean;
+  id?: string;
   /** One bank-side alert can consume only one card-side receipt. */
   paired: boolean;
 }
@@ -233,20 +247,28 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
 }
 
 export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
+  let lastMatchedId: string | null = null;
   /** dedupeKey → the capture times filed under it. */
   const seen = new Map<string, SeenOccurrence[]>();
-  const note = (key: string, ts: number | null) => {
+  /** The same stored row can appear in title and cross-channel indexes. */
+  const seenById = new Map<string, SeenOccurrence>();
+  const note = (key: string, ts: number | null, smsKey?: string, id?: string) => {
     const at = seen.get(key);
-    if (at) at.push({ ts, consumed: false });
-    else seen.set(key, [{ ts, consumed: false }]);
+    const occurrence = { ts, id, historyIdentity: smsKey?.startsWith('h') === true, consumed: false };
+    if (at) at.push(occurrence);
+    else seen.set(key, [occurrence]);
+    if (id) seenById.set(id, occurrence);
   };
   for (const t of existing) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
     // identical purchase later that day look like the same event.
-    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t));
+    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.smsKey, t.id);
   }
   const seenSms = new Set(existing.map((t) => t.smsKey).filter(Boolean) as string[]);
+  const seenSmsIds = new Map(
+    existing.filter((t) => t.smsKey).map((t) => [t.smsKey as string, t.id]),
+  );
   /** A day/amount/direction key still needs a capture time to identify an event. */
   const crossChannel = new Map<string, SeenEvent[]>();
   /** Ledger rows by id, so `consume` does not have to scan every bucket. */
@@ -259,10 +281,12 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
   const cardPayments = new Map<string, SeenCardPayment[]>();
+  const cardPaymentById = new Map<string, SeenCardPayment>();
   const noteCardPayment = (key: string, event: SeenCardPayment) => {
     const rows = cardPayments.get(key);
     if (rows) rows.push(event);
     else cardPayments.set(key, [event]);
+    if (event.id) cardPaymentById.set(event.id, event);
   };
   const manualPayments = new Map<string, SeenManualPayment[]>();
   const noteManualPayment = (key: string) => {
@@ -286,6 +310,8 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
         side: t.cardPaymentSide,
         title: t.title,
+        historyIdentity: t.smsKey?.startsWith('h') === true,
+        id: t.id,
         paired: false,
       });
     }
@@ -296,7 +322,25 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
 
   return {
     has(c) {
-      if (c.smsKey && seenSms.has(c.smsKey)) return true;
+      lastMatchedId = null;
+      if (c.smsKey && seenSms.has(c.smsKey)) {
+        lastMatchedId = seenSmsIds.get(c.smsKey) ?? null;
+        return true;
+      }
+      // The live Shortcut/Android identity predates history GUID hashing, but
+      // its `s{exact-message-time}-{amount}` key is still a strong bridge.
+      // Use it before merchant-title matching so a parser upgrade (or a user's
+      // corrected title) cannot leave the same Message counted twice. Consume
+      // it one-to-one: another history GUID at the same second is a real row.
+      if (c.smsKey?.startsWith('h') && Number.isFinite(c.ts)) {
+        const legacyId = seenSmsIds.get(`s${c.ts}-${c.amountFils}`);
+        const occurrence = legacyId ? seenById.get(legacyId) : undefined;
+        if (legacyId && occurrence && !occurrence.consumed) {
+          occurrence.consumed = true;
+          lastMatchedId = legacyId;
+          return true;
+        }
+      }
       const mine = candidateTime(c);
       if (c.eventKind === 'cardPayment' && c.accountId) {
         const side = c.cardPaymentSide ?? 'unknown';
@@ -309,6 +353,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         }
       }
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
+        const candidateIsHistory = c.smsKey?.startsWith('h') === true;
         const rows = cardPayments.get(`${c.amountFils}|${c.accountId}`) ?? [];
         const paired = rows.find(
           (row) =>
@@ -319,14 +364,19 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         );
         if (paired) {
           paired.paired = true;
+          lastMatchedId = paired.id ?? null;
           return true;
         }
         // Provider/delivery copies on the SAME side can still race by seconds.
         // Once an opposite side has been consumed, however, it cannot act as
         // a generic title duplicate for every later genuine receipt.
-        if (
-          rows.some(
-            (row) =>
+        const sameSide = rows.find(
+          (row) =>
+              // Exact historical identity was handled by seenSms. Two
+              // different retained Messages on the same settlement side are
+              // two events; an opposite side is still one settlement pair.
+              !(candidateIsHistory && row.historyIdentity) &&
+              (!(candidateIsHistory || row.historyIdentity) || !row.paired) &&
               row.side === c.cardPaymentSide &&
               // Seconds apart, but either side of midnight: the provider
               // stamped 23:59:58 and the delivery receiver 00:00:03, so an
@@ -335,19 +385,45 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
               // second payment is minutes away, not seconds.
               sameOrAdjacentDate(row.date, c.date) &&
               row.title.toLowerCase() === c.title.toLowerCase() &&
-              closeEnough(row.ts, mine, SAME_EVENT_MS),
-          )
-        ) return true;
+            closeEnough(row.ts, mine, SAME_EVENT_MS),
+        );
+        if (sameSide) {
+          // One live capture may account for one historical Message, not every
+          // equal payment in the next two minutes.
+          if (candidateIsHistory || sameSide.historyIdentity) sameSide.paired = true;
+          lastMatchedId = sameSide.id ?? null;
+          return true;
+        }
       } else {
         const at = seen.get(dedupeKey(c.date, c.amountFils, c.title));
         if (at) {
+          // Two different GUID-derived identities are two different retained
+          // Apple Messages, even when the bank stamped both in the same
+          // second. Exact re-imports were already caught by seenSms above.
+          // Continue comparing against Android/live captures so importing
+          // history after enabling live capture still removes overlap.
+          const comparable = c.smsKey?.startsWith('h')
+            ? at.filter((row) => !row.historyIdentity)
+            : at;
           // Same day, same amount, same name. That is one event captured twice
           // UNLESS both sides carry a timestamp and those are far enough apart
           // to be two separate visits. Without this the second identical charge
           // of the day was silently dropped and the user's spending under-read
           // — the comment here claimed both rows survived; the code kept one.
-          if (mine === null) return true;
-          if (at.some((o) => o.ts !== null && Math.abs(o.ts - mine) <= SAME_EVENT_MS)) {
+          if (mine === null && comparable.length > 0) return true;
+          const timed = comparable.find(
+            (occurrence) =>
+              (!(c.smsKey?.startsWith('h') || occurrence.historyIdentity) ||
+                !occurrence.consumed) &&
+              occurrence.ts !== null &&
+              Math.abs(occurrence.ts - mine!) <= SAME_EVENT_MS,
+          );
+          if (timed) {
+            // Exact history/live overlap is one-to-one. Without consuming the
+            // live occurrence it silences every distinct historical Message
+            // the bank happened to timestamp in the same two-minute window.
+            if (c.smsKey?.startsWith('h') || timed.historyIdentity) timed.consumed = true;
+            lastMatchedId = timed.id ?? null;
             return true;
           }
           // A row with no event clock at all — every manually added row, since
@@ -355,9 +431,10 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           // explain the bank's message about it, but only ONE of them: treating
           // it as a permanent day-long veto meant a user who logged an AED 400
           // Salik top-up by hand lost the genuine second one nine hours later.
-          const timeless = at.find((o) => o.ts === null && !o.consumed);
+          const timeless = comparable.find((o) => o.ts === null && !o.consumed);
           if (timeless) {
             timeless.consumed = true;
+            lastMatchedId = timeless.id ?? null;
             return true;
           }
         }
@@ -380,10 +457,16 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           // single AED 25 SMS silenced every AED 25 push in the next two
           // minutes, and the second real charge was never imported at all.
           match.consumed = true;
+          lastMatchedId = match.id ?? null;
           return true;
         }
       }
       return false;
+    },
+    takeMatchedId() {
+      const id = lastMatchedId;
+      lastMatchedId = null;
+      return id;
     },
     supersedes(c) {
       if (c.channel === 'push') return null;
@@ -407,10 +490,24 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
     consume(id) {
       const row = crossById.get(id);
       if (row) row.consumed = true;
+      const occurrence = seenById.get(id);
+      if (occurrence) occurrence.consumed = true;
+      const cardPayment = cardPaymentById.get(id);
+      if (cardPayment) cardPayment.paired = true;
+    },
+    consumeCapture(id) {
+      // Exact source identity has accounted for this row in the ordinary
+      // title/cross-channel indexes, but it has not consumed the other alert
+      // for the same card settlement. Marking `paired` here made a repeated
+      // history import offer the opposite debit/receipt leg as new every time.
+      const row = crossById.get(id);
+      if (row) row.consumed = true;
+      const occurrence = seenById.get(id);
+      if (occurrence) occurrence.consumed = true;
     },
     add(c) {
       const ts = candidateTime(c);
-      note(dedupeKey(c.date, c.amountFils, c.title), ts);
+      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.smsKey, c.id);
       if (c.smsKey) seenSms.add(c.smsKey);
       noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
         ts,
@@ -424,6 +521,8 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           ts,
           side: c.cardPaymentSide,
           title: c.title,
+          historyIdentity: c.smsKey?.startsWith('h') === true,
+          id: c.id,
           paired: false,
         });
       }
@@ -531,6 +630,14 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         !prior.userEdited &&
         isOppositeCardPaymentPair(row, prior, rowTime)
       ) return true;
+      // Distinct Apple Message identities survive hydration/migration too.
+      // Opposite card-payment sides above are deliberately one settlement;
+      // two distinct same-side messages are two real events.
+      if (
+        row.smsKey?.startsWith('h') &&
+        prior.smsKey?.startsWith('h') &&
+        row.smsKey !== prior.smsKey
+      ) return false;
       if (
         row.date !== prior.date ||
         row.amountFils !== prior.amountFils ||
@@ -575,6 +682,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         ? row.cardPaymentSide === 'receipt' ? row : prior
         : prior.viaPush && !row.viaPush ? row : prior;
     const secondary = preferred === prior ? row : prior;
+    const historicalIdentity = row.smsKey?.startsWith('h')
+      ? row
+      : prior.smsKey?.startsWith('h')
+        ? prior
+        : undefined;
     kept[duplicateAt] = {
       ...secondary,
       ...preferred,
@@ -588,6 +700,12 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // cross-channel branch above on the NEXT hydrate, and ate another
       // genuine charge. Every launch, compounding.
       viaPush: preferred.viaPush,
+      // A live/history merge must retain the stable Message identity. If the
+      // live `s...` key wins, the next distinct history GUID can merge into
+      // the same row too and vanish. The opaque h-key also makes re-imports
+      // exact after the first overlap reconciliation.
+      smsKey: historicalIdentity?.smsKey ?? preferred.smsKey,
+      ts: historicalIdentity?.ts ?? preferred.ts,
       // Preserve optional user-facing detail if only the poorer capture had
       // it; neither row is userEdited, but old builds could attach a note.
       ...(preferred.userEdited

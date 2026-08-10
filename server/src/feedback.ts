@@ -27,6 +27,11 @@
  *     how you end up storing the first four thousand characters of a bank
  *     statement in a field that was supposed to hold a sentence.
  */
+import {
+  FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+  FEEDBACK_WIRE_SCHEMA,
+  type FeedbackWirePayload,
+} from '@/lib/feedback-wire';
 
 /**
  * Whole-body ceiling. A feedback POST is a sentence and a small diagnostic; a
@@ -54,7 +59,7 @@ export const MAX_FEEDBACK_TEXT_LENGTH = 4_000;
  * anonymised failing-message shapes) and fits no ledger at all, so the failure
  * is a 413 at the wire rather than a database full of transactions.
  */
-export const MAX_DIAGNOSTIC_BYTES = 16 * 1024;
+export const MAX_DIAGNOSTIC_BYTES = FEEDBACK_DIAGNOSTIC_MAX_BYTES;
 
 /** Feedback is deleted this long after it arrives, acted on or not. */
 export const FEEDBACK_RETENTION_SECONDS = 14 * 24 * 60 * 60;
@@ -73,6 +78,8 @@ export interface FeedbackRecord {
   locale: string | null;
   /** Serialized JSON, or null. Stored as the client sent it, bounded. */
   diagnostic: string | null;
+  /** Always false in this release; true is rejected at the wire. */
+  aiReviewConsent: false;
 }
 
 export interface FeedbackReject {
@@ -126,13 +133,10 @@ export function validateFeedback(value: unknown): FeedbackRecord | FeedbackRejec
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { error: 'bad_json', status: 400 };
   }
-  const body = value as {
-    text?: unknown;
-    appVersion?: unknown;
-    platform?: unknown;
-    locale?: unknown;
-    diagnostic?: unknown;
-  };
+  const body = value as Partial<Record<keyof FeedbackWirePayload, unknown>>;
+
+  if (body.schema !== FEEDBACK_WIRE_SCHEMA) return { error: 'bad_schema', status: 400 };
+  if (body.aiReviewConsent !== false) return { error: 'ai_consent_unsupported', status: 400 };
 
   if (typeof body.text !== 'string') return { error: 'empty', status: 400 };
   const text = scrubProse(body.text);
@@ -184,7 +188,7 @@ export function validateFeedback(value: unknown): FeedbackRecord | FeedbackRejec
     diagnostic = serialized;
   }
 
-  return { text, appVersion, platform, locale, diagnostic };
+  return { text, appVersion, platform, locale, diagnostic, aiReviewConsent: false };
 }
 
 /**

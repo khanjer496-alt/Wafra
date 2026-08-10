@@ -456,6 +456,40 @@ const afterFirst = apply(BASE, first);
   ok('and the reminder itself lands as a bill due',
     plan.billDues.length === 1 && plan.billDues[0].merchant === 'E&', plan.billDues);
   ok('...and never as a transaction', plan.txCount === 0, plan.batch.transactions);
+
+  const newerReminder = {
+    ...reminder,
+    amountFils: 81234,
+    date: '2026-09-18',
+    dueDay: 18,
+    smsTs: smsTs + 31 * 86400000,
+  };
+  const historyPlan = buildImportPlan(
+    [reminder, newerReminder],
+    BASE,
+    newerReminder.smsTs,
+    new Date(2026, 8, 2),
+  );
+  ok('full history keeps only the newest recurring reminder per merchant',
+    historyPlan.billDues.length === 1 &&
+      historyPlan.billDues[0].amountFils === 81234 &&
+      historyPlan.billDues[0].dueDay === 18,
+    historyPlan.billDues);
+
+  const staleHistoryPlan = buildImportPlan(
+    [{
+      ...reminder,
+      date: null,
+      smsTs: Date.parse('2019-08-01T10:00:00Z'),
+      sourceEventId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    }],
+    BASE,
+    0,
+    new Date(2026, 8, 2),
+  );
+  ok('historical import does not resurrect years-old recurring bills',
+    staleHistoryPlan.billDues.length === 0,
+    staleHistoryPlan.billDues);
 }
 
 /* ...but never one the user corrected by hand. */

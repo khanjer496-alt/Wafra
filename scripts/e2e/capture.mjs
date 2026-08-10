@@ -17,11 +17,12 @@
  *   node scripts/e2e/capture.mjs --out DIR [--scheme dark] [--lang en] [--base URL]
  *   node scripts/e2e/capture.mjs --out DIR --all      # both schemes, both languages
  *
- *   # App Store sized captures — exact accepted pixel sizes, no alpha channel:
+ *   # Web review captures at App Store dimensions — never upload these:
  *   node scripts/e2e/capture.mjs --out DIR --store [--device iphone-6.9] [--all]
  *   node scripts/e2e/capture.mjs --out DIR --store --device iphone-6.5
  */
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { stripAlpha, readPngHeader } from './png-rgb.mjs';
 
@@ -49,9 +50,9 @@ fs.mkdirSync(OUT, { recursive: true });
  * `review` is the everyday one and must not move: it is the size every visual
  * review so far has been read at.
  *
- * The `store` entries exist because App Store Connect matches screenshots on
- * EXACT pixel dimensions and rejects anything else, so the six 1080x2160 files
- * in docs/store-assets — fine for Play — cannot be uploaded to Apple at all.
+ * The `store` entries let reviewers inspect compositions at App Store pixel
+ * dimensions. They are web renders, not upload assets; launch screenshots must
+ * come from the signed native Release build on the target platform.
  * Each width/height below is a real iPhone's logical size, chosen so that
  * logical x scale lands exactly on an accepted size with no rounding:
  *
@@ -99,7 +100,7 @@ const PUSHED = [
 ];
 
 /**
- * The store cut: six surfaces, in listing order.
+ * The web store-dimension review cut: six surfaces, in listing order.
  *
  * Not the same list as the review sweep, and deliberately shorter — Apple
  * allows up to ten screenshots per display size, but the listing is read left
@@ -224,7 +225,7 @@ async function setLanguage(page, lang) {
 }
 
 /**
- * Write one screenshot, and in store mode make it uploadable.
+ * Write one screenshot, and in store mode make the web review image opaque.
  *
  * The verification is not decoration. `deviceScaleFactor` is advisory — a
  * viewport Chromium cannot honour, a stray zoom, or a scrollbar all silently
@@ -296,14 +297,39 @@ async function captureRun(browser, { scheme, lang, device = 'review', store = fa
 
   let bad = 0;
   for (const s of surfaces) {
-    if (s.kind === 'tab') await openTab(s.name, s.label);
+    if (s.kind === 'tab') {
+      // A pushed Expo Router screen sits above the tabs. Return to the tab
+      // navigator before tapping, otherwise a hidden tab can miss and three
+      // differently named files all capture the previous pushed route.
+      await page.goto(`${BASE}/`, { waitUntil: 'networkidle' }).catch(() => {});
+      await settle(page, 250);
+      await openTab(s.name, s.label);
+    }
     else await page.goto(BASE + s.path, { waitUntil: 'networkidle' }).catch(() => {});
     await settle(page, 400);
     await waitForStable(page);
     if (!(await shoot(page, `${OUT}/${prefix}-${s.file}.png`, { store, expect }))) bad++;
     console.log(`shot ${prefix}-${s.file}`);
   }
+
+  if (store) {
+    const files = fs.readdirSync(OUT)
+      .filter((file) => file.startsWith(`${prefix}-`) && file.endsWith('.png'));
+    const byHash = new Map();
+    for (const file of files) {
+      const hash = createHash('sha256').update(fs.readFileSync(`${OUT}/${file}`)).digest('hex');
+      const matches = byHash.get(hash) ?? [];
+      matches.push(file);
+      byHash.set(hash, matches);
+    }
+    const duplicates = [...byHash.values()].filter((matches) => matches.length > 1);
+    for (const matches of duplicates) {
+      console.log(`! duplicate store frames: ${matches.join(', ')}`);
+      bad += matches.length - 1;
+    }
+  }
   if (bad) console.log(`! ${prefix}: ${bad} file(s) failed the size/alpha check`);
+  if (bad) process.exitCode = 1;
 
   // Hydration noise on cold route loads is upstream and expected; drop it so a
   // real error stands out. See scripts/e2e/README.md.

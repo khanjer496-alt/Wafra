@@ -55,6 +55,10 @@ import {
   type FeedbackDetail,
 } from '@/lib/feedback';
 import { FeedbackSendError } from '@/lib/feedback-transport';
+import {
+  FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+  serializeFeedbackWire,
+} from '@/lib/feedback-wire';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { shareText } from '@/lib/share-text';
@@ -91,6 +95,7 @@ export function describeSendFailure(error: unknown): { title: string; body: stri
       case 'network':
         return { title: t('feedbackOfflineTitle'), body: t('feedbackOfflineBody') };
       case 'too_large':
+      case 'diagnostic_too_large':
         return { title: t('feedbackTooLargeTitle'), body: t('feedbackTooLargeBody') };
       case 'rate_limited':
         return { title: t('feedbackBusyTitle'), body: t('feedbackBusyBody') };
@@ -215,6 +220,10 @@ export default function FeedbackScreen() {
   );
 
   const preview = useMemo(() => formatFeedbackPayload(payload), [payload]);
+  const attachmentTooLarge = useMemo(
+    () => serializeFeedbackWire(attachment).diagnosticBytes > FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+    [attachment],
+  );
 
   /**
    * Private Mode does not hide the other two levels, it disables them WITH the
@@ -240,7 +249,7 @@ export default function FeedbackScreen() {
   // user is looking at is the one that gets posted, so sending while a level
   // is still being built would post the previous level's attachment under the
   // new level's label — the exact disagreement this screen exists to prevent.
-  const ready = payload.message.length > 0 && !sending && !preparing;
+  const ready = payload.message.length > 0 && !sending && !preparing && !attachmentTooLarge;
 
   const send = async () => {
     setSending(true);
@@ -350,11 +359,15 @@ export default function FeedbackScreen() {
               onPress={() => setConfirming(true)}
             />
             <Button label={t('feedbackSaveCopy')} variant="outline" onPress={saveCopy} />
-            {!ready && !sending && (
+            {attachmentTooLarge && !preparing ? (
+              <ThemedText type="meta" themeColor="textTertiary">
+                {t('feedbackTooLargeBody')}
+              </ThemedText>
+            ) : !ready && !sending ? (
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('feedbackNeedsMessage')}
               </ThemedText>
-            )}
+            ) : null}
             {notice && (
               <Block>
                 <ThemedText type="small">{notice.title}</ThemedText>

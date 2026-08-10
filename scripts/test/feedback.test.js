@@ -21,6 +21,7 @@ const {
   FEEDBACK_DETAILS,
   FEEDBACK_MESSAGE_MAX,
   FEEDBACK_SCHEMA,
+  FEEDBACK_SHAPES_MAX,
   FeedbackTransportMissingError,
   buildFeedbackPayload,
   formatFeedbackPayload,
@@ -29,6 +30,13 @@ const {
   setFeedbackTransport,
   submitFeedback,
 } = require('./build/app-feedback.js');
+const {
+  FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+  FEEDBACK_RETENTION_DAYS,
+  FEEDBACK_WIRE_SCHEMA,
+  serializeFeedbackWire,
+  toFeedbackWirePayload,
+} = require('./build/feedback-wire.js');
 
 let pass = 0;
 let fail = 0;
@@ -218,6 +226,36 @@ const build = (over = {}) =>
     ledger: LEDGER,
     ...over,
   });
+
+{
+  const suffix = (index) =>
+    String.fromCharCode(65 + Math.floor(index / 26)) + String.fromCharCode(65 + (index % 26));
+  const many = Array.from({ length: 60 }, (_, index) => ({
+    id: `many-${index}`,
+    type: 'expense',
+    amountFils: 100,
+    category: 'other',
+    accountId: 'acc-cur',
+    title: 'Card purchase',
+    date: '2026-07-01',
+    source: 'sms',
+    raw: `Bank format ${suffix(index)}: AED 1.00 spent at UNKNOWN SHOP.`,
+  }));
+  const payload = buildFeedbackPayload({
+    message: 'Many formats were not understood.',
+    detail: 'shapes',
+    build: BUILD,
+    ledger: { ...LEDGER, transactions: many },
+  });
+  const serialized = serializeFeedbackWire(payload);
+  ok('feedback attaches only the highest-value format shapes',
+    payload.shapes.length === FEEDBACK_SHAPES_MAX && payload.counts.formats === 60);
+  ok('the preview says how many additional formats stayed local',
+    formatFeedbackPayload(payload).includes('35 additional format(s) stayed on this phone.'));
+  ok('a many-format report remains below the shared Worker diagnostic ceiling',
+    serialized.diagnosticBytes <= FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+    `${serialized.diagnosticBytes} bytes`);
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 1. The redaction. This is the block the feature exists to satisfy.
@@ -436,6 +474,9 @@ for (const asked of ['shapes', 'figures']) {
   seen('language', p.build.language);
   seen('marketId', p.build.marketId);
   seen('currency', p.build.currency);
+  seen('retentionDays', p.delivery.retentionDays);
+  seen('reviewedBy', 'Wafra maintainers');
+  seen('thirdPartyAi', p.delivery.thirdPartyAi ? 'yes' : 'no');
   for (const [k, v] of Object.entries(p.counts)) seen(k, v);
   ok('every field of the payload is rendered in the report', missing.length === 0,
     missing.join(' | '));
@@ -446,6 +487,23 @@ for (const asked of ['shapes', 'figures']) {
       text.includes(p.diagnostic.trimEnd().split('\n').pop()));
   ok('the report says what level it is', /^ {2}message shapes, counts/m.test(text));
   ok('the report explains its own aliases', /\[shop A\] is the same shop everywhere/.test(text));
+}
+
+{
+  const p = build({ detail: 'figures' });
+  const wire = toFeedbackWirePayload(p);
+  ok('the app and Worker share one versioned feedback contract',
+    wire.schema === FEEDBACK_WIRE_SCHEMA && wire.diagnostic.reportSchema === FEEDBACK_SCHEMA);
+  ok('feedback is retained for the disclosed maximum',
+    p.delivery.retentionDays === FEEDBACK_RETENTION_DAYS &&
+    wire.diagnostic.delivery.retentionDays === FEEDBACK_RETENTION_DAYS);
+  ok('third-party AI is disabled in both the previewed report and wire payload',
+    p.delivery.thirdPartyAi === false && wire.aiReviewConsent === false);
+  ok('the wire carries every redacted diagnostic field without device identity',
+    wire.text === p.message && wire.appVersion === p.build.version &&
+    wire.diagnostic.counts === p.counts && wire.diagnostic.shapes === p.shapes &&
+    wire.diagnostic.cardDiagnostic === p.diagnostic &&
+    !('deviceId' in wire) && !('installId' in wire) && !('pushToken' in wire));
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

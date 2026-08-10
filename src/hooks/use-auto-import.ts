@@ -26,7 +26,6 @@ import { AppState as RNAppState, Platform } from 'react-native';
 import { useToast } from '@/components/ui/toast';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
 import { enableRelayBackgroundSync } from '@/lib/background-relay';
-import { refreshEntitlement } from '@/lib/billing';
 import { isCaptureAvailable, planNewMessages } from '@/lib/capture';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
@@ -35,7 +34,7 @@ import { isProActive } from '@/lib/purchases';
 import { getRelayAutomationProof, getRelayConfig, getRelayRevokedAt } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 
-/** The one-time setup that must not repeat: entitlement, reminders, relay. */
+/** The one-time setup that must not repeat: reminders and relay. */
 let sessionSetupRan = false;
 
 /**
@@ -116,7 +115,7 @@ export type AutoImport = {
  * join make a second watcher redundant rather than harmful.
  */
 export function useAutoImport(watchForeground = false): AutoImport {
-  const { state, importBatch, undoBatch, ensureDurable, markParserVersion, setPro } = useStore();
+  const { state, importBatch, undoBatch, ensureDurable, markParserVersion } = useStore();
   const toast = useToast();
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
@@ -380,22 +379,6 @@ export function useAutoImport(watchForeground = false): AutoImport {
     if (!sessionSetupRan) {
       sessionSetupRan = true;
       void (async () => {
-        try {
-          // Ask the store who this customer is, once per launch.
-          //
-          // Without this, `pro` was a local boolean that nothing ever
-          // re-checked: once true it stayed true through a lapsed
-          // subscription, a refund or a cancellation, and a reinstall left a
-          // paying customer to find the Restore button by themselves.
-          //
-          // A null answer means the store could not be reached, which is NOT
-          // the same as not having paid — the cached flag stands in that
-          // case, so a flight does not lock someone out of their own ledger.
-          const entitled = await refreshEntitlement();
-          if (entitled !== null && entitled !== state.pro) setPro(entitled);
-        } catch {
-          // Entitlement is best-effort; the cached flag stands.
-        }
         try {
           await enableRelayBackgroundSync();
           // Never prompt on launch. Reminder/instant-alert surfaces ask only

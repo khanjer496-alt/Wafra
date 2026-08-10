@@ -26,12 +26,10 @@ name: Feedback agent
 #    applied and it must PASS. An agent that "fixed" a bug it never reproduced
 #    cannot get past it.
 #
-# 3. ONE RUN PER FEEDBACK ITEM, AND A BUDGET ABOVE THAT. The Worker caps
-#    dispatches at FEEDBACK_DISPATCH_PER_HOUR (see server/src/index.ts) so a
-#    flood of reports cannot become a flood of agent runs. The concurrency
-#    group below is the second half: a duplicate dispatch for an id already in
-#    flight queues behind it instead of starting a second agent on the same
-#    report.
+# 3. EXPLICIT AI CONSENT. Current app/Worker contracts return false, so the
+#    consent gate below stops both repository and manual dispatch before a
+#    prompt is composed. If a future consented path is introduced, the
+#    concurrency group still prevents two runs for the same item.
 
 on:
   repository_dispatch:
@@ -197,6 +195,26 @@ jobs:
               # on a 200 that is the user's words, and this log is public.
               tail -5 "$WORK/curl.err"
               echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      # A manual workflow_dispatch must not bypass the app's consent boundary.
+      # The prompt builder checks this again before it can write model input.
+      - name: Verify explicit third-party AI consent
+        run: |
+          set -euo pipefail
+          if ! node -e '
+            const fs = require("fs");
+            const item = JSON.parse(fs.readFileSync(process.env.WORK + "/feedback.json", "utf8"));
+            const disclosed = item.diagnostic?.delivery?.thirdPartyAi === true;
+            if (item.aiReviewConsent !== true || !disclosed) process.exit(1);
+          '; then
+            {
+              echo "## AI review not authorized"
+              echo
+              echo "This report did not explicitly consent to third-party AI review."
+              echo "It remains available to human Wafra maintainers until its retention period ends."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

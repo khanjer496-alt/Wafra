@@ -3,6 +3,10 @@ import {
   type FeedbackPayload,
   type FeedbackReceipt,
 } from '@/lib/feedback';
+import {
+  FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+  serializeFeedbackWire,
+} from '@/lib/feedback-wire';
 import { DEFAULT_RELAY_URL } from '@/lib/relay';
 
 /**
@@ -63,11 +67,13 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
     throw new FeedbackSendError('This build has no relay URL configured.', 'no_relay_url');
   }
 
-  // The payload is sent EXACTLY as the screen showed it. The user consented to
-  // a specific text; a transport that appended anything — a device id, a push
-  // token, an install id — would be sending something they did not read.
-  const body = JSON.stringify(payload);
-  if (body.length > MAX_BODY_BYTES) {
+  // The shared converter maps every displayed field and appends no device id,
+  // push token, install id or other identity.
+  const serialized = serializeFeedbackWire(payload);
+  if (serialized.diagnosticBytes > FEEDBACK_DIAGNOSTIC_MAX_BYTES) {
+    throw new FeedbackSendError('This report attachment is too large to send.', 'diagnostic_too_large');
+  }
+  if (serialized.bodyBytes > MAX_BODY_BYTES) {
     throw new FeedbackSendError('This report is too large to send.', 'too_large');
   }
 
@@ -76,7 +82,7 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
     response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body,
+      body: serialized.body,
     });
   } catch {
     // Offline, DNS, TLS. Nothing here is worth showing a user verbatim, and

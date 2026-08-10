@@ -116,22 +116,6 @@ const MAX_QUEUED_ROWS = 10_000;
  * limiting rule at the edge, which does see the IP and does not persist it.
  */
 const FEEDBACK_PER_HOUR = 60;
-/**
- * Agent runs per hour, globally. THIS is the cost bound, not the one above.
- *
- * One repository_dispatch is one Actions job with a model behind it, running
- * the full test corpus twice. That is minutes of CI and real money per item,
- * and it is not proportional to the cost of the INSERT that triggered it — so
- * it is budgeted separately. Past this, feedback is still accepted and still
- * stored; it just does not wake an agent, and the row says so
- * (`dispatch_status = 'skipped_budget'`) rather than looking like a success.
- *
- * Five an hour is a hundred and twenty a day of worst case. A real flood is
- * therefore capped at CI spend a human would notice on a dashboard rather than
- * on an invoice, and the feedback itself is never lost — a maintainer can
- * re-fire any id by hand through the workflow's workflow_dispatch input.
- */
-const FEEDBACK_DISPATCH_PER_HOUR = 5;
 /** Fallback pack for a device paired before market selection existed. */
 const DEFAULT_MARKET = 'AE';
 /**
@@ -1504,12 +1488,10 @@ export default {
       // operator looking at a feedback item with no PR behind it can tell
       // "GitHub was never wired up" from "the hourly agent budget was spent"
       // without a log line, and without anything quoting the payload.
-      const repository = githubRepository(env.GITHUB_REPOSITORY);
-      const dispatchStatus = !repository || !env.GITHUB_DISPATCH_TOKEN
-        ? 'skipped_unconfigured'
-        : (await overFeedbackWindow(env, 'dispatch', FEEDBACK_DISPATCH_PER_HOUR))
-          ? 'skipped_budget'
-          : 'pending';
+      // This app version does not offer third-party-AI consent, so a report is
+      // retained for human maintainers only and can never trigger the workflow.
+      // `validateFeedback` rejects true rather than treating consent as implied.
+      const dispatchStatus = 'skipped_no_consent';
 
       const id = crypto.randomUUID();
       await env.DB.prepare(
@@ -1530,14 +1512,9 @@ export default {
         )
         .run();
 
-      if (dispatchStatus === 'pending') {
-        ctx.waitUntil(sendRepositoryDispatch(env, id));
-      }
-      // `dispatched` says an agent run was REQUESTED, not that GitHub accepted
-      // it — the request is detached so the user's screen does not wait on
-      // api.github.com. The id is returned so a user can quote it and a
-      // maintainer can re-fire the workflow by hand.
-      return json({ id, dispatched: dispatchStatus === 'pending' }, 202);
+      // No detached workflow is scheduled without explicit consent. The id is
+      // returned so the user can quote it to a human maintainer.
+      return json({ id, dispatched: false }, 202);
     }
 
     // ── Feedback read: one item, by id, for the agent ──
@@ -1593,6 +1570,10 @@ export default {
         platform: row.platform,
         locale: row.locale,
         text: row.text,
+        // The current wire contract only accepts false. Returning it makes the
+        // downstream workflow independently enforce the same boundary even if
+        // somebody starts that workflow by hand.
+        aiReviewConsent: false,
         // Handed back as JSON rather than as the stored string, so the agent
         // does not have to double-parse. A row whose diagnostic somehow will
         // not parse yields null rather than failing the whole fetch — the

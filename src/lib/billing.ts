@@ -11,7 +11,9 @@ import { Platform } from 'react-native';
 import Purchases, {
   LOG_LEVEL,
   type CustomerInfo,
-  type PurchasesStoreProduct,
+  type CustomerInfoUpdateListener,
+  type PurchasesOffering,
+  type PurchasesPackage,
 } from 'react-native-purchases';
 
 import { ENTITLEMENT_ID, PRO_SKUS, type ProPlan } from '@/lib/purchases';
@@ -62,6 +64,51 @@ function entitled(info: CustomerInfo): boolean {
   return info.entitlements.active[ENTITLEMENT_ID] !== undefined;
 }
 
+const MAX_INACTIVE_CACHE_AGE_MS = 25 * 60 * 60 * 1000;
+
+export interface EntitlementSnapshot {
+  active: boolean;
+  requestDateMs: number;
+}
+
+/**
+ * RevenueCat can return cached CustomerInfo while offline. An old positive is
+ * safe to preserve, but an old negative must not revoke a locally cached Pro
+ * flag: after RevenueCat's offline grace that negative can mean "not recently
+ * verified", not "the store confirmed expiry".
+ */
+function entitlementSnapshot(info: CustomerInfo): EntitlementSnapshot | null {
+  const requestDateMs = Date.parse(info.requestDate);
+  if (!Number.isFinite(requestDateMs)) return null;
+  const active = entitled(info);
+  if (!active && Date.now() - requestDateMs > MAX_INACTIVE_CACHE_AGE_MS) return null;
+  return { active, requestDateMs };
+}
+
+/**
+ * Keep the local entitlement in step with renewals, refunds, cancellations,
+ * grace periods and purchases completed outside this screen.
+ */
+export async function observeEntitlement(
+  listener: (snapshot: EntitlementSnapshot) => void,
+): Promise<() => void> {
+  if (!(await ready())) return () => {};
+  const update: CustomerInfoUpdateListener = (info) => {
+    const snapshot = entitlementSnapshot(info);
+    if (snapshot) listener(snapshot);
+  };
+  Purchases.addCustomerInfoUpdateListener(update);
+  try {
+    const snapshot = entitlementSnapshot(await Purchases.getCustomerInfo());
+    if (snapshot) listener(snapshot);
+  } catch {
+    // Offline is unknown, not inactive. Preserve the cached entitlement.
+  }
+  return () => {
+    Purchases.removeCustomerInfoUpdateListener(update);
+  };
+}
+
 /**
  * The store's answer about this customer, or null if it could not be reached.
  *
@@ -70,10 +117,10 @@ function entitled(info: CustomerInfo): boolean {
  * customer out of their own ledger because the request timed out is the worst
  * thing this file could do.
  */
-export async function refreshEntitlement(): Promise<boolean | null> {
+export async function refreshEntitlement(): Promise<EntitlementSnapshot | null> {
   if (!(await ready())) return null;
   try {
-    return entitled(await Purchases.getCustomerInfo());
+    return entitlementSnapshot(await Purchases.getCustomerInfo());
   } catch {
     return null;
   }
@@ -102,11 +149,20 @@ export interface StorePrice {
 
 export type StorePrices = Partial<Record<ProPlan, StorePrice>>;
 
-function productForPlan(
-  products: PurchasesStoreProduct[],
+function packageForPlan(
+  offering: PurchasesOffering,
   plan: ProPlan,
-): PurchasesStoreProduct | undefined {
-  return products.find((product) => product.identifier === PRO_SKUS[plan]);
+): PurchasesPackage | undefined {
+  const standard = plan === 'monthly' ? offering.monthly : offering.annual;
+  if (standard?.product.identifier === PRO_SKUS[plan]) return standard;
+  return offering.availablePackages.find(
+    (candidate) => candidate.product.identifier === PRO_SKUS[plan],
+  );
+}
+
+async function currentPackage(plan: ProPlan): Promise<PurchasesPackage | null> {
+  const offering = (await Purchases.getOfferings()).current;
+  return offering ? packageForPlan(offering, plan) ?? null : null;
 }
 
 /**
@@ -117,9 +173,10 @@ function productForPlan(
 export async function loadStorePrices(): Promise<StorePrices | null> {
   if (!(await ready())) return null;
   try {
-    const products = await Purchases.getProducts(Object.values(PRO_SKUS));
-    const monthly = productForPlan(products, 'monthly');
-    const yearly = productForPlan(products, 'yearly');
+    const offering = (await Purchases.getOfferings()).current;
+    if (!offering) return null;
+    const monthly = packageForPlan(offering, 'monthly')?.product;
+    const yearly = packageForPlan(offering, 'yearly')?.product;
     const prices: StorePrices = {};
     if (monthly) {
       prices.monthly = {
@@ -143,13 +200,14 @@ export async function loadStorePrices(): Promise<StorePrices | null> {
 
 /** Store-owned page where the current customer can manage or cancel renewal. */
 export async function subscriptionManagementUrl(): Promise<string | null> {
-  if (!(await ready())) return null;
-  try {
-    const info = await Purchases.getCustomerInfo();
-    if (info.managementURL) return info.managementURL;
-  } catch {
-    // The store's generic subscription page is still useful when RevenueCat
-    // cannot refresh CustomerInfo, so fall through to the platform URL.
+  if (await ready()) {
+    try {
+      const info = await Purchases.getCustomerInfo();
+      if (info.managementURL) return info.managementURL;
+    } catch {
+      // The store's generic subscription page is still useful when RevenueCat
+      // cannot refresh CustomerInfo, so fall through to the platform URL.
+    }
   }
   if (Platform.OS === 'ios') return 'https://apps.apple.com/account/subscriptions';
   if (Platform.OS === 'android') return 'https://play.google.com/store/account/subscriptions';
@@ -159,18 +217,17 @@ export async function subscriptionManagementUrl(): Promise<string | null> {
 /** Starts a purchase flow. See PurchaseOutcome for what the answers mean. */
 export async function purchasePro(plan: ProPlan): Promise<PurchaseOutcome> {
   if (!(await ready())) return 'failed';
-  let product;
+  let selectedPackage: PurchasesPackage | null;
   try {
-    const products = await Purchases.getProducts([PRO_SKUS[plan]]);
-    product = products[0];
+    selectedPackage = await currentPackage(plan);
   } catch {
     return 'failed';
   }
-  // No such product on this store — the SKU is not activated yet, or is named
-  // differently in the console. Nothing the user did, and nothing they can fix.
-  if (!product) return 'failed';
+  // No package means the current RevenueCat Offering is incomplete or its
+  // store product is not active. Nothing the user did, and nothing they can fix.
+  if (!selectedPackage) return 'failed';
   try {
-    const { customerInfo } = await Purchases.purchaseStoreProduct(product);
+    const { customerInfo } = await Purchases.purchasePackage(selectedPackage);
     // A completed flow that did not grant the entitlement is a failure, not a
     // purchase: RevenueCat and the store disagree, and silently returning
     // would leave a charged customer locked out.

@@ -6,9 +6,12 @@ at the bottom contains none of them.
 
 ## Prepare the sender-aware Shortcut
 
-1. Install the current Wafra Capture Shortcut:
-   <https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1>
-2. Duplicate it and name the duplicate `Wafra Capture v2` while editing.
+1. Build a fresh Shortcut named `Wafra Capture v2`. Do not duplicate or
+   reinstall `85bd1e080e5849b591049eccffb9a3a1`: its Get File action uses
+   Shortcut Input as a directory and produces Apple's “Invalid file path”
+   error during Wafra's text test.
+2. Follow `docs/ios-shortcut-build.md`, including the setup import question.
+   The new graph must have no Get File, Save File, Move File or Folder action.
 3. In Details, accept **Messages** and **Text**, nothing else. Keep **Show in
    Share Sheet** off.
 4. Replace the existing plain `Text → Shortcut Input` read with this branch:
@@ -28,7 +31,8 @@ Text conversion is mandatory. A raw Contact object cannot identify the bank.
 
 1. Install the latest Wafra TestFlight build and open **Settings → iPhone
    capture**.
-2. Copy the setup code and paste it only into your local Shortcut when asked.
+2. Copy the setup code and paste it only into the import question on your local
+   Shortcut when asked.
 3. Run the Shortcut manually with `WAFRA_CAPTURE_TEST_V1`.
 4. Wafra must advance to **pipe ready**. This proves only Shortcut → relay →
    encrypted queue → app.
@@ -56,8 +60,9 @@ Text conversion is mandatory. A raw Contact object cannot identify the bank.
 
 ## Publish and report
 
-Rename the verified duplicate back to `Wafra Capture`. Verify its graph contains
-no literal setup code, token, relay URL, phone number, bank name or message.
+Rename the verified Shortcut to `Wafra Capture`. Verify its shared graph
+contains exactly one setup import question and no file/folder action, literal
+setup code, token, relay URL, phone number, bank name or message.
 Then Share → **Copy iCloud Link** and report only:
 
 ```text

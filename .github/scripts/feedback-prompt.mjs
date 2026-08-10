@@ -28,6 +28,15 @@ if (typeof item.text !== 'string' || !item.text.trim()) {
   process.exit(1);
 }
 
+// Defence in depth: repository_dispatch is not the only trigger. A maintainer
+// can start the workflow manually, so the final component that constructs
+// model input must independently require the user's explicit disclosure and
+// consent. Current app builds send false and therefore can never reach Claude.
+if (item.aiReviewConsent !== true || item.diagnostic?.delivery?.thirdPartyAi !== true) {
+  console.error('::error::this feedback item did not authorize third-party AI review');
+  process.exit(1);
+}
+
 // Bounded even though the relay already bounds it, because this file is the
 // last thing between a payload and a model context, and 8 KiB of aggregates is
 // already more diagnostic than any real bug needs.

@@ -494,6 +494,15 @@ Simulator results and source inspection do not satisfy this gate.
   RevenueCat, Expo Push Service/APNs, email/PDF import, trusted devices,
   Keychain survival after uninstall, backups/exports, and deletion failure
   recovery.
+- [x] Current feedback reports disclose 14-day retention and human maintainer
+  access, and are blocked from GitHub/third-party AI without explicit consent.
+- [ ] Before enabling worldwide automatic import, migrate all money-bearing
+  storage and formatting away from the two-decimal `*Fils` assumption; keep
+  the universal alert inspector review-only until that migration and its
+  AED/SAR equivalence tests are complete.
+- [ ] Approve each new bank/template family against held-out real alerts and
+  hard negatives. Synthetic and public examples are research evidence, not a
+  sufficient market launch corpus.
 - [ ] Establish an incident/support process for parser errors, deletion
   requests, RevenueCat customer deletion, compromised upload/relay keys, relay
   outage, and store review questions.

@@ -9,6 +9,7 @@ const terms = await readFile(new URL('docs/terms-of-use.md', root), 'utf8');
 const storeListing = await readFile(new URL('docs/store-listing.md', root), 'utf8');
 
 const errors = [];
+const BROKEN_CAPTURE_SHORTCUT_ID = '85bd1e080e5849b591049eccffb9a3a1';
 const requireValue = (value, label) => {
   if (typeof value !== 'string' || value.trim() === '') errors.push(`${label} is missing`);
 };
@@ -39,19 +40,43 @@ if (eas.build?.development?.developmentClient !== true) {
 }
 requireValue(extra.revenueCatAndroidKey, 'expo.extra.revenueCatAndroidKey');
 requireValue(extra.revenueCatIosKey, 'expo.extra.revenueCatIosKey');
-if (extra.revenueCatAndroidKey && !extra.revenueCatAndroidKey.startsWith('goog_')) {
+requireHttps(extra.privacyPolicyUrl, 'expo.extra.privacyPolicyUrl');
+requireHttps(extra.termsOfUseUrl, 'expo.extra.termsOfUseUrl');
+requireHttps(extra.supportUrl, 'expo.extra.supportUrl');
+if (extra.revenueCatAndroidKey && !/^goog_[A-Za-z0-9]+$/.test(extra.revenueCatAndroidKey)) {
   errors.push('expo.extra.revenueCatAndroidKey must be a RevenueCat Google public SDK key');
 }
-if (extra.revenueCatIosKey && !extra.revenueCatIosKey.startsWith('appl_')) {
+if (extra.revenueCatIosKey && !/^appl_[A-Za-z0-9]+$/.test(extra.revenueCatIosKey)) {
   errors.push('expo.extra.revenueCatIosKey must be a RevenueCat Apple public SDK key');
 }
 
-requireHttps(process.env.EXPO_PUBLIC_WAFRA_RELAY_URL, 'EXPO_PUBLIC_WAFRA_RELAY_URL');
+const productionEnv = eas.build?.production?.env ?? {};
+const relayUrl = process.env.EXPO_PUBLIC_WAFRA_RELAY_URL ?? productionEnv.EXPO_PUBLIC_WAFRA_RELAY_URL;
+const captureShortcutUrl =
+  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL ?? productionEnv.EXPO_PUBLIC_WAFRA_SHORTCUT_URL;
+const historyShortcutUrl =
+  process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ??
+  productionEnv.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+
+requireHttps(relayUrl, 'EXPO_PUBLIC_WAFRA_RELAY_URL');
 requireHttps(
-  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
+  captureShortcutUrl,
   'EXPO_PUBLIC_WAFRA_SHORTCUT_URL',
   /^\/shortcuts\/[A-Za-z0-9_-]+\/?$/,
 );
+requireHttps(
+  historyShortcutUrl,
+  'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL',
+  /^\/shortcuts\/[A-Za-z0-9_-]+\/?$/,
+);
+if (captureShortcutUrl?.includes(BROKEN_CAPTURE_SHORTCUT_ID)) {
+  errors.push(
+    'EXPO_PUBLIC_WAFRA_SHORTCUT_URL points to the retired file-path/sender-blind Shortcut',
+  );
+}
+if (captureShortcutUrl && historyShortcutUrl && captureShortcutUrl === historyShortcutUrl) {
+  errors.push('capture and history Shortcut URLs must be different');
+}
 
 const projectId = process.env.EXPO_PUBLIC_WAFRA_PROJECT_ID ?? extra.eas?.projectId;
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId ?? '')) {

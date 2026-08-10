@@ -32,7 +32,6 @@ import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AppState,
   Linking,
   Platform,
   ScrollView,
@@ -149,6 +148,11 @@ export default function IosSetupScreen() {
     getActiveMarket().banks.map((bank) => bank.name),
   );
   const [copied, setCopied] = useState<string | null>(null);
+  // Reading the pasteboard on return can trigger Apple's cross-app paste
+  // permission sheet. Track only values Wafra deliberately placed there and
+  // clear them on the user's explicit continue action without reading them
+  // back first.
+  const sensitiveCopyPending = useRef(false);
   /**
    * Private mode has to come off before this screen can pair, and that is the
    * user's call, not the wizard's. It was an `Alert.alert` with the whole
@@ -167,11 +171,6 @@ export default function IosSetupScreen() {
   // The polling loop closes over state; a ref keeps it reading the live one.
   const stateRef = useRef(state);
   stateRef.current = state;
-
-  // Armed only by a successful hand-off to the install page, and disarmed by
-  // the return it is waiting for. See the AppState effect below.
-  const leftForInstall = useRef(false);
-  const sawBackground = useRef(false);
 
   /** The relay has answered at least once, so capture is live, not proposed. */
   const captureOn = cfg?.setupState === 'verified';
@@ -206,39 +205,6 @@ export default function IosSetupScreen() {
   );
 
   /**
-   * Returning from the install page IS the confirmation.
-   *
-   * "I have installed it" asked the user to tell the app something the app can
-   * already observe: it handed iOS a URL, iOS put another app in front, and
-   * that app came back. Advancing on that costs one tap less and one decision
-   * less at the point in the flow where people are most likely to give up.
-   *
-   * 'background' rather than 'inactive' is the discriminator on purpose — a
-   * permission sheet or the app switcher makes an app inactive without ever
-   * leaving it, and advancing on that would skip a step nobody performed.
-   *
-   * The pasteboard is deliberately NOT cleared on this path: someone who
-   * bounced back to Wafra mid-install still needs the code to paste, and step
-   * 2 can walk back to it. Explicit confirmation still clears it, and so does
-   * leaving the automation step.
-   */
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'background') {
-        sawBackground.current = true;
-        return;
-      }
-      if (next !== 'active') return;
-      if (!leftForInstall.current || !sawBackground.current) return;
-      leftForInstall.current = false;
-      sawBackground.current = false;
-      setCopied(null);
-      setStep((current) => (current === 1 ? 2 : current));
-    });
-    return () => sub.remove();
-  }, []);
-
-  /**
    * Move within the wizard. Anything in flight on the step being left has to
    * stop, or a poll started on the test step keeps running behind the
    * automation instructions and lands a success on a screen that never asked.
@@ -247,8 +213,6 @@ export default function IosSetupScreen() {
     (next: Step) => {
       if (pollTimer.current) clearTimeout(pollTimer.current);
       pollTimer.current = null;
-      leftForInstall.current = false;
-      sawBackground.current = false;
       setListening(false);
       setTimedOut(false);
       setCaptured(null);
@@ -348,6 +312,7 @@ export default function IosSetupScreen() {
 
   const copy = useCallback(async (label: string, value: string) => {
     await Clipboard.setStringAsync(value);
+    sensitiveCopyPending.current = label === 'setup' || label === 'token';
     setCopied(label);
     if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
     setTimeout(() => setCopied((c) => (c === label ? null : c)), 2000);
@@ -355,34 +320,31 @@ export default function IosSetupScreen() {
 
   /**
    * The setup code carries the ingest bearer token. Take it off the pasteboard
-   * once it cannot still be needed, but never overwrite unrelated clipboard
-   * content the user put there themselves.
+   * on the user's explicit continue action. Do not read it back first: iOS can
+   * show a cross-app paste permission sheet for that read, directly inside the
+   * setup path. The button copy tells the user that continuing clears it.
    */
   const clearSetupCodeFromPasteboard = useCallback(async () => {
-    if (!cfg) return;
+    if (!sensitiveCopyPending.current) return;
     try {
-      const current = await Clipboard.getStringAsync();
-      if (current === shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken)) {
-        await Clipboard.setStringAsync('');
-      }
+      await Clipboard.setStringAsync('');
+      sensitiveCopyPending.current = false;
     } catch {
       // Pasteboard cleanup is best-effort; the token also remains in Shortcut.
     }
-  }, [cfg]);
+  }, []);
 
   const installShortcut = useCallback(async () => {
     if (!cfg) return;
     const code = shortcutSetupCode(cfg.ingestUrl, cfg.ingestToken);
     try {
       await Clipboard.setStringAsync(code);
+      sensitiveCopyPending.current = true;
       setCopied('setup');
       if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
       await Linking.openURL(DEFAULT_SHORTCUT_URL ?? 'shortcuts://');
       clearError();
-      leftForInstall.current = true;
-      sawBackground.current = false;
     } catch {
-      leftForInstall.current = false;
       fail(t('iosShortcutInstallFailed'));
     }
   }, [cfg, clearError, fail]);
@@ -671,6 +633,15 @@ export default function IosSetupScreen() {
                 {t('iosShortcutBody')}
               </ThemedText>
 
+              {DEFAULT_SHORTCUT_URL && (
+                <Block style={styles.note}>
+                  <Icon name="alert" size={16} color={theme.warning} />
+                  <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
+                    {t('iosShortcutReplaceNote')}
+                  </ThemedText>
+                </Block>
+              )}
+
               {DEFAULT_SHORTCUT_URL ? (
                 <>
                   <SectionHeader title={t('iosSetupCode')} />
@@ -825,9 +796,11 @@ export default function IosSetupScreen() {
                   {t('iosIntroBody2')}
                 </ThemedText>
               )}
-              <ThemedText type="nano" themeColor="textTertiary" style={styles.body}>
-                {t('iosTestLimit')}
-              </ThemedText>
+              {(captured || captureOn) && (
+                <ThemedText type="nano" themeColor="textTertiary" style={styles.body}>
+                  {t('iosTestLimit')}
+                </ThemedText>
+              )}
 
               {captured && (
                 <Animated.View entering={FadeIn.duration(300)}>

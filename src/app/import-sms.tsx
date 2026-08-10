@@ -20,9 +20,9 @@
  * `requiresPro` in lib/purchases.ts. The full inbox scan is still Pro, on the
  * platform that has one.
  */
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
   FadeInDown,
@@ -55,6 +55,10 @@ import {
 } from '@/lib/auto-import';
 import { categoryLabel } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
+import {
+  parseHistoricalMessageRecords,
+  type HistoricalImportResult,
+} from '@/lib/historical-import';
 import { isProActive, requiresPro } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
@@ -70,6 +74,40 @@ Salary of AED 18,500.00 has been credited to your account ending 5678`;
 
 const PREVIEW_LIMIT = 60;
 const PANEL_HEIGHT = 186;
+const HISTORY_SHORTCUT_URL = 'shortcuts://run-shortcut?name=Wafra%20History%20Import';
+const HISTORY_SHORTCUT_INSTALL_URL = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
+const HISTORY_SESSION_RE = /^[A-Za-z0-9_-]{8,128}$/;
+
+function validHistorySession(value: string | undefined): value is string {
+  return typeof value === 'string' && HISTORY_SESSION_RE.test(value);
+}
+
+function withoutExistingBillReminders(plan: ImportPlan, existingTitles: string[]): ImportPlan {
+  const existing = new Set(existingTitles.map((title) => title.trim().toLowerCase()));
+  const billDues = plan.billDues.filter((due) => {
+    const key = due.merchant.trim().toLowerCase();
+    if (existing.has(key)) return false;
+    // The Bill model currently has one row per merchant title. Keep the
+    // review count identical to what confirmation can actually file.
+    existing.add(key);
+    return true;
+  });
+  return billDues.length === plan.billDues.length ? plan : { ...plan, billDues };
+}
+
+function supportsHistoricalShortcut(): boolean {
+  if (Platform.OS !== 'ios') return false;
+  const [major = 0, minor = 0] = String(Platform.Version)
+    .split('.')
+    .map((part) => Number(part));
+  return major > 26 || (major === 26 && minor >= 5);
+}
+
+async function historyNativeModule() {
+  // Kept out of the module graph on Android at runtime: this Expo module has
+  // an Apple implementation only, exactly like Find Message itself.
+  return (await import('../../modules/wafra-message-history')).default;
+}
 
 /**
  * How many messages the user actually pasted, counted the way `pasteHint`
@@ -141,8 +179,8 @@ export default function ImportSmsScreen() {
   const theme = useTheme();
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
-  const { auto } = useLocalSearchParams<{ auto?: string }>();
-  const { state, importBatch, addBill } = useStore();
+  const { auto, history } = useLocalSearchParams<{ auto?: string; history?: string }>();
+  const { state, importBatch, ensureDurable, addBill } = useStore();
 
   const [text, setText] = useState('');
   const [plan, setPlan] = useState<ImportPlan | null>(null);
@@ -153,7 +191,17 @@ export default function ImportSmsScreen() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [historyResult, setHistoryResult] = useState<HistoricalImportResult | null>(null);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [historyCommitState, setHistoryCommitState] = useState<
+    'idle' | 'writing' | 'storage-failed' | 'cleanup-failed'
+  >('idle');
   const started = useRef(false);
+  const processedHistory = useRef<string | null>(null);
+  // State updates are not synchronous enough to protect a write/cleanup
+  // critical section from a second tap. This latch is.
+  const historyOperationLocked = useRef(false);
 
   const runScan = async () => {
     // The plan's duplicate checks read state.transactions, so scanning before
@@ -248,10 +296,145 @@ export default function ImportSmsScreen() {
     setPlan(p);
   };
 
-  const applyPlan = () => {
-    if (!plan) return;
-    importBatch(plan.batch);
+  const discardHistorySession = async () => {
+    if (!validHistorySession(history) || Platform.OS !== 'ios') return;
+    const native = await historyNativeModule();
+    await native.discardSession(history);
+  };
+
+  const leaveScreen = async () => {
+    if (historyOperationLocked.current) return;
+    if (!history || !validHistorySession(history)) {
+      router.back();
+      return;
+    }
+    // A failed SQLCipher write has already updated in-memory state. Keep the
+    // protected source session so recovery after restart remains possible.
+    if (historyCommitState === 'storage-failed') {
+      setNotice({ title: t('historyStorageFailed'), body: t('historyStorageFailedBody') });
+      return;
+    }
+    historyOperationLocked.current = true;
+    try {
+      await discardHistorySession();
+      router.back();
+    } catch {
+      historyOperationLocked.current = false;
+      setHistoryCommitState('cleanup-failed');
+      setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+    }
+  };
+
+  const leaveProtectedSessionForExpiry = () => {
+    // A native deletion or encrypted-write failure must not trap the user on
+    // an uncloseable route. The source remains under complete file protection
+    // and the native store will purge it after the documented TTL.
+    historyOperationLocked.current = false;
     router.back();
+  };
+
+  const applyPlan = async () => {
+    if (!plan || applying || historyOperationLocked.current) return;
+    historyOperationLocked.current = true;
+    setApplying(true);
+    setNotice(null);
+    setHistoryCommitState('writing');
+    // A live alert may land while this review is open. Rebuild against the
+    // latest state at the moment of confirmation so history/live overlap does
+    // not become two entries merely because the preview was old.
+    const currentPlan = historyResult
+      ? withoutExistingBillReminders(
+          buildImportPlan(historyResult.parsed, state, 0, new Date(), historyResult.declined),
+          state.bills.map((bill) => bill.title),
+        )
+      : plan;
+    if (
+      currentPlan.txCount === 0 &&
+      currentPlan.dueCount === 0 &&
+      currentPlan.healedCount === 0 &&
+      currentPlan.billDues.length === 0
+    ) {
+      setPlan(null);
+      setHistoryCommitState('idle');
+      try {
+        await discardHistorySession();
+        router.back();
+      } catch {
+        historyOperationLocked.current = false;
+        setHistoryCommitState('cleanup-failed');
+        setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+      } finally {
+        setApplying(false);
+      }
+      return;
+    }
+    try {
+      const receipt = importBatch(currentPlan.batch);
+      if (history) {
+        const existingBills = new Set(state.bills.map((bill) => bill.title.toLowerCase()));
+        for (const due of currentPlan.billDues) {
+          if (existingBills.has(due.merchant.toLowerCase())) continue;
+          existingBills.add(due.merchant.toLowerCase());
+          addBill({
+            title: due.merchant,
+            category: due.categoryGuess,
+            amountFils: due.amountFils,
+            dueDay: due.dueDay ?? (due.date ? Number(due.date.slice(8)) : 1),
+            autoDetected: true,
+          });
+        }
+      }
+      // Dispatch happened synchronously. Remove the button now: retrying this
+      // same plan would mint new transaction IDs even if the durable write or
+      // the later source cleanup fails.
+      setPlan(null);
+      await receipt.durable;
+      if (history && currentPlan.billDues.length > 0) await ensureDurable();
+    } catch {
+      historyOperationLocked.current = false;
+      setHistoryCommitState('storage-failed');
+      setNotice({
+        title: t('historyStorageFailed'),
+        body: history ? t('historyStorageFailedBody') : t('importStorageFailedBody'),
+      });
+      setApplying(false);
+      return;
+    }
+    try {
+      await discardHistorySession();
+      router.back();
+    } catch {
+      historyOperationLocked.current = false;
+      setHistoryCommitState('cleanup-failed');
+      setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+    }
+    setApplying(false);
+  };
+
+  const retrySecureSave = async () => {
+    if (applying || historyOperationLocked.current) return;
+    historyOperationLocked.current = true;
+    setApplying(true);
+    try {
+      await ensureDurable();
+    } catch {
+      historyOperationLocked.current = false;
+      setNotice({
+        title: t('historyStorageFailed'),
+        body: history ? t('historyStorageFailedBody') : t('importStorageFailedBody'),
+      });
+      setApplying(false);
+      return;
+    }
+    try {
+      await discardHistorySession();
+      router.back();
+    } catch {
+      historyOperationLocked.current = false;
+      setHistoryCommitState('cleanup-failed');
+      setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+    }
+    setApplying(false);
   };
 
   useEffect(() => {
@@ -262,6 +445,133 @@ export default function ImportSmsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (
+      !history ||
+      Platform.OS !== 'ios' ||
+      !state.hydrated ||
+      processedHistory.current === `${history}:${historyAttempt}`
+    ) return;
+    processedHistory.current = `${history}:${historyAttempt}`;
+    let active = true;
+    const load = async () => {
+      setScanning(true);
+      setNotice(null);
+      setPasteVerdict(null);
+      setPlan(null);
+      setHistoryResult(null);
+      setShowManual(false);
+      setHistoryCommitState('idle');
+      try {
+        if (!validHistorySession(history)) {
+          setNotice({
+            title: t('historyImportInvalid'),
+            body: t('historyImportInvalidBody'),
+          });
+          return;
+        }
+        const native = await historyNativeModule();
+        await native.purgeExpired();
+        const chunks = await native.listSessionChunks(history);
+        const seenIds = new Set<string>();
+        const result: HistoricalImportResult = {
+          parsed: [], declined: [], totalCount: 0, acceptedCount: 0,
+          invalidCount: 0, ignoredCount: 0, duplicateCount: 0, newestTs: 0,
+        };
+        for (const chunkIndex of chunks) {
+          const records = await native.readChunk(history, chunkIndex);
+          if (!active) return;
+          const part = parseHistoricalMessageRecords(
+            records,
+            state.merchantOverrides,
+            new Date(),
+            seenIds,
+          );
+          result.parsed.push(...part.parsed);
+          result.declined.push(...part.declined);
+          result.totalCount += part.totalCount;
+          result.acceptedCount += part.acceptedCount;
+          result.invalidCount += part.invalidCount;
+          result.ignoredCount += part.ignoredCount;
+          result.duplicateCount += part.duplicateCount;
+          result.newestTs = Math.max(result.newestTs, part.newestTs);
+          setProgress({ scanned: result.totalCount, found: result.acceptedCount });
+          // One native chunk is at most 50 records. Yield between chunks so a
+          // multi-year import cannot monopolize the JS thread for one long
+          // unresponsive frame or bridge the whole raw corpus at once.
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+        result.parsed.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
+        result.declined.sort((a, b) => a.smsTs - b.smsTs);
+        if (!active) return;
+        setHistoryResult(result);
+        const nextPlan = withoutExistingBillReminders(
+          buildImportPlan(result.parsed, state, 0, new Date(), result.declined),
+          state.bills.map((bill) => bill.title),
+        );
+        const txLike = result.parsed.filter(
+          (row) => row.kind === 'transaction' || row.kind === 'cardPayment',
+        );
+        setSkippedCount(Math.max(0, txLike.length - nextPlan.txCount));
+        setTrackedBills(new Set());
+        if (
+          nextPlan.txCount === 0 &&
+          nextPlan.dueCount === 0 &&
+          nextPlan.billDues.length === 0 &&
+          nextPlan.healedCount === 0
+        ) {
+          const recognizedCount = result.acceptedCount + result.declined.length;
+          setPlan(null);
+          setNotice({
+            title:
+              result.totalCount === 0
+                ? t('historyImportMissing')
+                : recognizedCount === 0
+                  ? t('historyImportNoneFound')
+                  : t('upToDate'),
+            body:
+              result.totalCount === 0
+                ? t('historyImportMissingBody')
+                : recognizedCount === 0
+                  ? tf('historyImportNoneFoundBody', {
+                      read: result.totalCount,
+                      skipped: result.invalidCount + result.ignoredCount,
+                    })
+                  : tf('historyImportNoNew', {
+                      read: result.totalCount,
+                      skipped: result.invalidCount + result.ignoredCount + result.duplicateCount,
+                    }),
+          });
+          await native.discardSession(history);
+          return;
+        }
+        setPlan(nextPlan);
+        if (result.invalidCount + result.ignoredCount > 0) {
+          setNotice({
+            title: t('historyImportReviewReady'),
+            body: tf('historyImportReviewCounts', {
+              matched: result.acceptedCount,
+              skipped: result.invalidCount + result.ignoredCount,
+            }),
+          });
+        }
+      } catch {
+        if (active) {
+          setNotice({ title: t('historyImportFailed'), body: t('historyImportFailedBody') });
+        }
+      } finally {
+        if (active) setScanning(false);
+      }
+    };
+    load();
+    return () => { active = false; };
+    // The import intentionally uses one hydrated ledger snapshot. Depending on
+    // the whole state object would cancel a multi-chunk read after any store
+    // update, while processedHistory prevents the replacement effect from
+    // restarting it. A new user retry increments historyAttempt explicitly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, historyAttempt, state.hydrated, state.merchantOverrides]);
+
   const previewRows = useMemo(
     () => (plan?.batch.transactions ?? []).slice(0, PREVIEW_LIMIT),
     [plan],
@@ -269,8 +579,10 @@ export default function ImportSmsScreen() {
 
   /** Rows the parser had to guess at — the ones worth reporting. */
   const unreadCount = useMemo(
-    () => (plan?.batch.transactions ?? []).filter((tx) => tx.raw).length,
-    [plan],
+    () => historyResult
+      ? historyResult.invalidCount + historyResult.ignoredCount
+      : (plan?.batch.transactions ?? []).filter((tx) => tx.raw).length,
+    [historyResult, plan],
   );
 
   const newBills = useMemo(() => {
@@ -286,6 +598,7 @@ export default function ImportSmsScreen() {
 
   return (
     <ThemedView style={styles.root}>
+      <Stack.Screen options={{ gestureEnabled: !validHistorySession(history) }} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
           {/* The title has to describe what this screen can actually do on the
@@ -293,7 +606,7 @@ export default function ImportSmsScreen() {
               "Read my inbox" named something the screen cannot do there. This
               key is deliberately platform-neutral rather than branched on
               Platform.OS — it is true on both, and it has an Arabic value. */}
-          <ScreenHeader title={t('importBankActivity')} onBack={() => router.back()} />
+          <ScreenHeader title={t('importBankActivity')} onBack={leaveScreen} />
         </View>
 
         <ScrollView
@@ -311,10 +624,12 @@ export default function ImportSmsScreen() {
                   </ThemedText>
                 </View>
                 <ThemedText type="small" tabular>
-                  {tf('importProgressCounts', {
-                    read: progress?.scanned ?? 0,
-                    matched: progress?.found ?? 0,
-                  })}
+                  {history
+                    ? t('historyPreparingReview')
+                    : tf('importProgressCounts', {
+                        read: progress?.scanned ?? 0,
+                        matched: progress?.found ?? 0,
+                      })}
                 </ThemedText>
               </View>
               <ThemedText type="meta" themeColor="textTertiary">
@@ -324,7 +639,9 @@ export default function ImportSmsScreen() {
           ) : (
             <Section index={0} style={styles.intro}>
               <ThemedText type="default" themeColor="textSecondary">
-                {isSmsScanningAvailable()
+                {history
+                  ? t('historyReviewPrivacy')
+                  : isSmsScanningAvailable()
                   ? t('scanBankAlertsPrivacy')
                   : t('pasteHint')}
               </ThemedText>
@@ -336,12 +653,47 @@ export default function ImportSmsScreen() {
                   only path — otherwise the wall is gone and nobody knows.
                   Same key as the paywall's own row, so the two can never
                   disagree about what is free. */}
-              {!isSmsScanningAvailable() && (
+              {!history && !isSmsScanningAvailable() && (
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('featPasteFreeText')}
                 </ThemedText>
               )}
-              {isSmsScanningAvailable() && (
+              {supportsHistoricalShortcut() && HISTORY_SHORTCUT_INSTALL_URL && !history && (
+                <>
+                  <Button
+                    label={t('installHistoryShortcut')}
+                    icon="download"
+                    variant="outline"
+                    onPress={() => {
+                      Linking.openURL(HISTORY_SHORTCUT_INSTALL_URL).catch(() => {
+                        setNotice({
+                          title: t('historyShortcutMissing'),
+                          body: t('historyShortcutMissingBody'),
+                        });
+                      });
+                    }}
+                  />
+                  <Button
+                    label={t('importPastMessages')}
+                    icon="calendar"
+                    onPress={async () => {
+                      setNotice(null);
+                      try {
+                        await Linking.openURL(HISTORY_SHORTCUT_URL);
+                      } catch {
+                        setNotice({
+                          title: t('historyShortcutMissing'),
+                          body: t('historyShortcutMissingBody'),
+                        });
+                      }
+                    }}
+                  />
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {t('historyImportPrivacy')}
+                  </ThemedText>
+                </>
+              )}
+              {!history && isSmsScanningAvailable() && (
                 <>
                   <Button label={t('findBankAlerts')} icon="search" onPress={runScan} />
                   <Button
@@ -351,7 +703,7 @@ export default function ImportSmsScreen() {
                   />
                 </>
               )}
-              {showManual && (
+              {!history && showManual && (
                 <>
                   <TextInput
                     accessibilityLabel={t('pasteBankMessagesA11y')}
@@ -426,6 +778,38 @@ export default function ImportSmsScreen() {
                   </View>
                 </Block>
               </View>
+              {validHistorySession(history) && historyResult === null && historyCommitState === 'idle' && (
+                <Button
+                  label={t('retryHistoryRead')}
+                  variant="outline"
+                  onPress={() => setHistoryAttempt((attempt) => attempt + 1)}
+                />
+              )}
+              {history && historyCommitState === 'cleanup-failed' && (
+                <Button
+                  label={t('deleteStagedMessages')}
+                  variant="outline"
+                  onPress={leaveScreen}
+                />
+              )}
+              {historyCommitState === 'storage-failed' && (
+                <Button
+                  label={t('retrySecureSave')}
+                  variant="outline"
+                  disabled={applying}
+                  onPress={retrySecureSave}
+                />
+              )}
+              {history && (
+                historyCommitState === 'cleanup-failed' ||
+                historyCommitState === 'storage-failed'
+              ) && (
+                <Button
+                  label={t('leaveImportScreen')}
+                  variant="ghost"
+                  onPress={leaveProtectedSessionForExpiry}
+                />
+              )}
             </Section>
           )}
 
@@ -437,7 +821,11 @@ export default function ImportSmsScreen() {
                     [
                       [plan.txCount, t('matchedLabel'), theme.text],
                       [plan.newAccountCount, t('cardsTitle'), theme.text],
-                      [unreadCount, t('unreadLabel'), unreadCount > 0 ? theme.warning : theme.textTertiary],
+                      [
+                        unreadCount,
+                        history ? t('skippedLabel') : t('unreadLabel'),
+                        unreadCount > 0 ? theme.warning : theme.textTertiary,
+                      ],
                     ] as const
                   ).map(([value, label, color], i) => (
                     <View
@@ -487,22 +875,29 @@ export default function ImportSmsScreen() {
                             {p.dueDay ? ` · ${tf('dueDay', { day: p.dueDay })}` : ''}
                           </ThemedText>
                         </View>
-                        <Button
-                          variant={tracked ? 'ghost' : 'outline'}
-                          label={tracked ? t('tracked') : t('track')}
-                          disabled={tracked}
-                          onPress={() => {
-                            addBill({
-                              title: p.merchant,
-                              category: p.categoryGuess,
-                              amountFils: p.amountFils,
-                              dueDay: p.dueDay ?? (p.date ? Number(p.date.slice(8)) : 1),
-                              autoDetected: true,
-                            });
-                            setTrackedBills(new Set(trackedBills).add(i));
-                          }}
-                          style={styles.trackButton}
-                        />
+                        {!history && (
+                          <Button
+                            variant={tracked ? 'ghost' : 'outline'}
+                            label={tracked ? t('tracked') : t('track')}
+                            disabled={tracked}
+                            onPress={() => {
+                              addBill({
+                                title: p.merchant,
+                                category: p.categoryGuess,
+                                amountFils: p.amountFils,
+                                dueDay: p.dueDay ?? (p.date ? Number(p.date.slice(8)) : 1),
+                                autoDetected: true,
+                              });
+                              setTrackedBills(new Set(trackedBills).add(i));
+                            }}
+                            style={styles.trackButton}
+                          />
+                        )}
+                        {history && (
+                          <ThemedText type="meta" themeColor="textTertiary">
+                            {t('filesOnConfirm')}
+                          </ThemedText>
+                        )}
                       </Row>
                     );
                   })}
@@ -513,7 +908,9 @@ export default function ImportSmsScreen() {
                 <Section index={3}>
                   <SectionHeader
                     title={
-                      plan.txCount > PREVIEW_LIMIT
+                      history
+                        ? t('readyToFile')
+                        : plan.txCount > PREVIEW_LIMIT
                         ? tf('justFiledFirst', { shown: PREVIEW_LIMIT, total: plan.txCount })
                         : t('justFiled')
                     }
@@ -599,14 +996,19 @@ export default function ImportSmsScreen() {
             </Section>
           )}
 
-          {!scanning && plan === null && (
+          {!history && !scanning && plan === null && (
             <Section index={2}>
               <SupplementImports />
             </Section>
           )}
         </ScrollView>
 
-        {plan !== null && !scanning && (plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0) && (
+        {plan !== null && !scanning && (
+          plan.txCount > 0 ||
+          plan.dueCount > 0 ||
+          plan.healedCount > 0 ||
+          (history && plan.billDues.length > 0)
+        ) && (
           <View style={styles.footer}>
             {/* The button appears for dues and healed rows too, so labelling
                 it from txCount alone offered to "File 0 entries" after a scan
@@ -624,12 +1026,18 @@ export default function ImportSmsScreen() {
                         count: plan.dueCount,
                         s: plan.dueCount === 1 ? '' : 's',
                       })
+                    : history && plan.billDues.length > 0
+                      ? tf('fileBillReminders', {
+                          count: plan.billDues.length,
+                          s: plan.billDues.length === 1 ? '' : 's',
+                        })
                     : tf('fixEntries', {
                         count: plan.healedCount,
                         ending: plan.healedCount === 1 ? 'y' : 'ies',
                       })
               }
               onPress={applyPlan}
+              disabled={applying}
             />
           </View>
         )}

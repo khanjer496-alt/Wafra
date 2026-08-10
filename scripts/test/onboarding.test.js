@@ -200,7 +200,7 @@ const emptyLedger = {
   // The alternative routes stay gated on `plan === null`, which is exactly why
   // clearing the plan is the fix: they come back at the moment they are needed.
   ok('the alternate import routes are visible on an unreadable paste',
-    /\{!scanning && plan === null && \(/.test(importSource) &&
+    /\{!history && !scanning && plan === null && \(/.test(importSource) &&
       /<SupplementImports \/>/.test(importSource));
 }
 

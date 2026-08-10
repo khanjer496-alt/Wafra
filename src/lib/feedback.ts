@@ -64,11 +64,15 @@
  */
 import { cardDiagnostics, parserCoverage, unreadFormats } from '@/lib/accuracy';
 import { categoryLabel } from '@/lib/categories';
+import {
+  FEEDBACK_DELIVERY,
+  type FeedbackDeliveryDisclosure,
+} from '@/lib/feedback-wire';
 import { STRUCTURAL_TITLES } from '@/lib/sms-parser';
 import type { Account, CardDue, CategoryId, Transaction } from '@/lib/types';
 
 /** Bumped when the payload's shape changes, so the receiving end can tell. */
-export const FEEDBACK_SCHEMA = 1;
+export const FEEDBACK_SCHEMA = 2;
 
 /**
  * How much of the ledger the user chose to attach. Nested: `figures` contains
@@ -89,6 +93,8 @@ export const FEEDBACK_DETAILS: readonly FeedbackDetail[] = ['none', 'shapes', 'f
  * rather than discovered afterwards.
  */
 export const FEEDBACK_MESSAGE_MAX = 2000;
+/** Highest-value unread formats only; the complete count remains in `counts`. */
+export const FEEDBACK_SHAPES_MAX = 25;
 
 /** Everything about the build, none of it about the user. */
 export interface FeedbackBuild {
@@ -177,6 +183,8 @@ export interface FeedbackPayload {
   detail: FeedbackDetail;
   /** Why the two differ, so the receiving agent is not left guessing. */
   withheld: 'private-mode' | null;
+  /** Retention and reviewer disclosure shown before the user sends. */
+  delivery: FeedbackDeliveryDisclosure;
   build: FeedbackBuild;
   /** Null at `none`. */
   counts: FeedbackCounts | null;
@@ -549,6 +557,7 @@ export function buildFeedbackPayload(input: FeedbackInput): FeedbackPayload {
     detailRequested: requested,
     detail,
     withheld,
+    delivery: { ...FEEDBACK_DELIVERY },
     build: { ...input.build },
     counts: null,
     shapes: null,
@@ -566,7 +575,7 @@ export function buildFeedbackPayload(input: FeedbackInput): FeedbackPayload {
     merchantOverrides: safe.merchantOverrides,
   });
 
-  const shapes: FeedbackShape[] = unreadFormats(safe.transactions, (id) =>
+  const allShapes: FeedbackShape[] = unreadFormats(safe.transactions, (id) =>
     categoryLabel(id, 'en'),
   ).map((f) => ({
     // The state was redacted before this ran, so `raw` is already a shape.
@@ -579,6 +588,7 @@ export function buildFeedbackPayload(input: FeedbackInput): FeedbackPayload {
     count: f.count,
     reason: f.reason,
   }));
+  const shapes = allShapes.slice(0, FEEDBACK_SHAPES_MAX);
 
   return {
     ...base,
@@ -593,7 +603,7 @@ export function buildFeedbackPayload(input: FeedbackInput): FeedbackPayload {
       decided: coverage.decided,
       categoryMeasured: coverage.categoryMeasured,
       categorised: coverage.categorised,
-      formats: shapes.length,
+      formats: allShapes.length,
     },
     shapes,
     // Same reasoning as `shape` above: the diagnostic is generated from an
@@ -654,6 +664,12 @@ export function formatFeedbackPayload(p: FeedbackPayload): string {
   }
   out.push('');
 
+  out.push('DELIVERY');
+  out.push(`  kept for at most ${p.delivery.retentionDays} days`);
+  out.push(`  readable by: ${p.delivery.reviewedBy === 'wafra-maintainers' ? 'Wafra maintainers' : p.delivery.reviewedBy}`);
+  out.push(`  third-party AI review: ${p.delivery.thirdPartyAi ? 'yes' : 'no'}`);
+  out.push('');
+
   if (p.counts) {
     const c = p.counts;
     out.push('COUNTS');
@@ -684,6 +700,8 @@ export function formatFeedbackPayload(p: FeedbackPayload): string {
       out.push(`  ${i + 1}. ${s.reason} · ${s.count} row(s) · read as "${s.title}" / ${s.category}`);
       out.push(...s.shape.split('\n').map((l) => `       ${l}`));
     });
+    const omitted = Math.max(0, (p.counts?.formats ?? p.shapes.length) - p.shapes.length);
+    if (omitted > 0) out.push(`  ${omitted} additional format(s) stayed on this phone.`);
     out.push('');
     out.push('  Every digit above is replaced by #, so no amount, date, reference');
     out.push('  or card number survives. Names are replaced by [shop A], [card A].');

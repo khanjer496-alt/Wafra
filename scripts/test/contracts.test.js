@@ -247,7 +247,8 @@ function ktSources(dir) {
       !/<Money[^>]*PRO_PRICES/.test(pro));
   ok('native pricing never falls back to an unlabeled USD reference',
     /Platform\.OS === 'web'[\s\S]{0,100}PRO_REFERENCE_PRICE_STRINGS/.test(pro) &&
-      /disabled=\{billingAvailable && !storePrices\?\.\[plan\]\}/.test(pro));
+      /if \(!storePrices\?\.\[plan\]\)/.test(pro) &&
+      /billingAvailable && !storePrices\?\.\[plan\]/.test(pro));
   ok('a failed catalog load can be retried without reopening the paywall',
     /priceStatus === 'failed'/.test(pro) &&
       /setPriceRequest\(\(request\) => request \+ 1\)/.test(pro));
@@ -358,7 +359,7 @@ function ktSources(dir) {
 {
   const src = read('src/lib/purchases.ts');
   const sdk = read('src/lib/billing.ts');
-  const home = read('src/hooks/use-auto-import.ts');
+  const layout = read('src/app/_layout.tsx');
 
   // The entitlement id is a string shared with a dashboard nobody can grep.
   ok('the entitlement id is named once and exported',
@@ -367,24 +368,32 @@ function ktSources(dir) {
 
   // Entitlement has to be asked for at launch. Without it `pro` is a local
   // boolean that survives a lapsed subscription, a refund and a cancellation.
-  ok('entitlement is re-checked on launch', /refreshEntitlement\(\)/.test(home));
+  ok('entitlement is re-checked on launch',
+    /observeEntitlement/.test(layout) && /refreshEntitlement\(\)/.test(layout));
 
   // ...and the answer has three states, not two. Treating "could not reach
   // the store" as "has not paid" locks a paying customer out of their own
   // ledger the first time they open the app on a plane.
   ok('a null entitlement leaves the cached flag alone',
-    /entitled !== null/.test(home));
-  ok('refreshEntitlement can return null', /Promise<boolean \| null>/.test(sdk));
+    /snapshot\) apply\(snapshot\)/.test(layout));
+  ok('refreshEntitlement can return null',
+    /Promise<EntitlementSnapshot \| null>/.test(sdk));
 
-  // A secret key in the client is a real incident. Only the public SDK key
-  // belongs in app.json, and only ever empty in the repository.
+  // A secret key in the client is a real incident. RevenueCat's platform
+  // public SDK keys may be committed because native builds need them baked
+  // into Expo config; local development may deliberately leave them empty.
   const appJson = JSON.parse(read('app.json'));
   const extra = appJson.expo.extra || {};
-  for (const k of ['revenueCatAndroidKey', 'revenueCatIosKey']) {
-    ok(`${k} ships empty`, extra[k] === '');
-  }
+  ok('the Android RevenueCat key is empty or a Google public SDK key',
+    extra.revenueCatAndroidKey === '' || /^goog_[A-Za-z0-9]+$/.test(extra.revenueCatAndroidKey));
+  ok('the iOS RevenueCat key is empty or an Apple public SDK key',
+    extra.revenueCatIosKey === '' || /^appl_[A-Za-z0-9]+$/.test(extra.revenueCatIosKey));
   ok('no secret RevenueCat key is committed',
     !/sk_[A-Za-z0-9]{10}/.test(read('app.json') + src + sdk));
+  const releaseCheck = read('scripts/check-release-config.mjs');
+  ok('the release gate rejects prefix-only RevenueCat placeholders',
+    /\^goog_\[A-Za-z0-9\]\+\$/.test(releaseCheck) &&
+      /\^appl_\[A-Za-z0-9\]\+\$/.test(releaseCheck));
 
   // Billing must be impossible rather than broken when unconfigured, or the
   // paywall opens a flow that cannot complete.
@@ -651,31 +660,48 @@ function ktSources(dir) {
 {
   const setup = read('src/app/ios-setup.tsx');
   const copy = read('src/lib/i18n.ts');
+  const shortcutSpec = read('docs/ios-shortcut-spec.md');
+  const releaseCheck = read('scripts/check-release-config.mjs');
+  const testflight = read('.github/workflows/ios-testflight.yml');
   const actionAt = setup.indexOf("t('iosAutomationAction')");
   const inputAt = setup.indexOf("t('iosAutomationInput')");
 
   ok('iOS setup explicitly passes the received Message object after choosing Wafra Capture',
     actionAt !== -1 && inputAt > actionAt &&
-      /pass Received Message—not Content/.test(copy));
+      /Input: Received Message \(not only Content\)/.test(copy));
   ok('the installed Shortcut copy keeps its plain-text manual test compatible',
-    /plain text for its manual test/.test(copy));
+    /Accept \*\*Messages\*\* and \*\*Text\*\*/.test(shortcutSpec) &&
+      /manual setup test/.test(shortcutSpec));
   ok('iOS setup discloses sender retention while raw Content is discarded',
     /discards raw Message Content after parsing/.test(copy) &&
       /when the Shortcut supplies it, the bank Sender label/.test(copy) &&
       /used to identify its card or account/.test(copy));
-  ok('iOS setup treats Message-object forwarding as a spec until physical Sender proof',
-    /setup instructions—not proof that Apple exposes Sender/.test(copy) &&
-      /first real alert must file under the right bank/.test(copy) &&
-      /bank attribution is unavailable and automatic capture is not parity-ready/.test(copy) &&
-      /manual test cannot prove[\s\S]*that Sender is exposed/.test(copy) &&
-      !/one automation per bank|fixed sender label/.test(copy));
-  ok('the Message-object and sender-retention instructions have first-class Arabic copy',
-    /مرّر «الرسالة المستلمة»/.test(copy) &&
-      /تعليمات إعداد وليست دليلاً/.test(copy) &&
-      /لن يتوفر تحديد البنك/.test(copy) &&
-      /لن يكون الالتقاط التلقائي جاهزاً للتكافؤ/.test(copy) &&
+  ok('technical sender limits appear after success instead of blocking setup comprehension',
+    setup.indexOf('(captured || captureOn)') < setup.indexOf("t('iosTestLimit')") &&
+      /first real bank alert is the final check/.test(copy) &&
+      /correct bank or card/.test(copy));
+  ok('returning from the install page cannot falsely confirm Shortcut setup',
+    !/AppState\.addEventListener/.test(setup) &&
+      /Shortcut is ready — clear code & continue/.test(copy));
+  ok('clearing the copied setup credential does not trigger an iOS paste read prompt',
+    /sensitiveCopyPending/.test(setup) &&
+      /Clipboard\.setStringAsync\(''\)/.test(setup) &&
+      !/Clipboard\.getStringAsync/.test(setup));
+  ok('the Message-object and setup instructions have first-class Arabic copy',
+    /الإدخال: «الرسالة المستلمة»/.test(copy) &&
+      /الاختصار جاهز — امسح الرمز وتابع/.test(copy) &&
       /محتوى الرسالة الخام/.test(copy) &&
       /اسم مرسل البنك/.test(copy));
+  ok('the next production build rejects the exact broken public Shortcut snapshot',
+    /85bd1e080e5849b591049eccffb9a3a1/.test(releaseCheck) &&
+      /retired file-path\/sender-blind Shortcut/.test(releaseCheck) &&
+      /brokenCaptureShortcut/.test(testflight));
+  ok('the replacement Shortcut contract prohibits file-backed configuration',
+    /no Get File, Save File, Move File or Folder/.test(shortcutSpec) &&
+      /setup import question/.test(shortcutSpec));
+  ok('historical import stays hidden until its tested public Shortcut is configured',
+    /supportsHistoricalShortcut\(\) && HISTORY_SHORTCUT_INSTALL_URL && !history/.test(
+      read('src/app/import-sms.tsx')));
 }
 
 /* ── Android inbox scans stay off the interaction critical path ─────── */
@@ -1269,6 +1295,7 @@ ok('the spoken label agrees with the sign on screen',
 {
   const sdk = read('src/lib/billing.ts');
   const pro = read('src/app/pro.tsx');
+  const strings = read('src/lib/i18n.ts');
 
   ok('restorePro has three answers, not two',
     /export async function restorePro\(\): Promise<boolean \| null>/.test(sdk),
@@ -1284,6 +1311,10 @@ ok('the spoken label agrees with the sign on screen',
     'an unactivated SKU made "Get Pro" silently inert, forever');
   ok('the paywall reports a failed purchase and stays silent on a cancelled one',
     /outcome === 'failed'/.test(code(pro)) && !/outcome === 'cancelled'/.test(code(pro)));
+  ok('an unconfirmed entitlement never guarantees that the store charged nothing',
+    !/Nothing has been charged/.test(strings) && !/لم يتم خصم أي مبلغ/.test(strings));
+  ok('the paywall exposes one live announcement path instead of announcing twice',
+    !/announceForAccessibility/.test(pro) && /accessibilityLiveRegion="polite"/.test(pro));
 }
 
 /* ── a background mode Apple will reject the binary for ─────────────────────
@@ -1538,6 +1569,43 @@ ok('the spoken label agrees with the sign on screen',
   ok(`no workflow reads the bare inputs context (${files.length} files)`,
     offenders.length === 0,
     offenders.slice(0, 3).join(' | '));
+}
+
+/* ── the worldwide inspector is not a production import path yet ───────── */
+{
+  const shipping = [...sources('src'), ...sources('server/src')];
+  const alertConsumers = shipping
+    .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`))
+    .filter((file) => /from ['"][^'"]*alert-draft['"]/.test(fs.readFileSync(file, 'utf8')));
+  const metadataConsumers = shipping
+    .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`) &&
+      !file.endsWith(`${path.sep}currency-metadata.ts`))
+    .filter((file) => /from ['"][^'"]*currency-metadata['"]/.test(fs.readFileSync(file, 'utf8')));
+  ok('the review-only alert inspector has no shipping importer',
+    alertConsumers.length === 0, alertConsumers.join(' | '));
+  ok('ISO draft metadata reaches shipping code only through the isolated inspector',
+    metadataConsumers.length === 0, metadataConsumers.join(' | '));
+}
+
+/* ── a manual workflow run cannot bypass third-party-AI consent ─────────── */
+{
+  const root = path.join(__dirname, '../..');
+  const workflow = fs.readFileSync(
+    path.join(root, '.github/workflows/feedback-agent.yml'),
+    'utf8',
+  );
+  const prompt = fs.readFileSync(
+    path.join(root, '.github/scripts/feedback-prompt.mjs'),
+    'utf8',
+  );
+  ok('the workflow checks explicit AI consent after fetching the report',
+    /Verify explicit third-party AI consent/.test(workflow) &&
+    /item\.aiReviewConsent !== true/.test(workflow) &&
+    /diagnostic\?\.delivery\?\.thirdPartyAi === true/.test(workflow));
+  ok('the prompt builder independently refuses reports without AI consent',
+    /item\.aiReviewConsent !== true/.test(prompt) &&
+    /diagnostic\?\.delivery\?\.thirdPartyAi !== true/.test(prompt) &&
+    /process\.exit\(1\)/.test(prompt));
 }
 
 /* ── what the prompt demands, the flags must permit ─────────────────────────

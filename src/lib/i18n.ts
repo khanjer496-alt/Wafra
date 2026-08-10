@@ -796,6 +796,11 @@ const S = {
   trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
   freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
   getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
+  startPlanWithPrice: {
+    en: 'Start {plan} — {price}',
+    ar: 'ابدأ الاشتراك {plan} — {price}',
+  },
+  purchaseInProgress: { en: 'Opening the store…', ar: 'جارٍ فتح المتجر…' },
   restorePurchase: { en: 'Restore purchase', ar: 'استعادة الشراء' },
   yearly: { en: 'YEARLY', ar: 'سنوي' },
   monthly: { en: 'MONTHLY', ar: 'شهري' },
@@ -1146,9 +1151,25 @@ const S = {
     en: 'Open your App Store or Google Play account to manage the subscription.',
     ar: 'افتح حسابك في App Store أو Google Play لإدارة الاشتراك.',
   },
-  subscriptionRenewalTerms: {
-    en: 'Payment is charged to your store account. Subscriptions renew automatically unless cancelled before the current billing period ends. You can manage or cancel renewal in your store account.',
-    ar: 'يُخصم المبلغ من حساب المتجر. يتجدد الاشتراك تلقائياً ما لم يُلغَ قبل نهاية فترة الفوترة الحالية. يمكنك إدارة التجديد أو إلغاؤه من حساب المتجر.',
+  subscriptionRenewalTermsIos: {
+    en: 'Payment is charged to your store account. The subscription renews automatically unless cancelled at least 24 hours before the current period ends.',
+    ar: 'يُخصم المبلغ من حساب المتجر. يتجدد الاشتراك تلقائياً ما لم يُلغَ قبل 24 ساعة على الأقل من نهاية الفترة الحالية.',
+  },
+  subscriptionRenewalTermsAndroid: {
+    en: 'Payment is charged to Google Play. The subscription renews automatically unless cancelled in Google Play before the next renewal date; access continues through the paid period.',
+    ar: 'يُخصم المبلغ من Google Play. يتجدد الاشتراك تلقائياً ما لم يُلغَ في Google Play قبل موعد التجديد التالي، ويستمر الوصول حتى نهاية المدة المدفوعة.',
+  },
+  privacyPolicy: { en: 'Privacy Policy', ar: 'سياسة الخصوصية' },
+  termsOfUse: { en: 'Terms of Use', ar: 'شروط الاستخدام' },
+  purchaseUnavailable: { en: 'Purchase unavailable', ar: 'الشراء غير متاح' },
+  purchaseLegalMissingBody: {
+    en: 'Purchases are temporarily unavailable because the required legal links are not configured.',
+    ar: 'الشراء غير متاح مؤقتاً لأن الروابط القانونية المطلوبة غير مهيأة.',
+  },
+  legalLinkFailed: { en: 'Could not open the legal page', ar: 'تعذّر فتح الصفحة القانونية' },
+  legalLinkFailedBody: {
+    en: 'Check your connection and try the link again.',
+    ar: 'تحقق من اتصالك وحاول فتح الرابط مرة أخرى.',
   },
   nothingToRestore: { en: 'Nothing to restore', ar: 'لا شيء لاستعادته' },
   nothingToRestoreBody: { en: 'Install Wafra from the App Store or Google Play to restore a purchase.', ar: 'ثبّت وفرة من App Store أو Google Play لاستعادة عملية شراء.' },
@@ -1164,10 +1185,10 @@ const S = {
     en: 'Your purchase has not been checked yet. Check your connection and try again.',
     ar: 'لم يتم التحقق من عملية الشراء بعد. تحقق من الاتصال وحاول مرة أخرى.',
   },
-  purchaseFailed: { en: 'Purchase could not start', ar: 'تعذّر بدء عملية الشراء' },
+  purchaseFailed: { en: 'Purchase not confirmed', ar: 'لم يتم تأكيد الشراء' },
   purchaseFailedBody: {
-    en: 'The store did not respond. Nothing has been charged. Check your connection and try again.',
-    ar: 'لم يستجب المتجر. لم يتم خصم أي مبلغ. تحقق من الاتصال وحاول مرة أخرى.',
+    en: 'The store could not confirm Pro yet. Check your connection, then restore purchases before trying to buy again.',
+    ar: 'لم يتمكن المتجر من تأكيد وفرة برو بعد. تحقق من الاتصال، ثم استعد المشتريات قبل محاولة الشراء مجدداً.',
   },
   monthsFreeSuffix: { en: '· {months} months free', ar: '· {months} أشهر مجاناً' },
   trialDaysLeftPaywall: {
@@ -1452,6 +1473,79 @@ const S = {
   },
   parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   trySample: { en: 'Try sample', ar: 'جرّب مثالاً' },
+  importPastMessages: { en: 'Import past Messages', ar: 'استيراد الرسائل السابقة' },
+  installHistoryShortcut: { en: 'Install history Shortcut', ar: 'تثبيت اختصار السجل' },
+  historyImportPrivacy: {
+    en: 'Apple Shortcuts searches all retained Messages in the date range you choose. Wafra checks them locally, keeps only financial matches, and uploads none of the text.',
+    ar: 'يبحث تطبيق اختصارات Apple في كل الرسائل المحتفظ بها ضمن المدة التي تختارها. يفحصها وفرة محلياً، ويحتفظ بالمطابقات المالية فقط، ولا يرفع أي نص.',
+  },
+  historyReviewPrivacy: {
+    en: 'Review only. The selected date range was checked on this iPhone; Message text is not uploaded and is removed from staging after a successful save or explicit cancel.',
+    ar: 'للمراجعة فقط. فُحصت المدة المحددة على هذا الآيفون؛ لا يُرفع نص الرسائل ويُحذف من التخزين المؤقت بعد الحفظ الناجح أو الإلغاء الصريح.',
+  },
+  historyPreparingReview: { en: 'Preparing review…', ar: 'جارٍ إعداد المراجعة…' },
+  retryHistoryRead: { en: 'Try reading again', ar: 'إعادة محاولة القراءة' },
+  historyShortcutMissing: { en: 'History Shortcut not installed', ar: 'اختصار السجل غير مثبت' },
+  historyShortcutMissingBody: {
+    en: 'Install “Wafra History Import” in Apple Shortcuts, then try again.',
+    ar: 'ثبّت «استيراد سجل وفرة» في تطبيق اختصارات Apple ثم أعد المحاولة.',
+  },
+  historyImportReviewReady: { en: 'Ready for review', ar: 'جاهز للمراجعة' },
+  historyImportReviewCounts: {
+    en: '{matched} matched · {skipped} unreadable or non-financial',
+    ar: 'طابقت {matched} · تعذّر فهم {skipped} أو لم تكن مالية',
+  },
+  historyImportNoNew: {
+    en: '{read} messages checked · {skipped} unreadable, repeated, or non-financial',
+    ar: 'فُحصت {read} رسالة · {skipped} غير مفهومة أو مكررة أو غير مالية',
+  },
+  historyImportNoneFound: {
+    en: 'No supported bank activity found',
+    ar: 'لم يُعثر على نشاط بنكي مدعوم',
+  },
+  historyImportNoneFoundBody: {
+    en: 'Wafra checked {read} retained messages; {skipped} were unreadable or did not match a supported bank alert. Nothing was filed. Try another date range after checking the Shortcut result count.',
+    ar: 'فحص وفرة {read} رسالة محتفظاً بها؛ تعذّر فهم {skipped} منها أو لم تطابق تنبيهًا بنكيًا مدعومًا. لم يُسجّل شيء. جرّب مدة أخرى بعد التحقق من عدد نتائج الاختصار.',
+  },
+  historyImportMissing: { en: 'No staged messages found', ar: 'لم تُوجد رسائل مؤقتة' },
+  historyImportMissingBody: {
+    en: 'Run Wafra History Import again and keep Wafra installed while the Shortcut finishes.',
+    ar: 'شغّل «استيراد سجل وفرة» مجدداً واترك وفرة مثبتاً حتى ينتهي الاختصار.',
+  },
+  historyImportInvalid: { en: 'This import link is invalid', ar: 'رابط الاستيراد غير صالح' },
+  historyImportInvalidBody: {
+    en: 'Nothing was read. Leave this screen and run Wafra History Import again from Apple Shortcuts.',
+    ar: 'لم تتم قراءة أي شيء. غادر هذه الشاشة وشغّل «استيراد سجل وفرة» مجدداً من اختصارات Apple.',
+  },
+  historyImportFailed: { en: 'Could not finish the import', ar: 'تعذّر إكمال الاستيراد' },
+  historyImportFailedBody: {
+    en: 'The protected source session is still on this iPhone. Try reading it again or cancel to delete it.',
+    ar: 'ما زالت جلسة المصدر المحمية على هذا الآيفون. أعد قراءتها أو ألغِ لحذفها.',
+  },
+  historyStorageFailed: { en: 'Secure save failed', ar: 'فشل الحفظ الآمن' },
+  historyStorageFailedBody: {
+    en: 'The review was applied in this open session but SQLCipher did not confirm the save. Retry the secure save, or leave; the protected source stays available for recovery and becomes eligible for cleanup after one hour.',
+    ar: 'طُبقت المراجعة في هذه الجلسة المفتوحة لكن SQLCipher لم يؤكد الحفظ. أعد محاولة الحفظ الآمن أو غادر؛ سيبقى المصدر المحمي متاحاً للاسترداد ويصبح مؤهلاً للتنظيف بعد ساعة.',
+  },
+  importStorageFailedBody: {
+    en: 'The entries were applied in this open session but encrypted storage did not confirm the save. Do not repeat this import now.',
+    ar: 'طُبقت العمليات في هذه الجلسة المفتوحة لكن التخزين المشفر لم يؤكد الحفظ. لا تكرر الاستيراد الآن.',
+  },
+  historyCleanupFailed: { en: 'Saved, but cleanup needs attention', ar: 'تم الحفظ لكن التنظيف يحتاج إجراءً' },
+  historyCleanupFailedBody: {
+    en: 'Your ledger is saved. Retry deletion, or leave; the protected staged Message text becomes eligible for cleanup after one hour.',
+    ar: 'تم حفظ سجلك. أعد محاولة الحذف أو غادر؛ يصبح نص الرسائل المؤقت المحمي مؤهلاً للتنظيف بعد ساعة.',
+  },
+  deleteStagedMessages: { en: 'Delete staged Message text', ar: 'حذف نص الرسائل المؤقت' },
+  retrySecureSave: { en: 'Retry secure save', ar: 'إعادة محاولة الحفظ الآمن' },
+  leaveImportScreen: { en: 'Leave this screen', ar: 'مغادرة هذه الشاشة' },
+  readyToFile: { en: 'Ready to file', ar: 'جاهز للتسجيل' },
+  skippedLabel: { en: 'skipped', ar: 'تم تخطيها' },
+  filesOnConfirm: { en: 'Files when you confirm', ar: 'يُسجَّل عند التأكيد' },
+  fileBillReminders: {
+    en: 'File {count} bill reminder{s}',
+    ar: 'تسجيل {count} من تذكيرات الفواتير',
+  },
 
   // iOS automatic capture setup.
   //
@@ -1559,8 +1653,12 @@ const S = {
 
   iosShortcutTitle: { en: 'Install the Shortcut', ar: 'ثبّت الاختصار' },
   iosShortcutBody: {
-    en: 'Copy and install Wafra Capture, then paste the setup code once when Shortcuts asks. The required Shortcut version must accept the received Message object and plain text for its manual test. Treat this as setup instructions—not proof that Apple exposes Sender—until a real alert confirms it.',
-    ar: 'انسخ اختصار Wafra Capture وثبّته، ثم الصق رمز الإعداد مرة واحدة عندما يطلبه تطبيق الاختصارات. يجب أن يقبل إصدار الاختصار المطلوب كائن الرسالة المستلمة والنص العادي للاختبار اليدوي. هذه تعليمات إعداد وليست دليلاً على إتاحة آبل لحقل المرسل؛ ولا يُثبت ذلك إلا تنبيه حقيقي.',
+    en: 'Tap below to copy this iPhone’s private setup code and open Shortcuts. Add Wafra Capture, run it once, and paste when Apple asks. Return here only after it says the Shortcut is ready.',
+    ar: 'اضغط أدناه لنسخ رمز الإعداد الخاص بهذا الآيفون وفتح الاختصارات. أضف «Wafra Capture»، وشغّله مرة واحدة، ثم الصق الرمز عندما تطلبه Apple. عد إلى هنا فقط بعد أن يؤكد الاختصار أنه جاهز.',
+  },
+  iosShortcutReplaceNote: {
+    en: 'Already installed Wafra Capture? Delete the old Shortcut before adding this version. Keeping both can make Apple run the broken copy.',
+    ar: 'هل ثبّتَّ «Wafra Capture» من قبل؟ احذف الاختصار القديم قبل إضافة هذا الإصدار. وجود النسختين قد يجعل Apple تشغّل النسخة المعطلة.',
   },
   iosSetupCode: { en: 'THIS IPHONE’S SETUP CODE', ar: 'رمز إعداد هذا الآيفون' },
   iosYourAddress: { en: 'YOUR ADDRESS', ar: 'عنوانك' },
@@ -1570,13 +1668,16 @@ const S = {
   iosCopyAddress: { en: 'Copy your Wafra address', ar: 'انسخ عنوان وفرة الخاص بك' },
   iosCopyToken: { en: 'Copy your secret key', ar: 'انسخ مفتاحك السري' },
   iosRunFor: { en: 'SET THE AUTOMATION TO RUN FOR', ar: 'اضبط الأتمتة لتعمل مع' },
-  iosOpenShortcut: { en: 'Copy code & install Shortcut', ar: 'انسخ الرمز وثبّت الاختصار' },
+  iosOpenShortcut: { en: 'Copy code & open latest Shortcut', ar: 'انسخ الرمز وافتح أحدث اختصار' },
   iosOpenShortcutsApp: { en: 'Open Shortcuts', ar: 'افتح تطبيق الاختصارات' },
   iosShortcutMissing: {
     en: 'This build has no published install link. You can still build “Wafra Capture” manually with the address and token below.',
     ar: 'لا يحتوي هذا الإصدار على رابط تثبيت منشور. ما زال بإمكانك إنشاء «Wafra Capture» يدوياً باستخدام العنوان والرمز أدناه.',
   },
-  iosInstalledIt: { en: 'I have installed it', ar: 'لقد ثبّته' },
+  iosInstalledIt: {
+    en: 'Shortcut is ready — clear code & continue',
+    ar: 'الاختصار جاهز — امسح الرمز وتابع',
+  },
 
   iosAutomationTitle: { en: 'Make it run by itself', ar: 'اجعله يعمل تلقائياً' },
   iosAutomationBody: {
@@ -1600,8 +1701,8 @@ const S = {
     ar: '٤. الإجراء: تشغيل اختصار ← Wafra Capture',
   },
   iosAutomationInput: {
-    en: '5. Required input: pass Received Message—not Content—to Wafra Capture. This specifies the intended setup; it does not prove Sender is exposed. The first real alert must file under the right bank. If it does not, bank attribution is unavailable and automatic capture is not parity-ready.',
-    ar: '٥. الإدخال المطلوب: مرّر «الرسالة المستلمة» إلى Wafra Capture، لا «المحتوى» وحده. هذا يحدد الإعداد المقصود ولا يثبت إتاحة حقل المرسل. يجب إسناد أول تنبيه حقيقي للبنك الصحيح؛ وإلا فلن يتوفر تحديد البنك ولن يكون الالتقاط التلقائي جاهزاً للتكافؤ.',
+    en: '5. Input: Received Message (not only Content)',
+    ar: '٥. الإدخال: «الرسالة المستلمة» (وليس «المحتوى» فقط)',
   },
   iosAutomationReady: {
     en: 'I chose Run Immediately',
@@ -1614,8 +1715,8 @@ const S = {
     ar: 'شغّل اختباراً آمناً واحداً عبر الاختصار المثبّت ثم عد إلى هنا. لن يضيف عملية شراء وهمية.',
   },
   iosTestLimit: {
-    en: 'This manual test cannot prove Apple’s Message sender trigger or that Sender is exposed. The next real alert must file under the right bank. If it does not, bank attribution is unavailable and automatic capture is not parity-ready.',
-    ar: 'لا يستطيع هذا الاختبار اليدوي إثبات مشغّل مرسل الرسالة لدى آبل أو إتاحة حقل المرسل. يجب إسناد التنبيه الحقيقي التالي للبنك الصحيح؛ وإلا فلن يتوفر تحديد البنك ولن يكون الالتقاط التلقائي جاهزاً للتكافؤ.',
+    en: 'The Shortcut and private sync work. The first real bank alert is the final check: it should appear under the correct bank or card.',
+    ar: 'يعمل الاختصار والمزامنة الخاصة. التنبيه البنكي الحقيقي الأول هو الاختبار الأخير: يجب أن يظهر تحت البنك أو البطاقة الصحيحة.',
   },
   iosCaught: {
     en: 'Captured and filed through the same path future alerts use.',
@@ -1631,13 +1732,16 @@ const S = {
     ar: 'في انتظار اختصار Wafra Capture',
   },
   iosTimedOut: {
-    en: 'Nothing arrived. Check that the Shortcut kept its setup code and is allowed to access the network, then run the test again.',
-    ar: 'لم تصل نتيجة. تأكد من احتفاظ الاختصار برمز الإعداد ومن السماح له بالوصول إلى الشبكة، ثم أعد الاختبار.',
+    en: 'The Shortcut did not finish. If Shortcuts showed “Invalid file path,” delete the old Wafra Capture and install the latest version below. Otherwise, open the Shortcut once and allow network access, then try again.',
+    ar: 'لم يكتمل تشغيل الاختصار. إذا عرض تطبيق الاختصارات «مسار ملف غير صالح»، فاحذف نسخة Wafra Capture القديمة وثبّت أحدث إصدار أدناه. وإلا فافتح الاختصار مرة واحدة واسمح له بالوصول إلى الشبكة ثم حاول مجدداً.',
   },
   iosTryAgain: { en: 'Try again', ar: 'حاول مرة أخرى' },
   iosStartListening: { en: 'Run capture test', ar: 'شغّل اختبار الالتقاط' },
   iosDone: { en: 'Done', ar: 'تم' },
-  iosSkipForNow: { en: 'Skip verification', ar: 'تخطَّ التحقق' },
+  iosSkipForNow: {
+    en: 'Finish for now — manual tracking still works',
+    ar: 'إنهاء الآن — يظل التسجيل اليدوي متاحاً',
+  },
   iosDisconnect: { en: 'Disconnect this iPhone', ar: 'افصل هذا الآيفون' },
   iosDisconnectFailed: {
     en: 'Could not disconnect. Stay online and try again so the relay copy can be erased.',
@@ -1965,8 +2069,8 @@ const S = {
     ar: 'أبلغ عن خلل، واختر ما تُرفقه',
   },
   feedbackIntro: {
-    en: 'Say what went wrong. Nothing leaves this phone until you tap Send, and the whole report is printed below so you can read it first.',
-    ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال، والتقرير كاملاً مطبوع بالأسفل لتقرأه أولاً.',
+    en: 'Say what went wrong. Nothing leaves this phone until you tap Send. The report is kept for at most 14 days for Wafra maintainers and is not sent to third-party AI.',
+    ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال. يُحتفظ بالتقرير لمدة أقصاها 14 يوماً لمشرفي وفرة ولا يُرسل إلى ذكاء اصطناعي خارجي.',
   },
   feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
   feedbackPlaceholder: {
@@ -2003,22 +2107,22 @@ const S = {
   },
   feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
   feedbackPreviewNote: {
-    en: 'This is the report itself, not a summary of it. It is written in English so whoever fixes the bug can read it.',
-    ar: 'هذا هو التقرير نفسه، لا ملخص له. وهو مكتوب بالإنجليزية ليقرأه من سيصلح الخلل.',
+    en: 'This is the whole report, not a summary. It is written in English for Wafra maintainers. Third-party AI review is off.',
+    ar: 'هذا هو التقرير كاملاً، لا ملخص له. وهو مكتوب بالإنجليزية لمشرفي وفرة. مراجعة الذكاء الاصطناعي الخارجي متوقفة.',
   },
   feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
   feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
   feedbackSendQ: { en: 'Send this report?', ar: 'إرسال هذا التقرير؟' },
   feedbackSendBody: {
-    en: 'The report above is what leaves this phone. Nothing else goes with it.',
-    ar: 'التقرير أعلاه هو ما يغادر هذا الهاتف. ولا شيء غيره.',
+    en: 'The report above is what leaves this phone. It is kept for at most 14 days, read by Wafra maintainers, and not sent to third-party AI.',
+    ar: 'التقرير أعلاه هو ما يغادر هذا الهاتف. يُحتفظ به لمدة أقصاها 14 يوماً ويقرأه مشرفو وفرة ولا يُرسل إلى ذكاء اصطناعي خارجي.',
   },
   feedbackSaveCopy: { en: 'Save a copy', ar: 'حفظ نسخة' },
   feedbackNeedsMessage: { en: 'Say what went wrong first.', ar: 'اكتب ما الذي حدث أولاً.' },
   feedbackSentTitle: { en: 'Report sent', ar: 'أُرسل التقرير' },
   feedbackSentBody: {
-    en: 'Reference {id}. This is how the parser learns a format it cannot read.',
-    ar: 'المرجع {id}. هكذا يتعلّم القارئ صيغة لا يستطيع قراءتها.',
+    en: 'Reference {id}. Wafra maintainers can review it for up to 14 days; no third-party AI receives it.',
+    ar: 'المرجع {id}. يمكن لمشرفي وفرة مراجعته لمدة تصل إلى 14 يوماً، ولا يستلمه أي ذكاء اصطناعي خارجي.',
   },
   feedbackNoTransportTitle: { en: 'Sending is not connected yet', ar: 'الإرسال غير موصول بعد' },
   feedbackNoTransportBody: {

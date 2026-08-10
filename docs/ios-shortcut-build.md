@@ -39,9 +39,9 @@ or iPad. A Mac with no paired iPhone has no real bank SMS to trigger it with.
 Parser, relay and account-placement simulations are useful, but none can prove
 what Apple's automation supplies as the Message Sender.
 
-You also do not need a setup code to publish. The graph asks for one on first
-run and stores it on the user's own iCloud Drive, so a copy that has never been
-run is already credential-free. Step 5's deletion only applies if you tested it.
+You also do not need a production setup code to publish. The graph uses an
+Apple import question attached to an empty Text field. Apple asks each person
+for their own setup code and does not include that answer in the shared field.
 
 So the split is: **one iPhone/iPad tester completes, verifies and publishes v2;
 the Mac owner wires that tested link into the app.**
@@ -49,22 +49,26 @@ the Mac owner wires that tested link into the app.**
 Pick a single iPhone tester as the designated verifier and do not tell anyone
 else iPhone capture works until they have finished:
 
-1. Install the current Wafra Capture link and duplicate it on their iPhone.
-2. Complete steps 1, 3 and 4 below so the duplicate accepts **Messages** and
+1. Build a fresh Shortcut on their iPhone. Do not duplicate the first public
+   Wafra Capture; its Get File action is wired to Shortcut Input and is the
+   source of the “path must be contained within the directory” failure.
+2. Complete steps 1 through 4 below so the Shortcut accepts **Messages** and
    **Text**, extracts **Content** and **Sender**, explicitly converts Sender to
    **Text**, and posts `text`, `sender` and `eventId`.
-3. Paste the setup code from their own copy of Wafra and run
+3. Use **Customise Shortcut** to answer the setup import question with the
+   setup code from their own copy of Wafra, then run
    `WAFRA_CAPTURE_TEST_V1`; Wafra should reach "pipe ready".
 4. Do step 8 below with a real locked-phone bank alert and confirm the row is
    assigned to the correct bank/card rather than merely arriving.
-5. Remove any literal test data, verify the graph contains no setup code, relay
-   URL, bearer, phone number or bank name, then copy its iCloud link.
+5. Verify the setup Text field is covered by the import question and that the
+   shared graph contains no setup code, relay URL, bearer, phone number or bank
+   name, then copy its iCloud link.
 6. Send that link to the Mac owner. Do not edit the graph between the successful
    test and publication. If project ownership later requires re-sharing it from
    another Apple account, repeat the physical verification on that exact link.
 
-The tester's setup token lives in their own iCloud Drive config file, not in the
-shared graph. Never ask them to send that code to the Mac owner.
+The tester's setup token lives only in their customised local Shortcut. Never
+ask them to send that code to the Mac owner.
 
 ---
 
@@ -78,10 +82,11 @@ copy it. It looks like this, on one line:
 {"v":1,"url":"https://<relay>/v1/ingest","token":"<long random string>"}
 ```
 
-That code contains **this device's ingest token**. It is a credential. The
-Shortcut writes it to that user's local iCloud Drive config file; it must never
-be typed as a literal action value, sent to the Mac owner, or included in an
-export. Step 5 verifies that boundary and is not optional.
+That code contains **this device's ingest token**. It is a credential. It must
+only be pasted as the answer to the setup import question on that user's
+device; it must never be a literal value in the shared graph, sent to the Mac
+owner, or included in an exported public artifact. Step 5 verifies that
+boundary and is not optional.
 
 ---
 
@@ -100,67 +105,53 @@ step 6 can run.
 
 ---
 
-## 2. The first-run branch: store the setup code
+## 2. Add the one-time setup question
 
-Everything in this step exists so the token lives in a file the user controls,
-not inside the published Shortcut.
+1. Add a **Text** action as the first action and leave it empty.
+2. Shortcut name menu → **Setup** → **Add New Question** → choose the Text
+   field from action 1. Use the question `Paste the setup code copied by Wafra`.
+   Leave the default answer empty.
+3. Add **Get Dictionary from Input**, using the Text action.
+4. Validate the Dictionary's `v`, `url` and `token`: `v` must equal `1`, `url`
+   must use HTTPS and end in `/v1/ingest`, and `token` must not be empty. On a
+   failure, stop with `Open Wafra and copy a new setup code.`
+5. If **Shortcut Input** has no value, show notification
+   `Wafra Capture is ready` and stop. This is the visible end of the one-time
+   setup run.
 
-Add, in order:
-
-1. **Get File** — Service: **iCloud Drive**, Path: `Shortcuts/Wafra Capture/config.json`.
-   Turn **Error If Not Found** OFF. (Tap the action → the toggle is in the
-   expanded options.)
-2. **If** — Condition: `File` **has no value**.
-
-Inside the **If** (the true branch):
-
-3. **Ask for Input** — Input Type: **Text**, Prompt: `Paste the setup code from Wafra`.
-4. **Get Dictionary from Input** — Input: **Provided Input** (the Ask result).
-5. **Get Dictionary Value** — Get **Value** for key `v`, from the Dictionary.
-6. **If** — Condition: `Dictionary Value` **is not** `1` → inside it, add
-   **Stop and Output** with text `That is not a Wafra setup code.` Then
-   **Stop This Shortcut**.
-7. **Get Dictionary Value** — Value for key `url`.
-8. **If** — `Dictionary Value` **does not contain** `/v1/ingest` → **Stop and
-   Output** `That setup code has no ingest address.` and stop.
-9. **Save File** — Service **iCloud Drive**, Path
-   `Shortcuts/Wafra Capture/config.json`, Input: the **Dictionary** from step 4.
-   **Ask Where To Save** OFF, **Overwrite If File Exists** ON.
-10. **Show Notification** — `Wafra Capture is ready`.
-11. **Stop This Shortcut**.
-
-> Do not add a step that sends the setup code anywhere. It is stored and
-> nothing else. The relay never needs to be told a token it issued.
-
-Now tap **Otherwise** / move below the If — the rest runs when the file exists.
+Do not add **Get File**, **Save File**, **Move File** or a Folder action. The
+first public Wafra Capture accidentally used Shortcut Input as the Get File
+directory. A text test could never be contained inside that “directory,” which
+is the exact failure shown by the TestFlight tester.
 
 ---
 
 ## 3. Read the message
 
-12. **Get Dictionary from Input** — Input: the **File** from step 1.
-13. **If** — Condition: `Shortcut Input` **is of type** **Text**
+6. **If** — Condition: `Shortcut Input` **is of type** **Text**
     - True branch: **Set Variable** `text` to **Shortcut Input**.
     - Otherwise: **Get Details of Messages** → **Content**, then **Set
       Variable** `text` to it. Then **Get Details of Messages** → **Sender**,
       then **Text** (an explicit Text action, converting the contact), then
-      **Set Variable** `sender` to that Text.
+      **Set Variable** `sender` to that Text. Then **Get Details of Messages**
+      → **Date** → **Format Date** using UTC and custom format
+      `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` → **Set Variable** `receivedAt`.
 
 The explicit **Text** action on the sender matters. Without it the value is a
 contact object, and what lands at the relay is not the bank label.
 
-14. **If** — `text` **has no value** → **Stop This Shortcut**. An empty message
+7. **If** — `text` **has no value** → **Stop This Shortcut**. An empty message
     must not become a request.
 
 ---
 
 ## 4. Send it
 
-15. **UUID** → **Set Variable** `eventId`.
-16. **Get Dictionary Value** — Value for key `url`, from the Dictionary in
-    step 12 → **Set Variable** `endpoint`.
-17. **Get Dictionary Value** — Value for key `token` → **Set Variable** `token`.
-18. **Get Contents of URL** — URL: `endpoint`. Expand **Show More**:
+8. **UUID** → **Set Variable** `eventId`.
+9. **Get Dictionary Value** — Value for key `url`, from the setup Dictionary →
+   **Set Variable** `endpoint`.
+10. **Get Dictionary Value** — Value for key `token` → **Set Variable** `token`.
+11. **Get Contents of URL** — URL: `endpoint`. Expand **Show More**:
     - Method: **POST**
     - Headers:
       - `Authorization` → `Bearer ` + `token` *(type the word Bearer, a space,
@@ -170,6 +161,11 @@ contact object, and what lands at the relay is not the bank label.
       - `text` (Text) → variable `text`
       - `sender` (Text) → variable `sender`
       - `eventId` (Text) → variable `eventId`
+      - `receivedAt` (Text) → variable `receivedAt`
+
+The manual Text setup test has no Message Date; omit `receivedAt` in that
+branch. Never stamp a real alert with the current time merely because the
+automation ran late.
 
 **Nothing after this action.** No Show Result, no Quick Look, no Copy to
 Clipboard, no Speak. A `202` means the row was accepted and a `204` means the
@@ -178,29 +174,28 @@ response on screen for.
 
 ---
 
-## 5. Remove the credential before publishing
+## 5. Prove the shared copy has no credential
 
-The Shortcut you just tested has your token sitting in
-`Shortcuts/Wafra Capture/config.json` on **your** iCloud Drive — not inside the
-Shortcut. That is the design. But verify it rather than trust it:
+1. Shortcut name menu → **Setup**. Confirm exactly one import question targets
+   the first Text action and has no default answer.
+2. Tap **Customise Shortcut**. Confirm Apple asks for the Wafra setup code and
+   that the answer populates the Text field.
+3. Read the graph looking for a literal relay URL, token, bank name, phone
+   number, or Message content. There must be none outside your local answer.
+4. After publishing, download the unsigned source behind the iCloud record and
+   inspect it. It must contain the import question, no file/folder actions, and
+   no setup value. Do not rely on the editor view alone. On this Mac, run:
 
-1. Files app → iCloud Drive → **Shortcuts** → **Wafra Capture** → delete
-   `config.json`.
-2. Run **Wafra Capture** once with any text. It must ask you to paste a setup
-   code — that is the proof that the graph carries no configuration of its own.
-3. Cancel the prompt. Do not paste anything.
-
-Then read the graph once more looking for a literal relay URL, a literal token,
-a bank name, or your own phone number typed into any action. There must be
-none. Anything typed literally into an action ships to every person who
-installs it.
+   ```bash
+   bash scripts/check-ios-shortcut-artifact.sh https://www.icloud.com/shortcuts/<new-id>
+   ```
 
 ---
 
 ## 6. Prove it works, then publish
 
-With `config.json` deleted, run the Shortcut and paste your setup code when it
-asks. Then run it again with the text:
+Run the freshly customised Shortcut once with no input. It must say
+`Wafra Capture is ready`. Then run it with the text:
 
 ```
 WAFRA_CAPTURE_TEST_V1

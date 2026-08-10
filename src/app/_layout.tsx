@@ -3,14 +3,15 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect } from 'react';
-import { StyleSheet, useColorScheme, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { AppState, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
+import { observeEntitlement, refreshEntitlement } from '@/lib/billing';
 import { PeriodProvider } from '@/lib/period-context';
 import { StoreProvider, useStore } from '@/lib/store';
 // Required at module scope so expo-task-manager can load the wake-only relay
@@ -22,6 +23,48 @@ import { installFeedbackTransport } from '@/lib/feedback-transport';
 // capture module keeps its promise of holding no network by taking delivery
 // through a setter; this is the one call that fills it in.
 installFeedbackTransport();
+
+function BillingSync() {
+  const { state, setPro } = useStore();
+  const currentPro = useRef(state.pro);
+  currentPro.current = state.pro;
+
+  useEffect(() => {
+    if (!state.hydrated) return;
+    let disposed = false;
+    let stopObserving = () => {};
+    let latestRequestDateMs = 0;
+    let refreshGeneration = 0;
+    const apply = (snapshot: { active: boolean; requestDateMs: number }) => {
+      if (disposed || snapshot.requestDateMs <= latestRequestDateMs) return;
+      latestRequestDateMs = snapshot.requestDateMs;
+      if (snapshot.active === currentPro.current) return;
+      currentPro.current = snapshot.active;
+      setPro(snapshot.active);
+    };
+    void observeEntitlement((snapshot) => {
+      refreshGeneration += 1;
+      apply(snapshot);
+    }).then((cleanup) => {
+      if (disposed) cleanup();
+      else stopObserving = cleanup;
+    });
+    const appState = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      const generation = ++refreshGeneration;
+      void refreshEntitlement().then((snapshot) => {
+        if (generation === refreshGeneration && snapshot) apply(snapshot);
+      });
+    });
+    return () => {
+      disposed = true;
+      appState.remove();
+      stopObserving();
+    };
+  }, [setPro, state.hydrated]);
+
+  return null;
+}
 
 /**
  * Mirrors the whole app left-to-right or right-to-left, live.
@@ -109,6 +152,7 @@ export default function RootLayout() {
 
   return (
     <StoreProvider>
+      <BillingSync />
       <Direction>
       <PeriodProvider>
       <ThemeProvider value={navTheme}>

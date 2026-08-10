@@ -14,33 +14,45 @@ user data. Pairing supplies a versioned one-paste JSON value:
 1. Accept **Messages** and **Text** as `Shortcut Input`. The intended personal
    automation passes the whole Message object so the graph can try to extract
    its sender. Text stays accepted so the manual setup test below still runs.
-2. Look for `Shortcuts/Wafra Capture/config.json` in iCloud Drive.
-3. If the file does not exist:
-   1. Ask for Text with “Paste the setup code from Wafra”.
-   2. Get Dictionary from the supplied text.
-   3. Require `v` to equal `1`, `url` to be an HTTPS URL ending in
-      `/v1/ingest`, and `token` to be non-empty. Stop with an error otherwise.
-   4. Save the original dictionary as
-      `Shortcuts/Wafra Capture/config.json`, overwriting only after the user
-      confirms a new setup code.
-   5. Show “Wafra Capture is ready” and stop. Do not send the setup code.
-4. Get Dictionary from the saved config file.
+2. Add one **Text** action for the setup JSON. Its shared value must be empty.
+   In the Shortcut's **Setup** screen, attach an import question to that Text
+   field: “Paste the setup code copied by Wafra.” Apple clears a field covered
+   by an import question from the shared copy and asks the recipient to supply
+   their own value when customising or first running it.
+3. Get Dictionary from that Text action. Require `v` to equal `1`, `url` to be
+   an HTTPS URL ending in `/v1/ingest`, and `token` to be non-empty. Stop with
+   “Open Wafra and copy a new setup code” when validation fails.
+4. If `Shortcut Input` has no value, show “Wafra Capture is ready” and stop.
+   This makes the one-time configuration run visibly complete without sending
+   any financial or setup data.
 5. Branch on the type of `Shortcut Input` before reading Message details:
    - For **Text**, set `text` to `Shortcut Input` and leave `sender` absent.
    - For **Messages**, get detail **Content** as `text`; get detail **Sender**,
      explicitly convert that result to plain **Text**, and set it as `sender`.
-     Do not rely on JSON coercion of a Contact or participant object.
+     Get detail **Date** and format it as an ISO-8601 instant in UTC with
+     milliseconds (`yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`) as `receivedAt`. Do not rely
+     on JSON coercion of a Contact, participant object or Date.
 6. Require non-empty `text`; stop without a request when it is empty.
 7. Generate a UUID as `eventId`.
 8. Get Contents of URL using the saved `url`:
    - Method: `POST`
    - Header: `Authorization: Bearer <saved token>`
    - Header: `Content-Type: application/json`
-   - JSON body: `{ "text": <text>, "sender": <sender>, "eventId": <UUID> }`
+   - JSON body:
+     `{ "text": <text>, "sender": <sender>, "eventId": <UUID>, "receivedAt": <Message Date> }`
    - Omit `sender` entirely when `sender` is empty. An empty string is
      accepted and treated as absent, but a missing key is the clearer request.
+   - Omit `receivedAt` only for manual Text setup tests. A real Message
+     automation must send the Message object's Date so a delayed automation
+     and a later history import identify the same event time.
 9. Do not show, speak, copy or log the response. A `202` means a row was
    accepted; `204` means the alert was intentionally ignored.
+
+The published graph must contain **no Get File, Save File, Move File or Folder
+action**. The first public Wafra Capture accidentally configured Get File to
+use `Shortcut Input` as its directory. The app's text probe therefore produced
+Apple's “The provided file path must be contained within the directory” error.
+File-backed configuration is prohibited so that failure class cannot return.
 
 ### Why the sender is sent, and what may be sent as one
 
@@ -69,7 +81,8 @@ must remain in “pipe ready” state until a real parsed row with
 `captureSource: "shortcut"` is durably staged by the headless iOS task.
 
 A Shortcut built against the earlier `{ "text", "eventId" }` contract keeps
-working; `sender` is optional on the wire.
+working; `sender` and `receivedAt` are optional on the wire. It is not complete
+for history/live overlap until republished with Message Date.
 
 ## Personal automation the user creates
 
@@ -95,8 +108,13 @@ not as parity proof, until the first real alert passes the physical test below.
 
 ## Publication and release proof
 
-- Build this graph in Apple Shortcuts, test it with a disposable staging relay,
-  remove the staging config file, then publish the credential-free Shortcut.
+- Build this graph in Apple Shortcuts and test it with a disposable staging
+  relay. Before sharing, add the import question to the setup Text field and
+  use **Customise Shortcut** to prove Apple asks the question and replaces that
+  field. Publish only the credential-free shared copy.
+- Download the unsigned source behind the resulting iCloud record and verify:
+  one setup import question exists; no file/folder action exists; and no relay
+  URL, bearer token, phone number, bank name or test data appears literally.
 - Put the resulting `https://www.icloud.com/shortcuts/<id>` URL in
   `EXPO_PUBLIC_WAFRA_SHORTCUT_URL` and run `npm run release:check`.
 - On a signed physical iPhone, prove one real bank alert while Wafra is closed

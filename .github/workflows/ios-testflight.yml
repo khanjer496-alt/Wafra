@@ -138,7 +138,7 @@ jobs:
       #      Three independent reasons, all of which surface as a confusing
       #      failure thirty minutes in. Stop now instead.
       - name: Refuse a combination that cannot reach TestFlight
-        if: inputs.submit && inputs.profile != 'production'
+        if: inputs.submit_build_id == '' && inputs.submit && inputs.profile != 'production'
         run: |
           {
             echo "# Not started — \`preview\` builds cannot go to TestFlight"
@@ -176,6 +176,7 @@ jobs:
       #      scripts/check-release-config.mjs blocks a release without it).
       - name: Read and check the app config
         id: config
+        if: inputs.submit_build_id == ''
         env:
           PROFILE: ${{ inputs.profile }}
           WANT_SUBMIT: ${{ inputs.submit }}
@@ -199,6 +200,26 @@ jobs:
             if (!eas.build?.[profile]) fail.push("buildProfile");
             if (wantSubmit && !eas.submit?.[profile]) fail.push("submitProfile");
 
+            if (profile === "production") {
+              const env = eas.build?.[profile]?.env ?? {};
+              const shortcut = /^https:\/\/www\.icloud\.com\/shortcuts\/[A-Za-z0-9_-]+\/?$/;
+              const https = /^https:\/\/[^\s]+$/;
+              const captureUrl = env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL ?? "";
+              const historyUrl = env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL ?? "";
+              if (!shortcut.test(captureUrl)) fail.push("captureShortcut");
+              if (!shortcut.test(historyUrl)) fail.push("historyShortcut");
+              if (captureUrl && historyUrl && captureUrl === historyUrl) fail.push("distinctShortcuts");
+              if (captureUrl.includes("85bd1e080e5849b591049eccffb9a3a1")) {
+                fail.push("brokenCaptureShortcut");
+              }
+              if (!/^appl_[A-Za-z0-9]+$/.test(app.extra?.revenueCatIosKey ?? "")) {
+                fail.push("revenueCatIosKey");
+              }
+              for (const key of ["privacyPolicyUrl", "termsOfUseUrl", "supportUrl"]) {
+                if (!https.test(app.extra?.[key] ?? "")) fail.push(key);
+              }
+            }
+
             out.push("fail=" + fail.join(","));
             out.push("bundle_id=" + bundleId);
             out.push("slug=" + (app.slug ?? ""));
@@ -214,7 +235,7 @@ jobs:
           PROFILE: ${{ inputs.profile }}
         run: |
           {
-            echo "# Not started — the app is not linked to an EAS project"
+            echo "# Not started — the selected app configuration is not ready"
             echo
             case ",$FAIL," in
               *,projectId,*)
@@ -254,6 +275,46 @@ jobs:
                 echo
                 echo "It should be \`app.wafra.ios\`. Apple identifies the app by this string and it cannot be changed"
                 echo "after the first submission."
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,captureShortcut,*|*,historyShortcut,*|*,distinctShortcuts,*)
+                echo "## The selected build profile does not contain two valid, distinct Shortcut links"
+                echo
+                echo "The real-time **Wafra Capture** graph and the user-run **Wafra History Import** graph"
+                echo "have different permissions and data paths. Set both public iCloud links in"
+                echo "\`eas.json → build.$PROFILE.env\`, and never reuse one link for both features."
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,brokenCaptureShortcut,*)
+                echo "## The production capture link is the retired broken Shortcut"
+                echo
+                echo "That iCloud snapshot uses Shortcut Input as a Get File directory, which causes"
+                echo "Apple's **Invalid file path** error during Wafra's text probe. It is also sender-blind."
+                echo "Publish and physically test the file-free import-question graph in"
+                echo "\`docs/ios-shortcut-build.md\`, then replace the production URL."
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,revenueCatIosKey,*)
+                echo "## \`expo.extra.revenueCatIosKey\` is not a RevenueCat Apple public SDK key"
+                echo
+                echo "A production build with no \`appl_…\` key cannot sell or restore Wafra Pro."
+                echo "Add the public platform key only after the App Store products, entitlement \`pro\`,"
+                echo "and current Offering are configured in RevenueCat."
+                echo
+                ;;
+            esac
+            case ",$FAIL," in
+              *,privacyPolicyUrl,*|*,termsOfUseUrl,*|*,supportUrl,*)
+                echo "## Required HTTPS legal or support links are missing"
+                echo
+                echo "Set `privacyPolicyUrl`, `termsOfUseUrl`, and `supportUrl` in"
+                echo "`app.json → expo.extra`. The paywall and store review must reach the same hosted pages."
                 echo
                 ;;
             esac

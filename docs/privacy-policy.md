@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 2 August 2026_
+_Last updated: 9 August 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS.
 
@@ -19,6 +19,10 @@ before release.
   it or for at most 30 days.
 - **Private Mode:** automatic iPhone relay capture is off. Imports and parsing
   stay on the device, and raw text is dropped immediately after processing.
+- **iPhone history import:** on iOS 26.5 or later, a user-run Apple Shortcut can
+  search messages in a date range the user chooses and pass them to Wafra for
+  local parsing and review. Nothing from this history import is sent to Wafra's
+  relay.
 - The ledger, accounts, budgets, bills, goals and settings live in encrypted
   app storage on the device. Wafra has no advertising or third-party analytics.
 
@@ -68,6 +72,30 @@ open, so Wafra does not promise a background update at an exact time.
 Private Mode disables this relay path. Because iOS has no local SMS-inbox API,
 automatic SMS capture is unavailable on iPhone while Private Mode is on.
 
+## iPhone message-history import
+
+On iOS 26.5 or later, the user can separately run Wafra's message-history
+Shortcut. The Shortcut uses Apple's **Find Messages** action to search the date
+range the user chooses. Apple does not provide Wafra with a direct SMS-inbox
+permission or API. The Shortcut therefore examines messages in that chosen
+range before Wafra's parser can identify which ones are financial alerts.
+
+The Shortcut passes message text, sender, date and an opaque hash of Apple's
+message identifier to Wafra in bounded batches. Those batches stay on the
+device, use iOS complete file protection, are excluded from device backups and
+are not sent to the relay, analytics or an AI service. Wafra parses each batch
+locally and shows a preview before changing the ledger. Raw message text is not
+written to the ledger.
+
+When the user confirms, Wafra first saves the structured results to its
+encrypted database and then deletes the staged batches. Cancelling also deletes
+them. If deletion is interrupted, staged batches become eligible for local
+cleanup after one hour and Wafra removes them the next time the history bridge
+runs. iOS does not guarantee that this fallback cleanup happens at an exact
+wall-clock time. Messages already deleted by the user, removed by Messages
+retention settings or unavailable to Apple's search cannot be recovered or
+imported.
+
 ## What is stored on the device
 
 Transactions, accounts, cards, budgets, bills, goals and settings are stored in
@@ -109,8 +137,12 @@ store biometric templates.
   vault removes every device and queue.
 - **Backup and export:** the user can create a backup or export and choose where
   to send it. The resulting file is controlled by the user.
-- **Reporting an unrecognised format:** if the user deliberately shares a
-  sample through their own email app, they can review it before sending.
+- **Feedback and unrecognised formats:** if the user deliberately sends a
+  report in Wafra, the exact redacted report is shown before confirmation. It
+  is stored in Cloudflare D1 for at most 14 days and can be read by Wafra
+  maintainers. In the current release it is not dispatched to GitHub Actions
+  or any third-party AI service. Reports contain no device, advertising,
+  installation or push identifier.
 
 Wafra does not include advertising, third-party analytics or crash reporting.
 
@@ -119,7 +151,8 @@ Wafra does not include advertising, third-party analytics or crash reporting.
 Wafra extracts transaction fields and suggests a merchant and category. These
 labels are visible only to the user, have no legal or financial effect and can
 be corrected. Wafra does not use bank alerts for advertising, credit decisions
-or training a server-side model.
+or training a server-side model. User feedback is not sent to a third-party AI
+in the current release.
 
 ## Security and retention
 
@@ -146,6 +179,8 @@ The user can:
 
 - decline Android SMS or notification access;
 - leave iPhone automatic capture unconfigured;
+- choose whether to install or run the iPhone history Shortcut, choose its date
+  range, review the results and cancel before saving;
 - decline or revoke bank-email forwarding and trusted-device sharing;
 - enable Private Mode to keep new processing local;
 - edit, export or delete local financial records; and

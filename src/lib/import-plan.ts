@@ -37,6 +37,14 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
   captureSource?: 'shortcut' | 'email' | 'pdf';
+  /**
+   * Opaque, locally generated identity for a historical Apple Message.
+   *
+   * The Shortcut hashes the Message GUID before Wafra sees it. Keeping that
+   * stable value in smsKey makes repeating a history import exactly
+   * idempotent without persisting the GUID or body.
+   */
+  sourceEventId?: string;
 };
 
 /**
@@ -59,6 +67,8 @@ export interface DeclinedSms {
   smsTs: number;
   sender?: string;
   channel?: CaptureChannel;
+  /** Opaque GUID-derived identity when the decline came from iOS history. */
+  sourceEventId?: string;
 }
 
 export interface ImportPlan {
@@ -171,8 +181,46 @@ export function buildImportPlan(
       });
     }
   };
+  const promoteMatchedHistory = (
+    matchedId: string,
+    smsKey: string,
+    p: ScannedSms,
+    resolvedAccountId?: string,
+    cardPaymentSide?: 'debit' | 'receipt',
+  ) => {
+    const prior = priorById.get(matchedId);
+    if (!prior) return;
+    // A hand-entered row may explain one bank alert, but the history importer
+    // must not rewrite the user's category/direction or attach an SMS identity
+    // to a row whose source remains manual.
+    if (prior.source !== 'sms') return;
+    // The existing row is still indexed by its legacy s-key, so looking it up
+    // through the incoming h-key cannot heal it. Build one combined update;
+    // the reducer intentionally keeps only the last patch for a row id.
+    const patch = prior.userEdited
+      ? null
+      : healPatch(prior, cardPaymentSide ? { ...p, cardPaymentSide } : p);
+    const accountChanged =
+      !prior.userEdited &&
+      resolvedAccountId !== undefined &&
+      resolvedAccountId !== prior.accountId;
+    const identityChanged =
+      prior.smsKey !== smsKey || prior.ts !== p.smsTs || prior.viaPush === true;
+    if (!patch && !accountChanged && !identityChanged) return;
+    updates.push({
+      ...(patch ?? { id: matchedId }),
+      ...(accountChanged ? { accountId: resolvedAccountId } : {}),
+      smsKey,
+      ts: p.smsTs,
+      viaPush: false,
+    });
+  };
   const smsKeyOf = (p: ScannedSms): string | undefined =>
-    p.smsTs !== undefined ? `s${p.smsTs}-${p.amountFils}` : undefined;
+    p.sourceEventId
+      ? `h${p.sourceEventId}`
+      : p.smsTs !== undefined
+        ? `s${p.smsTs}-${p.amountFils}`
+        : undefined;
   // Newest bank-quoted balance/limit per account — even from messages whose
   // transaction is already imported (rescans refresh the figures).
   const snapshots: ImportBatchInput['snapshots'] = {};
@@ -484,7 +532,18 @@ export function buildImportPlan(
       if (misread && !misread.isTransfer && !misread.userEdited) {
         updates.push({ id: misread.id, remove: true });
       }
-      if (p.merchant !== 'Bill payment') billDues.push(p);
+      // A multi-year iOS history search must not silently resurrect a utility
+      // account the user left years ago as a new recurring bill.
+      const historicalBillDate = p.date ?? (
+        Number.isFinite(p.smsTs) ? toISODate(new Date(p.smsTs!)) : null
+      );
+      const staleOrUndatedHistoryBill = Boolean(
+        p.sourceEventId && (!historicalBillDate || historicalBillDate < staleDueCutoff),
+      );
+      if (
+        p.merchant !== 'Bill payment' &&
+        !staleOrUndatedHistoryBill
+      ) billDues.push(p);
       continue;
     }
     if (p.kind === 'cardStatement') {
@@ -576,6 +635,25 @@ export function buildImportPlan(
         accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
       };
       if (guard.has(candidate)) {
+        const matchedId = guard.takeMatchedId();
+        const matchedPrior = matchedId ? priorById.get(matchedId) : undefined;
+        const matchedOppositeSettlementSide =
+          matchedPrior?.cardPaymentSide !== undefined &&
+          cardPaymentSide !== undefined &&
+          matchedPrior.cardPaymentSide !== cardPaymentSide;
+        if (p.sourceEventId && matchedId && !matchedOppositeSettlementSide) {
+          // Preserve the one-to-one live/history pairing in the actual batch.
+          // Otherwise h1 is discarded here, h2 reaches the reducer alone and
+          // fuzzy reconciliation folds h2 into the still-live row as well.
+          promoteMatchedHistory(
+            matchedId,
+            smsKey!,
+            p,
+            resolution.confident ? accountId : undefined,
+            cardPaymentSide,
+          );
+          guard.consumeCapture(matchedId);
+        }
         // A row imported as a plain expense before this message was
         // recognized as a card payment becomes a transfer now.
         healFromReparse(
@@ -619,6 +697,13 @@ export function buildImportPlan(
       // the NEXT same-value message in the window was dropped against it too,
       // and that one was a real charge nobody ever saw.
       guard.consume(protectedSupersededId);
+      if (p.sourceEventId && smsKey) {
+        // Technical source identity is safe to promote even when every
+        // user-facing field is protected. It also prevents the next distinct
+        // history Message from consuming this same push row through the title
+        // index after the cross-channel index was consumed.
+        promoteMatchedHistory(protectedSupersededId, smsKey, p);
+      }
       guard.add(captureCandidate);
       continue;
     }
@@ -628,6 +713,21 @@ export function buildImportPlan(
     if (resolution.confident) noteSnapshot(accountId, p);
     const candidate = { ...captureCandidate, accountId };
     if (guard.has(candidate)) {
+      const matchedId = guard.takeMatchedId();
+      if (p.sourceEventId && matchedId) {
+        // Promote the matched live capture to the exact retained-Message key.
+        // The next distinct history GUID can then survive reducer hydration.
+        promoteMatchedHistory(
+          matchedId,
+          smsKey!,
+          p,
+          resolution.confident ? accountId : undefined,
+        );
+        // One stored row is indexed by both title and capture channel. A
+        // history match consumes it in both places or h2 can reuse the push
+        // index after h1 consumed the title index.
+        guard.consume(matchedId);
+      }
       healFromReparse(smsKey, p, resolution.confident ? accountId : undefined);
       continue;
     }
@@ -751,6 +851,19 @@ export function buildImportPlan(
     const NEAR_MS = 7 * 86400000;
     const swept = new Set<string>();
     for (const d of declined) {
+      if (d.sourceEventId) {
+        // Historical Shortcut timestamps are commonly rounded to a second,
+        // so timestamp equality is not identity. Only a row imported from the
+        // exact same GUID-derived Message may be swept as a prior misparse.
+        const row = priorBySmsKey.get(`h${d.sourceEventId}`);
+        if (!row || swept.has(row.id)) continue;
+        if (row.source !== 'sms') continue;
+        if (row.userEdited || row.isTransfer || row.splits) continue;
+        if (row.raw !== undefined && !isDeclinedMessage(row.raw)) continue;
+        swept.add(row.id);
+        updates.push({ id: row.id, remove: true });
+        continue;
+      }
       if (!Number.isFinite(d.smsTs) || parsedTs.has(d.smsTs)) continue;
       const rows = rowsByTs.get(d.smsTs);
       if (!rows || rows.length !== 1) continue;
@@ -773,12 +886,26 @@ export function buildImportPlan(
     }
   }
 
+  // A long history can contain many reminders from the same merchant. The
+  // most recent one is the current amount/due day; filing the first
+  // (chronologically oldest) reminder quietly created stale recurring bills.
+  const latestBillDues = [...billDues.reduce((latest, due) => {
+    // Keep separately referenced accounts distinct when the bank supplies an
+    // account/reference identity, while still collapsing monthly repeats.
+    const key = `${due.merchant.trim().toLowerCase()}|${due.reference?.trim().toLowerCase() ?? ''}`;
+    const prior = latest.get(key);
+    const dueTime = due.smsTs ?? Date.parse(`${due.date ?? '1970-01-01'}T00:00:00Z`);
+    const priorTime = prior?.smsTs ?? Date.parse(`${prior?.date ?? '1970-01-01'}T00:00:00Z`);
+    if (!prior || dueTime >= priorTime) latest.set(key, due);
+    return latest;
+  }, new Map<string, ScannedSms>()).values()];
+
   return {
     batch: { transactions, newAccounts, newHints, newDues, snapshots, bankNames, cardTypes, lastScanTs: newestTs, updates },
     txCount: transactions.length,
     newAccountCount: newAccounts.length,
     dueCount: newDues.length,
     healedCount: updates.length,
-    billDues,
+    billDues: latestBillDues,
   };
 }

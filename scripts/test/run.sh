@@ -45,6 +45,15 @@ fi
 # suite; see the header there.
 bash build.sh
 
+# The protected iPhone history bridge is Foundation-only. Exercise the actual
+# Swift store whenever this gate runs on macOS; Linux CI has a separate Xcode
+# job that prebuilds the plugin before invoking the same suite.
+NATIVE_SUITES=0
+if [ "$(uname -s)" = "Darwin" ]; then
+  bash native-history-store.sh
+  NATIVE_SUITES=1
+fi
+
 # The Worker's own suites: the PDF/email statement parser and the encrypted push
 # tokens. They only ever ran from server/package.json's `test` script, which
 # nothing in `npm test` or `npm run check` called — so the code they cover was
@@ -81,10 +90,11 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=24
+EXPECTED_SUITES=26
 SUITES=(parser bank-corpus unit worker relay invariants import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
-        trusted-devices cloud-import fx db uncategorised bills categories feedback)
+        trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
+SUITES+=(historical-import)
 
 missing=""
 for t in "${SUITES[@]}"; do
@@ -110,4 +120,4 @@ for t in "${SUITES[@]}"; do
   node "$t.test.js"
 done
 
-echo "run.sh: ${#SUITES[@]} suites + ${#SERVER_SUITES[@]} server suites ran."
+echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."

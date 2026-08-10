@@ -1529,8 +1529,10 @@ const CARD_PAYMENT_DEBIT =
   {
     const {
       MAX_FEEDBACK_TEXT_LENGTH, MAX_DIAGNOSTIC_BYTES, MAX_FEEDBACK_BYTES,
-      FEEDBACK_RETENTION_SECONDS, FEEDBACK_DISPATCH_EVENT,
+      FEEDBACK_RETENTION_SECONDS,
     } = require('./build/feedback');
+    const { buildFeedbackPayload } = require('./build/app-feedback');
+    const { toFeedbackWirePayload } = require('./build/feedback-wire');
 
     /** Swap globalThis.fetch for the duration of one assertion group. */
     function stubFetch(respond) {
@@ -1543,13 +1545,30 @@ const CARD_PAYMENT_DEBIT =
       return { calls, restore: () => { globalThis.fetch = original; } };
     }
 
-    const REPORT = {
-      text: 'The ADCB refund from yesterday shows as a purchase, not a credit.',
-      appVersion: '1.4.2',
-      platform: 'ios',
-      locale: 'en-AE',
-      diagnostic: { parserVersion: 9, transactions: 412, unrecognised: 3 },
-    };
+    const REPORT = toFeedbackWirePayload(buildFeedbackPayload({
+      message: 'The ADCB refund from yesterday shows as a purchase, not a credit.',
+      detail: 'figures',
+      build: {
+        version: '1.4.2', platform: 'ios', language: 'en-AE', marketId: 'ae',
+        currency: 'AED', privateMode: false,
+      },
+      ledger: {
+        accounts: [{
+          id: 'feedback-card', name: 'Test Card', kind: 'card', openingFils: 0,
+          color: '#123456', last4: '4242', bankName: 'ADCB', cardType: 'credit',
+          snapshotFils: 35000, snapshotKind: 'outstanding', snapshotTs: 1_780_000_000_000,
+        }],
+        transactions: [{
+          id: 'feedback-tx', type: 'expense', amountFils: 1250, category: 'other',
+          accountId: 'feedback-card', title: 'Card purchase', date: '2026-08-01',
+          source: 'sms', raw: 'ADCB: AED 12.50 spent on card 4242 at SAMPLE SHOP.',
+        }],
+        cardDues: [{
+          id: 'feedback-due', accountId: 'feedback-card', totalDueFils: 35000,
+          minDueFils: 1750, paidFils: 0, dueDate: '2026-08-25',
+        }],
+      },
+    }));
     const feedbackRow = (env, id) =>
       env.DB.handle.prepare('SELECT * FROM feedback WHERE id = ?').get(id);
 
@@ -1568,34 +1587,17 @@ const CARD_PAYMENT_DEBIT =
       ok('feedback: an ordinary report is accepted', res.status === 202, String(res.status));
       ok('feedback: the caller is handed an id it can quote',
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.id));
-      ok('feedback: and told that an agent run was requested', body.dispatched === true);
+      ok('feedback: and told that no agent run was requested', body.dispatched === false);
 
       await wake.settled();
       github.restore();
 
-      ok('feedback: exactly one repository_dispatch is fired', github.calls.length === 1);
-      const [dispatch] = github.calls;
-      ok('feedback: aimed at the configured repository',
-        dispatch.url === 'https://api.github.com/repos/wafra/wafra/dispatches', dispatch.url);
-      ok('feedback: authenticated with the dispatch token, not with a user credential',
-        dispatch.init.headers.authorization === 'Bearer ghp_dispatch' &&
-          dispatch.init.headers['x-github-api-version'] === '2022-11-28' &&
-          typeof dispatch.init.headers['user-agent'] === 'string');
-      const payload = JSON.parse(dispatch.init.body);
-      ok('feedback: the dispatch names the event the workflow listens for',
-        payload.event_type === FEEDBACK_DISPATCH_EVENT, payload.event_type);
-      // THE assertion of this section. A client_payload is readable by anyone
-      // with access to the repository's Actions data and is kept in the run
-      // record forever; the feedback is not, so it must not travel in it.
-      ok('feedback: the dispatch carries the id and NOTHING else',
-        payload.client_payload.feedbackId === body.id &&
-          Object.keys(payload.client_payload).length === 1 &&
-          !dispatch.init.body.includes('ADCB') &&
-          !dispatch.init.body.includes('parserVersion'), dispatch.init.body);
+      ok('feedback: explicit no-AI consent prevents every repository_dispatch',
+        github.calls.length === 0);
 
       const stored = feedbackRow(env, body.id);
-      ok('feedback: the row records that the dispatch went out',
-        stored.dispatch_status === 'sent' && stored.dispatched_at > 0,
+      ok('feedback: the row records why no third-party workflow ran',
+        stored.dispatch_status === 'skipped_no_consent' && stored.dispatched_at === null,
         JSON.stringify(stored));
       ok('feedback: retention is stamped on the row at insert, not derived at read',
         stored.expires_at - stored.created_at === FEEDBACK_RETENTION_SECONDS);
@@ -1617,8 +1619,12 @@ const CARD_PAYMENT_DEBIT =
       ok('feedback read: the agent gets the words, the version and the platform',
         item.text === REPORT.text && item.appVersion === '1.4.2' &&
           item.platform === 'ios' && item.locale === 'en-AE', JSON.stringify(item));
+      ok('feedback read: the no-AI decision is explicit for every downstream reader',
+        item.aiReviewConsent === false);
       ok('feedback read: the diagnostic comes back as JSON, not as a string',
-        item.diagnostic.parserVersion === 9 && item.diagnostic.transactions === 412);
+        item.diagnostic.reportSchema === 2 && item.diagnostic.delivery.thirdPartyAi === false &&
+          item.diagnostic.detail === 'figures' && item.diagnostic.counts.transactions === 1 &&
+          typeof item.diagnostic.cardDiagnostic === 'string');
       const missing = await call(env, 'GET', '/v1/feedback/00000000-0000-4000-8000-000000000000', {
         token: 'read-token-abcdefghijklmnop',
       });
@@ -1658,7 +1664,7 @@ const CARD_PAYMENT_DEBIT =
         body.dispatched === false);
       ok('feedback: nothing is sent to GitHub at all', github.calls.length === 0);
       ok('feedback: the row explains why no PR will appear',
-        feedbackRow(env, body.id).dispatch_status === 'skipped_unconfigured');
+        feedbackRow(env, body.id).dispatch_status === 'skipped_no_consent');
 
       const noRead = await call(env, 'GET', `/v1/feedback/${body.id}`, { token: 'anything' });
       ok('feedback read: an unset read secret is 503, not an open door',
@@ -1689,9 +1695,10 @@ const CARD_PAYMENT_DEBIT =
       const { id } = await res.json();
       await wake.settled();
       github.restore();
-      ok('feedback: a rejected dispatch does not reject the user', res.status === 202);
-      ok('feedback: the failure is recorded on the row',
-        feedbackRow(env, id).dispatch_status === 'failed');
+      ok('feedback: configured GitHub still cannot override absent consent',
+        res.status === 202 && github.calls.length === 0);
+      ok('feedback: absent consent is recorded on the row',
+        feedbackRow(env, id).dispatch_status === 'skipped_no_consent');
     }
     {
       const env = { DB: makeDb(), GITHUB_REPOSITORY: 'w/w', GITHUB_DISPATCH_TOKEN: 'x' };
@@ -1701,8 +1708,9 @@ const CARD_PAYMENT_DEBIT =
       const { id } = await res.json();
       await wake.settled();
       github.restore();
-      ok('feedback: a network failure reaching GitHub does not reject the user',
-        res.status === 202 && feedbackRow(env, id).dispatch_status === 'failed');
+      ok('feedback: GitHub is never contacted when AI consent is false',
+        res.status === 202 && github.calls.length === 0 &&
+          feedbackRow(env, id).dispatch_status === 'skipped_no_consent');
     }
 
     /* ── Malformed and invalid bodies ── */
@@ -1716,6 +1724,10 @@ const CARD_PAYMENT_DEBIT =
         (await bad([1, 2, 3])).error === 'bad_json');
       ok('feedback: a bare JSON string is bad_json — there is no text fallback here',
         (await bad('"just some words"')).error === 'bad_json');
+      ok('feedback: a missing wire schema is refused',
+        (await bad({ ...REPORT, schema: undefined })).error === 'bad_schema');
+      ok('feedback: AI consent cannot be smuggled into a build with no consent UI',
+        (await bad({ ...REPORT, aiReviewConsent: true })).error === 'ai_consent_unsupported');
       ok('feedback: no text is empty', (await bad({ ...REPORT, text: undefined })).error === 'empty');
       ok('feedback: whitespace-only text is empty',
         (await bad({ ...REPORT, text: '   \n\t ' })).error === 'empty');
@@ -1818,7 +1830,7 @@ const CARD_PAYMENT_DEBIT =
         !('device_id' in env.DB.handle.prepare('SELECT * FROM feedback_limits').get()));
     }
 
-    /* ── The agent-run budget, which is the one that costs money ── */
+    /* ── No-consent submissions never consume the agent-run budget ── */
     {
       const env = { DB: makeDb(), GITHUB_REPOSITORY: 'w/w', GITHUB_DISPATCH_TOKEN: 'x' };
       const github = stubFetch();
@@ -1834,16 +1846,15 @@ const CARD_PAYMENT_DEBIT =
       github.restore();
       ok('feedback: a flood is still accepted and still stored in full',
         statuses.length === 12 && count(env.DB, 'feedback') === 12);
-      ok('feedback: but only the budgeted number of agent runs are fired',
-        github.calls.length === statuses.filter(Boolean).length &&
-          github.calls.length > 0 && github.calls.length < 12,
+      ok('feedback: no agent run is fired and every response says so',
+        github.calls.length === 0 && statuses.every((value) => value === false),
         `${github.calls.length} dispatches`);
-      ok('feedback: the write budget and the agent budget are separate counters',
-        env.DB.handle.prepare('SELECT COUNT(*) AS n FROM feedback_limits').get().n === 2);
-      ok('feedback: a report past the budget says why no agent will look at it',
+      ok('feedback: no-consent reports do not spend the agent budget',
+        env.DB.handle.prepare('SELECT COUNT(*) AS n FROM feedback_limits').get().n === 1);
+      ok('feedback: every stored report records absent consent',
         env.DB.handle
-          .prepare(`SELECT COUNT(*) AS n FROM feedback WHERE dispatch_status = 'skipped_budget'`)
-          .get().n === 12 - github.calls.length);
+          .prepare(`SELECT COUNT(*) AS n FROM feedback WHERE dispatch_status = 'skipped_no_consent'`)
+          .get().n === 12);
     }
   }
 

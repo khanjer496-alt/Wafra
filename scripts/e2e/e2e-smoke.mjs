@@ -1,5 +1,5 @@
 // Smoke suite: visits every screen of the four-tab IA, opens each detail
-// sheet, exercises the import paste flow, the paywall, founder unlock, and
+// sheet, exercises the import paste flow, the paywall, hidden-unlock defenses, and
 // trial expiry.
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
@@ -270,7 +270,7 @@ page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(1500);
-ok('onboarding leads with the headline', !!(await visibleText(page, 'Your bank already texts you')));
+ok('onboarding leads with the current headline', !!(await visibleText(page, /See your money clearly\.|Your messages can show where your money goes\./i)));
 const sample = await visibleText(page, 'Start with sample data', 6000);
 if (sample) { await sample.click(); await page.waitForTimeout(2200); }
 
@@ -661,12 +661,10 @@ await tapText(page, 'Wafra Pro', 1400);
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
 ok('paywall shows the trial chip', !!(await visibleText(page, /FREE TRIAL ACTIVE/i)));
 
-// ── Founder unlock: 7 taps on the VERSION row in Settings' About block ──
+// ── Hidden-unlock defense: repeated VERSION taps must not grant Pro ──
 //
-// It used to be the logo. The logo is the first thing in the About block and
-// VoiceOver announced it as a plain button that does nothing six times out of
-// seven, so the gesture moved to the version line — which is what a user
-// hunting for a build number would poke anyway. This test follows it there.
+// A founder bypass previously lived behind this gesture. Keep exercising the
+// exact old trigger so a future refactor cannot accidentally restore it.
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 await tapLabel(page, 'Settings', 1400);
@@ -683,7 +681,7 @@ await page.waitForTimeout(800);
 const proStored = await page.evaluate(
   () => JSON.parse(localStorage.getItem('wafra/state/v1') || '{}').pro === true,
 );
-ok('founder unlock activates Pro', proStored);
+ok('repeated version taps cannot grant Pro', !proStored);
 
 // ── Trial expiry: rewind the clock, drop pro, reload → hard paywall ────
 await page.evaluate(() => {

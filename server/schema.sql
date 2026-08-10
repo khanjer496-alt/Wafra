@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS feedback (
   text        TEXT NOT NULL,
   -- Serialized JSON, redacted client-side. Bounded at the wire.
   diagnostic  TEXT,
-  -- 'pending' | 'sent' | 'failed' | 'skipped_unconfigured' | 'skipped_budget'.
+  -- 'pending' | 'sent' | 'failed' | 'skipped_unconfigured' |
+  -- 'skipped_budget' | 'skipped_no_consent'.
   -- An operator has to be able to tell "no agent ran because GitHub is not
   -- wired up" from "no agent ran because the hourly budget was spent" without
   -- a log line quoting the payload.
@@ -154,11 +155,9 @@ CREATE TABLE IF NOT EXISTS feedback (
 -- it gets the same shape of backstop /v1/pair has: a global fixed window that
 -- stores no IP address, no hash of one, and nothing else user-derived.
 --
--- Two counters, not one, and they bound different things. `feedback` bounds
--- WRITES (how much a flood can put in the database). `dispatch` bounds AGENT
--- RUNS (how much a flood can spend), because one repository_dispatch is one CI
--- job with a model behind it, and the cost of that is not proportional to the
--- cost of an INSERT.
+-- The `feedback` counter bounds writes (how much a flood can put in the
+-- database). Third-party agent dispatch is disabled unless a future app and
+-- Worker contract add explicit consent, so no dispatch budget is spent today.
 CREATE TABLE IF NOT EXISTS feedback_limits (
   id            TEXT PRIMARY KEY,
   window_start  INTEGER NOT NULL,

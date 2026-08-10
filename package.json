@@ -14,9 +14,12 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p server/tsconfig.json",
     "test": "bash scripts/test/run.sh",
     "test:e2e": "bash scripts/e2e/run.sh",
+    "check:store": "node scripts/check-store-metadata.mjs",
+    "check:store-assets": "node scripts/check-store-assets.mjs",
+    "check:launch": "bash scripts/check-launch.sh",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run check:server"
+    "check": "npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:server"
   },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
@@ -74,6 +77,7 @@
     "eslint-config-expo": "~55.0.1",
     "globals": "^14.0.0",
     "playwright": "^1.62.0",
+    "pod-install": "1.1.0",
     "typescript": "~5.9.2"
   },
   "private": true,
