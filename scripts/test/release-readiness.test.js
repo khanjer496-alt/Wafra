@@ -71,6 +71,21 @@ const validFixture = () => {
     const root = validFixture();
     const report = await assessReleaseReadiness({
       root,
+      intent: { kind: 'build', platform: 'android', profile: 'production', submit: true },
+      publicEnv: {
+        EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '1',
+        WAFRA_SMS_CORPUS_EXPORT: '1',
+      },
+    });
+    ok('production rejects the temporary full-inbox corpus exporter',
+      report.findings.some(({ code }) => code === 'sms-corpus-export'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const report = await assessReleaseReadiness({
+      root,
       intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
       publicEnv: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' },
     });

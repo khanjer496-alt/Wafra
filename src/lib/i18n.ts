@@ -840,6 +840,43 @@ const S = {
   backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
   restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
   exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
+  smsCorpusExportTitle: {
+    en: 'Export parser corpus (temporary)',
+    ar: 'تصدير مجموعة رسائل للمحلّل (مؤقت)',
+  },
+  smsCorpusExportDetail: {
+    en: 'Share every received SMS from this Android phone',
+    ar: 'مشاركة جميع الرسائل المستلمة من هاتف أندرويد هذا',
+  },
+  smsCorpusExportProgress: {
+    en: 'Preparing {count} messages…',
+    ar: 'جارٍ تجهيز {count} رسالة…',
+  },
+  smsCorpusConfirmTitle: {
+    en: 'Export every received SMS?',
+    ar: 'تصدير جميع الرسائل المستلمة؟',
+  },
+  smsCorpusConfirmBody: {
+    en: 'This temporary diagnostic reads the full sender, date and text of every received SMS on this phone and prepares a local JSON file. Wafra does not upload it; you choose where to send it in the Android share sheet.',
+    ar: 'تقرأ هذه الأداة التشخيصية المؤقتة اسم المرسل والتاريخ والنص الكامل لكل رسالة مستلمة على هذا الهاتف، ثم تُنشئ ملف JSON محلياً. لا يرفعه وفرة؛ أنت تختار وجهته من قائمة المشاركة في أندرويد.',
+  },
+  smsCorpusConfirmAction: { en: 'Prepare file', ar: 'تجهيز الملف' },
+  smsCorpusPermissionTitle: {
+    en: 'SMS permission is needed',
+    ar: 'يلزم إذن الرسائل',
+  },
+  smsCorpusPermissionBody: {
+    en: 'Allow SMS access, then try the temporary export again.',
+    ar: 'اسمح بالوصول إلى الرسائل ثم أعد محاولة التصدير المؤقت.',
+  },
+  smsCorpusFailedTitle: {
+    en: 'Corpus export failed',
+    ar: 'تعذّر تصدير مجموعة الرسائل',
+  },
+  smsCorpusFailedBody: {
+    en: 'No file was shared. Keep Wafra open and try again.',
+    ar: 'لم تتم مشاركة أي ملف. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
+  },
   exportExpensePdf: { en: 'Expense report (PDF)', ar: 'تقرير المصروفات (PDF)' },
   expenseReportPeriod: { en: 'Expense report period', ar: 'فترة تقرير المصروفات' },
   expenseReportPeriodBody: {

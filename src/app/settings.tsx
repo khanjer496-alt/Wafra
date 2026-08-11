@@ -24,6 +24,10 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import { shareText } from '@/lib/share-text';
+import {
+  isSmsCorpusExportAvailable,
+  shareSmsCorpus,
+} from '@/lib/sms-corpus-export';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -138,6 +142,8 @@ export default function SettingsScreen() {
     isRelayPlatform() ? undefined : null,
   );
   const [smsGranted, setSmsGranted] = useState(false);
+  const [corpusExportCount, setCorpusExportCount] = useState<number | null>(null);
+  const [corpusExporting, setCorpusExporting] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
   // their way down to two merchants loses the only route to the screen with
@@ -499,6 +505,25 @@ export default function SettingsScreen() {
     shareText('wafra-backup.json', exportBackup(), {
       mimeType: 'application/json',
     }).catch(() => {});
+  };
+
+  const exportSmsCorpus = async () => {
+    if (corpusExporting) return;
+    setCorpusExporting(true);
+    try {
+      const granted = await requestSmsPermission();
+      setSmsGranted(granted);
+      if (!granted) {
+        Alert.alert(t('smsCorpusPermissionTitle'), t('smsCorpusPermissionBody'));
+        return;
+      }
+      setCorpusExportCount(0);
+      await shareSmsCorpus(setCorpusExportCount);
+    } catch {
+      Alert.alert(t('smsCorpusFailedTitle'), t('smsCorpusFailedBody'));
+    } finally {
+      setCorpusExporting(false);
+    }
   };
 
   const createExpenseReport = async (scope: 'month' | 'all') => {
@@ -1019,6 +1044,22 @@ export default function SettingsScreen() {
                   : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
             )}
+            {isSmsCorpusExportAvailable() &&
+              linkRow(
+                t('smsCorpusExportTitle'),
+                corpusExporting
+                  ? tf('smsCorpusExportProgress', { count: corpusExportCount ?? 0 })
+                  : t('smsCorpusExportDetail'),
+                () => {
+                  if (corpusExporting) return;
+                  setConfirmation({
+                    question: t('smsCorpusConfirmTitle'),
+                    body: t('smsCorpusConfirmBody'),
+                    confirmLabel: t('smsCorpusConfirmAction'),
+                    onConfirm: () => void exportSmsCorpus(),
+                  });
+                },
+              )}
             {/* Directly under "Improve accuracy", because it is the same
                 errand one step further on: that screen tells you WHAT the app
                 read wrong and hands you a diagnostic, and this one is how the

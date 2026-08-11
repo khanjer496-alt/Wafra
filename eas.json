@@ -5,19 +5,29 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
     },
     "development-simulator": {
       "extends": "development",
       "ios": {
         "simulator": true
+      },
+      "env": {
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
     },
     "preview": {
       "distribution": "internal",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev"
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
     },
     "preview-simulator": {
@@ -27,7 +37,21 @@
         "simulator": true
       },
       "env": {
-        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev"
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
+    },
+    "corpus-preview": {
+      "distribution": "internal",
+      "autoIncrement": true,
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "1",
+        "WAFRA_SMS_CORPUS_EXPORT": "1"
       }
     },
     "capture-beta": {
@@ -37,14 +61,18 @@
       "env": {
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://raw.githubusercontent.com/khanjer496-alt/Wafra/3f43134e280bfe7b0cd82aabe55a664139debf1a/assets/shortcuts/Wafra%20Capture.shortcut",
-        "EXPO_PUBLIC_WAFRA_SHORTCUT_FILE_BETA": "1"
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_FILE_BETA": "1",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
-        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1"
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
     }
   },

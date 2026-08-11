@@ -6,10 +6,20 @@ plugins {
 group = 'expo.modules.smsreader'
 version = '0.1.0'
 
+def smsCorpusExportEnabled = System.getenv('WAFRA_SMS_CORPUS_EXPORT') == '1'
+
 android {
   namespace "expo.modules.smsreader"
+  buildFeatures {
+    buildConfig true
+  }
   defaultConfig {
     versionCode 1
     versionName '0.1.0'
+    // This API exposes unfiltered inbox text and must never be enabled by an
+    // ordinary preview or production build. The temporary corpus profile sets
+    // this build-time variable explicitly; every other variant compiles the
+    // method closed even if JavaScript is modified later.
+    buildConfigField 'boolean', 'WAFRA_SMS_CORPUS_EXPORT', smsCorpusExportEnabled.toString()
   }
 }

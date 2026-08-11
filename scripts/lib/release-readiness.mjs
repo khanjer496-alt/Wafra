@@ -98,6 +98,12 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
   const captureUrl = publicValue('EXPO_PUBLIC_WAFRA_SHORTCUT_URL', env, publicEnv);
   const historyUrl = publicValue('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', env, publicEnv);
   const e2eDemo = publicValue('EXPO_PUBLIC_WAFRA_E2E_DEMO', env, publicEnv);
+  const smsCorpusJs = publicValue(
+    'EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT',
+    env,
+    publicEnv,
+  );
+  const smsCorpusNative = publicValue('WAFRA_SMS_CORPUS_EXPORT', env, publicEnv);
 
   if (e2eDemo === '1') {
     findings.push(finding(
@@ -105,6 +111,15 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
       'The browser E2E demo ledger is enabled in production',
       'A production build must start from the customer\'s real empty or persisted ledger.',
       'Remove EXPO_PUBLIC_WAFRA_E2E_DEMO from the production profile and environment.',
+    ));
+  }
+
+  if (smsCorpusJs === '1' || smsCorpusNative === '1') {
+    findings.push(finding(
+      'sms-corpus-export',
+      'The temporary raw SMS corpus exporter is enabled in production',
+      'A store build must not expose the internal full-inbox export path.',
+      'Remove both SMS corpus export flags from the production profile and environment.',
     ));
   }
 

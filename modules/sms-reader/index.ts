@@ -7,9 +7,22 @@ export interface RawSms {
   date: number;
 }
 
+export interface CorpusSms extends RawSms {
+  /** Android inbox row id, used only as a lossless pagination cursor. */
+  id: number;
+}
+
 interface SmsReaderModule {
   /** Newest-first messages with sinceMs <= date < untilMs, up to max. */
   getInboxSms(sinceMs: number, untilMs: number, max: number): Promise<RawSms[]>;
+  /** Present in every binary but returns true only in the temporary corpus build. */
+  isCorpusExportEnabled?(): boolean;
+  /** Unfiltered received SMS page. Throws unless the native corpus flag is enabled. */
+  getInboxCorpusPage?(
+    beforeDateMs: number,
+    beforeId: number,
+    max: number,
+  ): Promise<CorpusSms[]>;
   /** Retired delivery-buffer compatibility seam; returns no message bodies. */
   getReceived?(sinceMs: number): Promise<RawSms[]>;
   /** Purge the retired delivery buffer during cryptographic erase. */
