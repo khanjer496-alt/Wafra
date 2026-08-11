@@ -8,7 +8,13 @@ import {
 import { duplicateGuard } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
-import { isDeclinedMessage, overrideFitsDirection, STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
+import {
+  isNonPostingMessage,
+  overrideFitsDirection,
+  STRUCTURAL_TITLES,
+  type NonPostingReason,
+  type ParsedSms,
+} from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
 import type { Account, AppState, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
@@ -50,11 +56,11 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
 };
 
 /**
- * A message the scan read and the parser REFUSED as a refusal — a decline.
+ * A message the scan affirmatively identified as non-posted.
  *
- * Only the timestamp travels. The body is tested against the parser's own
- * `isDeclinedMessage` at the point it is read (auto-import.ts) and then
- * dropped, so nothing that is not already a fingerprint leaves the scanner.
+ * Only identity metadata travels. The body is tested against the parser's own
+ * `nonPostingReason` at the point it is read (auto-import.ts) and then dropped,
+ * so nothing that is not already a fingerprint leaves the scanner.
  *
  * This exists because the evidence for deleting a declined row is at SCAN
  * time and used to be thrown away. `parseSms` returns null for a decline, so
@@ -69,6 +75,8 @@ export interface DeclinedSms {
   smsTs: number;
   sender?: string;
   channel?: CaptureChannel;
+  /** Closed evidence class; optional for older relay/history callers. */
+  reason?: NonPostingReason;
   /** Opaque GUID-derived identity when the decline came from iOS history. */
   sourceEventId?: string;
 }
@@ -870,7 +878,7 @@ export function buildImportPlan(
         if (!row || swept.has(row.id)) continue;
         if (row.source !== 'sms') continue;
         if (row.userEdited || row.isTransfer || row.splits) continue;
-        if (row.raw !== undefined && !isDeclinedMessage(row.raw)) continue;
+        if (row.raw !== undefined && !isNonPostingMessage(row.raw)) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
         continue;
@@ -883,7 +891,7 @@ export function buildImportPlan(
       if (row.source !== 'sms') continue;
       if (row.userEdited || row.isTransfer || row.splits) continue;
       if (Math.abs(Date.parse(`${row.date}T12:00:00Z`) - d.smsTs) > NEAR_MS) continue;
-      if (row.raw !== undefined && !isDeclinedMessage(row.raw)) continue;
+      if (row.raw !== undefined && !isNonPostingMessage(row.raw)) continue;
       swept.add(row.id);
       updates.push({ id: row.id, remove: true });
     }

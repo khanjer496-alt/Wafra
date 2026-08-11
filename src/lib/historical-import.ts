@@ -1,6 +1,6 @@
 import { toISODate } from '@/lib/format';
 import {
-  isDeclinedMessage,
+  nonPostingReason,
   parseSms,
   type ParsedSms,
 } from '@/lib/sms-parser';
@@ -163,12 +163,14 @@ export function parseHistoricalMessageRecords(
       sender ? { sender } : undefined,
     );
     if (!result) {
-      if (isDeclinedMessage(record.text)) {
+      const reason = nonPostingReason(record.text);
+      if (reason) {
         declined.push({
           smsTs: timestamp,
           sender,
           channel: 'inbox',
           sourceEventId: record.id,
+          reason,
         });
       } else {
         ignoredCount += 1;

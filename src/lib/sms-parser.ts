@@ -176,8 +176,13 @@ export interface ParsedCard {
  * 17: ATM withdrawals use their own expense category. The structural title is
  * exact, so stored parser-owned ATM rows can be re-filed without using the
  * machine's mall/street address or changing a category the user chose.
+ *
+ * 18: non-posted corpus repairs. Long OTP challenges whose merchant contained
+ * punctuation, returned direct-debit requests and Google's temporary card
+ * verification holds could all be mistaken for settled expenses. A full
+ * re-read also repairs generic FAB credits that were hidden as self-transfers.
  */
-export const PARSER_VERSION = 17;
+export const PARSER_VERSION = 18;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -295,9 +300,10 @@ export interface ParsedSms {
  *            far too generic to match on their own — GOAL SPORTS and SPACE
  *            CAFE are real shops — and knowing which bank sent the message is
  *            the only thing that makes those nouns readable.
- *   brand    money moving TO the bank's own name ("...TO LIV FROM EMERGENCY
- *            FUNDS", real corpus #21) is moving inside your own bank. Without
- *            the sender, "LIV" is just a word that might be a payee.
+ *   brand    identifies how the sender names itself inside message bodies;
+ *            sender-specific grammars may use that only with independent
+ *            transaction evidence. A bank name alone never proves ownership
+ *            of both sides of a transfer.
  */
 export interface BankProfile {
   /** Bank name exactly as the active market pack knows it. */
@@ -756,6 +762,22 @@ const CODE_CHALLENGE_QUOTED_RE = new RegExp(
     `|${CHALLENGE_CODE_WORD}\\s*(?:is|:|-|=)?${CODE_MASK}${OTP_CODE_DIGITS}`,
   'i',
 );
+/**
+ * A challenge that puts the transaction description between "OTP/Auth Code
+ * for" and the quoted code.
+ *
+ * The generic same-sentence matcher above deliberately stops at a full stop,
+ * because crossing sentence boundaries lets an OTP footer bind to an unrelated
+ * reference number. Real DoubleSecure merchants can themselves contain a full
+ * stop ("Co. LL"), though, and long Aafaq descriptions can exceed its bounded
+ * gap. "... code FOR ... IS <digits>" plus a validity window remains a closed
+ * challenge shape, so this narrowly allows punctuation and a longer gap without
+ * weakening the ordinary footer boundary.
+ */
+const CODE_CHALLENGE_FOR_RE = new RegExp(
+  String.raw`\b(?:your\s+)?(?:double\s*secure\s+)?${CHALLENGE_CODE_WORD}\s+for\b[\s\S]{0,240}?\b(?:is|:)${CODE_MASK}${OTP_CODE_DIGITS}`,
+  'i',
+);
 // THE COUNTDOWN HAS TO BE ABOUT THE CODE.
 //
 // The first two alternatives are IMPERATIVES ("use it in 5 mins", "enter within
@@ -794,6 +816,8 @@ const CODE_VALIDITY_WINDOW_RE = new RegExp(
 // settlement"), which is where the suppression belongs.
 const PREAUTH_RE =
   /pre[\s-]?auth|auth(?:oris|oriz)ation\s+hold|\bauth\s+hold\b|amount\s+(?:has been\s+)?blocked|blocked on your(?:\s+\w+){0,2}\s+card|hold\s+(?:of|on|for|amount|placed)|\bon hold\b|temporary\s+(?:hold|charge|debit)|held on your (?:card|account)|earmark(?:ed)?|ring[\s-]?fenced|reserved on your card|has been (?:reserved|frozen)|provisional(?:ly)?\s+(?:debit|charge)|debited provisionally|pending\s+(?:transaction|authoris|authoriz)|not yet (?:posted|settled)|تم حجز|حجز مبلغ|مبلغ محجوز|تفويض مسبق/i;
+/** Google's card-verification descriptor is the hold itself, not a merchant. */
+const VERIFICATION_HOLD_DESCRIPTOR_RE = /\bgoogle\s*\*?\s*temporary\s+hold\b/i;
 /**
  * THE RELEASE OF A HOLD IS THE SETTLEMENT NOTICE, not the hold.
  *
@@ -876,7 +900,7 @@ const FRAUD_FOOTER_RE =
  * CAFE and TIME OUT MARKET stay safe because the bare nouns are not here.
  */
 const DECLINED_VERB_RE =
-  /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b/i;
+  /\b(?:declined|rejected|refused|denied|failed|unsuccessful|timed\s+out)\s+(?:due\s+to|because|owing\s+to|for\s+(?:insufficient|want\s+of))\b|\b(?:was|is|were|are|has\s+been|have\s+been|been)\s+(?:declined|rejected|refused|denied|unsuccessful|dishonou?red)\b|\b(?:declined|rejected|failed|unsuccessful|timed\s+out)\s*[.!:;]|\btransaction\s+(?:has\s+)?(?:declined|failed|rejected)\b|\b(?:returned|rejected)\s+(?:a\s+)?(?:direct\s+)?debit\s+(?:request|instruction)\b|\bplease\s+(?:retry|try\s+again)\b|\bcould\s+not\s+be\s+(?:processed|completed|authoris\w*|authoriz\w*|approved|honou?red)\b/i;
 const DECLINED_RE =
   /declin|reject(?:ed|ion)|refused|\bdenied\b|not\s+(?:approved|successful|authoris\w*|authoriz\w*|completed|processed|honou?red)|unapproved|disapproved|unauthoris|unauthoriz|unsuccessful|\binsufficient\s+(?:funds?|balance|credit)\b(?![^.\n]{0,24}\b(?:fee|charge|penalty)\b)|could not be (?:processed|completed|authoris\w*|authoriz\w*|approved|verified|honou?red)|unable to (?:process|complete|authoris\w*|authoriz\w*|approve)|has not been (?:processed|approved|completed)|did not (?:go through|succeed|complete)|\bfail(?:ed|ure|s)\b|was stopped|\baborted\b|\bterminated\b|\bvoided\b|\b(?:transaction|txn|purchase|payment|transfer|withdrawal|request)\b(?:[^.\n]|\.\d){0,40}?\s(?:was|is|has\s+been|been)\s+cancell?ed\b|exceeds\s+(?:your\s+)?(?:available\s+)?(?:limit|balance)|limit exceeded|do not honou?r|card\s+(?:has\s+)?expired|expired card|card is blocked|blocked for (?:online|international)|card restricted|invalid\s+(?:card|cvv|pin|otp|expiry|transaction)|\bis invalid\b|incorrect pin|wrong pin|pin tries exceeded|no response from (?:the\s+)?issuer|\btimed\s+out\b|\b(?:transaction|txn|request|session|connection|response|network|terminal)\s+time-?\s?outs?\b|مرفوض|تم رفض|لم تتم|لم يتم تنفيذ|فشلت|رصيد غير كاف|غير كافي|عدم كفايه|تم عكس|معكوسه/i;
 /**
@@ -1153,6 +1177,14 @@ const SETTLED_TENSE_RE =
  */
 const RETURNED_UNPAID_RE =
   /\b(?:cheque|check|chq)\b[^\n]{0,60}?\b(?:returned|bounced|dishonou?red|unpaid|not\s+honou?red)\b|\breturned\s+unpaid\b|\bcheque\s+return(?:ed)?\b|شيك مرتجع|شيك معاد/i;
+/**
+ * A movement explicitly waiting for later processing/clearing. The settled
+ * bank credit or debit arrives separately; importing this notice would either
+ * double-count it or invent the wrong direction (Quick Cash is a disbursement,
+ * not spending at the receiving bank).
+ */
+const PENDING_PROCESSING_RE =
+  /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b/i;
 
 /**
  * Currency-bound patterns compile from the ACTIVE MARKET's currency aliases
@@ -1260,6 +1292,10 @@ const UNITS_PER_USD: Record<string, number> = {
   JOD: 0.709, THB: 34, SGD: 1.29, HKD: 7.8, KRW: 1370, MYR: 4.3,
   IDR: 16200, LKR: 300, NPR: 134, BDT: 120, ZAR: 18, VND: 25400,
   SEK: 10.5, NOK: 10.7, DKK: 6.4, PLN: 3.9, ILS: 3.7, MAD: 9.8, LBP: 89500,
+  // Current official reference rates when this parser version shipped. These
+  // remain visibly labelled as fallback conversions and fx.ts may replace
+  // them with the transaction-date rate later.
+  AZN: 1.7, GEL: 2.6198,
 };
 
 function ensureCurrencyPatterns(): void {
@@ -1272,11 +1308,15 @@ function ensureCurrencyPatterns(): void {
   // matching. Folding only touches Arabic letters, digits and separators —
   // never a backslash or a dot — so folding a regex SOURCE is safe.
   const CUR = m.currency.aliases.map(foldOrthography).join('|');
-  AED_AMOUNT_RE = new RegExp(`(?:${CUR})\\s*([\\d,]+(?:\\.\\d{1,2})?)`, 'gi');
+  // Some banks omit the leading zero for sub-unit purchases ("AED .99").
+  // Keep that form currency-anchored: accepting a bare ".99" anywhere would
+  // turn decimal fragments in references and balances into transactions.
+  const FIGURE = String.raw`(?:[\d,]+(?:\.\d{1,2})?|\.\d{1,2})`;
+  AED_AMOUNT_RE = new RegExp(`(?:${CUR})\\s*(${FIGURE})`, 'gi');
   // The trailing guard covers Arabic too: without it "50 دار" would read its
   // first two letters as the currency symbol and invent an amount.
   AED_SUFFIX_RE = new RegExp(
-    `([\\d,]+(?:\\.\\d{1,2})?)\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
+    `(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
   // "Min Amt AED 154.32" is the abbreviated card-summary spelling of the same
   // figure. Without it that block had no minimum, and a statement with no
   // minimum raises no reminder for the payment the user actually has to make.
@@ -1446,11 +1486,11 @@ function ensureCurrencyPatterns(): void {
       `|transferr(?:ed|ing)` +
       `|${AR_DEBIT_WORDS}`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
-  FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*([\\d,]+(?:\\.\\d{1,2})?)`, 'i');
+  FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FIGURE})`, 'i');
   // Same line only. "Card No XXXX4777 \n USD .00" used to read the card's last
   // four digits as USD 8,722 and file a 32,031.55 purchase for a message whose
   // amount was masked out entirely.
-  FX_SUFFIX_RE = new RegExp(`([\\d,]+(?:\\.\\d{1,2})?)[^\\S\\r\\n]*(${codes})\\b`, 'i');
+  FX_SUFFIX_RE = new RegExp(`(${FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
 }
 
 /**
@@ -1535,12 +1575,21 @@ function extractForeignAmount(raw: string): ForeignAmount | null {
     // plus the card reference that can sit between it and the figure.
     if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at))) continue;
     const original = Number(c.num.replace(/,/g, ''));
+    const amountMinor = Math.round(original * 100);
     const rate = fxMinorPerUnit(c.code) / 100;
-    const fils = Math.round(original * rate * 100);
+    // Convert the integer foreign minor units directly. Multiplying the major
+    // value by a repeating cross-rate first made exact half-fils values land a
+    // binary hair below .5 (17 AZN became 3672.499999...), rounding one fils
+    // down. The tiny relative tolerance restores positive decimal half-up
+    // rounding without moving values that are not at a floating-point tie.
+    const unroundedFils = amountMinor * rate;
+    const fils = Math.floor(
+      unroundedFils + 0.5 + Number.EPSILON * Math.max(1, unroundedFils) * 4,
+    );
     if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
     return {
       currency: c.code,
-      amountMinor: Math.round(original * 100),
+      amountMinor,
       localFils: fils,
       rate,
     };
@@ -2526,6 +2575,8 @@ const TRUNCATED_DESCRIPTOR_KEYWORDS: [RegExp, CategoryId][] = [
  * genuine business payout.
  */
 const ORIGINATOR_RE = /b\/o\b|\b(?:l\.?l\.?c|ltd\b|limited\b|fze|fzco|dmcc|plc\b|inc\b)/i;
+const BUSINESS_INCOME_EVIDENCE_RE =
+  /\b(?:invoice|client|customer|merchant\s+(?:payout|settlement)|net\s+(?:online\s+)?sales|payout|talabat|delivery\s+hero)\b/i;
 
 /**
  * The only categories a CREDIT can be filed under.
@@ -2616,7 +2667,11 @@ function categoryOf(
     if (/salary|payroll|wages|راتب|الراتب|مرتب|رواتب|اجر شهري/i.test(text)) {
       return { id: 'salary', deliberate: true };
     }
-    if (/refund|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|adjustment|waive[rd]|cashback|\binterest\b|\bprofit\b/i.test(text)) {
+    if (
+      /refund|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|adjustment|waive[rd]|cashback|\binterest\b|\bprofit\b|\bcredited\s+(?:to|into)\s+your\s+(?:credit\s+|debit\s+)?card\b/i.test(
+        text,
+      )
+    ) {
       return { id: 'other', deliberate: true };
     }
     // Money arrived and we could not say from whom. `business` is a claim
@@ -2638,6 +2693,20 @@ function categoryOf(
     // there, and that is real business revenue. An originator marker or a
     // company suffix is enough to keep the claim.
     if (merchant && STRUCTURAL_TITLES.has(merchant.trim()) && !ORIGINATOR_RE.test(text)) {
+      return { id: 'other', deliberate: false };
+    }
+    // A named payer sending money into the user's account is not proof of
+    // business revenue. Personal repayments and family transfers use exactly
+    // this wording. Company/originator evidence above still permits Business;
+    // otherwise keep the credit visible and ask rather than making a tax-like
+    // claim from a person's name.
+    if (
+      !ORIGINATOR_RE.test(text) &&
+      !BUSINESS_INCOME_EVIDENCE_RE.test(text) &&
+      /(?:\b(?:credited|transferred|sent)\b(?:[^.\n]|\.\d){0,100}?\b(?:to|into)\s+your\b(?:[^.\n]|\.\d){0,60}?\baccount\b(?:[^.\n]|\.\d){0,80}?|\breceived\b(?:[^.\n]|\.\d){0,100}?)\bfrom\s+[a-z]/i.test(
+        text,
+      )
+    ) {
       return { id: 'other', deliberate: false };
     }
     return { id: 'business', deliberate: true };
@@ -3282,6 +3351,59 @@ function declinedInBody(body: string, suppressible: string): boolean {
   return DECLINED_RE.test(suppressible) || DECLINED_VERB_RE.test(body);
 }
 
+export type NonPostingReason =
+  | 'declined'
+  | 'security-challenge'
+  | 'preauthorisation'
+  | 'returned-unpaid'
+  | 'pending-processing';
+
+function nonPostingReasonInBody(
+  body: string,
+  suppressible: string,
+): NonPostingReason | null {
+  if (declinedInBody(body, suppressible)) return 'declined';
+  if (
+    OTP_RE.test(body) ||
+    ((CODE_CHALLENGE_QUOTED_RE.test(body) || CODE_CHALLENGE_FOR_RE.test(body)) &&
+      CODE_VALIDITY_WINDOW_RE.test(body))
+  ) {
+    return 'security-challenge';
+  }
+  if (
+    VERIFICATION_HOLD_DESCRIPTOR_RE.test(body) ||
+    PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))
+  ) {
+    return 'preauthorisation';
+  }
+  if (RETURNED_UNPAID_RE.test(body)) return 'returned-unpaid';
+  if (PENDING_PROCESSING_RE.test(body)) return 'pending-processing';
+  return null;
+}
+
+/**
+ * Affirmative evidence that an alert did not create a settled ledger entry.
+ *
+ * This is intentionally smaller than "everything parseSms rejects". Offers,
+ * summaries and malformed messages also return null, but none proves an older
+ * parser-created row was imaginary. These outcomes do: a refusal, a code
+ * challenge, a temporary authorisation hold, a returned unpaid instrument, or
+ * a notice explicitly waiting for later processing/clearing.
+ * The scanner retains only the message identity/timestamp for a guarded repair;
+ * it never carries the body through this interface.
+ */
+export function nonPostingReason(message: string): NonPostingReason | null {
+  const source = message.trim();
+  if (!source) return null;
+  const body = foldOrthography(stripInvisible(source));
+  const suppressible = blank(maskMerchantNames(body), FRAUD_FOOTER_RE);
+  return nonPostingReasonInBody(body, suppressible);
+}
+
+export function isNonPostingMessage(message: string): boolean {
+  return nonPostingReason(message) !== null;
+}
+
 /**
  * Does this message state that the transaction was REFUSED?
  *
@@ -3300,10 +3422,7 @@ function declinedInBody(body: string, suppressible: string): boolean {
  * SMS text — never about the title the old parser wrote onto the row.
  */
 export function isDeclinedMessage(message: string): boolean {
-  const source = message.trim();
-  if (!source) return false;
-  const body = foldOrthography(stripInvisible(source));
-  return declinedInBody(body, blank(maskMerchantNames(body), FRAUD_FOOTER_RE));
+  return nonPostingReason(message) === 'declined';
 }
 
 // SNAPSHOT_RE and PLAIN_BALANCE_RE are market-compiled in
@@ -3814,28 +3933,15 @@ function parseSmsInner(
   // that has to beat a boilerplate footer. extractCard is pure.
   const card = extractCard(raw, bank);
 
-  if (OTP_RE.test(raw)) return null;
-  // A CODE CHALLENGE WITH A COUNTDOWN IS NOT A PURCHASE — and the purchase it
-  // is challenging arrives afterwards as its own SMS, so importing it
-  // DOUBLE-COUNTS every online card payment. Tested here, ahead of
-  // hasPostedEvidence, because the challenge quotes the amount, the merchant
-  // AND the card: there is no evidence gate it would not pass. The countdown
-  // is the proof that the code is still unused. See CODE_CHALLENGE_QUOTED_RE
-  // for why "authorisation code" alone must never suppress on its own.
-  if (CODE_CHALLENGE_QUOTED_RE.test(raw) && CODE_VALIDITY_WINDOW_RE.test(raw)) return null;
+  // A refusal, code challenge, hold or returned instrument created no settled
+  // ledger entry. Keep this single classifier shared with the rescan repair;
+  // otherwise the live parser and the code that removes an older phantom can
+  // disagree about the same message.
+  const suppressible = blank(maskMerchantNames(raw), FRAUD_FOOTER_RE);
+  if (nonPostingReasonInBody(raw, suppressible)) return null;
   // Read once: this is what every boilerplate-shaped suppression rule below
   // has to beat before it may delete a message.
   const posted = hasPostedEvidence(raw, card);
-  // Suppression reads the sentence ABOUT the transaction, never the name of
-  // the shop it was made at (maskMerchantNames), and never the fraud-reporting
-  // footer stapled underneath it (FRAUD_FOOTER_RE).
-  const suppressible = blank(maskMerchantNames(raw), FRAUD_FOOTER_RE);
-  // The masked pass catches a refusal stated about the transaction; the
-  // unmasked pass catches one the merchant descriptor swallowed. Both live in
-  // `declinedInBody` so `isDeclinedMessage` and this call site can never drift.
-  if (declinedInBody(raw, suppressible)) return null;
-  // ...but the RELEASE of a hold is the settlement notice, not the hold.
-  if (PREAUTH_RE.test(blank(suppressible, HOLD_RELEASE_RE))) return null;
   // Footer boilerplate ("do not disclose your PIN", "never share your OTP",
   // "3D Secure") only gets to delete a message that shows no posted
   // transaction at all.
@@ -3844,9 +3950,12 @@ function parseSmsInner(
   // is a real alert with a spend-to-date footer, and it keeps its transaction.
   if (SPEND_SUMMARY_RE.test(raw) && !extractMerchant(raw, MERCHANT_RE)) return null;
   // A threshold in an offer is a figure to qualify for, not one that moved.
-  if (OFFER_RE.test(raw) && !posted) return null;
-  // A returned cheque is money that stayed in the account.
-  if (RETURNED_UNPAID_RE.test(raw)) return null;
+  const statementEvidence =
+    STATEMENT_RE.test(raw) &&
+    BILL_DUE_WORDS.test(raw) &&
+    (card !== null || /\b(?:credit|covered)\s*card\b|\bcard\s+statement\b/i.test(raw)) &&
+    statementTotalFils(raw) !== null;
+  if (OFFER_RE.test(raw) && !posted && !statementEvidence) return null;
   // A future or scheduled event arrives AGAIN as a real debit or credit, so
   // posting it now counts the same money twice. Suppressed only when the
   // modal governs the ONLY money clause in the body and nothing says the
@@ -4369,6 +4478,42 @@ function parseSmsInner(
     }
   }
 
+  // HSBC account-to-account alerts put the direction in BOTH the preposition
+  // and a sign suffix:
+  //   "Transfer from 041-339***-001 AED 1,500.00-"  (money left)
+  //   "Transfer to   041-339***-001 AED 1,500.00+"  (money arrived)
+  // Requiring the pair to agree keeps a stray plus on the balance from
+  // deciding direction and turns the two legs into explicit transfers rather
+  // than spending/business income.
+  const hsbcAccountTransfer = raw.match(
+    /^from\s+hsbc:\s*\d{1,2}[a-z]{3}\d{2,4}\s+(?:(?:internet\s+banking\s+)?(?:debit|credit)\s+telegraphic\s+)?transfer\s+(from|to)\s+[\d*x.-]{6,32}\s+(?:aed|dhs?\.?)\s*([\d,]+(?:\.\d{1,2})?)\s*([+-])/i,
+  );
+  if (hsbcAccountTransfer) {
+    const [, side, amountText, sign] = hsbcAccountTransfer;
+    const agrees = (side.toLowerCase() === 'from' && sign === '-') ||
+      (side.toLowerCase() === 'to' && sign === '+');
+    const amountFils = Math.round(Number(amountText.replace(/,/g, '')) * 100);
+    if (!agrees || !Number.isSafeInteger(amountFils) || amountFils <= 0) return null;
+    return {
+      kind: 'transaction',
+      type: sign === '+' ? 'income' : 'expense',
+      amountFils,
+      merchant: 'Bank transfer',
+      date,
+      dueDay: null,
+      minDueFils: null,
+      card,
+      transferHint: true,
+      snapshotFils,
+      snapshotKind,
+      categoryGuess: 'other',
+      categoryDeliberate: true,
+      currency,
+      reference,
+      raw: source,
+    };
+  }
+
   // Telegraphic transfers / outward remittances — money moved between
   // accounts (usually abroad), not merchant spending.
   if (/issuance of telegraphic transfer|debit telegraphic transfer|^outward remittance/i.test(raw)) {
@@ -4708,6 +4853,17 @@ function parseSmsInner(
   // "RULE TRANSFER TO SAVINGS WITH ONE-SHOT SAVING" — an automated sweep into
   // the user's own savings pot. It is the clearest possible self-transfer, and
   // three of them were being counted as spending.
+  const bankOwnedDestination = bank?.ownPot
+    ? new RegExp(
+        `\\b(?:to|into)\\s+(?:your\\s+)?(?:${bank.ownPot.source})`,
+        'i',
+      )
+    : null;
+  const bankOwnedMovement =
+    bankOwnedDestination?.test(raw) === true &&
+    ((type === 'expense' && /\b(?:debited|deducted|sent|moved)\b/i.test(raw)) ||
+      /(?:\brule\s+transfer\b|\btransfer(?:red)?\b|\bmoved\b|\bsweep\b)/i.test(raw) ||
+      /\bto\b[^.\n]{0,60}\bfrom\b/i.test(raw));
   if (
     !isBillDue &&
     // A savings pot has a NAME, and the name is rarely the word "savings":
@@ -4724,15 +4880,12 @@ function parseSmsInner(
     (/transfer to savings|savings? (?:rule|goal|pot|plan)\b|round-?up saving|\brule\s+transfer\b|one-?shot\s+sav|\bemergency\s+funds?\b|\bsaving\s+spaces?\b|\bliv\s+goals?\b/i.test(
       raw,
     ) ||
-      // Sender-gated: money moving to one of THIS bank's own products, or to
-      // the bank's own name ("...TO LIV FROM EMERGENCY FUNDS", real corpus
-      // #21). Both are the user shifting money inside their own bank, and
-      // both read as an unknown payee without the sender.
-      (!!bank &&
-        new RegExp(
-          `\\b(?:to|into)\\s+(?:your\\s+)?(?:${bank.ownPot?.source ?? 'x^'}|${bank.brand.source})`,
-          'i',
-        ).test(raw)))
+      // Sender-gated: money moving to one of THIS bank's explicitly named own
+      // products. The bank brand alone is not enough: external salary and P2P
+      // income are routinely described as "transferred to your FAB account".
+      // The real "TO LIV FROM EMERGENCY FUNDS" form is already covered by the
+      // explicit savings-pot evidence above.
+      bankOwnedMovement)
   ) {
     merchant = 'Savings transfer';
     structuralMerchant = true;

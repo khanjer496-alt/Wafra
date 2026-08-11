@@ -11,7 +11,7 @@
 // close the app, open it again, and the same messages are read a second time.
 
 const { buildImportPlan } = require('./build/import-plan.js');
-const { parseSms, isDeclinedMessage } = require('./build/sms-parser.js');
+const { parseSms, isDeclinedMessage, nonPostingReason } = require('./build/sms-parser.js');
 const { setActiveMarket } = require('./build/markets.js');
 
 let pass = 0;
@@ -53,7 +53,8 @@ function scan(messages, channel = 'inbox') {
     if (ts > newestTs) newestTs = ts;
     const p = parseSms(body);
     if (!p) {
-      if (isDeclinedMessage(body)) declined.push({ smsTs: ts, sender: sender ?? 'ENBD', channel });
+      const reason = nonPostingReason(body);
+      if (reason) declined.push({ smsTs: ts, sender: sender ?? 'ENBD', channel, reason });
       continue;
     }
     parsed.push({
@@ -704,17 +705,43 @@ const DECLINE_SMS = [{
     !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
 }
 
-/* Suppression is not refusal. Everything else parseSms drops — OTPs, offers,
- * spend summaries, pre-auth holds — must never become deletion evidence. */
+/* Only affirmative non-posting outcomes travel as repair evidence. Offers and
+ * spend summaries still do not: returning null alone proves nothing. */
 {
-  const notDeclines = [
+  const repairable = [
     'Your OTP for the transaction of AED 250.00 at NOON is 448120. Do not share it.',
+    'Purchase of AED 1.00 with Debit Card ending 1234 at GOOGLE *TEMPORARY HOLD, g.co/helppay.',
+  ];
+  const ignored = [
     'Get 20% off at CARREFOUR when you pay with your Card ending 1234.',
     'You spent AED 3,420.00 this month with Card ending 1234.',
   ];
-  const s = scan(notDeclines.map((body, i) => ({ body, ts: DECLINE_TS + i })));
-  ok('suppressed-but-not-declined messages are carried as neither',
-    s.parsed.length === 0 && s.declined.length === 0, s.declined);
+  const repairScan = scan(repairable.map((body, i) => ({ body, ts: DECLINE_TS + i })));
+  ok('security challenges and verification holds carry bounded repair evidence',
+    repairScan.parsed.length === 0 && repairScan.declined.length === 2 &&
+      repairScan.declined.map((row) => row.reason).join() === 'security-challenge,preauthorisation',
+    repairScan.declined);
+  const ignoredScan = scan(ignored.map((body, i) => ({ body, ts: DECLINE_TS + 10 + i })));
+  ok('offers and summaries remain neither parsed nor deletion evidence',
+    ignoredScan.parsed.length === 0 && ignoredScan.declined.length === 0, ignoredScan.declined);
+
+  const OTP_TS = DECLINE_TS + 20;
+  const otpRaw = repairable[0];
+  const priorOtp = {
+    ...DECLINED_ROW,
+    id: 'old-otp-purchase',
+    ts: OTP_TS,
+    smsKey: `s${OTP_TS}-25000`,
+    amountFils: 25000,
+    title: 'Noon',
+    raw: otpRaw,
+  };
+  const otpScan = scan([{ body: otpRaw, ts: OTP_TS }]);
+  const otpPlan = buildImportPlan([], { ...BASE, transactions: [priorOtp] }, OTP_TS,
+    new Date(2026, 7, 2), otpScan.declined);
+  ok('a full re-read removes a purchase an older parser made from an OTP',
+    otpPlan.batch.updates.some((update) => update.id === priorOtp.id && update.remove),
+    otpPlan.batch.updates);
 }
 
 /* ── what must STILL import ──────────────────────────────────────────── */

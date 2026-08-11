@@ -8,7 +8,7 @@ import { inspectUniversalAlert } from '@/lib/alert-market-detection';
 import { prepareReviewAlert, type ReviewAlert } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { isDeclinedMessage, parseSms, type ParsedSms } from '@/lib/sms-parser';
+import { nonPostingReason, parseSms, type ParsedSms } from '@/lib/sms-parser';
 import {
   detectLaunchMarketFromAlert,
   getActiveMarket,
@@ -248,10 +248,12 @@ export async function scanInbox(
     channel: CaptureChannel,
     existingInspection: ReturnType<typeof inspectUniversalAlert> | null = null,
   ): Promise<void> => {
-    // A decline is affirmative proof that no money moved. It belongs only in
-    // the healing channel and must never be offered as a reviewable charge.
-    if (isDeclinedMessage(body)) {
-      declined.push({ smsTs: ts, sender, channel });
+    // A refusal, code challenge, hold or returned instrument is affirmative
+    // proof that no settled money movement happened. It belongs only in the
+    // guarded healing channel and must never become a reviewable charge.
+    const reason = nonPostingReason(body);
+    if (reason) {
+      declined.push({ smsTs: ts, sender, channel, reason });
       return;
     }
     if (!REVIEW_MONEY_HINT.test(body)) return;

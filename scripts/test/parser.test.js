@@ -1,4 +1,10 @@
-const { parseSms, parseSmsBatch, bankProfileForSender } = require('./build/sms-parser');
+const {
+  parseSms,
+  parseSmsBatch,
+  bankProfileForSender,
+  isDeclinedMessage,
+  nonPostingReason,
+} = require('./build/sms-parser');
 
 let pass = 0, fail = 0;
 /**
@@ -1487,7 +1493,7 @@ t('a refund paid BACK to your card is income, not a second purchase',
 
 t('money received from a person is income',
   'You have received a payment of AED 250.00 from Ahmed via Ziina.',
-  { type: 'income', amountFils: 25000, merchant: 'Ahmed' });
+  { type: 'income', amountFils: 25000, merchant: 'Ahmed', category: 'other', deliberate: false });
 
 t('cash paid IN at a deposit machine is income',
   'Cash deposit of AED 2,000 paid in at CDM. A/c 1234.',
@@ -4678,6 +4684,100 @@ t('the debit leg of a card payment quotes no card snapshot',
 t('the receipt leg still records the card limit',
   'Thank you for your payment of AED 5,000.00 towards your Credit Card 4110. Available limit is now AED 20,000.00',
   { kind: 'cardPayment', side: 'receipt', snapshotFils: 2000000, snapshotKind: 'limit' });
+
+// ── FULL-INBOX CORPUS: NON-POSTED EVENTS MUST NEVER BECOME MONEY ──
+t('a long Aafaq OTP challenge is not a loan payment',
+  'Dear Customer, Your OTP for Aafaq Islamic Finance Card ending 1234 at DEPARTMENT OF ECONOMIC DEVELOPMENT AJMAN for AED 4,500.00 is 682914. Please enter the OTP to complete the transaction. OTP is valid for 10 minutes only.',
+  null);
+t('a DoubleSecure challenge survives punctuation in the merchant description',
+  'Your DoubleSecure Auth Code for card ending 4822 at Emirates Fast Food Co. LL of AED 63.50 is 5969. This code expires in 5 minutes. Do not share this code with anyone.',
+  null);
+t('a posted purchase with an authorisation reference remains a purchase',
+  'AED 63.50 spent at Emirates Fast Food Co. LL using Debit Card 4822. Authorisation code: 5969. Avl Bal AED 900.00.',
+  { amountFils: 6350, merchant: 'Emirates Fast Food Co' });
+t('a returned direct-debit request is not a loan expense',
+  'From HSBC: Account 041-339***-1 returned a debit request due to INSUFFICIENT FUNDS for AED 187.50 in payment to DUBAI ISLAMIC BANK PJSC.',
+  null);
+ok('the returned direct-debit request is affirmative repair evidence',
+  isDeclinedMessage('From HSBC: Account 041-339***-1 returned a debit request due to INSUFFICIENT FUNDS for AED 187.50 in payment to DUBAI ISLAMIC BANK PJSC.'));
+t('a Google temporary verification hold is not spending',
+  'Purchase of AED 1.00 with Debit Card ending 8783 at GOOGLE *TEMPORARY HOLD, g.co/helppay. Avl Balance is AED 9,000.00.',
+  null);
+t('the release of the same Google verification hold is not income',
+  'Purchase amount of AED 1.00 at GOOGLE *TEMPORARY HOLD on your Debit Card has been refunded to your card account. Avl Bal is AED 9,001.00.',
+  null);
+ok('the verification hold carries a bounded non-posting reason',
+  nonPostingReason('Purchase of AED 1.00 at GOOGLE *TEMPORARY HOLD on Debit Card 8783.') === 'preauthorisation');
+
+// ── SENDER-GATED SELF TRANSFERS NEED ACTUAL MOVEMENT EVIDENCE ──
+t('a generic FAB credit is visible income, not a hidden savings transfer',
+  'An amount of AED 2,500.00 has been credited to your FAB account XXXX1234 on 11/08/2026. Your Available Balance is AED 8,000.00',
+  { type: 'income', merchant: 'Incoming transfer', category: 'other', transfer: false },
+  { sender: 'FAB' });
+t('salary transferred to a FAB account stays visible salary income',
+  'Your salary of AED 10,000.00 has been transferred to your FAB account from ACME LLC.',
+  { type: 'income', amountFils: 1000000, category: 'salary', transfer: false },
+  { sender: 'FAB' });
+t('a person transferring money to a FAB account stays visible income',
+  'AED 2,500.00 has been transferred to your FAB account from JOHN DOE.',
+  { type: 'income', amountFils: 250000, category: 'other', deliberate: false, transfer: false },
+  { sender: 'FAB' });
+t('an explicit Liv rule transfer remains an internal savings movement',
+  'AED 2,500.00 has been debited from your account no. 001-XXX12XXX-34 RULE TRANSFER TO SAVINGS WITH ONE-SHOT SAVING. The available balance is AED 8,000.00.',
+  { type: 'expense', merchant: 'Savings transfer', transfer: true },
+  { sender: 'Liv' });
+t('a merchant credit to a card is an offset, not business revenue',
+  'Amount of AED 125.00 from NAMSHI has been credited to your card ending with 4110. Available limit is AED 8,000.00.',
+  { type: 'income', merchant: 'Namshi', category: 'other', deliberate: true });
+t('an explicit merchant settlement remains business income',
+  'AED 2,500.00 has been credited to your account 1234 B/O DELIVERY HERO TALABAT DB LLC Balance Net Online Sales.',
+  { type: 'income', category: 'business' });
+
+// ── FULL-INBOX CORPUS: HSBC SIGNED ACCOUNT TRANSFERS ──
+t('an HSBC signed transfer-from alert is an outgoing transfer',
+  'From HSBC: 14SEP23 Transfer from 041-339***-001 AED 1,500.00- Your available balance is AED 250.00',
+  { type: 'expense', amountFils: 150000, merchant: 'Bank transfer', transfer: true });
+t('the matching HSBC transfer-to alert is an incoming transfer',
+  'From HSBC: 14SEP23 Transfer to 041-339***-001 AED 1,500.00+ Your available balance is AED 1,750.00',
+  { type: 'income', amountFils: 150000, merchant: 'Bank transfer', transfer: true });
+t('the longer HSBC telegraphic wording uses the same signed grammar',
+  'From HSBC: 14JAN2023 Internet Banking Debit Telegraphic Transfer from 041-339***-001 AED 12,500.00- Your available balance is AED 800.00',
+  { type: 'expense', amountFils: 1250000, merchant: 'Bank transfer', transfer: true });
+t('an HSBC transfer whose sign conflicts with its preposition is refused',
+  'From HSBC: 14SEP23 Transfer from 041-339***-001 AED 1,500.00+ Your available balance is AED 1,750.00',
+  null);
+
+// A download link is delivery boilerplate on this statement, not an offer.
+t('a FAB statement survives its mobile-app download link',
+  'Your statement of the card ending with 6900 dated 18Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB1qEZ. The total amount due is AED 6,032.42. Minimum due is AED 301.62. Due date is 26Aug26',
+  { kind: 'cardStatement', amountFils: 603242, minDueFils: 30162, dueDay: 26,
+    card: { last4: '6900', kind: 'credit' } });
+
+t('a Quick Cash notice awaiting processing is not spending at the receiving bank',
+  'Dear Customer, your Quick Cash Amt of AED 20,000.00 to First Abu Dhabi Bank has been transferred and will be processed within 2 working days.',
+  null);
+t('a cheque deposit subject to clearing is not posted income yet',
+  'AED 4,000.00 has been deposited to your account 001-XXX12XXX-34 subject to being cleared through cheque number 778899.',
+  null);
+ok('the pending-processing notices are repairable without retaining their text',
+  nonPostingReason('AED 4,000.00 has been deposited to your account 1234 subject to being cleared through cheque number 778899.') === 'pending-processing');
+
+// ── FULL-INBOX CORPUS: TRAVEL CURRENCIES AND SUB-UNIT FIGURES ──
+t('a currency-anchored local figure may omit its leading zero',
+  'Purchase of AED .99 with Debit Card ending 8783 at TEST MERCHANT, DUBAI. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 99, merchant: 'Test Merchant' });
+t('a currency-anchored foreign figure may omit its leading zero',
+  'Purchase of USD .99 with Debit Card ending 8783 at TEST MERCHANT, NEW YORK. Avl Balance is AED 900.00.',
+  { type: 'expense', amountFils: 364, originalCurrency: 'USD', originalAmountMinor: 99,
+    fxSource: 'fallback' });
+t('an Azerbaijan purchase remains visible through a fallback conversion',
+  'Credit Card Purchase\nCard No XXXX3749\nAZN 17.00\nQAFQAZ HOTEL BAKU AZE\n10/08/26 18:45\nAvailable Balance AED 9715.74',
+  { type: 'expense', amountFils: 3673, originalCurrency: 'AZN', originalAmountMinor: 1700,
+    fxSource: 'fallback' });
+t('a Georgia purchase remains visible through a fallback conversion',
+  'Credit Card Purchase\nCard No XXXX3749\nGEL 25.00\nWOLT TBILISI GEO\n10/08/26 19:15\nAvailable Balance AED 9680.69',
+  { type: 'expense', amountFils: 3505, originalCurrency: 'GEL', originalAmountMinor: 2500,
+    fxSource: 'fallback' });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

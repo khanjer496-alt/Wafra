@@ -1752,7 +1752,10 @@ if (!workflow) {
   // security check that cries wolf at prose is one people learn to re-run
   // until it passes. The property is unchanged: the guard must sit between
   // prebuild and the command that actually builds.
-  const gradleAt = workflow.search(/^\s*run:\s*\.\/gradlew\s+assembleRelease/m);
+  // The release workflow may select a build variant inside a guarded run
+  // block. Match the executable command itself, whether it is the whole `run:`
+  // value or a line inside `run: |`; prose never starts with `./gradlew`.
+  const gradleAt = workflow.search(/^\s*(?:run:\s*)?\.\/gradlew\s+assembleRelease\b/m);
 
   ok('the release workflow verifies SQLCipher after prebuild',
     guardAt !== -1,
