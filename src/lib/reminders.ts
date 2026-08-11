@@ -126,9 +126,10 @@ export function buildPaymentReminders(
         shiftISO(due.dueDate, offset),
         tf('notificationCardDue', { name, when: label }),
         // Only quote a minimum the bank actually stated. When none was, the
-        // stored figure is a 5%-with-a-floor placeholder Wafra computed, and a
-        // push notification is the last place to hand someone a number the app
-        // made up — it arrives with no screen around it to qualify it.
+        // stored figure may be a market-specific fallback or an explicit zero
+        // sentinel meaning "not stated". A push notification is the last place
+        // to hand someone a number the bank did not provide — it arrives with
+        // no screen around it to qualify it.
         minimumKnown
           ? tf('notificationOutstandingMinimum', {
               amount: formatAED(remainingFils, { decimals: false }),

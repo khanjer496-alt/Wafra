@@ -120,9 +120,41 @@ function tinyPdf(line) {
   ok('CSV amounts become integer minor units with explicit direction',
     splitCsv.rows[0].amountFils === 4000 && splitCsv.rows[0].type === 'expense' &&
       splitCsv.rows[1].amountFils === 1850000 && splitCsv.rows[1].type === 'income');
+  ok('CSV rows use the same merchant categories as bank alerts',
+    splitCsv.rows[0].categoryGuess === 'groceries' &&
+      splitCsv.rows[0].categoryDeliberate === true &&
+      splitCsv.rows[1].categoryGuess === 'salary' &&
+      splitCsv.rows[1].categoryDeliberate === true,
+    JSON.stringify(splitCsv.rows.map((row) => ({
+      merchant: row.merchant,
+      category: row.categoryGuess,
+      deliberate: row.categoryDeliberate,
+    }))));
   ok('CSV preserves legitimate repeated rows and rejects invalid-date and wrong-market rows',
     splitCsv.totalRows === 5 && splitCsv.rejectedRows === 2 &&
       splitCsv.rows[1].merchant === 'Salary' && splitCsv.rows[2].merchant === 'Salary');
+
+  const atmCsvAe = parseStatementCsv([
+    'Date,Description,Debit,Credit,Currency',
+    '04/07/2026,ATM CASH WITHDRAWAL 1234,500.00,,AED',
+    '04/07/2026,ATMOSPHERE CAFE,25.00,,AED',
+    '04/07/2026,ATM CASH WITHDRAWAL FEE,2.00,,AED',
+  ].join('\n'), 'AED');
+  const atmCsvSa = parseStatementCsv([
+    'Date,Description,Debit,Credit,Currency',
+    '04/07/2026,ATM withdrawal 5678,750.00,,SAR',
+  ].join('\n'), 'SAR');
+  ok('UAE and Saudi CSV cash withdrawals use their own category',
+    atmCsvAe.rows[0]?.merchant === 'ATM withdrawal' &&
+      atmCsvAe.rows[0]?.categoryGuess === 'cash-withdrawal' &&
+      atmCsvAe.rows[0]?.categoryDeliberate === true &&
+      atmCsvSa.rows[0]?.merchant === 'ATM withdrawal' &&
+      atmCsvSa.rows[0]?.categoryGuess === 'cash-withdrawal');
+  ok('statement ATM matching does not consume merchant names or withdrawal fees',
+    atmCsvAe.rows[1]?.merchant === 'ATMOSPHERE CAFE' &&
+      atmCsvAe.rows[1]?.categoryGuess !== 'cash-withdrawal' &&
+      atmCsvAe.rows[2]?.merchant === 'ATM CASH WITHDRAWAL FEE' &&
+      atmCsvAe.rows[2]?.categoryGuess !== 'cash-withdrawal');
 
   const directedTsv = parseStatementCsv([
     'Posting Date\tDetails\tAmount\tDr Cr',
@@ -132,6 +164,9 @@ function tinyPdf(line) {
   ok('TSV amount plus direction columns are supported',
     directedTsv.rows.length === 2 && directedTsv.rows[0].amountFils === 5250 &&
       directedTsv.rows[1].type === 'income');
+  ok('statement refunds are intentionally non-spending income',
+    directedTsv.rows[1].categoryGuess === 'other' &&
+      directedTsv.rows[1].categoryDeliberate === true);
 
   const signedSemicolon = parseStatementCsv([
     'Date;Narration;Amount',
@@ -212,7 +247,8 @@ function tinyPdf(line) {
     '02/07/2026 WRONG MARKET AED 10.00 DR',
   ].join('\n'), 'SAR');
   ok('Saudi statement rows retain SAR and reject explicit AED rows',
-    saRows.length === 1 && saRows[0].currency === 'SAR' && saRows[0].amountFils === 4500);
+    saRows.length === 1 && saRows[0].currency === 'SAR' && saRows[0].amountFils === 4500 &&
+      saRows[0].categoryGuess === 'groceries' && saRows[0].categoryDeliberate === true);
   const currencyWordMerchant = parseStatementText('01/07/2026 SAR TRADING 45.00 DR', 'AED');
   ok('a currency word inside the merchant is not mistaken for an amount currency',
     currencyWordMerchant.length === 1 && currencyWordMerchant[0].currency === 'AED');
@@ -223,9 +259,24 @@ function tinyPdf(line) {
   ok('real PDF bytes are text-extracted', pdf.pages === 1);
   ok('text PDF row becomes a structured transaction',
     pdf.rows.length === 1 && pdf.rows[0].merchant === 'CARREFOUR MARKET' &&
-      pdf.rows[0].amountFils === 4000,
+      pdf.rows[0].amountFils === 4000 && pdf.rows[0].categoryGuess === 'groceries' &&
+      pdf.rows[0].categoryDeliberate === true,
     JSON.stringify(pdf.rows));
   ok('PDF parser raw exists only at the in-memory boundary', pdf.rows[0].raw.includes('CARREFOUR'));
+
+  const atmPdfAe = await extractPdfStatementRows(
+    tinyPdf('04/07/2026 ATM CASH WITHDRAWAL 1234 AED 500.00 DR'),
+    'AED',
+  );
+  const atmPdfSa = await extractPdfStatementRows(
+    tinyPdf('04/07/2026 CASH WITHDRAWAL AT AL RAJHI ATM SAR 750.00 DR'),
+    'SAR',
+  );
+  ok('UAE and Saudi PDF cash withdrawals use their own category',
+    atmPdfAe.rows[0]?.merchant === 'ATM withdrawal' &&
+      atmPdfAe.rows[0]?.categoryGuess === 'cash-withdrawal' &&
+      atmPdfSa.rows[0]?.merchant === 'ATM withdrawal' &&
+      atmPdfSa.rows[0]?.categoryGuess === 'cash-withdrawal');
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

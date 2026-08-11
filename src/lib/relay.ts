@@ -1246,6 +1246,7 @@ const RELAY_CATEGORIES = new Set([
   'groceries',
   'dining',
   'transport',
+  'cash-withdrawal',
   'utilities',
   'telecom',
   'rent',

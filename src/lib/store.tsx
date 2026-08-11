@@ -437,6 +437,29 @@ export function migratePersistedState(
         return income;
       });
 
+    // ATM rows have always carried this exact structural title. Releases
+    // before parser v17 could file the machine's mall/street address under a
+    // merchant category, so repair every parser-owned expense rather than
+    // only rows currently in Other. Hand edits remain authoritative.
+    parsed.transactions = parsed.transactions.map((t) => {
+      if (
+        t.userEdited ||
+        t.source !== 'sms' ||
+        t.isTransfer ||
+        t.type !== 'expense' ||
+        t.title !== 'ATM withdrawal'
+      ) {
+        return t;
+      }
+      const category = guessCategory(
+        t.title,
+        t.type,
+        parsed.merchantOverrides,
+        t.title,
+      );
+      return category !== t.category ? { ...t, category } : t;
+    });
+
     // Re-file rows stuck in Other: each parser release widens the merchant
     // vocabulary, so imported-as-Other rows get another chance without
     // needing a rescan. User overrides still win.

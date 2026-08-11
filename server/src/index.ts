@@ -1366,7 +1366,6 @@ export default {
           device,
           {
             ...withoutRaw(extracted.rows[index]),
-            categoryDeliberate: true,
             captureSource: 'pdf',
             receivedAt: receivedAt[index],
           },
@@ -1421,7 +1420,6 @@ export default {
           device,
           {
             ...withoutRaw(parsed.rows[index]),
-            categoryDeliberate: true,
             captureSource: 'csv',
             receivedAt: receivedAt[index],
           },
@@ -1882,7 +1880,6 @@ export default {
           device,
           {
             ...withoutRaw(extracted.rows[rowIndex]),
-            categoryDeliberate: true,
             captureSource: 'pdf',
             receivedAt: receivedAt[rowIndex],
           },
@@ -1928,7 +1925,6 @@ export default {
           device,
           {
             ...withoutRaw(parsed.rows[rowIndex]),
-            categoryDeliberate: true,
             captureSource: 'csv',
             receivedAt: receivedAt[rowIndex],
           },

@@ -310,7 +310,13 @@ function loadHydrationExports(realModules = {}) {
   const parser = {
     PARSER_VERSION: 999,
     normalizeServiceName: (title) => title === 'Legacy service' ? 'Canonical service' : null,
-    guessCategory: (title) => title === 'Unclassified merchant' ? 'dining' : 'other',
+    guessCategory: (title, _type, overrides) =>
+      overrides?.[title.trim().toLowerCase()] ??
+      (title === 'Unclassified merchant'
+        ? 'dining'
+        : title === 'ATM withdrawal'
+          ? 'cash-withdrawal'
+          : 'other'),
     parseSms: (raw) =>
       raw === 'now a statement'
         ? { kind: 'cardStatement' }
@@ -675,6 +681,7 @@ const tx = (id, extra = {}) => ({
     tx('edited-income', { type: 'income', category: 'dining', userEdited: true }),
     tx('edited-service', { title: 'Legacy service', userEdited: true }),
     tx('edited-category', { title: 'Unclassified merchant', userEdited: true }),
+    tx('edited-atm', { title: 'ATM withdrawal', category: 'other', userEdited: true }),
     tx('edited-raw', { title: 'My correction', raw: 'parser would replace this', userEdited: true }),
   ];
   const before = new Map(edited.map((row) => [row.id, JSON.stringify(row)]));
@@ -684,6 +691,7 @@ const tx = (id, extra = {}) => ({
     tx('auto-income', { type: 'income', category: 'dining' }),
     tx('auto-service', { title: 'Legacy service' }),
     tx('auto-category', { title: 'Unclassified merchant' }),
+    tx('auto-atm', { title: 'ATM withdrawal', category: 'shopping' }),
     tx('auto-raw', { raw: 'reparse me' }),
   ];
   const migrated = hydration.migratePersistedState({ transactions: [...edited, ...automatic] });
@@ -698,8 +706,22 @@ const tx = (id, extra = {}) => ({
       byId.get('auto-income')?.category === 'business' &&
       byId.get('auto-service')?.title === 'Canonical service' &&
       byId.get('auto-category')?.category === 'dining' &&
+      byId.get('auto-atm')?.category === 'cash-withdrawal' &&
       byId.get('auto-raw')?.title === 'Reparsed merchant' &&
       byId.get('auto-raw')?.raw === undefined);
+}
+
+{
+  const pinnedAtm = tx('pinned-atm', {
+    title: 'ATM withdrawal',
+    category: 'other',
+  });
+  const migrated = hydration.migratePersistedState({
+    transactions: [pinnedAtm],
+    merchantOverrides: { 'atm withdrawal': 'shopping' },
+  });
+  ok('an explicit ATM merchant rule outranks the automatic cash category',
+    migrated.transactions[0]?.category === 'shopping');
 }
 
 {

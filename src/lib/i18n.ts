@@ -431,8 +431,8 @@ const S = {
     ar: 'وقد أجبت بنفسك عن {decided} منها — متجر ثبّتّه أو عملية صنّفتها بيدك — فلا تُحاسَب وفرة عليها.',
   },
   coverageSkipped: {
-    en: 'A further {skipped} messages are transfers, card payments, ATM withdrawals, fees and money coming in. None of those has a shop name or a spending category to get right, so they are left out of both counts rather than counted as failures.',
-    ar: 'وهناك {skipped} رسالة أخرى هي تحويلات ودفعات بطاقات وسحوبات صراف ورسوم ومبالغ واردة. لا شيء فيها يحمل اسم متجر أو تصنيف إنفاق كي يُخطئ فيه، لذا تُستثنى من العدّين بدل أن تُحسب أخطاءً.',
+    en: 'A further {skipped} messages are transfers, card payments, ATM withdrawals, fees and money coming in. These are not shop purchases whose merchant or category Wafra needs to infer, so they are left out of both counts rather than counted as failures.',
+    ar: 'وهناك {skipped} رسالة أخرى هي تحويلات ودفعات بطاقات وسحوبات صراف ورسوم ومبالغ واردة. ليست هذه مشتريات من متجر تحتاج وفرة إلى استنتاج اسمه أو تصنيفه، لذا تُستثنى من العدّين بدل أن تُحسب أخطاءً.',
   },
   coverageNoText: {
     en: 'The misses are counted here, but the messages behind them were never kept on this phone, so they cannot be listed below or shared.',

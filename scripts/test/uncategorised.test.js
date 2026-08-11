@@ -360,6 +360,9 @@ ok('nothing on an empty list is worth prompting for', !worthPrompting(uncategori
     'Card payment',
     'Account debit',
     'Mobile recharge',
+    'Transfer to Sam Example',
+    'Payment to •1849',
+    '2c2p',
   ];
   eq(
     'no structural title is offered as a merchant',

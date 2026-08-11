@@ -399,6 +399,58 @@ const afterFirst = apply(BASE, first);
     plan.batch.newDues[0]?.accountId === 'enbd', plan.batch.newDues[0]);
 }
 
+/* An unstated minimum is never borrowed from another market's convention. */
+{
+  const saState = {
+    ...BASE,
+    accounts: [{
+      id: 'albilad-card', name: 'Bank Albilad Credit Card •4567', kind: 'card',
+      cardType: 'credit', last4: '4567', bankName: 'Bank Albilad',
+      openingFils: 0, color: '#E63329',
+    }],
+  };
+  const saStatement = {
+    kind: 'cardStatement', type: 'expense', amountFils: 200000, currency: 'SAR',
+    merchant: 'Card statement', date: '2026-08-20', dueDay: 20, minDueFils: null,
+    card: { last4: '4567', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: '',
+    smsTs: T0 + 4_050_000, sender: 'Albilad', channel: 'inbox',
+  };
+  const plan = buildImportPlan([saStatement], saState, saStatement.smsTs, new Date(2026, 7, 2));
+  ok('Saudi statement without a stated minimum gets no UAE 5% figure',
+    plan.batch.newDues[0]?.minDueFils === 0 &&
+      plan.batch.newDues[0]?.minDueEstimated === true,
+    plan.batch.newDues[0]);
+
+  const oldWrongEstimate = {
+    id: 'old-sa-due', accountId: 'albilad-card', totalDueFils: 200000,
+    minDueFils: 10000, minDueEstimated: true, dueDate: '2026-08-20',
+    paidFils: 4500,
+  };
+  const repairPlan = buildImportPlan(
+    [saStatement],
+    { ...saState, cardDues: [oldWrongEstimate] },
+    saStatement.smsTs,
+    new Date(2026, 7, 2),
+  );
+  ok('a rescan offers a repair for an old Saudi due carrying the UAE estimate',
+    repairPlan.batch.newDues.length === 1 &&
+      repairPlan.batch.newDues[0]?.minDueFils === 0 &&
+      repairPlan.batch.newDues[0]?.minDueEstimated === true,
+    repairPlan.batch.newDues);
+
+  const { mergeImportedCardDues } = require('./build/cards.js');
+  const repaired = mergeImportedCardDues(
+    [oldWrongEstimate],
+    [{ ...repairPlan.batch.newDues[0], id: 'repair' }],
+    saState.accounts,
+  )[0];
+  ok('the repair removes only the invented minimum and preserves payment evidence',
+    repaired.minDueFils === 0 && repaired.minDueEstimated === true &&
+      repaired.paidFils === 4500,
+    repaired);
+}
+
 /* A parser upgrade must never delete a statement row the user corrected. */
 {
   const smsTs = T0 + 4_200_000;
@@ -1603,9 +1655,12 @@ const DECLINE_SMS = [{
   ok('a stated minimum still beats an estimate, whichever arrived first',
     minOf(due('d1', 20000), due('d2', 5000, { minDueEstimated: true })) === 20000 &&
       minOf(due('d1', 5000, { minDueEstimated: true }), due('d2', 20000)) === 20000);
-  ok('two estimates still take the larger',
+  ok('two positive estimates still take the larger',
     minOf(due('d1', 5000, { minDueEstimated: true }),
       due('d2', 7000, { minDueEstimated: true })) === 7000);
+  ok('an explicit newer unknown estimate removes an older invented fallback',
+    minOf(due('d1', 5000, { minDueEstimated: true }),
+      due('d2', 0, { minDueEstimated: true })) === 0);
 
   // The whole point of the estimate flag: a guess must never be quoted back
   // as the bank's figure, and must never make the user look delinquent.

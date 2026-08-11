@@ -2981,6 +2981,11 @@ ok('stale: a stale statement that gets paid leaves openDues',
   {
     const structural = [...parser.STRUCTURAL_TITLES].map((title) =>
       row({ title, category: 'other' }));
+    structural.push(
+      row({ title: 'Transfer to Sam Example', category: 'other' }),
+      row({ title: 'Payment to •1849', category: 'other' }),
+      row({ title: '2c2p', category: 'other' }),
+    );
     const c = cov(structural);
     ok('coverage: no structural title is ever a miss',
       c.measured === 0 && c.skipped === structural.length, `${c.measured}/${c.skipped}`);

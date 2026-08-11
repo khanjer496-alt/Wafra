@@ -63,8 +63,10 @@ export function normalizeAlertText(source: string): string {
         break;
       }
     }
-    if (character === '٫') replaced = '.';
-    else if (character === '٬') replaced = ',';
+    // Keep the Arabic decimal separator distinct. Unlike ASCII `.`/`,`, it is
+    // explicit decimal evidence for three-minor-unit currencies and must not
+    // be downgraded to the ambiguous `1.234` shape.
+    if (character === '٬') replaced = ',';
     else if (character === '−') replaced = '-';
     else if (character === '\u00a0' || character === '\u2007' || character === '\u202f') replaced = ' ';
     else if ((code >= 0x200e && code <= 0x200f) || (code >= 0x202a && code <= 0x202e) ||
@@ -85,8 +87,9 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
   const negative = value.startsWith('-');
   if (negative) value = value.slice(1);
   value = value.replace(/[ '\u2019]/g, '');
-  if (!/^\d[\d.,]*$/.test(value) || value.length > 48) return null;
+  if (!/^\d[\d.,٫]*$/.test(value) || value.length > 48) return null;
 
+  const arabicDecimal = value.lastIndexOf('٫');
   const dot = value.lastIndexOf('.');
   const comma = value.lastIndexOf(',');
   let decimalAt = -1;
@@ -102,7 +105,14 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
       middle.every((part) => /^\d{2}$/.test(part));
   };
 
-  if (dot >= 0 && comma >= 0) {
+  if (arabicDecimal >= 0) {
+    if (value.indexOf('٫') !== arabicDecimal || dot >= 0) return null;
+    const tail = value.length - arabicDecimal - 1;
+    if (exponent <= 0 || tail < 1 || tail > exponent) return null;
+    const integerPart = value.slice(0, arabicDecimal);
+    if (integerPart.includes(',') && !validGroupedInteger(integerPart, ',')) return null;
+    decimalAt = arabicDecimal;
+  } else if (dot >= 0 && comma >= 0) {
     const last = Math.max(dot, comma);
     const tail = value.length - last - 1;
     if (exponent <= 0 || tail !== exponent) return null;
@@ -138,20 +148,20 @@ function parseNumber(source: string, exponent: number): ParsedNumber | null {
 
   const integerRaw = decimalAt >= 0 ? value.slice(0, decimalAt) : value;
   const fractionRaw = decimalAt >= 0 ? value.slice(decimalAt + 1) : '';
-  const integer = integerRaw.replace(/[.,]/g, '');
+  const integer = integerRaw.replace(/[.,٫]/g, '');
   if (!/^\d+$/.test(integer) || (fractionRaw && !/^\d+$/.test(fractionRaw))) return null;
   if (fractionRaw.length > exponent) return null;
   const digits = `${integer}${fractionRaw.padEnd(exponent, '0')}`.replace(/^0+(?=\d)/, '');
   const minorUnits = `${negative ? '-' : ''}${digits || '0'}`;
   let alternateMinorUnits: string | null = null;
   if (ambiguous) {
-    const grouped = value.replace(/[.,]/g, '').replace(/^0+(?=\d)/, '') || '0';
+    const grouped = value.replace(/[.,٫]/g, '').replace(/^0+(?=\d)/, '') || '0';
     alternateMinorUnits = `${negative ? '-' : ''}${grouped}${'0'.repeat(exponent)}`;
   }
   return { minorUnits, ambiguous, alternateMinorUnits };
 }
 
-const NUMBER = `[+-]?(?:\\d[\\d.,' \\u2019]{0,46}\\d|\\d)`;
+const NUMBER = `[+-]?(?:\\d[\\d.,٫' \\u2019]{0,46}\\d|\\d)`;
 const TOKEN_GAP = '\\s{0,3}';
 const ISO_PREFIX = new RegExp(`\\b([A-Za-z]{3})${TOKEN_GAP}(${NUMBER})`, 'g');
 const ISO_SUFFIX = new RegExp(`(${NUMBER})${TOKEN_GAP}([A-Za-z]{3})\\b`, 'g');

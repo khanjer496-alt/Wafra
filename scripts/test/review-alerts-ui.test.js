@@ -40,6 +40,8 @@ ok('review route offers explicit correction before promotion, never silent impor
     /reviewAlertDateA11y/.test(add) &&
     /type:\s*['"]promoteReviewAlert['"]/.test(store) &&
     /dismissReviewAlert\(item\.id, ['"]dismissed['"]\)/.test(route));
+ok('a review-only cash event defaults to the cash-withdrawal category',
+  /family === 'cash-withdrawal'[\s\S]{0,80}\? 'cash-withdrawal'/.test(add));
 ok('review amounts stay exact instead of crossing floating point',
   /minorUnits\.padStart/.test(route) &&
     !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route));

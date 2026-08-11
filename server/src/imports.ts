@@ -3,7 +3,7 @@ import PostalMime from 'postal-mime';
 import { parse as parseCsvRecords } from 'csv-parse/sync';
 import { extractText, getDocumentProxy } from 'unpdf';
 
-import type { ParsedSms } from '@/lib/sms-parser';
+import { classifyMerchantDescription, type ParsedSms } from '@/lib/sms-parser';
 
 const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
@@ -305,10 +305,19 @@ export function parseStatementCsv(
       rejectedRows += 1;
       continue;
     }
+    const classification = classifyMerchantDescription(
+      merchant,
+      type,
+      defaultCurrency === 'AED' ? 'AE' : 'SA',
+    );
     rows.push({
-      kind: 'transaction', type, amountFils: minor, currency: defaultCurrency, merchant, date,
+      kind: 'transaction', type, amountFils: minor, currency: defaultCurrency,
+      merchant: classification.merchant, date,
       dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
-      snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: record.join(delimiter),
+      snapshotFils: null, snapshotKind: null,
+      categoryGuess: classification.categoryGuess,
+      categoryDeliberate: classification.categoryDeliberate,
+      raw: record.join(delimiter),
     });
   }
   return { rows, totalRows, rejectedRows };
@@ -363,10 +372,19 @@ export function parseStatementText(
     const amountFils = Math.round(Number(amountText.replace(/,/g, '')) * 100);
     if (!Number.isSafeInteger(amountFils) || amountFils <= 0 || !merchant) continue;
     const type = direction === 'CR' || direction === 'CREDIT' ? 'income' : 'expense';
+    const classification = classifyMerchantDescription(
+      merchant,
+      type,
+      currency === 'AED' ? 'AE' : 'SA',
+    );
     rows.push({
-      kind: 'transaction', type, amountFils, currency, merchant, date,
+      kind: 'transaction', type, amountFils, currency,
+      merchant: classification.merchant, date,
       dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
-      snapshotFils: null, snapshotKind: null, categoryGuess: 'other', raw: line,
+      snapshotFils: null, snapshotKind: null,
+      categoryGuess: classification.categoryGuess,
+      categoryDeliberate: classification.categoryDeliberate,
+      raw: line,
     });
   }
   return rows;

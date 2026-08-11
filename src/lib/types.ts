@@ -7,6 +7,8 @@ export type CategoryId =
   | 'groceries'
   | 'dining'
   | 'transport'
+  /** Cash taken from an ATM. The later use of that cash is not inferred. */
+  | 'cash-withdrawal'
   | 'utilities'
   | 'telecom'
   | 'rent'
@@ -246,9 +248,10 @@ export interface CardDue {
   totalDueFils: number;
   minDueFils: number;
   /**
-   * True when no minimum was stated in the SMS and `minDueFils` is a fallback
-   * estimate. The bank's terms decide the real minimum; without one quoted,
-   * the app must not tell the user it knows what theirs is.
+   * True when no minimum was stated in the SMS and `minDueFils` is either a
+   * market-specific fallback estimate or zero when no honest estimate exists.
+   * The bank's terms decide the real minimum; without one quoted, the app must
+   * not tell the user it knows what theirs is.
    */
   minDueEstimated?: boolean;
   /** ISO date the payment is due by. */

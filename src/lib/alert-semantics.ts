@@ -36,10 +36,17 @@ export interface MarketAlertContext {
 
 export type MoneyCandidateRole = 'transaction' | 'balance' | 'limit' | 'due' | 'fee' | 'unknown';
 
-const AUTHENTICATION = /\b(?:otp|one[ -]?time password|3d secure|3ds|verification code|security code|approve (?:this )?(?:payment|purchase)|fraud check)\b|رمز (?:التحقق|التأكيد)|كلمة المرور/i;
+const AUTHENTICATION = /\b(?:otp|one[ -]?time password|3d secure|3ds|verification code|security code|sicherheitscode|c[óo]digo de seguridad|codice di sicurezza|beveiligingscode|approve (?:this )?(?:payment|purchase)|fraud check)\b|code de s[ée]curit[ée]|رمز (?:التحقق|التأكيد)|كلمة المرور/i;
 const FAILED = /\b(?:declined|failed|unsuccessful|rejected|not approved|insufficient funds|returned unpaid)\b|مرفوض(?:ة)?|فشل(?:ت)?|تعذر|असफल|अस्वीकृत/i;
+const NEGATED_POSTING = [
+  /(?:(?:\bne\s+|n['’])(?:[\p{L}\p{M}'’-]+\s+){0,4}pas\s+(?:[\p{L}\p{M}'’-]+\s+){0,2}|\bnon\s+)(?:payé|payée|paye|payee|débité|débitée|debite|debitee|crédité|créditée|credite|creditee|remboursé|remboursée|effectué|effectuée)(?=$|[^\p{L}\p{N}])/iu,
+  /\bno\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pagad[oa]s?|cargad[oa]s?|abonad[oa]s?|reembolsad[oa]s?)(?=$|[^\p{L}\p{N}])/iu,
+  /\bnon\s+(?:[\p{L}\p{M}'’-]+\s+){0,4}(?:pagat[oa]|addebitat[oa]|accreditat[oa]|rimborsat[oa])(?=$|[^\p{L}\p{N}])/iu,
+  /\bnicht\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:bezahlt|abgebucht|belastet|gutgeschrieben|erstattet)(?=$|[^\p{L}\p{N}])/iu,
+  /\bniet\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:betaald|afgeschreven|bijgeschreven|terugbetaald)(?=$|[^\p{L}\p{N}])/iu,
+] as const;
 const FUTURE = /\b(?:will be (?:debited|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل)|طلب تحصيل|مستحق|डेबिट किया जाएगा|भुगतान देय/i;
-const STATEMENT = /\b(?:statement|minimum (?:amount )?due|amount due|payment due date|relevé|kontoauszug|extracto|estratto conto)\b|كشف حساب|الحد الأدنى المستحق/i;
+const STATEMENT = /\b(?:statement|credit card bill|card bill|minimum (?:amount )?due|amount due|payment due date|kontoauszug|extracto|estratto conto|rekeningoverzicht)\b|relev[ée]|كشف حساب|الحد الأدنى المستحق/i;
 const BALANCE = /\b(?:available balance|current balance|avl bal|available limit|credit limit|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
 const POSTED = /\b(?:spent|purchase(?:d)?|paid|debited|credited|received|sent|withdrawn|deposited|refund(?:ed)?|revers(?:al|ed)|completed|successful|charged|posted|débité|crédité|effectué|belastet|abgebucht|gutgeschrieben|bezahlt|cargado|abonado|pagado|addebitato|accreditato|afgeschreven|bijgeschreven|betaald)\b|تم (?:الخصم|الإيداع|الدفع|التحويل)|سحب|شراء|دفع|استرداد|डेबिट किया गया|क्रेडिट किया गया|जमा किया गया|भुगतान किया गया/i;
 const CREDIT = /\b(?:credited|received|deposit(?:ed)?|refund(?:ed)?|revers(?:al|ed)|credited back|crédité|gutschrift|gutgeschrieben|abonado|accredito|accreditato|bijgeschreven|terugbetaling)\b|تم (?:الإيداع|رد)|استرداد|क्रेडिट|जमा/i;
@@ -95,10 +102,15 @@ const postingStatus = (
   futureTerms: readonly string[] = [],
 ): PostingStatus => {
   if (AUTHENTICATION.test(text)) return 'informational';
-  if (FAILED.test(text) || findTerm(text, failedTerms)) return 'failed';
-  if (FUTURE.test(text) || findTerm(text, futureTerms)) return 'future';
+  if (FAILED.test(text) || NEGATED_POSTING.some((pattern) => pattern.test(text)) ||
+    findTerm(text, failedTerms)) return 'failed';
+  // The generic layer cannot separate a statement total from an individual
+  // posting safely. Exact verified bank grammars may do that later; until
+  // then every statement-shaped alert is informational and non-importable.
+  if (STATEMENT.test(text)) return 'informational';
   const hasTransactionEvidence = POSTED.test(text) || Boolean(findTerm(text, postedTerms));
-  if ((STATEMENT.test(text) || BALANCE.test(text)) && !hasTransactionEvidence) return 'informational';
+  if (FUTURE.test(text) || findTerm(text, futureTerms)) return 'future';
+  if (BALANCE.test(text) && !hasTransactionEvidence) return 'informational';
   return hasTransactionEvidence ? 'posted' : 'unknown';
 };
 

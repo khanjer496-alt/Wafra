@@ -859,6 +859,12 @@ async function queueItem(id, row, publicKey) {
     !relay.isParsedRelayRow({ ...row, sender: 'ENBD\nforged' }));
   ok('row: a legitimate rawless structured row is accepted',
     !('raw' in row) && relay.isParsedRelayRow(row));
+  ok('row: the cash-withdrawal category crosses the sealed iOS relay',
+    relay.isParsedRelayRow({
+      ...row,
+      merchant: 'ATM withdrawal',
+      categoryGuess: 'cash-withdrawal',
+    }));
   ok('row: raw Message Content is forbidden even when empty',
     !relay.isParsedRelayRow({ ...row, raw: 'full bank SMS' }) &&
       !relay.isParsedRelayRow({ ...row, raw: '' }) &&

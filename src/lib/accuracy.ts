@@ -1,7 +1,10 @@
 import { netWorthFils, reliableBalanceFils } from '@/lib/balances';
 import { DORMANT_AFTER_DAYS } from '@/lib/cards';
 import { toISODate } from '@/lib/format';
-import { overrideFitsDirection, STRUCTURAL_TITLES } from '@/lib/sms-parser';
+import {
+  isDeliberateOtherTitle,
+  overrideFitsDirection,
+} from '@/lib/sms-parser';
 import type { AppState, Transaction } from '@/lib/types';
 
 /**
@@ -428,7 +431,7 @@ const CARD_PAYMENT_TITLE_RE = /^Card •/;
 
 function namesNoMerchant(title: string): boolean {
   const t = title.trim();
-  return STRUCTURAL_TITLES.has(t) || NO_MERCHANT_TITLES.has(t) || CARD_PAYMENT_TITLE_RE.test(t);
+  return isDeliberateOtherTitle(t) || NO_MERCHANT_TITLES.has(t) || CARD_PAYMENT_TITLE_RE.test(t);
 }
 
 export interface ParserCoverage {

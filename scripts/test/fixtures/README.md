@@ -31,6 +31,16 @@ can never be counted as evidence that RAKBANK is supported.
 `public-sources.md` records the redaction provenance for every row — where it
 came from, and what was replaced.
 
+`global-alert-formats.js` is a separate 188-row representative corpus for the
+14 first-wave review markets. Each market covers all ten required alert
+families plus explicit declined, future, localized-negation and statement-
+aggregate controls. It combines documented alert families with
+independently authored, localized near-real templates. Every value and identity
+is fictional, and every row is labelled `standard-derived` or `synthetic`.
+It is deliberately useful for grammar development and hard-negative testing
+without pretending to be customer evidence: the rollout runner proves that
+none of these rows can count toward automatic-import eligibility.
+
 ## Nothing in here names its own bank, except HSBC
 
 `From HSBC:` is the only in-body bank marker anywhere in the accuracy-report

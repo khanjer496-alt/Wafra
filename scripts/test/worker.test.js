@@ -1558,6 +1558,16 @@ const CARD_PAYMENT_DEBIT =
     ok('statement: a DIFFERENT statement is not suppressed by the first one\'s receipts',
       different.status === 202 && differentRows.length === 2,
       JSON.stringify(differentRows.map((row) => row.merchant)));
+    ok('statement: structured rows carry the shared merchant categorizer',
+      differentRows[0]?.categoryGuess === 'groceries' &&
+        differentRows[0]?.categoryDeliberate === true &&
+        differentRows[1]?.categoryGuess === 'salary' &&
+        differentRows[1]?.categoryDeliberate === true,
+      JSON.stringify(differentRows.map((row) => ({
+        merchant: row.merchant,
+        category: row.categoryGuess,
+        deliberate: row.categoryDeliberate,
+      }))));
     ok('statement: and the phone imports both of those as well',
       importOnPhone(differentRows).batch.transactions.length === 2);
 

@@ -13,7 +13,7 @@
  * be there — if a later rule takes one of them, that is a regression and this
  * suite is where it shows up.
  */
-const { guessCategory } = require('./build/sms-parser');
+const { guessCategory, parseSms } = require('./build/sms-parser');
 const { CATEGORIES } = require('./build/categories');
 const { getActiveMarket, setActiveMarket } = require('./build/markets');
 
@@ -38,6 +38,13 @@ function ok(name, condition, detail) {
     fail++;
     console.log(`✗ ${name}${detail ? ` — ${detail}` : ''}`);
   }
+}
+
+{
+  const cash = CATEGORIES.find((category) => category.id === 'cash-withdrawal');
+  ok('cash withdrawal is a complete bilingual expense category',
+    cash?.label === 'Cash withdrawal' && cash?.labelAr === 'سحب نقدي' &&
+      cash?.icon === 'cash' && cash?.type === 'expense', cash);
 }
 
 /** The category a purchase SMS resolves to, read the way the store reads it. */
@@ -190,7 +197,6 @@ eq(
   const leftAlone = [
     // Processors whose payee the descriptor does not carry at all.
     ['WWW.2C2P.COM*2C2P (THA, BANGKOK', 'the gateway, not the shop it charged for'],
-    ['WWW.KSHER.CO*BARTELS C BANGKOK THA', 'same, with a truncated payee'],
     ['FAT*THE VIOLE, Dubai', 'a processor star and a cut-off name'],
     ['HTTPS SWIFAPP COM, ABU DHABI', 'an app name that says nothing about its trade'],
     ['Simplex_Elastum, s@simplex.com', 'Simplex is also an ordinary company name'],
@@ -205,17 +211,14 @@ eq(
     ['MARFAA SHARJAH ARE', 'unguessable'],
     ['SHEETWA, 4074', 'unguessable'],
     ['TUBA INT, SHARJAH', 'unguessable'],
-    ['LETO DUBAI ARE', 'unguessable'],
     ['CRO, st Julians', 'three letters'],
     ['THE BOX, SHARJAH', 'a common phrase, not a trade'],
     ['AL NIMAR AL ABYADH SHARJAH ARE', 'unguessable'],
     ['ABO ALO,SHARJAH-AE', 'unguessable'],
     ['AMERICAN DEALD, AMMAN', 'unguessable'],
     ['AT TWENTY TWO HOUSE, PHUKET', 'a house name'],
-    ['MARUSH PHUKET THA', 'unguessable'],
     ['AROMAYA, PHUKET', 'unguessable'],
     ['NIKORN MARINE, PHUKET', 'marine is engineering as often as it is a boat'],
-    ['MOONTREESPA 24192419 THA', 'SPA is glued to the name; the only rules that reach it also reach VESPA'],
     // The traps that would each be a WRONG answer, not merely a bold one.
     ['BLUE BAY REAL ESTATE L, DUBAI', 'AED 40 to an agency is not Rent, and Rent mints bills'],
     ['VEDA INC INVESTMENT L., DUBAI MEDIA C', 'a company with Investment in its name is not an investment'],
@@ -224,12 +227,10 @@ eq(
     ['ON TECHNOLOGIES FZ LLC, DUBAI', '"Technologies" is a company suffix, not a trade'],
     ['XPOWERPLUS, DUBAI', 'unguessable'],
     ['DUBAI FAMILIES, SHARJAH', 'unguessable'],
-    ['AKIBA DORI FZ LLC, DUBAI', 'unguessable'],
     ['Loop DXB LLC 1, Dubai', 'unguessable'],
     ['PUFFTOPIA CANNABIS CO PHUKET THA', 'the app has no category this belongs in'],
     ['KING ABDUL AZIZ STREET DUBAI AE', 'a street, not a shop'],
     ['TOPS-MY FRONT YARD PHU PHUKET THA', 'TOPS is an English word; see the report'],
-    ['TUM RUB THAI/TOPS PHUK PHUKET THA', 'same, and this one is a restaurant inside the supermarket'],
   ];
   for (const [descriptor, why] of leftAlone) {
     eq(`left in other on purpose: ${descriptor} — ${why}`, cat(purchase(descriptor)), 'other');
@@ -245,10 +246,10 @@ eq(
 // third party". These assertions pin today's behaviour so the boundary is
 // visible rather than forgotten.
 {
-  const p2p = "Hey Naser Khanjar, you've successfully transferred AED 202.00 to Yasser Allam.";
+  const p2p = "Hey Customer, you've successfully transferred AED 202.00 to Sam Example.";
   const fastpay =
-    'Dear Naser Naze, AED 750.00 has been debited from your Saving Bank Account ending with 2501' +
-    ' for a FastPay transfer to Mohammad Nazem.';
+    'Dear Customer, AED 750.00 has been debited from your Saving Bank Account ending with 2501' +
+    ' for a FastPay transfer to Alex Example.';
   eq('a send to a named person is not filed under a spending category', cat(p2p), 'other');
   eq('nor is the FastPay shape', cat(fastpay), 'other');
   // And specifically NOT any of the four that would be actively wrong.
@@ -259,6 +260,60 @@ eq(
       cat(text),
     );
   }
+  for (const [name, text, title] of [
+    ['completed transfer', p2p, 'Transfer to Sam Example'],
+    ['FastPay transfer', fastpay, 'Transfer to Alex Example'],
+  ]) {
+    const parsed = parseSms(text);
+    ok(
+      `${name} is intentionally understood rather than an uncategorised miss`,
+      parsed?.merchant === title && parsed?.categoryGuess === 'other' &&
+        parsed?.categoryDeliberate === true && parsed?.transferHint === false,
+      JSON.stringify(parsed && {
+        merchant: parsed.merchant,
+        category: parsed.categoryGuess,
+        deliberate: parsed.categoryDeliberate,
+        transferHint: parsed.transferHint,
+      }),
+    );
+  }
+}
+
+/* ── Bounded merchant evidence from the supplied accuracy report ───────── */
+// These rules name the business, never its city. The controls below keep
+// PHUKET and DUBAI from becoming category evidence in their own right.
+eq('L\'ETO is the documented restaurant brand', cat(cardPurchase('LETO DUBAI ARE')), 'dining');
+eq('Little Bangkok is the documented restaurant brand', cat(purchase('LITTLE BANGKOK, DUBAI')), 'dining');
+eq('Akiba Dori is a documented restaurant', cat(purchase('AKIBA DORI FZ LLC, DUBAI')), 'dining');
+eq('Tum Rub Thai is bounded as the restaurant name', cat(cardPurchase('TUM RUB THAI/TOPS PHUK PHUKET THA')), 'dining');
+eq('Bartels behind its gateway is a documented cafe', cat(cardPurchase('WWW.KSHER.CO*BARTELS C BANGKOK THA')), 'dining');
+eq('Marush Phuket is a documented restaurant', cat(cardPurchase('MARUSH PHUKET THA')), 'dining');
+eq('Loof Garden Phuket is a documented cafe', cat(cardPurchase('LOOF GARDEN PHUKET THA')), 'dining');
+eq('Phukettique Phuket is a documented cafe', cat(cardPurchase('PHUKETTIQUE PHUKET THA')), 'dining');
+eq('Moontree Spa is bounded without matching Vespa', cat(cardPurchase('MOONTREESPA 24192419 THA')), 'personal-care');
+eq('Plenary Wellness is a documented health and wellness centre', cat(cardPurchase('PLENARY WELLNESS PHUKET THA')), 'health');
+eq('the exact Al Mazoon studio is known personal care', cat(purchase('AL MAZOON STUDIO BR 1 SHARJAH ARE')), 'personal-care');
+eq('a Thai souvenir descriptor is retail', cat(cardPurchase('SAWADEEKATHAISOUVENIRS PHUKET THA')), 'shopping');
+eq('Mrs Wrap is documented travel-accessory retail', cat(cardPurchase('MRS.WRAP CO.,LTD. PHUKET THA')), 'shopping');
+eq('the garment-trading truncation remains retail', cat(purchase('LAMSAT QOTUNIA GAR TR, SHARJAH')), 'shopping');
+eq('a different studio stays unknown', cat(purchase('BLUE LIGHT STUDIO, DUBAI')), 'other');
+eq('a Vespa merchant is not a spa', cat(purchase('VESPA MOTOR STORE, DUBAI')), 'shopping');
+eq('Phuket alone is not travel or wellness', cat(cardPurchase('GREEN NATURAL PHUKET THA')), 'other');
+
+{
+  const processor = parseSms(
+    'Purchase of THB 584.00 with Debit Card ending 1354 at WWW.2C2P.COM*2C2P (THA, BANGKOK. Avl Balance is AED 23,965.65.',
+  );
+  ok(
+    'a bare payment processor is intentionally Other, not an unread category',
+    processor?.merchant === '2c2p' && processor?.categoryGuess === 'other' &&
+      processor?.categoryDeliberate === true,
+    JSON.stringify(processor && {
+      merchant: processor.merchant,
+      category: processor.categoryGuess,
+      deliberate: processor.categoryDeliberate,
+    }),
+  );
 }
 
 /* ── The list itself ────────────────────────────────────────────────────── */
@@ -311,6 +366,11 @@ eq(
   eq('and the same airport', cat(cardPurchase('CF-1024 DON MUANG BANGKOK THA')), 'travel');
   // ...without disturbing the pack's own telecom rule, which runs first.
   eq('Saudi telecom vocabulary still wins in its own pack', cat(purchase('MOBILY RECHARGE, RIYADH')), 'telecom');
+  eq('Jarir Bookstore is Saudi retail', cat(purchase('JARIR BOOKSTORE, RIYADH')), 'shopping');
+  eq('Nahdi Pharmacy is Saudi health', cat(purchase('NAHDI PHARMACY, JEDDAH')), 'health');
+  eq('Flynas is travel', cat(purchase('FLYNAS BOOKING, RIYADH')), 'travel');
+  eq('the ordinary word extra is not treated as the electronics chain',
+    cat(purchase('EXTRA REWARDS PROMOTION, RIYADH')), 'other');
   eq('SADAD is a payment rail and cannot invent a utility category',
     cat(purchase('SADAD PAYMENT REFERENCE 1234')), 'other');
   eq('a named Saudi utility still categorizes through SADAD',

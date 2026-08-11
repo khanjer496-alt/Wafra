@@ -1,4 +1,9 @@
-import { bankFromMessage, bankFromSender, getActiveMarket } from '@/lib/markets';
+import {
+  bankFromMessage,
+  bankFromSender,
+  getActiveMarket,
+  keywordsForMarket,
+} from '@/lib/markets';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
@@ -161,8 +166,18 @@ export interface ParsedCard {
  *     only through healPatch's deliberate-category branch, which needs this;
  *   - declined messages are recognised by an exported predicate the hydrate
  *     migration uses.
+ *
+ * 16: merchant/category reconciliation. Named person-to-person transfers and
+ * bare payment processors are now marked as structurally understood instead
+ * of repeatedly asking the user for a spending category; bounded merchant
+ * evidence from the UAE accuracy corpus and the Saudi market pack reaches
+ * already-imported rows through the normal heal path.
+ *
+ * 17: ATM withdrawals use their own expense category. The structural title is
+ * exact, so stored parser-owned ATM rows can be re-filed without using the
+ * machine's mall/street address or changing a category the user chose.
  */
-export const PARSER_VERSION = 15;
+export const PARSER_VERSION = 17;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -2576,6 +2591,7 @@ function categoryOf(
   type: TransactionType,
   overrides?: Record<string, CategoryId>,
   merchant?: string,
+  marketId?: 'AE' | 'SA',
 ): { id: CategoryId; deliberate: boolean; pinned?: boolean } {
   if (overrides && merchant) {
     const hit = overrides[merchant.trim().toLowerCase()];
@@ -2626,8 +2642,20 @@ function categoryOf(
     }
     return { id: 'business', deliberate: true };
   }
+  if (merchant?.trim() === 'ATM withdrawal') {
+    return { id: 'cash-withdrawal', deliberate: true };
+  }
+  // A processor-only descriptor is evidence that the bank understood the
+  // payment rail but did not disclose the underlying shop. There is no honest
+  // spending category to invent. Marking this as a deliberate `other` keeps it
+  // out of the "needs categorising" queue while a processor plus a real payee
+  // (for example "2C2P BOLT") still reaches the payee's category normally.
+  if (merchant && /^(?:2c2p)$/i.test(merchant.trim())) {
+    return { id: 'other', deliberate: true };
+  }
   // Market-local vocabulary wins over the global baseline.
-  for (const [re, cat] of [...getActiveMarket().keywords, ...CATEGORY_KEYWORDS]) {
+  const marketKeywords = marketId ? keywordsForMarket(marketId) : getActiveMarket().keywords;
+  for (const [re, cat] of [...marketKeywords, ...CATEGORY_KEYWORDS]) {
     if (re.test(text)) return { id: cat, deliberate: true };
   }
   // Last, and only against the shop's own name. A structural title is the
@@ -2649,6 +2677,70 @@ export function guessCategory(
   merchant?: string,
 ): CategoryId {
   return categoryOf(text, type, overrides, merchant).id;
+}
+
+export interface MerchantClassification {
+  merchant: string;
+  categoryGuess: CategoryId;
+  categoryDeliberate: boolean;
+}
+
+/**
+ * Classify a statement/import description through the same merchant vocabulary
+ * used by SMS without pretending the description is itself a bank alert.
+ *
+ * Statement rows already carry authoritative direction and amount. This seam
+ * intentionally does not run `parseSms`, which could reinterpret a balance or
+ * reference inside the narration as a second transaction. Unknown income is
+ * also left for review: a transfer from a person is not automatically business
+ * revenue merely because it arrived as a credit.
+ */
+export function classifyMerchantDescription(
+  description: string,
+  type: TransactionType,
+  marketId?: 'AE' | 'SA',
+): MerchantClassification {
+  const normalized = stripInvisible(description)
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const merchant = normalizeServiceName(normalized) ?? normalized;
+
+  if (type === 'income') {
+    if (/\bsalary\b|\bpayroll\b|\bwages?\b|راتب|الراتب|مرتب|رواتب|اجر شهري/i.test(normalized)) {
+      return { merchant, categoryGuess: 'salary', categoryDeliberate: true };
+    }
+    if (/\brefund\b|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|\bcashback\b|\binterest\b|\bprofit\b/i.test(normalized)) {
+      return { merchant, categoryGuess: 'other', categoryDeliberate: true };
+    }
+    if (/\bmerchant\s+(?:payout|settlement)\b|\bsales?\s+proceeds\b|\bbusiness\s+income\b|\binvoice\s+(?:paid|payment)\b/i.test(normalized)) {
+      return { merchant, categoryGuess: 'business', categoryDeliberate: true };
+    }
+    return { merchant, categoryGuess: 'other', categoryDeliberate: false };
+  }
+
+  // Statement narrations do not pass through the SMS title builder. Recognise
+  // only a withdrawal phrase at the start of the bank's description, and
+  // keep explicit fee/commission rows out so they can follow the fee rules.
+  // The word boundary prevents ordinary names such as ATMOSPHERE from
+  // becoming cash withdrawals.
+  if (
+    /^(?:atm\s+(?:cash\s+)?(?:withdrawal|wdl)\b|cash\s+(?:withdrawal|wdl)\b|سحب\s+نقدي\b)/iu.test(normalized) &&
+    !/\b(?:fee|charge|commission)\b|رسوم|عمولة/iu.test(normalized)
+  ) {
+    return {
+      merchant: 'ATM withdrawal',
+      categoryGuess: 'cash-withdrawal',
+      categoryDeliberate: true,
+    };
+  }
+
+  const category = categoryOf(normalized, type, undefined, merchant, marketId);
+  return {
+    merchant,
+    categoryGuess: category.id,
+    categoryDeliberate: category.deliberate,
+  };
 }
 
 /**
@@ -2824,6 +2916,27 @@ export const STRUCTURAL_TITLES = new Set([
   'Outward remittance',
   'Mobile recharge',
 ]);
+
+/**
+ * A stored neutral-category title that is an intentional parser conclusion,
+ * not a merchant waiting for the user to classify it.
+ *
+ * `categoryDeliberate` exists only while an alert is being planned; the
+ * compact ledger row intentionally does not persist parser confidence. These
+ * bounded dynamic shapes preserve that distinction after hydration without
+ * making every `other` merchant look understood. A named person-to-person
+ * transfer is still real spending, so it must not be marked `isTransfer` and
+ * excluded from totals merely to keep it out of the merchant-category chore.
+ */
+export function isDeliberateOtherTitle(title: string): boolean {
+  const normalized = title.trim();
+  return (
+    STRUCTURAL_TITLES.has(normalized) ||
+    /^Transfer to [\p{L}\p{M}][\p{L}\p{M} .'-]{0,80}$/u.test(normalized) ||
+    /^Payment to [•Xx*·]{1,8}\d{2,4}$/u.test(normalized) ||
+    /^2c2p$/i.test(normalized)
+  );
+}
 
 /**
  * The BUSINESS ACTIVITY a UAE trade name states about itself.
@@ -3312,7 +3425,11 @@ function saysDebit(raw: string): boolean {
   // The kind-after-number form is the mirror of the credit rule above, and it
   // is how Arabic states it: "بطاقة: **4567;مدى" normalises to "**4567; debit".
   // مدى is Saudi Arabia's debit network, so that IS the message saying debit.
-  return /\bdebit\s+card\b/i.test(raw) || /\d{4}\s*[;,]\s*debit\b/i.test(raw);
+  return (
+    /\bdebit\s+card\b/i.test(raw) ||
+    /\bmada\s+card\b/i.test(raw) ||
+    /\d{4}\s*[;,]\s*(?:debit|mada)\b/i.test(raw)
+  );
 }
 
 /**
@@ -4623,11 +4740,15 @@ function parseSmsInner(
   }
 
   if (!isBillDue && type === 'expense') {
+    const completedNamed = raw.match(
+      /\byou(?:'ve|\s+have)\s+successfully\s+transferred\s+[A-Z]{3}\s+[\d,]+(?:\.\d{1,3})?\s+to\s+([A-Za-z][A-Za-z .'-]{0,40}?)\s*(?:[.;]|$)/i,
+    );
     const named = raw.match(
       /\b(?:fastpay|instant|local|domestic|international|fund|mobile\s+banking)\s+transfer\s+to\s+([A-Za-z][A-Za-z .'\-]{2,40}?)\s*(?:[.,;]|\bif\b|$)/i,
     );
-    if (named) {
-      merchant = `Transfer to ${named[1].trim().replace(/\s{2,}/g, ' ')}`;
+    const namedPayee = completedNamed?.[1] ?? named?.[1];
+    if (namedPayee) {
+      merchant = `Transfer to ${namedPayee.trim().replace(/\s{2,}/g, ' ')}`;
       structuralMerchant = true;
     } else if (/\btransfer\s+to\s+[A-Z]{2}[\dX·•]/i.test(raw)) {
       merchant = 'Bank transfer';
@@ -4810,7 +4931,8 @@ function parseSmsInner(
     // category applies to it. Money moving between places has no category, and
     // reporting one of these as an unread format is what buried the real
     // misses in the accuracy report.
-    categoryDeliberate: cat.deliberate || transferHint || STRUCTURAL_TITLES.has(merchant),
+    categoryDeliberate:
+      cat.deliberate || structuralMerchant || transferHint || STRUCTURAL_TITLES.has(merchant),
     currency,
     reference,
     raw: source,

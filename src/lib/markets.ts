@@ -173,6 +173,19 @@ const CROSS_BORDER_KEYWORDS: [RegExp, CategoryId][] = [
   // "WASSAGY EBOOKS ...". The global vocabulary reads `bookshop` and
   // `book store`; this is the same claim about the same goods.
   [/\be-?books?\b/i, 'shopping'],
+  // Bounded merchants from a UAE-issued-card accuracy corpus. Each name has a
+  // public trade identity; none relies on PHUKET/DUBAI or another location to
+  // decide what was bought. This prevents the old location-driven "Travel"
+  // mistake without teaching broad words such as `studio`, `home` or `spa` to
+  // classify unrelated businesses.
+  [/\bl'?eto\s+(?:dubai|riyadh|jeddah|caffe|cafe|restaurant)\b/i, 'dining'],
+  [/\blittle\s+bangkok\b|\bakiba\s+dori\b|\btum\s+rub\s+thai\b/i, 'dining'],
+  [/\bbartels\s+c\s+bangkok\b|\bmarush\s+phuket\b|\bloof\s+garden\s+phuket\b|\bphukettique\s+phuket\b/i, 'dining'],
+  [/\bmoontree\s*spa\b|\bal\s+mazoon\s+studio\b/i, 'personal-care'],
+  [/\bplenary\s+(?:longevity\s+)?wellness\b/i, 'health'],
+  [/\bsawadee\s*ka\s*thai\s*souvenirs?\b|\bsawadeekathaisouvenirs\b/i, 'shopping'],
+  [/\bmrs\.?\s*wrap\s+co\b/i, 'shopping'],
+  [/\blamsat\s+qotunia\s+gar\s+tr\b/i, 'shopping'],
 ];
 
 const AE: MarketPack = {
@@ -236,12 +249,20 @@ const SA: MarketPack = {
     [/hungerstation|jahez|mrsool|toyou|the\s*chefz/i, 'dining'],
     [/panda|tamimi|danube|othaim|bindawood|lulu/i, 'groceries'],
     [/petromin|sasco|aldrees|naft/i, 'transport'],
+    [/jarir\s+(?:book\s*store|marketing)|مكتبه\s+جرير/i, 'shopping'],
+    [/nahdi\s+(?:pharmacy|medical)|صيدليه\s+النهدي/i, 'health'],
+    [/flynas|flyadeal|saudia\s+(?:air|airlines?|booking)/i, 'travel'],
     ...ARABIC_KEYWORDS,
     ...CROSS_BORDER_KEYWORDS,
   ],
 };
 
 export const MARKETS: MarketPack[] = [AE, SA];
+
+/** Read-only vocabulary lookup for already-validated statement/import rows. */
+export function keywordsForMarket(id: 'AE' | 'SA'): MarketPack['keywords'] {
+  return MARKETS.find((market) => market.id === id)?.keywords ?? [];
+}
 
 let active: MarketPack = AE;
 

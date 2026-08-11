@@ -22,6 +22,7 @@ export const CATEGORIES: CategoryMeta[] = [
   { id: 'groceries', label: 'Groceries', labelAr: 'البقالة', icon: 'cart', type: 'expense' },
   { id: 'dining', label: 'Dining', labelAr: 'المطاعم', icon: 'dining', type: 'expense' },
   { id: 'transport', label: 'Transport', labelAr: 'المواصلات', icon: 'car', type: 'expense' },
+  { id: 'cash-withdrawal', label: 'Cash withdrawal', labelAr: 'سحب نقدي', icon: 'cash', type: 'expense' },
   { id: 'utilities', label: 'Utilities', labelAr: 'المرافق', icon: 'bolt', type: 'expense' },
   { id: 'telecom', label: 'Telecom', labelAr: 'الاتصالات', icon: 'phone', type: 'expense' },
   { id: 'rent', label: 'Rent', labelAr: 'الإيجار', icon: 'home', type: 'expense' },

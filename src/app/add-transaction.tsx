@@ -63,7 +63,11 @@ export default function AddTransactionScreen() {
   const reviewType: TransactionType = reviewItem?.direction === 'credit' ? 'income' : 'expense';
   const reviewCategory: CategoryId = reviewType === 'income'
     ? 'business'
-    : reviewItem?.family === 'utility' ? 'utilities' : 'other';
+    : reviewItem?.family === 'utility'
+      ? 'utilities'
+      : reviewItem?.family === 'cash-withdrawal'
+        ? 'cash-withdrawal'
+        : 'other';
   const reviewTitle = reviewItem ? defaultReviewTitle(reviewItem) : '';
   const matchedAccount = reviewItem?.instrument?.last4
     ? state.accounts.find((account) => account.last4 === reviewItem.instrument?.last4)

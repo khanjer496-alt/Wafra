@@ -137,8 +137,11 @@ export function mergeImportedCardDues(
     // earlier — `existing` is walked before `incoming`, so `due` is the fresher
     // reading. Math.max here meant a bank revising a minimum DOWN never landed,
     // and `belowMinimum` went on accusing the user of underpaying against a
-    // figure the bank itself had superseded. Two guesses still take the larger:
-    // neither is evidence, and the larger one is the safer thing to show.
+    // figure the bank itself had superseded. Two positive guesses still take
+    // the larger: neither is evidence, and the larger one is the safer thing
+    // to show. A newer zero estimate is different: zero is the explicit
+    // "minimum not stated" sentinel used where no market-specific estimate is
+    // valid, so it removes an older invented fallback instead of merging it.
     const minimum =
       priorKnown && !nextKnown
         ? prior.minDueFils
@@ -146,7 +149,9 @@ export function mergeImportedCardDues(
           ? due.minDueFils
           : priorKnown && nextKnown
             ? due.minDueFils
-            : Math.max(prior.minDueFils, due.minDueFils);
+            : due.minDueFils === 0
+              ? 0
+              : Math.max(prior.minDueFils, due.minDueFils);
     const settledAt = [prior.settledAt, due.settledAt]
       .filter((value): value is string => Boolean(value))
       .sort()

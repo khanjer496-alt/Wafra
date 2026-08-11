@@ -24,7 +24,10 @@
  * module is not.
  */
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import { overrideFitsDirection, STRUCTURAL_TITLES } from '@/lib/sms-parser';
+import {
+  isDeliberateOtherTitle,
+  overrideFitsDirection,
+} from '@/lib/sms-parser';
 import type { AppState, Transaction } from '@/lib/types';
 
 /**
@@ -263,7 +266,7 @@ function isCandidate(
   const title = t.title.trim();
   if (title.length < 3) return false;
   if (title === GENERIC_MERCHANT) return false;
-  if (STRUCTURAL_TITLES.has(title)) return false;
+  if (isDeliberateOtherTitle(title)) return false;
   // "The user already answered for this merchant" — but only if the answer can
   // reach this row. Every row that gets here is an expense (checked above), and
   // `overrideFitsDirection` is what says an income category may not decide one.

@@ -32,7 +32,7 @@ ok('unknown and historical codes are not guessed',
   const source = 'خصم AED ١٢٣٫٤٥ والرصيد ۹٬۸۷۶٫۵۴';
   const normalized = normalizeAlertText(source);
   ok('Arabic-Indic and Persian digits normalize in one pass',
-    normalized === 'خصم AED 123.45 والرصيد 9,876.54', normalized);
+    normalized === 'خصم AED 123٫45 والرصيد 9,876٫54', normalized);
   ok('normalization preserves UTF-16 offsets', normalized.length === source.length);
 }
 
@@ -69,6 +69,14 @@ function one(source) {
   ok('both KWD decimal and grouping interpretations survive for review',
     candidate.interpretations.some((x) => x.minorUnits === '1250') &&
     candidate.interpretations.some((x) => x.minorUnits === '1250000'));
+}
+
+{
+  const { candidate } = one('خصم KWD ١٫٢٥٠ لشراء بالبطاقة');
+  ok('the Arabic decimal separator grounds an exact three-decimal value',
+    candidate.currency === 'KWD' && candidate.exponent === 3 &&
+      candidate.minorUnits === '1250' && candidate.interpretations.length === 1,
+    JSON.stringify(candidate));
 }
 
 {

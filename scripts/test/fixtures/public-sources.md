@@ -62,6 +62,29 @@ means stable repository test data, not a claim of access to customer inboxes.
 
 ## Usable
 
+### Representative global corpus
+
+`global-alert-formats.js` covers twelve representative alert outcomes for every
+first-wave market: all ten required single-alert families plus a declined
+purchase and a future recurring debit. Additional hard negatives cover
+localized payment negation and statement-period aggregates. The sentences are not
+presented as verbatim bank messages. They use fictional values and localized
+banking vocabulary, and remain excluded from consented-real rollout metrics.
+
+Two rows have stronger, official event-family grounding:
+
+- [HDFC Bank transaction-alert documentation](https://www.hdfcbank.com/content/bbp/repositories/723fb80a-2dde-42a3-9793-7ae1be57c87f/?path=%2FPersonal%2FPay%2FCards%2FCredit+Card%2FCredit+Card+Landing+Page%2FTransactionAlerts.pdf)
+  documents alerts for approved ATM, POS and online card transactions.
+- [SBI's e-mandate FAQ](https://sbi.co.in/web/personal-banking/faq-on-e-mandate-on-debit-cards)
+  publishes the structure of a pre-debit mandate notice, including merchant,
+  amount, due date and masked card identity.
+
+The remaining rows are explicitly synthetic near-real templates. Official
+sources confirm that banks offer transaction, balance, decline or card-payment
+alerts—for example [Chase account alerts](https://www.chase.com/content/chase-ux/en/personal/first-banking/faq.transcript.html/6373182626112)
+and [Commerzbank card notifications](https://www.commerzbank.de/privatkunden/wissen/ratgeber/grundwissen/banking/unterschied-kreditkarte-debitkarte/)—but do not publish stable message bodies.
+Those sources justify the event families, not the invented wording.
+
 ### MabudAlam/transaction_sms_parser — **MIT**
 
 Dart package, 30+ Indian banks. India-only, so its bank list and UPI handles

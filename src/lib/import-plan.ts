@@ -602,10 +602,17 @@ export function buildImportPlan(
         existingDue !== undefined &&
         p.minDueFils !== null &&
         (existingDue.minDueEstimated === true || existingDue.minDueFils !== p.minDueFils);
+      const removesWrongMarketEstimate =
+        existingDue !== undefined &&
+        p.currency === 'SAR' &&
+        p.minDueFils === null &&
+        existingDue.minDueEstimated === true &&
+        existingDue.minDueFils !== 0;
       // A parser-version rescan of an identical obligation is idempotent. A
-      // newly authoritative minimum is the one reason to re-offer it to the
-      // reducer's monotonic due merge.
-      if (existingDue && !improvesMinimum) continue;
+      // newly authoritative minimum, or removing the old UAE-only 5% fallback
+      // from a Saudi due, is the reason to re-offer it to the reducer's
+      // monotonic due merge.
+      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate) continue;
       // The parser reaches this branch only with statement structure and
       // forces card.kind=credit. That is authoritative evidence which upgrades
       // a debit fallback; rejecting it is what stranded real statements.
@@ -613,9 +620,11 @@ export function buildImportPlan(
         accountId,
         totalDueFils: p.amountFils,
         // 5% is a common UAE card minimum, but it is not this card's minimum
-        // unless the bank said so. Kept as a placeholder for the progress
-        // bar's sake, flagged so nothing quotes it back as a figure.
-        minDueFils: p.minDueFils ?? estimatedMinimumFils(p.amountFils),
+        // unless the bank said so. A Saudi statement gets no UAE-derived
+        // placeholder at all. Both remain flagged so nothing quotes an
+        // unstated value back as the bank's figure.
+        minDueFils:
+          p.minDueFils ?? (p.currency === 'AED' ? estimatedMinimumFils(p.amountFils) : 0),
         minDueEstimated: p.minDueFils === null ? true : undefined,
         dueDate: p.date,
         paidFils: 0,

@@ -113,7 +113,7 @@ t('refund is income',
 
 t('atm withdrawal',
   'AED 1,000.00 withdrawn from your account at ENBD ATM DEIRA on 12/07/2026. Available balance AED 3,210.38',
-  { amountFils: 100000, type: 'expense' });
+  { amountFils: 100000, type: 'expense', category: 'cash-withdrawal', deliberate: true });
 
 t('acronym kept in titlecase', 'Purchase of AED 30.00 at KFC with card ending 22',
   { merchant: 'KFC', category: 'dining' });
@@ -234,8 +234,10 @@ if (sfxBal && sfxBal.amountFils === 25000) { pass++; console.log('✓ suffix amo
 else { fail++; console.log('✗ suffix amount skips suffix balance', JSON.stringify(sfxBal && sfxBal.amountFils)); }
 
 const atm = parseSms('AED 500.00 cash withdrawal from ATM at ENBD BRANCH DEIRA. Avl Bal AED 6,123.00');
-if (atm && atm.merchant === 'ATM withdrawal' && atm.type === 'expense') { pass++; console.log('✓ ATM withdrawal titled correctly'); }
-else { fail++; console.log('✗ ATM withdrawal titled correctly', JSON.stringify(atm && atm.merchant)); }
+if (atm && atm.merchant === 'ATM withdrawal' && atm.type === 'expense' &&
+  atm.categoryGuess === 'cash-withdrawal' && atm.categoryDeliberate === true) {
+  pass++; console.log('✓ ATM withdrawal has its own category');
+} else { fail++; console.log('✗ ATM withdrawal has its own category', JSON.stringify(atm)); }
 
 const fee = parseSms('Your card ending 1234 has been charged AED 262.50 as annual fee.');
 if (fee && fee.merchant === 'Annual card fee') { pass++; console.log('✓ annual card fee keeps its fixed-cost identity'); }
@@ -1495,7 +1497,7 @@ t('cash paid IN at a deposit machine is income',
 // once the direction is right, so the polarity bug corrupted the title too.
 t('a credit-card cash advance is spending, titled as a withdrawal',
   'Cash advance of AED 1,000.00 on your Credit Card 1234 at ATM.',
-  { type: 'expense', amountFils: 100000, merchant: 'ATM withdrawal', category: 'other',
+  { type: 'expense', amountFils: 100000, merchant: 'ATM withdrawal', category: 'cash-withdrawal',
     card: { last4: '1234', kind: 'credit' } });
 
 // ══ Declines: a refusal and a purchase live in the same sentence ══
@@ -2444,7 +2446,7 @@ t('an Arabic salary credit is income, with no invented payee',
 t('an Arabic ATM withdrawal',
   'سحب نقدي بمبلغ 500.00 درهم من جهاز الصراف الآلي بتاريخ 12/07/2026. الرصيد المتاح 3,210.38 درهم',
   { kind: 'transaction', type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal',
-    category: 'other', date: '2026-07-12', snapshotFils: 321038, snapshotKind: 'balance' });
+    category: 'cash-withdrawal', date: '2026-07-12', snapshotFils: 321038, snapshotKind: 'balance' });
 
 // ── The suppression gates, in Arabic ──
 // These are dangerous in the OPPOSITE direction to everything above: each one
@@ -2848,7 +2850,7 @@ fmt('RECON', 'family A — credit-card sibling quotes "Avl Cr. Limit"',
 // to be filed as shopping because the address contains "CENTRE".
 fmt('RECON', 'family A — cash withdrawal, category pinned with the title',
   'Cash Withdrawal of AED 500.00 with Debit Card ending 4502 at EMIRATES NBD ATM DEIRA CITY CENTRE. Avl Balance is AED 1,258.91.',
-  { type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal', category: 'other',
+  { type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal', category: 'cash-withdrawal',
     snapshotFils: 125891, snapshotKind: 'balance' });
 
 // REAL corpus #21 (seen 4x). Family E: an account-side debit whose purpose is
@@ -3035,7 +3037,7 @@ fmt('RECON', 'debit card purchase — "Available Balance" means cash, not headro
 // not take three different categories depending on which machine was used.
 fmt('RECON', 'ATM withdrawal at a mall is cash out, not shopping',
   'AED 500.00 has been withdrawn from your ADIB Account XXX1234 at ADIB ATM AL WAHDA MALL on 12/07/2026. Available Balance AED 2,900.00',
-  { type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal', category: 'other',
+  { type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal', category: 'cash-withdrawal',
     date: '2026-07-12', card: { last4: '1234', kind: 'account' }, snapshotFils: 290000 });
 
 fmt('RECON', 'salary credited to the account',
@@ -3130,7 +3132,7 @@ fmt('RECON', 'account purchase debit',
 
 fmt('RECON', 'ATM withdrawal on a debit card',
   'AED 500.00 has been withdrawn using your RAKBANK Debit Card ending 7712 at RAKBANK ATM AL QUOZ on 12/07/2026. Available Balance: AED 2,900.00',
-  { type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal', category: 'other',
+  { type: 'expense', amountFils: 50000, merchant: 'ATM withdrawal', category: 'cash-withdrawal',
     date: '2026-07-12', card: { last4: '7712', kind: 'debit' } });
 
 fmt('RECON', 'salary credit',
@@ -3557,6 +3559,22 @@ t('a naturally-spelled Arabic cafe still classifies as dining',
 t('a naturally-spelled Arabic pharmacy still classifies as health',
   'شراء بمبلغ 30.00 درهم لدى صيدلية النهدي من بطاقتك المنتهية 4833',
   { type: 'expense', amountFils: 3000, category: 'health' });
+
+// Saudi's Mada network is explicit debit-card evidence in either script. The
+// English form used to leave the kind unknown even though the Arabic form was
+// already handled.
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('an English Mada card is a debit card',
+    'POS purchase of SAR 125.50 at JARIR BOOKSTORE using Mada Card ending 1234. Available balance SAR 2,500.00.',
+    { type: 'expense', amountFils: 12550, currency: 'SAR', category: 'shopping',
+      card: { last4: '1234', kind: 'debit' } });
+  t('a Saudi pharmacy descriptor uses the Saudi market pack',
+    'Purchase of SAR 45.00 with Mada Card ending 1234 at NAHDI PHARMACY, RIYADH. Available balance SAR 900.00.',
+    { category: 'health', card: { last4: '1234', kind: 'debit' } });
+  setActiveMarket('AE');
+}
 
 t('a co-op (جمعية) is groceries',
   'شراء بمبلغ 90.00 درهم لدى جمعية الاتحاد من بطاقتك المنتهية 4833',
@@ -4043,21 +4061,22 @@ t('the bank\'s own subscription fee is a deliberate other',
 //
 // A city is not a cuisine: PHUKET is the city field on a ferry, a supermarket,
 // a mall and a sportswear shop in this same corpus, and BANGKOK is the city on
-// a Bolt ride. So the Thai restaurants stay uncategorised, and so does "Little
-// Bangkok". These assertions exist so that a future rule keyed on a place name
-// fails here rather than in someone's ledger.
+// a Bolt ride. The exact Little Bangkok brand has evidence elsewhere; a name
+// that merely includes Phuket still has none.
 t('a Thai restaurant name carries no category evidence', g('PHUKET DELIGHT', 'PHUKET'),
   { category: 'other', deliberate: false });
-t('a city in the descriptor does not make a category', g('LITTLE BANGKOK', 'DUBAI'),
-  { category: 'other', deliberate: false });
+t('the exact Little Bangkok brand is dining', g('LITTLE BANGKOK', 'DUBAI'),
+  { category: 'dining', deliberate: true });
 t('a ferry operator named only MARINE stays uncategorised', g('NIKORN MARINE', 'PHUKET'),
   { category: 'other', deliberate: false });
-// `studio` is a salon in this inbox and a gym, a photographer and a yoga hall
-// in the next one. `the box` is a restaurant here and a storage company in
-// Dubai. Both stay in Other on purpose.
-t('a studio is not necessarily a salon',
+// `studio` alone remains ambiguous. This exact merchant was established as a
+// personal-care business by the supplied accuracy corpus; the bounded rule
+// must not generalise to another studio.
+t('the exact Al Mazoon studio is personal care',
   'Credit Card Purchase \nCard No XXXX5678 \nAED 25.00 \nAL MAZOON STUDIO BR 1 SHARJAH ARE \n13/05/25 20:28 \nAvailable Balance AED 524.10',
-  { merchant: 'Al Mazoon Studio', category: 'other', deliberate: false });
+  { merchant: 'Al Mazoon Studio', category: 'personal-care', deliberate: true });
+t('an unrelated studio remains uncategorised', g('BLUE LIGHT STUDIO', 'DUBAI'),
+  { category: 'other', deliberate: false });
 t('THE BOX is a restaurant here and a storage company elsewhere',
   'Purchase of AED 98.00 with Credit Card ending 5678 at THE BOX, SHARJAH. Avl Cr. Limit is AED 18,354.23',
   { merchant: 'The Box', category: 'other', deliberate: false });
