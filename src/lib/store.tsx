@@ -1173,6 +1173,15 @@ const SAVE_DEBOUNCE_MS = 700;
 const TX_CHUNK_ORDER = 'oldest-first';
 
 /**
+ * Browser E2E exports need a deterministic ledger without restoring the old
+ * first-run sample button. Expo inlines EXPO_PUBLIC_* values at bundle time,
+ * and scripts/e2e/run.sh is the only caller that sets this flag. Native and
+ * production web bundles therefore keep the real empty first-run path.
+ */
+const E2E_DEMO_LEDGER =
+  Platform.OS === 'web' && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1';
+
+/**
  * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
  *
  * Exported for the perf suite, which asserts the property the whole scheme
@@ -1271,7 +1280,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     try {
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
-      let next: Partial<Omit<AppState, 'hydrated'>> = { onboarded: false };
+      let next: Partial<Omit<AppState, 'hydrated'>> = E2E_DEMO_LEDGER
+        ? demoState()
+        : { onboarded: false };
       if (loaded) {
         const parsed = loaded;
         // Pre-onboarding builds stored data without the flag; count them as onboarded.

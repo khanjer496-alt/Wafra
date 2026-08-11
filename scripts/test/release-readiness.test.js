@@ -71,6 +71,18 @@ const validFixture = () => {
     const root = validFixture();
     const report = await assessReleaseReadiness({
       root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+      publicEnv: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' },
+    });
+    ok('production rejects the browser-only demo ledger',
+      report.findings.some(({ code }) => code === 'e2e-demo-ledger'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const report = await assessReleaseReadiness({
+      root,
       intent: { kind: 'build', platform: 'ios', profile: 'preview', submit: true },
     });
     ok('submission requires the matching submit profile',

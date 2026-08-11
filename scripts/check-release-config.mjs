@@ -19,6 +19,7 @@ const publicEnv = Object.fromEntries([
   'EXPO_PUBLIC_WAFRA_RELAY_URL',
   'EXPO_PUBLIC_WAFRA_SHORTCUT_URL',
   'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL',
+  'EXPO_PUBLIC_WAFRA_E2E_DEMO',
 ].flatMap((key) => process.env[key] ? [[key, process.env[key]]] : []));
 
 const intent = kind === 'build'

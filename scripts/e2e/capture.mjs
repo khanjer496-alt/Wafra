@@ -153,49 +153,11 @@ async function waitForStable(page, { tries = 40, needed = 3, gap = 150 } = {}) {
   return false;
 }
 
-/** Click by visible label, hit-testing so we never hit a mounted-but-hidden screen. */
-async function tapText(page, label) {
-  const matches = page.getByText(label, { exact: false });
-  const n = await matches.count();
-  for (let i = 0; i < n; i++) {
-    const el = matches.nth(i);
-    if (!(await el.isVisible().catch(() => false))) continue;
-    const box = await el.boundingBox().catch(() => null);
-    if (!box) continue;
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    const onTop = await page.evaluate(
-      ([px, py, text]) => {
-        const hit = document.elementFromPoint(px, py);
-        return !!hit && (hit.textContent ?? '').toLowerCase().includes(text.toLowerCase());
-      },
-      [x, y, label],
-    );
-    if (!onTop) continue;
-    await page.mouse.click(x, y);
-    return true;
-  }
-  return false;
-}
-
-/** Clear the first-run gate with the demo ledger loaded, so screens have data. */
-async function bootWithSampleData(page) {
+/** Wait for the E2E-only demo ledger embedded by the screenshot export. */
+async function bootWithDemoLedger(page) {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-  await settle(page, 1400);
-  // 'Read my inbox' is Android-only; on web the primary is 'Continue', which
-  // leads to the choose step. Either path ends at 'Start with sample data'.
-  for (let i = 0; i < 3; i++) {
-    if (await tapText(page, 'Start with sample data')) {
-      await settle(page, 1400);
-      return true;
-    }
-    if (await tapText(page, 'Continue')) {
-      await settle(page, 900);
-      continue;
-    }
-    break;
-  }
-  return false;
+  await settle(page, 2200);
+  return !!(await page.getByText(/Saved so far this month/i).first().isVisible().catch(() => false));
 }
 
 /**
@@ -270,7 +232,7 @@ async function captureRun(browser, { scheme, lang, device = 'review', store = fa
     if (m.type() === 'error') errors.push(m.text());
   });
 
-  const booted = await bootWithSampleData(page);
+  const booted = await bootWithDemoLedger(page);
   if (!booted) console.log(`! ${suffix}: onboarding gate not cleared`);
   if (lang !== 'en') await setLanguage(page, lang);
 

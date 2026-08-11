@@ -546,11 +546,18 @@ ok('hydration clears the latch only AFTER a successful read',
 
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
-    /let next: [^=]*= \{ onboarded: false \}/.test(hydrateBody) &&
+    /let next: [^=]*= E2E_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
     (hydrateBody.match(/setHydrationFailed\(false\)/g) ?? []).length === 1,
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +
     'branch that leaves a genuinely new install latched off forever');
+
+ok('the browser demo ledger is isolated to an explicit E2E export',
+  /Platform\.OS === 'web'\s*&&\s*process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1'/.test(store) &&
+    /EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx expo export/.test(
+      fs.readFileSync(path.join(__dirname, '../e2e/run.sh'), 'utf8'),
+    ),
+  'production onboarding must never inherit the deterministic AED ledger used by browser tests');
 
 const retryBody = bodyOf(store, 'const retryHydration = useCallback');
 ok('the store exposes a retry that reruns hydration',

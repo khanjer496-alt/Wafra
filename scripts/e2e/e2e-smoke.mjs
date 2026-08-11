@@ -269,10 +269,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1500);
-ok('onboarding leads with the current headline', !!(await visibleText(page, /See your money clearly\.|Your messages can show where your money goes\./i)));
-const sample = await visibleText(page, 'Start with sample data', 6000);
-if (sample) { await sample.click(); await page.waitForTimeout(2200); }
+await page.waitForTimeout(2200);
 
 // ── Home ──────────────────────────────────────────────────────────────
 ok('home hero states the saved result', !!(await visibleText(page, /Saved so far this month/i)));

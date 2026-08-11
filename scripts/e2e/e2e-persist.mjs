@@ -26,10 +26,6 @@ const ok = (name, cond, detail = '') => {
 };
 
 await page.goto(BASE + '/', { waitUntil: 'networkidle' });
-await page.waitForTimeout(1500);
-
-const sample = page.getByText('Start with sample data', { exact: false }).last();
-await sample.click();
 await page.waitForTimeout(2500);
 
 const heroBefore = await page.getByText(/AED/).first().textContent();

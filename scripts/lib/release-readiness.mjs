@@ -97,6 +97,16 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
   const relayUrl = publicValue('EXPO_PUBLIC_WAFRA_RELAY_URL', env, publicEnv);
   const captureUrl = publicValue('EXPO_PUBLIC_WAFRA_SHORTCUT_URL', env, publicEnv);
   const historyUrl = publicValue('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', env, publicEnv);
+  const e2eDemo = publicValue('EXPO_PUBLIC_WAFRA_E2E_DEMO', env, publicEnv);
+
+  if (e2eDemo === '1') {
+    findings.push(finding(
+      'e2e-demo-ledger',
+      'The browser E2E demo ledger is enabled in production',
+      'A production build must start from the customer\'s real empty or persisted ledger.',
+      'Remove EXPO_PUBLIC_WAFRA_E2E_DEMO from the production profile and environment.',
+    ));
+  }
 
   requireHttps(relayUrl, 'relay-url', 'EXPO_PUBLIC_WAFRA_RELAY_URL', findings);
   if (platform === 'ios' || platform === 'all') {

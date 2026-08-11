@@ -220,8 +220,6 @@ const reload = async () => {
 };
 
 await reload();
-const start = await page.getByText('Start with sample data').first();
-if (await start.count()) { await start.click().catch(() => {}); await page.waitForTimeout(2400); }
 
 /* ── 1. Press everything ──────────────────────────────────────────────── */
 

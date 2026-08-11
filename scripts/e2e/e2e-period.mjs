@@ -113,9 +113,7 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1500);
-const sample = await visibleText(page, 'Start with sample data', 6000);
-if (sample) { await sample.click(); await page.waitForTimeout(2200); }
+await page.waitForTimeout(2200);
 
 const shortMonth = (offset = 0) => {
   const d = new Date();

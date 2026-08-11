@@ -12,7 +12,7 @@ PORT="${E2E_PORT:-8126}"
 OUT="${E2E_DIST:-dist}"
 
 echo "→ exporting web build to $OUT"
-npx expo export --platform web --output-dir "$OUT" >/dev/null
+EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx expo export --platform web --output-dir "$OUT" >/dev/null
 
 echo "→ serving $OUT on :$PORT"
 # serve.mjs, not `npx serve`: serve is in nobody's dependencies, so this line
@@ -32,4 +32,5 @@ curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; e
 
 node scripts/e2e/e2e-smoke.mjs
 node scripts/e2e/e2e-period.mjs
+node scripts/e2e/e2e-persist.mjs
 node scripts/e2e/e2e-navigation.mjs
