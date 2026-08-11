@@ -246,7 +246,7 @@ jobs:
 
       # Only needed to upload to Play, which is not what most builds are for.
       - name: Build Play Store bundle (AAB)
-        if: inputs.bundle || github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true'
         working-directory: android
         run: ./gradlew bundleRelease --no-daemon
 
@@ -265,7 +265,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Play bundle artifact
-        if: inputs.bundle || github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wafra-aab

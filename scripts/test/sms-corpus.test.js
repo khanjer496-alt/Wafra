@@ -132,6 +132,8 @@ const rejects = async (name, run, code) => {
       /github\.event\.inputs\.corpus == 'true' && 'wafra-sms-corpus-apk' \|\| 'wafra-apk'/.test(githubBuild));
   ok('the manual corpus artifact targets the phone CPU architecture',
     /CORPUS_BUILD[\s\S]{0,500}reactNativeArchitectures=arm64-v8a/.test(githubBuild));
+  ok('a manual corpus build never spends time producing a Play bundle',
+    (githubBuild.match(/github\.event\.inputs\.corpus != 'true'/g) ?? []).length === 2);
 
   console.log(`\nsms-corpus: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
