@@ -60,7 +60,12 @@ import {
   requestNotificationPermission,
   syncDailySummary,
 } from '@/lib/notifications';
-import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import {
+  hasSmsPermission,
+  isSmsScanningAvailable,
+  requestSmsDeliveryPermission,
+  requestSmsPermission,
+} from '@/lib/auto-import';
 import { tapped } from '@/lib/haptics';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
@@ -120,7 +125,12 @@ export default function SettingsScreen() {
       : 'system';
 
   const market = MARKETS.find((m) => m.id === state.marketId) ?? MARKETS[0];
+  const hasGlobalLedger = state.ledgerMoney != null &&
+    state.ledgerMoney.currency !== 'AED' && state.ledgerMoney.currency !== 'SAR';
   const language: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
+  const reviewAlertCount = state.reviewTray.pending.filter(
+    (item) => item.expiresAt > Date.now(),
+  ).length;
   // `undefined` is "not read yet" and `null` is "read, and there is no pairing".
   // Collapsing the two would print "not connected" for a frame to a user whose
   // capture is in fact running, on the screen where they came to check.
@@ -265,6 +275,11 @@ export default function SettingsScreen() {
 
   const toggleInstantAlerts = async (enabled: boolean) => {
     if (enabled) {
+      const receivesSms = await requestSmsDeliveryPermission();
+      if (!receivesSms) {
+        Alert.alert(t('instantAlertsSmsPermissionTitle'), t('instantAlertsSmsPermissionBody'));
+        return;
+      }
       // Android 13 needs the notification permission before anything can be
       // posted. Asking here rather than at delivery time means the failure is
       // visible now, instead of as banners that silently never arrive.
@@ -369,7 +384,8 @@ export default function SettingsScreen() {
     }
   };
 
-  const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
+  const notifAvailable = Platform.OS === 'android' &&
+    NotificationReader?.isAvailable?.() === true;
   const notifEnabled = notifAvailable && NotificationReader != null && NotificationReader.isEnabled();
   const onNotificationAccess = () => {
     if (!notifAvailable || !NotificationReader) {
@@ -615,7 +631,20 @@ export default function SettingsScreen() {
     }
 
     try {
-      await clearAll(isRelayPlatform() ? clearBackgroundRelayRows : undefined);
+      const notificationReader = NotificationReader;
+      const cleanupCaptureQueue = isRelayPlatform()
+        ? clearBackgroundRelayRows
+        : Platform.OS === 'android'
+          ? async () => {
+              if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
+                throw new Error('sms_capture_cleanup_failed');
+              }
+              if (notificationReader && !(await notificationReader.clearCaptured())) {
+                throw new Error('notification_capture_cleanup_failed');
+              }
+            }
+          : undefined;
+      await clearAll(cleanupCaptureQueue);
     } catch (error) {
       if (!(error instanceof ClearAllError) || error.stage === 'erase') {
         // The relay half really did succeed — the device row, its queue and its
@@ -941,13 +970,27 @@ export default function SettingsScreen() {
                 {t('privacyRetentionExact')}
               </ThemedText>
             </Block>
+            <Block style={styles.privacyCopy}>
+              <Icon name="lock" size={16} color={theme.textTertiary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
+                {t('privacySecurityExact')}
+              </ThemedText>
+            </Block>
           </Section>
 
           <Section index={3}>
             <SectionHeader title={t('dataHeader')} />
-            {/* The two "teach the app" chores first: both carry a live count,
-                both are why someone opens this section on an ordinary day, and
-                neither is an export. Back up and Restore follow, marked. */}
+            {/* Review and the two "teach the app" chores first: each carries a
+                live state, each is why someone opens this section on an
+                ordinary day, and none is an export. Back up and Restore follow,
+                marked. */}
+            {linkRow(
+              t('reviewAlertsTitle'),
+              reviewAlertCount > 0
+                ? tf('reviewAlertsSettingsCount', { count: reviewAlertCount })
+                : t('reviewAlertsNone'),
+              () => router.push('/review-alerts'),
+            )}
             {linkRow(
               t('sortShops'),
               unsorted.merchants.length > 0
@@ -1022,12 +1065,18 @@ export default function SettingsScreen() {
 
           <Section index={5}>
             <SectionHeader title={t('regionHeader')} />
-            {/* "Country pack" was a developer's word for the pack architecture
-                in markets.ts. The user picked a country. The sub-line already
-                names the currency and what the pack changes. */}
-            {linkRow(
-              t('country'),
-              tf('countryPackDetail', {
+            {hasGlobalLedger ? (
+              <Row>
+                <View style={styles.rowText}>
+                  <ThemedText type="small">{t('parserPack')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {tf('globalParserPackDetail', { currency: state.ledgerMoney!.currency })}
+                  </ThemedText>
+                </View>
+              </Row>
+            ) : linkRow(
+              t('parserPack'),
+              tf('parserPackDetail', {
                 country: marketName(market.id),
                 currency: market.currency.display,
               }),
@@ -1071,8 +1120,8 @@ export default function SettingsScreen() {
       <ChoiceSheet
         visible={regionSheet === 'country'}
         onClose={() => setRegionSheet(null)}
-        title={t('country')}
-        body={t('onboardMarketBody')}
+        title={t('parserPack')}
+        body={t('parserPackPickerBody')}
         options={marketChoices}
         value={market.id}
         onSelect={setMarket}

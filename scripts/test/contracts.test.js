@@ -145,6 +145,90 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   }
 }
 
+/* ── SMS delivery privacy: no second raw-message archive ─────────────── */
+{
+  const receiver = code(read(
+    'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsDeliveryReceiver.kt',
+  ));
+  const nativeModule = code(read(
+    'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
+  ));
+  const scanner = code(read('src/lib/auto-import.ts'));
+  const settings = code(read('src/app/settings.tsx'));
+  ok('SMS delivery never writes a second raw-message buffer',
+    !receiver.includes('putString(') && !receiver.includes('JSONObject(') &&
+      receiver.includes('SensitiveMessageFilter.shouldReject(body)') &&
+      receiver.includes('InstantAlert.post(context, address, body)'));
+  ok('upgrades and erase synchronously purge the retired plaintext SMS buffer',
+    nativeModule.includes('OnCreate {') &&
+      nativeModule.includes('AsyncFunction("clearCaptured")') &&
+      nativeModule.includes('.edit().clear().commit()') &&
+      nativeModule.includes('InstantAlert.clear(context)') &&
+      read('modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt')
+        .includes('cancelAll()'));
+  ok('incoming SMS permission is requested only for the optional instant banner',
+    /requestSmsPermission\(\)[\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
+      .test(scanner) &&
+      /requestSmsDeliveryPermission\(\)[\s\S]*PermissionsAndroid\.PERMISSIONS\.RECEIVE_SMS/
+        .test(scanner) &&
+      /toggleInstantAlerts[\s\S]*requestSmsDeliveryPermission\(\)/.test(settings));
+}
+
+/* ── Bank-app notifications: encrypted queue and durable acknowledgement ─ */
+{
+  const store = code(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt',
+  ));
+  const service = code(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/BankNotificationListenerService.kt',
+  ));
+  const nativeModule = code(read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationReaderModule.kt',
+  ));
+  const nativePackages = read(
+    'modules/notification-reader/android/src/main/java/expo/modules/notificationreader/TrustedBankNotificationPackages.kt',
+  );
+  const jsPackages = read('src/lib/trusted-bank-notification-packages.ts');
+  const scanner = code(read('src/lib/auto-import.ts'));
+  ok('notification bodies are sealed with AndroidKeyStore AES-GCM before persistence',
+    store.includes('AndroidKeyStore') && store.includes('AES/GCM/NoPadding') &&
+      store.includes('.put("ct"') && !service.includes('getSharedPreferences('));
+  ok('notification candidates are bounded and expire from the encrypted queue',
+    store.includes('MAX_ROWS = 500') && store.includes('RETENTION_MS = 7L * 24 * 60 * 60 * 1000') &&
+      service.includes('MAX_TITLE_CHARS = 512') && service.includes('MAX_TEXT_CHARS = 4096'));
+  const kotlinPackageIds = [...nativePackages.matchAll(/"([A-Za-z0-9_.]+)" to "[A-Z]{2}"/g)]
+    .map((match) => match[1]).sort();
+  const jsPackageIds = [...jsPackages.matchAll(/'([A-Za-z0-9_.]+)': '[A-Z]{2}'/g)]
+    .map((match) => match[1]).sort();
+  ok('notification parsing is restricted to curated Play-installed bank packages',
+    kotlinPackageIds.length >= 10 && JSON.stringify(kotlinPackageIds) === JSON.stringify(jsPackageIds) &&
+      nativePackages.includes('installingPackageName') && nativePackages.includes('com.android.vending') &&
+      service.includes('TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)') &&
+      scanner.includes('trustedBankNotificationMarket(n.pkg)'));
+  ok('bank-app capture stays unavailable until package-specific templates are benchmarked',
+    nativePackages.includes('const val CAPTURE_ENABLED = false') &&
+      nativeModule.includes('Function("isAvailable")'));
+  ok('notification erase prevents old shade rows from being swept back in',
+    store.includes('CLEARED_THROUGH') && store.includes('.putLong(CLEARED_THROUGH, clearedThrough)') &&
+      store.includes('if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return'));
+  ok('a transient KeyStore failure never compacts the ciphertext queue',
+    store.indexOf('val secretKey = key()') < store.indexOf('for (index in 0 until envelopes.length())') &&
+      store.includes('catch (_: AEADBadTagException)') &&
+      !/private fun decrypt[\s\S]*?catch \(_: Exception\)/.test(store));
+  ok('the old plaintext notification preference is erased instead of migrated',
+    store.includes('LEGACY_PREFS') && store.includes('legacy.edit().clear().commit()') &&
+      store.includes('Legacy notification queue could not be erased') &&
+      nativeModule.includes('OnCreate {') &&
+      nativeModule.includes('NotificationCaptureStore.purgeLegacyPlaintext(context)'));
+  ok('notification capture exposes separate read, acknowledge and erase operations',
+    nativeModule.includes('AsyncFunction("getCaptured")') &&
+      nativeModule.includes('AsyncFunction("ackCaptured")') &&
+      nativeModule.includes('AsyncFunction("clearCaptured")'));
+  ok('notification rows are acknowledged only through the scan commit boundary',
+    scanner.includes('commit: notificationIds.size > 0') &&
+      scanner.includes('notificationReader.ackCaptured([...notificationIds])'));
+}
+
 /* ── One definition of spending ───────────────────────────────────────── */
 //
 // This was written at least four ways across six files, and one of them left
@@ -276,8 +360,8 @@ function ktSources(dir) {
 
   const store = fs.readFileSync(path.join(ROOT, 'src/lib/store.tsx'), 'utf8');
   ok('an editable ledger backup cannot grant Pro or restart the trial',
-    /pro: _pro, trialStartTs: _trial/.test(store) &&
-      /pro: state\.pro, trialStartTs: state\.trialStartTs/.test(store));
+    /pro: _pro,[\s\S]{0,120}trialStartTs: _trial/.test(store) &&
+      /pro: state\.pro,[\s\S]{0,120}trialStartTs: state\.trialStartTs/.test(store));
 }
 
 
@@ -856,7 +940,10 @@ function ktSources(dir) {
   ok('the staged relay inbox is a different database from the ledger',
     !!nameOf(staged) && nameOf(staged) !== nameOf(ledger));
   ok('erasing empties the staged relay inbox too',
-    /await clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(settings));
+    /\? clearBackgroundRelayRows/.test(settings) &&
+      /SmsReader\.clearCaptured\(\)/.test(settings) &&
+      /notificationReader\.clearCaptured\(\)/.test(settings) &&
+      /await clearAll\(cleanupCaptureQueue\)/.test(settings));
 }
 
 {
@@ -865,7 +952,9 @@ function ktSources(dir) {
   const store = read('src/lib/store.tsx');
   const copy = read('src/lib/i18n.ts');
   ok('every erase keeps capture cleanup inside the blocked ledger transaction',
-    /await clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(settings) &&
+    /await clearAll\(cleanupCaptureQueue\)/.test(settings) &&
+      /SmsReader\.clearCaptured\(\)/.test(settings) &&
+      /notificationReader\.clearCaptured\(\)/.test(settings) &&
       /cfg = await getRelayConfigStrict\(\)/.test(settings) &&
       /eraseLocalInitializeFailedTitle/.test(settings) &&
       /recoveryState === 'erased-initialize'/.test(recovery) &&
@@ -874,7 +963,9 @@ function ktSources(dir) {
       /Your data was erased/.test(copy) &&
       /isRelayPlatform\(\) \? await getRelayConfigStrict\(\) : null/.test(recovery) &&
       /if \(relay\) await unpairDevice\(relay\)/.test(recovery) &&
-      /clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(recovery) &&
+      /clearAll\(cleanupCaptureQueue\)/.test(recovery) &&
+      /SmsReader\.clearCaptured\(\)/.test(recovery) &&
+      /notificationReader\.clearCaptured\(\)/.test(recovery) &&
       store.indexOf('await afterErase()') <
         store.lastIndexOf("dispatch({ type: 'hydrate', state: persistedBlank })"));
 }
@@ -1627,6 +1718,7 @@ ok('the spoken label agrees with the sign on screen',
   const metadataConsumers = shipping
     .filter((file) => !file.endsWith(`${path.sep}alert-draft.ts`) &&
       !file.endsWith(`${path.sep}currency-metadata.ts`) &&
+      !file.endsWith(`${path.sep}ledger-money.ts`) &&
       !file.endsWith(`${path.sep}alert-market-pack-types.ts`) &&
       !file.endsWith(`${path.sep}alert-rollout.ts`))
     .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*currency-metadata['"]/.test(
@@ -1637,6 +1729,7 @@ ok('the spoken label agrees with the sign on screen',
       !file.endsWith(`${path.sep}alert-market-packs.ts`) &&
       !file.endsWith(`${path.sep}alert-market-packs.us-eu.ts`) &&
       !file.endsWith(`${path.sep}alert-market-packs.india-me.ts`) &&
+      !file.endsWith(`${path.sep}alert-market-detection.ts`) &&
       !file.endsWith(`${path.sep}alert-rollout.ts`))
     .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:alert-semantics|alert-market-packs|alert-rollout)['"]/.test(
       fs.readFileSync(file, 'utf8'),

@@ -28,7 +28,7 @@ export const US_EU_ALERT_MARKET_PACKS = {
     market: 'DE', currencies: ['EUR'], currencyAliases: {},
     rails: ['sepa'], transferTerms: ['überweisung'],
     utilityTerms: ['strom', 'gas', 'wasser', 'telefon'],
-    recurringTerms: ['dauerauftrag', 'lastschrift', 'abonnement'],
+    recurringTerms: ['dauerauftrag', 'abonnement'],
     failedTerms: ['abgelehnt', 'fehlgeschlagen'], futureTerms: ['wird abgebucht', 'fällig'],
     debitTerms: ['belastet', 'abgebucht'], creditTerms: ['gutgeschrieben'],
   },

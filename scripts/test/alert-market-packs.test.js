@@ -20,6 +20,32 @@ ok('all first-wave markets are reachable through the review interface',
   firstWaveMarkets.every((market) => inspectMarketAlert('Bank notice', market).market === market));
 
 {
+  const identified = inspectMarketAlert(
+    'HDFC Bank card purchase INR 42.10 was debited at SAMPLE SHOP',
+    'IN',
+    { sender: 'HDFC-BK' },
+  );
+  const conflict = inspectMarketAlert(
+    'Bank of America card charged USD 5.00 at SAMPLE SHOP',
+    'US',
+    { sender: 'WELLSFARGO' },
+  );
+  ok('sender and content can identify an institution without bypassing review safety',
+    identified.institution.decision === 'identified' &&
+    identified.institution.institution === 'hdfc-bank' &&
+    identified.decision === 'review', JSON.stringify(identified.institution));
+  ok('conflicting institution evidence remains ambiguous',
+    conflict.institution.decision === 'ambiguous' &&
+    conflict.institution.institution === null &&
+    conflict.institution.reasons.includes('sender-body-conflict'),
+    JSON.stringify(conflict.institution));
+  ok('institution evidence never retains the raw alert or sender',
+    !JSON.stringify(identified.institution).includes('SAMPLE SHOP') &&
+    !JSON.stringify(identified.institution).includes('HDFC-BK'),
+    JSON.stringify(identified.institution));
+}
+
+{
   const result = inspectMarketAlert('Rs. 1,25,000.50 debited through UPI fund transfer to RAVI', 'IN');
   ok('India pack scopes Rs. to INR and preserves Indian grouping',
     result.decision === 'review' && result.family === 'transfer' &&
@@ -37,6 +63,17 @@ ok('all first-wave markets are reachable through the review interface',
   ok('Indian grouped integers parse without requiring a decimal fraction',
     groupedInteger.draft.candidates[0]?.minorUnits === '12500000',
     JSON.stringify(groupedInteger));
+
+  const hindiPurchase = inspectMarketAlert('कार्ड खरीद INR 1,250.50 डेबिट किया गया', 'IN');
+  const hindiDecline = inspectMarketAlert('कार्ड भुगतान INR 500.00 अस्वीकृत', 'IN');
+  ok('Hindi posted card activity is reviewable with exact INR money',
+    hindiPurchase.decision === 'review' && hindiPurchase.status === 'posted' &&
+    hindiPurchase.family === 'purchase' && hindiPurchase.direction === 'debit' &&
+    hindiPurchase.draft.candidates[0]?.minorUnits === '125050',
+    JSON.stringify(hindiPurchase));
+  ok('Hindi failed activity is never posted',
+    hindiDecline.status === 'failed' && hindiDecline.decision === 'refuse',
+    JSON.stringify(hindiDecline));
 }
 
 {
@@ -113,6 +150,14 @@ for (const [market, text] of [
     result.status === 'failed' && result.decision === 'refuse', JSON.stringify(result));
 }
 
+{
+  const directDebit = inspectMarketAlert('Lastschrift EUR 25,00 wurde abgebucht', 'DE');
+  ok('one German direct debit is evidence, not automatically a subscription',
+    directDebit.status === 'posted' && directDebit.family !== 'recurring-payment' &&
+    directDebit.eventEvidence.scheduledDebit?.scheme === 'sepa-direct-debit',
+    JSON.stringify(directDebit));
+}
+
 for (const [market, text, currency, minorUnits] of [
   ['QA', 'تم الخصم ر.ق ١٢٫٣٤ لشراء بالبطاقة', 'QAR', '1234'],
   ['OM', 'تم الخصم ر.ع ١٢٫٣٤٥ لشراء بالبطاقة', 'OMR', '12345'],
@@ -168,6 +213,129 @@ for (const [label, market, text, family] of [
   ok('explicit posted recurrence may be suggested for review',
     recurring.family === 'recurring-payment' && recurring.decision === 'review',
     JSON.stringify(recurring));
+}
+
+{
+  const mandate = inspectMarketAlert(
+    'UPI AutoPay mandate registered for INR 299.00. UMN XX-REDACTED. Next debit tomorrow.',
+    'IN',
+  );
+  ok('an explicit mandate becomes structured subscription evidence without posting spending',
+    mandate.status === 'informational' && mandate.family !== 'recurring-payment' &&
+    mandate.decision === 'refuse' &&
+    mandate.eventEvidence.scheduledDebit?.subject === 'mandate' &&
+    mandate.eventEvidence.scheduledDebit.scheme === 'upi-autopay' &&
+    mandate.eventEvidence.scheduledDebit.event === 'created' &&
+    mandate.eventEvidence.scheduledDebit.amountRole === 'maximum' &&
+    mandate.eventEvidence.scheduledDebit.amountCandidateIndex === 0 &&
+    mandate.eventEvidence.scheduledDebit.hasReference === true,
+    JSON.stringify(mandate));
+
+  const successfulSetup = inspectMarketAlert(
+    'UPI AutoPay e-mandate setup successful for INR 299.00',
+    'IN',
+  );
+  ok('successful mandate setup is lifecycle evidence, never posted money',
+    successfulSetup.status === 'informational' &&
+      successfulSetup.decision === 'refuse' &&
+      successfulSetup.family !== 'recurring-payment' &&
+      successfulSetup.eventEvidence.scheduledDebit?.event === 'created',
+    JSON.stringify(successfulSetup));
+
+  const bareExecution = inspectMarketAlert(
+    'UPI AutoPay mandate executed for INR 299.00. UMN XX-REDACTED.',
+    'IN',
+  );
+  ok('a bare executed lifecycle notice is not proof that money moved',
+    bareExecution.status === 'informational' && bareExecution.decision === 'refuse' &&
+      bareExecution.eventEvidence.scheduledDebit?.event === 'executed' &&
+      bareExecution.eventEvidence.scheduledDebit.amountRole === 'none',
+    JSON.stringify(bareExecution));
+
+  const postedExecution = inspectMarketAlert(
+    'UPI AutoPay mandate executed and INR 299.00 was debited from your account.',
+    'IN',
+  );
+  ok('an executed mandate needs independent debit evidence before review',
+    postedExecution.status === 'posted' && postedExecution.decision === 'review' &&
+      postedExecution.eventEvidence.scheduledDebit?.event === 'executed' &&
+      postedExecution.eventEvidence.scheduledDebit.amountRole === 'posted',
+    JSON.stringify(postedExecution));
+
+  const fundsReleased = inspectMarketAlert(
+    'UPI mandate funds unblocked for INR 299.00.',
+    'IN',
+  );
+  ok('released mandate funds are informational and never spending',
+    fundsReleased.status === 'informational' && fundsReleased.decision === 'refuse' &&
+      fundsReleased.eventEvidence.scheduledDebit?.event === 'funds-released' &&
+      fundsReleased.eventEvidence.scheduledDebit.amountRole === 'none',
+    JSON.stringify(fundsReleased));
+
+  const cancelled = inspectMarketAlert(
+    'Your standing order for GBP 25.00 has been cancelled. Reference REDACTED.',
+    'GB',
+  );
+  ok('a cancelled standing order is evidence only and never a transaction',
+    cancelled.status === 'informational' && cancelled.decision === 'refuse' &&
+    cancelled.family !== 'recurring-payment' &&
+    cancelled.eventEvidence.scheduledDebit?.subject === 'standing-instruction' &&
+    cancelled.eventEvidence.scheduledDebit.event === 'cancelled' &&
+    cancelled.eventEvidence.scheduledDebit.amountRole === 'none' &&
+    cancelled.eventEvidence.scheduledDebit.amountCandidateIndex === null,
+    JSON.stringify(cancelled));
+
+  const directDebit = inspectMarketAlert(
+    'Direct debit USD 40.00 was debited from account ending 4321 to MERCHANT',
+    'US',
+  );
+  ok('one direct debit is recorded as commitment evidence but not called a subscription',
+    directDebit.decision === 'review' && directDebit.family !== 'recurring-payment' &&
+    directDebit.eventEvidence.scheduledDebit?.subject === 'direct-debit' &&
+    directDebit.eventEvidence.instrument?.kind === 'account' &&
+    directDebit.eventEvidence.instrument.last4 === '4321',
+    JSON.stringify(directDebit));
+
+  const utilityDebit = inspectMarketAlert(
+    'Direct debit GBP 40.00 was debited for an energy bill',
+    'GB',
+  );
+  ok('payment scheme stays separate from the economic utility family',
+    utilityDebit.family === 'utility' &&
+    utilityDebit.eventEvidence.utility?.event === 'posted' &&
+    utilityDebit.eventEvidence.scheduledDebit?.subject === 'direct-debit',
+    JSON.stringify(utilityDebit));
+}
+
+{
+  const cardFee = inspectMarketAlert(
+    'Annual card fee USD 50.00 was charged to card ending 9876',
+    'US',
+  );
+  const accountFee = inspectMarketAlert(
+    'Monthly account maintenance fee USD 8.00 was debited from account ending 2468',
+    'US',
+  );
+  ok('card fees carry scoped instrument evidence',
+    cardFee.family === 'fee' && cardFee.eventEvidence.fee?.scope === 'card' &&
+    cardFee.eventEvidence.instrument?.kind === 'card' &&
+    cardFee.eventEvidence.instrument.last4 === '9876',
+    JSON.stringify(cardFee));
+  ok('account fees carry scoped instrument evidence',
+    accountFee.family === 'fee' &&
+    accountFee.eventEvidence.fee?.scope === 'account' &&
+    accountFee.eventEvidence.instrument?.kind === 'account' &&
+    accountFee.eventEvidence.instrument.last4 === '2468',
+    JSON.stringify(accountFee));
+
+  const scheduledFee = inspectMarketAlert(
+    'Annual card fee USD 50.00 will be charged to card ending 9876 next month',
+    'US',
+  );
+  ok('a scheduled fee is evidence but never posted spending',
+    scheduledFee.status === 'future' && scheduledFee.decision === 'refuse' &&
+    scheduledFee.eventEvidence.fee?.event === 'scheduled',
+    JSON.stringify(scheduledFee));
 }
 
 {
@@ -247,7 +415,7 @@ for (const [label, market, text, family] of [
     measured.metrics.reviewDecisionRecall.ratio === 1 &&
     measured.metrics.exactMoneyAndDirection.ratio === 1 &&
     measured.metrics.familyPrecision.ratio === 1 &&
-    measured.metrics.subscriptionRecall.ratio === 1 &&
+    measured.metrics.recurringAlertRecall.ratio === 1 &&
     Object.values(measured.metrics.familyRecall).every((result) => result.ratio === 1),
     JSON.stringify(measured));
   ok('automatic import remains closed until the real dedupe path is benchmarked',
@@ -311,10 +479,10 @@ for (const [label, market, text, family] of [
       : fixture);
   const missedRecurringReport = runMarketBenchmark('GB', missedRecurring);
   ok('recurring alerts need recall as well as precision',
-    missedRecurringReport.blockers.includes('subscription-recall') &&
+    missedRecurringReport.blockers.includes('recurring-alert-recall') &&
       missedRecurringReport.blockers.includes('family-recall:recurring-payment'),
     JSON.stringify({ blockers: missedRecurringReport.blockers,
-      recall: missedRecurringReport.metrics.subscriptionRecall }));
+      recall: missedRecurringReport.metrics.recurringAlertRecall }));
 
   const contaminated = perfectReal.map((fixture) => ({ ...fixture }));
   contaminated.push({

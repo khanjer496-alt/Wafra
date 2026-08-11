@@ -113,6 +113,74 @@ const S = {
   captureLatest: { en: 'Latest filed {date}', ar: 'آخر عملية مسجّلة {date}' },
   emptyPeriodBody: { en: 'Pull down to check for new bank activity. One transaction is enough to start the month.', ar: 'اسحب للأسفل للتحقق من نشاط بنكي جديد. تكفي عملية واحدة لبدء الشهر.' },
 
+  // Structured global-alert review. These items are deliberately described as
+  // possible activity, never as parser failures, and none of this copy claims
+  // an item has entered the ledger.
+  reviewAlertsTitle: { en: 'Alerts to review', ar: 'تنبيهات للمراجعة' },
+  reviewAlertsHomeCount: {
+    en: '{count} possible transaction{s} need review',
+    ar: '{count} تنبيه مالي للمراجعة',
+  },
+  reviewAlertsSettingsCount: {
+    en: '{count} waiting for review',
+    ar: '{count} تنبيه قيد المراجعة',
+  },
+  reviewAlertsNone: { en: 'Nothing waiting', ar: 'لا شيء قيد المراجعة' },
+  reviewAlertsIntro: {
+    en: 'Wafra found possible financial activity in bank alerts it cannot import automatically yet. Nothing here has been added to your ledger.',
+    ar: 'وجدت وفرة نشاطاً مالياً محتملاً في تنبيهات بنكية لا يمكن استيرادها تلقائياً بعد. لم يُضف أي شيء هنا إلى سجلك.',
+  },
+  reviewAlertsPrivacy: {
+    en: 'Only a structured summary is kept here. The bank-alert text is not stored.',
+    ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص التنبيه البنكي.',
+  },
+  reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
+  reviewAlertsEmptyBody: {
+    en: 'Possible transactions that need a decision will appear here.',
+    ar: 'ستظهر هنا العمليات المحتملة التي تحتاج إلى قرارك.',
+  },
+  reviewAlertPossiblePurchase: { en: 'Possible purchase', ar: 'عملية شراء محتملة' },
+  reviewAlertPossibleTransfer: { en: 'Possible transfer', ar: 'تحويل محتمل' },
+  reviewAlertPossibleCash: { en: 'Possible cash withdrawal', ar: 'سحب نقدي محتمل' },
+  reviewAlertPossibleRefund: { en: 'Possible refund', ar: 'استرداد محتمل' },
+  reviewAlertPossibleFee: { en: 'Possible fee', ar: 'رسوم محتملة' },
+  reviewAlertPossibleUtility: { en: 'Possible utility payment', ar: 'دفعة خدمات محتملة' },
+  reviewAlertPossibleRecurring: { en: 'Possible recurring payment', ar: 'دفعة متكررة محتملة' },
+  reviewAlertMoneyOut: { en: 'Money out', ar: 'مبلغ خارج' },
+  reviewAlertMoneyIn: { en: 'Money in', ar: 'مبلغ داخل' },
+  reviewAlertCardEnding: { en: 'Card ending {last4}', ar: 'بطاقة تنتهي بـ {last4}' },
+  reviewAlertAccountEnding: { en: 'Account ending {last4}', ar: 'حساب ينتهي بـ {last4}' },
+  reviewAlertWalletEnding: { en: 'Wallet ending {last4}', ar: 'محفظة تنتهي بـ {last4}' },
+  reviewAlertDismissQuestion: { en: 'Dismiss this alert?', ar: 'تجاهل هذا التنبيه؟' },
+  reviewAlertDismissBody: {
+    en: 'It will remain outside your ledger and will not appear in this review list again.',
+    ar: 'سيبقى خارج سجلك ولن يظهر في قائمة المراجعة مرة أخرى.',
+  },
+  reviewAlertDismissed: { en: 'Alert dismissed', ar: 'تم تجاهل التنبيه' },
+  reviewAlertDismissFailed: {
+    en: 'Could not save that change. The alert may return next time.',
+    ar: 'تعذّر حفظ هذا التغيير. قد يعود التنبيه في المرة القادمة.',
+  },
+  reviewAlertAdd: { en: 'Add', ar: 'إضافة' },
+  reviewAlertAddHint: {
+    en: 'Review the category, account, direction and date before adding it.',
+    ar: 'راجع التصنيف والحساب والاتجاه والتاريخ قبل إضافتها.',
+  },
+  reviewAlertAddTitle: { en: 'Review transaction', ar: 'مراجعة العملية' },
+  reviewAlertAdded: { en: 'Transaction added', ar: 'تمت إضافة العملية' },
+  reviewAlertAddFailed: {
+    en: 'Could not add this alert. Check its currency, account and date.',
+    ar: 'تعذّرت إضافة هذا التنبيه. تحقق من العملة والحساب والتاريخ.',
+  },
+  reviewAlertOwnAccounts: {
+    en: 'This moved money between my own accounts',
+    ar: 'هذا تحويل بين حساباتي الشخصية',
+  },
+  reviewAlertDateA11y: {
+    en: 'Transaction date in year month day format',
+    ar: 'تاريخ العملية بصيغة سنة شهر يوم',
+  },
+
   // Foreign-currency activity
   foreignActivity: { en: 'Foreign activity', ar: 'العمليات بالعملات الأجنبية' },
   foreignSpending: { en: 'Foreign spending', ar: 'الإنفاق بالعملات الأجنبية' },
@@ -662,6 +730,14 @@ const S = {
     en: 'Needs bank SMS reading above',
     ar: 'يحتاج تفعيل قراءة رسائل البنك أعلاه',
   },
+  instantAlertsSmsPermissionTitle: {
+    en: 'Incoming SMS access was not allowed',
+    ar: 'لم يُسمح بالوصول إلى الرسائل الواردة',
+  },
+  instantAlertsSmsPermissionBody: {
+    en: 'Instant banners need Android’s incoming SMS permission. Bank-alert history import still works with the separate SMS-reading permission.',
+    ar: 'تحتاج التنبيهات الفورية إذن أندرويد للرسائل الواردة. ويظل استيراد سجل تنبيهات البنك يعمل بإذن قراءة الرسائل المنفصل.',
+  },
   bankPushOn: {
     en: 'On · bank-app money alerts import automatically',
     ar: 'مفعّل · تُستورد تنبيهات المال من تطبيق البنك تلقائياً',
@@ -670,8 +746,9 @@ const S = {
     en: 'Off · for banks that push instead of SMS',
     ar: 'متوقف · للبنوك التي ترسل إشعارات بدلاً من الرسائل',
   },
-  regionHeader: { en: 'Region', ar: 'المنطقة' },
+  regionHeader: { en: 'Language & bank formats', ar: 'اللغة وتنسيقات البنوك' },
   countryPack: { en: 'Country pack', ar: 'حزمة الدولة' },
+  parserPack: { en: 'Launch parser preference', ar: 'تفضيل محلل الإطلاق' },
   // What the pack changes, stated as what it changes: which banks and shops
   // are recognised in NEW messages. It does not restate the currency as
   // something the pack sets, because on a ledger that already holds money it
@@ -679,6 +756,18 @@ const S = {
   countryPackDetail: {
     en: '{country} · {currency} · bank and shop names in new messages',
     ar: '{country} · {currency} · أسماء البنوك والمتاجر في الرسائل الجديدة',
+  },
+  parserPackDetail: {
+    en: '{country} · {currency} automatic import; Android can detect other supported formats for review',
+    ar: '{country} · استيراد تلقائي بعملة {currency}؛ يستطيع أندرويد اكتشاف تنسيقات مدعومة أخرى للمراجعة',
+  },
+  globalParserPackDetail: {
+    en: 'Android worldwide review · {currency} ledger; iPhone capture remains UAE/Saudi',
+    ar: 'مراجعة عالمية على أندرويد · سجل بعملة {currency}؛ يبقى التقاط الآيفون للإمارات والسعودية',
+  },
+  parserPackPickerBody: {
+    en: 'Choose the launch-tested UAE or Saudi automatic-import pack. Android detects other supported countries per alert and keeps them review-first; iPhone does not yet.',
+    ar: 'اختر حزمة الاستيراد التلقائي المختبرة للإمارات أو السعودية. يكتشف أندرويد الدول المدعومة الأخرى لكل تنبيه ويعرضها للمراجعة أولاً؛ الآيفون لا يدعم ذلك بعد.',
   },
   /**
    * Why a differently-denominated pack is greyed out.
@@ -739,6 +828,10 @@ const S = {
   privacyRetentionExact: {
     en: 'Android alerts are parsed on-device. On iPhone, your Shortcut sends selected bank alerts to Wafra’s relay; it deletes the raw text immediately and keeps only a device-sealed transaction for up to 30 days. Private Mode is local-only and disables iPhone Shortcut capture.',
     ar: 'تُحلَّل تنبيهات أندرويد على الجهاز. وعلى الآيفون يرسل الاختصار تنبيهات البنوك المحددة إلى مرحّل وفرة؛ فيحذف النص فوراً ولا يحتفظ إلا بعملية مشفّرة لهذا الجهاز لمدة أقصاها ٣٠ يوماً. الوضع الخاص محلي فقط ويوقف التقاط الاختصار على الآيفون.',
+  },
+  privacySecurityExact: {
+    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone; optional bank-app alerts wait only in a short-lived encrypted queue. iPhone uses your personal Shortcut and Wafra’s encrypted relay. Wafra cannot sign in to a bank, reply to messages, approve a payment or move money.',
+    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات الرسائل على هذا الهاتف، وتنتظر تنبيهات تطبيقات البنوك الاختيارية فقط في طابور مشفر قصير المدة. ويستخدم الآيفون اختصارك الشخصي ومُرحّل وفرة المشفر. ولا يستطيع وفرة تسجيل الدخول إلى بنك أو الرد على الرسائل أو الموافقة على دفعة أو نقل الأموال.',
   },
   country: { en: 'Country', ar: 'الدولة' },
   language: { en: 'Language', ar: 'اللغة' },
@@ -1034,7 +1127,7 @@ const S = {
     en: 'Track spending, bills, subscriptions and savings in one private ledger.',
     ar: 'تتبّع المصروفات والفواتير والاشتراكات والادخار في سجل خاص واحد.',
   },
-  onboardPersonalizeCta: { en: 'Personalise Wafra', ar: 'خصّص وفرة' },
+  onboardPersonalizeCta: { en: 'Set up Wafra', ar: 'إعداد وفرة' },
   onboardStepOf: { en: 'Step {step} of {total}', ar: 'الخطوة {step} من {total}' },
   onboardBack: { en: 'Back', ar: 'رجوع' },
   onboardMarketTitle: { en: 'Where does your money live?', ar: 'أين تعيش أموالك؟' },
@@ -1082,24 +1175,33 @@ const S = {
   onboardCalendarMonthDetail: { en: 'Starts on day 1', ar: 'يبدأ في اليوم 1' },
   onboardSalaryDay: { en: 'Salary day', ar: 'يوم الراتب' },
   onboardDayNumber: { en: 'Day {day}', ar: 'اليوم \u2066{day}\u2069' },
-  onboardCaptureTitleAndroid: { en: 'Now make it automatic.', ar: 'والآن اجعله تلقائياً.' },
+  onboardCaptureTitleAndroid: { en: 'Choose your message access.', ar: 'اختر مستوى الوصول إلى الرسائل.' },
   onboardCaptureBodyAndroid: {
-    en: 'Wafra will read bank SMS already on this phone, file the transactions, then keep up with new alerts.',
-    ar: 'سيقرأ وفرة رسائل البنك الموجودة على هذا الهاتف ويسجّل العمليات، ثم يتابع التنبيهات الجديدة.',
+    en: 'Automatic capture needs Android SMS permission. Manual entry needs no message access.',
+    ar: 'يحتاج الالتقاط التلقائي إلى إذن رسائل أندرويد. لا يحتاج الإدخال اليدوي إلى الوصول للرسائل.',
   },
-  onboardCaptureTitleIos: { en: 'One Shortcut. Then hands off.', ar: 'اختصار واحد. ثم لا حاجة للتدخل.' },
+  onboardCaptureTitleIos: { en: 'Choose your message access.', ar: 'اختر مستوى الوصول إلى الرسائل.' },
   onboardCaptureBodyIos: {
-    en: 'A guided Apple Shortcuts setup forwards only the bank senders you choose. New transactions arrive without opening Wafra.',
-    ar: 'إعداد موجّه في اختصارات Apple يمرّر فقط مرسلي البنوك الذين تختارهم. تصل العمليات الجديدة دون فتح وفرة.',
+    en: 'Automatic capture uses a personal Apple Shortcut. Manual entry needs no Messages access.',
+    ar: 'يستخدم الالتقاط التلقائي اختصاراً شخصياً من آبل. لا يحتاج الإدخال اليدوي إلى الوصول للرسائل.',
   },
   onboardCaptureTitleWeb: { en: 'Your plan is ready.', ar: 'خطتك جاهزة.' },
   onboardCaptureBodyWeb: {
     en: 'Automatic bank-message capture is available in the phone apps.',
     ar: 'التقاط رسائل البنك تلقائياً متاح في تطبيقات الهاتف.',
   },
-  onboardCaptureAndroidCta: { en: 'Import bank SMS', ar: 'استورد رسائل البنك' },
+  onboardCaptureAndroidCta: { en: 'Enable automatic SMS capture', ar: 'فعّل الالتقاط التلقائي للرسائل' },
   onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
   onboardCaptureSkip: { en: 'Finish without capture', ar: 'إنهاء دون التقاط' },
+  onboardCaptureNoSms: { en: 'Maximum privacy · no SMS access', ar: 'أقصى خصوصية · دون وصول إلى الرسائل' },
+  onboardCapturePrivacyAndroid: {
+    en: 'Automatic SMS capture processes supported bank alerts only on this phone and never uploads SMS content. Anything else is discarded before app storage. Or choose maximum privacy for no SMS access.',
+    ar: 'يعالج الالتقاط التلقائي تنبيهات البنوك المدعومة على هذا الهاتف فقط، ولا يرفع محتوى الرسائل. ويُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل تخزينه في وفرة. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
+  },
+  onboardCapturePrivacyIos: {
+    en: 'Automatic capture forwards alerts only from bank conversations you select. Wafra’s encrypted relay parses them, discards raw text immediately, and queues only a device-sealed transaction. Or choose maximum privacy for no Messages access.',
+    ar: 'يمرّر الالتقاط التلقائي التنبيهات فقط من محادثات البنوك التي تختارها. يحللها مُرحّل وفرة المشفر، ويتخلص فوراً من النص الخام، ولا يضع في الطابور إلا عملية مشفرة لجهازك. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
+  },
   onboardSmsDenied: {
     en: 'SMS access was not granted. Your plan is saved; you can enable capture later.',
     ar: 'لم يُمنح إذن الرسائل. حُفظت خطتك ويمكنك تفعيل الالتقاط لاحقاً.',
@@ -1108,6 +1210,10 @@ const S = {
   onboardCompleteBody: {
     en: '{goals} goal{s}, {budgets} live budgets, and a money month from day {day}.',
     ar: '{goals} أهداف و{budgets} ميزانيات مفعّلة، وشهر مالي يبدأ في اليوم \u2066{day}\u2069.',
+  },
+  onboardCompleteBodyAutomatic: {
+    en: 'Wafra identifies each supported bank alert automatically. Your ledger currency is confirmed by the first transaction you choose to add—not by a country guess.',
+    ar: 'يتعرّف وفرة تلقائياً على كل تنبيه بنكي مدعوم. تتحدد عملة سجلك بأول عملية تختار إضافتها، لا بتخمين الدولة.',
   },
   onboardSummaryGoals: { en: 'Savings goals', ar: 'أهداف الادخار' },
   onboardSummaryBudgets: { en: 'Category budgets', ar: 'ميزانيات التصنيفات' },
@@ -1567,6 +1673,14 @@ const S = {
     en: 'The entries were applied in this open session but encrypted storage did not confirm the save. Do not repeat this import now.',
     ar: 'طُبقت العمليات في هذه الجلسة المفتوحة لكن التخزين المشفر لم يؤكد الحفظ. لا تكرر الاستيراد الآن.',
   },
+  notificationCleanupFailedTitle: {
+    en: 'Saved, but notification cleanup needs attention',
+    ar: 'تم الحفظ لكن تنظيف التنبيهات يحتاج إجراءً',
+  },
+  notificationCleanupFailedBody: {
+    en: 'Your ledger is safe, but Wafra could not clear its encrypted notification queue. A later scan may see the same alert again; duplicate protection will ignore it.',
+    ar: 'سجلك محفوظ، لكن تعذّر على وفرة مسح قائمة التنبيهات المشفرة. قد يرى الفحص اللاحق التنبيه نفسه مجدداً، وستتجاهله حماية التكرار.',
+  },
   historyCleanupFailed: { en: 'Saved, but cleanup needs attention', ar: 'تم الحفظ لكن التنظيف يحتاج إجراءً' },
   historyCleanupFailedBody: {
     en: 'Your ledger is saved. Retry deletion, or leave; the protected staged Message text becomes eligible for cleanup after one hour.',
@@ -1669,8 +1783,8 @@ const S = {
     ar: 'أوقفه واتصل',
   },
   iosContinueManual: {
-    en: 'Continue without automatic capture',
-    ar: 'المتابعة دون الالتقاط التلقائي',
+    en: 'Maximum privacy · no Messages access',
+    ar: 'أقصى خصوصية · دون وصول إلى الرسائل',
   },
 
   iosBanksTitle: { en: 'Which banks text you?', ar: 'أي البنوك تراسلك؟' },
@@ -1928,8 +2042,8 @@ const S = {
   importProgress: { en: 'Progress', ar: 'التقدم' },
   importProgressCounts: { en: '{read} read · {matched} matched', ar: 'قُرئت {read} · طابقت {matched}' },
   importProgressPrivacy: {
-    en: 'Reading backwards from today. Nothing leaves the phone.',
-    ar: 'تجري القراءة عكسياً بدءاً من اليوم. لا يغادر شيء الهاتف.',
+    en: 'Reading backwards on this phone. Unsupported and private messages are discarded before storage; nothing is uploaded.',
+    ar: 'تجري القراءة عكسياً على هذا الهاتف. يُتخلص من الرسائل غير المدعومة والخاصة قبل الحفظ، ولا يُرفع أي نص.',
   },
   pasteBankMessagesA11y: { en: 'Paste bank messages', ar: 'ألصق رسائل البنك' },
   bankMessageExample: {
@@ -1951,8 +2065,8 @@ const S = {
   },
   smsPermissionNeeded: { en: 'Permission needed', ar: 'الإذن مطلوب' },
   smsPermissionNeededBody: {
-    en: 'Wafra needs SMS access to read bank alerts. You can also paste messages manually below.',
-    ar: 'يحتاج وفرة إذن الرسائل لقراءة تنبيهات البنك. ويمكنك أيضاً لصق الرسائل يدوياً أدناه.',
+    en: 'SMS access is optional and used only for on-device bank-alert import. Anything that is not supported financial activity is discarded before storage. You can keep access off and paste messages manually below.',
+    ar: 'إذن الرسائل اختياري ويُستخدم فقط لاستيراد تنبيهات البنك على الجهاز. يُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل الحفظ. يمكنك إبقاء الإذن مغلقاً ولصق الرسائل يدوياً أدناه.',
   },
   matchedLabel: { en: 'Matched', ar: 'مطابقة' },
   unreadLabel: { en: 'Unread', ar: 'غير مقروءة' },
@@ -2344,6 +2458,14 @@ const S = {
   // `structuralTitleLabel` at the bottom of this file.
   titleAtmWithdrawal: { en: 'ATM withdrawal', ar: 'سحب من الصراف' },
   titleBankFee: { en: 'Bank fee', ar: 'رسوم بنكية' },
+  titleAnnualCardFee: { en: 'Annual card fee', ar: 'رسوم البطاقة السنوية' },
+  titleAnnualBankFee: { en: 'Annual bank fee', ar: 'رسوم بنكية سنوية' },
+  titleAccountMaintenanceFee: { en: 'Account maintenance fee', ar: 'رسوم صيانة الحساب' },
+  titleServiceCharge: { en: 'Service charge', ar: 'رسوم خدمة' },
+  titleOverlimitFee: { en: 'Overlimit fee', ar: 'رسوم تجاوز الحد' },
+  titleInsufficientBalanceFee: { en: 'Insufficient balance fee', ar: 'رسوم عدم كفاية الرصيد' },
+  titleLatePaymentFee: { en: 'Late payment fee', ar: 'رسوم تأخر السداد' },
+  titleOverdraftFee: { en: 'Overdraft fee', ar: 'رسوم السحب على المكشوف' },
   titleVatFee: { en: 'VAT fee', ar: 'ضريبة القيمة المضافة' },
   titleCashDeposit: { en: 'Cash deposit', ar: 'إيداع نقدي' },
   titleCheque: { en: 'Cheque', ar: 'شيك' },
@@ -2467,6 +2589,14 @@ export function hasArabicScript(text: string): boolean {
 const STRUCTURAL_TITLE_KEYS: Record<string, StringKey> = {
   'ATM withdrawal': 'titleAtmWithdrawal',
   'Bank fee': 'titleBankFee',
+  'Annual card fee': 'titleAnnualCardFee',
+  'Annual bank fee': 'titleAnnualBankFee',
+  'Account maintenance fee': 'titleAccountMaintenanceFee',
+  'Service charge': 'titleServiceCharge',
+  'Overlimit fee': 'titleOverlimitFee',
+  'Insufficient balance fee': 'titleInsufficientBalanceFee',
+  'Late payment fee': 'titleLatePaymentFee',
+  'Overdraft fee': 'titleOverdraftFee',
   'VAT fee': 'titleVatFee',
   'Cash deposit': 'titleCashDeposit',
   Cheque: 'titleCheque',

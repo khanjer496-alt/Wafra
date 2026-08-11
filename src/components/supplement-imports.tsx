@@ -18,6 +18,7 @@ import {
   createEmailForwardingAddress,
   getImportCapabilities,
   revokeEmailForwardingAddress,
+  uploadCsvStatement,
   uploadPdfStatement,
 } from '@/lib/cloud-import';
 import {
@@ -36,7 +37,7 @@ import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 
 
-type Busy = 'connect' | 'capabilities' | 'pdf' | 'email-create' | 'email-check' | 'email-revoke' | null;
+type Busy = 'connect' | 'capabilities' | 'statement' | 'email-create' | 'email-check' | 'email-revoke' | null;
 
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
@@ -46,7 +47,14 @@ export function SupplementImports() {
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
   const theme = useTheme();
-  const { state, importBatch, ensureDurable, markParserVersion } = useStore();
+  const {
+    state,
+    importBatch,
+    stageReviewAlerts,
+    ensureDurable,
+    markParserVersion,
+    setMarket,
+  } = useStore();
   const stateRef = useRef(state);
   stateRef.current = state;
   const captureExecutor = useMemo(
@@ -55,11 +63,13 @@ export function SupplementImports() {
         ledger: {
           getState: () => stateRef.current,
           importBatch,
+          stageReviewAlerts,
           ensureDurable,
           markParserVersion,
+          setMarket: (market) => setMarket(market),
         },
       }),
-    [ensureDurable, importBatch, markParserVersion],
+    [ensureDurable, importBatch, markParserVersion, setMarket, stageReviewAlerts],
   );
   const clipboardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedAddress = useRef<string | null>(null);
@@ -78,7 +88,10 @@ export function SupplementImports() {
     if (!(value instanceof CloudImportError)) return copy.errUnexpected;
     if (value.code === 'network') return copy.errNetwork;
     if (value.code === 'unauthorized') return copy.errAuth;
-    if (value.code === 'invalid_pdf' || value.code === 'pdf_required') return copy.errInvalid;
+    if (
+      value.code === 'invalid_pdf' || value.code === 'pdf_required' ||
+      value.code === 'invalid_csv' || value.code === 'csv_required'
+    ) return copy.errInvalid;
     if (value.code === 'too_large' || value.code === 'too_many_pages' || value.code === 'too_many_rows') return copy.errLarge;
     if (value.code === 'unreadable_pdf') return copy.errUnreadable;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
@@ -179,22 +192,34 @@ export function SupplementImports() {
     let pickedFile: File | null = null;
     try {
       const picked = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf',
+        type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
         copyToCacheDirectory: true,
         multiple: false,
       });
       if (picked.canceled || !picked.assets[0]) return;
       const asset = picked.assets[0];
       pickedFile = new File(asset.uri);
-      setBusy('pdf');
-      const accepted = await uploadPdfStatement(cfg, asset, capabilities);
+      setBusy('statement');
+      const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
+        capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+      const accepted = csv
+        ? await uploadCsvStatement(cfg, asset, capabilities)
+        : await uploadPdfStatement(cfg, asset, capabilities);
       try {
         const imported = await syncQueued();
-        setStatus(interpolate(imported > 0 ? copy.pdfSuccess : copy.pdfNoNew, {
-          accepted: accepted.acceptedRows,
-          pages: accepted.pages,
-          imported,
-        }));
+        if ('pages' in accepted) {
+          setStatus(interpolate(imported > 0 ? copy.pdfSuccess : copy.pdfNoNew, {
+            accepted: accepted.acceptedRows,
+            pages: accepted.pages,
+            imported,
+          }));
+        } else {
+          setStatus(interpolate(imported > 0 ? copy.csvSuccess : copy.csvNoNew, {
+            accepted: accepted.acceptedRows,
+            rejected: accepted.rejectedRows,
+            imported,
+          }));
+        }
         if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       } catch {
         setStatus(interpolate(copy.acceptedPending, { accepted: accepted.acceptedRows }));
@@ -284,7 +309,8 @@ export function SupplementImports() {
   };
 
   const locked = state.privateMode;
-  const mb = capabilities ? Math.round(capabilities.pdf.maxBytes / 1048576) : 0;
+  const pdfMb = capabilities ? Math.round(capabilities.pdf.maxBytes / 1048576) : 0;
+  const csvMb = capabilities ? Math.round(capabilities.csv.maxBytes / 1048576) : 0;
 
   return (
     <View style={styles.root}>
@@ -341,14 +367,15 @@ export function SupplementImports() {
                 <Icon name="upload" size={20} color={theme.primary} />
               </View>
               <View style={styles.cardCopy}>
-                <ThemedText type="small">{copy.pdfTitle}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">{copy.pdfBody}</ThemedText>
+                <ThemedText type="small">{copy.statementTitle}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">{copy.statementBody}</ThemedText>
               </View>
             </View>
             {capabilities && (
               <ThemedText type="nano" themeColor="textTertiary" tabular>
-                {interpolate(copy.pdfLimits, {
-                  mb,
+                {interpolate(copy.statementLimits, {
+                  pdfMb,
+                  csvMb,
                   pages: capabilities.pdf.maxPages,
                   rows: capabilities.pdf.maxRows,
                 })}
@@ -356,7 +383,7 @@ export function SupplementImports() {
             )}
             <Button
               icon="upload"
-              label={busy === 'pdf' ? copy.uploading : copy.choosePdf}
+              label={busy === 'statement' ? copy.uploading : copy.chooseStatement}
               onPress={() => void pickAndUpload()}
               disabled={!capabilities || busy !== null}
             />

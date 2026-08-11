@@ -236,7 +236,6 @@ const SA: MarketPack = {
     [/hungerstation|jahez|mrsool|toyou|the\s*chefz/i, 'dining'],
     [/panda|tamimi|danube|othaim|bindawood|lulu/i, 'groceries'],
     [/petromin|sasco|aldrees|naft/i, 'transport'],
-    [/\bsadad\b/i, 'utilities'],
     ...ARABIC_KEYWORDS,
     ...CROSS_BORDER_KEYWORDS,
   ],
@@ -278,6 +277,7 @@ let active: MarketPack = AE;
  * caller — Settings, onboarding, a restored backup, the Worker.
  */
 let ledgerCurrency: string | null = null;
+let ledgerExponent: 0 | 2 | 3 | null = null;
 
 export function getActiveMarket(): MarketPack {
   return active;
@@ -287,9 +287,10 @@ export function getActiveMarket(): MarketPack {
  * Pin the accounting currency to `code`, or release it with `null` when the
  * ledger holds no money. Anything that is not a three-letter code releases.
  */
-export function setLedgerCurrency(code: string | null): void {
+export function setLedgerCurrency(code: string | null, exponent: 0 | 2 | 3 = 2): void {
   const wanted = code?.trim().toUpperCase();
   ledgerCurrency = wanted && /^[A-Z]{3}$/.test(wanted) ? wanted : null;
+  ledgerExponent = ledgerCurrency ? exponent : null;
 }
 
 /** ISO 4217 code pack `id` denominates in — what a ledger recorded under it is. */
@@ -300,6 +301,16 @@ export function marketCurrencyCode(id: string): string {
 /** ISO 4217 code the stored fils are denominated in. */
 export function ledgerCurrencyCode(): string {
   return ledgerCurrency ?? active.currency.code;
+}
+
+/** The accounting currency already committed to disk, or null on a fresh ledger. */
+export function pinnedLedgerCurrencyCode(): string | null {
+  return ledgerCurrency;
+}
+
+/** Persisted minor-unit exponent; never re-derived from mutable ISO metadata. */
+export function ledgerCurrencyExponent(): 0 | 2 | 3 {
+  return ledgerExponent ?? 2;
 }
 
 /** How that currency renders in front of an amount: the "AED" in "AED 1,234". */
@@ -326,6 +337,53 @@ export function setActiveMarket(id: string): boolean {
   if (!canSelectMarket(id)) return false;
   active = MARKETS.find((m) => m.id === id) ?? AE;
   return true;
+}
+
+const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
+const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
+
+/**
+ * Route the launch-tested Gulf parser from this alert's evidence.
+ *
+ * Sender identity wins over the quoted currency because a UAE card can make
+ * a purchase in SAR and a Saudi card can make one in AED. When the sender is
+ * not yet in either registry, AED and SAR themselves are unambiguous market
+ * evidence; they choose a parser pack but never prove that money moved.
+ */
+export function detectLaunchMarketFromAlert(
+  source: string,
+  sender?: string,
+): 'AE' | 'SA' | null {
+  const senderText = sender?.trim() ?? '';
+  const senderMarkets = senderText
+    ? MARKETS.filter((market) => market.banks.some((bank) => bank.re.test(senderText)))
+    : [];
+  if (senderMarkets.length === 1) return senderMarkets[0].id as 'AE' | 'SA';
+  if (senderMarkets.length > 1) return null;
+  const aed = AED_ALERT.test(source);
+  const sar = SAR_ALERT.test(source);
+  if (aed === sar) return null;
+  return aed ? 'AE' : 'SA';
+}
+
+/**
+ * Parse synchronously under one market without changing the user's stored
+ * preference. A pinned ledger refuses the other currency before the parser
+ * can convert or relabel it.
+ */
+export function withMarketPackForParsing<T>(
+  id: 'AE' | 'SA',
+  parse: () => T,
+): T | null {
+  const pack = MARKETS.find((market) => market.id === id);
+  if (!pack || (ledgerCurrency && ledgerCurrency !== pack.currency.code)) return null;
+  const previous = active;
+  active = pack;
+  try {
+    return parse();
+  } finally {
+    active = previous;
+  }
 }
 
 /** Best-effort country from the device locale ("en-SA" → SA). */

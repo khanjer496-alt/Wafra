@@ -1846,6 +1846,12 @@ const DATE_RE =
 // "03/07/26 05:53" — a bare date WITH a time is the transaction timestamp and
 // beats any "statement due on <date>" footer later in the message.
 const DATETIME_RE = /\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\s+\d{1,2}:\d{2}(?!\d)/;
+// Bank Albilad's Arabic alert corpus uses a labelled, year-first timestamp on
+// its own line: "في: 2019-05-07 23:44" (also with slashes). Keep the Arabic
+// label and time mandatory so a reference fragment elsewhere cannot become a
+// transaction date merely because it resembles ISO order.
+const ARABIC_ISO_DATETIME_RE =
+  /(?:^|\n)\s*في\s*:\s*(\d{4})[-/](\d{1,2})[-/](\d{1,2})\s+\d{1,2}:\d{2}(?!\d)/im;
 /**
  * ISO order, which the region's own billers use and no other rule here could
  * read: "Transaction Date: 2022-03-11", "تاريخ المعاملة: 2020-04-15", "Pymt
@@ -1870,6 +1876,20 @@ const HSBC_DATE_RE = /\bfrom\s+hsbc:\s*(\d{1,2})([A-Za-z]{3})(\d{2})\b/i;
 const ATM_RE = /\batm\b|cash\s+withdrawal|\bwithdrawn\b|سحب نقدي|الصراف الالي|صراف الي|جهاز الصراف/i;
 const FEE_RE =
   /\bfees?\b|\bcharges?\s+(?:of|:)|service charge|\bvat\b|annual membership|رسوم|رسم خدمه|ضريبه القيمه المضافه/i;
+const feeTitle = (raw: string): string => {
+  if (/\binsufficient balance fee\b/i.test(raw)) return 'Insufficient balance fee';
+  if (/\boverlimit fee\b/i.test(raw)) return 'Overlimit fee';
+  if (/\blate payment fee\b/i.test(raw)) return 'Late payment fee';
+  if (/\boverdraft fee\b/i.test(raw)) return 'Overdraft fee';
+  if (/\b(?:monthly )?(?:account )?maintenance fee\b|\bmonthly account fee\b/i.test(raw)) {
+    return 'Account maintenance fee';
+  }
+  if (/\bservice charge\b|رسم خدمه/i.test(raw)) return 'Service charge';
+  if (/\bannual (?:membership|(?:credit )?card )?fee\b|\bannual membership\b/i.test(raw)) {
+    return /\bcard\b/i.test(raw) ? 'Annual card fee' : 'Annual bank fee';
+  }
+  return 'Bank fee';
+};
 /**
  * A salary credit, for TITLING only — the category is decided separately.
  * "payroll" and "wages" are here because UAE employers on WPS use all three,
@@ -2781,6 +2801,14 @@ const SERVICE_NAMES: [RegExp, string][] = [
 export const STRUCTURAL_TITLES = new Set([
   'ATM withdrawal',
   'Bank fee',
+  'Annual card fee',
+  'Annual bank fee',
+  'Account maintenance fee',
+  'Service charge',
+  'Overlimit fee',
+  'Insufficient balance fee',
+  'Late payment fee',
+  'Overdraft fee',
   'VAT fee',
   'Cash deposit',
   'Cheque',
@@ -2944,6 +2972,59 @@ function extractAmountFils(raw: string): number | null {
 function amountWithFx(raw: string): number | null {
   return extractAmountFils(raw) ?? extractForeignAmountFils(raw);
 }
+
+interface TtPaymentAmount {
+  amountFils: number;
+  type: 'income' | 'expense';
+  originalAmountMinor?: number;
+  originalCurrency?: string;
+  fxRate?: number;
+  fxSource?: 'fallback';
+}
+
+/**
+ * HSBC TT alerts put an account fragment immediately before the amount. The
+ * generic suffix matcher can read that fragment as money, so this branch must
+ * remain prefix-only; unlike the old hand parser, it still preserves foreign
+ * currency and conversion provenance.
+ */
+const extractTtPaymentAmount = (raw: string): TtPaymentAmount | null => {
+  const ttIndex = raw.search(/\btt\s+payment\b/i);
+  if (ttIndex < 0) return null;
+  // Only the transfer clause may supply its money. A fee before "TT Payment"
+  // and an available-balance figure after it are separate financial facts.
+  const clause = raw.slice(ttIndex, ttIndex + 180).split(/\r?\n/)[0];
+  const candidates = clause.matchAll(
+    /\b(AED|DHS|SAR|USD|EUR|GBP)\s*([\d,]+(?:\.\d{1,2})?)\s*([+-])?/gi,
+  );
+  for (const match of candidates) {
+    const at = match.index as number;
+    if (BALANCE_PREFIX_RE.test(clause.slice(Math.max(0, at - 56), at))) continue;
+    const code = match[1].toUpperCase() === 'DHS' ? 'AED' : match[1].toUpperCase();
+    const major = Number(match[2].replace(/,/g, ''));
+    if (!Number.isFinite(major) || major <= 0) continue;
+    const originalAmountMinor = Math.round(major * 100);
+    const localCode = getActiveMarket().currency.code;
+    if (code === localCode) {
+      if (originalAmountMinor > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+      return { amountFils: originalAmountMinor, type: match[3] === '+' ? 'income' : 'expense' };
+    }
+    if (!(code in UNITS_PER_USD)) continue;
+    const rate = fxMinorPerUnit(code) / 100;
+    const amountFils = Math.round(major * rate * 100);
+    if (!Number.isFinite(amountFils) || amountFils <= 0 ||
+      amountFils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+    return {
+      amountFils,
+      type: match[3] === '+' ? 'income' : 'expense',
+      originalAmountMinor,
+      originalCurrency: code,
+      fxRate: rate,
+      fxSource: 'fallback',
+    };
+  }
+  return null;
+};
 
 /**
  * WHAT A CREDIT-CARD STATEMENT SAYS IS OWED — or nothing at all.
@@ -3537,6 +3618,15 @@ function extractDate(raw: string): string | null {
   const withTime = raw.match(DATETIME_RE);
   if (withTime) {
     const iso = numericDate(withTime[1], withTime[2], withTime[3]);
+    if (iso) return iso;
+  }
+  const arabicIsoTime = raw.match(ARABIC_ISO_DATETIME_RE);
+  if (arabicIsoTime) {
+    const iso = isoDate(
+      Number(arabicIsoTime[1]),
+      Number(arabicIsoTime[2]),
+      Number(arabicIsoTime[3]),
+    );
     if (iso) return iso;
   }
   const hsbc = raw.match(HSBC_DATE_RE);
@@ -4189,15 +4279,11 @@ function parseSmsInner(
   // HSBC-style "TT Payment to 041-339***-001 AED 1,108.00+" — an
   // inter-account transfer; "+" after the amount marks money arriving.
   if (/\btt\s+payment\b/i.test(raw)) {
-    // Account fragments like "041-339***-001 AED" fake a suffix amount, so
-    // read the prefix-form figure (optionally "+"-terminated) directly.
-    const m = raw.match(/(?:aed|dhs|sar|usd|eur|gbp)\s*([\d,]+(?:\.\d{1,2})?)/i);
-    const amountFils = m ? Math.round(Number(m[1].replace(/,/g, '')) * 100) : null;
-    if (!amountFils) return null;
+    const amount = extractTtPaymentAmount(raw);
+    if (!amount) return null;
     return {
       kind: 'transaction',
-      type: /[\d.,]\+/.test(raw) ? 'income' : 'expense',
-      amountFils,
+      ...amount,
       merchant: 'Bank transfer',
       date,
       dueDay: null,
@@ -4617,7 +4703,7 @@ function parseSmsInner(
               : /value\s+added\s+tax|\bvat\b\s*(?:@|¡)?\s*\d|\bvat\s+on\b|\bfor\s+vat\b/i.test(raw)
                 ? 'VAT fee'
                 : FEE_RE.test(raw)
-                  ? 'Bank fee'
+                  ? feeTitle(raw)
                   : /instant\s+transfer|local\s+transfer|social\s+transfer/i.test(raw)
                     ? 'Outgoing transfer'
                     // No card in the message means no card purchase: "An amount

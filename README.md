@@ -16,7 +16,7 @@
 - **Budgets** — monthly limits per category with pace tracking, near-limit warnings, and over-budget alerts.
 - **Wallet** — accounts, credit/debit cards, statement dues, goals, derived balances, and net worth.
 - **Multi-currency** — original amount, AED conversion, rate source/date, and currency exposure summaries.
-- **Supplemental imports** — opt-in forwarding addresses for bank email and text-based PDF statement upload; raw email/PDF content is discarded after parsing.
+- **Supplemental imports** — opt-in forwarding addresses plus conservative text-PDF, CSV, and TSV statement upload; raw email and statement content is discarded after parsing.
 - **Trusted devices** — encrypted future-capture fan-out with owner/member roles, expiring invites, device revocation, and no financial data in invite links.
 - **Fintech interaction system** — dark-first with full light mode, live English/Arabic RTL, semantic native haptics, reduced-motion support, Reanimated motion, SQLCipher persistence, and biometric lock.
 
@@ -48,7 +48,7 @@ Platform submission gates are documented in `docs/play-release.md` and
 - Expo SDK 55 / React Native 0.83 / React 19.2
 - Expo Router, Reanimated 4, native Expo modules, local Android Expo modules
 - SQLCipher on native; AsyncStorage only for the web QA/demo surface
-- Cloudflare Worker + D1 relay for iOS/email/PDF and trusted-device delivery
+- Cloudflare Worker + D1 relay for iOS/email/statement imports and trusted-device delivery
 - TypeScript throughout
 
 ## Structure
@@ -60,5 +60,5 @@ src/
   constants/      # theme tokens (colors, spacing, radius)
   lib/            # parser, capture, encrypted store, relay, analytics, and seed data
 modules/          # Android SMS and bank-notification native modules
-server/           # privacy-minimizing iOS/email/PDF relay
+server/           # privacy-minimizing iOS/email/statement relay
 ```

@@ -914,7 +914,7 @@ async function queueItem(id, row, publicKey) {
     relay.relayRowToScannedSms(row).sender === row.sender &&
       relay.relayRowToScannedSms(row).smsTs === Date.parse(row.receivedAt) &&
       relay.relayRowToScannedSms(row).receivedAt === undefined &&
-      relay.relayRowToScannedSms(row).market === undefined &&
+      relay.relayRowToScannedSms(row).market === 'AE' &&
       !('raw' in relay.relayRowToScannedSms(row)));
 
   /* ═════════ End to end: the Shortcut, the Worker, and the phone ═════════
@@ -1074,17 +1074,17 @@ async function queueItem(id, row, publicKey) {
     const retried = await relay.syncRelay(cfg);
     await relay.ackRelay(cfg, retried.ids);
 
-    // The same message under two packs is two different transactions. Under AE
-    // a Saudi alert is converted at a fallback rate and loses its category;
-    // under SA it is read as the bank actually sent it.
+    // The alert itself selects the Saudi pack even while the paired device's
+    // stored preference is UAE. Explicit SAR/bank evidence must not be
+    // converted through the wrong launch parser.
     // Distinct eventIds: these two posts carry the SAME text, and without them
     // the relay would (correctly) collapse the second as a Shortcut retry.
     await shortcutPost(SA_PURCHASE, 'ALRAJHI', '2026-07-18T09:00:00.000Z', 'sa-under-ae-01');
     const underAe = await relay.syncRelay(cfg);
     await relay.ackRelay(cfg, underAe.ids);
-    eq('market: an SA message on an AE device is converted and guessed at',
+    eq('market: an SA message on an AE device is read in its own currency',
       [underAe.parsed[0].currency, underAe.parsed[0].amountFils],
-      ['AED', 4407]);
+      ['SAR', 4500]);
 
     const switched = await relay.setRelayMarket(cfg, 'SA');
     await shortcutPost(SA_PURCHASE, 'ALRAJHI', '2026-07-19T09:00:00.000Z', 'sa-under-sa-01');
@@ -1093,8 +1093,9 @@ async function queueItem(id, row, publicKey) {
     eq('market: the same message on an SA device is read as sent',
       [underSa.parsed[0].currency, underSa.parsed[0].amountFils],
       ['SAR', 4500]);
-    ok('market: and it was the DEVICE that decided, not the relay',
-      underAe.parsed[0].amountFils !== underSa.parsed[0].amountFils);
+    ok('market: per-alert evidence wins over the stored device preference',
+      underAe.parsed[0].currency === underSa.parsed[0].currency &&
+        underAe.parsed[0].amountFils === underSa.parsed[0].amountFils);
 
     // Unpair reaches the real Worker and takes the device with it.
     await relay.unpairDevice(switched);
@@ -1422,6 +1423,10 @@ async function queueItem(id, row, publicKey) {
         newAccountCount: 0, billDues: [],
       };
       const changedPlan = { ...emptyPlan, txCount: 1 };
+      const reviewOnlyPlan = {
+        ...emptyPlan,
+        batch: { lastScanTs: 900 },
+      };
       const executorModule = execute('src/lib/capture-executor.ts', (id) => {
         if (id === '@/lib/auto-import') return { buildImportPlan: () => emptyPlan };
         if (id === '@/lib/capture') {
@@ -1558,6 +1563,100 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
+        let releaseReview;
+        const reviewDurable = new Promise((resolve) => { releaseReview = resolve; });
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            ...ledger(Promise.resolve(), events),
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return { admitted: 1, durable: reviewDurable };
+            },
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [], declined: [], newestTs: 1,
+              reviewCandidates: [{ id: 'structured-review' }],
+              source: 'sms', needsSetup: false,
+              commit: async () => void events.push('commit'),
+            }),
+            planRows: () => emptyPlan,
+          },
+        });
+        const running = executor.execute('routine');
+        await Promise.resolve();
+        eq('capture executor: review-only capture waits behind encrypted staging',
+          events, ['review-stage']);
+        releaseReview();
+        const outcome = await running;
+        eq('capture executor: review-only commit follows encrypted staging',
+          events, ['review-stage', 'parser', 'commit']);
+        ok('capture executor: review-only outcome reports an aggregate count',
+          outcome.kind === 'up-to-date' && outcome.reviewAlerts === 1,
+          JSON.stringify(outcome));
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            ...ledger(Promise.resolve(), events),
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return { admitted: 1, durable: Promise.resolve() };
+            },
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [], declined: [], newestTs: 900,
+              reviewCandidates: [{ id: 'structured-review' }],
+              source: 'sms', needsSetup: false,
+              commit: async () => void events.push('commit'),
+            }),
+            planRows: () => reviewOnlyPlan,
+          },
+        });
+        await executor.execute('routine');
+        eq('capture executor: review-only SMS cursor is durable before completion',
+          events, ['review-stage', 'persist', 'parser', 'commit']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            ...ledger(Promise.resolve(), events),
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return {
+                admitted: 1,
+                durable: Promise.reject(new Error('review durability failed')),
+              };
+            },
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [row(1, 'SHOP')], declined: [], newestTs: 1,
+              reviewCandidates: [{ id: 'structured-review' }],
+              source: 'sms', needsSetup: false,
+              commit: async () => void events.push('commit'),
+            }),
+            planRows: () => changedPlan,
+          },
+        });
+        let threw = false;
+        try {
+          await executor.execute('routine');
+        } catch {
+          threw = true;
+        }
+        ok('capture executor: failed review durability rejects mixed capture', threw);
+        eq('capture executor: a failed review write cannot advance import or commit',
+          events, ['review-stage']);
+      }
+
+      {
+        const events = [];
         const cfg = { baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k' };
         const queued = {
           parsed: [row(20, 'ADNOC')],
@@ -1577,6 +1676,88 @@ async function queueItem(id, row, publicKey) {
         await executor.execute('supplemental');
         eq('capture executor: supplemental persistence precedes acknowledgement and reserves probes',
           events, ['persist', 'ack:bank-row']);
+      }
+
+      {
+        const events = [];
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE',
+        };
+        const marketLedger = {
+          ...ledger(Promise.resolve(), events),
+          getState: () => ({ ...hydrated, marketId: 'AE' }),
+          setMarket: (market) => { events.push(`market:${market}`); return true; },
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: marketLedger,
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [{ ...row(21, 'PANDA'), market: 'SA' }],
+              ids: ['sa-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        await executor.execute('supplemental');
+        eq('capture executor: a relay row pins its parsed market before ledger persistence',
+          events, ['market:SA', 'persist', 'ack']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            ...ledger(Promise.resolve(), events),
+            getState: () => ({ ...hydrated, marketId: 'AE' }),
+            setMarket: () => false,
+          },
+          dependencies: {
+            getRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE',
+            }),
+            sync: async () => ({
+              parsed: [{ ...row(22, 'PANDA'), market: 'SA' }],
+              ids: ['sa-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        let refused = false;
+        try { await executor.execute('supplemental'); } catch { refused = true; }
+        ok('capture executor: an opposite-currency ledger refuses before persistence or ack',
+          refused && events.length === 0, JSON.stringify(events));
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            ...ledger(Promise.resolve(), events),
+            getState: () => ({ ...hydrated, marketId: 'AE' }),
+            setMarket: () => true,
+          },
+          dependencies: {
+            getRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE',
+            }),
+            sync: async () => ({
+              parsed: [row(23, 'LEGACY'), { ...row(24, 'PANDA'), market: 'SA' }],
+              ids: ['legacy-ae', 'new-sa'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 2, shortcutRowsWithBank: 2,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        let refused = false;
+        try { await executor.execute('supplemental'); } catch { refused = true; }
+        ok('capture executor: mixed legacy and marked currencies refuse before persistence or ack',
+          refused && events.length === 0, JSON.stringify(events));
       }
 
       {

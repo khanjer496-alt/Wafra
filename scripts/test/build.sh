@@ -21,8 +21,8 @@ set -e
 cd "$(dirname "$0")"
 
 # The build needs server/'s dependency set on disk before it starts: the Worker's
-# types come from @cloudflare/workers-types and imports.ts pulls postal-mime and
-# unpdf, which the symlink at the end of this file points build/ at.
+# types come from @cloudflare/workers-types and imports.ts pulls postal-mime,
+# unpdf, and csv-parse, which the symlink at the end points build/ at.
 [ -d ../../server/node_modules ] || npm --prefix ../../server ci
 
 rm -rf build && mkdir -p build
@@ -64,6 +64,8 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft \
+         alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray \
+         ledger-money review-promotion trusted-bank-notification-packages \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import; do
   [ -f "../../src/lib/$f.ts" ] || continue
@@ -145,7 +147,7 @@ for f in ../../server/src/*.ts; do
 done
 mv build/index.ts build/worker.ts
 
-# build/imports.ts imports postal-mime and unpdf, which are server/'s
+# build/imports.ts imports postal-mime, unpdf, and csv-parse, which are server/'s
 # dependencies and unreachable from scripts/test by both tsc and node. Point
 # node_modules resolution for this directory at the set that actually holds
 # them rather than adding them to the app's own dependency list, where they

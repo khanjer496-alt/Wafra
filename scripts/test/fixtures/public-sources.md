@@ -103,17 +103,13 @@ Saudi, and the only source found with **Arabic** GCC message text:
 
     شراء عبر نقاط البيع بطاقة: **1234;الإئتمانية لدى: <merchant> مبلغ: 12.00 SAR
 
-### sarim2000/pennywiseai-tracker issues
-
-The issue tracker, **not the code**. Contributors paste real message text when
-requesting a bank, and those quotes are facts about bank wording.
-
 ## Do not copy from
 
 **sarim2000/pennywiseai-tracker** is **AGPL-3.0**. It supports six UAE banks —
 ADCB, Emirates Islamic, Emirates NBD, FAB, Liv, Mashreq — which makes its
 source the most tempting thing in this list and the most dangerous. AGPL would
-force Wafra to publish under AGPL too. Read the issues; stay out of the code.
+force Wafra to publish under AGPL too. Its architecture may inform independent
+design review, but its source, regexes and fixtures are not Wafra inputs.
 
 **ritesh-kanwar/Cashiro** is the same trap wearing a different name: same UAE
 bank list, same "on-device, no cloud" pitch, **also AGPL-3.0**, and it has a
@@ -139,13 +135,14 @@ before it looks at anything else. Banks in both Gulf markets send Arabic to any
 customer whose profile language is Arabic, so this was a whole-user gap rather
 than a missing format.
 
-`src/lib/arabic-sms.ts` rewrites the vocabulary into the wording the parser
-already reads, and everything downstream — categories, cards, dues,
-subscriptions — is inherited rather than reimplemented. See that file's header
-for why a rewrite rather than a second parser.
+The shipping `src/lib/sms-parser.ts` normalizes Arabic digits, orthography and
+transaction vocabulary directly, so categories, cards, dues and subscriptions
+continue through one parser interface. `src/lib/arabic-sms.ts` is a historical
+test-only rewrite and is not the production seam.
 
-Al Bilad's two published formats are the reference, and are pinned verbatim in
-`scripts/test/arabic.test.js`:
+Al Bilad's two published formats are the reference, and are pinned under the
+Saudi market in `scripts/test/fixtures/saudi-bank-formats.js`, executed by the
+same acceptance harness as the named UAE corpus:
 
     شراء عبر نقاط البيع
     بطاقة: **1234;الإئتمانية
@@ -155,12 +152,12 @@ Al Bilad's two published formats are the reference, and are pinned verbatim in
     رصيد: 1234.56 SAR
     في: 2019-05-07 23:44
 
+The labelled `في: YYYY-MM-DD HH:mm` and slash-separated twin are both accepted
+without enabling an unlabelled year-first date anywhere else in a message.
+
 ### Still open
 
-- **Dates.** `في: 2019-05-07` is ISO; the date patterns read `d/m/y`, so an
-  Arabic message's own date is not used. Live SMS take the received time, so
-  this only shows on a bulk import of old messages.
-- **The word list is the ceiling.** A rewrite is only ever as good as its
+- **The word list is the ceiling.** A deterministic parser is only ever as good as its
   vocabulary, and this one has never been checked against a real Arabic
   message from a UAE bank — there is no such corpus to check against. The
   first real one will almost certainly add words.

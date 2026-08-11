@@ -18,6 +18,7 @@ import {
   type RelaySyncResult,
 } from '@/lib/relay';
 import type { AppState, ImportBatchInput } from '@/lib/types';
+import type { ReviewAlert } from '@/lib/alert-review-tray';
 
 export type CaptureIntent = 'routine' | 'supplemental' | 'setup-verification' | 'background';
 
@@ -27,6 +28,7 @@ export interface CaptureImportSummary {
   healed: number;
   newAccounts: number;
   transactionIds: string[];
+  reviewAlerts: number;
 }
 
 export type CaptureExecutionOutcome =
@@ -52,6 +54,9 @@ export interface CaptureLedgerAdapter {
   importBatch: (input: ImportBatchInput) => { ids: string[]; durable: Promise<void> };
   ensureDurable: () => Promise<void>;
   markParserVersion: () => void;
+  /** Persist a launch pack selected from strong per-alert AED/SAR evidence. */
+  setMarket?: (id: 'AE' | 'SA') => boolean;
+  stageReviewAlerts?: (items: ReviewAlert[]) => { admitted: number; durable: Promise<void> };
 }
 
 export interface BackgroundCaptureAdapter {
@@ -88,22 +93,53 @@ const EMPTY_SUMMARY: CaptureImportSummary = {
   healed: 0,
   newAccounts: 0,
   transactionIds: [],
+  reviewAlerts: 0,
 };
 
 const hasChanges = (plan: ImportPlan): boolean =>
   plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0;
 
-const summary = (plan: ImportPlan, transactionIds: string[] = []): CaptureImportSummary => ({
+const summary = (
+  plan: ImportPlan,
+  transactionIds: string[] = [],
+  reviewAlerts = 0,
+): CaptureImportSummary => ({
   transactions: plan.txCount,
   dues: plan.dueCount,
   healed: plan.healedCount,
   newAccounts: plan.newAccountCount,
   transactionIds,
+  reviewAlerts,
 });
 
 const acknowledgementsFor = (queued: RelaySyncResult): string[] => {
   const reserved = new Set(queued.testIds);
   return queued.ids.filter((id) => !reserved.has(id));
+};
+
+const launchMarketForRows = (
+  rows: readonly ScannedSms[],
+  fallback?: string | null,
+): 'AE' | 'SA' | null => {
+  const fallbackMarket = fallback === 'AE' || fallback === 'SA' ? fallback : null;
+  const markets = new Set<'AE' | 'SA'>();
+  for (const row of rows) {
+    if (row.market === 'AE' || row.market === 'SA') markets.add(row.market);
+    else if (fallbackMarket) markets.add(fallbackMarket);
+  }
+  if (markets.size > 1) throw new Error('Relay page contains more than one ledger currency');
+  if (markets.size === 1) return [...markets][0];
+  return null;
+};
+
+const alignLedgerMarket = (
+  ledger: CaptureLedgerAdapter,
+  market: 'AE' | 'SA' | null,
+): void => {
+  if (!market || market === ledger.getState().marketId) return;
+  if (!ledger.setMarket || !ledger.setMarket(market)) {
+    throw new Error('Captured money does not match this ledger currency');
+  }
 };
 
 export const createCaptureExecutor = ({
@@ -134,6 +170,7 @@ export const createCaptureExecutor = ({
 
     const collected = await dependencies.collectRoutine(state);
     if (collected.needsSetup) return { kind: 'needs-setup' };
+    alignLedgerMarket(activeLedger, collected.detectedLaunchMarket);
     // Inbox/relay I/O can overlap a hand edit or another import. Build the
     // batch against the authoritative state after collection, not the state
     // used only to choose the scan watermark and parser overrides.
@@ -146,23 +183,63 @@ export const createCaptureExecutor = ({
       new Date(),
       collected.declined,
     );
+    const reviewCandidates = collected.reviewCandidates ?? [];
 
     if (!hasChanges(plan)) {
+      let reviewAlerts = 0;
+      if (reviewCandidates.length > 0) {
+        if (!activeLedger.stageReviewAlerts) {
+          throw new Error('Capture executor requires review staging for review candidates');
+        }
+        const receipt = activeLedger.stageReviewAlerts(reviewCandidates);
+        reviewAlerts = receipt.admitted;
+        await receipt.durable;
+      }
+      // A review-only Android scan still consumed the inbox up to newestTs.
+      // Persist that cursor after the sanitized tray is durable; otherwise it
+      // rereads the same bounded review window forever. Alerts older than the
+      // privacy cap are intentionally not retained. Relay rows use ACKs.
+      if (collected.source === 'sms' &&
+        plan.batch.lastScanTs > stateAtPlan.lastScanTs) {
+        const cursorReceipt = activeLedger.importBatch(plan.batch);
+        await cursorReceipt.durable;
+      }
+      // A parser-version reread is complete only after every admitted review
+      // item is encrypted. If staging failed, leaving the old version forces a
+      // safe historical retry instead of skipping those older alerts in-memory.
       activeLedger.markParserVersion();
       // A deduplicated relay row may only exist in current React state because
       // an earlier encrypted write failed. Flush before dropping its sealed copy.
-      if (collected.source === 'relay') await activeLedger.ensureDurable();
+      if (collected.source === 'relay' && reviewCandidates.length === 0) {
+        await activeLedger.ensureDurable();
+      }
       await collected.commit();
-      return { kind: 'up-to-date', source: collected.source, ...EMPTY_SUMMARY };
+      return {
+        kind: 'up-to-date',
+        source: collected.source,
+        ...EMPTY_SUMMARY,
+        reviewAlerts,
+      };
     }
 
+    let reviewAlerts = 0;
+    if (reviewCandidates.length > 0) {
+      if (!activeLedger.stageReviewAlerts) {
+        throw new Error('Capture executor requires review staging for review candidates');
+      }
+      // Review first, before the import advances the SMS watermark. If the
+      // later ledger write fails, a reread safely dedupes this tray item.
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      reviewAlerts = reviewReceipt.admitted;
+      await reviewReceipt.durable;
+    }
     const receipt = activeLedger.importBatch(plan.batch);
     await receipt.durable;
     await collected.commit();
     return {
       kind: 'imported',
       source: collected.source,
-      ...summary(plan, receipt.ids),
+      ...summary(plan, receipt.ids, reviewAlerts),
     };
   };
 
@@ -174,6 +251,7 @@ export const createCaptureExecutor = ({
     if (!cfg) return { kind: 'needs-setup' };
 
     const queued = await dependencies.sync(cfg);
+    alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     // Network collection can overlap a foreground import or an edit. Plan
     // against the authoritative ledger after that wait, not the snapshot that
     // happened to be current when the request started.
@@ -230,6 +308,7 @@ export const createCaptureExecutor = ({
     const cfg = await dependencies.getRelay();
     if (!cfg) return { kind: 'needs-setup' };
     const queued = await dependencies.sync(cfg);
+    alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     const shortcutRow = queued.parsed.find((row) => row.captureSource === 'shortcut');
     const proofObserved = queued.testReceived > 0 || shortcutRow !== undefined;
 

@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 9 August 2026_
+_Last updated: 11 August 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS.
 
@@ -25,22 +25,49 @@ before release.
   relay.
 - The ledger, accounts, budgets, bills, goals and settings live in encrypted
   app storage on the device. Wafra has no advertising or third-party analytics.
+- **Zero message access is always available:** leave Android SMS permission off
+  or leave iPhone automatic capture unconfigured and use manual entry/imports.
+- Wafra cannot sign in to a bank, reply to a message, approve a transaction or
+  move money. Automatic capture keeps only supported financial activity;
+  other message content is discarded before Wafra storage.
+
+## Message-access choices
+
+Android SMS access is optional. If the user keeps it off, Wafra cannot scan the
+SMS inbox at all; manual entry and user-initiated imports remain available. If
+the user enables automatic SMS history, Android necessarily gives the app
+permission to read message text on that phone. Wafra checks the text locally
+to decide whether it is supported financial activity. Other content is
+discarded before app storage and is never uploaded. The no-permission option
+remains available for users who prefer manual entry.
+
+On iPhone, leaving automatic capture unconfigured gives Wafra no Messages
+access. If the user enables Wafra Capture, Apple Shortcuts forwards alerts only
+from bank conversations the user selected. The encrypted relay parses the
+content, discards raw text immediately, and queues only a device-sealed
+structured transaction. Unsupported content is not logged, queued, returned,
+added to the ledger or used for analytics.
 
 ## Android bank-alert access
 
 **SMS (`READ_SMS`, `RECEIVE_SMS`).** If permission is granted, Wafra reads bank
 transaction alerts to extract an amount, merchant, date, card or account tail,
 direction and any quoted balance. Inbox scanning and parsing happen on the
-Android device.
+Android device. Wafra does not maintain a second raw-SMS delivery archive; the
+Android system inbox remains the source read during import.
 
 Messages that do not look financial are ignored. When the parser cannot
 confidently understand a bank format, Android may keep a short local excerpt so
 the user can review or report it. That excerpt is not uploaded automatically
 and can be deleted in Settings.
 
+Wafra does not request Android Accessibility access and does not use SMS to
+reply, enter codes, approve prompts or control another app.
+
 **Bank-app notifications (optional).** If notification access is enabled,
-Wafra applies the same local processing to bank-app notifications. This is off
-until the user enables it.
+Wafra places candidate bank-app alerts in a bounded, short-lived queue encrypted
+with Android Keystore. The app deletes each queued alert after durable local
+classification. This is off until the user enables it.
 
 ## iPhone automatic capture
 
@@ -124,12 +151,16 @@ store biometric templates.
   RevenueCat does not receive bank messages, ledger transactions or balances
   from Wafra.
 - **Forwarded bank email:** if the user creates a private forwarding address,
-  the relay parses the forwarded MIME, text, HTML and supported PDF attachments
+  the relay parses the forwarded MIME, text, HTML and supported PDF, CSV, or TSV attachments
   in memory. Raw email and attachments are not stored. Only structured rows,
   sealed independently to the user's devices, can enter the delivery queue.
 - **PDF statement import:** a user-selected PDF of up to 5 MiB and 100 pages is
   sent to the relay. PDF bytes and extracted text are discarded after parsing;
   only conservative, structured debit or credit rows are sealed and queued.
+- **CSV or TSV statement import:** a user-selected UTF-8 export of up to 1 MiB
+  and 200 rows is sent to the relay. The bytes are discarded after parsing;
+  only rows with supported named fields and explicit debit or credit direction
+  are sealed and queued. Rejected-row counts contain no statement text.
 - **Trusted devices and family:** an owner may invite up to eight devices to
   receive future captures. Each device has its own public key and credentials;
   the relay stores device labels and roles but cannot decrypt sealed rows.

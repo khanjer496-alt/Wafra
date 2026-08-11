@@ -5,8 +5,11 @@ export const INDIA_ME_ALERT_MARKET_PACKS = {
     market: 'IN', currencies: ['INR'], currencyAliases: { 'Rs.': ['INR'], Rs: ['INR'] },
     rails: ['upi', 'imps', 'neft', 'rtgs', 'nach', 'ecs', 'aeps', 'bbps', 'fastag'],
     transferTerms: ['fund transfer', 'transferred to', 'received from beneficiary'],
-    utilityTerms: ['electricity bill', 'water bill', 'gas bill', 'mobile bill'],
-    recurringTerms: ['upi autopay', 'auto debit'],
+    utilityTerms: [
+      'electricity bill', 'water bill', 'gas bill', 'mobile bill',
+      'बिजली बिल', 'पानी बिल', 'गैस बिल', 'मोबाइल बिल',
+    ],
+    recurringTerms: ['upi autopay', 'auto debit', 'यूपीआई ऑटोपे', 'ई-मैंडेट'],
   },
   QA: {
     market: 'QA', currencies: ['QAR'], currencyAliases: { 'ر.ق': ['QAR'] },

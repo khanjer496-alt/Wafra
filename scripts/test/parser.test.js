@@ -238,8 +238,22 @@ if (atm && atm.merchant === 'ATM withdrawal' && atm.type === 'expense') { pass++
 else { fail++; console.log('✗ ATM withdrawal titled correctly', JSON.stringify(atm && atm.merchant)); }
 
 const fee = parseSms('Your card ending 1234 has been charged AED 262.50 as annual fee.');
-if (fee && fee.merchant === 'Bank fee') { pass++; console.log('✓ bank fee titled correctly'); }
-else { fail++; console.log('✗ bank fee titled correctly', JSON.stringify(fee && fee.merchant)); }
+if (fee && fee.merchant === 'Annual card fee') { pass++; console.log('✓ annual card fee keeps its fixed-cost identity'); }
+else { fail++; console.log('✗ annual card fee keeps its fixed-cost identity', JSON.stringify(fee && fee.merchant)); }
+
+t('explicit annual credit-card fee keeps its subtype',
+  'Your credit card ending 1234 has been charged AED 262.50 as annual credit card fee.',
+  { merchant: 'Annual card fee', amountFils: 26250, category: 'other' });
+t('explicit monthly account fee keeps its subtype',
+  'Your account 9012 has been charged AED 25.00 as monthly account fee.',
+  { merchant: 'Account maintenance fee', amountFils: 2500, category: 'other' });
+
+t('an unlabelled year-first reference is not treated as the transaction date',
+  'Your card ending 1234 has been charged AED 25.00 at TEST STORE. Ref 2019-05-07 23:44',
+  { merchant: 'Test Store', amountFils: 2500, date: null });
+t('an impossible labelled Saudi date is not accepted',
+  'مشتريات نقاط البيع\nبطاقة: **4567;مدى\nمبلغ: 34.00 AED\nلدى: Some restaurant\nفي: 2019-02-31 23:44',
+  { merchant: 'Some Restaurant', amountFils: 3400, date: null });
 
 const dep = parseSms('AED 3,000.00 deposited into your account XX0002 via CDM.');
 if (dep && dep.type === 'income' && dep.merchant === 'Cash deposit') { pass++; console.log('✓ cash deposit titled correctly'); }
@@ -480,6 +494,39 @@ if (tt && tt.merchant === 'Bank transfer' && tt.transferHint === true && tt.type
     JSON.stringify(tt && { m: tt.merchant, t: tt.transferHint, ty: tt.type, a: tt.amountFils }));
 }
 
+ok('HSBC local TT control carries no invented FX provenance',
+  tt?.currency === 'AED' && tt.originalCurrency === undefined &&
+    tt.originalAmountMinor === undefined && tt.fxSource === undefined,
+  JSON.stringify(tt));
+
+t('HSBC foreign TT converts through the normal FX path and keeps provenance',
+  'From HSBC: 20MAR25 TT Payment to 041-339***-001 USD 100.00+ Your available balance is AED 946.48',
+  {
+    merchant: 'Bank transfer', amountFils: 36725, currency: 'AED', type: 'income',
+    transfer: true, originalCurrency: 'USD', originalAmountMinor: 10000, fxSource: 'fallback',
+  });
+
+t('HSBC foreign TT skips a balance decoy before the transferred amount',
+  'From HSBC: 20MAR25 Available balance USD 900.00. TT Payment to 041-339***-001 USD 100.00+',
+  {
+    merchant: 'Bank transfer', amountFils: 36725, currency: 'AED', type: 'income',
+    transfer: true, originalCurrency: 'USD', originalAmountMinor: 10000, fxSource: 'fallback',
+  });
+
+t('HSBC TT binds money to the transfer clause instead of an earlier fee',
+  'Fee USD 25.00. From HSBC: 20MAR25 TT Payment to 041-339***-001 USD 100.00+',
+  {
+    merchant: 'Bank transfer', amountFils: 36725, currency: 'AED', type: 'income',
+    transfer: true, originalCurrency: 'USD', originalAmountMinor: 10000, fxSource: 'fallback',
+  });
+
+t('HSBC TT direction follows its own sign instead of a later positive balance',
+  'From HSBC: 20MAR25 TT Payment to 041-339***-001 USD 100.00- Your available balance is AED 946.48+',
+  {
+    merchant: 'Bank transfer', amountFils: 36725, currency: 'AED', type: 'expense',
+    transfer: true, originalCurrency: 'USD', originalAmountMinor: 10000, fxSource: 'fallback',
+  });
+
 t('HSBC DDR debit names the receiving bank',
   'From HSBC: Account 41 -339***-1 was debited for AED 1108.00 on 4560902 for DUBAI ISLAMIC BANK PJSC . Please safe keep this unique DDR Reference No. 8883070.',
   { merchant: 'Dubai Islamic Bank', amountFils: 110800 });
@@ -623,7 +670,7 @@ t('an overlimit fee that will apply has not been charged',
 // CONTROL: the same fee, actually charged, is a real expense.
 t('an overlimit fee that HAS been charged is a real expense',
   'An overlimit fee of AED 288.75 has been charged to your Credit Card XXX0000. Avl Bal AED 1,200.00.',
-  { amountFils: 28875 });
+  { amountFils: 28875, merchant: 'Overlimit fee' });
 // CONTROL: a quoted available balance is still settlement evidence — the
 // percentage lookbehind must not have taken that away.
 t('a quoted available balance still proves the money moved',
@@ -1517,7 +1564,7 @@ t(
 t(
   'an insufficient-balance FEE is money that actually left the account',
   'AED 25.00 has been debited from your account 1234 as an insufficient balance fee. Avl Bal AED 400.00',
-  { type: 'expense', amountFils: 2500 },
+  { type: 'expense', amountFils: 2500, merchant: 'Insufficient balance fee' },
 );
 // ══ Money that is not a purchase, and purchases that are not money ══
 // Every one of these was verified against the compiled parser before the fix.

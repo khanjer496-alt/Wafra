@@ -88,6 +88,7 @@ ok('NaN is not announced', !announce(row({ amountFils: NaN })));
 // Announcing them tells the user they just spent their way through a quarter.
 ok('an emailed statement row is not announced', !announce(row({ captureSource: 'email' })));
 ok('a PDF statement row is not announced', !announce(row({ captureSource: 'pdf' })));
+ok('a CSV statement row is not announced', !announce(row({ captureSource: 'csv' })));
 // A setup probe never carries a capture source, so the capture test cannot
 // post a banner for a transaction that was never real.
 ok('a row with no capture source is not announced', !announce(row({ captureSource: undefined })));

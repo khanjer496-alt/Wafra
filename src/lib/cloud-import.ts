@@ -1,14 +1,16 @@
-/** Native transport for forwarded-email and PDF statement supplements. */
+/** Native transport for forwarded-email and statement-file supplements. */
 import { fetch as expoFetch } from 'expo/fetch';
 import { File } from 'expo-file-system';
 
 import {
   CloudImportError,
+  parseCsvImportAccepted,
   parseImportCapabilities,
   parseEmailForwardingCredential,
   parsePdfImportAccepted,
   pdfImportError,
   type ImportCapabilities,
+  type CsvImportAccepted,
   type PdfImportAccepted,
   type EmailForwardingCredential,
 } from '@/lib/cloud-import-contract';
@@ -16,10 +18,10 @@ import type { RelayConfig } from '@/lib/relay';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
-export interface PickedPdf {
+export interface PickedStatement {
   uri: string;
   name: string;
-  mimeType?: string;
+  mimeType?: string | null;
   size?: number;
 }
 
@@ -96,7 +98,7 @@ export async function revokeEmailForwardingAddress(cfg: RelayConfig): Promise<vo
  */
 export async function uploadPdfStatement(
   cfg: RelayConfig,
-  picked: PickedPdf,
+  picked: PickedStatement,
   capabilities: ImportCapabilities,
 ): Promise<PdfImportAccepted> {
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
@@ -116,6 +118,40 @@ export async function uploadPdfStatement(
   const body = await safeJson(response);
   if (!response.ok) throw pdfImportError(response.status, body);
   const accepted = parsePdfImportAccepted(body);
+  if (!accepted) throw new CloudImportError('unexpected', response.status);
+  return accepted;
+}
+
+/** Upload a user-selected delimited statement without base64 or multipart encoding. */
+export async function uploadCsvStatement(
+  cfg: RelayConfig,
+  picked: PickedStatement,
+  capabilities: ImportCapabilities,
+): Promise<CsvImportAccepted> {
+  if (!capabilities.csv.enabled) throw new CloudImportError('service');
+  const file = new File(picked.uri);
+  if (!file.exists) throw new CloudImportError('invalid_csv');
+  const size = picked.size ?? file.size;
+  if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_csv');
+  if (size > capabilities.csv.maxBytes) throw new CloudImportError('too_large', 413);
+
+  const extensionType = /\.tsv$/i.test(picked.name)
+    ? 'text/tab-separated-values'
+    : 'text/csv';
+  const requestedType = picked.mimeType?.split(';', 1)[0].trim().toLowerCase();
+  const contentType = requestedType && capabilities.csv.accepts.includes(requestedType)
+    ? requestedType
+    : extensionType;
+  if (!capabilities.csv.accepts.includes(contentType)) throw new CloudImportError('service');
+
+  const response = await relayFetch(`${cfg.baseUrl}/v1/import/csv`, cfg.adminToken, {
+    method: 'POST',
+    headers: { 'content-type': contentType },
+    body: file,
+  });
+  const body = await safeJson(response);
+  if (!response.ok) throw pdfImportError(response.status, body);
+  const accepted = parseCsvImportAccepted(body);
   if (!accepted) throw new CloudImportError('unexpected', response.status);
   return accepted;
 }

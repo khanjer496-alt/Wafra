@@ -1,12 +1,11 @@
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
-  type AccessibilityRole,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,29 +23,13 @@ import {
   requestSmsPermission,
   scanInbox,
 } from '@/lib/auto-import';
-import { formatAmount } from '@/lib/format';
 import { committed, tapped } from '@/lib/haptics';
-import { getLanguage, t, tf, type StringKey } from '@/lib/i18n';
-import {
-  allOnboardingGoalTitles,
-  BUDGET_PRESETS,
-  buildOnboardingPlan,
-  DEFAULT_ONBOARDING_ANSWERS,
-  GOAL_PRESETS,
-  type OnboardingAnswers,
-  type OnboardingBudgetId,
-  type OnboardingGoalId,
-  type OnboardingMarketId,
-} from '@/lib/onboarding';
+import { t, tf, type StringKey } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
 
 type Step =
   | 'welcome'
-  | 'market'
-  | 'goals'
-  | 'budget'
-  | 'month'
   | 'capture'
   | 'scanning'
   | 'complete';
@@ -54,7 +37,7 @@ type Step =
 // 'month' is deliberately absent. Asking a salary day up front is a question
 // the app can answer for itself later, and it sat between the user and the
 // thing they came for. The setting still exists in state with its default.
-const QUESTION_STEPS: readonly Step[] = ['market', 'goals', 'budget', 'capture'];
+const QUESTION_STEPS: readonly Step[] = ['capture'];
 
 /** Onboarding is night mode regardless of the OS theme: the first screen sets
  * the tone, and the mark is at its strongest on charcoal. */
@@ -97,20 +80,6 @@ function points(): [IconName, string, string][] {
   ];
 }
 
-function marketCopy(id: OnboardingMarketId) {
-  return id === 'AE'
-    ? {
-        title: t('onboardMarketUae'),
-        detail: t('onboardMarketUaeDetail'),
-        flag: '🇦🇪',
-      }
-    : {
-        title: t('onboardMarketSaudi'),
-        detail: t('onboardMarketSaudiDetail'),
-        flag: '🇸🇦',
-      };
-}
-
 function captureCopy(): { title: StringKey; body: StringKey } {
   if (Platform.OS === 'ios') {
     return { title: 'onboardCaptureTitleIos', body: 'onboardCaptureBodyIos' };
@@ -119,73 +88,6 @@ function captureCopy(): { title: StringKey; body: StringKey } {
     return { title: 'onboardCaptureTitleAndroid', body: 'onboardCaptureBodyAndroid' };
   }
   return { title: 'onboardCaptureTitleWeb', body: 'onboardCaptureBodyWeb' };
-}
-
-function SelectionRow({
-  title,
-  detail,
-  icon,
-  leading,
-  selected,
-  onPress,
-  role = 'radio',
-  hint,
-}: {
-  title: string;
-  detail: string;
-  icon?: IconName;
-  leading?: string;
-  selected: boolean;
-  onPress: () => void;
-  role?: AccessibilityRole;
-  hint?: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole={role}
-      accessibilityLabel={`${title}. ${detail}`}
-      accessibilityHint={hint}
-      accessibilityState={role === 'checkbox' ? { checked: selected } : { selected }}
-      onPress={() => {
-        tapped();
-        onPress();
-      }}
-      style={({ pressed }) => [
-        styles.choice,
-        {
-          backgroundColor: selected ? night.primarySoft : night.backgroundElement,
-          borderColor: selected ? night.primary : night.cardBorder,
-          opacity: pressed ? 0.82 : 1,
-          transform: [{ scale: pressed ? 0.99 : 1 }],
-        },
-      ]}>
-      <View
-        style={[
-          styles.choiceIcon,
-          { backgroundColor: selected ? night.primary : night.backgroundSelected },
-        ]}>
-        {icon ? (
-          <Icon name={icon} size={19} color={selected ? night.onPrimary : night.textSecondary} />
-        ) : (
-          <ThemedText style={styles.flag}>{leading}</ThemedText>
-        )}
-      </View>
-      <View style={styles.choiceCopy}>
-        <ThemedText style={styles.choiceTitle}>{title}</ThemedText>
-        <ThemedText style={styles.choiceDetail}>{detail}</ThemedText>
-      </View>
-      <View
-        style={[
-          styles.selectionMark,
-          {
-            backgroundColor: selected ? night.primary : 'transparent',
-            borderColor: selected ? night.primary : night.cardBorderStrong,
-          },
-        ]}>
-        {selected && <Icon name="check" size={13} color={night.onPrimary} strokeWidth={2.2} />}
-      </View>
-    </Pressable>
-  );
 }
 
 function ProgressHeader({ step, onBack }: { step: Step; onBack: () => void }) {
@@ -249,32 +151,16 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     storageRecoveryState,
     hydrationFailed,
     importBatch,
-    setOnboarded,
-    loadDemoData,
+    stageReviewAlerts,
     setMarket,
-    setMonthStartDay,
-    upsertBudget,
-    addGoal,
-    deleteGoal,
+    setOnboarded,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
-  const [answers, setAnswers] = useState<OnboardingAnswers>(() => ({
-    ...DEFAULT_ONBOARDING_ANSWERS,
-    marketId: state.marketId === 'SA' ? 'SA' : 'AE',
-  }));
   const [progress, setProgress] = useState({ scanned: 0, found: 0 });
   const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
   const [smsDenied, setSmsDenied] = useState(false);
-  const [goalLimitAnnounced, setGoalLimitAnnounced] = useState(false);
 
   const activeStep: Step = params.onboarding === 'complete' ? 'complete' : step;
-  const plan = useMemo(() => buildOnboardingPlan(answers, getLanguage()), [answers]);
-  const budgetPreset = BUDGET_PRESETS.find((preset) => preset.id === answers.budgetId)!;
-  const budgetValues = Object.values(budgetPreset.limitsByMarket[answers.marketId]).filter(
-    (value): value is number => typeof value === 'number',
-  );
-  const budgetTotal = budgetValues.reduce((sum, value) => sum + value, 0);
-  const currency = answers.marketId === 'SA' ? 'SAR' : 'AED';
   const capture = captureCopy();
 
   /**
@@ -295,44 +181,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // The guided iOS setup is itself onboarding. Do not paint this gate over it.
   const showOverlay =
     !showRecovery && state.hydrated && !state.onboarded && pathname !== '/ios-setup';
-  const notifAvailable = Platform.OS === 'android' && NotificationReader != null;
-
-  const updateAnswer = <K extends keyof OnboardingAnswers>(
-    key: K,
-    value: OnboardingAnswers[K],
-  ) => setAnswers((current) => ({ ...current, [key]: value }));
-
-  const chooseGoal = (id: OnboardingGoalId) => {
-    setGoalLimitAnnounced(false);
-    setAnswers((current) => {
-      if (current.goalIds.includes(id)) {
-        const remaining = current.goalIds.filter((goalId) => goalId !== id);
-        return { ...current, goalIds: remaining };
-      }
-      if (current.goalIds.length >= 2) {
-        setGoalLimitAnnounced(true);
-        return current;
-      }
-      return { ...current, goalIds: [...current.goalIds, id] };
-    });
-  };
-
-  /** Reconcile preset-owned rows so going back and changing an answer never
-   * duplicates goals. Budgets are naturally idempotent because category is
-   * their key in the store. */
-  const savePlan = () => {
-    const presetTitles = new Set(allOnboardingGoalTitles());
-    state.goals.filter((goal) => presetTitles.has(goal.title)).forEach((goal) => deleteGoal(goal.id));
-    setMarket(plan.answers.marketId);
-    setMonthStartDay(plan.answers.monthStartDay);
-    plan.budgets.forEach(upsertBudget);
-    plan.goals.forEach(addGoal);
-  };
-
-  const finishQuestionnaire = () => {
-    savePlan();
-    setStep('capture');
-  };
+  const notifAvailable = Platform.OS === 'android' &&
+    NotificationReader?.isAvailable?.() === true;
 
   const startScan = async () => {
     const granted = await requestSmsPermission();
@@ -343,11 +193,27 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
     setStep('scanning');
     try {
-      const { parsed, newestTs } = await scanInbox(0, {}, (scanned, found) =>
-        setProgress({ scanned, found }),
+      const {
+        parsed,
+        reviewCandidates,
+        newestTs,
+        detectedLaunchMarket,
+        commit,
+      } = await scanInbox(0, {}, (scanned, found) => setProgress({ scanned, found }));
+      if (detectedLaunchMarket && detectedLaunchMarket !== state.marketId) {
+        if (!setMarket(detectedLaunchMarket)) {
+          throw new Error('market_mismatch');
+        }
+      }
+      const reviewReceipt = stageReviewAlerts(reviewCandidates);
+      await reviewReceipt.durable;
+      const importPlan = buildImportPlan(
+        parsed,
+        detectedLaunchMarket ? { ...state, marketId: detectedLaunchMarket } : state,
+        newestTs,
       );
-      const importPlan = buildImportPlan(parsed, state, newestTs);
-      importBatch(importPlan.batch);
+      await importBatch(importPlan.batch).durable;
+      await commit();
       setResult({ tx: importPlan.txCount, accounts: importPlan.newAccountCount });
       setStep('complete');
       committed();
@@ -460,16 +326,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               <View style={styles.actions}>
                 <Button
                   label={t('onboardPersonalizeCta')}
-                  onPress={() => setStep('market')}
+                  onPress={() => setStep('capture')}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
-                />
-                <Button
-                  variant="ghost"
-                  label={t('startWithSample')}
-                  onPress={loadDemoData}
-                  labelColor={night.text}
-                  style={styles.ghost}
                 />
               </View>
             </Animated.ScrollView>
@@ -481,121 +340,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
                 <Animated.View key={activeStep} entering={entering} style={styles.questionBody}>
-                  {activeStep === 'market' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardMarketTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>{t('onboardMarketBody')}</ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {(['AE', 'SA'] as const).map((id) => {
-                          const copy = marketCopy(id);
-                          return (
-                            <SelectionRow
-                              key={id}
-                              title={copy.title}
-                              detail={copy.detail}
-                              leading={copy.flag}
-                              selected={answers.marketId === id}
-                              onPress={() => updateAnswer('marketId', id)}
-                            />
-                          );
-                        })}
-                      </View>
-                      <Button
-                        label={t('continueWord')}
-                        onPress={() => setStep('goals')}
-                        labelColor={night.onPrimary}
-                        style={styles.primaryButton}
-                      />
-                    </>
-                  )}
-
-                  {activeStep === 'goals' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardGoalsTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>{t('onboardGoalsBody')}</ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {GOAL_PRESETS.map((preset) => (
-                          <SelectionRow
-                            key={preset.id}
-                            title={t(preset.titleKey)}
-                            detail={t(preset.detailKey)}
-                            icon={preset.icon}
-                            role="checkbox"
-                            selected={answers.goalIds.includes(preset.id)}
-                            hint={
-                              !answers.goalIds.includes(preset.id) && answers.goalIds.length >= 2
-                                ? t('onboardGoalMax')
-                                : undefined
-                            }
-                            onPress={() => chooseGoal(preset.id)}
-                          />
-                        ))}
-                      </View>
-                      {goalLimitAnnounced && (
-                        <ThemedText
-                          accessibilityLiveRegion="polite"
-                          style={[styles.inlineNote, { color: night.warning }]}>
-                          {t('onboardGoalMax')}
-                        </ThemedText>
-                      )}
-                      <Button
-                        label={t('continueWord')}
-                        disabled={answers.goalIds.length === 0}
-                        onPress={() => setStep('budget')}
-                        labelColor={night.onPrimary}
-                        style={styles.primaryButton}
-                      />
-                    </>
-                  )}
-
-                  {activeStep === 'budget' && (
-                    <>
-                      <View style={styles.questionTop}>
-                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardBudgetTitle')}
-                        </ThemedText>
-                        <ThemedText style={styles.questionBodyCopy}>{t('onboardBudgetBody')}</ThemedText>
-                      </View>
-                      <View style={styles.choiceList}>
-                        {BUDGET_PRESETS.map((preset) => {
-                          const values = Object.values(preset.limitsByMarket[answers.marketId]).filter(
-                            (value): value is number => typeof value === 'number',
-                          );
-                          const total = values.reduce((sum, value) => sum + value, 0);
-                          return (
-                            <SelectionRow
-                              key={preset.id}
-                              title={t(preset.titleKey)}
-                              detail={`${t(preset.detailKey)} · ${tf('onboardBudgetPreview', {
-                                count: values.length,
-                                amount: `${currency} ${formatAmount(total, { decimals: false })}`,
-                              })}`}
-                              icon="wallet"
-                              selected={answers.budgetId === preset.id}
-                              onPress={() =>
-                                updateAnswer('budgetId', preset.id as OnboardingBudgetId)
-                              }
-                            />
-                          );
-                        })}
-                      </View>
-                      <Button
-                        label={t('continueWord')}
-                        onPress={finishQuestionnaire}
-                        labelColor={night.onPrimary}
-                        style={styles.primaryButton}
-                      />
-                    </>
-                  )}
-
                   {activeStep === 'capture' && (
                     <>
                       <View style={styles.captureHero}>
@@ -611,24 +355,16 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
                       </View>
-                      <View style={styles.planStrip}>
-                        <View style={styles.planMetric}>
-                          <ThemedText style={styles.planValue} tabular>{plan.goals.length}</ThemedText>
-                          <ThemedText style={styles.planLabel}>{t('onboardSummaryGoals')}</ThemedText>
-                        </View>
-                        <View style={styles.planDivider} />
-                        <View style={styles.planMetric}>
-                          <ThemedText style={styles.planValue} tabular>{plan.budgets.length}</ThemedText>
-                          <ThemedText style={styles.planLabel}>{t('onboardSummaryBudgets')}</ThemedText>
-                        </View>
-                        <View style={styles.planDivider} />
-                        <View style={styles.planMetric}>
-                          <ThemedText style={styles.planValue} tabular>
-                            {currency} {formatAmount(budgetTotal, { decimals: false })}
+                      {Platform.OS !== 'web' && (
+                        <View style={styles.capturePrivacy}>
+                          <Icon name="lock" size={17} color={night.textSecondary} />
+                          <ThemedText style={styles.capturePrivacyText}>
+                            {t(Platform.OS === 'ios'
+                              ? 'onboardCapturePrivacyIos'
+                              : 'onboardCapturePrivacyAndroid')}
                           </ThemedText>
-                          <ThemedText style={styles.planLabel}>{t(budgetPreset.titleKey)}</ThemedText>
                         </View>
-                      </View>
+                      )}
                       <View style={styles.captureActions}>
                         <Button
                           label={
@@ -644,8 +380,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         />
                         {Platform.OS !== 'web' && (
                           <Button
-                            variant="ghost"
-                            label={t('onboardCaptureSkip')}
+                            variant="outline"
+                            label={t(Platform.OS === 'android'
+                              ? 'onboardCaptureNoSms'
+                              : 'iosContinueManual')}
                             onPress={() => setStep('complete')}
                             labelColor={night.text}
                             style={styles.ghost}
@@ -688,12 +426,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           {t('onboardCompleteTitle')}
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>
-                          {tf('onboardCompleteBody', {
-                            goals: plan.goals.length,
-                            s: plan.goals.length === 1 ? '' : 's',
-                            budgets: plan.budgets.length,
-                            day: plan.answers.monthStartDay,
-                          })}
+                          {t('onboardCompleteBodyAutomatic')}
                         </ThemedText>
                         {smsDenied && (
                           <ThemedText
@@ -717,30 +450,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             })}
                           </ThemedText>
                         )}
-                      </View>
-
-                      <View style={styles.summaryList}>
-                        <View style={styles.summaryRow}>
-                          <Icon name="target" size={19} color={night.primary} />
-                          <ThemedText style={styles.summaryTitle}>{t('onboardSummaryGoals')}</ThemedText>
-                          <ThemedText style={styles.summaryValue} tabular>
-                            {tf('onboardSummaryActive', { count: plan.goals.length })}
-                          </ThemedText>
-                        </View>
-                        <View style={styles.summaryRow}>
-                          <Icon name="wallet" size={19} color={night.primary} />
-                          <ThemedText style={styles.summaryTitle}>{t('onboardSummaryBudgets')}</ThemedText>
-                          <ThemedText style={styles.summaryValue} tabular>
-                            {tf('onboardSummaryActive', { count: plan.budgets.length })}
-                          </ThemedText>
-                        </View>
-                        <View style={styles.summaryRow}>
-                          <Icon name="calendar" size={19} color={night.primary} />
-                          <ThemedText style={styles.summaryTitle}>{t('onboardSummaryMonth')}</ThemedText>
-                          <ThemedText style={styles.summaryValue} tabular>
-                            {tf('onboardDayNumber', { day: plan.answers.monthStartDay })}
-                          </ThemedText>
-                        </View>
                       </View>
 
                       <View style={styles.captureActions}>
@@ -831,7 +540,6 @@ const styles = StyleSheet.create({
   progressSegment: { flex: 1, height: 3, borderRadius: 2 },
   scrollContent: { flexGrow: 1, paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four },
   questionBody: { flex: 1, paddingTop: Spacing.five },
-  questionTop: { gap: Spacing.two, marginBottom: Spacing.four },
   questionTitle: {
     fontFamily: Fonts.sansSemi,
     fontSize: 29,
@@ -840,36 +548,6 @@ const styles = StyleSheet.create({
     color: night.text,
   },
   questionBodyCopy: { color: night.textSecondary, fontSize: 14, lineHeight: 22 },
-  choiceList: { gap: Spacing.two + 2 },
-  choice: {
-    minHeight: 76,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderWidth: 1,
-    borderRadius: Radius.control,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three - 2,
-  },
-  choiceIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  flag: { fontSize: 20, lineHeight: 25 },
-  choiceCopy: { flex: 1, minWidth: 0, gap: 2 },
-  choiceTitle: { color: night.text, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 20 },
-  choiceDetail: { color: night.textTertiary, fontSize: 11.5, lineHeight: 17 },
-  selectionMark: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   inlineNote: { marginTop: Spacing.three, fontSize: 12, lineHeight: 18 },
   primaryButton: { marginTop: Spacing.four, backgroundColor: night.primary },
   captureHero: { gap: Spacing.three, alignItems: 'flex-start' },
@@ -881,18 +559,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  planStrip: {
-    marginTop: Spacing.five,
-    flexDirection: 'row',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: night.cardBorder,
-    paddingVertical: Spacing.three,
-  },
-  planMetric: { flex: 1, alignItems: 'center', gap: 4, paddingHorizontal: 3 },
-  planValue: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 13, textAlign: 'center' },
-  planLabel: { color: night.textTertiary, fontSize: 10, lineHeight: 14, textAlign: 'center' },
-  planDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.cardBorder },
   captureActions: { marginTop: 'auto', paddingTop: Spacing.five, gap: Spacing.two },
   scanning: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   completeHero: { gap: Spacing.three, alignItems: 'flex-start' },
@@ -904,21 +570,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  summaryList: {
-    marginTop: Spacing.five,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: night.cardBorder,
-  },
-  summaryRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: night.cardBorder,
-  },
-  summaryTitle: { flex: 1, color: night.text, fontFamily: Fonts.sansMedium, fontSize: 13 },
-  summaryValue: { color: night.textSecondary, fontFamily: Fonts.monoMedium, fontSize: 11 },
   notifNote: { color: night.textSecondary, fontSize: 12, lineHeight: 18 },
+  capturePrivacy: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: night.cardBorder,
+    borderRadius: Radius.md,
+    padding: Spacing.three,
+  },
+  capturePrivacyText: {
+    flex: 1,
+    color: night.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
 });

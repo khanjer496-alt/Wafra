@@ -1,7 +1,10 @@
 const { isDeepStrictEqual } = require('util');
 
 const { parseSms } = require('./build/sms-parser');
-const corpus = require('./fixtures/uae-bank-formats');
+const { setActiveMarket } = require('./build/markets');
+const uaeCorpus = require('./fixtures/uae-bank-formats');
+const saudiCorpus = require('./fixtures/saudi-bank-formats');
+const corpus = [...uaeCorpus, ...saudiCorpus];
 
 let pass = 0;
 let fail = 0;
@@ -18,7 +21,7 @@ function ok(name, condition, detail) {
 const REQUIRED_BANKS = ['ENBD', 'ADCB', 'FAB', 'Mashreq', 'ADIB', 'RAKBANK', 'Liv', 'Wio'];
 const EVIDENCE = new Set(['repository-redacted', 'public-redacted', 'synthetic-grammar-probe']);
 
-const represented = new Set(corpus.map((row) => row.bank));
+const represented = new Set(uaeCorpus.map((row) => row.bank));
 ok(
   'all eight product banks have an executable fixture',
   REQUIRED_BANKS.every((bank) => represented.has(bank)),
@@ -33,9 +36,22 @@ ok(
   'synthetic wording is visibly quarantined',
   corpus.filter((row) => row.evidence === 'synthetic-grammar-probe').every((row) => row.bank === 'RAKBANK'),
 );
+ok(
+  'Saudi acceptance rows are public/redacted and explicitly market-scoped',
+  saudiCorpus.length > 0 && saudiCorpus.every(
+    (row) => row.market === 'SA' && row.evidence === 'public-redacted',
+  ),
+);
+ok(
+  'every UAE acceptance row is explicitly market-scoped',
+  uaeCorpus.length > 0 && uaeCorpus.every((row) => row.market === 'AE'),
+);
 
 for (const row of corpus) {
+  const selected = setActiveMarket(row.market);
+  ok(`${row.bank}/${row.id}: selects ${row.market} market`, selected === true);
   const parsed = parseSms(row.body);
+  setActiveMarket('AE');
   ok(`${row.bank}/${row.id}: parses`, parsed !== null);
   if (!parsed) continue;
 

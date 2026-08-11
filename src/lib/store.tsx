@@ -21,6 +21,7 @@ import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
 import {
+  canSelectMarket,
   detectMarketId,
   marketCurrencyCode,
   setActiveMarket,
@@ -48,6 +49,20 @@ import {
   LedgerResetError,
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
+import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney } from '@/lib/ledger-money';
+import {
+  planReviewPromotion,
+  type PromoteReviewAlertInput,
+  type ReviewPromotionFailure,
+} from '@/lib/review-promotion';
+import {
+  admitPreparedReviewAlert,
+  emptyAlertReviewTray,
+  normalizeAlertReviewTray,
+  resolveReviewAlert as resolveAlertReviewItem,
+  type ReviewAlert,
+  type ReviewTombstone,
+} from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
@@ -86,6 +101,16 @@ export class ClearAllError extends Error {
   }
 }
 
+export class ReviewPromotionError extends Error {
+  readonly reason: ReviewPromotionFailure;
+
+  constructor(reason: ReviewPromotionFailure) {
+    super(`Review alert could not be added: ${reason}`);
+    this.name = 'ReviewPromotionError';
+    this.reason = reason;
+  }
+}
+
 export type StorageRecoveryState =
   | 'preserved'
   | 'erased-initialize'
@@ -96,6 +121,8 @@ const STORAGE_KEY = 'wafra/state/v1';
 
 const EMPTY_STATE: AppState = {
   hydrated: false,
+  ledgerMoney: null,
+  reviewTray: emptyAlertReviewTray(),
   accounts: [],
   transactions: [],
   budgets: [],
@@ -183,6 +210,8 @@ const PERSISTED_INCOME_ORIGINATOR_RE =
 export function migratePersistedState(
   parsed: Partial<Omit<AppState, 'hydrated'>>,
 ): Partial<Omit<AppState, 'hydrated'>> {
+  parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
+  parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -488,9 +517,10 @@ export function parseBackupForRestore(
   json: string,
 ): Partial<Omit<AppState, 'hydrated'>> | null {
   try {
-    const parsed = JSON.parse(json) as { app?: unknown; data?: unknown };
+    const parsed = JSON.parse(json) as { app?: unknown; version?: unknown; data?: unknown };
     if (
       parsed.app !== 'wafra' ||
+      (parsed.version !== undefined && parsed.version !== 1) ||
       typeof parsed.data !== 'object' ||
       parsed.data === null ||
       !('transactions' in parsed.data) ||
@@ -549,6 +579,13 @@ type Action =
   | { type: 'setPro'; pro: boolean }
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; language: string }
+  | { type: 'setReviewTray'; reviewTray: AppState['reviewTray'] }
+  | {
+      type: 'promoteReviewAlert';
+      transaction: Transaction;
+      reviewTray: AppState['reviewTray'];
+      ledgerMoney: NonNullable<AppState['ledgerMoney']>;
+    }
   | { type: 'markParserVersion' }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -559,29 +596,11 @@ type Action =
 /**
  * Money already recorded, as opposed to plans that can be retyped.
  *
- * Transactions, accounts, bills and card dues all store fils that came out of
- * a real balance, statement or charge; relabelling them in another currency is
- * the defect this guards. Budgets and goals are deliberately NOT here: they
- * are targets the user set, the onboarding presets are already chosen per
- * market (`limitsByMarket`), and counting them would refuse a country change
- * to someone still stepping back and forth through onboarding, who has no
- * recorded money at all.
+ * Transactions, accounts, bills and card dues store observed money. Budgets
+ * and goals store planned money. Both are denominated facts: changing the
+ * currency label without converting or resetting their integer minor units is
+ * still corruption, even before the first bank transaction arrives.
  */
-function ledgerHoldsMoney(s: AppState): boolean {
-  const accountHoldsMoney = s.accounts.some(
-    (account) =>
-      account.openingFils !== 0 ||
-      (typeof account.snapshotFils === 'number' && account.snapshotFils !== 0) ||
-      (typeof account.creditLimitFils === 'number' && account.creditLimitFils !== 0),
-  );
-  return (
-    accountHoldsMoney ||
-    s.transactions.length > 0 ||
-    s.bills.length > 0 ||
-    s.cardDues.length > 0
-  );
-}
-
 /**
  * Pin (or release) the ledger's accounting currency from the state that now
  * exists — see `ledgerCurrency` in markets.ts for why the pin exists at all.
@@ -592,10 +611,14 @@ function ledgerHoldsMoney(s: AppState): boolean {
  * release or re-pin it on the same tick, with no field to migrate.
  */
 function syncLedgerCurrency(next: AppState): AppState {
-  setLedgerCurrency(
-    next.marketId && ledgerHoldsMoney(next) ? marketCurrencyCode(next.marketId) : null,
-  );
-  return next;
+  if (!ledgerStateHasMoney(next)) {
+    setLedgerCurrency(null);
+    return next.ledgerMoney === null ? next : { ...next, ledgerMoney: null };
+  }
+  const spec = next.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(next.marketId));
+  if (!spec) throw new Error('Ledger currency is not supported');
+  setLedgerCurrency(spec.currency, spec.exponent);
+  return next.ledgerMoney === spec ? next : { ...next, ledgerMoney: spec };
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -668,6 +691,15 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'setUiLanguage':
       setLanguage(action.language === 'ar' ? 'ar' : 'en');
       return { ...state, language: action.language };
+    case 'setReviewTray':
+      return { ...state, reviewTray: action.reviewTray };
+    case 'promoteReviewAlert':
+      return {
+        ...state,
+        ledgerMoney: action.ledgerMoney,
+        reviewTray: action.reviewTray,
+        transactions: sortTxs([action.transaction, ...state.transactions]),
+      };
     case 'setThemePreference': {
       // Applied here as well as on hydrate, so the palette turns over on the
       // same tick the setting is written rather than on the next launch.
@@ -993,6 +1025,9 @@ interface StoreValue {
    * rows; relay callers must await it before acknowledging the server queue.
    */
   importBatch: (input: ImportBatchInput) => ImportReceipt;
+  stageReviewAlerts: (items: ReviewAlert[]) => { admitted: number; durable: Promise<void> };
+  dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
+  promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
    * Flush the current authoritative snapshot to SQLCipher. Relay callers use
    * this before acknowledging a row that deduped against in-memory state.
@@ -1027,7 +1062,7 @@ interface StoreValue {
   setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
-  setMarket: (id: string) => void;
+  setMarket: (id: string) => boolean;
   setUiLanguage: (language: string) => void;
   setOnboarded: () => void;
   exportBackup: () => string;
@@ -1231,6 +1266,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return true;
     } catch (error) {
       if (hydrationRun.current !== run) return false;
+      persistence.block();
       /**
        * A storage failure is NOT a first run, and this is the line that used
        * to say it was.
@@ -1458,6 +1494,73 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Encrypted ledger write failed');
   }, [persist]);
 
+  const stageReviewAlerts = useCallback((items: ReviewAlert[]) => {
+    if (!authoritativeState.current.hydrated || items.length === 0) {
+      return { admitted: 0, durable: ensureDurable() };
+    }
+    let reviewTray = authoritativeState.current.reviewTray;
+    let admitted = 0;
+    const now = Date.now();
+    for (const item of items) {
+      const result = admitPreparedReviewAlert(reviewTray, item, now);
+      reviewTray = result.state;
+      if (result.outcome === 'admitted') admitted += 1;
+    }
+    if (admitted === 0) return { admitted, durable: ensureDurable() };
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setReviewTray', reviewTray });
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('Encrypted review-tray write failed');
+    });
+    return { admitted, durable };
+  }, [dispatch, ensureDurable, persist]);
+
+  const dismissReviewAlert = useCallback(async (
+    id: string,
+    outcome: ReviewTombstone['outcome'],
+  ): Promise<void> => {
+    const reviewTray = resolveAlertReviewItem(
+      authoritativeState.current.reviewTray,
+      id,
+      outcome,
+      Date.now(),
+    );
+    const next = dispatch({ type: 'setReviewTray', reviewTray });
+    if (!await persist(next)) throw new Error('Encrypted review dismissal write failed');
+  }, [dispatch, persist]);
+
+  const promoteReviewAlert = useCallback(async (
+    input: PromoteReviewAlertInput,
+  ): Promise<'added' | 'duplicate'> => {
+    if (!authoritativeState.current.hydrated) {
+      throw new ReviewPromotionError('not-found');
+    }
+    const plan = planReviewPromotion(
+      authoritativeState.current,
+      input,
+      makeId('tx'),
+      Date.now(),
+    );
+    if (plan.outcome === 'refused') throw new ReviewPromotionError(plan.reason);
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = plan.outcome === 'duplicate'
+      ? dispatch({ type: 'setReviewTray', reviewTray: plan.reviewTray })
+      : dispatch({
+          type: 'promoteReviewAlert',
+          transaction: plan.transaction,
+          reviewTray: plan.reviewTray,
+          ledgerMoney: plan.ledgerMoney,
+        });
+    if (!await persist(next)) throw new Error('Encrypted review promotion write failed');
+    return plan.outcome;
+  }, [dispatch, persist]);
+
   const undoBatch = useCallback((ids: string[]) => {
     dispatch({ type: 'undoBatch', ids });
   }, []);
@@ -1592,7 +1695,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setMarket = useCallback((id: string) => {
+    if (!canSelectMarket(id)) return false;
     dispatch({ type: 'setMarket', id });
+    return true;
   }, []);
 
   const setUiLanguage = useCallback((language: string) => {
@@ -1603,7 +1708,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // Store entitlements and the local trial clock are not ledger data. They
     // are deliberately excluded so an editable JSON backup cannot mint Pro or
     // restart a trial when it is restored.
-    const { hydrated: _h, pro: _pro, trialStartTs: _trial, ...data } = state;
+    const {
+      hydrated: _h,
+      pro: _pro,
+      trialStartTs: _trial,
+      reviewTray: _reviewTray,
+      ...data
+    } = state;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });
   }, [state]);
 
@@ -1612,10 +1723,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!restored) return false;
     // Older backups may still contain these fields. The current store answer
     // wins regardless of what the file says.
-    const safeState = { ...restored, pro: state.pro, trialStartTs: state.trialStartTs };
+    const safeState = {
+      ...restored,
+      pro: state.pro,
+      trialStartTs: state.trialStartTs,
+      reviewTray: state.reviewTray,
+    };
     dispatch({ type: 'restore', state: safeState });
     return true;
-  }, [dispatch, state.pro, state.trialStartTs]);
+  }, [dispatch, state.pro, state.reviewTray, state.trialStartTs]);
 
   const loadDemoData = useCallback(() => {
     dispatch({ type: 'loadDemo', state: demoState() });
@@ -1714,6 +1830,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       deleteTransaction,
       importBatch,
+      stageReviewAlerts,
+      dismissReviewAlert,
+      promoteReviewAlert,
       ensureDurable,
       undoBatch,
       upsertBudget,
@@ -1761,6 +1880,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       deleteTransaction,
       importBatch,
+      stageReviewAlerts,
+      dismissReviewAlert,
+      promoteReviewAlert,
       ensureDurable,
       undoBatch,
       upsertBudget,

@@ -311,6 +311,10 @@ eq(
   eq('and the same airport', cat(cardPurchase('CF-1024 DON MUANG BANGKOK THA')), 'travel');
   // ...without disturbing the pack's own telecom rule, which runs first.
   eq('Saudi telecom vocabulary still wins in its own pack', cat(purchase('MOBILY RECHARGE, RIYADH')), 'telecom');
+  eq('SADAD is a payment rail and cannot invent a utility category',
+    cat(purchase('SADAD PAYMENT REFERENCE 1234')), 'other');
+  eq('a named Saudi utility still categorizes through SADAD',
+    cat(purchase('SADAD SAUDI ELECTRIC PAYMENT')), 'utilities');
   setActiveMarket('AE');
 }
 

@@ -92,13 +92,12 @@ const iosControllerSource = fs.readFileSync(
 );
 
 ok(
-  'questionnaire plan is wired to persistent store actions',
-  [
-    'setMarket(plan.answers.marketId)',
-    'setMonthStartDay(plan.answers.monthStartDay)',
-    'plan.budgets.forEach(upsertBudget)',
-    'plan.goals.forEach(addGoal)',
-  ].every((needle) => gateSource.includes(needle)),
+  'first run never forces a country or writes guessed-currency plans',
+  gateSource.includes("const QUESTION_STEPS: readonly Step[] = ['capture']") &&
+    gateSource.includes("onPress={() => setStep('capture')}") &&
+    !gateSource.includes('setMarket(plan.answers.marketId)') &&
+    !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
+    !gateSource.includes('plan.goals.forEach(addGoal)'),
 );
 ok(
   'iOS Shortcut setup returns to the personalized completion',
@@ -106,8 +105,8 @@ ok(
     iosSource.includes("router.replace('/?onboarding=complete')"),
 );
 ok(
-  'sample data remains a first-run path',
-  gateSource.includes('onPress={loadDemoData}'),
+  'first run cannot silently pin a worldwide user to the AED sample ledger',
+  !gateSource.includes('loadDemoData') && !gateSource.includes("t('startWithSample')"),
 );
 
 /* ── the first-launch states these screens are actually in ────────────

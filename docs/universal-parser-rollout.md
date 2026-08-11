@@ -15,6 +15,62 @@ documentation. Most US and European institutions publish alert categories but
 not stable message bodies, so those seeds remain synthetic until consented,
 locally redacted fixtures prove an exact institution/channel/template grammar.
 
+The review interface now carries market-scoped institution candidates from
+sender and body evidence for representative first-wave banks. Exact sender and
+body agreement is identified; conflicts remain ambiguous; unknown senders stay
+unknown. These research identities do not claim that a bank's message formats
+are supported, and institution evidence never bypasses transaction safety.
+
+## Automatic market routing
+
+Country selection is not a parser input for the worldwide review path. Each
+alert is routed independently from its sender/institution identity, localized
+bank grammar, payment rail and currency evidence. Device region is only a
+supporting hint: it cannot create a route, and it cannot override a bank alert
+from another country. This matters for expatriates, travellers and foreign
+cards.
+
+The router returns `single`, `ambiguous` or `unknown`; it does not expose an
+uncalibrated confidence percentage and it never returns the source or sender.
+Generic USD/EUR symbols, English or Arabic text, and an overlapping global
+brand such as HSBC remain ambiguous without market-specific evidence. Two
+independent consistent alerts can resolve a provisional capture market;
+duplicate copies of one alert cannot manufacture consensus.
+
+Routing is not import authorization. UAE and Saudi automatic capture continues
+through the launch parser. First-wave global routes feed only the review path
+until the corresponding bank/template rollout gates pass.
+
+## Private review tray
+
+A global alert reaches the encrypted review tray only after the launch parser
+returns no transaction and the worldwide inspector finds one posted,
+institution-backed transaction with an exact currency, exponent, amount,
+direction and supported family. Authentication, failed, future, statement,
+balance, mandate-lifecycle, unknown-direction and ambiguous-amount messages are
+discarded rather than shown as parser failures.
+
+Tray items contain structured evidence only—no raw message, sender, account
+reference, parser reason or candidate list. Pending items expire after 30 days
+and are capped at 50. Add/dismiss decisions leave only an opaque, expiring
+tombstone so rescans do not nag the user. The tray is excluded from editable
+backups and never creates transactions, bills or subscriptions automatically.
+
+The current first integration is Android on-device capture. iOS requires a
+separately threat-modelled, origin-device-only sealed review envelope because
+the existing relay deliberately drops unparsed Message content. Until that
+exists, the app must not claim iOS worldwide review parity.
+
+## Ledger money staging
+
+Persisted ledgers now carry an explicit ISO currency and minor-unit exponent
+while keeping every existing UAE/Saudi `*Fils` integer unchanged. The first
+schema accepts exponents 0, 2 and 3 so currencies such as JPY, AED/USD and KWD
+have exact input/format primitives. This is storage preparation, not permission
+to auto-import global alerts: import, FX, relay, reports and backup-version
+contracts still need end-to-end currency enforcement before those rows may
+enter the ledger.
+
 India has stronger standardized evidence: NPCI publishes AEPS success,
 decline, reversal, withdrawal, balance-enquiry and transfer alert families,
 plus UPI collect-request and statement-narration standards. A collect request
@@ -51,6 +107,13 @@ Primary research starting points:
 6. Suggest a category only when evidence is explicit.
 7. Treat explicit recurring language as a recurring-payment candidate, then
    detect subscriptions across posted history; one merchant charge is never enough.
+
+Mandates, standing instructions and direct-debit notices are structured
+schedule evidence, not proof that the economic family is a cancellable
+subscription. A utility, loan, insurance payment or investment can use the
+same payment scheme. Lifecycle messages (create, modify, pause, resume,
+cancel) remain informational; pre-debit notices remain future; neither writes
+money. Full mandate/reference values are not copied into review reports.
 
 When two nearby figures cannot be safely clause-scoped—for example a charge
 immediately followed by an available balance—the review inspector refuses to
@@ -89,7 +152,7 @@ Per market/bank pack, automatic import requires:
 - exact posting-status accuracy of at least 99%;
 - exact amount, currency and direction of at least 99.5%;
 - family precision of at least 98%;
-- subscription precision of at least 98%, preferring lower recall to false subscriptions;
+- recurring-alert precision of at least 98%, preferring lower recall to false recurring labels;
 - duplicate-creation rate no higher than 0.1%;
 - zero forbidden imports;
 - zero regressions in the complete UAE/Saudi suite.
@@ -98,3 +161,9 @@ These are engineering launch gates, not regulator-provided thresholds. Passing
 them makes a pack eligible for a limited bank/template rollout; it does not
 turn on an entire country. Physical shadow telemetry and user confirmation
 remain required before broader enablement.
+
+The recurring-alert metric measures single-message classification only. It is
+not a subscription-accuracy claim. Subscription accuracy requires a separate
+held-out sequence benchmark through the history-based detector, including
+variable utilities, mandate lifecycle changes, cross-account fees and explicit
+user dismissals.

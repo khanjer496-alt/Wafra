@@ -64,6 +64,8 @@ const PATTERNS = [
   ['BANK_WORD_RE', patternSource('InstantAlert', 'BANK_WORD_RE', vars)],
   ['MONEY_RE', patternSource('BankNotificationListenerService', 'MONEY_RE')],
   ['SMS_MONEY_RE', patternSource('SmsDeliveryReceiver', 'MONEY_RE')],
+  ['SMS_CREDENTIAL_RE', patternSource('SensitiveMessageFilter', 'CREDENTIAL_RE')],
+  ['NOTIFICATION_CREDENTIAL_RE', patternSource('SensitiveNotificationFilter', 'CREDENTIAL_RE')],
 ];
 
 // Two gates decide whether a message is about money at all — one for SMS at
@@ -75,6 +77,12 @@ const PATTERNS = [
   const a = PATTERNS.find(([n]) => n === 'MONEY_RE')[1];
   const b = PATTERNS.find(([n]) => n === 'SMS_MONEY_RE')[1];
   ok('both money gates accept the same currencies', a === b, { notification: a, sms: b });
+}
+
+{
+  const sms = PATTERNS.find(([n]) => n === 'SMS_CREDENTIAL_RE')[1];
+  const notification = PATTERNS.find(([n]) => n === 'NOTIFICATION_CREDENTIAL_RE')[1];
+  ok('SMS and notification credential gates are identical', sms === notification);
 }
 
 /**
@@ -92,6 +100,15 @@ const AMOUNT_CASES = [
   ['Using your card for GHS 120.00 at SHOP. Avl Limit AED 5,000.00', '120.00'],
 ];
 
+const CREDENTIAL_CASES = [
+  ['Use 458213 to authenticate your purchase of AED 500.00 at NOON.', true],
+  ['Enter 458213 to confirm the payment of SAR 250.00.', true],
+  ['Your OTP is 458213 for an AED 80.00 transaction.', true],
+  ['AED 89.50 spent at CARREFOUR. Do not share your OTP with anyone.', false],
+  ['Purchase of AED 89.50 at CARREFOUR authenticated via 3D Secure.', false],
+  ['Purchase of AED 89.50 at CARREFOUR with Debit Card ending 1234.', false],
+];
+
 /* ── hand it to javac ────────────────────────────────────────────────── */
 
 function javaString(s) {
@@ -103,12 +120,21 @@ public class WafraRegexCheck {
   public static void main(String[] a) {
     int bad = 0;
     Pattern amount = null;
+    Pattern credential = null;
 ${PATTERNS.map(
   ([name, body]) => `    try {
       Pattern p = Pattern.compile(${javaString(body)}, Pattern.CASE_INSENSITIVE);
       if ("AMOUNT_RE".equals(${javaString(name)})) amount = p;
+      if ("SMS_CREDENTIAL_RE".equals(${javaString(name)})) credential = p;
       System.out.println("COMPILES ${name}");
     } catch (Exception e) { bad++; System.out.println("BROKEN ${name} " + e.getMessage()); }`,
+).join('\n')}
+${CREDENTIAL_CASES.map(
+  ([body, want], index) => `    {
+      boolean got = credential.matcher(${javaString(body)}).find();
+      if (got != ${want}) { bad++; System.out.println("CREDENTIAL wrong ${index} " + got); }
+      else System.out.println("CREDENTIAL ok ${index}");
+    }`,
 ).join('\n')}
 ${AMOUNT_CASES.map(
   ([body, want]) => `    {
@@ -150,6 +176,12 @@ for (const [name] of PATTERNS) {
 for (const [, want] of AMOUNT_CASES) {
   ok(`Java reads the amount as ${want}`, out.includes(`AMOUNT ok ${want}`),
     out.split('\n').filter((l) => l.startsWith('WRONG')));
+}
+
+for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
+  ok(`Java credential gate handles case ${index + 1}`,
+    out.includes(`CREDENTIAL ok ${index}`),
+    out.split('\n').filter((line) => line.startsWith('CREDENTIAL wrong')));
 }
 
 fs.rmSync(dir, { recursive: true, force: true });

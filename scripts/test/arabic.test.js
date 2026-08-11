@@ -25,46 +25,9 @@ function check(name, ok, detail) {
   }
 }
 
-// ── the two verbatim corpus formats ──────────────────────────────────────
-
-const CORPUS_CREDIT = `شراء عبر نقاط البيع
-بطاقة: **1234;الإئتمانية
-لدى: Some merchant
-دولة: السعودية
-مبلغ: 12.00 SAR
-رصيد: 1234.56 SAR
-في: 2019-05-07 23:44`;
-
-const CORPUS_DEBIT = `مشتريات نقاط البيع
-بطاقة: **4567;مدى
-من: xx005
-مبلغ: 34.00 SAR
-لدى: Some restaurant
-دولة: السعودية
-في: 2019/05/07 01:29`;
-
-{
-  const r = parseSms(CORPUS_CREDIT);
-  check('corpus: a labelled Arabic purchase parses at all', !!r);
-  check('corpus: direction is expense', r && r.type === 'expense', r && r.type);
-  check('corpus: the shop on its own line is the merchant', r && r.merchant === 'Some Merchant', r && r.merchant);
-  check('corpus: the card number is read', r && r.card && r.card.last4 === '1234', r && r.card);
-  // "**1234;الإئتمانية" states the kind AFTER the number. Getting this wrong
-  // files the charge against a debit card and breaks the card-due chain.
-  check('corpus: الإئتمانية makes it a CREDIT card', r && r.card && r.card.kind === 'credit', r && r.card);
-  check('corpus: رصيد is read as a figure', r && r.snapshotFils === 123456, r && r.snapshotFils);
-  // The stored text must be what the bank sent, not the rewrite: it is what
-  // the accuracy export shows and what a later version re-parses.
-  check('corpus: raw keeps the original Arabic', r && r.raw === CORPUS_CREDIT);
-}
-
-{
-  const r = parseSms(CORPUS_DEBIT);
-  check('corpus: the debit-card format parses', !!r);
-  check('corpus: merchant found below the amount line', r && r.merchant === 'Some Restaurant', r && r.merchant);
-  check('corpus: مدى makes it a DEBIT card', r && r.card && r.card.kind === 'debit', r && r.card);
-  check('corpus: card number read', r && r.card && r.card.last4 === '4567', r && r.card);
-}
+// The two public Bank Albilad bodies now live in the market-aware acceptance
+// corpus. Keeping them here silently ran them under the default UAE pack and
+// asserted everything except the amount, currency and date.
 
 // ── one rule each ────────────────────────────────────────────────────────
 
@@ -179,7 +142,7 @@ check('٫ is a decimal point', arabicToEnglish('١٥٠٫٥٠ درهم').includes
 // The line structure has to survive: the parser's multi-line descriptor
 // reader is behind an includes('\n') check, and the labelled format is one
 // field per line.
-check('line breaks survive the rewrite', arabicToEnglish(CORPUS_CREDIT).includes('\n'));
+check('line breaks survive the rewrite', arabicToEnglish('مبلغ: 12.00 SAR\nرصيد: 100.00 SAR').includes('\n'));
 
 // ── the English path must not notice any of this ─────────────────────────
 

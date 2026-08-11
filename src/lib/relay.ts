@@ -1234,7 +1234,7 @@ export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
    * field is what carries it — see resolveReceivedAt in server/src/index.ts.
    */
   receivedAt?: string;
-  captureSource?: 'shortcut' | 'email' | 'pdf';
+  captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
   /** Structured sender label only; raw Message Content never reaches sync. */
   sender?: string;
   /** Market pack the relay parsed this row under ('AE', 'SA'). */
@@ -1388,7 +1388,8 @@ export function isParsedRelayRow(
     row.captureSource !== undefined &&
     row.captureSource !== 'shortcut' &&
     row.captureSource !== 'email' &&
-    row.captureSource !== 'pdf'
+    row.captureSource !== 'pdf' &&
+    row.captureSource !== 'csv'
   ) return false;
   if (!validRelaySender(row.sender)) return false;
 
@@ -1429,9 +1430,9 @@ export function isParsedRelayRow(
  * Preserve the validated sender for bank/card identity in buildImportPlan, and
  * the message timestamp for its duplicate fingerprint.
  *
- * `market` is dropped rather than carried: the phone parses nothing here, so it
- * would be a field with no reader. There is deliberately no message digest on
- * this row either — retries are collapsed server-side by the keyed replay
+ * `market` is carried so an empty ledger can pin the exact pack that parsed the
+ * body and an existing opposite-currency ledger can refuse it. There is
+ * deliberately no message digest on this row either—retries are collapsed server-side by the keyed replay
  * receipt in server/src/index.ts, which cannot be searched against a guessed
  * bank alert the way a bare SHA-256 of the text could.
  */
@@ -1440,8 +1441,13 @@ export function relayRowToScannedSms(
   fallbackTs = Date.now(),
 ): ScannedSms {
   const ts = row.receivedAt ? Date.parse(row.receivedAt) : NaN;
-  const { receivedAt: _receipt, market: _market, ...structured } = row;
-  return { ...structured, smsTs: Number.isFinite(ts) ? ts : fallbackTs };
+  const { receivedAt: _receipt, ...structured } = row;
+  const parsedMarket = validRelayMarket(row.market);
+  return {
+    ...structured,
+    market: parsedMarket === 'AE' || parsedMarket === 'SA' ? parsedMarket : undefined,
+    smsTs: Number.isFinite(ts) ? ts : fallbackTs,
+  };
 }
 
 /** Drop collected rows from the queue. Call only after they are persisted. */

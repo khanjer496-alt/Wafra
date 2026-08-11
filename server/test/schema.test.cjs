@@ -90,10 +90,11 @@ ok('retained queue rows get scheduled wake retries',
     /pending \?\? \[\][\s\S]*wakeDevice\(env, row\.id\)/.test(worker));
 ok('server drops parser raw before sealing',
   /const \{ raw: _discard, \.\.\.structured \} = parsed!/.test(worker));
-ok('Shortcut rows are explicitly distinguished from email and PDF imports',
+ok('Shortcut rows are explicitly distinguished from email, PDF, and CSV imports',
   /captureSource: 'shortcut'/.test(worker) &&
     /captureSource: 'email'/.test(worker) &&
-    /captureSource: 'pdf'/.test(worker));
+    /captureSource: 'pdf'/.test(worker) &&
+    /captureSource: 'csv'/.test(worker));
 ok('replay receipts are keyed digests rather than bodies',
   /CREATE TABLE IF NOT EXISTS ingest_receipts/.test(schema) &&
     /keyedFingerprint\(device\.requestSecret, replayMaterial\)/.test(worker));
@@ -115,7 +116,7 @@ ok('background sync has a separate least-privilege credential',
 ok('setup probe is reserved for the foreground verifier',
   /if \(!isTest && insertedTargets\.length > 0\) ctx\.waitUntil/.test(worker));
 ok('email and PDF rows cross the same raw-discard boundary',
-  /\.\.\.withoutRaw\(parsedRows\[index\]\), captureSource: 'email'/.test(worker) &&
+  /\.\.\.withoutRaw\(parsedRows\[index\]\)[\s\S]{0,160}captureSource: 'email'/.test(worker) &&
     /\.\.\.withoutRaw\(extracted\.rows\[index\]\)/.test(worker));
 ok('PDF endpoint never returns extracted rows or text',
   /return json\(\{ acceptedRows: extracted\.rows\.length, pages: extracted\.pages \}, 202\)/.test(worker));
@@ -129,6 +130,15 @@ ok('PDF upload and capability discovery require admin scope',
 ok('direct PDF upload enforces media type, byte cap and PDF magic',
   /content-type[\s\S]{0,180}application\/pdf/.test(worker) &&
     /readBytes\(req, MAX_PDF_BYTES\)/.test(worker) && /!== '%PDF-'/.test(worker));
+ok('direct CSV upload requires admin scope, an allowed media type, and a byte cap',
+  /url\.pathname === '\/v1\/import\/csv'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
+    /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
+    /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
+    /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+ok('forwarded attachments share aggregate attachment and row ceilings',
+  /const MAX_EMAIL_ATTACHMENTS = 8/.test(worker) &&
+    /let importedRows = 0/.test(worker) &&
+    /importedRows \+ parsed\.rows\.length > MAX_IMPORT_ROWS/.test(worker));
 ok('email forwarding tokens are opt-in, rotatable and revocable',
   /url\.pathname === '\/v1\/email-token'/.test(worker) &&
     /UPDATE devices SET email_token_hash = \?1 WHERE id = \?2/.test(worker) &&

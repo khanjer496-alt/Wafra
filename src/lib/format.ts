@@ -1,4 +1,14 @@
-import { ledgerCurrencyDisplay } from '@/lib/markets';
+import {
+  formatMinorUnits,
+  parseMajorToMinor,
+  roundToWholeMajorMinor,
+  storedLedgerMoneySpec,
+} from '@/lib/ledger-money';
+import {
+  ledgerCurrencyCode,
+  ledgerCurrencyDisplay,
+  ledgerCurrencyExponent,
+} from '@/lib/markets';
 import { getLanguage, t } from '@/lib/i18n';
 
 const MONTHS = [
@@ -17,9 +27,10 @@ const MONTHS_SHORT_AR = [
 ];
 const DAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
-function groupThousands(n: number): string {
-  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
+const activeMoneySpec = () => storedLedgerMoneySpec(
+  ledgerCurrencyCode(),
+  ledgerCurrencyExponent(),
+) ?? storedLedgerMoneySpec('AED', 2)!;
 
 /**
  * Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234".
@@ -32,17 +43,7 @@ function groupThousands(n: number): string {
  * instead of a whole one, and in the common case none at all.
  */
 export function formatAmount(fils: number, opts?: { decimals?: boolean }): string {
-  const abs = Math.abs(Math.round(fils));
-  const cents = abs % 100;
-  const showDecimals = opts?.decimals ?? cents !== 0;
-  const whole = showDecimals ? Math.floor(abs / 100) : Math.round(abs / 100);
-  // Take the sign from what is actually printed, not from the input. A net of
-  // −20 fils rounds to zero at whole-dirham precision, and "AED -0" under
-  // "Overspent so far this month" is not a number anyone recognizes — the
-  // hero sweeps through it every time the month crosses breakeven.
-  const sign = fils < 0 && (whole > 0 || (showDecimals && cents > 0)) ? '-' : '';
-  const base = `${sign}${groupThousands(whole)}`;
-  return showDecimals ? `${base}.${String(cents).padStart(2, '0')}` : base;
+  return formatMinorUnits(Math.round(fils), activeMoneySpec(), opts);
 }
 
 /**
@@ -72,7 +73,7 @@ export function totalAsShown(values: number[]): number {
  * different arithmetic, which is the defect they were written to close.
  */
 export function toWholeDirhamFils(fils: number): number {
-  return Math.round(fils / 100) * 100;
+  return roundToWholeMajorMinor(fils, activeMoneySpec());
 }
 
 /**
@@ -90,24 +91,21 @@ export function formatAED(fils: number, opts?: { decimals?: boolean }): string {
 
 /** Compact form for chart labels: "1.2k", "18k". */
 export function formatCompactAED(fils: number): string {
-  const aed = Math.abs(fils) / 100;
-  if (aed >= 1_000_000) {
-    const m = aed / 1_000_000;
+  const amount = Math.abs(fils) / (10 ** activeMoneySpec().exponent);
+  if (amount >= 1_000_000) {
+    const m = amount / 1_000_000;
     return `${m >= 100 ? Math.round(m) : Math.round(m * 10) / 10}M`;
   }
-  if (aed >= 1000) {
-    const k = aed / 1000;
+  if (amount >= 1000) {
+    const k = amount / 1000;
     return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}k`;
   }
-  return String(Math.round(aed));
+  return String(Math.round(amount));
 }
 
 export function parseAmountToFils(text: string): number | null {
-  const cleaned = text.replace(/[^0-9.]/g, '');
-  if (!cleaned) return null;
-  const value = Number(cleaned);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return Math.round(value * 100);
+  const cleaned = text.replace(/[^0-9.,]/g, '');
+  return parseMajorToMinor(cleaned, activeMoneySpec());
 }
 
 export function toISODate(d: Date): string {

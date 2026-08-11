@@ -14,6 +14,7 @@
 module.exports = Object.freeze([
   {
     id: 'enbd-credit-card-purchase',
+    market: 'AE',
     bank: 'ENBD',
     channel: 'sms',
     evidence: 'repository-redacted',
@@ -41,6 +42,7 @@ module.exports = Object.freeze([
     // either. Reading it as unknown would leave a real credit card
     // unidentified, the opposite failure to the one `unknown` prevents.
     id: 'adcb-salik-card-credit',
+    market: 'AE',
     bank: 'ADCB',
     channel: 'sms',
     evidence: 'repository-redacted',
@@ -63,6 +65,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'fab-multiline-card-purchase',
+    market: 'AE',
     bank: 'FAB',
     channel: 'sms',
     evidence: 'repository-redacted',
@@ -86,6 +89,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'fab-account-credit-with-reference',
+    market: 'AE',
     bank: 'FAB',
     channel: 'sms',
     evidence: 'repository-redacted',
@@ -108,6 +112,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'mashreq-foreign-compact-date',
+    market: 'AE',
     bank: 'Mashreq',
     channel: 'sms',
     evidence: 'public-redacted',
@@ -135,6 +140,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'adib-compact-masked-card',
+    market: 'AE',
     bank: 'ADIB',
     channel: 'sms',
     evidence: 'public-redacted',
@@ -155,6 +161,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'rakbank-retail-grammar-probe',
+    market: 'AE',
     bank: 'RAKBANK',
     channel: 'sms',
     evidence: 'synthetic-grammar-probe',
@@ -177,6 +184,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'liv-debit-card-spend',
+    market: 'AE',
     bank: 'Liv',
     channel: 'sms',
     evidence: 'repository-redacted',
@@ -197,6 +205,7 @@ module.exports = Object.freeze([
   },
   {
     id: 'wio-foreign-with-local-equivalent',
+    market: 'AE',
     bank: 'Wio',
     channel: 'push',
     evidence: 'public-redacted',

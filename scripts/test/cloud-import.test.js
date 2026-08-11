@@ -1,6 +1,7 @@
 const {
   parseEmailForwardingCredential,
   parseImportCapabilities,
+  parseCsvImportAccepted,
   parsePdfImportAccepted,
   pdfImportError,
 } = require('./build/cloud-import-contract');
@@ -35,16 +36,32 @@ const capabilities = {
     parser: 'text-explicit-direction-v1',
     note: 'Scans and ambiguous visual debit/credit columns are rejected, not guessed.',
   },
+  csv: {
+    enabled: true,
+    accepts: ['text/csv', 'text/tab-separated-values'],
+    maxBytes: 1048576,
+    maxRows: 200,
+    parser: 'named-columns-explicit-direction-v1',
+    note: 'Explicit direction required.',
+  },
 };
 
 const parsed = parseImportCapabilities(capabilities);
 ok('capabilities: exact service document is accepted',
-  parsed?.pdf.maxBytes === 5242880 && parsed?.pdf.maxPages === 100);
+  parsed?.pdf.maxBytes === 5242880 && parsed?.pdf.maxPages === 100 &&
+    parsed?.csv.maxBytes === 1048576);
 ok('capabilities: missing limits are rejected instead of guessed',
   parseImportCapabilities({ ...capabilities, pdf: { enabled: true } }) === null);
+const oldRelayCapabilities = { email: capabilities.email, pdf: capabilities.pdf };
+ok('capabilities: an older relay keeps PDF/email working with CSV disabled',
+  parseImportCapabilities(oldRelayCapabilities)?.csv.enabled === false &&
+    parseImportCapabilities(oldRelayCapabilities)?.pdf.enabled === true);
 ok('pdf response: only positive row/page counts are accepted',
   parsePdfImportAccepted({ acceptedRows: 8, pages: 2 })?.acceptedRows === 8 &&
   parsePdfImportAccepted({ acceptedRows: 0, pages: 2 }) === null);
+ok('csv response: accepted and explicitly rejected rows must reconcile to total',
+  parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10 })?.rejectedRows === 2 &&
+  parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 1, totalRows: 10 }) === null);
 ok('pdf response: unsupported format remains a distinct user-facing error',
   pdfImportError(422, { error: 'unsupported_statement_format' }).code ===
     'unsupported_statement_format');
@@ -68,6 +85,9 @@ ok('SDK 55 upload uses File + expo/fetch, never the throwing legacy upload API',
   /from 'expo\/fetch'/.test(transport) &&
   /body: file/.test(transport) &&
   !/expo-file-system\/legacy|uploadAsync|new FormData/i.test(transport));
+ok('CSV and TSV use a distinct authenticated statement endpoint',
+  /uploadCsvStatement/.test(transport) && /\/v1\/import\/csv/.test(transport) &&
+    /text\/tab-separated-values/.test(transport));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
   /pickedFile\.delete\(\)/.test(surface));

@@ -183,6 +183,52 @@ function AutomaticCapture({
   );
 }
 
+/**
+ * One aggregate doorway, never one warning per unrecognized message.
+ *
+ * The review tray is structured evidence only and none of it is ledger money.
+ * Keeping this as a separate target under capture preserves the capture card's
+ * existing contract: that card still syncs or finishes setup; this one reviews.
+ */
+function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => void }) {
+  const theme = useTheme();
+  const enter = useScreenEntering();
+  if (count === 0) return null;
+  const label = tf('reviewAlertsHomeCount', { count, s: count === 1 ? '' : 's' });
+
+  return (
+    <Animated.View entering={enter(FadeInDown.delay(40).duration(280))}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${t('reviewAlertsTitle')}. ${label}`}
+        accessibilityHint={t('reviewAlertsPrivacy')}
+        onPress={() => {
+          tapped();
+          onPress();
+        }}
+        style={({ pressed }) => [
+          styles.reviewPrompt,
+          {
+            borderColor: theme.cardBorder,
+            backgroundColor: theme.backgroundElement,
+            transform: [{ scale: pressed ? 0.985 : 1 }],
+          },
+        ]}>
+        <View style={[styles.reviewPromptIcon, { backgroundColor: theme.backgroundSelected }]}>
+          <Icon name="alert" size={17} color={theme.warning} />
+        </View>
+        <ThemedText type="small" style={styles.reviewPromptCopy}>
+          {label}
+        </ThemedText>
+        <ThemedText type="nano" style={{ color: theme.warning }}>
+          {t('review')}
+        </ThemedText>
+        <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }) {
   const theme = useTheme();
   const router = useRouter();
@@ -640,6 +686,9 @@ export default function HomeScreen() {
       : captureState;
 
   const now = useMemo(() => new Date(), []);
+  const reviewAlertCount = state.reviewTray.pending.filter(
+    (item) => item.expiresAt > now.getTime(),
+  ).length;
   const [refreshing, setRefreshing] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
   const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
@@ -766,6 +815,11 @@ export default function HomeScreen() {
                 router.push('/ios-setup');
               } else void runAutoImport(true);
             }}
+          />
+
+          <ReviewAlertsPrompt
+            count={reviewAlertCount}
+            onPress={() => router.push('/review-alerts')}
           />
 
           {/* One sentence, with somewhere to go. A carousel of five of these
@@ -924,6 +978,25 @@ const styles = StyleSheet.create({
   captureTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   captureTitle: { flexShrink: 1 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
+  reviewPrompt: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two + 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.control,
+    marginTop: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  reviewPromptIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewPromptCopy: { flex: 1 },
 
   heroLabel: { marginBottom: Spacing.two },
   heroCompare: { marginTop: Spacing.two, marginBottom: Spacing.two },

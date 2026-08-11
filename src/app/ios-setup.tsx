@@ -119,8 +119,10 @@ export default function IosSetupScreen() {
   const {
     state,
     importBatch,
+    stageReviewAlerts,
     ensureDurable,
     markParserVersion,
+    setMarket,
     setOnboarded,
     setPrivateMode,
   } = useStore();
@@ -135,8 +137,10 @@ export default function IosSetupScreen() {
       ledger: {
         getState: () => stateRef.current,
         importBatch,
+        stageReviewAlerts,
         ensureDurable,
         markParserVersion,
+        setMarket: (market) => setMarket(market),
       },
       leavePrivateMode: () => setPrivateMode(false),
     });
@@ -148,7 +152,7 @@ export default function IosSetupScreen() {
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [ensureDurable, importBatch, markParserVersion, setPrivateMode]);
+  }, [ensureDurable, importBatch, markParserVersion, setMarket, setPrivateMode, stageReviewAlerts]);
 
   const send = useCallback((intent: IosSetupIntent): Promise<void> =>
     controllerRef.current?.send(intent) ?? Promise.resolve(), []);
@@ -334,7 +338,7 @@ export default function IosSetupScreen() {
               />
               <Button
                 label={t('iosContinueManual')}
-                variant="ghost"
+                variant="outline"
                 onPress={finish}
                 style={styles.ctaSecondary}
               />
@@ -349,6 +353,13 @@ export default function IosSetupScreen() {
               <ThemedText themeColor="textSecondary" style={styles.body}>
                 {t('iosShortcutBody')}
               </ThemedText>
+
+              <Block style={styles.note}>
+                <Icon name="lock" size={16} color={theme.textTertiary} />
+                <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
+                  {t('onboardCapturePrivacyIos')}
+                </ThemedText>
+              </Block>
 
               {shortcutAvailable && (
                 <Block style={styles.note}>

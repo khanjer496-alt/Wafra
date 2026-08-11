@@ -1,14 +1,34 @@
 import { PermissionsAndroid, Platform } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type RawSms } from '../../modules/sms-reader';
+import { inspectUniversalAlert } from '@/lib/alert-market-detection';
+import { prepareReviewAlert, type ReviewAlert } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
 import { isDeclinedMessage, parseSms, type ParsedSms } from '@/lib/sms-parser';
+import {
+  detectLaunchMarketFromAlert,
+  getActiveMarket,
+  pinnedLedgerCurrencyCode,
+  withMarketPackForParsing,
+} from '@/lib/markets';
+import {
+  trustedBankNotificationMarket,
+  trustedBankNotificationSender,
+} from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 40; // 40k messages is far beyond any real inbox
+const MAX_REVIEW_CANDIDATES = 50;
+// Cheap superset of currencies the worldwide reviewer can currently ground.
+// It avoids running fourteen market packs over ordinary personal SMS, while
+// false positives merely reach the review module and are refused there.
+const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
+const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 /**
  * Parsing is synchronous JavaScript. A 1,000-message page takes roughly
  * 100 ms even on a desktop Hermes-class CPU and several times that on a
@@ -33,17 +53,18 @@ export async function hasSmsPermission(): Promise<boolean> {
 
 export async function requestSmsPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
-  // READ_SMS covers the inbox history scan, RECEIVE_SMS the delivery
-  // broadcast that catches an alert as it lands. They share a permission
-  // group, so this is one prompt, but each has to be asked for by name or
-  // the receiver silently never fires.
-  const result = await PermissionsAndroid.requestMultiple([
-    PermissionsAndroid.PERMISSIONS.READ_SMS,
-    PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
-  ]);
-  // The inbox scan is the feature; live capture is an enhancement on top, so
-  // READ_SMS alone still counts as granted.
-  return result[PermissionsAndroid.PERMISSIONS.READ_SMS] === PermissionsAndroid.RESULTS.GRANTED;
+  // Automatic ledger import reads the Android system inbox. RECEIVE_SMS is a
+  // separate, optional capability used only by the instant-banner toggle and
+  // is requested at that point—not bundled into first-run tracking consent.
+  const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
+  return result === PermissionsAndroid.RESULTS.GRANTED;
+}
+
+export async function requestSmsDeliveryPermission(): Promise<boolean> {
+  if (!isSmsScanningAvailable()) return false;
+  const permission = PermissionsAndroid.PERMISSIONS.RECEIVE_SMS;
+  if (await PermissionsAndroid.check(permission)) return true;
+  return (await PermissionsAndroid.request(permission)) === PermissionsAndroid.RESULTS.GRANTED;
 }
 
 export type { CaptureChannel } from '@/lib/dedupe';
@@ -53,6 +74,12 @@ export { buildImportPlan } from '@/lib/import-plan';
 
 export interface ScanResult {
   parsed: ScannedSms[];
+  /**
+   * Sanitized global alerts that the launch parser refused but the worldwide
+   * inspector can ground strongly enough for review. These never enter
+   * `parsed`, so this scanner cannot auto-import them.
+   */
+  reviewCandidates: ReviewAlert[];
   /**
    * Fingerprints of the messages this scan refused as DECLINES.
    *
@@ -68,6 +95,72 @@ export interface ScanResult {
   /** Timestamp of the newest message seen, for incremental scans. */
   newestTs: number;
   scannedCount: number;
+  /** Strong launch-pack evidence observed while parsing this scan. */
+  detectedLaunchMarket: 'AE' | 'SA' | null;
+  /** Retire native notification rows only after ledger/review durability. */
+  commit: () => Promise<void>;
+}
+
+const NOOP_SCAN_COMMIT = async () => {};
+
+/** Best-effort locale region. Routing treats it only as supporting evidence. */
+function deviceRegionHint(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const DATABASE_KEY_NAME = 'wafra.database.key.v1';
+const REVIEW_IDENTITY_DOMAIN = 'wafra.alert-review-identity.v1';
+
+class ReviewIdentityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReviewIdentityError';
+  }
+}
+
+type ExpoDigest = {
+  CryptoDigestAlgorithm: { SHA256: unknown };
+  digestStringAsync(algorithm: unknown, data: string): Promise<string>;
+};
+
+const sha256 = (data: string): Promise<string> => {
+  // The test harness intentionally stubs only Crypto's random-byte surface.
+  // Cast at this private seam while production calls Expo SDK 55's documented
+  // digestStringAsync/CryptoDigestAlgorithm pair directly.
+  const digest = Crypto as unknown as ExpoDigest;
+  return digest.digestStringAsync(digest.CryptoDigestAlgorithm.SHA256, data);
+};
+
+/**
+ * Stable, device-bound identity for one Android capture.
+ *
+ * The SQLCipher database key is already random, THIS_DEVICE_ONLY, and deleted
+ * by the ledger's cryptographic erase. A domain-separated derivative keys this
+ * local fingerprint, so a copied tombstone cannot be tested against guessed
+ * bank messages offline. No second key or erase path is introduced.
+ */
+async function reviewCaptureIdentity(
+  source: string,
+  sender: string,
+  observedAt: number,
+  channel: CaptureChannel,
+  databaseKey: string,
+): Promise<{ id: string; sourceKey: string } | null> {
+  if (!/^[0-9a-f]{64}$/i.test(databaseKey)) return null;
+  const material = [
+    channel,
+    String(observedAt),
+    bodyPrint(sender.normalize('NFKC')),
+    bodyPrint(source.normalize('NFKC')),
+  ].join('\u0000');
+  const identityKey = await sha256(`${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`);
+  const digest = await sha256(`${identityKey}\u0000${material}`);
+  if (!/^[0-9a-f]{64}$/i.test(digest)) return null;
+  return { sourceKey: `arc1_${digest}`, id: `ari1_${digest}` };
 }
 
 /**
@@ -78,23 +171,116 @@ export async function scanInbox(
   sinceMs: number,
   overrides: Record<string, import('@/lib/types').CategoryId>,
   onProgress?: (scanned: number, found: number) => void,
+  regionHint: string | null = deviceRegionHint(),
 ): Promise<ScanResult> {
   if (!isSmsScanningAvailable() || !SmsReader) {
-    return { parsed: [], declined: [], newestTs: sinceMs, scannedCount: 0 };
+    return {
+      parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs, scannedCount: 0,
+      detectedLaunchMarket: null,
+      commit: NOOP_SCAN_COMMIT,
+    };
   }
 
   const parsed: (ParsedSms & { smsTs: number; sender: string; channel: CaptureChannel })[] = [];
+  const reviewCandidates: ReviewAlert[] = [];
+  const reviewSourceKeys = new Set<string>();
+  let databaseKeyPromise: Promise<string | null> | null = null;
+  const databaseKey = (): Promise<string | null> => {
+    databaseKeyPromise ??= SecureStore.getItemAsync(DATABASE_KEY_NAME);
+    return databaseKeyPromise;
+  };
   const declined: DeclinedSms[] = [];
+  const notificationIds = new Set<string>();
+  const pinnedCurrency = pinnedLedgerCurrencyCode();
+  let sessionLaunchMarket: 'AE' | 'SA' | null =
+    pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
+  let detectedLaunchMarket: 'AE' | 'SA' | null = null;
+  const inspectWorldwide = (body: string, sender: string) => {
+    if (!REVIEW_MONEY_HINT.test(body)) return null;
+    try {
+      return inspectUniversalAlert({ source: body, sender, regionHint });
+    } catch {
+      return null;
+    }
+  };
+  const parseLaunchAlert = (
+    body: string,
+    sender: string,
+    inspection: ReturnType<typeof inspectUniversalAlert> | null,
+    forcedMarket?: string,
+  ): ParsedSms | null => {
+    // A confidently global issuer is review-only, never converted through a
+    // Gulf parser because one happens to be active. AE/SA routes are the
+    // launch-tested parser path and must still accept foreign-card postings.
+    if (inspection?.route.decision === 'single' &&
+      inspection.route.market !== 'AE' && inspection.route.market !== 'SA') return null;
+    const routed = forcedMarket === 'AE' || forcedMarket === 'SA'
+      ? forcedMarket
+      : inspection?.route.decision === 'single' &&
+          (inspection.route.market === 'AE' || inspection.route.market === 'SA')
+        ? inspection.route.market
+        : detectLaunchMarketFromAlert(body, sender);
+    // Foreign money needs positive Gulf sender evidence; local AED/SAR money
+    // must also resolve its own pack before parsing. This is what stops a
+    // Saudi alert on an en-US phone falling through the default UAE pack.
+    if ((REVIEW_MONEY_HINT.test(body) || LAUNCH_MONEY_HINT.test(body)) && !routed) return null;
+    const desired = routed ?? sessionLaunchMarket ?? getActiveMarket().id;
+    if (desired !== 'AE' && desired !== 'SA') return null;
+    if (sessionLaunchMarket && desired !== sessionLaunchMarket) return null;
+    const result = withMarketPackForParsing(desired, () =>
+      parseSms(body, overrides, { sender }));
+    if (result && routed) {
+      sessionLaunchMarket ??= routed;
+      detectedLaunchMarket = routed;
+    }
+    return result;
+  };
   /**
-   * Called only where a parse returned null, and only the REFUSAL half of that
-   * is kept. `parseSms` answers null for a dozen reasons — an OTP, an offer, a
-   * spend summary, a pre-auth hold, a figure the bank masked — and "the parser
-   * no longer reads this" is emphatically not evidence that a charge did not
-   * happen. `isDeclinedMessage` is the parser's OWN suppression predicate,
-   * exported so the two cannot drift, and it is the affirmative half.
+   * Called only where the launch parser returned null. Declines keep their
+   * existing healing fingerprint and stop there. Every other refusal may be
+   * inspected, but only `prepareReviewAlert` can emit a source-free candidate;
+   * OTPs, offers, balances, failed/future activity and ambiguous money vanish.
    */
-  const noteIfDeclined = (body: string, ts: number, sender: string, channel: CaptureChannel) => {
-    if (isDeclinedMessage(body)) declined.push({ smsTs: ts, sender, channel });
+  const inspectRefused = async (
+    body: string,
+    ts: number,
+    sender: string,
+    channel: CaptureChannel,
+    existingInspection: ReturnType<typeof inspectUniversalAlert> | null = null,
+  ): Promise<void> => {
+    // A decline is affirmative proof that no money moved. It belongs only in
+    // the healing channel and must never be offered as a reviewable charge.
+    if (isDeclinedMessage(body)) {
+      declined.push({ smsTs: ts, sender, channel });
+      return;
+    }
+    if (!REVIEW_MONEY_HINT.test(body)) return;
+    const inspection = existingInspection ?? inspectWorldwide(body, sender);
+    if (!inspection) return;
+    // Refuse unsafe/global-ambiguous evidence before touching Keychain or
+    // hashing source-derived material.
+    const prepared = prepareReviewAlert({
+      id: 'capture_probe_id_0001',
+      sourceKey: 'capture_probe_key_001',
+      observedAt: ts,
+      channel,
+      inspection,
+    });
+    if (!prepared) return;
+    const key = await databaseKey();
+    if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
+    const identity = await reviewCaptureIdentity(body, sender, ts, channel, key);
+    if (!identity) throw new ReviewIdentityError('Encrypted review identity is invalid');
+    if (reviewSourceKeys.has(identity.sourceKey)) return;
+    reviewSourceKeys.add(identity.sourceKey);
+    reviewCandidates.push({ ...prepared, ...identity });
+    // Inbox, delivery and push are collected in different phases. Keep the
+    // newest bounded set by event time—not whichever channel happened to run
+    // first—so a full inbox cannot crowd out a fresh bank-app alert.
+    reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
+    if (reviewCandidates.length > MAX_REVIEW_CANDIDATES) {
+      reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
+    }
   };
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
@@ -117,7 +303,11 @@ export async function scanInbox(
       // "Covered Card" is a credit card, a Liv Goal or a Wio Saving Space is
       // the bank's own savings pot rather than a shop, and money moving to the
       // bank's own brand name is moving inside your own bank.
-      const p = parseSms(sms.body, overrides, { sender: sms.address });
+      const worldwide = inspectWorldwide(sms.body, sms.address);
+      // A globally identified issuer must never be interpreted as an AED/SAR
+      // foreign-card purchase merely because that launch pack is active. The
+      // routed alert remains review-only until its own bank/template gates pass.
+      const p = parseLaunchAlert(sms.body, sms.address, worldwide);
       if (p) {
         parsed.push({
           ...p,
@@ -127,7 +317,7 @@ export async function scanInbox(
           channel: 'inbox',
         });
       } else {
-        noteIfDeclined(sms.body, sms.date, sms.address, 'inbox');
+        await inspectRefused(sms.body, sms.date, sms.address, 'inbox', worldwide);
       }
       // The native inbox query is already asynchronous; the expensive part is
       // the regex grammar above after the 1,000 bodies cross the bridge. A
@@ -158,7 +348,8 @@ export async function scanInbox(
         // built from that timestamp to call them two different charges. The
         // body is the one thing both copies agree on exactly.
         if (!inboxBodies.has(bodyPrint(sms.body))) {
-          const p = parseSms(sms.body, overrides, { sender: sms.address });
+          const worldwide = inspectWorldwide(sms.body, sms.address);
+          const p = parseLaunchAlert(sms.body, sms.address, worldwide);
           if (p) {
             parsed.push({
               ...p,
@@ -168,7 +359,7 @@ export async function scanInbox(
               channel: 'delivery',
             });
           } else {
-            noteIfDeclined(sms.body, sms.date, sms.address, 'delivery');
+            await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide);
           }
         }
         if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < received.length) {
@@ -176,24 +367,41 @@ export async function scanInbox(
         }
       }
       onProgress?.(scannedCount, parsed.length);
-    } catch {
+    } catch (error) {
+      if (error instanceof ReviewIdentityError) throw error;
       // Capture buffer is best-effort; the inbox results stand on their own.
     }
   }
 
   // Bank-app push notifications captured by the notification listener (banks
   // are shifting from SMS to push). Same parser, same dedupe fingerprints.
-  if (NotificationReader?.isEnabled?.()) {
+  const notificationReader = NotificationReader;
+  if (notificationReader?.isEnabled?.()) {
     try {
-      const captured = await NotificationReader.getCaptured(sinceMs);
+      // This queue has its own explicit acknowledgement. Always read every
+      // retained row: using the ledger watermark here could strand an older
+      // unacknowledged notification forever after a newer SMS advances it.
+      const captured = await notificationReader.getCaptured(0);
       for (let i = 0; i < captured.length; i++) {
         const n = captured[i];
+        if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
+        const trustedMarket = trustedBankNotificationMarket(n.pkg);
+        if (!trustedMarket) continue;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
         // Package names usually contain the bank ("com.enbd...", "adcb...").
-        const p = parseSms(`${n.title} ${n.text}`.trim(), overrides, {
-          sender: `${n.pkg} ${n.title}`,
-        });
+        const source = `${n.title} ${n.text}`.trim();
+        const sender = `${n.pkg} ${n.title}`;
+        const worldwide = inspectWorldwide(
+          source,
+          trustedBankNotificationSender(n.pkg) ?? sender,
+        );
+        // Only the active launch market may auto-import from a bank app. A
+        // Saudi app on a UAE ledger (or vice versa) must never relabel/convert
+        // its money through the active parser; global packages remain review.
+        const p = trustedMarket === 'AE' || trustedMarket === 'SA'
+          ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
+          : null;
         if (p) {
           parsed.push({
             ...p,
@@ -204,19 +412,43 @@ export async function scanInbox(
             channel: 'push',
           });
         } else {
-          noteIfDeclined(`${n.title} ${n.text}`.trim(), n.ts, `${n.pkg} ${n.title}`, 'push');
+          await inspectRefused(
+            source,
+            n.ts,
+            sender,
+            'push',
+            worldwide,
+          );
         }
+        // Claim the row only after all parser/review work for it completed.
+        // If anything above throws, this ciphertext remains for the next run.
+        notificationIds.add(n.id);
         if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < captured.length) {
           await yieldToUi();
         }
       }
       onProgress?.(scannedCount, parsed.length);
-    } catch {
+    } catch (error) {
+      if (error instanceof ReviewIdentityError) throw error;
       // Listener data is best-effort; SMS results stand on their own.
     }
   }
 
   // Oldest-first so account auto-creation sees the earliest occurrence first.
   parsed.sort((a, b) => a.smsTs - b.smsTs);
-  return { parsed, declined, newestTs, scannedCount };
+  reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
+  return {
+    parsed,
+    reviewCandidates,
+    declined,
+    newestTs,
+    scannedCount,
+    detectedLaunchMarket,
+    commit: notificationIds.size > 0 && notificationReader
+      ? async () => {
+          const acknowledged = await notificationReader.ackCaptured([...notificationIds]);
+          if (!acknowledged) throw new Error('Notification capture acknowledgement failed');
+        }
+      : NOOP_SCAN_COMMIT,
+  };
 }

@@ -47,12 +47,27 @@ object InstantAlert {
       .edit().putBoolean(KEY_ENABLED, enabled).apply()
   }
 
+  /** Erase is synchronous: no delivery broadcast may observe stale consent. */
+  fun clear(context: Context): Boolean {
+    val disabled = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit().remove(KEY_ENABLED).commit()
+    // Erase should also remove any bank banner already visible in the shade.
+    try {
+      (context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancelAll()
+    } catch (_: Exception) {
+      // The durable consent flag above is the security boundary. A platform
+      // notification-service failure must not re-enable future banners.
+    }
+    return disabled
+  }
+
   /**
    * Post a banner for this message, or do nothing if it is not plainly a
    * completed transaction. Never throws.
    */
   fun post(context: Context, sender: String, body: String) {
     try {
+      if (SensitiveMessageFilter.shouldReject(body)) return
       if (!isEnabled(context)) return
       val manager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return

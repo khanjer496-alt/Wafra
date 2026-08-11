@@ -20,9 +20,9 @@ export const UNIVERSAL_AUTO_IMPORT_GATES = {
   reviewDecisionRecall: 0.95,
   exactMoneyAndDirection: 0.995,
   familyPrecision: 0.98,
-  subscriptionPrecision: 0.98,
+  recurringAlertPrecision: 0.98,
   minimumFamilyRecall: 0.9,
-  subscriptionRecall: 0.98,
+  recurringAlertRecall: 0.98,
   maximumDuplicateRate: 0.001,
 } as const;
 
@@ -55,6 +55,8 @@ export interface MarketBenchmarkFixture {
   market: UniversalMarket;
   institution: string;
   channel: string;
+  /** Optional redacted sender evidence used by institution grammars. */
+  sender?: string | null;
   templateVersion: string;
   split: 'authoring' | 'held-out';
   provenance: FixtureProvenance;
@@ -89,8 +91,8 @@ export interface MarketRolloutReport {
     reviewDecisionRecall: BenchmarkMetric;
     exactMoneyAndDirection: BenchmarkMetric;
     familyPrecision: BenchmarkMetric;
-    subscriptionPrecision: BenchmarkMetric;
-    subscriptionRecall: BenchmarkMetric;
+    recurringAlertPrecision: BenchmarkMetric;
+    recurringAlertRecall: BenchmarkMetric;
     familyRecall: Record<BenchmarkFamily, BenchmarkMetric>;
   };
   /** Runner-generated fixture refs and mismatch kinds only. Source and caller IDs stay private. */
@@ -112,7 +114,7 @@ const metric = (passed: number, total: number): BenchmarkMetric => ({
 });
 
 const executeFixture = (fixture: MarketBenchmarkFixture, fixtureRef: string): ExecutedFixture => {
-  const actual = inspectMarketAlert(fixture.source, fixture.market);
+  const actual = inspectMarketAlert(fixture.source, fixture.market, { sender: fixture.sender });
   const candidate = actual.primaryCandidateIndex === null
     ? null
     : actual.draft.candidates[actual.primaryCandidateIndex] ?? null;
@@ -189,10 +191,10 @@ export const runMarketBenchmark = (
     ({ fixture, actual }) => fixture.expected.status === 'posted' &&
       actual.family === fixture.expected.family,
   ).length;
-  const subscriptions = actualPosted.filter(
+  const recurringAlerts = actualPosted.filter(
     ({ actual }) => actual.family === 'recurring-payment',
   );
-  const subscriptionCorrect = subscriptions.filter(
+  const recurringAlertCorrect = recurringAlerts.filter(
     ({ fixture }) => fixture.expected.status === 'posted' &&
       fixture.expected.family === 'recurring-payment',
   ).length;
@@ -222,8 +224,8 @@ export const runMarketBenchmark = (
     reviewDecisionRecall: metric(reviewCorrect, expectedReview.length),
     exactMoneyAndDirection: metric(moneyCorrect, actualPosted.length),
     familyPrecision: metric(familyCorrect, actualPosted.length),
-    subscriptionPrecision: metric(subscriptionCorrect, subscriptions.length),
-    subscriptionRecall: familyRecall['recurring-payment'],
+    recurringAlertPrecision: metric(recurringAlertCorrect, recurringAlerts.length),
+    recurringAlertRecall: familyRecall['recurring-payment'],
     familyRecall,
   };
   const blockers: string[] = [];
@@ -266,17 +268,17 @@ export const runMarketBenchmark = (
   if (metrics.familyPrecision.ratio < UNIVERSAL_AUTO_IMPORT_GATES.familyPrecision) {
     blockers.push('family-precision');
   }
-  if (subscriptions.length &&
-    metrics.subscriptionPrecision.ratio < UNIVERSAL_AUTO_IMPORT_GATES.subscriptionPrecision) {
-    blockers.push('subscription-precision');
+  if (recurringAlerts.length &&
+    metrics.recurringAlertPrecision.ratio < UNIVERSAL_AUTO_IMPORT_GATES.recurringAlertPrecision) {
+    blockers.push('recurring-alert-precision');
   }
   for (const family of REQUIRED_BENCHMARK_FAMILIES) {
     if (metrics.familyRecall[family].ratio < UNIVERSAL_AUTO_IMPORT_GATES.minimumFamilyRecall) {
       blockers.push(`family-recall:${family}`);
     }
   }
-  if (metrics.subscriptionRecall.ratio < UNIVERSAL_AUTO_IMPORT_GATES.subscriptionRecall) {
-    blockers.push('subscription-recall');
+  if (metrics.recurringAlertRecall.ratio < UNIVERSAL_AUTO_IMPORT_GATES.recurringAlertRecall) {
+    blockers.push('recurring-alert-recall');
   }
   if (splitLeakage) blockers.push('template-split-leakage');
   if (sourceSplitLeakage) blockers.push('source-split-leakage');

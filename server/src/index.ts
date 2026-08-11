@@ -25,7 +25,11 @@
  * inputs to parsing. Neither is ever a column: the sender is sealed with the
  * row, and the market is a two-letter country code the user already chose.
  */
-import { MARKETS, setActiveMarket } from '@/lib/markets';
+import {
+  detectLaunchMarketFromAlert,
+  MARKETS,
+  withMarketPackForParsing,
+} from '@/lib/markets';
 import { parseSms } from '@/lib/sms-parser';
 import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
 
@@ -47,9 +51,11 @@ import {
   validateFeedback,
 } from './feedback';
 import {
+  decodeCsv,
   extractPdfStatementRows,
   normalizeEmailContent,
   parseRawEmail,
+  parseStatementCsv,
   parseStatementText,
 } from './imports';
 import { relaySender } from './ingest-row';
@@ -87,9 +93,16 @@ const MAX_ACK_BYTES = 16_384;
 const MAX_PUSH_BYTES = 1_024;
 const MAX_EMAIL_BYTES = 128 * 1_024;
 const MAX_RAW_EMAIL_BYTES = 6 * 1024 * 1024;
+const MAX_EMAIL_ATTACHMENTS = 8;
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
+const MAX_CSV_BYTES = 1024 * 1024;
 const MAX_PDF_PAGES = 100;
 const MAX_IMPORT_ROWS = 200;
+const CSV_CONTENT_TYPES = new Set([
+  'text/csv',
+  'application/csv',
+  'text/tab-separated-values',
+]);
 const INVITE_TTL_SECONDS = 10 * 60;
 const MAX_VAULT_DEVICES = 8;
 /** Global backstop; edge rate limiting remains the production first line. */
@@ -199,6 +212,10 @@ function validMarket(id: unknown): string | null {
   if (typeof id !== 'string') return null;
   const up = id.trim().toUpperCase();
   return MARKETS.some((market) => market.id === up) ? up : null;
+}
+
+function statementCurrencyForMarket(market: string): 'AED' | 'SAR' {
+  return market === 'SA' ? 'SAR' : 'AED';
 }
 
 /**
@@ -645,11 +662,15 @@ async function queueEmailRows(
   normalized: string,
   eventMaterial: string,
 ): Promise<{ acceptedRows: number; wake: Set<string> }> {
-  // Same rule as /v1/ingest: pack selection and parsing are one synchronous
-  // block, because the active pack is module-level state the isolate shares.
-  setActiveMarket(device.market);
-  const alert = parseSms(normalized);
-  const parsedRows = alert ? [alert] : parseStatementText(normalized);
+  // Forwarded single alerts use the same per-alert AED/SAR routing as the
+  // Shortcut. The paired device market remains the default only for
+  // currency-less statement rows and older evidence-free templates.
+  const alertMarket = detectLaunchMarketFromAlert(normalized) ?? device.market;
+  const alert = withMarketPackForParsing(alertMarket as 'AE' | 'SA', () =>
+    parseSms(normalized));
+  const parsedRows = alert
+    ? [alert]
+    : parseStatementText(normalized, statementCurrencyForMarket(device.market));
   if (parsedRows.length === 0) return { acceptedRows: 0, wake: new Set() };
   if (parsedRows.length > MAX_IMPORT_ROWS) throw new Error('too_many_rows');
   const baseKey = await keyedFingerprint(device.requestSecret, eventMaterial);
@@ -670,7 +691,12 @@ async function queueEmailRows(
     const inserted = await queueStructuredRow(
       env,
       device,
-      { ...withoutRaw(parsedRows[index]), captureSource: 'email', receivedAt: receivedAt[index] },
+      {
+        ...withoutRaw(parsedRows[index]),
+        captureSource: 'email',
+        market: alert ? alertMarket : device.market,
+        receivedAt: receivedAt[index],
+      },
       `${baseKey}:${index}`,
       REPLAY_WINDOW_SECONDS,
     );
@@ -1090,18 +1116,22 @@ export default {
       const sender = validatedSender === undefined ? null : validatedSender;
 
       const isTest = text.trim() === RELAY_TEST_MESSAGE;
-      // Selecting the pack and parsing is ONE synchronous block on purpose.
-      // `setActiveMarket` sets module-level state that every request in the
-      // isolate shares, so an `await` between these two lines would let a
-      // concurrent request for another market change the pack out from under
-      // this parse. A Workers isolate runs JavaScript on one thread, so with no
-      // await here no interleaving is possible. Do not add one.
+      // Choose UAE/Saudi from this alert's sender/currency evidence. The
+      // paired device market is only a fallback for older formats without
+      // explicit evidence; it must not turn SAR into AED on an en-US phone.
+      // Selection and parsing remain one synchronous block so another request
+      // cannot change module-level parser state between them.
       //
       // `sender` goes in as a parse INPUT, not as data to store: it is the only
       // thing that says which bank sent the message, and three sender-gated
       // rules (islamic / ownPot / brand) never fire without it.
-      if (!isTest) setActiveMarket(device.market);
-      const parsed = isTest ? null : parseSms(text, undefined, { sender: sender ?? undefined });
+      const parsedMarket = isTest
+        ? device.market
+        : detectLaunchMarketFromAlert(text, sender ?? undefined) ?? device.market;
+      const parsed = isTest
+        ? null
+        : withMarketPackForParsing(parsedMarket as 'AE' | 'SA', () =>
+            parseSms(text, undefined, { sender: sender ?? undefined }));
       // Not a transaction — an OTP, a promo, a delivery notice. Nothing is
       // stored and nothing is echoed back: the Shortcut fires on every message
       // from the sender, and most of them are none of our business.
@@ -1123,7 +1153,7 @@ export default {
         // not a bank message, so it gets no bank label.
         ...(!isTest && sender ? { sender } : {}),
         // Which pack this row was parsed under, sealed with it. Not a column.
-        ...(!isTest ? { market: device.market } : {}),
+        ...(!isTest ? { market: parsedMarket } : {}),
         // The MESSAGE's time when the Shortcut sent a plausible one, this
         // relay's receipt time otherwise — see resolveReceivedAt. A probe is
         // not a bank message and is always stamped now.
@@ -1178,7 +1208,7 @@ export default {
       return empty(202);
     }
 
-    // ── Forwarded email and PDF statement supplements ──
+    // ── Forwarded email and statement-file supplements ──
     if (req.method === 'GET' && url.pathname === '/v1/import/capabilities') {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
@@ -1196,6 +1226,14 @@ export default {
           maxPages: MAX_PDF_PAGES,
           parser: 'text-explicit-direction-v1',
           note: 'Scans and ambiguous visual debit/credit columns are rejected, not guessed.',
+        },
+        csv: {
+          enabled: true,
+          accepts: [...CSV_CONTENT_TYPES],
+          maxBytes: MAX_CSV_BYTES,
+          maxRows: MAX_IMPORT_ROWS,
+          parser: 'named-columns-explicit-direction-v1',
+          note: 'CSV, TSV, and semicolon exports need date, description, and explicit debit/credit direction.',
         },
       });
     }
@@ -1303,7 +1341,10 @@ export default {
 
       let extracted: Awaited<ReturnType<typeof extractPdfStatementRows>>;
       try {
-        extracted = await extractPdfStatementRows(incoming.bytes);
+        extracted = await extractPdfStatementRows(
+          incoming.bytes,
+          statementCurrencyForMarket(device.market),
+        );
       } catch {
         return json({ error: 'unreadable_pdf' }, 422);
       }
@@ -1335,7 +1376,69 @@ export default {
         for (const targetId of inserted) wake.add(targetId);
       }
       if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
+      if (wake.size === 0 && await queueIsFull(env, device.id)) {
+        return json({ error: 'queue_full' }, 429);
+      }
       return json({ acceptedRows: extracted.rows.length, pages: extracted.pages }, 202);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/import/csv') {
+      const device = await authenticate(req, env, 'admin');
+      if (!device) return json({ error: 'unauthorized' }, 401);
+      const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() ?? '';
+      if (!CSV_CONTENT_TYPES.has(contentType)) return json({ error: 'csv_required' }, 415);
+      const incoming = await readBytes(req, MAX_CSV_BYTES);
+      if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
+      if (incoming.bytes.length === 0) return json({ error: 'invalid_csv' }, 400);
+
+      let parsed: ReturnType<typeof parseStatementCsv>;
+      try {
+        parsed = parseStatementCsv(
+          decodeCsv(incoming.bytes),
+          statementCurrencyForMarket(device.market),
+          MAX_IMPORT_ROWS,
+        );
+      } catch (error) {
+        const code = error instanceof Error ? error.message : 'invalid_csv';
+        if (code === 'too_many_rows') return json({ error: code }, 413);
+        if (code === 'unsupported_statement_format') return json({ error: code }, 422);
+        return json({ error: 'invalid_csv' }, 400);
+      }
+      if (parsed.rows.length === 0) {
+        return json({
+          error: 'unsupported_statement_format',
+          requirement: 'named_columns_with_explicit_debit_credit_direction',
+        }, 422);
+      }
+
+      const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
+      const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
+      const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
+      const wake = new Set<string>();
+      for (let index = 0; index < parsed.rows.length; index++) {
+        const inserted = await queueStructuredRow(
+          env,
+          device,
+          {
+            ...withoutRaw(parsed.rows[index]),
+            categoryDeliberate: true,
+            captureSource: 'csv',
+            receivedAt: receivedAt[index],
+          },
+          `${baseKey}:${index}`,
+          72 * 60 * 60,
+        );
+        for (const targetId of inserted) wake.add(targetId);
+      }
+      if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
+      if (wake.size === 0 && await queueIsFull(env, device.id)) {
+        return json({ error: 'queue_full' }, 429);
+      }
+      return json({
+        acceptedRows: parsed.rows.length,
+        rejectedRows: parsed.rejectedRows,
+        totalRows: parsed.totalRows,
+      }, 202);
     }
 
     // ── Wake-only push registration ──
@@ -1714,6 +1817,7 @@ export default {
 
     const messageId = message.headers.get('message-id')?.slice(0, 512) ?? crypto.randomUUID();
     const wake = new Set<string>();
+    let importedRows = 0;
     if (parsedEmail.text) {
       try {
         const imported = await queueEmailRows(
@@ -1722,6 +1826,7 @@ export default {
           parsedEmail.text,
           `mime:${messageId}`,
         );
+        importedRows += imported.acceptedRows;
         for (const id of imported.wake) wake.add(id);
       } catch {
         message.setReject('This forwarded email has too many statement rows.');
@@ -1729,7 +1834,12 @@ export default {
       }
     }
 
-    for (let attachmentIndex = 0; attachmentIndex < parsedEmail.pdfAttachments.length; attachmentIndex++) {
+    let attachmentBudget = MAX_EMAIL_ATTACHMENTS;
+    for (
+      let attachmentIndex = 0;
+      attachmentIndex < parsedEmail.pdfAttachments.length && attachmentBudget > 0;
+      attachmentIndex++, attachmentBudget--
+    ) {
       const bytes = parsedEmail.pdfAttachments[attachmentIndex];
       if (bytes.byteLength > MAX_PDF_BYTES) continue;
       // BEFORE the extract. pdf.js detaches the buffer it is handed, so a
@@ -1750,14 +1860,15 @@ export default {
       );
       let extracted: Awaited<ReturnType<typeof extractPdfStatementRows>>;
       try {
-        extracted = await extractPdfStatementRows(bytes);
+        extracted = await extractPdfStatementRows(bytes, statementCurrencyForMarket(device.market));
       } catch {
         continue;
       }
       if (
         extracted.pages > MAX_PDF_PAGES ||
         extracted.rows.length === 0 ||
-        extracted.rows.length > MAX_IMPORT_ROWS
+        extracted.rows.length > MAX_IMPORT_ROWS ||
+        importedRows + extracted.rows.length > MAX_IMPORT_ROWS
       ) continue;
       const baseKey = await keyedFingerprint(
         device.requestSecret,
@@ -1780,6 +1891,53 @@ export default {
         );
         for (const id of inserted) wake.add(id);
       }
+      importedRows += extracted.rows.length;
+    }
+    for (
+      let attachmentIndex = 0;
+      attachmentIndex < parsedEmail.csvAttachments.length && attachmentBudget > 0;
+      attachmentIndex++, attachmentBudget--
+    ) {
+      const attachment = parsedEmail.csvAttachments[attachmentIndex];
+      if (attachment.bytes.byteLength === 0 || attachment.bytes.byteLength > MAX_CSV_BYTES) continue;
+      let parsed: ReturnType<typeof parseStatementCsv>;
+      try {
+        parsed = parseStatementCsv(
+          decodeCsv(attachment.bytes),
+          statementCurrencyForMarket(device.market),
+          MAX_IMPORT_ROWS,
+        );
+      } catch {
+        continue;
+      }
+      if (parsed.rows.length === 0 || importedRows + parsed.rows.length > MAX_IMPORT_ROWS) continue;
+      const digest = b64encode(
+        await crypto.subtle.digest(
+          'SHA-256',
+          attachment.bytes as Uint8Array<ArrayBuffer>,
+        ),
+      );
+      const baseKey = await keyedFingerprint(
+        device.requestSecret,
+        `mime-csv:${messageId}:${attachmentIndex}:${digest}`,
+      );
+      const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
+      for (let rowIndex = 0; rowIndex < parsed.rows.length; rowIndex++) {
+        const inserted = await queueStructuredRow(
+          env,
+          device,
+          {
+            ...withoutRaw(parsed.rows[rowIndex]),
+            categoryDeliberate: true,
+            captureSource: 'csv',
+            receivedAt: receivedAt[rowIndex],
+          },
+          `${baseKey}:${rowIndex}`,
+          72 * 60 * 60,
+        );
+        for (const id of inserted) wake.add(id);
+      }
+      importedRows += parsed.rows.length;
     }
     if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
   },

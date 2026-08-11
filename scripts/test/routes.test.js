@@ -142,10 +142,11 @@ function sources(dir = SRC) {
   const settings = fs.readFileSync(path.join(SRC, 'app/settings.tsx'), 'utf8');
   const at = (needle) => settings.indexOf(needle);
 
-  ok('neither region row mutates the setting on tap',
+  ok('region rows never mutate settings directly, and worldwide money has no dead parser picker',
     !/cycleMarket|cycleLanguage/.test(settings) &&
-      /<ChoiceSheet[\s\S]{0,400}title=\{t\('country'\)\}/.test(settings) &&
-      /<ChoiceSheet[\s\S]{0,400}title=\{t\('language'\)\}/.test(settings));
+      /<ChoiceSheet[\s\S]{0,400}title=\{t\('parserPack'\)\}/.test(settings) &&
+      /<ChoiceSheet[\s\S]{0,400}title=\{t\('language'\)\}/.test(settings) &&
+      /hasGlobalLedger \? \([\s\S]{0,500}<Row>[\s\S]{0,500}globalParserPackDetail/.test(settings));
 
   /**
    * And the picker may not be an alert.

@@ -10,12 +10,10 @@ export interface RawSms {
 interface SmsReaderModule {
   /** Newest-first messages with sinceMs <= date < untilMs, up to max. */
   getInboxSms(sinceMs: number, untilMs: number, max: number): Promise<RawSms[]>;
-  /**
-   * Bank alerts captured by the delivery receiver (RECEIVE_SMS), oldest
-   * first. Drains entries older than sinceMs as it reads. Present only on
-   * builds carrying the receiver, so callers must guard on it.
-   */
+  /** Retired delivery-buffer compatibility seam; returns no message bodies. */
   getReceived?(sinceMs: number): Promise<RawSms[]>;
+  /** Purge the retired delivery buffer during cryptographic erase. */
+  clearCaptured?(): Promise<boolean>;
   /**
    * Whether to post a banner the moment a bank SMS is delivered.
    *

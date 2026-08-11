@@ -116,7 +116,15 @@ export type AutoImport = {
  * join make a second watcher redundant rather than harmful.
  */
 export function useAutoImport(watchForeground = false): AutoImport {
-  const { state, importBatch, undoBatch, ensureDurable, markParserVersion } = useStore();
+  const {
+    state,
+    importBatch,
+    stageReviewAlerts,
+    undoBatch,
+    ensureDurable,
+    markParserVersion,
+    setMarket,
+  } = useStore();
   const stateRef = useRef(state);
   stateRef.current = state;
   const captureExecutor = useMemo(
@@ -125,11 +133,13 @@ export function useAutoImport(watchForeground = false): AutoImport {
         ledger: {
           getState: () => stateRef.current,
           importBatch,
+          stageReviewAlerts,
           ensureDurable,
           markParserVersion,
+          setMarket,
         },
       }),
-    [ensureDurable, importBatch, markParserVersion],
+    [ensureDurable, importBatch, markParserVersion, setMarket, stageReviewAlerts],
   );
   const toast = useToast();
   const router = useRouter();
@@ -241,7 +251,17 @@ export function useAutoImport(watchForeground = false): AutoImport {
         return 'needs-setup';
       }
       if (outcome.kind === 'up-to-date') {
-        if (interactive) toast.show(t('upToDateNoNew'));
+        if (interactive && outcome.reviewAlerts > 0) {
+          toast.show(
+            tf('reviewAlertsHomeCount', {
+              count: outcome.reviewAlerts,
+              s: outcome.reviewAlerts === 1 ? '' : 's',
+            }),
+            [{ label: t('review'), onPress: () => router.push('/review-alerts') }],
+          );
+        } else if (interactive) {
+          toast.show(t('upToDateNoNew'));
+        }
         return 'up-to-date';
       }
       if (outcome.kind !== 'imported') return 'up-to-date';

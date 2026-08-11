@@ -13,6 +13,9 @@ export const PermissionsAndroid = {
   async check(_permission: string): Promise<boolean> {
     return false;
   },
+  async request(_permission: string): Promise<string> {
+    return 'denied';
+  },
   async requestMultiple(permissions: string[]): Promise<Record<string, string>> {
     return Object.fromEntries(permissions.map((p) => [p, 'denied']));
   },

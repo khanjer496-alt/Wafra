@@ -255,11 +255,12 @@ which stays in the foreground app.
 | `PATCH` | `/v1/devices/:id` | Owner (or self) + `{name}` → rename a device |
 | `DELETE` | `/v1/devices/:id` | Owner (or member self) → revoke one device; the last owner returns `409` |
 | `DELETE` | `/v1/vault` | Owner bearer → explicitly erase the vault and every device queue |
-| `GET` | `/v1/import/capabilities` | Admin bearer → truthful email/PDF formats and limits |
+| `GET` | `/v1/import/capabilities` | Admin bearer → truthful email/PDF/CSV formats and limits |
 | `POST` | `/v1/email-token` | Admin bearer → create/rotate `{emailToken, forwardingAddress}` |
 | `DELETE` | `/v1/email-token` | Admin bearer → revoke email forwarding |
 | `POST` | `/v1/email/ingest` | Email bearer + `{text?, html?, eventId?}` → structured sealed rows |
 | `POST` | `/v1/import/pdf` | Admin bearer + `application/pdf` bytes → structured sealed rows |
+| `POST` | `/v1/import/csv` | Admin bearer + CSV/TSV bytes → accepted/rejected counts and structured sealed rows |
 | `POST` | `/v1/feedback` | **No bearer** + `{text, appVersion, platform, locale?, diagnostic?}` → `202 {id, dispatched}` |
 | `GET` | `/v1/feedback/:id` | Feedback-read bearer → the one item, for the agent that will fix it |
 | `GET` | `/v1/health` | → `{ok: true}` |
@@ -329,12 +330,13 @@ stored and the row says `skipped_unconfigured` — nothing 500s. See the secrets
 block at the end of `wrangler.toml` for exactly which token, which scopes, and
 who sets which half.
 
-## Email and PDF supplement
+## Email and statement supplements
 
 Cloudflare Email Routing calls the Worker's email handler for
 `<emailToken>@<EMAIL_DOMAIN>`. `postal-mime` parses RFC822/MIME in memory;
 plain text is preferred and HTML is reduced to inert text before it reaches the
-same bank-alert parser. PDF attachments take the same route as direct uploads.
+same bank-alert parser. PDF, CSV, and TSV attachments take the same routes as
+direct uploads.
 The raw email, HTML and attachments fall out of scope when the request ends;
 only individually device-sealed structured rows reach D1.
 
@@ -345,6 +347,14 @@ row needs a valid date, a description, an amount and an explicit `DR`/`CR` or
 exists only as visual column position returns `422` — Wafra does not guess
 whether money came in or went out. This path is why the "no history" limit
 below is survivable on iOS.
+
+`POST /v1/import/csv` accepts at most 1 MiB and 200 data rows. It supports
+comma-, tab-, and semicolon-delimited UTF-8 exports with English or Arabic
+named columns. Each accepted row needs a valid date and description, plus one
+of: separate debit/credit columns, an amount with a direction column, or an
+explicitly signed amount. Quoted fields and Arabic-Indic digits are supported.
+Malformed rows, duplicate rows, currency mismatches, and unsigned ambiguous
+amounts are counted as rejected; they are never inferred from column position.
 
 ## Tests
 
@@ -357,7 +367,7 @@ the real Worker, POST a bank SMS as the Shortcut does, collect the sealed row,
 open it, file it, acknowledge it, and assert the message text is nowhere in the
 database.
 
-`server/test/*.cjs` cover the PDF/email parser, the push-token encryption and
+`server/test/*.cjs` cover the PDF/CSV/email parser, the push-token encryption and
 this schema. They run from the repo root's `npm test` — they used to run only
 from `npm --prefix server test`, which nothing called.
 

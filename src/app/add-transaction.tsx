@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -15,6 +15,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { useToast } from '@/components/ui/toast';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useTheme } from '@/hooks/use-theme';
@@ -24,39 +25,105 @@ import { committed } from '@/lib/haptics';
 import { t as tUi } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
+import type { ReviewAlert } from '@/lib/alert-review-tray';
 import type { CategoryId, TransactionType } from '@/lib/types';
+
+function reviewMajorAmount(item: ReviewAlert): string {
+  const { minorUnits, exponent } = item.amount;
+  if (exponent === 0) return minorUnits;
+  const padded = minorUnits.padStart(exponent + 1, '0');
+  const split = padded.length - exponent;
+  return `${padded.slice(0, split)}.${padded.slice(split)}`;
+}
+
+function defaultReviewTitle(item: ReviewAlert): string {
+  if (item.family === 'cash-withdrawal') return 'ATM withdrawal';
+  if (item.family === 'refund') return 'Refund';
+  if (item.family === 'fee') return 'Bank fee';
+  if (item.family === 'utility') return 'Bill payment';
+  if (item.family === 'transfer') {
+    return item.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer';
+  }
+  if (item.family === 'recurring-payment') return 'Card payment';
+  return 'Card payment';
+}
 
 export default function AddTransactionScreen() {
   const theme = useTheme();
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
-  const { state, addTransaction } = useStore();
+  const toast = useToast();
+  const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
+  const reviewId = Array.isArray(params.reviewId) ? params.reviewId[0] : params.reviewId;
+  const { state, addTransaction, promoteReviewAlert } = useStore();
+  const reviewItem = reviewId
+    ? state.reviewTray.pending.find((item) => item.id === reviewId) ?? null
+    : null;
 
-  const [type, setType] = useState<TransactionType>('expense');
+  const reviewType: TransactionType = reviewItem?.direction === 'credit' ? 'income' : 'expense';
+  const reviewCategory: CategoryId = reviewType === 'income'
+    ? 'business'
+    : reviewItem?.family === 'utility' ? 'utilities' : 'other';
+  const reviewTitle = reviewItem ? defaultReviewTitle(reviewItem) : '';
+  const matchedAccount = reviewItem?.instrument?.last4
+    ? state.accounts.find((account) => account.last4 === reviewItem.instrument?.last4)
+    : null;
+
+  const [type, setType] = useState<TransactionType>(reviewType);
   const [amountText, setAmountText] = useState('');
-  const [category, setCategory] = useState<CategoryId>('groceries');
-  const [accountId, setAccountId] = useState(state.accounts[0]?.id ?? '');
-  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState<CategoryId>(reviewCategory);
+  const [accountId, setAccountId] = useState(matchedAccount?.id ?? state.accounts[0]?.id ?? '');
+  const [title, setTitle] = useState(reviewTitle);
   const [dayOffset, setDayOffset] = useState(0);
+  const [reviewDate, setReviewDate] = useState(
+    reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '',
+  );
+  const [betweenOwnAccounts, setBetweenOwnAccounts] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
   const amountFils = parseAmountToFils(amountText);
-  const canSave = !!amountFils && !!accountId;
+  const reviewRouteInvalid = !!reviewId && !reviewItem;
+  const canSave = !saving && !!accountId && !reviewRouteInvalid &&
+    (reviewItem ? /^\d{4}-\d{2}-\d{2}$/.test(reviewDate) : !!amountFils);
 
   const date = useMemo(() => {
+    if (reviewItem) return reviewDate;
     const d = new Date();
     d.setDate(d.getDate() - dayOffset);
     return toISODate(d);
-  }, [dayOffset]);
+  }, [dayOffset, reviewDate, reviewItem]);
 
   const switchType = (t: TransactionType) => {
     setType(t);
     setCategory(t === 'expense' ? 'groceries' : 'salary');
   };
 
-  const save = () => {
-    if (!amountFils || !accountId) return;
+  const save = async () => {
+    if (!canSave || !accountId) return;
     committed();
+    if (reviewItem) {
+      setSaving(true);
+      try {
+        await promoteReviewAlert({
+          reviewId: reviewItem.id,
+          type,
+          title: title.trim() || reviewTitle,
+          category,
+          accountId,
+          date: reviewDate,
+          betweenOwnAccounts,
+        });
+        toast.show(tUi('reviewAlertAdded'));
+        router.back();
+      } catch {
+        toast.show(tUi('reviewAlertAddFailed'));
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (!amountFils) return;
     addTransaction({
       type,
       amountFils,
@@ -89,7 +156,7 @@ export default function AddTransactionScreen() {
               <Icon name="close" size={18} color={theme.text} />
             </Pressable>
             <ThemedText type="smallBold" accessibilityRole="header" style={styles.headerTitle}>
-              {tUi('newTransaction')}
+              {tUi(reviewItem ? 'reviewAlertAddTitle' : 'newTransaction')}
             </ThemedText>
             <View style={styles.closeBtn} />
           </View>
@@ -127,21 +194,43 @@ export default function AddTransactionScreen() {
             {/* Amount */}
             <View style={styles.amountWrap}>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
-                {ledgerCurrencyDisplay()}
+                {reviewItem?.amount.currency ?? ledgerCurrencyDisplay()}
               </ThemedText>
-              <TextInput
-                value={amountText}
-                onChangeText={setAmountText}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                accessibilityLabel={tUi('amountInLedgerCurrency')}
-                autoFocus
-                placeholderTextColor={theme.textSecondary}
-                style={[styles.amountInput, { color: theme.text }]}
-              />
+              {reviewItem ? (
+                <ThemedText type="title" tabular style={styles.reviewAmount}>
+                  {reviewMajorAmount(reviewItem)}
+                </ThemedText>
+              ) : (
+                <TextInput
+                  value={amountText}
+                  onChangeText={setAmountText}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  accessibilityLabel={tUi('amountInLedgerCurrency')}
+                  autoFocus
+                  placeholderTextColor={theme.textSecondary}
+                  style={[styles.amountInput, { color: theme.text }]}
+                />
+              )}
             </View>
 
             {/* Category grid */}
+            {reviewItem?.family === 'transfer' && (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: betweenOwnAccounts }}
+                accessibilityLabel={tUi('reviewAlertOwnAccounts')}
+                onPress={() => setBetweenOwnAccounts((value) => !value)}
+                style={[styles.transferChoice, { borderColor: theme.cardBorder }]}>
+                <Icon
+                  name={betweenOwnAccounts ? 'check' : 'repeat'}
+                  size={18}
+                  color={betweenOwnAccounts ? theme.primary : theme.textSecondary}
+                />
+                <ThemedText type="small">{tUi('reviewAlertOwnAccounts')}</ThemedText>
+              </Pressable>
+            )}
+
             <View style={styles.fieldBlock}>
               <ThemedText type="small" themeColor="textSecondary">{tUi('category')}</ThemedText>
               <CategoryChips
@@ -191,6 +280,23 @@ export default function AddTransactionScreen() {
             {/* Date quick-pick */}
             <View style={styles.fieldBlock}>
               <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
+              {reviewItem ? (
+                <TextInput
+                  value={reviewDate}
+                  onChangeText={setReviewDate}
+                  accessibilityLabel={tUi('reviewAlertDateA11y')}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={theme.textSecondary}
+                  style={[
+                    styles.titleInput,
+                    {
+                      backgroundColor: theme.backgroundElement,
+                      borderColor: theme.cardBorder,
+                      color: theme.text,
+                    },
+                  ]}
+                />
+              ) : (
               <View style={styles.dateRow}>
                 {[
                   { label: tUi('today'), offset: 0 },
@@ -218,6 +324,7 @@ export default function AddTransactionScreen() {
                   );
                 })}
               </View>
+              )}
             </View>
 
             {/* Title */}
@@ -256,7 +363,7 @@ export default function AddTransactionScreen() {
               accessibilityRole="button"
               accessibilityLabel={tUi('saveTransaction')}
               accessibilityState={{ disabled: !canSave }}
-              onPress={save}
+              onPress={() => void save()}
               disabled={!canSave}
               style={[
                 styles.saveBtn,
@@ -264,7 +371,7 @@ export default function AddTransactionScreen() {
               ]}>
               <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
               <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                {tUi('saveTransaction')}
+                {tUi(reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
               </ThemedText>
             </Pressable>
           </View>
@@ -338,6 +445,16 @@ const styles = StyleSheet.create({
     minWidth: 120,
     textAlign: 'center',
     padding: 0,
+  },
+  reviewAmount: { fontSize: 42, fontWeight: '800' },
+  transferChoice: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.three,
   },
   fieldBlock: {
     gap: Spacing.two,

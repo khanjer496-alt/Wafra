@@ -144,6 +144,11 @@ export function detectSubscriptions(
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const k = t.title.trim().toLowerCase();
     if (!k || dismissed.has(k)) continue;
+    // A fee alert proves a posted fee, not a future commitment. Even an annual
+    // fee needs stable card/account identity carried through the Subscription
+    // model before it can safely become a recurring bill. Until then every
+    // parser-minted fee stays out of automatic recurrence detection.
+    if (/fee$/.test(k) || k === 'service charge') continue;
     const list = groups.get(k) ?? [];
     list.push(t);
     groups.set(k, list);

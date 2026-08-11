@@ -20,11 +20,25 @@ export interface ImportCapabilities {
     parser: string;
     note: string;
   };
+  csv: {
+    enabled: boolean;
+    accepts: string[];
+    maxBytes: number;
+    maxRows: number;
+    parser: string;
+    note: string;
+  };
 }
 
 export interface PdfImportAccepted {
   acceptedRows: number;
   pages: number;
+}
+
+export interface CsvImportAccepted {
+  acceptedRows: number;
+  rejectedRows: number;
+  totalRows: number;
 }
 
 export interface EmailForwardingCredential {
@@ -37,6 +51,8 @@ export type CloudImportErrorCode =
   | 'unauthorized'
   | 'invalid_pdf'
   | 'pdf_required'
+  | 'invalid_csv'
+  | 'csv_required'
   | 'too_large'
   | 'too_many_pages'
   | 'too_many_rows'
@@ -66,6 +82,10 @@ function positiveInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
+function nonNegativeInt(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
@@ -75,6 +95,8 @@ export function parseImportCapabilities(value: unknown): ImportCapabilities | nu
   const root = object(value);
   const email = object(root?.email);
   const pdf = object(root?.pdf);
+  const csvValue = root?.csv;
+  const csv = object(csvValue);
   if (
     typeof email?.enabled !== 'boolean' ||
     !stringList(email.accepts) ||
@@ -87,6 +109,33 @@ export function parseImportCapabilities(value: unknown): ImportCapabilities | nu
     typeof pdf.parser !== 'string' ||
     typeof pdf.note !== 'string'
   ) return null;
+  if (
+    csvValue !== undefined && (
+      typeof csv?.enabled !== 'boolean' ||
+      !stringList(csv.accepts) ||
+      !positiveInt(csv.maxBytes) ||
+      !positiveInt(csv.maxRows) ||
+      typeof csv.parser !== 'string' ||
+      typeof csv.note !== 'string'
+    )
+  ) return null;
+  const csvCapability: ImportCapabilities['csv'] = csv
+    ? {
+        enabled: csv.enabled as boolean,
+        accepts: [...(csv.accepts as string[])],
+        maxBytes: csv.maxBytes as number,
+        maxRows: csv.maxRows as number,
+        parser: csv.parser as string,
+        note: csv.note as string,
+      }
+    : {
+        enabled: false,
+        accepts: [],
+        maxBytes: 0,
+        maxRows: 0,
+        parser: 'unavailable',
+        note: 'This relay does not advertise CSV imports.',
+      };
 
   return {
     email: {
@@ -103,6 +152,7 @@ export function parseImportCapabilities(value: unknown): ImportCapabilities | nu
       parser: pdf.parser,
       note: pdf.note,
     },
+    csv: csvCapability,
   };
 }
 
@@ -110,6 +160,21 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   const body = object(value);
   if (!positiveInt(body?.acceptedRows) || !positiveInt(body.pages)) return null;
   return { acceptedRows: body.acceptedRows, pages: body.pages };
+}
+
+export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {
+  const body = object(value);
+  if (
+    !positiveInt(body?.acceptedRows) ||
+    !nonNegativeInt(body.rejectedRows) ||
+    !positiveInt(body.totalRows) ||
+    body.acceptedRows + body.rejectedRows !== body.totalRows
+  ) return null;
+  return {
+    acceptedRows: body.acceptedRows,
+    rejectedRows: body.rejectedRows,
+    totalRows: body.totalRows,
+  };
 }
 
 export function parseEmailForwardingCredential(
@@ -131,6 +196,8 @@ export function parseEmailForwardingCredential(
 const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'invalid_pdf',
   'pdf_required',
+  'invalid_csv',
+  'csv_required',
   'too_large',
   'too_many_pages',
   'too_many_rows',

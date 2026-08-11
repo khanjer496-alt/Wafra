@@ -306,6 +306,30 @@ ok('groups: commitments never count in trueSubscriptions',
   subsLib.trueSubscriptions(supplier).length === 0);
 ok('groups: commitments listed under fixedCommitments',
   subsLib.fixedCommitments(supplier).length === 2);
+
+{
+  const annualFee = (accountId, date, fils) => ({
+    ...subTx('Annual card fee', date, fils, 'other'), accountId,
+    id: `annual-${accountId}-${date}`,
+  });
+  const fees = subsLib.detectSubscriptions([
+    annualFee('card-a', '2024-06-01', 25000),
+    annualFee('card-a', '2025-06-01', 25000),
+    annualFee('card-a', '2026-06-01', 25000),
+    annualFee('card-b', '2024-06-01', 50000),
+    annualFee('card-b', '2025-06-01', 50000),
+    annualFee('card-b', '2026-06-01', 50000),
+  ], [], new Date(2026, 6, 25));
+  ok('posted annual fees do not become commitments without durable card identity',
+    fees.length === 0, JSON.stringify(fees));
+
+  const penaltyRows = ['2026-05-01', '2026-06-01', '2026-07-01'].flatMap((date) => [
+    { ...subTx('Bank fee', date, 2500, 'other'), id: `generic-${date}` },
+    { ...subTx('Overlimit fee', date, 5000, 'other'), id: `overlimit-${date}` },
+  ]);
+  ok('generic and penalty fees never mint fixed commitments from cadence alone',
+    subsLib.detectSubscriptions(penaltyRows, [], new Date(2026, 6, 25)).length === 0);
+}
 ok('groups: a supplier is not a bill',
   subsLib.billCommitments(supplier).length === 0);
 ok('groups: a supplier is an other repeat payment',

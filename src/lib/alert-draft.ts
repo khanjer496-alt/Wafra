@@ -256,7 +256,7 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
 const HARD_NEGATIVES: readonly [string, RegExp][] = [
   ['authentication-or-otp', /\b(?:otp|one[ -]?time password|verification code|authorization code|security code|do not share|pin)\b|رمز (?:التحقق|التأكيد)|كلمة المرور/i],
   ['declined-or-failed', /\b(?:declined|failed|unsuccessful|rejected|not approved)\b|مرفوض|فشل(?:ت|ت)?/i],
-  ['scheduled-or-due', /\b(?:pre[ -]?debit|will be debited|scheduled|due on|payment due|reminder)\b|سيتم (?:خصم|سحب)|مستحق/i],
+  ['scheduled-or-due', /\b(?:pre[ -]?debit|will be (?:debited|charged|deducted|collected)|will apply|scheduled|due on|payment due|reminder)\b|سيتم (?:خصم|سحب|تحصيل)|مستحق/i],
   ['promotion', /\b(?:offer|promotion|promo code|discount voucher|apply now)\b|عرض ترويجي|خصم خاص/i],
   ['aggregate-or-summary', /\b(?:spend to date|spending summary|totaling|statement total|monthly total)\b|ملخص (?:الإنفاق|المصروفات)/i],
 ];

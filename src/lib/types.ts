@@ -1,3 +1,6 @@
+import type { LedgerMoneySpec } from '@/lib/ledger-money';
+import type { AlertReviewTrayState } from '@/lib/alert-review-tray';
+
 export type TransactionType = 'expense' | 'income';
 
 export type CategoryId =
@@ -266,6 +269,10 @@ export interface Goal {
 
 export interface AppState {
   hydrated: boolean;
+  /** Explicit meaning of every legacy `*Fils` integer; null before a ledger has money. */
+  ledgerMoney: LedgerMoneySpec | null;
+  /** Encrypted, structured global alerts awaiting an explicit user decision. */
+  reviewTray: AlertReviewTrayState;
   accounts: Account[];
   transactions: Transaction[];
   budgets: Budget[];

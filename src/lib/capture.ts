@@ -35,12 +35,15 @@ import {
   syncRelay,
 } from '@/lib/relay';
 import { PARSER_VERSION } from '@/lib/sms-parser';
+import type { ReviewAlert } from '@/lib/alert-review-tray';
 import type { AppState } from '@/lib/types';
 
 export type CaptureSource = 'sms' | 'relay' | 'none';
 
 export interface CaptureResult {
   parsed: ScannedSms[];
+  /** Sanitized global alerts. They are review evidence, never import rows. */
+  reviewCandidates: ReviewAlert[];
   /**
    * Timestamps of messages this collection read and refused as declines, so
    * the planner can retire rows an older parser booked from them.
@@ -55,6 +58,8 @@ export interface CaptureResult {
   declined: DeclinedSms[];
   /** Newest message timestamp seen, for the next incremental scan. */
   newestTs: number;
+  /** Strong per-alert evidence for the launch-tested UAE/Saudi parser pack. */
+  detectedLaunchMarket: 'AE' | 'SA' | null;
   source: CaptureSource;
   /** Acknowledge collected rows. Safe to call when there is nothing to ack. */
   commit: () => Promise<void>;
@@ -133,12 +138,31 @@ async function clearStagedRows(snapshot: string | null): Promise<void> {
 
 const EMPTY: CaptureResult = {
   parsed: [],
+  reviewCandidates: [],
   declined: [],
   newestTs: 0,
+  detectedLaunchMarket: null,
   source: 'none',
   commit: NOOP,
   needsSetup: false,
 };
+
+function relayLaunchMarket(
+  rows: readonly ScannedSms[],
+  fallback?: string | null,
+): 'AE' | 'SA' | null {
+  const fallbackMarket = fallback === 'AE' || fallback === 'SA' ? fallback : null;
+  const markets = new Set<'AE' | 'SA'>();
+  for (const row of rows) {
+    if (row.market === 'AE' || row.market === 'SA') markets.add(row.market);
+    else if (fallbackMarket) markets.add(fallbackMarket);
+  }
+  if (markets.size > 1) {
+    throw new Error('Relay page contains more than one ledger currency');
+  }
+  if (markets.size === 1) return [...markets][0];
+  return null;
+}
 
 /**
  * Collect whatever has arrived since the last scan. Assumes any permission
@@ -162,8 +186,27 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     // moved — so the row has to be retired, and the proof is the message
     // still sitting in the inbox at that exact millisecond. The scan is the
     // only place that proof exists. The default covers a stubbed scanInbox.
-    const { parsed, declined = [], newestTs } = await scanInbox(sinceMs, state.merchantOverrides);
-    return { parsed, declined, newestTs, source: 'sms', commit: NOOP, needsSetup: false };
+    const {
+      parsed,
+      reviewCandidates = [],
+      declined = [],
+      newestTs,
+      detectedLaunchMarket = null,
+      commit,
+    } = await scanInbox(
+      sinceMs,
+      state.merchantOverrides,
+    );
+    return {
+      parsed,
+      reviewCandidates,
+      declined,
+      newestTs,
+      detectedLaunchMarket,
+      source: 'sms',
+      commit,
+      needsSetup: false,
+    };
   }
 
   // Note there is no relay equivalent of the re-read above, and there cannot
@@ -194,9 +237,11 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
         );
         return {
           parsed: staged.rows,
+          reviewCandidates: [],
           // No body ever reached this device; see CaptureResult.declined.
           declined: [],
           newestTs,
+          detectedLaunchMarket: relayLaunchMarket(staged.rows, state.marketId),
           source: 'relay',
           commit: async () => {
             await clearStagedRows(staged.snapshot);
@@ -225,12 +270,15 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     if (!queued) return stagedOnly();
     const { parsed, ids, testIds } = queued;
     const collected = [...staged.rows, ...parsed];
+    const detectedLaunchMarket = relayLaunchMarket(collected, cfg.market);
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
     return {
       parsed: collected,
+      reviewCandidates: [],
       // No body ever reached this device; see CaptureResult.declined.
       declined: [],
       newestTs,
+      detectedLaunchMarket,
       source: 'relay',
       commit: async () => {
         // The setup probe is addressed to /ios-setup and to nobody else.

@@ -772,7 +772,7 @@ const CARD_PAYMENT_DEBIT =
       (await syncOpened(env, bodyKeyed)).items.length === 2);
   }
 
-  /* ═════════════════ The market pack drives parsing ═════════════════ */
+  /* ═══════════ Per-alert market routing drives parsing ═══════════ */
 
   {
     const env = { DB: makeDb() };
@@ -785,14 +785,13 @@ const CARD_PAYMENT_DEBIT =
     const aeRow = (await syncOpened(env, ae)).rows[0];
     const saRow = (await syncOpened(env, sa)).rows[0];
 
-    // The same message, two packs. Under AE the SAR amount is misread and the
-    // merchant means nothing; under SA it is 45.00 at a supermarket. This is
-    // what the hardcoded default cost every non-UAE user.
+    // The alert's unambiguous SAR evidence selects the Saudi pack on both
+    // devices. A stale locale/device preference must never relabel SAR as AED.
     ok('market: an SA device reads SAR 45.00 correctly', saRow.amountFils === 4500);
-    ok('market: the AE pack does not read the same message the same way',
-      aeRow.amountFils !== 4500, `AE read ${aeRow.amountFils}`);
-    ok('market: the row records which pack parsed it',
-      saRow.market === 'SA' && aeRow.market === 'AE');
+    ok('market: an AE device also routes explicit SAR evidence safely',
+      aeRow.amountFils === 4500 && aeRow.currency === 'SAR', JSON.stringify(aeRow));
+    ok('market: each row records the pack selected from the alert',
+      saRow.market === 'SA' && aeRow.market === 'SA');
 
     // PATCH, not re-pair: re-pairing would mint a new ingest token and orphan
     // the one baked into the user's Shortcut — the one piece of this system the
@@ -1242,8 +1241,10 @@ const CARD_PAYMENT_DEBIT =
     const me = await pairDevice(env);
 
     const caps = await call(env, 'GET', '/v1/import/capabilities', { token: me.adminToken });
-    ok('import: capabilities are admin-only and describe both supplements',
-      caps.status === 200 && (await caps.json()).pdf.enabled === true);
+    const capabilityBody = await caps.json();
+    ok('import: capabilities are admin-only and describe email, PDF, and CSV supplements',
+      caps.status === 200 && capabilityBody.pdf.enabled === true &&
+        capabilityBody.csv.enabled === true && capabilityBody.csv.maxRows === 200);
     ok('import: capabilities are not readable with the ingest token',
       (await call(env, 'GET', '/v1/import/capabilities', { token: me.ingestToken })).status === 401);
 
@@ -1268,9 +1269,95 @@ const CARD_PAYMENT_DEBIT =
     ok('email: the row is labelled as having come from email',
       emailRow.captureSource === 'email' && emailRow.amountFils === 4000,
       JSON.stringify(emailRow));
+    const forwardedSaudi = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken, body: { text: SA_PURCHASE },
+    });
+    const saEmailRow = (await syncOpened(env, me)).rows.find((row) => row.market === 'SA');
+    ok('email: per-alert SAR evidence overrides an AE device without conversion',
+      forwardedSaudi.status === 202 && saEmailRow?.currency === 'SAR' &&
+        saEmailRow?.amountFils === 4500,
+      JSON.stringify(saEmailRow));
     ok('email: an empty forward is refused',
       (await call(env, 'POST', '/v1/email/ingest', { token: email.emailToken, body: { text: '' } }))
         .status === 400);
+
+    const attachedCsv = Buffer.from([
+      'Date,Description,Debit,Credit,Currency',
+      '01/07/2026,Email attachment shop,31.25,,AED',
+    ].join('\n')).toString('base64');
+    const mime = [
+      'From: bank@example.test',
+      `To: ${email.forwardingAddress}`,
+      'Message-ID: <csv-attachment@example.test>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="wafra-csv"',
+      '',
+      '--wafra-csv',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'Attached statement',
+      '--wafra-csv',
+      'Content-Type: text/csv; name="statement.csv"',
+      'Content-Disposition: attachment; filename="statement.csv"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      attachedCsv,
+      '--wafra-csv--',
+      '',
+    ].join('\r\n');
+    let emailReject = '';
+    await worker.email({
+      to: email.forwardingAddress,
+      raw: new Response(mime).body,
+      rawSize: Buffer.byteLength(mime),
+      headers: new Headers({ 'message-id': '<csv-attachment@example.test>' }),
+      setReject: (reason) => { emailReject = reason; },
+    }, env, { waitUntil: () => {} });
+    const attachedRows = (await drainOpened(env, me)).filter((row) => row.captureSource === 'csv');
+    ok('email: a CSV attachment follows the same encrypted import path',
+      emailReject === '' && attachedRows.length === 1 &&
+        attachedRows[0].captureSource === 'csv' && attachedRows[0].amountFils === 3125 &&
+        attachedRows[0].raw === undefined,
+      JSON.stringify({ emailReject, attachedRows }));
+
+    const csvPart = (prefix) => Buffer.from([
+      'Date,Description,Debit,Credit,Currency',
+      ...Array.from({ length: 120 }, (_, index) =>
+        `01/07/2026,${prefix} ${index},1.00,,AED`),
+    ].join('\n')).toString('base64');
+    const aggregateMime = [
+      'From: bank@example.test',
+      `To: ${email.forwardingAddress}`,
+      'Message-ID: <aggregate-csv@example.test>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/mixed; boundary="wafra-many"',
+      '',
+      '--wafra-many',
+      'Content-Type: text/csv; name="first.csv"',
+      'Content-Disposition: attachment; filename="first.csv"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      csvPart('First'),
+      '--wafra-many',
+      'Content-Type: text/csv; name="second.csv"',
+      'Content-Disposition: attachment; filename="second.csv"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      csvPart('Second'),
+      '--wafra-many--',
+      '',
+    ].join('\r\n');
+    await worker.email({
+      to: email.forwardingAddress,
+      raw: new Response(aggregateMime).body,
+      rawSize: Buffer.byteLength(aggregateMime),
+      headers: new Headers({ 'message-id': '<aggregate-csv@example.test>' }),
+      setReject: () => {},
+    }, env, { waitUntil: () => {} });
+    const aggregateRows = await drainOpened(env, me);
+    ok('email: all attachments share one 200-row ceiling',
+      aggregateRows.length === 120 && aggregateRows.every((row) => row.merchant.startsWith('First')),
+      String(aggregateRows.length));
 
     const revoked = await call(env, 'DELETE', '/v1/email-token', { token: me.adminToken });
     ok('email: the address can be revoked', revoked.status === 204);
@@ -1292,12 +1379,70 @@ const CARD_PAYMENT_DEBIT =
         token: me.ingestToken, headers: { 'content-type': 'application/pdf' }, body: '%PDF-1.4',
       })).status === 401);
 
+    ok('csv: an unsupported media type is refused before parsing',
+      (await call(env, 'POST', '/v1/import/csv', {
+        token: me.adminToken,
+        headers: { 'content-type': 'application/json' },
+        body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+      })).status === 415);
+    ok('csv: the ingest token cannot upload a statement',
+      (await call(env, 'POST', '/v1/import/csv', {
+        token: me.ingestToken,
+        headers: { 'content-type': 'text/csv' },
+        body: 'Date,Description,Debit,Credit\n01/07/2026,Taxi,20.00,',
+      })).status === 401);
+    const csvUpload = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: [
+        'Date,Description,Debit,Credit,Currency',
+        '01/07/2026,"Carrefour, Market",40.00,,AED',
+        '02/07/2026,Salary,,18500.00,AED',
+        '03/07/2026,Wrong currency,20.00,,SAR',
+      ].join('\n'),
+    });
+    const csvAccepted = await csvUpload.json();
+    ok('csv: valid rows are accepted and rejected rows are counted',
+      csvUpload.status === 202 && csvAccepted.acceptedRows === 2 &&
+        csvAccepted.rejectedRows === 1 && csvAccepted.totalRows === 3,
+      JSON.stringify(csvAccepted));
+    const csvRows = (await drainOpened(env, me)).filter((row) => row.captureSource === 'csv');
+    ok('csv: structured rows reach the encrypted queue without raw statement text',
+      csvRows.length === 2 && csvRows[0].merchant === 'Carrefour, Market' &&
+        csvRows[0].amountFils === 4000 && csvRows.every((row) => row.raw === undefined),
+      JSON.stringify(csvRows));
+    ok('csv: unsigned amount-only exports are rejected rather than guessed',
+      (await call(env, 'POST', '/v1/import/csv', {
+        token: me.adminToken,
+        headers: { 'content-type': 'text/csv' },
+        body: 'Date,Description,Amount\n01/07/2026,Ambiguous,20.00',
+      })).status === 422);
+
     // Email forwarding is off unless the operator configured a domain, and the
     // route says so rather than minting an address that can never receive mail.
     const noDomain = { DB: makeDb() };
     const solo = await pairDevice(noDomain);
     ok('email: an unconfigured relay refuses to mint an address',
       (await call(noDomain, 'POST', '/v1/email-token', { token: solo.adminToken })).status === 503);
+
+    const saEnv = { DB: makeDb() };
+    const saDevice = await pairDevice(saEnv, { market: 'SA' });
+    const saCsv = await call(saEnv, 'POST', '/v1/import/csv', {
+      token: saDevice.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Panda,45.00,',
+    });
+    const saCsvRows = await drainOpened(saEnv, saDevice);
+    ok('csv: a Saudi device defaults a currency-less statement to SAR',
+      saCsv.status === 202 && saCsvRows.length === 1 && saCsvRows[0].currency === 'SAR');
+    const saPdf = await call(saEnv, 'POST', '/v1/import/pdf', {
+      token: saDevice.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['02/07/2026 PANDA SAR 50.00 DR']),
+    });
+    const saPdfRows = await drainOpened(saEnv, saDevice);
+    ok('pdf: a Saudi statement keeps SAR through extraction and queueing',
+      saPdf.status === 202 && saPdfRows.length === 1 && saPdfRows[0].currency === 'SAR');
   }
 
   /* ══════ A multi-row statement must arrive as many rows, not as one ══════

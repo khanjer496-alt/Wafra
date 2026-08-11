@@ -12,6 +12,7 @@
 
 const { buildImportPlan } = require('./build/import-plan.js');
 const { parseSms, isDeclinedMessage } = require('./build/sms-parser.js');
+const { setActiveMarket } = require('./build/markets.js');
 
 let pass = 0;
 let fail = 0;
@@ -1072,17 +1073,22 @@ const DECLINE_SMS = [{
 مبلغ: 34.00 SAR
 لدى: Some restaurant
 في: 2019-05-07 23:44`;
+  setActiveMarket('SA');
   const parsed = parseSms(arabicMada);
   const plan = buildImportPlan(
-    [{ ...parsed, smsTs: T0 + 5_700_000, sender: 'ADCB', channel: 'inbox' }],
+    [{ ...parsed, smsTs: T0 + 5_700_000, sender: 'Albilad', channel: 'inbox' }],
     BASE,
     T0 + 5_700_000,
   );
   ok('Arabic Mada import: parser debit kind is preserved through account resolution',
     parsed?.card?.kind === 'debit' &&
+      parsed?.amountFils === 3400 && parsed?.currency === 'SAR' &&
+      parsed?.date === '2019-05-07' &&
+      plan.batch.transactions[0]?.amountFils === 3400 &&
       plan.batch.cardTypes?.['0'] === 'debit' &&
       plan.batch.newAccounts[0]?.cardType === 'debit',
-    { parsed: parsed?.card, batch: plan.batch });
+    { parsed, batch: plan.batch });
+  setActiveMarket('AE');
 }
 
 /* A better SMS may dedupe an edited push, but may not overwrite it. */

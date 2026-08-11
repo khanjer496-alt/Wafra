@@ -25,7 +25,7 @@
  *     can do to itself.
  */
 import React, { useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -38,6 +38,8 @@ import { clearBackgroundRelayRows } from '@/lib/background-relay';
 import { getRelayConfigStrict, isRelayPlatform, unpairDevice } from '@/lib/relay';
 import type { StorageFailure } from '@/lib/storage-diagnostics';
 import { useStore, type StorageRecoveryState } from '@/lib/store';
+import NotificationReader from '../../modules/notification-reader';
+import SmsReader from '../../modules/sms-reader';
 
 /** Matches the onboarding surface it stands in for: night, whatever the OS says. */
 const night = Colors.dark;
@@ -85,7 +87,20 @@ export function StorageRecovery({
     try {
       const relay = isRelayPlatform() ? await getRelayConfigStrict() : null;
       if (relay) await unpairDevice(relay);
-      await clearAll(isRelayPlatform() ? clearBackgroundRelayRows : undefined);
+      const notificationReader = NotificationReader;
+      const cleanupCaptureQueue = isRelayPlatform()
+        ? clearBackgroundRelayRows
+        : Platform.OS === 'android'
+          ? async () => {
+              if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
+                throw new Error('sms_capture_cleanup_failed');
+              }
+              if (notificationReader && !(await notificationReader.clearCaptured())) {
+                throw new Error('notification_capture_cleanup_failed');
+              }
+            }
+          : undefined;
+      await clearAll(cleanupCaptureQueue);
       committed();
     } catch {
       // `clearAll` throws when the erase or the blank-store write failed. The

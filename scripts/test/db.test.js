@@ -374,6 +374,9 @@ function loadHydrationExports(realModules = {}) {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
       LedgerResetError: class LedgerResetError extends Error {},
     },
+    '@/lib/ledger-money': require('./build/ledger-money'),
+    '@/lib/alert-review-tray': require('./build/alert-review-tray'),
+    '@/lib/review-promotion': require('./build/review-promotion'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     // The REAL predicate, not a stub. It is what decides which rows a merchant
@@ -494,7 +497,9 @@ if (!gateSrc || !recoverySrc) {
   const confirmBranchAt = recovery.indexOf('if (confirmingErase)');
   ok('erase is behind a separate destructive confirmation',
     !!eraseBody &&
-      /clearAll\(isRelayPlatform\(\) \? clearBackgroundRelayRows : undefined\)/.test(eraseBody) &&
+      /const cleanupCaptureQueue = isRelayPlatform\(\)/.test(eraseBody) &&
+      /notificationReader\.clearCaptured\(\)/.test(eraseBody) &&
+      /clearAll\(cleanupCaptureQueue\)/.test(eraseBody) &&
       (recovery.match(/clearAll\(/g) ?? []).length === 1 &&
       confirmBranchAt !== -1 &&
       confirmBranchAt < recovery.indexOf('onErase()') &&
@@ -644,6 +649,23 @@ const tx = (id, extra = {}) => ({
       card?.snapshotFils === 875000);
   ok('backup restore still rejects an invalid envelope',
     hydration.parseBackupForRestore(JSON.stringify({ app: 'not-wafra', data: { transactions: [] } })) === null);
+  ok('backup restore rejects unknown future envelope versions',
+    hydration.parseBackupForRestore(JSON.stringify({
+      app: 'wafra', version: 2, data: { transactions: [] },
+    })) === null);
+  const globalLedger = hydration.parseBackupForRestore(JSON.stringify({
+      app: 'wafra',
+      version: 1,
+      data: {
+        marketId: 'AE',
+        ledgerMoney: { schemaVersion: 2, currency: 'KWD', exponent: 3 },
+        transactions: [tx('mixed-money', { amountFils: 500 })],
+      },
+    }));
+  ok('backup restore preserves an explicit global ledger currency independently of the launch parser pack',
+    globalLedger?.ledgerMoney?.currency === 'KWD' &&
+      globalLedger?.ledgerMoney?.exponent === 3 &&
+      globalLedger?.transactions?.length === 1);
 }
 
 {
@@ -885,12 +907,11 @@ ok('backup restore migrates old state before dispatching it',
   !!restoreBackupBody &&
     inOrder(restoreBackupBody, 'parseBackupForRestore(json)', "dispatch({ type: 'restore'"));
 
-const ledgerHoldsMoneyBody = bodyOf(store, 'function ledgerHoldsMoney');
+const { ledgerStateHasMoney } = require('./build/ledger-money');
 ok('account-only ledgers pin their accounting currency',
-  !!ledgerHoldsMoneyBody &&
-    /account\.openingFils !== 0/.test(ledgerHoldsMoneyBody) &&
-    /account\.snapshotFils/.test(ledgerHoldsMoneyBody) &&
-    /account\.creditLimitFils/.test(ledgerHoldsMoneyBody),
+  ledgerStateHasMoney({ accounts: [{ openingFils: 1 }] }) &&
+    ledgerStateHasMoney({ accounts: [{ snapshotFils: 1 }] }) &&
+    ledgerStateHasMoney({ accounts: [{ creditLimitFils: 1 }] }),
   'an opening balance, bank snapshot, or card limit must not be relabelled from AED to SAR');
 
 const clearAllBody = bodyOf(store, 'const clearAll = useCallback');

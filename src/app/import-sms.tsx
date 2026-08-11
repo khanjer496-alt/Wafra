@@ -180,7 +180,7 @@ export default function ImportSmsScreen() {
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
   const { auto, history } = useLocalSearchParams<{ auto?: string; history?: string }>();
-  const { state, importBatch, ensureDurable, addBill } = useStore();
+  const { state, importBatch, ensureDurable, stageReviewAlerts, addBill } = useStore();
 
   const [text, setText] = useState('');
   const [plan, setPlan] = useState<ImportPlan | null>(null);
@@ -193,6 +193,7 @@ export default function ImportSmsScreen() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [applying, setApplying] = useState(false);
   const [historyResult, setHistoryResult] = useState<HistoricalImportResult | null>(null);
+  const [pendingScanCommit, setPendingScanCommit] = useState<(() => Promise<void>) | null>(null);
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [historyCommitState, setHistoryCommitState] = useState<
     'idle' | 'writing' | 'storage-failed' | 'cleanup-failed'
@@ -231,11 +232,13 @@ export default function ImportSmsScreen() {
         return;
       }
       // Full history: fingerprints make rescans safe (no duplicates).
-      const { parsed, newestTs, declined } = await scanInbox(
+      const { parsed, reviewCandidates, newestTs, declined, commit } = await scanInbox(
         0,
         state.merchantOverrides,
         (scanned, found) => setProgress({ scanned, found }),
       );
+      const reviewReceipt = stageReviewAlerts(reviewCandidates);
+      await reviewReceipt.durable;
       // `declined` carried through, exactly as the automatic path does. Without
       // it this screen — the one a user reaches BECAUSE something looks wrong —
       // is the one path that cannot clear a refused transaction the ledger
@@ -246,7 +249,11 @@ export default function ImportSmsScreen() {
       setPlan(p);
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
+        await commit();
         setNotice({ title: t('upToDate'), body: t('inboxAlreadyFiled') });
+        setPendingScanCommit(null);
+      } else {
+        setPendingScanCommit(() => commit);
       }
     } finally {
       setScanning(false);
@@ -356,6 +363,24 @@ export default function ImportSmsScreen() {
     ) {
       setPlan(null);
       setHistoryCommitState('idle');
+      if (!history && pendingScanCommit) {
+        try {
+          // The preview became a no-op because a concurrent live capture
+          // durably filed the same rows. They are now safe to retire from the
+          // native encrypted queue even though this confirmation has no new
+          // ledger batch of its own.
+          await pendingScanCommit();
+          setPendingScanCommit(null);
+        } catch {
+          historyOperationLocked.current = false;
+          setNotice({
+            title: t('notificationCleanupFailedTitle'),
+            body: t('notificationCleanupFailedBody'),
+          });
+          setApplying(false);
+          return;
+        }
+      }
       try {
         await discardHistorySession();
         router.back();
@@ -400,6 +425,20 @@ export default function ImportSmsScreen() {
       setApplying(false);
       return;
     }
+    if (!history && pendingScanCommit) {
+      try {
+        await pendingScanCommit();
+        setPendingScanCommit(null);
+      } catch {
+        historyOperationLocked.current = false;
+        setNotice({
+          title: t('notificationCleanupFailedTitle'),
+          body: t('notificationCleanupFailedBody'),
+        });
+        setApplying(false);
+        return;
+      }
+    }
     try {
       await discardHistorySession();
       router.back();
@@ -425,6 +464,20 @@ export default function ImportSmsScreen() {
       });
       setApplying(false);
       return;
+    }
+    if (!history && pendingScanCommit) {
+      try {
+        await pendingScanCommit();
+        setPendingScanCommit(null);
+      } catch {
+        historyOperationLocked.current = false;
+        setNotice({
+          title: t('notificationCleanupFailedTitle'),
+          body: t('notificationCleanupFailedBody'),
+        });
+        setApplying(false);
+        return;
+      }
     }
     try {
       await discardHistorySession();

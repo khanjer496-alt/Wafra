@@ -4,7 +4,6 @@ import android.content.Context
 import android.provider.Telephony
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import org.json.JSONArray
 
 /**
  * Reads SMS from the device inbox. The app must hold the READ_SMS runtime
@@ -17,6 +16,17 @@ import org.json.JSONArray
 class SmsReaderModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SmsReader")
+
+    // Older releases buffered full delivery bodies in ordinary preferences.
+    // The receiver no longer writes them; purge that archive on every module
+    // load even when SMS permission is off and the user never starts a scan.
+    OnCreate {
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("SMS reader context is unavailable")
+      if (!clearLegacyDeliveryBuffer(context)) {
+        throw IllegalStateException("Legacy SMS delivery buffer could not be erased")
+      }
+    }
 
     AsyncFunction("getInboxSms") { sinceMs: Double, untilMs: Double, max: Int ->
       val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
@@ -34,10 +44,12 @@ class SmsReaderModule : Module() {
           val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
           val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
           while (it.moveToNext() && messages.size < max) {
+            val body = it.getString(bodyIdx) ?: ""
+            if (SensitiveMessageFilter.shouldReject(body)) continue
             messages.add(
               mapOf(
                 "address" to (it.getString(addressIdx) ?: ""),
-                "body" to (it.getString(bodyIdx) ?: ""),
+                "body" to body,
                 "date" to it.getLong(dateIdx).toDouble()
               )
             )
@@ -49,42 +61,19 @@ class SmsReaderModule : Module() {
       messages
     }
 
-    /**
-     * Alerts captured by SmsDeliveryReceiver at delivery time, oldest first.
-     * Entries older than sinceMs are dropped rather than returned, so the
-     * buffer does not grow across scans.
-     */
-    AsyncFunction("getReceived") { sinceMs: Double ->
+    /** Compatibility seam for builds that carried the old delivery buffer. */
+    AsyncFunction("getReceived") { _: Double ->
       val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
-      val messages = mutableListOf<Map<String, Any>>()
-      try {
-        val prefs = context.getSharedPreferences(
-          SmsDeliveryReceiver.PREFS,
-          Context.MODE_PRIVATE
-        )
-        val arr = JSONArray(prefs.getString(SmsDeliveryReceiver.KEY, "[]"))
-        val keep = JSONArray()
-        val since = sinceMs.toLong()
-        for (i in 0 until arr.length()) {
-          val entry = arr.optJSONObject(i) ?: continue
-          val date = entry.optLong("date")
-          if (date < since) continue
-          keep.put(entry)
-          messages.add(
-            mapOf(
-              "address" to entry.optString("address"),
-              "body" to entry.optString("body"),
-              "date" to date.toDouble()
-            )
-          )
-        }
-        if (keep.length() != arr.length()) {
-          prefs.edit().putString(SmsDeliveryReceiver.KEY, keep.toString()).apply()
-        }
-      } catch (_: Exception) {
-        // A malformed buffer must not break the scan; the inbox query still runs.
+      if (!clearLegacyDeliveryBuffer(context)) {
+        throw IllegalStateException("Legacy SMS delivery buffer could not be erased")
       }
-      messages.sortedBy { it["date"] as Double }
+      emptyList<Map<String, Any>>()
+    }
+
+    /** Used by every erase surface; safe and idempotent. */
+    AsyncFunction("clearCaptured") {
+      val context = appContext.reactContext ?: return@AsyncFunction false
+      clearLegacyDeliveryBuffer(context) && InstantAlert.clear(context)
     }
 
     /**
@@ -106,4 +95,8 @@ class SmsReaderModule : Module() {
       InstantAlert.isEnabled(context)
     }
   }
+
+  private fun clearLegacyDeliveryBuffer(context: Context): Boolean =
+    context.getSharedPreferences(SmsDeliveryReceiver.PREFS, Context.MODE_PRIVATE)
+      .edit().clear().commit()
 }

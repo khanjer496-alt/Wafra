@@ -3,15 +3,13 @@ package expo.modules.notificationreader
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import org.json.JSONArray
-import org.json.JSONObject
 
 /**
  * Captures bank-app transaction notifications (banks are shifting from SMS to
- * push alerts). Only notifications whose text mentions a dirham amount are
- * kept — everything else is ignored on the spot, so no personal chatter is
- * ever stored. Kept entries go to a small ring buffer in SharedPreferences
- * that the app drains during its normal import scan.
+ * push alerts). Only bounded notifications whose text contains a supported
+ * money marker are retained as candidates. Entries go to a small, expiring
+ * AndroidKeyStore-encrypted queue that the app acknowledges only after its
+ * ledger/review write is durable.
  */
 class BankNotificationListenerService : NotificationListenerService() {
   override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -43,42 +41,31 @@ class BankNotificationListenerService : NotificationListenerService() {
   private fun capture(sbn: StatusBarNotification) {
     try {
       if (sbn.packageName == packageName) return
+      // Notification access is device-wide. Exact package identity is the
+      // security boundary that keeps chats, shops and an app imitating a bank
+      // alert out of both the encrypted queue and the launch parser.
+      if (!TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)) return
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
       val text = (
         extras.getCharSequence(Notification.EXTRA_BIG_TEXT)
           ?: extras.getCharSequence(Notification.EXTRA_TEXT)
         )?.toString() ?: ""
+      // A bank alert is short. Refuse pathological payloads rather than
+      // truncating them into a different message or allowing another app to
+      // fill the encrypted queue with multi-megabyte notifications.
+      if (title.length > MAX_TITLE_CHARS || text.length > MAX_TEXT_CHARS) return
       val body = "$title $text".trim()
-      if (body.isEmpty() || !MONEY_RE.containsMatchIn(body)) return
+      if (body.isEmpty() || SensitiveNotificationFilter.shouldReject(body) ||
+        !MONEY_RE.containsMatchIn(body)) return
 
-      val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-      val arr = JSONArray(prefs.getString(KEY, "[]"))
-      // Skip exact repeats. Checked across the whole buffer rather than only
-      // against the last entry, because the connect-time sweep re-reads
-      // notifications this service already saw when they were posted.
-      for (i in 0 until arr.length()) {
-        val e = arr.optJSONObject(i) ?: continue
-        if (e.optString("text") == text &&
-          e.optString("pkg") == sbn.packageName &&
-          e.optLong("ts") == sbn.postTime
-        ) {
-          return
-        }
-      }
-      arr.put(
-        JSONObject()
-          .put("pkg", sbn.packageName)
-          .put("title", title)
-          .put("text", text)
-          .put("ts", sbn.postTime)
+      NotificationCaptureStore.append(
+        context = this,
+        pkg = sbn.packageName,
+        title = title,
+        text = text,
+        ts = sbn.postTime,
       )
-      val trimmed = if (arr.length() > MAX) {
-        JSONArray().also { out ->
-          for (i in arr.length() - MAX until arr.length()) out.put(arr.get(i))
-        }
-      } else arr
-      prefs.edit().putString(KEY, trimmed.toString()).apply()
     } catch (_: Exception) {
       // Never crash the listener; a dropped notification is recoverable, a
       // dead listener is not.
@@ -86,9 +73,9 @@ class BankNotificationListenerService : NotificationListenerService() {
   }
 
   companion object {
-    const val PREFS = "wafra_notification_capture"
-    const val KEY = "captured"
-    const val MAX = 500
+    private const val MAX_TITLE_CHARS = 512
+    private const val MAX_TEXT_CHARS = 4096
+
     // Arabic writes the currency on either side of the figure and spells it
     // out ("150.00 درهم"), so a bank app posting in Arabic passed none of the
     // prefix-only tests and every one of its notifications was dropped here,

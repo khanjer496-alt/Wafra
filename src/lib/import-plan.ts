@@ -36,7 +36,9 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Structured settlement side survives server raw-body discard on iOS. */
   cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
-  captureSource?: 'shortcut' | 'email' | 'pdf';
+  captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
+  /** Launch pack that produced this body-free relay row. */
+  market?: 'AE' | 'SA';
   /**
    * Opaque, locally generated identity for a historical Apple Message.
    *
