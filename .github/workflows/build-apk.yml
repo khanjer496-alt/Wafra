@@ -15,6 +15,10 @@ on:
         description: 'Also build the Play Store bundle (.aab) — adds ~5 min'
         type: boolean
         default: false
+      corpus:
+        description: 'Internal ARM64 APK with the temporary full-inbox parser corpus exporter'
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -53,6 +57,12 @@ jobs:
       # fork or a renamed Worker overrides it without editing this file. Not a
       # secret: it is a public URL that ships inside the APK by definition.
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
+      # Both halves are required: Gradle compiles the raw native method closed,
+      # while Expo inlines the public flag into the JavaScript bundle. A normal
+      # push/manual build pins both off. Only an explicit manual corpus run can
+      # enable them together.
+      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
+      WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -225,7 +235,14 @@ jobs:
 
       - name: Build release APK
         working-directory: android
-        run: ./gradlew assembleRelease --no-daemon
+        env:
+          CORPUS_BUILD: ${{ github.event.inputs.corpus == 'true' && 'true' || 'false' }}
+        run: |
+          if [ "$CORPUS_BUILD" = "true" ]; then
+            ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+          else
+            ./gradlew assembleRelease --no-daemon
+          fi
 
       # Only needed to upload to Play, which is not what most builds are for.
       - name: Build Play Store bundle (AAB)
@@ -243,7 +260,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wafra-apk
+          name: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
           path: wafra.apk
           retention-days: 30
 

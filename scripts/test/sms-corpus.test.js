@@ -81,6 +81,10 @@ const rejects = async (name, run, code) => {
   const gradle = fs.readFileSync(path.join(root, 'modules/sms-reader/android/build.gradle'), 'utf8');
   const adapter = fs.readFileSync(path.join(root, 'src/lib/sms-corpus-export.ts'), 'utf8');
   const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
+  const githubBuild = fs.readFileSync(path.join(
+    root,
+    '.github/workflows/build-apk.yml',
+  ), 'utf8');
   const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
 
   ok('native raw access is compiled closed without the private build flag',
@@ -121,6 +125,13 @@ const rejects = async (name, run, code) => {
       ordinaryProfiles.every(([, profile]) =>
         profile.env?.EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT === '0' &&
         profile.env?.WAFRA_SMS_CORPUS_EXPORT === '0'));
+  ok('GitHub requires an explicit manual corpus input and labels its artifact',
+    /workflow_dispatch:[\s\S]{0,500}corpus:[\s\S]{0,200}type: boolean/.test(githubBuild) &&
+      /EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: \$\{\{ github\.event\.inputs\.corpus == 'true' && '1' \|\| '0' \}\}/.test(githubBuild) &&
+      /WAFRA_SMS_CORPUS_EXPORT: \$\{\{ github\.event\.inputs\.corpus == 'true' && '1' \|\| '0' \}\}/.test(githubBuild) &&
+      /github\.event\.inputs\.corpus == 'true' && 'wafra-sms-corpus-apk' \|\| 'wafra-apk'/.test(githubBuild));
+  ok('the manual corpus artifact targets the phone CPU architecture',
+    /CORPUS_BUILD[\s\S]{0,500}reactNativeArchitectures=arm64-v8a/.test(githubBuild));
 
   console.log(`\nsms-corpus: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
