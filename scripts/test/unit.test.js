@@ -907,6 +907,24 @@ ok('reliable: fully-manual account derives from opening + entries',
   bal.reliableBalanceFils(balState, balState.accounts[4]) === 40000);
 ok('net worth sums only reliable, skips archived',
   bal.netWorthFils(balState) === -406100 + 1250000 + 40000);
+const worthBreakdown = bal.netWorthBreakdown(balState);
+ok('net worth breakdown exposes the same auditable equation as the headline',
+  worthBreakdown.balanceFils === 1290000 &&
+    worthBreakdown.debtFils === 406100 &&
+    worthBreakdown.totalFils === 883900);
+ok('net worth breakdown distinguishes included, missing and archived accounts',
+  worthBreakdown.knownAccountCount === 3 &&
+    worthBreakdown.unknownAccountCount === 2 &&
+    worthBreakdown.activeAccountCount === 5 &&
+    !Object.prototype.hasOwnProperty.call(worthBreakdown.balanceByAccountId, 'archived-quoted'));
+ok('net worth breakdown row figures agree with the reliable-balance contract',
+  balState.accounts
+    .filter((account) => !account.archived)
+    .every((account) => {
+      const reliable = bal.reliableBalanceFils(balState, account);
+      const projected = worthBreakdown.balanceByAccountId[account.id];
+      return reliable === null ? projected === null : projected === reliable;
+    }));
 
 // ── One payment must not settle two overlapping statements ──
 const allocLib = require('./build/cards');

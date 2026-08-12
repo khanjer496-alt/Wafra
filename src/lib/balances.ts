@@ -11,6 +11,20 @@ import type { Account, AppState } from './types';
  */
 type BalanceState = Pick<AppState, 'accounts' | 'transactions'>;
 
+export interface NetWorthBreakdown {
+  /** Known positive balances, rounded exactly as Wallet displays each account. */
+  balanceFils: number;
+  /** Absolute value of known negative balances, including card amounts owed. */
+  debtFils: number;
+  /** `balanceFils - debtFils`. */
+  totalFils: number;
+  activeAccountCount: number;
+  knownAccountCount: number;
+  unknownAccountCount: number;
+  /** The same reliable figure used by the headline, keyed for Wallet rows. */
+  balanceByAccountId: Readonly<Record<string, number | null>>;
+}
+
 /** Current balance of an account: opening balance plus all its transactions. */
 export function accountBalanceFils(state: BalanceState, accountId: string): number {
   const account = state.accounts.find((a) => a.id === accountId);
@@ -48,18 +62,76 @@ export function reliableBalanceFils(state: BalanceState, account: Account): numb
 }
 
 export function netWorthFils(state: BalanceState): number {
-  // Only bank-quoted or fully-manual balances count; unknowable accounts and
-  // hidden (dead card) accounts contribute nothing.
-  //
-  // Each part is snapped to the whole dirham it is DISPLAYED as before it is
-  // added in. Summing raw fils and rounding once at the end is arithmetically
-  // purer and reads as a bug: the fils of two accounts carried, so Wallet's
-  // headline came out a dirham above the two rows printed directly under it.
-  // A finance app disagreeing with itself on one screen costs more than half a
-  // dirham of precision on a figure that is shown to the dirham anyway.
-  return state.accounts.reduce((sum, a) => {
-    if (a.archived) return sum;
-    const fils = reliableBalanceFils(state, a);
-    return fils === null ? sum : sum + toWholeDirhamFils(fils);
-  }, 0);
+  return netWorthBreakdown(state).totalFils;
+}
+
+/**
+ * The auditable version of Wallet's headline.
+ *
+ * This projection exists so the UI can show the equation behind its estimate,
+ * not merely the final number. It also avoids calling `reliableBalanceFils`
+ * once per account (and scanning every transaction each time) on a screen that
+ * can contain dozens of discovered cards. Transactions are indexed once, then
+ * the exact same reliability rules are applied to each active account.
+ */
+export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
+  const runningByAccount = new Map<string, number>();
+  const smsAccountIds = new Set<string>();
+
+  for (const account of state.accounts) {
+    if (!account.archived) runningByAccount.set(account.id, account.openingFils ?? 0);
+  }
+  for (const transaction of state.transactions) {
+    if (!runningByAccount.has(transaction.accountId)) continue;
+    if (transaction.source === 'sms') smsAccountIds.add(transaction.accountId);
+    runningByAccount.set(
+      transaction.accountId,
+      (runningByAccount.get(transaction.accountId) ?? 0) +
+        (transaction.type === 'income' ? transaction.amountFils : -transaction.amountFils),
+    );
+  }
+
+  let balanceFils = 0;
+  let debtFils = 0;
+  let knownAccountCount = 0;
+  let unknownAccountCount = 0;
+  const balanceByAccountId: Record<string, number | null> = {};
+
+  for (const account of state.accounts) {
+    if (account.archived) continue;
+
+    let reliable: number | null;
+    if (account.cardType === 'credit') {
+      reliable =
+        account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
+          ? -account.snapshotFils
+          : null;
+    } else if (account.snapshotKind === 'balance' && account.snapshotFils !== undefined) {
+      reliable = account.snapshotFils;
+    } else {
+      reliable = smsAccountIds.has(account.id) ? null : (runningByAccount.get(account.id) ?? 0);
+    }
+
+    if (reliable === null) {
+      balanceByAccountId[account.id] = null;
+      unknownAccountCount += 1;
+      continue;
+    }
+
+    const shown = toWholeDirhamFils(reliable);
+    balanceByAccountId[account.id] = shown;
+    knownAccountCount += 1;
+    if (shown < 0) debtFils += Math.abs(shown);
+    else balanceFils += shown;
+  }
+
+  return {
+    balanceFils,
+    debtFils,
+    totalFils: balanceFils - debtFils,
+    activeAccountCount: knownAccountCount + unknownAccountCount,
+    knownAccountCount,
+    unknownAccountCount,
+    balanceByAccountId,
+  };
 }

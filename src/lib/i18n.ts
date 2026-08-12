@@ -358,6 +358,35 @@ const S = {
   // Wallet
   walletTitle: { en: 'Wallet', ar: 'المحفظة' },
   netWorth: { en: 'Net worth', ar: 'صافي الثروة' },
+  estimatedNetWorth: { en: 'Estimated net worth', ar: 'صافي الثروة التقديري' },
+  partialEstimate: { en: 'Partial estimate', ar: 'تقدير جزئي' },
+  allAccountsIncluded: { en: 'All active accounts included', ar: 'تم تضمين كل الحسابات النشطة' },
+  noActiveAccounts: { en: 'No active accounts yet', ar: 'لا توجد حسابات نشطة بعد' },
+  addAccountForEstimate: {
+    en: 'Use + to add an account and start your estimate.',
+    ar: 'استخدم + لإضافة حساب وبدء التقدير.',
+  },
+  knownBalances: { en: 'Known balances', ar: 'الأرصدة المعروفة' },
+  amountsOwed: { en: 'Amounts owed', ar: 'المبالغ المستحقة' },
+  netWorthCoverage: {
+    en: '{known} of {total} active accounts included',
+    ar: 'تم تضمين {known} من أصل {total} حسابات نشطة',
+  },
+  netWorthMissing: {
+    en: 'Accounts excluded until a reliable balance arrives: {count}',
+    ar: 'حسابات مستبعدة حتى يتوفر رصيد موثوق: {count}',
+  },
+  howNetWorthCalculated: { en: 'How this is calculated', ar: 'كيف يتم احتسابه' },
+  netWorthExplanation: {
+    en: 'Wafra adds the latest bank-reported balances and balances you track manually, then subtracts credit-card amounts owed. Inactive accounts and accounts without a reliable balance are left out.',
+    ar: 'تجمع وفرة أحدث الأرصدة الواردة من البنك والأرصدة التي تتابعها يدوياً، ثم تطرح المبالغ المستحقة على البطاقات الائتمانية. لا تُحتسب الحسابات غير النشطة أو التي لا يتوفر لها رصيد موثوق.',
+  },
+  ledgerTrend6mo: { en: 'Recorded movement · 6 months', ar: 'حركة السجل · ٦ أشهر' },
+  ledgerTrendExplanation: {
+    en: 'From opening balances and filed activity—not the estimate above.',
+    ar: 'استناداً إلى الأرصدة الافتتاحية والعمليات المسجلة، وليس التقدير أعلاه.',
+  },
+  moreCards: { en: 'View more cards · {count}', ar: 'عرض بطاقات أخرى · {count}' },
   cardsHeader: { en: 'Cards', ar: 'البطاقات' },
   accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
   inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },

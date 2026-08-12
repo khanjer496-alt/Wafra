@@ -38,6 +38,7 @@ import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSugge
 import { tapped } from '@/lib/haptics';
 import { netWorthSeries } from '@/lib/analytics';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
+import { netWorthBreakdown } from '@/lib/balances';
 import {
   formatAED,
   formatAmount,
@@ -46,7 +47,7 @@ import {
   parseAmountToFils,
   totalAsShown,
 } from '@/lib/format';
-import { netWorthFils, reliableBalanceFils, useStore } from '@/lib/store';
+import { useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
@@ -135,6 +136,7 @@ export default function WalletScreen() {
   // destructive answer to it opens second.
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const [worthExpanded, setWorthExpanded] = useState(false);
 
   // The curve is an SVG, so it needs a pixel width rather than a percentage.
   // Measured once from the row it sits in, which is what keeps it correct on a
@@ -146,8 +148,8 @@ export default function WalletScreen() {
    *
    * Scans every transaction once per account, so it is kept off the render
    * path — and it counts as well as sums, because the sum alone lies.
-   * `netWorthFils` adds up only balances the bank has quoted; an account whose
-   * balance cannot be known contributes nothing (balances.ts), which makes
+   * `netWorthBreakdown` adds up only balances the bank has quoted; an account
+   * whose balance cannot be known contributes nothing (balances.ts), which makes
    * "unknown" and "zero" the same output. A phone whose cards have never sent
    * a statement SMS was therefore told, in display type, that its net worth
    * was AED 0 — directly above rows that each said "no balance SMS yet".
@@ -156,17 +158,18 @@ export default function WalletScreen() {
    * use: nothing knowable is a dash, not a zero, and a partial answer says how
    * many accounts it had to leave out so it can be reconciled against them.
    */
-  const worth = useMemo(() => {
-    let known = 0;
-    let unknown = 0;
-    for (const account of state.accounts) {
-      // Archived accounts are out of the sum, so they are out of the count.
-      if (account.archived) continue;
-      if (reliableBalanceFils(state, account) === null) unknown += 1;
-      else known += 1;
-    }
-    return { fils: netWorthFils(state), known, unknown };
-  }, [state]);
+  const worth = useMemo(() => netWorthBreakdown(state), [state]);
+  const worthCoverageText =
+    worth.activeAccountCount === 0
+      ? t('addAccountForEstimate')
+      : tf('netWorthCoverage', {
+          known: worth.knownAccountCount,
+          total: worth.activeAccountCount,
+        });
+  const worthMissingText =
+    worth.unknownAccountCount > 0
+      ? tf('netWorthMissing', { count: worth.unknownAccountCount })
+      : null;
 
   /**
    * Movement since the start of the six-month window. A single figure with no
@@ -211,6 +214,23 @@ export default function WalletScreen() {
   // account is omitted from the compact rows below, so this is hierarchy —
   // not duplicated financial information.
   const featuredCard = cards[0] ?? null;
+  // Wallet is the overview, not the card inventory. Keep the hero plus three
+  // useful rows here and leave the complete list to the dedicated Cards
+  // screen. This removes the longest source of scroll without hiding access.
+  const previewCardIds = useMemo(
+    () => new Set(cards.slice(0, 4).map((account) => account.id)),
+    [cards],
+  );
+  const previewCardGroups = useMemo(
+    () =>
+      cardGroups
+        .map((group) => ({
+          ...group,
+          accounts: group.accounts.filter((account) => previewCardIds.has(account.id)),
+        }))
+        .filter((group) => group.accounts.length > 0),
+    [cardGroups, previewCardIds],
+  );
   const nonCardAccounts = useMemo(
     () =>
       state.accounts.filter(
@@ -345,36 +365,151 @@ export default function WalletScreen() {
             </View>
           </View>
 
-          {/* The one figure this screen exists to show. No card and no
-              gradient behind it: theme.ts asks for dividers over boxes, and the
-              three hard-coded hexes the fill used exist in neither palette. */}
-          <View style={styles.worth}>
-            <ThemedText type="micro" themeColor="textTertiary">
-              {t('netWorth')}
-            </ThemedText>
+          {/* An estimate should be auditable at the point it is shown. The old
+              headline silently treated every unknown balance as zero and put
+              a differently calculated chart directly underneath it. This card
+              exposes the equation, coverage and exclusions without making the
+              user visit a help page. */}
+          <View
+            style={[
+              styles.worthCard,
+              { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+            ]}>
+            <View style={styles.worthHeader}>
+              <View style={styles.worthHeaderCopy}>
+                <ThemedText type="smallBold">{t('estimatedNetWorth')}</ThemedText>
+                <ThemedText
+                  type="meta"
+                  style={{
+                    color:
+                      worth.activeAccountCount === 0
+                        ? theme.textSecondary
+                        : worth.unknownAccountCount > 0
+                          ? theme.warning
+                          : theme.income,
+                  }}>
+                  {worth.activeAccountCount === 0
+                    ? t('noActiveAccounts')
+                    : worth.unknownAccountCount > 0
+                      ? t('partialEstimate')
+                      : t('allAccountsIncluded')}
+                </ThemedText>
+              </View>
+              <View style={[styles.worthMark, { backgroundColor: theme.primarySoft }]}>
+                <Icon name="wallet" size={18} color={theme.primary} />
+              </View>
+            </View>
+
             <View style={styles.worthRow}>
-              <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
+              <ThemedText
+                accessible={false}
+                type="smallBold"
+                themeColor="textSecondary"
+                tabular
+                style={styles.aed}>
                 {ledgerCurrencyDisplay()}
               </ThemedText>
-              <ThemedText type="amount" tabular>
-                {worth.known > 0 ? formatAmount(worth.fils, { decimals: false }) : '—'}
+              <ThemedText
+                type="amount"
+                tabular
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.58}
+                accessibilityLabel={
+                  worth.knownAccountCount > 0
+                    ? `${ledgerCurrencyDisplay()} ${formatAmount(worth.totalFils)}`
+                    : undefined
+                }>
+                {worth.knownAccountCount > 0
+                  ? formatAmount(worth.totalFils, { decimals: false })
+                  : '—'}
               </ThemedText>
             </View>
-            {worth.unknown > 0 && (
-              <ThemedText type="micro" themeColor="textSecondary">
-                {/* "label · count" is this screen's own idiom for a qualifier
-                    with a number on it — the bank group headings below read
-                    the same way — so the caption needs no sentence of its own
-                    to say WHICH rows the figure could not include. */}
-                {worth.known > 0 ? `${t('noBalanceYet')} · ${worth.unknown}` : t('noBalanceYet')}
-              </ThemedText>
+
+            <View style={[styles.worthEquation, { borderColor: theme.cardBorder }]}>
+              <View style={styles.worthPart}>
+                <ThemedText type="micro" themeColor="textSecondary">
+                  {t('knownBalances')}
+                </ThemedText>
+                <ThemedText
+                  type="smallBold"
+                  tabular
+                  accessibilityLabel={`${t('knownBalances')}: ${formatAED(worth.balanceFils)}`}>
+                  {formatAED(worth.balanceFils, { decimals: false })}
+                </ThemedText>
+              </View>
+              <View style={[styles.worthPart, styles.worthDebtPart, { borderTopColor: theme.cardBorder }]}>
+                <ThemedText type="micro" themeColor="textSecondary">
+                  {t('amountsOwed')}
+                </ThemedText>
+                <ThemedText
+                  type="smallBold"
+                  tabular
+                  accessibilityLabel={`${t('amountsOwed')}: ${formatAED(worth.debtFils)}`}
+                  style={{ color: worth.debtFils > 0 ? theme.expense : theme.text }}>
+                  − {formatAED(worth.debtFils, { decimals: false })}
+                </ThemedText>
+              </View>
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                [worthCoverageText, worthMissingText, t('howNetWorthCalculated')]
+                  .filter(Boolean)
+                  .join('. ')
+              }
+              accessibilityState={{ expanded: worthExpanded }}
+              onPress={() => {
+                tapped();
+                setWorthExpanded((expanded) => !expanded);
+              }}
+              style={({ pressed }) => [
+                styles.worthExplainButton,
+                { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
+              ]}>
+              <View style={styles.worthCoverage}>
+                <Icon
+                  name={worth.activeAccountCount === 0 ? 'plus' : worth.unknownAccountCount > 0 ? 'alert' : 'check'}
+                  size={16}
+                  color={
+                    worth.activeAccountCount === 0
+                      ? theme.primary
+                      : worth.unknownAccountCount > 0
+                        ? theme.warning
+                        : theme.income
+                  }
+                />
+                <View style={styles.worthCoverageCopy}>
+                  <ThemedText type="small" numberOfLines={2}>
+                    {worthCoverageText}
+                  </ThemedText>
+                  {worthMissingText && (
+                    <ThemedText type="meta" themeColor="textSecondary" numberOfLines={2}>
+                      {worthMissingText}
+                    </ThemedText>
+                  )}
+                </View>
+              </View>
+              <View style={worthExpanded ? styles.chevronExpanded : undefined}>
+                <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+              </View>
+            </Pressable>
+
+            {worthExpanded && (
+              <View style={[styles.worthExplanation, { borderTopColor: theme.cardBorder }]}>
+                <ThemedText type="smallBold">{t('howNetWorthCalculated')}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {t('netWorthExplanation')}
+                </ThemedText>
+              </View>
             )}
           </View>
 
-          {/* The shape behind that figure — a line, not bars.
+          {/* A separate recorded-movement view — a line, not bars.
               This was six columns scaled 10–40px across the window's own
               min/max, so five of the six months rendered as near-identical
-              stubs beside one tall block and the card read as "you had nothing
+              stubs beside one tall block and the view read as "you had nothing
               until August". Bars are also the wrong mark: a bar says "these are
               six separate amounts", and a balance is one amount that never
               stopped existing between the months. TrendCurve is the shared
@@ -383,10 +518,15 @@ export default function WalletScreen() {
             <Animated.View
               entering={enter(FadeInDown.duration(320))}
               style={styles.section}>
-              <SectionHeader title={t('netWorth6mo')} />
+              <View style={styles.trendHeader}>
+                <SectionHeader title={t('ledgerTrend6mo')} />
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {t('ledgerTrendExplanation')}
+                </ThemedText>
+              </View>
               <View
                 accessible
-                accessibilityLabel={t('netWorth6mo')}
+                accessibilityLabel={t('ledgerTrend6mo')}
                 onLayout={(e) => setCurveWidth(e.nativeEvent.layout.width)}>
                 {curveWidth > 0 && (
                   <TrendCurve points={worthSeries} width={curveWidth} height={104} />
@@ -646,7 +786,7 @@ export default function WalletScreen() {
                   failed to recognise. Under a FAB heading it is obviously
                   six FAB cards — and if that is wrong, it is obviously
                   wrong. */}
-              {cardGroups.map((group) => {
+              {previewCardGroups.map((group) => {
                 const compactAccounts = group.accounts.filter(
                   (account) => account.id !== featuredCard?.id,
                 );
@@ -723,6 +863,24 @@ export default function WalletScreen() {
                 </View>
                 );
               })}
+              {cards.length > 4 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={tf('moreCards', { count: cards.length - 4 })}
+                  onPress={() => {
+                    tapped();
+                    router.push('/cards');
+                  }}
+                  style={({ pressed }) => [
+                    styles.moreCards,
+                    { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
+                  ]}>
+                  <ThemedText type="smallBold" themeColor="primary">
+                    {tf('moreCards', { count: cards.length - 4 })}
+                  </ThemedText>
+                  <Icon name="chevron-right" size={16} color={theme.primary} />
+                </Pressable>
+              )}
             </View>
           )}
 
@@ -731,7 +889,7 @@ export default function WalletScreen() {
             <SectionHeader title={t('accountsHeader')} />
             <View>
               {nonCardAccounts.map((account, i) => {
-                const balance = reliableBalanceFils(state, account);
+                const balance = worth.balanceByAccountId[account.id] ?? null;
                 const fromBank = account.snapshotKind === 'balance' && account.snapshotFils !== undefined;
                 const meta = KIND_META[account.kind];
                 return (
@@ -1253,9 +1411,67 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     gap: Spacing.five,
   },
-  worth: { gap: Spacing.two, marginTop: -Spacing.two },
+  worthCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.bottomSheet,
+    padding: Spacing.four,
+    gap: Spacing.three,
+    marginTop: -Spacing.two,
+  },
+  worthHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  worthHeaderCopy: { flex: 1, minWidth: 0, gap: 2 },
+  worthMark: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   worthRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
+  worthEquation: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.three,
+    gap: Spacing.three,
+  },
+  worthPart: { minWidth: 0, gap: Spacing.one },
+  worthDebtPart: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: Spacing.three,
+  },
+  worthExplainButton: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    marginHorizontal: -Spacing.two,
+    marginVertical: -Spacing.one,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+    borderRadius: Radius.control,
+  },
+  worthCoverage: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  worthCoverageCopy: { flex: 1, minWidth: 0, gap: 1 },
+  chevronExpanded: { transform: [{ rotate: '180deg' }] },
+  worthExplanation: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: Spacing.three,
+    gap: Spacing.two,
+  },
+  trendHeader: { gap: Spacing.one },
   // One label per point, spread to the same width the curve is drawn to, so a
   // month name sits under the part of the line it belongs to.
   axis: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -1286,6 +1502,15 @@ const styles = StyleSheet.create({
   },
   section: {
     gap: Spacing.two,
+  },
+  moreCards: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two,
+    borderRadius: Radius.control,
+    marginTop: Spacing.one,
   },
   summaryLink: {
     flexDirection: 'row',

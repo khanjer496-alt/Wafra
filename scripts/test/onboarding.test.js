@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const onboarding = require('./build/onboarding');
+const i18n = require('./build/i18n');
 
 let pass = 0;
 let fail = 0;
@@ -150,7 +151,7 @@ ok(
 
 const { parseSmsBatch } = require('./build/sms-parser');
 const { buildImportPlan } = require('./build/import-plan');
-const { netWorthFils, reliableBalanceFils } = require('./build/balances');
+const { netWorthBreakdown, netWorthFils, reliableBalanceFils } = require('./build/balances');
 
 const walletSource = fs.readFileSync(
   path.join(__dirname, '../../src/app/(tabs)/wallet.tsx'),
@@ -167,6 +168,11 @@ const emptyLedger = {
   budgets: [],
   merchantOverrides: {},
 };
+
+i18n.setLanguage('en');
+eq('partial net-worth copy resolves every placeholder',
+  i18n.tf('netWorthMissing', { count: 2 }),
+  'Accounts excluded until a reliable balance arrives: 2');
 
 /* Net worth: a sum of nothing is not an answer.
  *
@@ -194,18 +200,24 @@ const emptyLedger = {
   eq('so the net-worth sum over it is zero, which is not the same as zero money',
     netWorthFils(state), 0);
 
-  // Which is why the screen counts what it could know as well as summing it,
-  // and prints the same dash its own rows print rather than that zero.
-  ok('Wallet counts the accounts it cannot know a balance for',
-    /reliableBalanceFils\(state, account\) === null/.test(walletSource) &&
-      /worth\.known/.test(walletSource));
+  const breakdown = netWorthBreakdown(state);
+  eq('the auditable projection reports that missing coverage explicitly',
+    [breakdown.knownAccountCount, breakdown.unknownAccountCount], [0, 1]);
+
+  // Which is why the screen consumes the auditable projection and prints the
+  // same dash its own rows print rather than that zero.
+  ok('Wallet uses the shared net-worth breakdown rather than rebuilding it in UI',
+    /netWorthBreakdown\(state\)/.test(walletSource) &&
+      /worth\.unknownAccountCount/.test(walletSource));
   ok('Wallet prints a dash, not AED 0, when nothing is knowable',
-    /worth\.known > 0 \? formatAmount\(worth\.fils, \{ decimals: false \}\) : '—'/.test(
+    /worth\.knownAccountCount > 0[\s\S]*?formatAmount\(worth\.totalFils, \{ decimals: false \}\)[\s\S]*?: '—'/.test(
       walletSource,
     ));
-  ok('and a partial answer names how many rows it left out',
-    /worth\.unknown > 0 &&/.test(walletSource) &&
-      /noBalanceYet'\)\} · \$\{worth\.unknown\}/.test(walletSource));
+  ok('and a partial answer shows the equation and names its coverage',
+    /worth\.balanceFils/.test(walletSource) &&
+      /worth\.debtFils/.test(walletSource) &&
+      /netWorthCoverage/.test(walletSource) &&
+      /netWorthMissing/.test(walletSource));
 }
 
 /* A paste the parser cannot read.
