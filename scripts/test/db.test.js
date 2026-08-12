@@ -375,6 +375,7 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/sms-parser': parser,
     '@/lib/ledger': { internalTransferIds: () => new Set() },
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
+    '@/lib/bills': require('./build/bills'),
     '@/lib/dedupe': dedupe,
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),

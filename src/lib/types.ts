@@ -219,6 +219,12 @@ export interface Bill {
   id: string;
   title: string;
   category: CategoryId;
+  /**
+   * Optional non-secret provider/account discriminator learned from an alert.
+   * It contains only a closed kind plus masked tail (never a full account or
+   * transaction reference) and keeps two accounts at one utility distinct.
+   */
+  importIdentity?: string;
   /** Expected amount in fils. */
   amountFils: number;
   /** Day of month the bill is due (1–31). */
@@ -400,6 +406,8 @@ export interface ImportBatchInput {
   /** last4 → index into newAccounts OR existing accountId. */
   newHints: Record<string, string>;
   newDues: Omit<CardDue, 'id'>[];
+  /** Fresh utility/telecom reminders learned by this same durable scan. */
+  newBills?: Omit<Bill, 'id' | 'paidMonths'>[];
   /** accountRef → newest bank-quoted balance/limit figure from the scan. */
   snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
   /** accountRef → bank name learned from the SMS sender (backfill only). */

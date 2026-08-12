@@ -1087,6 +1087,28 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
   return value.slice();
 }
 
+/** Most recent settled statement per live credit card, for Bills history. */
+export function recentlySettledDues(
+  state: AppState,
+  today: Date,
+  withinDays = 75,
+): DueWithStatus[] {
+  const cutoff = shiftISO(toISODate(today), -withinDays);
+  const creditIds = new Set(
+    state.accounts.filter((account) => account.cardType === 'credit' && !account.archived)
+      .map((account) => account.id),
+  );
+  const newest = new Map<string, DueWithStatus>();
+  for (const due of state.cardDues) {
+    if (!creditIds.has(due.accountId) || due.dueDate < cutoff) continue;
+    const status = dueWithStatus(state, due, today);
+    if (status.status !== 'settled') continue;
+    const prior = newest.get(due.accountId);
+    if (!prior || due.dueDate > prior.due.dueDate) newest.set(due.accountId, status);
+  }
+  return [...newest.values()].sort((a, b) => b.due.dueDate.localeCompare(a.due.dueDate));
+}
+
 function computeOpenDues(state: AppState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
@@ -1210,7 +1232,12 @@ export function cardStatementView(state: AppState, accountId: string): CardState
   // A second, narrower copy here is how a statement could read "settled" while
   // the payment that settled it was invisible in this very list.
   const ids = cardAccountIds(state, accountId);
-  const payments = cardPaymentsOf(state, ids).sort((a, b) => b.date.localeCompare(a.date));
+  // `cardPaymentsOf` returns a memoized oldest-first array because statement
+  // allocation must spend payments in time order. Sorting that shared array
+  // in place for display changed every later allocation in the same render:
+  // Bills said ADCB had AED 170 left while its detail sheet said AED 713.
+  // Display gets its own copy; the accounting cache remains immutable.
+  const payments = cardPaymentsOf(state, ids).slice().sort((a, b) => b.date.localeCompare(a.date));
   // The group, not the one row the sheet was opened on: one physical card can
   // appear as both a debit and a credit row, and opening the debit one must
   // not hide the bill the credit one carries.

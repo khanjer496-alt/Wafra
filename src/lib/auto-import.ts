@@ -1,4 +1,4 @@
-import { PermissionsAndroid, Platform } from 'react-native';
+import { Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
@@ -53,11 +53,24 @@ export async function hasSmsPermission(): Promise<boolean> {
 
 export async function requestSmsPermission(): Promise<boolean> {
   if (!isSmsScanningAvailable()) return false;
+  if (await hasSmsPermission()) return true;
   // Automatic ledger import reads the Android system inbox. RECEIVE_SMS is a
   // separate, optional capability used only by the instant-banner toggle and
   // is requested at that point—not bundled into first-run tracking consent.
   const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS);
   return result === PermissionsAndroid.RESULTS.GRANTED;
+}
+
+/** Open Wafra's Android app-details page, including restricted-access controls. */
+export async function openSmsPermissionSettings(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Linking.openSettings();
+}
+
+/** Stable native error boundary; never inspect or expose platform error text. */
+export function isSmsInboxAccessError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null &&
+    'code' in error && (error as { code?: unknown }).code === 'ERR_SMS_INBOX_ACCESS';
 }
 
 export async function requestSmsDeliveryPermission(): Promise<boolean> {

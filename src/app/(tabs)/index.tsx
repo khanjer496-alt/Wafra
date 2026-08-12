@@ -28,6 +28,7 @@ import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { Icon } from '@/components/ui/icon';
+import { useToast } from '@/components/ui/toast';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
@@ -259,6 +260,8 @@ function Hero({
   incomeFils,
   expenseFils,
   cashOutFils,
+  cardPaymentsFils,
+  accountOutflowFils,
   comparison,
 }: {
   period: Period;
@@ -267,6 +270,8 @@ function Hero({
   incomeFils: number;
   expenseFils: number;
   cashOutFils: number;
+  cardPaymentsFils: number;
+  accountOutflowFils: number;
   comparison: PeriodComparison | null;
 }) {
   const theme = useTheme();
@@ -379,7 +384,10 @@ function Hero({
         <View style={styles.cashOutCopy}>
           <ThemedText type="small">{t('cashOutLabel')}</ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
-            {t('cashOutHint')}
+            {tf('cashOutBreakdown', {
+              cards: formatAED(cardPaymentsFils, { decimals: false }),
+              accounts: formatAED(accountOutflowFils, { decimals: false }),
+            })}
           </ThemedText>
         </View>
         <ThemedText type="smallBold" tabular>
@@ -630,6 +638,7 @@ export default function HomeScreen() {
   const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const router = useRouter();
+  const toast = useToast();
   const { state, applyFxUpdates, setCaptureOptOut } = useStore();
   const { period } = usePeriod();
   // `true`: Home is the screen that scans on mount and on foreground resume.
@@ -740,10 +749,12 @@ export default function HomeScreen() {
     try {
       await runAutoImport(true);
       await syncPaymentReminders(state);
+    } catch {
+      toast.show(t('captureRefreshFailed'), { tone: 'error' });
     } finally {
       setRefreshing(false);
     }
-  }, [runAutoImport, state]);
+  }, [runAutoImport, state, toast]);
 
   return (
     <ThemedView style={styles.root}>
@@ -795,6 +806,8 @@ export default function HomeScreen() {
             incomeFils={dashboard.hero.incomeFils}
             expenseFils={dashboard.hero.expenseFils}
             cashOutFils={dashboard.hero.cashOutFils}
+            cardPaymentsFils={dashboard.hero.cardPaymentsFils}
+            accountOutflowFils={dashboard.hero.accountOutflowFils}
           />
 
           <AutomaticCapture

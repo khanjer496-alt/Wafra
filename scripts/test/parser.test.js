@@ -43,6 +43,7 @@ function t(name, msg, expect, options) {
       // at all, and dedupe.ts's pairing has 18 references to it.
       if (expect.side !== undefined && p.cardPaymentSide !== expect.side) errs.push(`cardPaymentSide ${p.cardPaymentSide} != ${expect.side}`);
       if (expect.reference !== undefined && p.reference !== expect.reference) errs.push(`reference ${p.reference} != ${expect.reference}`);
+      if (expect.billIdentity !== undefined && p.billIdentity !== expect.billIdentity) errs.push(`billIdentity ${p.billIdentity} != ${expect.billIdentity}`);
       if (expect.currency !== undefined && p.currency !== expect.currency) errs.push(`currency ${p.currency} != ${expect.currency}`);
       // FX PROVENANCE. The local amount is the same either way; what differs is
       // whether the bank quoted it or this file's cross-rate table guessed it,
@@ -719,7 +720,8 @@ t('parenthetical descriptor drops (noon Food)',
 
 t('SEWA bill notice is a due reminder, not an expense',
   'Dear Customer, Bill amount for your account 5557118 is AED 785.4, billed on 07-Jan-22.Please pay by 22-Jan-22. Click here to view bill  https://sewapayment.tiny.us/359aezc3',
-  { kind: 'billDue' });
+  { kind: 'billDue', merchant: 'SEWA', category: 'utilities', date: '2022-01-22', dueDay: 22,
+    billIdentity: 'account:7118' });
 
 // The reported shape, verbatim apart from the account identifiers. Twelve of
 // these landed in one user's ledger as AED 775.81 expenses each — AED 9,309 of
@@ -727,7 +729,8 @@ t('SEWA bill notice is a due reminder, not an expense',
 // hasDebit true and isBillDue requires !hasDebit.
 t('e& due-date notice is a reminder, not a charge',
   'Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due for FISH BASKET REST. with the Party-ID 3014835 on 15-08-2026 . To pay your bill, please visit businessonline.etisalat.ae/quickpay. Kindly disregard this message if you have already paid. Thank you.',
-  { kind: 'billDue', merchant: 'E&', amountFils: 77581, date: '2026-08-15', dueDay: 15, category: 'telecom' });
+  { kind: 'billDue', merchant: 'E&', amountFils: 77581, date: '2026-08-15', dueDay: 15,
+    category: 'telecom', billIdentity: 'party:4835' });
 
 // The article at the front of that sentence used to win the merchant: the
 // capture ran from "the" all the way to "e&" and titled the row
@@ -910,6 +913,10 @@ t('a named biller keeps its own category over the bill-pay default',
   'Dear Customer, Your payment instructions of AED 417.9 to Du for consumer number 1238865 has been processed on 21/10/2022 17:03',
   { merchant: 'Du', category: 'telecom' });
 
+t('an unknown consumer-number nickname does not invent a utility category',
+  'Dear Customer, Your payment instructions of AED 12168.00 to Fishbasket for consumer number 1238865 has been processed on 01/08/2026 12:30',
+  { merchant: 'Fishbasket', category: 'other', type: 'expense' });
+
 t('utility direct debit names the biller instead of "Card purchase"',
   'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.',
   { merchant: 'SEWA', category: 'utilities', type: 'expense' });
@@ -956,7 +963,7 @@ t('FAB direct-debit instalment reads as a loan payment',
 // happens to contain the word "Payment".
 t('a payout credited to the account is income, not spending',
   'AED 1,165.33 has been credited to your account no. 095XXX11XXX01 File Ref 1234535B/O DELIVERY HERO TALABAT DB LLCTalabat Biweekly Payment till',
-  { type: 'income', category: 'business' });
+  { type: 'income', merchant: 'Talabat sales', category: 'business' });
 
 t('rent received is income',
   'AED 15,000.00 has been credited to your account no. 095-XXX11XXX-01 IPI TT REF: 99OTT1238075 AHMADBADRIMOHAMMADALKAILI RENTPAYMENTS',
@@ -4743,7 +4750,7 @@ t('a merchant credit to a card is an offset, not business revenue',
   { type: 'income', merchant: 'Namshi', category: 'other', deliberate: true });
 t('an explicit merchant settlement remains business income',
   'AED 2,500.00 has been credited to your account 1234 B/O DELIVERY HERO TALABAT DB LLC Balance Net Online Sales.',
-  { type: 'income', category: 'business' });
+  { type: 'income', merchant: 'Talabat sales', category: 'business' });
 
 // ── FULL-INBOX CORPUS: HSBC SIGNED ACCOUNT TRANSFERS ──
 t('an HSBC signed transfer-from alert is an outgoing transfer',

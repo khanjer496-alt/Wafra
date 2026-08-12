@@ -24,7 +24,13 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState as RNAppState, Platform } from 'react-native';
 
 import { useToast } from '@/components/ui/toast';
-import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
+import {
+  hasSmsPermission,
+  isSmsInboxAccessError,
+  isSmsScanningAvailable,
+  openSmsPermissionSettings,
+  requestSmsPermission,
+} from '@/lib/auto-import';
 import { enableRelayBackgroundSync } from '@/lib/background-relay';
 import { isCaptureAvailable } from '@/lib/capture';
 import { createCaptureExecutor } from '@/lib/capture-executor';
@@ -235,13 +241,43 @@ export function useAutoImport(watchForeground = false): AutoImport {
         if (!granted) {
           setNeedsPermission(true);
           setCaptureState('off');
+          if (interactive) {
+            toast.show(t('smsAccessOff'), {
+              tone: 'warning',
+              actions: [{
+                label: t('openSettings'),
+                onPress: () => void openSmsPermissionSettings().catch(() => {}),
+              }],
+            });
+          }
           return 'no-permission';
         }
         setNeedsPermission(false);
         setCaptureState('active');
       }
 
-      const outcome = await captureExecutor.execute('routine');
+      let outcome;
+      try {
+        outcome = await captureExecutor.execute('routine');
+      } catch (error) {
+        if (!isSmsInboxAccessError(error)) throw error;
+        setNeedsPermission(true);
+        setCaptureState('off');
+        if (interactive) {
+          toast.show(t('smsAccessOff'), {
+            tone: 'warning',
+            actions: [{
+              label: t('openSettings'),
+              onPress: () => void openSmsPermissionSettings().catch(() => {}),
+            }],
+          });
+        }
+        return 'no-permission';
+      }
+      // Only a completed native/relay read makes capture fresh. A provider
+      // restriction thrown above must not suppress the immediate retry after
+      // the user returns from Android settings.
+      lastScanAt = Date.now();
       if (outcome.kind === 'not-hydrated') {
         if (interactive) toast.show(t('stillLoading'));
         return 'not-hydrated';
@@ -284,6 +320,13 @@ export function useAutoImport(watchForeground = false): AutoImport {
         tf('importedTransactions', {
           count: outcome.transactions,
           s: outcome.transactions === 1 ? '' : 's',
+          bills:
+            outcome.bills > 0
+              ? tf('importedBills', {
+                  count: outcome.bills,
+                  s: outcome.bills === 1 ? '' : 's',
+                })
+              : '',
           cards:
             outcome.newAccounts > 0
               ? tf('importedNewCards', {
@@ -295,7 +338,9 @@ export function useAutoImport(watchForeground = false): AutoImport {
         {
           tone: 'success',
           actions: [
-            { label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) },
+            ...(outcome.transactionIds.length > 0
+              ? [{ label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) }]
+              : []),
             { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
           ],
         },
@@ -394,7 +439,6 @@ export function useAutoImport(watchForeground = false): AutoImport {
      */
     const scan = (force = false) => {
       if (!force && Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
-      lastScanAt = Date.now();
       void latestScan.current(false).catch(() => {
         // Best-effort; manual import still available.
       });

@@ -60,6 +60,46 @@ eq('bill due-soon (5d)', bills.billsForMonth([mkBill(23)], [], today)[0].status,
 eq('bill upcoming', bills.billsForMonth([mkBill(30)], [], today)[0].status, 'upcoming');
 eq('bill dueDay 31 clamps in Jun', bills.billsForMonth([mkBill(31)], [], new Date(2026, 5, 15))[0].daysLeft, 15);
 
+{
+  const manual = {
+    id: 'manual', title: 'E&', category: 'telecom', amountFils: 5000,
+    dueDay: 9, accountId: 'chosen', paidMonths: ['2026-07'],
+  };
+  const untouched = bills.mergeImportedBills([manual], [{
+    id: 'new', title: 'E&', category: 'telecom', amountFils: 77581,
+    dueDay: 15, autoDetected: true, paidMonths: [],
+  }]);
+  eq('an imported reminder never rewrites a manually managed bill', untouched, [manual]);
+
+  const detected = { ...manual, id: 'detected', autoDetected: true };
+  const refreshed = bills.mergeImportedBills([detected], [{
+    id: 'new', title: 'e&', category: 'telecom', amountFils: 77581,
+    dueDay: 15, autoDetected: true, paidMonths: [],
+  }])[0];
+  eq('a newer automatic reminder refreshes only its changing statement facts', refreshed, {
+    ...detected, title: 'e&', amountFils: 77581, dueDay: 15,
+  });
+
+  const arabic = bills.mergeImportedBills([{
+    id: 'arabic-1', title: 'كهرباء الشارقة', category: 'utilities', amountFils: 100,
+    dueDay: 1, autoDetected: true, paidMonths: [],
+  }], [{
+    id: 'arabic-2', title: 'اتصالات', category: 'telecom', amountFils: 200,
+    dueDay: 2, autoDetected: true, paidMonths: [],
+  }]);
+  eq('different Arabic biller titles retain separate identities', arabic.length, 2);
+
+  const twoAccounts = bills.mergeImportedBills([], [
+    { id: 'sewa-a', title: 'SEWA', category: 'utilities', amountFils: 10000,
+      dueDay: 22, autoDetected: true, importIdentity: 'account:7118', paidMonths: [] },
+    { id: 'sewa-b', title: 'SEWA', category: 'utilities', amountFils: 20000,
+      dueDay: 23, autoDetected: true, importIdentity: 'account:2442', paidMonths: [] },
+  ]);
+  eq('two imported accounts at one provider do not overwrite each other',
+    twoAccounts.map((bill) => [bill.importIdentity, bill.amountFils]),
+    [['account:7118', 10000], ['account:2442', 20000]]);
+}
+
 // ── the nightly spend summary ──
 //
 // A digest that disagrees with the screen it summarises is worse than none:
@@ -4953,6 +4993,40 @@ eq('analytics: the category trend follows the split too',
   eq('and its ratio is zero, not null', cmp && cmp.ratio, 0);
   eq('it knows it is comparing part of a period', cmp && cmp.partial, true);
   eq('it names the previous period, not the date range', cmp && cmp.previousLabel, 'Jul 2026');
+}
+
+/* ── card detail is a read, never a mutation of statement accounting ───── */
+{
+  const cardsLib = require('./build/cards.js');
+  const account = {
+    id: 'adcb-7720', name: 'ADCB Credit Card •7720', kind: 'card',
+    cardType: 'credit', last4: '7720', openingFils: 0, color: '#123456',
+  };
+  const state = {
+    accounts: [account],
+    transactions: [
+      { id: 'pay-jul', type: 'income', amountFils: 117600, category: 'other',
+        accountId: account.id, title: 'Card •7720 payment', date: '2026-07-17',
+        source: 'sms', isTransfer: true, cardPaymentSide: 'receipt' },
+      { id: 'pay-jun', type: 'income', amountFils: 54311, category: 'other',
+        accountId: account.id, title: 'Card •7720 payment', date: '2026-06-13',
+        source: 'sms', isTransfer: true, cardPaymentSide: 'receipt' },
+    ],
+    cardDues: [
+      { id: 'jul', accountId: account.id, totalDueFils: 117449, minDueFils: 0,
+        dueDate: '2026-07-19', paidFils: 0 },
+      { id: 'aug', accountId: account.id, totalDueFils: 71474, minDueFils: 0,
+        dueDate: '2026-08-18', paidFils: 0 },
+    ],
+  };
+  const today = new Date('2026-08-12T12:00:00Z');
+  const before = cardsLib.openDues(state, today)[0]?.remainingFils;
+  const detail = cardsLib.cardStatementView(state, account.id);
+  const after = cardsLib.openDues(state, today)[0]?.remainingFils;
+  eq('opening card detail agrees with the Bills outstanding figure', detail.outstandingFils, before);
+  eq('opening card detail cannot reorder cached payments and change the due', after, before);
+  ok('a recently settled card remains visible beneath current dues',
+    cardsLib.recentlySettledDues(state, today).some((row) => row.due.id === 'jul'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -2,6 +2,7 @@ import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -21,6 +22,7 @@ import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import {
   buildImportPlan,
+  isSmsInboxAccessError,
   isSmsScanningAvailable,
   requestSmsPermission,
   scanInbox,
@@ -214,9 +216,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setCompletionOutcome('automatic');
       setStep('complete');
       committed();
-    } catch {
+    } catch (error) {
       setResult({ tx: 0, accounts: 0 });
-      setCompletionOutcome('failed');
+      if (Platform.OS === 'android' && isSmsInboxAccessError(error)) {
+        setSmsDenied(true);
+        setCompletionOutcome('denied');
+      } else {
+        setCompletionOutcome('failed');
+      }
       setStep('complete');
     }
   };
@@ -527,11 +534,27 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           )}
                         </ThemedText>
                         {smsDenied && (
-                          <ThemedText
-                            accessibilityLiveRegion="polite"
-                            style={[styles.inlineNote, { color: night.warning }]}>
-                            {t('onboardSmsDenied')}
-                          </ThemedText>
+                          <View style={styles.permissionRecovery}>
+                            <ThemedText
+                              accessibilityLiveRegion="polite"
+                              style={[styles.inlineNote, { color: night.warning }]}>
+                              {t('onboardSmsDenied')}
+                            </ThemedText>
+                            <Button
+                              variant="outline"
+                              label={t('retryHistoryRead')}
+                              onPress={() => void startScan()}
+                              labelColor={night.text}
+                              style={styles.ghost}
+                            />
+                            <Button
+                              variant="outline"
+                              label={t('openPhoneSettings')}
+                              onPress={() => void Linking.openSettings().catch(() => {})}
+                              labelColor={night.text}
+                              style={styles.ghost}
+                            />
+                          </View>
                         )}
                         {result && result.tx > 0 && (
                           <ThemedText style={[styles.inlineNote, { color: night.primary }]}>
@@ -667,6 +690,7 @@ const styles = StyleSheet.create({
   },
   questionBodyCopy: { color: night.textSecondary, fontSize: 14, lineHeight: 22 },
   inlineNote: { marginTop: Spacing.three, fontSize: 12, lineHeight: 18 },
+  permissionRecovery: { gap: Spacing.two, width: '100%' },
   primaryButton: { marginTop: Spacing.four, backgroundColor: night.primary },
   captureHero: { gap: Spacing.three, alignItems: 'flex-start' },
   captureIcon: {

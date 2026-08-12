@@ -24,7 +24,7 @@ import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
-import { openDues } from '@/lib/cards';
+import { openDues, recentlySettledDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
 import {
   formatAED,
@@ -120,6 +120,7 @@ export default function BillsScreen() {
   };
 
   const dues = useMemo(() => openDues(state, now), [state, now]);
+  const paidCards = useMemo(() => recentlySettledDues(state, now), [state, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
     () => internalTransferIds(state.transactions, liveAccounts),
@@ -757,6 +758,45 @@ export default function BillsScreen() {
                   </ThemedText>
                 </View>
               )}
+              {paidCards.length > 0 && (
+                <View style={styles.paidCardsBlock}>
+                  <ThemedText type="micro" themeColor="textSecondary">
+                    {t('paidCardsRecently')}
+                  </ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {t('paidCardsRecentlyHint')}
+                  </ThemedText>
+                  {paidCards.map(({ due }, i) => {
+                    const account = state.accounts.find((row) => row.id === due.accountId);
+                    return (
+                      <Pressable
+                        key={due.id}
+                        accessibilityRole="button"
+                        onPress={() => setCardDetail(account ?? null)}
+                        style={[
+                          styles.dueRow,
+                          i > 0 && {
+                            borderTopWidth: StyleSheet.hairlineWidth,
+                            borderTopColor: theme.cardBorder,
+                          },
+                        ]}>
+                        <View style={{ flex: 1, gap: 1 }}>
+                          <ThemedText type="default">{account?.name ?? t('card')}</ThemedText>
+                          <ThemedText type="small" style={{ color: theme.income }}>
+                            {tf('paidStatementDue', { date: shortDate(due.dueDate) })}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.paidCardAmount}>
+                          <ThemedText type="smallBold" tabular>
+                            {formatAED(due.totalDueFils, { decimals: false })}
+                          </ThemedText>
+                          <Icon name="check" size={16} color={theme.income} strokeWidth={2.6} />
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
             </>
           )}
 
@@ -1264,6 +1304,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: Spacing.two,
+  },
+  paidCardsBlock: {
+    marginTop: Spacing.four,
+    gap: Spacing.one,
+  },
+  paidCardAmount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
   },
   cardSummary: {
     flexDirection: 'row',

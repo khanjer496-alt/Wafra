@@ -172,6 +172,11 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       /requestSmsDeliveryPermission\(\)[\s\S]*PermissionsAndroid\.PERMISSIONS\.RECEIVE_SMS/
         .test(scanner) &&
       /toggleInstantAlerts[\s\S]*requestSmsDeliveryPermission\(\)/.test(settings));
+  ok('restricted SMS access is an error, never a successful empty inbox',
+    nativeModule.includes('checkSelfPermission(Manifest.permission.READ_SMS)') &&
+      nativeModule.includes('SMS inbox query returned no cursor') &&
+      nativeModule.includes('catch (error: SecurityException)') &&
+      !/catch \([^)]*SecurityException[^)]*\) \{\s*\}/.test(nativeModule));
 }
 
 /* ── Bank-app notifications: encrypted queue and durable acknowledgement ─ */
@@ -869,6 +874,9 @@ function ktSources(dir) {
     /runAutoImport\(true\)\s*\.catch\(/.test(refresh) &&
       refresh.indexOf('.catch(') < refresh.indexOf('.finally(') &&
       /toast\.show\(t\('captureRefreshFailed'\),\s*\{\s*tone:\s*'error'\s*\}\)/.test(refresh));
+  ok('permission denial does not mark the inbox fresh and offers Android settings',
+    hook.indexOf("return 'no-permission'") < hook.indexOf('lastScanAt = Date.now()') &&
+      /toast\.show\(t\('smsAccessOff'\)[\s\S]*openSmsPermissionSettings/.test(hook));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,
@@ -880,6 +888,8 @@ function ktSources(dir) {
   // tab never renders.
   const home = read('src/app/(tabs)/index.tsx');
   ok('Home is the screen that watches the foreground', /useAutoImport\(true\)/.test(home));
+  ok('Home refresh surfaces a native inbox failure',
+    /await runAutoImport\(true\);[\s\S]*?catch \{[\s\S]*?captureRefreshFailed/.test(home));
 }
 
 /* ── an erased ledger rebuilds itself from the inbox ─────────────────── */

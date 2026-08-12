@@ -1,14 +1,23 @@
 package expo.modules.smsreader
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.provider.Telephony
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.exception.CodedException
+
+private class SmsInboxAccessException(
+  message: String,
+  cause: Throwable? = null
+) : CodedException("ERR_SMS_INBOX_ACCESS", message, cause)
 
 /**
  * Reads SMS from the device inbox. The app must hold the READ_SMS runtime
- * permission before calling getInboxSms; the query returns an empty list
- * if the permission is missing rather than crashing.
+ * permission before calling getInboxSms. Missing/restricted access is an
+ * error, not an empty inbox: JavaScript must never advance a scan watermark
+ * or tell the user they are up to date when Android refused the query.
  *
  * Paged: pass untilMs from a previous page's oldest timestamp to walk the
  * full inbox history in batches without loading everything at once.
@@ -32,7 +41,11 @@ class SmsReaderModule : Module() {
     }
 
     AsyncFunction("getInboxSms") { sinceMs: Double, untilMs: Double, max: Int ->
-      val context = appContext.reactContext ?: return@AsyncFunction emptyList<Map<String, Any>>()
+      val context = appContext.reactContext
+        ?: throw SmsInboxAccessException("SMS reader context is unavailable")
+      if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+        throw SmsInboxAccessException("SMS inbox permission is unavailable")
+      }
       val messages = mutableListOf<Map<String, Any>>()
       try {
         val cursor = context.contentResolver.query(
@@ -41,8 +54,8 @@ class SmsReaderModule : Module() {
           "${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.DATE} < ?",
           arrayOf(sinceMs.toLong().toString(), untilMs.toLong().toString()),
           "${Telephony.Sms.DATE} DESC"
-        )
-        cursor?.use {
+        ) ?: throw SmsInboxAccessException("SMS inbox query returned no cursor")
+        cursor.use {
           val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
           val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
           val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
@@ -58,8 +71,11 @@ class SmsReaderModule : Module() {
             )
           }
         }
-      } catch (_: SecurityException) {
-        // Permission not granted — return what we have (empty).
+      } catch (error: SecurityException) {
+        // Some Android/OEM restricted-access layers can deny the provider
+        // even after the runtime permission reports granted. Preserve that
+        // distinction so the UI can send the user back to App settings.
+        throw SmsInboxAccessException("SMS inbox access is restricted", error)
       }
       messages
     }

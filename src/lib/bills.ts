@@ -83,6 +83,66 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+/** Unicode-safe identity for imported billers; Arabic titles must not all collapse to "". */
+function billIdentity(s: string): string {
+  return s.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/**
+ * Merge bill reminders learned during an encrypted capture.
+ *
+ * A manual reminder is the user's decision and is never rewritten. An
+ * automatically detected reminder is refreshed by the newest bank notice so
+ * its amount and due day do not stay frozen at last month's values. Paid
+ * months and an explicitly chosen account survive that refresh.
+ */
+export function mergeImportedBills(existing: Bill[], incoming: Bill[]): Bill[] {
+  const merged = existing.slice();
+  // One existing reminder may satisfy at most one reminder in this capture.
+  // Without this claim set, two current SEWA/e& accounts with the same title
+  // both select index 0 and the later one silently overwrites the earlier.
+  const claimed = new Set<number>();
+  const initialLength = merged.length;
+  for (const bill of incoming) {
+    const key = billIdentity(bill.title);
+    // A manual reminder remains the user's single source of truth for that
+    // named provider, matching the pre-import behavior.
+    if (merged.slice(0, initialLength).some(
+      (row) => !row.autoDetected && billIdentity(row.title) === key,
+    )) continue;
+    const sameTitle = merged
+      .slice(0, initialLength)
+      .map((row, index) => ({ row, index }))
+      .filter(({ row, index }) => !claimed.has(index) && billIdentity(row.title) === key);
+    const exact = bill.importIdentity
+      ? sameTitle.find(({ row }) => row.importIdentity === bill.importIdentity)
+      : sameTitle.find(({ row }) => !row.importIdentity);
+    // Migrate one pre-identity automatic reminder in place rather than making
+    // an upgrade show both its legacy and newly identified form.
+    const legacy = bill.importIdentity
+      ? sameTitle.find(({ row }) => !row.importIdentity)
+      : undefined;
+    const match = exact ?? legacy;
+    const index = match?.index ?? -1;
+    if (index < 0) {
+      merged.push(bill);
+      continue;
+    }
+    claimed.add(index);
+    const prior = merged[index];
+    merged[index] = {
+      ...prior,
+      title: bill.title,
+      category: bill.category,
+      amountFils: bill.amountFils,
+      dueDay: bill.dueDay,
+      autoDetected: true,
+      ...(bill.importIdentity ? { importIdentity: bill.importIdentity } : {}),
+    };
+  }
+  return merged;
+}
+
 /**
  * Words that identify a KIND of bill rather than who it is owed to.
  *

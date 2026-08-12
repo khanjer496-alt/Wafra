@@ -35,6 +35,8 @@ export interface DashboardProjection {
     incomeFils: number;
     expenseFils: number;
     cashOutFils: number;
+    cardPaymentsFils: number;
+    accountOutflowFils: number;
     netFils: number;
   };
   comparison: PeriodComparison | null;
@@ -74,10 +76,10 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = composition(summary).totalFils;
   const incomeFils = Math.round(summary.incomeFils / 100) * 100;
-  const cashOutFils = summarizeCashOutflow(state, period, {
+  const cashOut = summarizeCashOutflow(state, period, {
     live: liveAccounts,
     internal,
-  }).totalFils;
+  });
   const unreadCount = unreadFormatCount(state);
   const uncategorisedSummary = uncategorisedMerchants(state);
 
@@ -96,7 +98,9 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
     hero: {
       incomeFils,
       expenseFils,
-      cashOutFils,
+      cashOutFils: cashOut.totalFils,
+      cardPaymentsFils: cashOut.cardPaymentsFils,
+      accountOutflowFils: cashOut.accountOutflowFils,
       netFils: incomeFils - expenseFils,
     },
     comparison: periodComparison(state.transactions, period, liveAccounts, internal, now),

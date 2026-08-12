@@ -25,6 +25,7 @@ export type CaptureIntent = 'routine' | 'supplemental' | 'setup-verification' | 
 export interface CaptureImportSummary {
   transactions: number;
   dues: number;
+  bills: number;
   healed: number;
   newAccounts: number;
   transactionIds: string[];
@@ -90,6 +91,7 @@ export interface CaptureExecutorOptions {
 const EMPTY_SUMMARY: CaptureImportSummary = {
   transactions: 0,
   dues: 0,
+  bills: 0,
   healed: 0,
   newAccounts: 0,
   transactionIds: [],
@@ -97,7 +99,8 @@ const EMPTY_SUMMARY: CaptureImportSummary = {
 };
 
 const hasChanges = (plan: ImportPlan): boolean =>
-  plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0;
+  plan.txCount > 0 || plan.dueCount > 0 || plan.healedCount > 0 ||
+  (plan.batch.newBills?.length ?? 0) > 0;
 
 const summary = (
   plan: ImportPlan,
@@ -106,6 +109,7 @@ const summary = (
 ): CaptureImportSummary => ({
   transactions: plan.txCount,
   dues: plan.dueCount,
+  bills: plan.batch.newBills?.length ?? 0,
   healed: plan.healedCount,
   newAccounts: plan.newAccountCount,
   transactionIds,

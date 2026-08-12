@@ -93,7 +93,17 @@ function withoutExistingBillReminders(plan: ImportPlan, existingTitles: string[]
     existing.add(key);
     return true;
   });
-  return billDues.length === plan.billDues.length ? plan : { ...plan, billDues };
+  if (billDues.length === plan.billDues.length) return plan;
+  const allowed = new Set(billDues.map((due) => due.merchant.trim().toLowerCase()));
+  return {
+    ...plan,
+    billDues,
+    batch: {
+      ...plan.batch,
+      newBills: (plan.batch.newBills ?? []).filter((bill) =>
+        allowed.has(bill.title.trim().toLowerCase())),
+    },
+  };
 }
 
 function supportsHistoricalShortcut(): boolean {
@@ -401,26 +411,11 @@ export default function ImportSmsScreen() {
     }
     try {
       const receipt = importBatch(currentPlan.batch);
-      if (history) {
-        const existingBills = new Set(state.bills.map((bill) => bill.title.toLowerCase()));
-        for (const due of currentPlan.billDues) {
-          if (existingBills.has(due.merchant.toLowerCase())) continue;
-          existingBills.add(due.merchant.toLowerCase());
-          addBill({
-            title: due.merchant,
-            category: due.categoryGuess,
-            amountFils: due.amountFils,
-            dueDay: due.dueDay ?? (due.date ? Number(due.date.slice(8)) : 1),
-            autoDetected: true,
-          });
-        }
-      }
       // Dispatch happened synchronously. Remove the button now: retrying this
       // same plan would mint new transaction IDs even if the durable write or
       // the later source cleanup fails.
       setPlan(null);
       await receipt.durable;
-      if (history && currentPlan.billDues.length > 0) await ensureDurable();
     } catch {
       historyOperationLocked.current = false;
       setHistoryCommitState('storage-failed');

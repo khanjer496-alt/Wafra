@@ -6,6 +6,10 @@ import type { Account, AppState } from '@/lib/types';
 export interface CashOutflowSummary {
   /** Cash that actually left bank, debit-card, or cash accounts. */
   totalFils: number;
+  /** Distinct credit-card settlements included once. */
+  cardPaymentsFils: number;
+  /** Purchases, withdrawals, fees and external transfers funded immediately. */
+  accountOutflowFils: number;
   /** Canonical ledger rows behind the total, after settlement dedupe. */
   transactionIds: ReadonlySet<string>;
 }
@@ -48,6 +52,8 @@ export function summarizeCashOutflow(
 
   const transactionIds = new Set<string>();
   let totalFils = 0;
+  let cardPaymentsFils = 0;
+  let accountOutflowFils = 0;
 
   for (const transaction of state.transactions) {
     const settlement = settlements.get(transaction.id);
@@ -63,9 +69,12 @@ export function summarizeCashOutflow(
     if (!inPeriod(movementDate, period)) continue;
     if (!isSettlement && (isAbsorbedSettlementObservation || !leavesCashAccount)) continue;
 
+    const amountFils = settlement?.amountFils ?? transaction.amountFils;
     transactionIds.add(transaction.id);
-    totalFils += settlement?.amountFils ?? transaction.amountFils;
+    totalFils += amountFils;
+    if (isSettlement) cardPaymentsFils += amountFils;
+    else accountOutflowFils += amountFils;
   }
 
-  return { totalFils, transactionIds };
+  return { totalFils, cardPaymentsFils, accountOutflowFils, transactionIds };
 }

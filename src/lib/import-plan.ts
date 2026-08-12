@@ -16,7 +16,7 @@ import {
   type ParsedSms,
 } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
-import type { Account, AppState, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
+import type { Account, AppState, Bill, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
 /**
@@ -107,6 +107,7 @@ function emptyPlan(): ImportPlan {
       newAccounts: [],
       newHints: {},
       newDues: [],
+      newBills: [],
       snapshots: {},
       bankNames: {},
       cardTypes: {},
@@ -284,6 +285,7 @@ export function buildImportPlan(
   const newHints: Record<string, string> = {};
   const transactions: Omit<Transaction, 'id'>[] = [];
   const newDues: Omit<CardDue, 'id'>[] = [];
+  const newBills: Omit<Bill, 'id' | 'paidMonths'>[] = [];
   const billDues: ScannedSms[] = [];
   const fallbackAccountId = state.accounts[0]?.id ?? '';
 
@@ -587,17 +589,16 @@ export function buildImportPlan(
       if (misread && !misread.isTransfer && !misread.userEdited) {
         updates.push({ id: misread.id, remove: true });
       }
-      // A multi-year iOS history search must not silently resurrect a utility
-      // account the user left years ago as a new recurring bill.
+      // A full Android reread and a multi-year iOS history search must not
+      // silently resurrect a utility account the user left years ago as a new
+      // recurring bill. Only a current reminder becomes a live obligation.
       const historicalBillDate = p.date ?? (
         Number.isFinite(p.smsTs) ? toISODate(new Date(p.smsTs!)) : null
       );
-      const staleOrUndatedHistoryBill = Boolean(
-        p.sourceEventId && (!historicalBillDate || historicalBillDate < staleDueCutoff),
-      );
+      const staleOrUndatedBill = !historicalBillDate || historicalBillDate < staleDueCutoff;
       if (
         p.merchant !== 'Bill payment' &&
-        !staleOrUndatedHistoryBill
+        !staleOrUndatedBill
       ) billDues.push(p);
       continue;
     }
@@ -977,10 +978,32 @@ export function buildImportPlan(
   // A long history can contain many reminders from the same merchant. The
   // most recent one is the current amount/due day; filing the first
   // (chronologically oldest) reminder quietly created stale recurring bills.
+  const billImportIdentity = (due: ScannedSms): string | null => {
+    // A generic transaction/invoice reference changes each billing cycle. It
+    // is dedupe evidence for one alert, never the identity of the obligation;
+    // treating it as such creates a second monthly reminder every month.
+    return due.billIdentity ?? null;
+  };
+  const latestUnidentifiedCycle = billDues.reduce((latest, due) => {
+    if (billImportIdentity(due)) return latest;
+    const merchant = due.merchant.trim().toLowerCase();
+    const cycle = due.date?.slice(0, 7) ?? '';
+    if (cycle > (latest.get(merchant) ?? '')) latest.set(merchant, cycle);
+    return latest;
+  }, new Map<string, string>());
   const latestBillDues = [...billDues.reduce((latest, due) => {
     // Keep separately referenced accounts distinct when the bank supplies an
     // account/reference identity, while still collapsing monthly repeats.
-    const key = `${due.merchant.trim().toLowerCase()}|${due.reference?.trim().toLowerCase() ?? ''}`;
+    const merchant = due.merchant.trim().toLowerCase();
+    const identity = billImportIdentity(due);
+    const cycle = due.date?.slice(0, 7) ?? '';
+    // With no account identity, retain distinct obligations from the newest
+    // provider cycle (amount/day are the only structured facts available),
+    // but never resurrect the same provider's previous month beside it.
+    if (!identity && cycle !== latestUnidentifiedCycle.get(merchant)) return latest;
+    const key = identity
+      ? `${merchant}|${identity}`
+      : `${merchant}|unidentified|${due.amountFils}|${due.dueDay ?? due.date?.slice(8) ?? ''}`;
     const prior = latest.get(key);
     const dueTime = due.smsTs ?? Date.parse(`${due.date ?? '1970-01-01'}T00:00:00Z`);
     const priorTime = prior?.smsTs ?? Date.parse(`${prior?.date ?? '1970-01-01'}T00:00:00Z`);
@@ -988,8 +1011,33 @@ export function buildImportPlan(
     return latest;
   }, new Map<string, ScannedSms>()).values()];
 
+  for (const due of latestBillDues) {
+    const dueDay = due.dueDay ?? (due.date ? Number(due.date.slice(8)) : 0);
+    if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) continue;
+    const importIdentity = billImportIdentity(due);
+    newBills.push({
+      title: due.merchant,
+      category: due.categoryGuess,
+      amountFils: due.amountFils,
+      dueDay,
+      autoDetected: true,
+      ...(importIdentity ? { importIdentity } : {}),
+    });
+  }
+
   return {
-    batch: { transactions, newAccounts, newHints, newDues, snapshots, bankNames, cardTypes, lastScanTs: newestTs, updates },
+    batch: {
+      transactions,
+      newAccounts,
+      newHints,
+      newDues,
+      newBills,
+      snapshots,
+      bankNames,
+      cardTypes,
+      lastScanTs: newestTs,
+      updates,
+    },
     txCount: transactions.length,
     newAccountCount: newAccounts.length,
     dueCount: newDues.length,

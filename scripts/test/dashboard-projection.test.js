@@ -124,6 +124,8 @@ setActiveMarket('AE');
     incomeFils: 0,
     expenseFils: 0,
     cashOutFils: 0,
+    cardPaymentsFils: 0,
+    accountOutflowFils: 0,
     netFils: 0,
   });
   ok('the selected current month is marked live', projected.live === true);
@@ -212,6 +214,8 @@ setActiveMarket('AE');
     incomeFils: 10100,
     expenseFils: 6100,
     cashOutFils: 6100,
+    cardPaymentsFils: 0,
+    accountOutflowFils: 6100,
     netFils: 4000,
   });
   eq('the comparison uses the same eligible current rows',

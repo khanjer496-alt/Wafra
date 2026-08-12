@@ -187,8 +187,14 @@ export interface ParsedCard {
  * an outgoing payee can no longer create an income-only category. Import
  * planning also recognizes one retained local SMS across amount/FX parser
  * corrections, so this reread cannot append that message beside its old row.
+ *
+ * 20: income and obligation recovery from the owner corpus. FAB/Liv merchant
+ * settlements from Delivery Hero are named Talabat sales instead of a generic
+ * incoming transfer; SEWA reminders use their pay-by date; and current
+ * utility/telecom reminders enter the same durable capture batch as ledger
+ * rows. Unknown consumer-number nicknames no longer invent a utility category.
  */
-export const PARSER_VERSION = 19;
+export const PARSER_VERSION = 20;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -238,6 +244,8 @@ export interface ParsedSms {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Bank transaction/reference identifier, with surrounding prose removed. */
   reference: string | null;
+  /** Privacy-safe provider/account tail for a bill reminder, when stated. */
+  billIdentity?: string;
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
   /** Balance / available-limit / outstanding figure the bank quoted, if any. */
@@ -1727,6 +1735,25 @@ function extractReference(raw: string): string | null {
   return tail.match(REFERENCE_VALUE_RE)?.[1] ?? null;
 }
 
+/**
+ * A provider-side account discriminator safe to retain with a Bill.
+ *
+ * Only the final four alphanumeric characters cross the parser boundary. The
+ * full consumer/party/account number remains in the ephemeral SMS body and is
+ * discarded with it. The label is part of the identity so an account tail and
+ * a consumer tail cannot accidentally become the same obligation.
+ */
+function extractBillIdentity(raw: string): string | null {
+  const match = raw.match(
+    /\b(account|consumer|party|customer|contract|service)(?:\s*-?\s*(?:number|no\.?|id))?\s*[:#-]?\s*([A-Z0-9X*·•-]{4,40})\b/i,
+  );
+  if (!match) return null;
+  const value = match[2].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  if (value.length < 4) return null;
+  const kind = match[1].toLowerCase();
+  return `${kind}:${value.slice(-4)}`;
+}
+
 // Auxiliaries and conjunctions end the descriptor and start a sentence about
 // it. Without them the rest of the sentence became part of the name — "Acme
 // Llc As Payment", "Zara And The" — and those rows can never group with the
@@ -2594,6 +2621,20 @@ const BUSINESS_INCOME_EVIDENCE_RE =
   /\b(?:invoice|client|customer|merchant\s+(?:payout|settlement)|net\s+(?:online\s+)?sales|payout|talabat|delivery\s+hero)\b/i;
 
 /**
+ * Closed originator names proven by merchant-settlement alert fixtures.
+ *
+ * These credits do not use the parser's ordinary `from <payer>` grammar. FAB
+ * puts the originator after a transfer reference and sometimes glues `LLC`
+ * directly to `Balance Net Online Sales`, so the row was counted as Business
+ * but displayed as the unhelpful `Incoming transfer`.
+ */
+function businessIncomeTitle(raw: string): string | null {
+  return /\bdelivery\s+hero\s+talabat\s+db\s+l\.?l\.?c/i.test(raw)
+    ? 'Talabat sales'
+    : null;
+}
+
+/**
  * The only categories a CREDIT can be filed under.
  *
  * Spelled here rather than imported from categories.ts because this module is
@@ -2963,7 +3004,7 @@ const SERVICE_NAMES: [RegExp, string][] = [
   // real ledger carried Sharjah's electricity authority as "Shj Elec Water
   // Auth", "Sharjah Elect And Water" AND "Sharjah Electricity & Water" — three
   // merchants of one charge each, so the utility never appeared at all.
-  [/\bsewa\b|shj\s*elec|sharjah\s*elec(?:t|tricity)?(?:\s*(?:and|&)\s*water)?|sharjah\s*electricity\s*(?:and|&)\s*water/i, 'SEWA'],
+  [/\bsewa\b|sewapayment|sewa\.gov|shj\s*elec|sharjah\s*elec(?:t|tricity)?(?:\s*(?:and|&)\s*water)?|sharjah\s*electricity\s*(?:and|&)\s*water/i, 'SEWA'],
   [/\bfewa\b|federal\s*electricity(?:\s*(?:and|&)\s*water)?|federal\s*elec/i, 'FEWA'],
   [/\bdewa\b|dubai\s*electricity(?:\s*(?:and|&)\s*water)?/i, 'DEWA'],
   [/\baadc\b|\baddc\b|al\s*ain\s*distribution|abu\s*dhabi\s*distribution/i, 'ADDC'],
@@ -3765,6 +3806,8 @@ const DAY_MONTH_DATE_RE =
  */
 const DUE_BY_NUMERIC_RE = /\b(?:by|before)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/i;
 const DUE_BY_NAMED_RE = /\b(?:by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
+const DUE_BY_DAY_NAMED_RE =
+  /\b(?:by|before)\s+(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s](\d{2,4})\b/i;
 /**
  * A DEADLINE clause and the date it introduces — the same footer read from the
  * other side.
@@ -3831,6 +3874,11 @@ function extractDueDate(raw: string): string | null {
   const byNamed = raw.match(DUE_BY_NAMED_RE);
   if (byNamed) {
     const iso = namedDate(byNamed[1], byNamed[2], byNamed[3]);
+    if (iso) return iso;
+  }
+  const byDayNamed = raw.match(DUE_BY_DAY_NAMED_RE);
+  if (byDayNamed) {
+    const iso = namedDate(byDayNamed[2], byDayNamed[1], byDayNamed[3]);
     if (iso) return iso;
   }
   // "Pymt due 2022-06-06" — the abbreviated block's deadline. Last, because
@@ -4227,6 +4275,8 @@ function parseSmsInner(
     const payee = billerPay[1].trim().replace(/\s{2,}/g, ' ');
     const merchant = normalizeServiceName(payee) ?? titleCase(payee);
     const cat = categoryOf(payee, 'expense', overrides, merchant);
+    const registeredUtility =
+      cat.id === 'other' && /home\s*inet|home\s*internet|villa\s*bill|apt\s*home|off\s*home/i.test(payee);
     return {
       kind: 'transaction',
       type: 'expense',
@@ -4239,8 +4289,14 @@ function parseSmsInner(
       transferHint: false,
       snapshotFils,
       snapshotKind,
-      // A named biller beats the default; "Du" should still read as telecom.
-      categoryGuess: cat.id === 'other' ? 'utilities' : cat.id,
+      // A consumer-number payment proves a registered biller, not what kind
+      // of business it is. A user can nickname one "Fishbasket"; defaulting
+      // every unknown nickname to Utilities confidently mis-filed that real
+      // supplier payment. Known internet/electricity names still resolve
+      // through categoryOf, while an unknown nickname stays visible in Other
+      // until the user pins it once.
+      categoryGuess: registeredUtility ? 'utilities' : cat.id,
+      categoryDeliberate: cat.deliberate || registeredUtility,
       ...(cat.pinned ? { categoryPinned: true as const } : {}),
       currency,
       reference,
@@ -4809,6 +4865,16 @@ function parseSmsInner(
       const arBill = raw.match(AR_BILL_MERCHANT_RE);
       merchant = arBill ? sliceUnfolded(clean, arBill) : extractArabicMerchant(payeeText, clean);
     }
+    // A utility reminder often names the biller only in its footer/domain:
+    // "view SEWA magazine" / sewa.gov.ae, or an e& self-care link. The due
+    // grammar correctly reads the amount and deadline but the generic payee
+    // grammar has nothing to capture, leaving a structurally-known bill titled
+    // "Bill payment". That title is deliberately refused by import-plan,
+    // which meant the reminder vanished before Bills could ever show it.
+    // Service-name normalization is a closed, tested vocabulary and is safer
+    // than widening the payee regex over arbitrary footer prose.
+    const namedBiller = normalizeServiceName(raw);
+    if (namedBiller) merchant = namedBiller;
   } else {
     merchant = extractMerchant(payeeText, MERCHANT_RE);
     if (!merchant) merchant = extractArabicMerchant(payeeText, clean);
@@ -4964,7 +5030,8 @@ function parseSmsInner(
     // titles can never group into subscriptions, so this matters.
     const service =
       !isBillDue && type === 'expense' && !transferHint ? normalizeServiceName(raw) : null;
-    merchant = service ?? (isBillDue
+    const businessTitle = !isBillDue && type === 'income' ? businessIncomeTitle(raw) : null;
+    merchant = service ?? businessTitle ?? (isBillDue
       ? 'Bill payment'
       : type === 'income'
         ? /\brefund(?:ed)?\b/i.test(raw) || REVERSAL_RE.test(raw)
@@ -5077,6 +5144,7 @@ function parseSmsInner(
   // still filed it under groceries — the merchant right, the category still
   // borrowed from an advert. It is the same sentence and the same argument.
   const cat = categoryOf(titlePinned ? merchant : payeeText, type, overrides, merchant);
+  const billDueDate = isBillDue ? extractDueDate(raw) ?? statedDate : null;
 
   return {
     kind: isBillDue ? 'billDue' : 'transaction',
@@ -5096,8 +5164,8 @@ function parseSmsInner(
     merchant,
     // A REMINDER's date is its deadline, so it reads the unblanked body. A
     // POSTING's is not, and reads the body with the deadline clause removed.
-    date: isBillDue ? statedDate : date,
-    dueDay: isBillDue && statedDate ? Number(statedDate.slice(8)) : null,
+    date: isBillDue ? billDueDate : date,
+    dueDay: billDueDate ? Number(billDueDate.slice(8)) : null,
     minDueFils: null,
     card,
     transferHint,
@@ -5265,8 +5333,13 @@ export function parseSms(
 ): ParsedSms | null {
   const parsed = parseSmsInner(message, overrides, options);
   if (!parsed) return null;
+  const billIdentity = parsed.kind === 'billDue' ? extractBillIdentity(message) : null;
   const named = bankFromMessage(message);
-  return named ? { ...parsed, bankHint: named.name } : parsed;
+  return {
+    ...parsed,
+    ...(billIdentity ? { billIdentity } : {}),
+    ...(named ? { bankHint: named.name } : {}),
+  };
 }
 
 export function parseSmsBatch(

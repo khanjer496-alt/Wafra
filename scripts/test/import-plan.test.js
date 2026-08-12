@@ -2007,5 +2007,78 @@ const DECLINE_SMS = [{
     repaired.accounts.map((a) => a.name));
 }
 
+/* ── utility reminders survive routine capture ───────────────────────── */
+{
+  const current = scan([{
+    body: 'Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due on 15-08-2026. To pay your bill, please visit businessonline.etisalat.ae/quickpay.',
+    ts: Date.parse('2026-08-10T08:00:00Z'),
+    sender: 'Etisalat',
+  }]);
+  const currentPlan = buildImportPlan(
+    current.parsed,
+    BASE,
+    current.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('a current utility reminder is part of the same durable import batch',
+    currentPlan.batch.newBills?.length === 1 &&
+      currentPlan.batch.newBills[0].title === 'E&' &&
+      currentPlan.batch.newBills[0].category === 'telecom' &&
+      currentPlan.batch.newBills[0].dueDay === 15,
+    currentPlan.batch.newBills);
+
+  const twoAccounts = scan([
+    {
+      body: 'Dear Customer, Bill amount for your account 5557118 is AED 100.00, billed on 07-Aug-26. Please pay by 22-Aug-26. https://sewa.gov.ae',
+      ts: Date.parse('2026-08-07T08:00:00Z'), sender: 'SEWA',
+    },
+    {
+      body: 'Dear Customer, Bill amount for your account 9992442 is AED 200.00, billed on 08-Aug-26. Please pay by 23-Aug-26. https://sewa.gov.ae',
+      ts: Date.parse('2026-08-08T08:00:00Z'), sender: 'SEWA',
+    },
+  ]);
+  const twoAccountPlan = buildImportPlan(
+    twoAccounts.parsed, BASE, twoAccounts.newestTs, new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('two current accounts at one utility remain two durable reminders',
+    twoAccountPlan.batch.newBills?.length === 2 &&
+      new Set(twoAccountPlan.batch.newBills.map((bill) => bill.importIdentity)).size === 2,
+    twoAccountPlan.batch.newBills);
+
+  const changingInvoices = scan([
+    {
+      body: 'Your DEWA bill of AED 450.00 is due on 25/07/2026. Reference No: INV20260711.',
+      ts: Date.parse('2026-07-20T08:00:00Z'), sender: 'DEWA',
+    },
+    {
+      body: 'Your DEWA bill of AED 450.00 is due on 25/08/2026. Reference No: INV20260822.',
+      ts: Date.parse('2026-08-10T08:00:00Z'), sender: 'DEWA',
+    },
+  ]);
+  const invoicePlan = buildImportPlan(
+    changingInvoices.parsed, BASE, changingInvoices.newestTs, new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('changing invoice references never create a second monthly reminder',
+    invoicePlan.batch.newBills?.length === 1 &&
+      invoicePlan.batch.newBills[0].importIdentity === undefined &&
+      invoicePlan.batch.newBills[0].dueDay === 25,
+    invoicePlan.batch.newBills);
+
+  const old = scan([{
+    body: 'Dear Customer, Bill amount for your account 5557118 is AED 785.40, billed on 07-Jan-22. Please pay by 22-Jan-22. Click here to view SEWA magazine https://sewa.gov.ae',
+    ts: Date.parse('2022-01-07T08:00:00Z'),
+    sender: 'SEWA',
+  }]);
+  const oldPlan = buildImportPlan(
+    old.parsed,
+    BASE,
+    old.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('a full reread does not resurrect a years-old utility reminder',
+    oldPlan.batch.newBills?.length === 0,
+    oldPlan.batch.newBills);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -127,6 +127,10 @@ const spending = summarizeMonth(transactions, period, live, internal);
 
 eq('credit purchases count in spending but not cash out', spending.expenseFils, 100000);
 eq('cash out includes funded spending, settlements once, and external transfers', cashOut.totalFils, 330000);
+eq('cash out explains the card-payment portion without counting purchases twice',
+  cashOut.cardPaymentsFils, 170000);
+eq('cash out explains the immediately-funded account portion',
+  cashOut.accountOutflowFils, 160000);
 ok('opposite settlement alerts are represented by one canonical row',
   Number(cashOut.transactionIds.has('payment-debit')) +
     Number(cashOut.transactionIds.has('payment-receipt')) === 1);

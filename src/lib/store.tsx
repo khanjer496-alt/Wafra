@@ -44,6 +44,7 @@ import {
   PARSER_VERSION,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
+import { mergeImportedBills } from '@/lib/bills';
 import {
   createLedgerPersistence,
   LedgerResetError,
@@ -569,6 +570,7 @@ type Action =
       newAccounts: Account[];
       newHints: Record<string, string>;
       newDues: CardDue[];
+      newBills: Bill[];
       snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
       bankNames: Record<string, string>;
       cardTypes: Record<string, 'credit' | 'debit'>;
@@ -802,6 +804,7 @@ function reduceState(state: AppState, action: Action): AppState {
         return next;
       });
       const dues = mergeImportedCardDues(state.cardDues, action.newDues, accounts);
+      const bills = mergeImportedBills(state.bills, action.newBills);
       // Heal existing rows the parser now reads better.
       const existing = applyHealUpdates(state.transactions, action.updates);
       const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
@@ -810,6 +813,7 @@ function reduceState(state: AppState, action: Action): AppState {
         accounts,
         accountHints: { ...state.accountHints, ...action.newHints },
         cardDues: dues,
+        bills,
         lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
         parserVersion: PARSER_VERSION,
       }));
@@ -1476,6 +1480,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           : d.accountId,
       id: makeId('due'),
     }));
+    const newBills: Bill[] = (input.newBills ?? []).map((bill) => ({
+      ...bill,
+      paidMonths: [],
+      id: makeId('bill'),
+    }));
     const snapshots: ImportBatchInput['snapshots'] = {};
     for (const [ref, snap] of Object.entries(input.snapshots ?? {})) {
       const id =
@@ -1500,6 +1509,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       newAccounts,
       newHints,
       newDues,
+      newBills,
       snapshots,
       bankNames,
       cardTypes,

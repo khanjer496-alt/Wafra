@@ -7,6 +7,10 @@
  */
 export const Platform: { OS: 'ios' | 'android' | 'web' } = { OS: 'ios' };
 
+export const Linking = {
+  async openSettings(): Promise<void> {},
+};
+
 export const PermissionsAndroid = {
   PERMISSIONS: { READ_SMS: 'android.permission.READ_SMS', RECEIVE_SMS: 'android.permission.RECEIVE_SMS' },
   RESULTS: { GRANTED: 'granted', DENIED: 'denied' },
