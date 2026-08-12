@@ -1,0 +1,25 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Set up Wafra"
+    timeout: 20000
+- tapOn: "Set up Wafra"
+- tapOn: "Enable automatic SMS capture"
+- extendedWaitUntil:
+    visible: "Don’t allow"
+    timeout: 10000
+- tapOn: "Don’t allow"
+- extendedWaitUntil:
+    visible: "SMS access was not granted. You can continue and enable capture later."
+    timeout: 20000
+- assertVisible: "Open Wafra"
+- tapOn: "Open Wafra"
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 20000
+- assertVisible: "Turn on automatic tracking"
+- assertNotVisible: "Watching bank alerts"
+- takeScreenshot: "permission-denied-${PLATFORM}"

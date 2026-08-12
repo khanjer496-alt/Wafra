@@ -3201,6 +3201,20 @@ ok('stale: a stale statement that gets paid leaves openDues',
   ok('heal: a deliberate "other" never demotes a categorised row',
     demote === null || demote.category === undefined, demote);
 
+  const impossibleDirection = heal.healPatch(
+    { ...base, category: 'salary', title: 'Salary Services' },
+    { ...parsed, merchant: 'Salary Services', categoryGuess: 'other', categoryDeliberate: false },
+  );
+  ok('heal: an income-only category on an expense is repaired even to cautious Other',
+    impossibleDirection?.category === 'other', impossibleDirection);
+
+  const contactTitle = heal.healPatch(
+    { ...base, title: 'Example Shop 971501234567', category: 'shopping' },
+    { ...parsed, merchant: 'Example Shop', categoryGuess: 'shopping' },
+  );
+  ok('heal: a contact number retained in a merchant title is removed on reread',
+    contactTitle?.title === 'Example Shop', contactTitle);
+
   // The user's own correction outranks every rule in the file.
   const edited = heal.healPatch({ ...base, userEdited: true }, parsed);
   ok('heal: a hand-corrected row is still untouchable', edited === null, edited);

@@ -145,6 +145,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
   const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
+  const previousCaptureOptOut = useRef(state.captureOptOut);
 
   // Read the real platform capability whenever the screen regains focus. This
   // makes the card turn on immediately after returning from Settings or iOS
@@ -158,6 +159,11 @@ export function useAutoImport(watchForeground = false): AutoImport {
       if (!watchForeground) return;
       let current = true;
       void (async () => {
+        if (state.captureOptOut) {
+          setNeedsPermission(false);
+          setCaptureState('off');
+          return;
+        }
         if (Platform.OS === 'ios') {
           const [cfg, revokedAt] = await Promise.all([
             getRelayConfig(),
@@ -196,7 +202,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
       return () => {
         current = false;
       };
-    }, [watchForeground]),
+    }, [state.captureOptOut, watchForeground]),
   );
 
   const performAutoImport = useCallback(
@@ -214,6 +220,11 @@ export function useAutoImport(watchForeground = false): AutoImport {
         if (interactive) router.push('/pro');
         return 'not-pro';
       }
+      // The OS may still report READ_SMS as granted after the user opted out
+      // inside Wafra. Stop before even asking the native permission module;
+      // the explicit capture-card action is what turns this preference back
+      // on.
+      if (state.captureOptOut) return 'unavailable';
       if (!isCaptureAvailable()) return 'unavailable';
       // Android needs the SMS permission before it can read anything. iOS has
       // no permission to ask for — its messages arrive over the relay — so the
@@ -257,7 +268,10 @@ export function useAutoImport(watchForeground = false): AutoImport {
               count: outcome.reviewAlerts,
               s: outcome.reviewAlerts === 1 ? '' : 's',
             }),
-            [{ label: t('review'), onPress: () => router.push('/review-alerts') }],
+            {
+              tone: 'warning',
+              actions: [{ label: t('review'), onPress: () => router.push('/review-alerts') }],
+            },
           );
         } else if (interactive) {
           toast.show(t('upToDateNoNew'));
@@ -278,10 +292,13 @@ export function useAutoImport(watchForeground = false): AutoImport {
                 })
               : '',
         }),
-        [
-          { label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) },
-          { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
-        ],
+        {
+          tone: 'success',
+          actions: [
+            { label: t('undo'), onPress: () => undoBatch(outcome.transactionIds) },
+            { label: t('review'), onPress: () => router.push('/transactions?source=sms') },
+          ],
+        },
       );
       return 'imported';
     },
@@ -363,7 +380,13 @@ export function useAutoImport(watchForeground = false): AutoImport {
   // already captured.
   useEffect(() => {
     if (!watchForeground) return;
-    if (!state.hydrated) return;
+    // The navigator stays mounted under onboarding so Expo Router can return
+    // from the iOS setup route. Mounted must not mean active: scanning and
+    // rebuilding projections behind the welcome flow competes with the one
+    // progress surface the user is actually watching.
+    if (!state.hydrated || !state.onboarded) return;
+    const captureJustEnabled = previousCaptureOptOut.current && !state.captureOptOut;
+    previousCaptureOptOut.current = state.captureOptOut;
 
     /**
      * @param force ignore the freshness throttle. Only the call below passes
@@ -399,7 +422,10 @@ export function useAutoImport(watchForeground = false): AutoImport {
      * watermark off 0 — which re-runs this effect once more into a throttle
      * that was just stamped.
      */
-    scan(state.lastScanTs <= 0);
+    // Do not stamp the freshness throttle for a scan that the durable opt-out
+    // will refuse. When capture is explicitly enabled again, force the first
+    // real scan even if another scan happened less than 30 seconds earlier.
+    if (!state.captureOptOut) scan(state.lastScanTs <= 0 || captureJustEnabled);
 
     if (!sessionSetupRan) {
       sessionSetupRan = true;
@@ -421,7 +447,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.hydrated, state.lastScanTs, watchForeground]);
+  }, [state.captureOptOut, state.hydrated, state.onboarded, state.lastScanTs, watchForeground]);
 
   /**
    * Tonight's summary follows the ledger, not the launch.
@@ -433,17 +459,18 @@ export function useAutoImport(watchForeground = false): AutoImport {
    * identity: the store is a reducer, so that reference changes exactly when
    * the rows do, and never otherwise.
    *
-   * Not gated on `watchForeground`. Any screen that imported rows should leave
-   * the evening's summary correct, and `syncDailySummary` replaces a single
-   * identified notification rather than appending, so running it more than once
-   * costs nothing.
+   * Home is the single owner. `usePullToRefresh` mounts this hook in every
+   * visited tab; letting all four instances observe the same reducer meant one
+   * import could schedule the same native notification four times. A scan from
+   * another tab still updates the shared transaction array, so Home's mounted
+   * owner sees it and keeps the digest current.
    */
   useEffect(() => {
-    if (!state.hydrated || !state.dailySummary) return;
+    if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
     void syncDailySummary(state).catch(() => {
       // A digest is never worth surfacing an error over.
     });
-  }, [state]);
+  }, [state, watchForeground]);
 
   return { runAutoImport, needsPermission, captureState };
 }
@@ -476,7 +503,7 @@ export function usePullToRefresh(): { refreshing: boolean; onRefresh: () => void
     // nothing reaches the global handler.
     void runAutoImport(true)
       .catch(() => {
-        if (alive.current) toast.show(t('captureRefreshFailed'));
+        if (alive.current) toast.show(t('captureRefreshFailed'), { tone: 'error' });
       })
       .finally(() => {
         if (alive.current) setRefreshing(false);

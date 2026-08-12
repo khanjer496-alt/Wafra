@@ -1569,6 +1569,50 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
+        let current = { hydrated: true, lastScanTs: 1, captureOptOut: false };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => {
+              events.push('persist');
+              return { ids: [], durable: Promise.resolve() };
+            },
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return { admitted: 1, durable: Promise.resolve() };
+            },
+            ensureDurable: async () => void events.push('flush'),
+            markParserVersion: () => void events.push('parser'),
+            setMarket: () => {
+              events.push('market');
+              return true;
+            },
+          },
+          dependencies: {
+            collectRoutine: async () => {
+              current = { hydrated: true, lastScanTs: 1, captureOptOut: true };
+              return {
+                parsed: [row(1, 'SHOP')], declined: [], newestTs: 2,
+                reviewCandidates: [{ id: 'must-not-stage' }],
+                detectedLaunchMarket: 'SA', source: 'relay', needsSetup: false,
+                commit: async () => void events.push('ack'),
+              };
+            },
+            planRows: () => {
+              events.push('plan');
+              return changedPlan;
+            },
+          },
+        });
+        const outcome = await executor.execute('routine');
+        eq('capture executor: opting out during collection stages, imports and acknowledges nothing',
+          events, []);
+        ok('capture executor: an interrupted opt-out reports no imported source',
+          outcome.kind === 'up-to-date' && outcome.source === 'none');
+      }
+
+      {
+        const events = [];
         let releaseReview;
         const reviewDurable = new Promise((resolve) => { releaseReview = resolve; });
         const executor = executorModule.createCaptureExecutor({
@@ -1600,6 +1644,46 @@ async function queueItem(id, row, publicKey) {
         ok('capture executor: review-only outcome reports an aggregate count',
           outcome.kind === 'up-to-date' && outcome.reviewAlerts === 1,
           JSON.stringify(outcome));
+      }
+
+      {
+        const events = [];
+        let current = { hydrated: true, lastScanTs: 0, captureOptOut: false };
+        let releaseReview;
+        const reviewDurable = new Promise((resolve) => { releaseReview = resolve; });
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => {
+              events.push('persist');
+              return { ids: [], durable: Promise.resolve() };
+            },
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return { admitted: 1, durable: reviewDurable };
+            },
+            ensureDurable: async () => void events.push('flush'),
+            markParserVersion: () => void events.push('parser'),
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [], declined: [], newestTs: 1,
+              reviewCandidates: [{ id: 'already-being-encrypted' }],
+              source: 'relay', needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+            planRows: () => emptyPlan,
+          },
+        });
+        const running = executor.execute('routine');
+        await Promise.resolve();
+        current = { ...current, captureOptOut: true };
+        releaseReview();
+        const outcome = await running;
+        eq('capture executor: opting out during review durability prevents cursor, import and ack',
+          events, ['review-stage']);
+        ok('capture executor: a durability-boundary opt-out reports no imported source',
+          outcome.kind === 'up-to-date' && outcome.source === 'none');
       }
 
       {

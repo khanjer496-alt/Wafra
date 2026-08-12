@@ -1,0 +1,10 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- extendedWaitUntil:
+    visible: "See your money clearly."
+    timeout: 20000
+- assertVisible: "Set up Wafra"
+- takeScreenshot: "welcome-${PLATFORM}"

@@ -695,6 +695,9 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       : prior.smsKey?.startsWith('h')
         ? prior
         : undefined;
+    const debitSide = cardPaymentPair
+      ? row.cardPaymentSide === 'debit' ? row : prior
+      : undefined;
     kept[duplicateAt] = {
       ...secondary,
       ...preferred,
@@ -714,6 +717,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // exact after the first overlap reconciliation.
       smsKey: historicalIdentity?.smsKey ?? preferred.smsKey,
       ts: historicalIdentity?.ts ?? preferred.ts,
+      // The receipt is the richer settlement record and remains canonical,
+      // but cash left on the debit alert's date. Preserve that fact across a
+      // midnight/weekend boundary so Cash out stays in the funding period.
+      cashOutDate: debitSide?.cashOutDate ?? debitSide?.date ??
+        preferred.cashOutDate ?? secondary.cashOutDate,
       // Preserve optional user-facing detail if only the poorer capture had
       // it; neither row is userEdited, but old builds could attach a note.
       ...(preferred.userEdited

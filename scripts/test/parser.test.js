@@ -3835,6 +3835,12 @@ t('a site number is still not part of the name',
 t('a country and a phone tail both come off, in either order',
   'Purchase of AED 30.00 with Debit Card ending 1354 at SP TODD SNYDER +····0068 USA. Avl Balance is AED 100.00.',
   { merchant: 'Todd Snyder' });
+t('a bare acquirer phone tail is not retained as merchant identity',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at SP TODD SNYDER 971501234567, DUBAI. Avl Balance is AED 100.00.',
+  { merchant: 'Todd Snyder' });
+t('a phone plus acquirer location block is not merchant identity',
+  'Purchase of AED 30.00 with Debit Card ending 1354 at SP TODD SNYDER +971501234567 NEW YORK US. Avl Balance is AED 100.00.',
+  { merchant: 'Todd Snyder' });
 t('a terminal id in FRONT of the name comes off',
   'Purchase of AED 68.38 with Debit Card ending 8783 at PZD131 CENTRAL PHUKET, PHUKET. Avl Balance is AED 37,488.79.  Pls refer stmt for exact amt.',
   { merchant: 'Central Phuket' });
@@ -4159,6 +4165,9 @@ t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBA
   ok('an income rule does not file a purchase',
     guessCategory('TALABAT', 'expense', { talabat: 'salary' }, 'TALABAT') !== 'salary',
     guessCategory('TALABAT', 'expense', { talabat: 'salary' }, 'TALABAT'));
+  ok('salary words in an outgoing payee cannot create an income-only category',
+    guessCategory('SALARY SERVICES', 'expense', {}, 'SALARY SERVICES') === 'other',
+    guessCategory('SALARY SERVICES', 'expense', {}, 'SALARY SERVICES'));
 
   // Not "expenses only": correcting a credit from Business to Salary in the
   // entry sheet offers to remember that merchant, so an income rule is
@@ -4714,6 +4723,9 @@ t('a generic FAB credit is visible income, not a hidden savings transfer',
   'An amount of AED 2,500.00 has been credited to your FAB account XXXX1234 on 11/08/2026. Your Available Balance is AED 8,000.00',
   { type: 'income', merchant: 'Incoming transfer', category: 'other', transfer: false },
   { sender: 'FAB' });
+t('a balance line after a dangling credit preposition is not a merchant',
+  'AED 100.00 has been credited to\nAvailable balance is AED 500.00.',
+  { type: 'income', amountFils: 10000, merchant: 'Incoming transfer' });
 t('salary transferred to a FAB account stays visible salary income',
   'Your salary of AED 10,000.00 has been transferred to your FAB account from ACME LLC.',
   { type: 'income', amountFils: 1000000, category: 'salary', transfer: false },
@@ -4761,6 +4773,11 @@ t('a cheque deposit subject to clearing is not posted income yet',
   null);
 ok('the pending-processing notices are repairable without retaining their text',
   nonPostingReason('AED 4,000.00 has been deposited to your account 1234 subject to being cleared through cheque number 778899.') === 'pending-processing');
+t('an explicitly pending transaction is not a settled purchase',
+  'Purchase of AED 50.00 with Debit Card ending 1234 at CARREFOUR, DUBAI. This transaction is pending processing.',
+  null);
+ok('a generic pending notice carries bounded repair evidence',
+  nonPostingReason('Payment of AED 50.00 is still pending completion.') === 'pending-processing');
 
 // ── FULL-INBOX CORPUS: TRAVEL CURRENCIES AND SUB-UNIT FIGURES ──
 t('a currency-anchored local figure may omit its leading zero',

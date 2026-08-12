@@ -234,7 +234,8 @@ function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>)
     // real settlement is often filed against the debit sibling — narrowing to
     // `creditIds.has(t.accountId)` here would drop those.
     creditIds.size > 0 &&
-    (t.type === 'income' ||
+    (t.cardPaymentSide !== undefined ||
+      t.type === 'income' ||
       // Older builds stored card payments in the wrong direction. Keep
       // that compatibility path, but only for a row whose title says it
       // is a card settlement. Treating every transfer OUT of a credit card
@@ -299,14 +300,155 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
    * second payment leaves a balance showing that the user can clear with Mark
    * paid, while counting one twice quietly settles a bill they still owe.
    */
-  const sided = new Set(
-    matched.filter((t) => t.cardPaymentSide !== undefined).map((t) => `${t.date}|${t.amountFils}`),
-  );
-  const value = collapseSettlementLegs(
-    matched.filter((t) => t.cardPaymentSide !== undefined || !sided.has(`${t.date}|${t.amountFils}`)),
-  );
+  const value = canonicalCardPayments(matched);
   paymentsCache.byKey.set(key, value);
   return value;
+}
+
+/**
+ * Every distinct payment toward a credit card.
+ *
+ * A card settlement can be observed twice: once when money leaves the bank
+ * account and once when the card acknowledges receipt. `cardPaymentsOf`
+ * already owns the conservative side/manual collapsing rules used to settle
+ * statements, so cash-flow reporting consumes that same answer rather than
+ * inventing a second dedupe policy.
+ */
+export function cardPaymentRows(state: AppState): Transaction[] {
+  const creditIds = new Set(
+    state.accounts.filter((account) => account.cardType === 'credit').map((account) => account.id),
+  );
+  const byAccount = new Map<string, Transaction[]>();
+
+  // One ledger walk, not one full walk per card. Home projects this on every
+  // durable state change and a large imported inbox can hold thousands of
+  // rows; multiplying that by the number of cards made a correctness figure
+  // into a render-path performance regression.
+  for (const transaction of state.transactions) {
+    if (!creditIds.has(transaction.accountId)) continue;
+    if (!isCardPayment(transaction, new Set([transaction.accountId]), creditIds)) continue;
+    const rows = byAccount.get(transaction.accountId) ?? [];
+    rows.push(transaction);
+    byAccount.set(transaction.accountId, rows);
+  }
+
+  const canonicalEntries = [...byAccount.values()].flatMap((rows) => {
+    const collapsed = canonicalCardPaymentsWithEvidence(rows);
+    return collapsed.rows.map((row) => ({
+      row,
+      receipt: collapsed.receiptByCanonicalId.get(row.id),
+    }));
+  });
+  const canonical = canonicalEntries.map(({ row }) => row);
+
+  /**
+   * Older builds filed the debit observation on the funding bank account and
+   * the receipt observation on the card. Card allocation cannot safely attach
+   * that bank row to a statement, but whole-ledger Cash out can still prove
+   * that explicit opposite sides are one movement: exact amount, ±1 day, one
+   * debit consumed by one receipt. Unmatched debit observations remain real
+   * cash movements and are returned as their own canonical rows.
+   */
+  const receiptSlots = canonicalEntries
+    .map(({ row, receipt }, index) => ({ row, receipt, index }))
+    .filter(
+      (entry): entry is { row: Transaction; receipt: Transaction; index: number } =>
+        entry.receipt !== undefined,
+    );
+  const externalDebits = state.transactions
+    .filter(
+      (row) =>
+        row.isTransfer === true &&
+        row.cardPaymentSide === 'debit' &&
+        !creditIds.has(row.accountId),
+    )
+    .slice()
+    .sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
+    );
+
+  const receiptSlotsByAmount = new Map<number, typeof receiptSlots>();
+  for (const slot of receiptSlots) {
+    const bucket = receiptSlotsByAmount.get(slot.receipt.amountFils) ?? [];
+    bucket.push(slot);
+    receiptSlotsByAmount.set(slot.receipt.amountFils, bucket);
+  }
+  const externalDebitsByAmount = new Map<number, Transaction[]>();
+  for (const debit of externalDebits) {
+    const bucket = externalDebitsByAmount.get(debit.amountFils) ?? [];
+    bucket.push(debit);
+    externalDebitsByAmount.set(debit.amountFils, bucket);
+  }
+  const matchedExternalDebitIds = new Set<string>();
+  for (const [amountFils, debits] of externalDebitsByAmount) {
+    const slots = (receiptSlotsByAmount.get(amountFils) ?? []).slice().sort(
+      (a, b) =>
+        a.receipt.date.localeCompare(b.receipt.date) ||
+        (a.receipt.ts ?? 0) - (b.receipt.ts ?? 0) ||
+        a.receipt.id.localeCompare(b.receipt.id),
+    );
+    for (const [debitIndex, receiptIndex] of preferredObservedPairs(
+      debits,
+      slots.map((slot) => slot.receipt),
+    )) {
+      const debit = debits[debitIndex];
+      const slot = slots[receiptIndex];
+      matchedExternalDebitIds.add(debit.id);
+      canonical[slot.index] = {
+        ...slot.row,
+        cashOutDate: debit.cashOutDate ?? debit.date,
+        cashOutAccountId: debit.accountId,
+      };
+    }
+  }
+  for (const debit of externalDebits) {
+    if (!matchedExternalDebitIds.has(debit.id)) canonical.push(debit);
+  }
+
+  return canonical;
+}
+
+function canonicalCardPayments(rows: Transaction[]): Transaction[] {
+  return canonicalCardPaymentsWithEvidence(rows).rows;
+}
+
+interface CanonicalCardPaymentEvidence {
+  rows: Transaction[];
+  /**
+   * Receipt observations survive even when a prior manual "Mark paid" row is
+   * the canonical representative. Whole-ledger cash flow needs that evidence
+   * to absorb the funding-bank debit instead of counting the same payment a
+   * second time.
+   */
+  receiptByCanonicalId: ReadonlyMap<string, Transaction>;
+}
+
+function canonicalCardPaymentsWithEvidence(rows: Transaction[]): CanonicalCardPaymentEvidence {
+  // Older ledgers can contain one unsided compatibility copy beside the newer
+  // explicit debit/receipt evidence. Consume at most one compat copy per
+  // explicit movement; a Set-based filter used to erase every same-key row,
+  // including two deliberate same-day "Mark paid" taps.
+  const sidedCounts = new Map<string, { debit: number; receipt: number }>();
+  for (const row of rows) {
+    if (row.cardPaymentSide === undefined) continue;
+    const key = `${row.date}|${row.amountFils}`;
+    const counts = sidedCounts.get(key) ?? { debit: 0, receipt: 0 };
+    counts[row.cardPaymentSide] += 1;
+    sidedCounts.set(key, counts);
+  }
+  const compatCopiesToConsume = new Map(
+    [...sidedCounts].map(([key, counts]) => [key, Math.max(counts.debit, counts.receipt)]),
+  );
+  const retained = rows.filter((row) => {
+    if (row.cardPaymentSide !== undefined || settlementLeg(row) === 'manual') return true;
+    const key = `${row.date}|${row.amountFils}`;
+    const remaining = compatCopiesToConsume.get(key) ?? 0;
+    if (remaining <= 0) return true;
+    compatCopiesToConsume.set(key, remaining - 1);
+    return false;
+  });
+  return collapseSettlementLegsWithEvidence(retained);
 }
 
 /** Which half of a settlement a row is: the parser's answer, or its origin. */
@@ -320,8 +462,11 @@ function settlementLeg(t: Transaction): SettlementLeg {
 interface OpenSettlement {
   row: Transaction;
   leg: SettlementLeg;
+  keptIndex: number;
   /** Legs already folded in. One movement has one of each, never two. */
   absorbed: Set<SettlementLeg>;
+  /** Bank-observed legs retained even when a manual claim stays canonical. */
+  observed: Partial<Record<'debit' | 'receipt', Transaction>>;
 }
 
 /**
@@ -393,7 +538,195 @@ const OBSERVED_COLLAPSE_DAYS = 1;
 /** A manual claim and the bank's confirmation of it. */
 const ASSERTED_COLLAPSE_DAYS = 7;
 
-function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
+interface ObservedSettlementCluster {
+  debit?: Transaction;
+  receipt?: Transaction;
+}
+
+interface MatchScore {
+  count: number;
+  distance: number;
+  pairs: [number, number][];
+}
+
+function isoDayDistance(a: string, b: string): number {
+  return Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
+}
+
+/**
+ * Pair two chronological observation streams without letting a locally-nearest
+ * choice strand a later valid pair. The score mirrors the manual matcher:
+ * preserve as many real movements as possible, then prefer the least date
+ * skew among those maximum-cardinality answers.
+ */
+function preferredObservedPairs(
+  debits: Transaction[],
+  receipts: Transaction[],
+): [number, number][] {
+  const memo = new Map<string, MatchScore>();
+  const solve = (debitIndex: number, receiptIndex: number): MatchScore => {
+    if (debitIndex >= debits.length || receiptIndex >= receipts.length) {
+      return { count: 0, distance: 0, pairs: [] };
+    }
+    const key = `${debitIndex}:${receiptIndex}`;
+    const cached = memo.get(key);
+    if (cached) return cached;
+
+    const distance = isoDayDistance(debits[debitIndex].date, receipts[receiptIndex].date);
+    let best: MatchScore | null = null;
+    if (distance <= OBSERVED_COLLAPSE_DAYS) {
+      const tail = solve(debitIndex + 1, receiptIndex + 1);
+      best = {
+        count: tail.count + 1,
+        distance: tail.distance + distance,
+        pairs: [[debitIndex, receiptIndex], ...tail.pairs],
+      };
+    }
+    const consider = (candidate: MatchScore) => {
+      if (
+        best === null ||
+        candidate.count > best.count ||
+        (candidate.count === best.count && candidate.distance < best.distance)
+      ) best = candidate;
+    };
+    consider(solve(debitIndex + 1, receiptIndex));
+    consider(solve(debitIndex, receiptIndex + 1));
+    const resolved = best ?? { count: 0, distance: 0, pairs: [] };
+    memo.set(key, resolved);
+    return resolved;
+  };
+  return solve(0, 0).pairs;
+}
+
+function observedSettlementClusters(ordered: Transaction[]): ObservedSettlementCluster[] {
+  const debits = ordered.filter((row) => settlementLeg(row) === 'debit');
+  const receipts = ordered.filter((row) => settlementLeg(row) === 'receipt');
+  const clusters: ObservedSettlementCluster[] = [];
+  const usedDebits = new Set<number>();
+  const usedReceipts = new Set<number>();
+
+  for (const [debitIndex, receiptIndex] of preferredObservedPairs(debits, receipts)) {
+    usedDebits.add(debitIndex);
+    usedReceipts.add(receiptIndex);
+    clusters.push({ debit: debits[debitIndex], receipt: receipts[receiptIndex] });
+  }
+  debits.forEach((debit, index) => {
+    if (!usedDebits.has(index)) clusters.push({ debit });
+  });
+  receipts.forEach((receipt, index) => {
+    if (!usedReceipts.has(index)) clusters.push({ receipt });
+  });
+
+  return clusters.sort((a, b) => {
+    const aRow = a.debit ?? a.receipt!;
+    const bRow = b.debit ?? b.receipt!;
+    return (
+      aRow.date.localeCompare(bRow.date) ||
+      (aRow.ts ?? 0) - (bRow.ts ?? 0) ||
+      aRow.id.localeCompare(bRow.id)
+    );
+  });
+}
+
+function preferredObservedMatches(rows: Transaction[]): ReadonlyMap<string, string> {
+  const result = new Map<string, string>();
+  const byAmount = new Map<number, Transaction[]>();
+  for (const row of rows) {
+    const leg = settlementLeg(row);
+    if (leg !== 'debit' && leg !== 'receipt') continue;
+    const bucket = byAmount.get(row.amountFils) ?? [];
+    bucket.push(row);
+    byAmount.set(row.amountFils, bucket);
+  }
+  for (const amountRows of byAmount.values()) {
+    const ordered = amountRows.slice().sort(
+      (a, b) => a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
+    );
+    const debits = ordered.filter((row) => settlementLeg(row) === 'debit');
+    const receipts = ordered.filter((row) => settlementLeg(row) === 'receipt');
+    for (const [debitIndex, receiptIndex] of preferredObservedPairs(debits, receipts)) {
+      result.set(debits[debitIndex].id, receipts[receiptIndex].id);
+      result.set(receipts[receiptIndex].id, debits[debitIndex].id);
+    }
+  }
+  return result;
+}
+
+/**
+ * Match manual claims to observed bank movements globally for each amount.
+ *
+ * A nearest-row greedy choice can lose cardinality: claims on days 1/2 and
+ * receipts on days 8/9 must pair twice, while claims on days 1/7 and one
+ * receipt on day 8 should choose day 7. The dynamic program maximizes valid
+ * pairs first, then minimizes total date distance, preserving chronological
+ * order. Both observed legs of one movement receive the same preferred claim.
+ */
+function preferredManualMatches(rows: Transaction[]): ReadonlyMap<string, string> {
+  const result = new Map<string, string>();
+  const byAmount = new Map<number, Transaction[]>();
+  for (const row of rows) {
+    const leg = settlementLeg(row);
+    if (leg !== 'manual' && leg !== 'debit' && leg !== 'receipt') continue;
+    const bucket = byAmount.get(row.amountFils) ?? [];
+    bucket.push(row);
+    byAmount.set(row.amountFils, bucket);
+  }
+
+  for (const amountRows of byAmount.values()) {
+    const ordered = amountRows.slice().sort(
+      (a, b) => a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
+    );
+    const manuals = ordered.filter((row) => settlementLeg(row) === 'manual');
+    const clusters = observedSettlementClusters(ordered);
+
+    const memo = new Map<string, MatchScore>();
+    const solve = (manualIndex: number, clusterIndex: number): MatchScore => {
+      if (manualIndex >= manuals.length || clusterIndex >= clusters.length) {
+        return { count: 0, distance: 0, pairs: [] };
+      }
+      const key = `${manualIndex}:${clusterIndex}`;
+      const cached = memo.get(key);
+      if (cached) return cached;
+      const manual = manuals[manualIndex];
+      const cluster = clusters[clusterIndex];
+      const observed = [cluster.debit, cluster.receipt].filter(
+        (row): row is Transaction => row !== undefined,
+      );
+      const distance = Math.min(...observed.map((row) => isoDayDistance(manual.date, row.date)));
+      let best: MatchScore | null = null;
+      if (distance <= ASSERTED_COLLAPSE_DAYS) {
+        const tail = solve(manualIndex + 1, clusterIndex + 1);
+        best = {
+          count: tail.count + 1,
+          distance: tail.distance + distance,
+          pairs: [[manualIndex, clusterIndex], ...tail.pairs],
+        };
+      }
+      const consider = (candidate: MatchScore) => {
+        if (
+          best === null ||
+          candidate.count > best.count ||
+          (candidate.count === best.count && candidate.distance < best.distance)
+        ) best = candidate;
+      };
+      consider(solve(manualIndex + 1, clusterIndex));
+      consider(solve(manualIndex, clusterIndex + 1));
+      const resolved = best ?? { count: 0, distance: 0, pairs: [] };
+      memo.set(key, resolved);
+      return resolved;
+    };
+
+    for (const [manualIndex, clusterIndex] of solve(0, 0).pairs) {
+      const manualId = manuals[manualIndex].id;
+      const cluster = clusters[clusterIndex];
+      if (cluster.debit) result.set(cluster.debit.id, manualId);
+      if (cluster.receipt) result.set(cluster.receipt.id, manualId);
+    }
+  }
+  return result;
+}
+
+function collapseSettlementLegsWithEvidence(rows: Transaction[]): CanonicalCardPaymentEvidence {
   const ordered = rows
     .slice()
     .sort(
@@ -404,6 +737,9 @@ function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
   // turn this into a quadratic walk on the render path.
   const open = new Map<number, OpenSettlement[]>();
   const kept: Transaction[] = [];
+  const receiptByCanonicalId = new Map<string, Transaction>();
+  const preferredManualByObservedId = preferredManualMatches(ordered);
+  const preferredObservedById = preferredObservedMatches(ordered);
 
   for (const row of ordered) {
     const leg = settlementLeg(row);
@@ -415,9 +751,13 @@ function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
     }
     // Pruned at the WIDER window; `fits` applies the right one per pair, so an
     // SMS-vs-SMS pair six days apart is still two payments.
-    const bucket = (open.get(row.amountFils) ?? []).filter(
-      (s) => s.row.date >= shiftISO(row.date, -ASSERTED_COLLAPSE_DAYS),
-    );
+    const oppositeObserved = (s: OpenSettlement): Transaction | undefined =>
+      leg === 'debit' ? s.observed.receipt : leg === 'receipt' ? s.observed.debit : undefined;
+    const bucket = (open.get(row.amountFils) ?? []).filter((s) => {
+      if (s.row.date >= shiftISO(row.date, -ASSERTED_COLLAPSE_DAYS)) return true;
+      const opposite = oppositeObserved(s);
+      return opposite !== undefined && opposite.date >= shiftISO(row.date, -OBSERVED_COLLAPSE_DAYS);
+    });
     const fits = (s: OpenSettlement) => {
       if (s.leg === leg || s.leg === 'unsided' || s.absorbed.has(leg)) return false;
       // A manual claim explains bank alerts; two bank alerts explain each
@@ -426,26 +766,92 @@ function collapseSettlementLegs(rows: Transaction[]): Transaction[] {
       const span = s.leg === 'manual' || leg === 'manual'
         ? ASSERTED_COLLAPSE_DAYS
         : OBSERVED_COLLAPSE_DAYS;
-      return s.row.date >= shiftISO(row.date, -span);
+      if (s.row.date >= shiftISO(row.date, -span)) return true;
+      // A manual assertion can be a week before the bank confirms it. Once
+      // one observed side is attached, the opposite side may arrive the next
+      // day and must join that evidence rather than be measured again from the
+      // older manual date.
+      const opposite = oppositeObserved(s);
+      return opposite !== undefined && opposite.date >= shiftISO(row.date, -OBSERVED_COLLAPSE_DAYS);
     };
     const fitting = bucket.filter(fits);
+    const preferredManualId =
+      leg === 'debit' || leg === 'receipt'
+        ? preferredManualByObservedId.get(row.id)
+        : undefined;
+    const bankLegAgainstManual = preferredManualId
+      ? fitting.find(
+          (candidate) => candidate.leg === 'manual' && candidate.row.id === preferredManualId,
+        )
+      : undefined;
+    const observedAgainstManual =
+      leg === 'manual'
+        ? fitting.find((candidate) =>
+            Object.values(candidate.observed).some(
+              (observed) =>
+                observed !== undefined && preferredManualByObservedId.get(observed.id) === row.id,
+            ),
+          )
+        : undefined;
+    const preferredObservedId =
+      leg === 'debit' || leg === 'receipt' ? preferredObservedById.get(row.id) : undefined;
+    const containsObservedId = (candidate: OpenSettlement, id: string) =>
+      candidate.row.id === id || Object.values(candidate.observed).some((value) => value?.id === id);
+    const observedPreferredPartner = preferredObservedId
+      ? fitting.find((candidate) => containsObservedId(candidate, preferredObservedId))
+      : undefined;
+    const nonManualFitting = fitting.filter(
+      (candidate) =>
+        candidate.leg !== 'manual' &&
+        Object.values(candidate.observed).every(
+          (observed) => observed === undefined || preferredObservedById.get(observed.id) === undefined,
+        ),
+    );
     const partner =
-      fitting.find((s) => s.row.date === row.date) ??
+      bankLegAgainstManual ??
+      observedAgainstManual ??
+      observedPreferredPartner ??
+      (preferredObservedId === undefined
+        ? nonManualFitting.find((s) => s.row.date === row.date) ??
       // Nearest in time, not oldest. Rows are walked in date order, so the last
       // fitting entry is the closest one — and with a seven-day window a bucket
       // can hold more than the two candidates the ±1 day rule ever saw.
-      fitting.at(-1);
+          nonManualFitting.at(-1)
+        : undefined);
     if (partner) {
+      if (leg === 'receipt') receiptByCanonicalId.set(partner.row.id, row);
       partner.absorbed.add(leg);
+      if (leg === 'debit' || leg === 'receipt') partner.observed[leg] = row;
+      const explicitMovementDate = partner.row.cashOutDate ?? row.cashOutDate;
+      const debit = partner.leg === 'debit' ? partner.row : leg === 'debit' ? row : undefined;
+      const manual = partner.leg === 'manual' ? partner.row : leg === 'manual' ? row : undefined;
+      // A bank debit is the evidence for when cash actually left. It must
+      // replace the provisional date inherited from an earlier manual claim.
+      const cashOutDate = debit?.cashOutDate ?? debit?.date ?? explicitMovementDate ?? manual?.date;
+      const cashOutAccountId = debit?.cashOutAccountId ?? debit?.accountId;
+      if (
+        (cashOutDate && partner.row.cashOutDate !== cashOutDate) ||
+        (cashOutAccountId && partner.row.cashOutAccountId !== cashOutAccountId)
+      ) {
+        partner.row = { ...partner.row, cashOutDate, cashOutAccountId };
+        kept[partner.keptIndex] = partner.row;
+      }
       open.set(row.amountFils, bucket);
       continue;
     }
-    bucket.push({ row, leg, absorbed: new Set() });
+    bucket.push({
+      row,
+      leg,
+      keptIndex: kept.length,
+      absorbed: new Set(),
+      observed: leg === 'debit' || leg === 'receipt' ? { [leg]: row } : {},
+    });
     open.set(row.amountFils, bucket);
     kept.push(row);
+    if (leg === 'receipt') receiptByCanonicalId.set(row.id, row);
   }
 
-  return kept;
+  return { rows: kept, receiptByCanonicalId };
 }
 
 /** A card's statements: one per due date, however many rows describe each. */

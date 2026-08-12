@@ -96,6 +96,7 @@ export default function CategoriseScreen() {
           ending: count === 1 ? 'y' : 'ies',
           category: categoryLabel(category, state.language === 'ar' ? 'ar' : 'en'),
         }),
+        { tone: 'success' },
       );
     },
     [merchants, setMerchantOverride, state.language, toast],

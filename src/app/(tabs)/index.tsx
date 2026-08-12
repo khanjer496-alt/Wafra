@@ -16,7 +16,7 @@
  */
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, AppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -27,10 +27,9 @@ import { TransactionRow } from '@/components/transaction-row';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
-import { CountUpAmount } from '@/components/ui/count-up';
 import { Icon } from '@/components/ui/icon';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
-import { SkeletonRows } from '@/components/ui/states';
+import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
@@ -38,8 +37,7 @@ import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
-import { buildReferenceFxUpdates, formatOriginalCurrency } from '@/lib/fx';
-import type { ForeignActivitySummary } from '@/lib/fx-summary';
+import { buildReferenceFxUpdates } from '@/lib/fx';
 import { tapped } from '@/lib/haptics';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { periodLabel, type Period } from '@/lib/period';
@@ -144,9 +142,10 @@ function AutomaticCapture({
         }}
         style={({ pressed }) => [
           styles.capture,
+          active && styles.captureHealthy,
           {
-            backgroundColor: active ? theme.primarySoft : theme.backgroundElement,
-            borderColor: active ? theme.primaryBorder : theme.cardBorder,
+            backgroundColor: active ? 'transparent' : theme.backgroundElement,
+            borderColor: active ? 'transparent' : theme.cardBorder,
             transform: [{ scale: pressed ? 0.985 : 1 }],
           },
         ]}>
@@ -229,67 +228,12 @@ function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => 
   );
 }
 
-function ForeignActivityPreview({ summary }: { summary: ForeignActivitySummary }) {
-  const theme = useTheme();
-  const router = useRouter();
-  const language = useStore().state.language === 'ar' ? 'ar' : 'en';
-  if (summary.groups.length === 0) return null;
-  const top = summary.groups.slice(0, 2);
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${t('foreignActivity')}, ${formatAED(summary.totalLocalFils)}`}
-      onPress={() => {
-        tapped();
-        router.push('/currency');
-      }}
-      style={({ pressed }) => [
-        styles.currencyPreview,
-        {
-          backgroundColor: theme.backgroundElement,
-          borderColor: theme.cardBorder,
-          transform: [{ scale: pressed ? 0.985 : 1 }],
-        },
-      ]}>
-      <View style={styles.currencyPreviewTop}>
-        <View style={styles.currencyPreviewHeading}>
-          <Icon name="plane" size={17} color={theme.primary} />
-          <ThemedText type="micro" themeColor="textTertiary">
-            {t('foreignActivity')}
-          </ThemedText>
-        </View>
-        <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-      </View>
-      <ThemedText type="heading" tabular>
-        {formatAED(summary.totalLocalFils, { decimals: false })}
-      </ThemedText>
-      <View style={styles.currencyRows}>
-        {top.map((group) => (
-          <View key={group.currency} style={styles.currencyRow}>
-            <ThemedText type="smallBold" tabular style={{ color: theme.primary }}>
-              {group.currency}
-            </ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1} style={styles.currencyOriginal}>
-              {formatOriginalCurrency(group.originalMinor, group.currency, language)}
-            </ThemedText>
-            <ThemedText type="small" tabular>
-              {formatAED(group.localFils, { decimals: false })}
-            </ThemedText>
-          </View>
-        ))}
-      </View>
-    </Pressable>
-  );
-}
-
-
 /**
  * The comparison, as a sentence rather than a signed number.
  *
  * A bare "+4,890" needs the reader to work out the sign convention before it
  * means anything, and on a spending figure the intuitive reading of a plus is
- * backwards — more out is worse. The word does that work: "more out than Jul".
+ * backwards — more spent is worse. The words do that work: "more spent than Jul".
  *
  * Rounded to whole dirhams before the zero test, so a difference of eleven
  * fils reads as "the same" rather than as a change nobody can see. The colour
@@ -314,6 +258,7 @@ function Hero({
   netFils,
   incomeFils,
   expenseFils,
+  cashOutFils,
   comparison,
 }: {
   period: Period;
@@ -321,6 +266,7 @@ function Hero({
   netFils: number;
   incomeFils: number;
   expenseFils: number;
+  cashOutFils: number;
   comparison: PeriodComparison | null;
 }) {
   const theme = useTheme();
@@ -328,7 +274,7 @@ function Hero({
   const enter = useScreenEntering();
 
   const caption =
-    (netFils >= 0 ? t('saved') : t('overspent')) +
+    t('netAfterSpending') +
     ' ' +
     (live
       ? t('soFarThisMonth')
@@ -385,7 +331,10 @@ function Hero({
           <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
             {ledgerCurrencyDisplay()}
           </ThemedText>
-          <CountUpAmount fils={netFils} type="display" prefix="" durationMs={900} />
+          <ThemedText type="display" tabular>
+            {netFils < 0 ? '−' : ''}
+            {formatAmount(Math.abs(netFils), { decimals: false })}
+          </ThemedText>
         </View>
       )}
 
@@ -395,21 +344,21 @@ function Hero({
         {(
           [
             [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
-            [t('outLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
+            [t('spentLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
         ).map(([label, fils, color, href], i) => (
           <Pressable
             key={label}
-            accessibilityRole="button"
+            accessibilityRole={href ? 'button' : 'text'}
             accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
-            onPress={() => {
+            onPress={href ? () => {
               tapped();
               router.push(href);
-            }}
+            } : undefined}
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
-              i === 1 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
+              i > 0 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
             ]}>
             <View style={styles.splitTop}>
               <View style={[styles.dot, { backgroundColor: color }]} />
@@ -422,6 +371,20 @@ function Hero({
             </ThemedText>
           </Pressable>
         ))}
+      </View>
+      <View
+        accessible
+        accessibilityLabel={`${t('cashOutLabel')}, ${formatAED(cashOutFils, { decimals: false })}. ${t('cashOutHint')}`}
+        style={[styles.cashOutRow, { borderTopColor: theme.cardBorder }]}>
+        <View style={styles.cashOutCopy}>
+          <ThemedText type="small">{t('cashOutLabel')}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">
+            {t('cashOutHint')}
+          </ThemedText>
+        </View>
+        <ThemedText type="smallBold" tabular>
+          {formatAmount(cashOutFils, { decimals: false })}
+        </ThemedText>
       </View>
     </Animated.View>
   );
@@ -667,7 +630,7 @@ export default function HomeScreen() {
   const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const router = useRouter();
-  const { state, applyFxUpdates } = useStore();
+  const { state, applyFxUpdates, setCaptureOptOut } = useStore();
   const { period } = usePeriod();
   // `true`: Home is the screen that scans on mount and on foreground resume.
   // The other tabs take the same hook without that flag — they get the shared
@@ -681,11 +644,17 @@ export default function HomeScreen() {
   // the surface whose whole job is syncing.
   const captureStatus: CaptureSurfaceState = !isProActive(state)
     ? 'paused'
-    : needsPermission
+    : state.captureOptOut || needsPermission
       ? 'off'
       : captureState;
 
-  const now = useMemo(() => new Date(), []);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next === 'active') setNow(new Date());
+    });
+    return () => subscription.remove();
+  }, []);
   const reviewAlertCount = state.reviewTray.pending.filter(
     (item) => item.expiresAt > now.getTime(),
   ).length;
@@ -722,7 +691,24 @@ export default function HomeScreen() {
         now,
         dismissedInsightId: dismissedInsight,
       }),
-    [state, period, now, dismissedInsight],
+    // The projection intentionally depends on ledger slices, not the whole
+    // context object. Review-tray, entitlement, and theme updates
+    // must not repeat the 10k-row financial analysis.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      state.hydrated,
+      state.transactions,
+      state.accounts,
+      state.budgets,
+      state.bills,
+      state.cardDues,
+      state.notSubscriptions,
+      state.merchantOverrides,
+      state.language,
+      period,
+      now,
+      dismissedInsight,
+    ],
   );
   const insight = dashboard.insight;
 
@@ -773,29 +759,42 @@ export default function HomeScreen() {
             <View style={styles.topActions}>
               <IconButton
                 name="search"
-                label={t('seeAll')}
+                label={t('searchMerchants')}
                 onPress={() => router.push('/transactions')}
               />
               <IconButton name="sliders" label={t('settingsTitle')} onPress={() => router.push('/settings')} />
             </View>
           </View>
 
+          {!state.hydrated ? (
+            <View
+              style={styles.homeLoading}
+              accessibilityLabel={t('loadingLedger')}
+              accessibilityRole="progressbar">
+              <SkeletonRows count={1} height={76} />
+              <SkeletonRows count={2} height={48} />
+              <SkeletonRows count={3} height={52} />
+            </View>
+          ) : (
+          <>
           <Hero
             period={period}
             live={dashboard.live}
             comparison={dashboard.comparison}
-            // All three figures from one arithmetic, so the hero equals its
-            // own two cells. It read "63,039 in, 8,815 out, saved 54,223" —
+            // Income, spending, and saved come from one arithmetic, so the hero equals its
+            // own In and Spent cells. It read "63,039 in, 8,815 spent, saved 54,223" —
             // a subtraction that is off by one, in 40px type, at the top of
             // the screen. Each cell was rounded on its own while the net was
             // computed from the raw fils and rounded once more.
             //
-            // Out is the composition total, which Flow prints above the
+            // Spent is the composition total, which Flow prints above the
             // category split; in is rounded the same way; and the net is the
-            // difference between those two, not a third measurement.
+            // difference between those two, not a third measurement. Cash out
+            // is separate: actual account movement, never subtracted again.
             netFils={dashboard.hero.netFils}
             incomeFils={dashboard.hero.incomeFils}
             expenseFils={dashboard.hero.expenseFils}
+            cashOutFils={dashboard.hero.cashOutFils}
           />
 
           <AutomaticCapture
@@ -803,6 +802,18 @@ export default function HomeScreen() {
             lastCaptureDate={dashboard.lastAutomaticCaptureDate}
             onPress={() => {
               if (captureStatus === 'paused') router.push('/pro');
+              else if (state.captureOptOut) {
+                // This tap is the user's explicit reversal of the durable
+                // no-capture choice. Persist it before opening setup; a stale
+                // Android READ_SMS grant must never be enough on its own.
+                void setCaptureOptOut(false).then(() => {
+                  if (Platform.OS === 'ios') router.push('/ios-setup');
+                  // Android's foreground effect observes this preference
+                  // change and starts with a fresh callback/state snapshot.
+                  // Calling the old render's callback here would see the old
+                  // opt-out and make this first tap look broken.
+                }).catch(() => Alert.alert(t('capturePreferenceFailed')));
+              }
               // Only iOS states that still owe the user setup go to the
               // wizard: 'off' (no relay config), 'needs-test' (paired but
               // unverified), 'pipe-ready' (verified pipe, automation not yet
@@ -817,14 +828,17 @@ export default function HomeScreen() {
             }}
           />
 
-          <ReviewAlertsPrompt
-            count={reviewAlertCount}
-            onPress={() => router.push('/review-alerts')}
-          />
-
-          {/* One sentence, with somewhere to go. A carousel of five of these
-              was five things to skim and nothing to act on. */}
-          {insight && (
+          {/* One next action, not four competing notices. */}
+          {reviewAlertCount > 0 ? (
+            <ReviewAlertsPrompt
+              count={reviewAlertCount}
+              onPress={() => router.push('/review-alerts')}
+            />
+          ) : dashboard.uncategorised.shouldPrompt ? (
+            <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
+          ) : dashboard.unreadFormats.shouldPrompt ? (
+            <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
+          ) : insight ? (
             <Animated.View
               entering={enter(FadeInDown.delay(40).duration(320))}
               style={[
@@ -863,32 +877,12 @@ export default function HomeScreen() {
                 </Pressable>
               </View>
             </Animated.View>
-          )}
+          ) : null}
 
           <LeavingSoon
             items={dashboard.upcoming.items}
             withinDays={dashboard.upcoming.withinDays}
             onOpen={openOutgoing}
-          />
-
-          {/* Foreign-currency detail is useful but secondary on Home (and has
-              a full destination in Wallet). Keeping it below the month's one
-              insight and upcoming outgoings prevents four peer cards from
-              competing directly under the hero. */}
-          <ForeignActivityPreview summary={dashboard.foreignActivity} />
-
-          {/* Above the unread-format row on purpose. This one the user can
-              actually finish — one tap per merchant, and the entries move —
-              while that one asks them to send a list off and wait for a
-              release. The actionable ask goes first. */}
-          <CategorisePrompt
-            summary={dashboard.uncategorised.summary}
-            shouldPrompt={dashboard.uncategorised.shouldPrompt}
-          />
-
-          <UnreadFormatsPrompt
-            count={dashboard.unreadFormats.count}
-            shouldPrompt={dashboard.unreadFormats.shouldPrompt}
           />
 
           <Animated.View
@@ -909,31 +903,24 @@ export default function HomeScreen() {
                 }>
                 <TransactionRow
                   transaction={tx}
-                  account={state.accounts.find((a) => a.id === tx.accountId)}
+                  account={dashboard.accountById.get(tx.accountId)}
                   onPress={setEntry}
                   internal={dashboard.internalTransactionIds.has(tx.id)}
                 />
               </View>
             ))}
-            {/* Reading the ledger back off disk takes long enough to paint,
-                and an unhydrated store is indistinguishable from an empty one.
-                The screen was announcing t('noEntriesPeriod') over
-                AED 0 and then replacing it with a real month — telling the user
-                their data was gone, every cold start. Skeletons until the store
-                says it has looked. */}
-            {!state.hydrated && dashboard.activityRows.length === 0 && <SkeletonRows count={4} height={44} />}
-            {state.hydrated && dashboard.activityRows.length === 0 && (
-              <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
-                <ThemedText type="display" themeColor="textTertiary" tabular style={styles.emptyFigure}>
-                  {ledgerCurrencyDisplay()} 0
-                </ThemedText>
-                <ThemedText type="small">{t('noEntriesPeriod')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary" style={styles.emptyBody}>
-                  {t('emptyPeriodBody')}
-                </ThemedText>
-              </View>
+            {dashboard.activityRows.length === 0 && (
+              <EmptyMonth
+                monthName={periodLabel(period)}
+                onReadInbox={() => void runAutoImport(true)}
+                primaryLabel={t('checkBankAlerts')}
+                body={t('emptyMonthCaptureHelp')}
+                onAddManually={() => router.push('/add-transaction')}
+              />
             )}
           </Animated.View>
+          </>
+          )}
         </ScrollView>
       </SafeAreaView>
       <PeriodSheet visible={periodSheetOpen} onClose={() => setPeriodSheetOpen(false)} />
@@ -956,6 +943,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.three,
   },
   topActions: { flexDirection: 'row', gap: Spacing.two },
+  homeLoading: { gap: Spacing.four, paddingTop: Spacing.two },
 
   capture: {
     flexDirection: 'row',
@@ -966,6 +954,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: 11,
     marginTop: Spacing.four,
+  },
+  captureHealthy: {
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: Spacing.two,
+    marginTop: Spacing.three,
   },
   captureIcon: {
     width: 32,
@@ -1015,6 +1009,15 @@ const styles = StyleSheet.create({
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   splitFigure: { fontSize: 17, lineHeight: 22 },
   dot: { width: 5, height: 5, borderRadius: 3 },
+  cashOutRow: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.three,
+  },
+  cashOutCopy: { flex: 1, gap: Spacing.half },
 
   currencyPreview: {
     marginTop: Spacing.four,

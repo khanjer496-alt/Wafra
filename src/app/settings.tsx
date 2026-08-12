@@ -115,6 +115,7 @@ export default function SettingsScreen() {
     setAppLock,
     setDailySummary,
     setPrivateMode,
+    setCaptureOptOut,
     setMarket,
     setUiLanguage,
     exportBackup,
@@ -260,6 +261,15 @@ export default function SettingsScreen() {
 
   const toggleSms = async (enabled: boolean) => {
     if (!enabled) {
+      try {
+        // This is the immediate in-app off switch. Android cannot revoke its
+        // own runtime permission, so the durable preference is the barrier;
+        // system settings are offered as the optional second layer.
+        await setCaptureOptOut(true);
+      } catch {
+        Alert.alert(t('capturePreferenceFailed'));
+        return;
+      }
       // Android grants permissions but never takes them back on request; the
       // only honest "off" is the one in the system settings. So say where it
       // is AND open it — the alert used to type out "Settings → Apps → Wafra →
@@ -277,6 +287,22 @@ export default function SettingsScreen() {
     }
     const granted = await requestSmsPermission();
     setSmsGranted(granted);
+    if (granted) {
+      try {
+        await setCaptureOptOut(false);
+      } catch {
+        Alert.alert(t('capturePreferenceFailed'));
+      }
+    }
+  };
+
+  const openIosCaptureSetup = async () => {
+    try {
+      await setCaptureOptOut(false);
+      router.push('/ios-setup');
+    } catch {
+      Alert.alert(t('capturePreferenceFailed'));
+    }
   };
 
   const toggleInstantAlerts = async (enabled: boolean) => {
@@ -942,8 +968,8 @@ export default function SettingsScreen() {
             {isSmsScanningAvailable() &&
               switchRow(
                 t('readBankSms'),
-                t(smsGranted ? 'smsGrantedLocal' : 'smsOffNoImport'),
-                smsGranted,
+                t(smsGranted && !state.captureOptOut ? 'smsGrantedLocal' : 'smsOffNoImport'),
+                smsGranted && !state.captureOptOut,
                 toggleSms,
               )}
             {/* iPhone capture is a privacy setting as much as a feature: the
@@ -955,14 +981,16 @@ export default function SettingsScreen() {
             {isRelayPlatform() &&
               linkRow(
                 t('automaticCapture'),
-                relay === undefined
+                state.captureOptOut
+                  ? t('captureIosOff')
+                  : relay === undefined
                   ? t('captureChecking')
                   : relay === null
                     ? t('captureIosOff')
                     : relay.setupState === 'verified'
                       ? t('captureIosOn')
                       : t('captureIosNeedsTest'),
-                () => router.push('/ios-setup'),
+                () => void openIosCaptureSetup(),
               )}
             {/* Gated like every other capture row above it. Rendering this
                 unconditionally made it the one dead end in the section on

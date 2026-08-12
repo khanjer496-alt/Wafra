@@ -250,10 +250,10 @@ export default function FlowScreen() {
                 {formatAED(comp.totalFils, { decimals: false })}
               </ThemedText>
             </View>
-            {/* Only while the limits and "Total out" describe the same span.
+            {/* Only while the limits and "Total spent" describe the same span.
                 Limits are monthly; the period pill is not, and this cell was
                 printed unqualified beside a period-scoped total whatever the
-                pill said. On "This year" the rail read `Total out AED 210,000`
+                pill said. On "This year" the rail read `Total spent AED 210,000`
                 next to `With limits 1,177 / 1,800` — August's spending under a
                 2026 heading, two figures a reader is invited to compare and
                 cannot. Out of the rail in those views; the section below still
@@ -464,7 +464,7 @@ export default function FlowScreen() {
                     <View style={[styles.limitTrack, { backgroundColor: theme.track }]}>
                       <View
                         style={{
-                          width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
+                          width: `${ratio <= 0 ? 0 : Math.max(2, Math.min(100, ratio * 100))}%`,
                           height: '100%',
                           backgroundColor: barColor,
                           borderRadius: 3,
@@ -492,7 +492,7 @@ export default function FlowScreen() {
             )}
           </Animated.View>
 
-          {/* ── In vs out ── */}
+          {/* ── Income vs spending ── */}
           {/* Uncarded for the same reason as the composition above: nothing
               here is tappable or dismissible, so the border was decoration.
               No "ALL STATS" link on this header either — it used to land on a
@@ -551,7 +551,7 @@ export default function FlowScreen() {
                         style={[
                           styles.trendBar,
                           {
-                            height: `${empty ? 0 : Math.max(2, (m.income / trendMax) * 100)}%`,
+                            height: `${m.income <= 0 ? 0 : Math.max(2, (m.income / trendMax) * 100)}%`,
                             backgroundColor: theme.primary,
                           },
                         ]}
@@ -560,7 +560,7 @@ export default function FlowScreen() {
                         style={[
                           styles.trendBar,
                           {
-                            height: `${empty ? 0 : Math.max(2, (m.expense / trendMax) * 100)}%`,
+                            height: `${m.expense <= 0 ? 0 : Math.max(2, (m.expense / trendMax) * 100)}%`,
                             backgroundColor: current
                               ? theme.expense
                               : dark
@@ -628,7 +628,7 @@ const styles = StyleSheet.create({
   /**
     * Three equal thirds cut the only figure the rail exists for.
     *
-    * "Total out" carries a currency prefix and up to six digits — AED
+    * "Total spent" carries a currency prefix and up to six digits — AED
     * 17,148 — and a third of a phone's width does not hold it, so the number
     * the section is named after rendered as "AED 17,1…". The pair beside it
     * loses the same way: "1,177 / 1,800" became "1,177 / …".

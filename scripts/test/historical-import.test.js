@@ -106,14 +106,17 @@ function applyLikeStore(state, plan) {
   ], {}, NOW);
   ok('duplicate IDs are counted and parsed once',
     result.duplicateCount === 1 && result.parsed.length === 2, result);
-  ok('declines retain only their clock and sender',
-    result.declined.length === 1 &&
+  ok('non-posting alerts retain only safe routing metadata',
+    result.declined.length === 2 &&
       result.declined[0].smsTs === Date.parse(RECEIVED) &&
       result.declined[0].sourceEventId === id('b') &&
-      !Object.prototype.hasOwnProperty.call(result.declined[0], 'raw'),
+      result.declined[0].reason === 'declined' &&
+      result.declined[1].sourceEventId === id('c') &&
+      result.declined[1].reason === 'security-challenge' &&
+      result.declined.every((row) => !Object.prototype.hasOwnProperty.call(row, 'raw')),
     result.declined);
-  ok('non-financial messages are ignored without becoming invalid',
-    result.ignoredCount === 1, result);
+  ok('recognized non-posting alerts are not reported as unread formats',
+    result.ignoredCount === 0, result);
   ok('malformed, impossible-date and oversized rows are rejected',
     result.invalidCount === 4, result);
   ok('unsafe optional sender metadata is dropped without losing the bank alert',

@@ -154,9 +154,16 @@ const { scanInbox } = require('./build/auto-import.js');
       !JSON.stringify(first.reviewCandidates).includes('PRIVATE-CAFE') &&
       !JSON.stringify(first.reviewCandidates).includes('BNPPARIBAS'),
     JSON.stringify(first.reviewCandidates));
-  ok('declines stay exclusively in the healing channel',
-    first.declined.length === 1 && first.declined[0].smsTs === NOW + 3_000 &&
-      first.reviewCandidates.every((item) => item.observedAt !== NOW + 3_000),
+  ok('non-posting alerts stay exclusively in the metadata-only healing channel',
+    first.declined.length === 2 &&
+      first.declined[0].smsTs === NOW + 3_000 &&
+      first.declined[0].reason === 'declined' &&
+      first.declined[1].smsTs === NOW + 4_000 &&
+      first.declined[1].reason === 'security-challenge' &&
+      first.declined.every((item) => !Object.prototype.hasOwnProperty.call(item, 'raw')) &&
+      first.reviewCandidates.every(
+        (item) => item.observedAt !== NOW + 3_000 && item.observedAt !== NOW + 4_000,
+      ),
     JSON.stringify({ declined: first.declined, reviews: first.reviewCandidates }));
   ok('OTP and duplicate delivery copies never enter review',
     first.reviewCandidates.length === 3 && first.scannedCount === 7,

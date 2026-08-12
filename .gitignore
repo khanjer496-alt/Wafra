@@ -46,6 +46,11 @@ app-example
 /android
 scripts/test/build/
 
+# Local build products and simulator/test captures
+/artifacts/
+/builds/
+/modules/*/android/build/
+
 # The Worker has its own toolchain (Workers runtime types, not React Native).
 server/node_modules/
 server/.wrangler/

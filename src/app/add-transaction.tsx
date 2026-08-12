@@ -61,13 +61,11 @@ export default function AddTransactionScreen() {
     : null;
 
   const reviewType: TransactionType = reviewItem?.direction === 'credit' ? 'income' : 'expense';
-  const reviewCategory: CategoryId = reviewType === 'income'
-    ? 'business'
-    : reviewItem?.family === 'utility'
+  const reviewCategory: CategoryId | null = reviewItem?.family === 'utility'
       ? 'utilities'
       : reviewItem?.family === 'cash-withdrawal'
         ? 'cash-withdrawal'
-        : 'other';
+        : null;
   const reviewTitle = reviewItem ? defaultReviewTitle(reviewItem) : '';
   const matchedAccount = reviewItem?.instrument?.last4
     ? state.accounts.find((account) => account.last4 === reviewItem.instrument?.last4)
@@ -75,8 +73,12 @@ export default function AddTransactionScreen() {
 
   const [type, setType] = useState<TransactionType>(reviewType);
   const [amountText, setAmountText] = useState('');
-  const [category, setCategory] = useState<CategoryId>(reviewCategory);
-  const [accountId, setAccountId] = useState(matchedAccount?.id ?? state.accounts[0]?.id ?? '');
+  const [category, setCategory] = useState<CategoryId | null>(
+    reviewItem ? reviewCategory : 'groceries',
+  );
+  const [accountId, setAccountId] = useState(
+    reviewItem ? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',
+  );
   const [title, setTitle] = useState(reviewTitle);
   const [dayOffset, setDayOffset] = useState(0);
   const [reviewDate, setReviewDate] = useState(
@@ -88,7 +90,7 @@ export default function AddTransactionScreen() {
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
   const amountFils = parseAmountToFils(amountText);
   const reviewRouteInvalid = !!reviewId && !reviewItem;
-  const canSave = !saving && !!accountId && !reviewRouteInvalid &&
+  const canSave = !saving && !!accountId && !!category && !reviewRouteInvalid &&
     (reviewItem ? /^\d{4}-\d{2}-\d{2}$/.test(reviewDate) : !!amountFils);
 
   const date = useMemo(() => {
@@ -104,7 +106,7 @@ export default function AddTransactionScreen() {
   };
 
   const save = async () => {
-    if (!canSave || !accountId) return;
+    if (!canSave || !accountId || !category) return;
     committed();
     if (reviewItem) {
       setSaving(true);
@@ -118,10 +120,10 @@ export default function AddTransactionScreen() {
           date: reviewDate,
           betweenOwnAccounts,
         });
-        toast.show(tUi('reviewAlertAdded'));
+        toast.show(tUi('reviewAlertAdded'), { tone: 'success' });
         router.back();
       } catch {
-        toast.show(tUi('reviewAlertAddFailed'));
+        toast.show(tUi('reviewAlertAddFailed'), { tone: 'error' });
       } finally {
         setSaving(false);
       }
@@ -243,6 +245,11 @@ export default function AddTransactionScreen() {
                 onToggle={setCategory}
                 layout="wrap"
               />
+              {reviewItem && !category && (
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {tUi('reviewAlertChooseCategory')}
+                </ThemedText>
+              )}
             </View>
 
             {/* Account */}
@@ -279,6 +286,21 @@ export default function AddTransactionScreen() {
                   );
                 })}
               </ScrollView>
+              {reviewItem && !accountId && state.accounts.length > 0 && (
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {tUi('reviewAlertChooseAccount')}
+                </ThemedText>
+              )}
+              {state.accounts.length === 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => router.push('/wallet')}
+                  style={styles.emptyAccountAction}>
+                  <ThemedText type="small" style={{ color: theme.primary }}>
+                    {tUi('reviewAlertCreateAccount')}
+                  </ThemedText>
+                </Pressable>
+              )}
             </View>
 
             {/* Date quick-pick */}
@@ -365,8 +387,8 @@ export default function AddTransactionScreen() {
             ]}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={tUi('saveTransaction')}
-              accessibilityState={{ disabled: !canSave }}
+              accessibilityLabel={tUi(saving ? 'savingSecurely' : 'saveTransaction')}
+              accessibilityState={{ disabled: !canSave, busy: saving }}
               onPress={() => void save()}
               disabled={!canSave}
               style={[
@@ -375,7 +397,7 @@ export default function AddTransactionScreen() {
               ]}>
               <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
               <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                {tUi(reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
+                {tUi(saving ? 'savingSecurely' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
               </ThemedText>
             </Pressable>
           </View>
@@ -494,6 +516,11 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  emptyAccountAction: {
+    minHeight: 44,
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
   },
   dateRow: {
     flexDirection: 'row',

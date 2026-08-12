@@ -181,8 +181,14 @@ export interface ParsedCard {
  * punctuation, returned direct-debit requests and Google's temporary card
  * verification holds could all be mistaken for settled expenses. A full
  * re-read also repairs generic FAB credits that were hidden as self-transfers.
+ *
+ * 19: adversarial full-inbox safety. Explicit pending transactions are
+ * suppressed, contact-number tails are removed from merchant identity, and
+ * an outgoing payee can no longer create an income-only category. Import
+ * planning also recognizes one retained local SMS across amount/FX parser
+ * corrections, so this reread cannot append that message beside its old row.
  */
-export const PARSER_VERSION = 18;
+export const PARSER_VERSION = 19;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -1184,7 +1190,7 @@ const RETURNED_UNPAID_RE =
  * not spending at the receiving bank).
  */
 const PENDING_PROCESSING_RE =
-  /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b/i;
+  /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b|\b(?:transaction|payment|transfer|purchase|withdrawal)\b(?:[^.\n]|\.\d){0,60}?\b(?:is|remains?)\s+(?:still\s+)?pending(?:\s+(?:processing|clearance|completion))?\b/i;
 
 /**
  * Currency-bound patterns compile from the ACTIVE MARKET's currency aliases
@@ -2071,6 +2077,15 @@ function cleanDescriptor(name: string): string {
     // one shop into one merchant per branch that answered.
     .replace(/[-\s]*\b(?:AE|ARE|UAE|BH|BHR|SA|KSA|US|USA|GB|IN)$/i, '')
     .replace(/[\s,]*\+[\d·•X\s-]{6,}$/i, '') // "MUZZ LTD +····1111"
+    // Some acquirers omit the plus sign and append a support/branch phone in
+    // the same descriptor field. A run of at least eight phone-like digits is
+    // not merchant identity; retaining it splits one shop by branch and shows
+    // contact data as a title. Four-digit years and terminal ids remain under
+    // the narrower rules above.
+    .replace(
+      /(?:^|[\s,]+)(?:[A-Z]{2}-)?\+?\d[\d\s()-]{6,}\d(?:\s+[A-Z]{2,16}){0,2}$/i,
+      '',
+    )
     .trim();
   // The gateway's own name, then its field separator, then the shop's:
   // "FAT*THE VIOLE" is The Viole — and the SAME purchase arrives again as the
@@ -2725,7 +2740,9 @@ function categoryOf(
   // Market-local vocabulary wins over the global baseline.
   const marketKeywords = marketId ? keywordsForMarket(marketId) : getActiveMarket().keywords;
   for (const [re, cat] of [...marketKeywords, ...CATEGORY_KEYWORDS]) {
-    if (re.test(text)) return { id: cat, deliberate: true };
+    if (re.test(text) && overrideFitsDirection(cat, type)) {
+      return { id: cat, deliberate: true };
+    }
   }
   // Last, and only against the shop's own name. A structural title is the
   // parser's own words for "no payee here" — it is not a descriptor, and
@@ -3252,7 +3269,9 @@ function extractMerchant(raw: string, re: RegExp): string {
     // reporting-period phrase hides behind the same "to" a merchant uses, and
     // a row titled "Date" both invents a shop and defeats the spend-summary
     // gate, which only fires when the message names no merchant.
-    if (/^(?:the|this|that|your|our|an?|and|for|to|date)$/i.test(candidate)) continue;
+    if (/^(?:the|this|that|your|our|an?|and|for|to|date|available|balance|limit)$/i.test(candidate)) {
+      continue;
+    }
     if (/^\d+\s+(?:month|day|week|year|hr|hour|min)/i.test(candidate)) continue; // "up to 12 months"
     if (/^acc[\s/]|^a\/?c\b|^cr\.?\s*card/i.test(candidate)) continue; // "from Acc/Cr.Card ..."
     // "your funds transfer request of AED 4,070.80 to IBAN/Account/Card
@@ -5005,10 +5024,21 @@ function parseSmsInner(
       /^(?:alp|eig|sq|tap|web|v|paypal|google|gpay|apl|amzn|pos|ziina|mamo|wl)\s*\*\s*/i,
       '',
     );
+    const cleanedMerchant = cleanDescriptor(
+      (unprefixed || deUrled || merchant).replace(/[\s,;.*-]+$/, ''),
+    );
     merchant =
       normalizeServiceName(descriptor || merchant) ??
       normalizeServiceName(merchant) ??
-      titleCase((unprefixed || deUrled || merchant).replace(/[\s,;.*-]+$/, ''));
+      (cleanedMerchant
+        ? titleCase(cleanedMerchant)
+        : type === 'income'
+          ? 'Incoming transfer'
+          : transferHint
+            ? 'Card payment'
+            : !card || card.kind === 'account'
+              ? 'Account debit'
+              : 'Card purchase');
   }
   // ATM messages usually name a location; the row is still a cash withdrawal.
   //

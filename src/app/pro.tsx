@@ -18,13 +18,12 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { Row, ScreenHeader, Section } from '@/components/ui/layout';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { t, tf } from '@/lib/i18n';
+import { alignEnd, t, tf } from '@/lib/i18n';
 import {
   autoCaptureMethod,
+  PRO_PRICES,
   PRO_REFERENCE_PRICE_STRINGS,
-  TRIAL_DAYS,
   trialDaysLeft,
-  yearlySavingMonths,
   type ProPlan,
 } from '@/lib/purchases';
 import {
@@ -45,6 +44,7 @@ type FeatureRow = {
 
 type PriceStatus = 'unavailable' | 'loading' | 'ready' | 'failed';
 type BillingAction = 'buy' | 'restore' | 'manage' | null;
+type Completion = 'purchase' | 'restore' | null;
 
 function configuredUrl(key: 'privacyPolicyUrl' | 'termsOfUseUrl'): string | null {
   const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
@@ -72,8 +72,6 @@ function features(): FeatureRow[] {
       textKey:
         autoCaptureMethod() === 'relayCapture' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
     },
-    { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
-    { icon: 'calendar', titleKey: 'featSalaryMonths', textKey: 'featSalaryMonthsText' },
     { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
   ];
 }
@@ -101,6 +99,7 @@ export default function ProScreen() {
   const [priceRequest, setPriceRequest] = useState(0);
   const [billingAction, setBillingAction] = useState<BillingAction>(null);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  const [completion, setCompletion] = useState<Completion>(null);
   const trial = trialDaysLeft(state);
   const rows = features();
   const privacyPolicyUrl = configuredUrl('privacyPolicyUrl');
@@ -128,17 +127,26 @@ export default function ProScreen() {
     };
   }, [billingAvailable, priceRequest]);
 
-  const savingMonths = useMemo(() => {
-    if (!storePrices) return Platform.OS === 'web' ? yearlySavingMonths() : null;
-    const monthly = storePrices.monthly;
-    const yearly = storePrices.yearly;
-    if (!monthly || !yearly || monthly.currencyCode !== yearly.currencyCode) return null;
-    const months = yearlySavingMonths({
-      monthly: { fils: Math.round(monthly.price * 100) },
-      yearly: { fils: Math.round(yearly.price * 100) },
-    });
-    return months > 0 ? months : null;
+  const savingPercent = useMemo(() => {
+    const monthly = storePrices?.monthly;
+    const yearly = storePrices?.yearly;
+    if (monthly && yearly && monthly.currencyCode === yearly.currencyCode) {
+      const fullYear = monthly.price * 12;
+      if (fullYear <= 0 || yearly.price >= fullYear) return null;
+      return Math.floor((1 - yearly.price / fullYear) * 100);
+    }
+    if (Platform.OS !== 'web') return null;
+    const fullYear = PRO_PRICES.monthly.fils * 12;
+    return Math.floor((1 - PRO_PRICES.yearly.fils / fullYear) * 100);
   }, [storePrices]);
+
+  const displayPrice = (candidate: ProPlan): string =>
+    storePrices?.[candidate]?.priceString ??
+    (Platform.OS === 'web'
+      ? PRO_REFERENCE_PRICE_STRINGS[candidate]
+      : t(priceStatus === 'loading' ? 'priceLoading' : 'priceUnavailable'));
+
+  const selectedStorePrice = storePrices?.[plan]?.priceString ?? null;
 
   /**
    * What the last tap on Get Pro or Restore had to say.
@@ -148,9 +156,10 @@ export default function ProScreen() {
    * the one build the end-to-end suite drives, the two buttons on the screen
    * that sells the product did nothing, said nothing and logged nothing.
    *
-   * It is drawn under the buttons rather than over them: none of these five
-   * outcomes asks the user to decide anything, so none of them has earned a
-   * modal. What they have to do is be visible, which an alert was not.
+   * It is drawn in the persistent purchase region rather than over the screen:
+   * none of these outcomes asks the user to decide anything, so none of them
+   * has earned a modal. What it has to do is stay visible, which an alert did
+   * not reliably do in the web preview or after a store sheet closes.
    */
   const buy = async () => {
     if (billingAction) return;
@@ -170,7 +179,10 @@ export default function ProScreen() {
     setBillingAction('buy');
     try {
       const outcome = await purchasePro(plan);
-      if (outcome === 'granted') setPro(true);
+      if (outcome === 'granted') {
+        setPro(true);
+        setCompletion('purchase');
+      }
       // 'cancelled' is the user closing the sheet, and gets no dialogue —
       // telling someone their own decision failed is noise. 'failed' is the
       // store: an unactivated SKU, an SDK that would not configure, a throw.
@@ -193,7 +205,10 @@ export default function ProScreen() {
     setBillingAction('restore');
     try {
       const restored = await restorePro();
-      if (restored) setPro(true);
+      if (restored) {
+        setPro(true);
+        setCompletion('restore');
+      }
       // null is "could not ask the store", NOT "never paid". A subscriber
       // reinstalling on a bad connection must not be told their purchase does
       // not exist — they should be told to try again.
@@ -238,33 +253,53 @@ export default function ProScreen() {
           <ScreenHeader title={t('wafraPro')} onBack={() => router.back()} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}>
           <Section index={0} style={styles.hero}>
-            <Icon name="diamond" size={30} color={theme.warning} />
-            <ThemedText type="title">{t('wafraPro')}</ThemedText>
+            <View style={[styles.heroMark, { backgroundColor: theme.primarySoft }]}>
+              <Icon name="spark" size={24} color={theme.primary} />
+            </View>
+            <ThemedText type="meta" style={{ color: theme.primary }}>
+              {t('wafraPro')}
+            </ThemedText>
+            <ThemedText type="title">{t('proOutcomeTitle')}</ThemedText>
             <ThemedText type="default" themeColor="textSecondary">
               {state.pro
                 ? t('proActiveThanks')
                 : trial > 0
-                  ? tf('trialDaysLeftPaywall', {
-                      total: TRIAL_DAYS,
+                  ? tf('proTrialActiveBody', {
                       left: trial,
                       s: trial === 1 ? '' : 's',
                     })
-                  : t('trialEndedPaywall')}
+                  : t('proTrialEndedBody')}
             </ThemedText>
             {!state.pro && trial > 0 && (
-              <ThemedText type="nano" style={{ color: theme.primary }}>
-                {t('freeTrialActive')}
-              </ThemedText>
+              <View
+                style={[
+                  styles.statusPill,
+                  { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder },
+                ]}>
+                <View style={[styles.statusDot, { backgroundColor: theme.primary }]} />
+                <ThemedText type="nano" style={{ color: theme.primary }}>
+                  {tf('settingsTrialDays', {
+                    count: trial,
+                    s: trial === 1 ? '' : 's',
+                  })}
+                </ThemedText>
+              </View>
             )}
           </Section>
 
           <Section index={1}>
+            <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
+              {t('proBenefitsTitle')}
+            </ThemedText>
             {rows.map((f, i) => (
               <Row key={f.titleKey} last={i === rows.length - 1}>
-                <View style={styles.featureIcon}>
-                  <Icon name={f.icon} size={19} color={theme.textSecondary} />
+                <View style={[styles.featureIcon, { backgroundColor: theme.backgroundSelected }]}>
+                  <Icon name={f.icon} size={18} color={theme.textSecondary} />
                 </View>
                 <View style={styles.featureText}>
                   <ThemedText type="small">{t(f.titleKey)}</ThemedText>
@@ -307,97 +342,89 @@ export default function ProScreen() {
           </Section>
 
           {!state.pro && (
-            <Section index={3} style={styles.buy}>
+            <Section index={3} style={styles.planSection}>
+              <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
+                {t('proChoosePlan')}
+              </ThemedText>
               <View style={styles.plans} accessibilityRole="radiogroup">
                 {(['yearly', 'monthly'] as ProPlan[]).map((p) => {
                   const selected = plan === p;
+                  const unavailable =
+                    billingAvailable && priceStatus === 'ready' && !storePrices?.[p];
                   return (
                     <Pressable
                       key={p}
                       accessibilityRole="radio"
                       accessibilityState={{
                         checked: selected,
-                        disabled: billingAvailable && priceStatus === 'ready' && !storePrices?.[p],
+                        disabled: unavailable,
                       }}
-                      disabled={billingAvailable && priceStatus === 'ready' && !storePrices?.[p]}
-                      onPress={() => setPlan(p)}
-                      style={[
-                        styles.plan,
+                      disabled={unavailable}
+                      onPress={() => {
+                        setNotice(null);
+                        setPlan(p);
+                      }}
+                      style={({ pressed }) => [
+                        styles.planRow,
                         {
                           backgroundColor: selected ? theme.primarySoft : 'transparent',
                           borderColor: selected ? theme.primaryBorder : theme.cardBorder,
+                          opacity: unavailable ? 0.45 : pressed ? 0.78 : 1,
                         },
                       ]}>
-                      <ThemedText type="micro" themeColor="textTertiary">
-                        {p === 'yearly' ? t('yearly') : t('monthly')}
-                      </ThemedText>
-                      <ThemedText type="subtitle" tabular>
-                        {storePrices?.[p]?.priceString ??
-                          (Platform.OS === 'web'
-                            ? PRO_REFERENCE_PRICE_STRINGS[p]
-                            : t(priceStatus === 'loading' ? 'priceLoading' : 'priceUnavailable'))}
-                      </ThemedText>
-                      <ThemedText type="meta" themeColor="textTertiary">
-                        {p === 'yearly'
-                          ? savingMonths
-                            ? `${t('perYear')} ${tf('monthsFreeSuffix', { months: savingMonths })}`
-                            : t('perYear')
-                          : t('perMonth')}
+                      <View
+                        style={[
+                          styles.radio,
+                          { borderColor: selected ? theme.primary : theme.cardBorderStrong },
+                        ]}>
+                        {selected && (
+                          <View style={[styles.radioDot, { backgroundColor: theme.primary }]} />
+                        )}
+                      </View>
+                      <View style={styles.planCopy}>
+                        <View style={styles.planHeading}>
+                          <ThemedText type="smallBold">
+                            {p === 'yearly' ? t('yearly') : t('monthly')}
+                          </ThemedText>
+                          {p === 'yearly' && savingPercent !== null && savingPercent > 0 && (
+                            <View
+                              style={[
+                                styles.savingBadge,
+                                { backgroundColor: theme.primary, borderColor: theme.primary },
+                              ]}>
+                              <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                                {tf('proSavePercent', { percent: savingPercent })}
+                              </ThemedText>
+                            </View>
+                          )}
+                        </View>
+                        <ThemedText type="meta" themeColor="textTertiary">
+                          {p === 'yearly' ? t('perYear') : t('perMonth')}
+                        </ThemedText>
+                      </View>
+                      <ThemedText
+                        type="subtitle"
+                        tabular
+                        style={[styles.planPrice, { textAlign: alignEnd() }]}>
+                        {displayPrice(p)}
                       </ThemedText>
                     </Pressable>
                   );
                 })}
               </View>
-              <Button
-                label={
-                  billingAction === 'buy'
-                    ? t('purchaseInProgress')
-                    : storePrices?.[plan]
-                      ? tf('startPlanWithPrice', {
-                          plan: plan === 'yearly' ? t('yearly') : t('monthly'),
-                          price: storePrices[plan]?.priceString ?? '',
-                        })
-                      : t('getPro')
-                }
-                onPress={buy}
-                disabled={billingAction !== null || (billingAvailable && !storePrices?.[plan])}
-              />
               {billingAvailable && priceStatus === 'failed' && (
                 <Button
                   variant="ghost"
                   label={t('retryPrices')}
-                  onPress={() => setPriceRequest((request) => request + 1)}
+                  onPress={() => {
+                    setNotice(null);
+                    setPriceRequest((request) => request + 1);
+                  }}
                 />
               )}
-              <Button
-                variant="ghost"
-                label={t('restorePurchase')}
-                disabled={billingAction !== null}
-                onPress={restore}
-              />
-              {Platform.OS !== 'web' && (
-                <Button
-                  variant="ghost"
-                  label={t('manageSubscription')}
-                  disabled={billingAction !== null}
-                  onPress={manage}
-                />
-              )}
-              <ThemedText type="nano" themeColor="textTertiary">
-                {t(Platform.OS === 'ios' ? 'subscriptionRenewalTermsIos' : 'subscriptionRenewalTermsAndroid')}
-              </ThemedText>
             </Section>
           )}
-          {state.pro && Platform.OS !== 'web' && (
-            <Section index={3} style={styles.buy}>
-              <Button
-                variant="ghost"
-                label={t('manageSubscription')}
-                disabled={billingAction !== null}
-                onPress={manage}
-              />
-            </Section>
-          )}
+
           {(privacyPolicyUrl || termsOfUseUrl) && (
             <View style={styles.legalLinks}>
               {privacyPolicyUrl && (
@@ -422,21 +449,130 @@ export default function ProScreen() {
               )}
             </View>
           )}
+        </ScrollView>
+
+        <View
+          style={[
+            styles.purchaseBar,
+            { borderColor: theme.cardBorder, backgroundColor: theme.background },
+          ]}>
           {notice && (
             <View
               accessibilityRole="alert"
               accessibilityLiveRegion="polite"
               style={[
                 styles.notice,
-                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+                { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg },
               ]}>
-              <ThemedText type="small">{notice.title}</ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {notice.body}
-              </ThemedText>
+              <Icon name="alert" size={18} color={theme.expense} />
+              <View style={styles.noticeCopy}>
+                <ThemedText type="smallBold">{notice.title}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {notice.body}
+                </ThemedText>
+              </View>
             </View>
           )}
-        </ScrollView>
+
+          {completion && (
+            <View
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={[
+                styles.success,
+                { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft },
+              ]}>
+              <View style={[styles.successIcon, { backgroundColor: theme.primary }]}>
+                <Icon name="check" size={20} color={theme.onPrimary} />
+              </View>
+              <View style={styles.successCopy}>
+                <ThemedText type="smallBold">
+                  {t(
+                    completion === 'purchase'
+                      ? 'proPurchaseSuccessTitle'
+                      : 'proRestoreSuccessTitle',
+                  )}
+                </ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {t(
+                    completion === 'purchase'
+                      ? 'proPurchaseSuccessBody'
+                      : 'proRestoreSuccessBody',
+                  )}
+                </ThemedText>
+              </View>
+            </View>
+          )}
+
+          {completion ? (
+            <Button label={t('proContinue')} icon="check" onPress={() => router.back()} />
+          ) : state.pro ? (
+            <>
+              {Platform.OS !== 'web' && (
+                <Button
+                  variant="outline"
+                  label={t('manageSubscription')}
+                  disabled={billingAction !== null}
+                  onPress={manage}
+                />
+              )}
+              <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
+            </>
+          ) : (
+            <>
+              <View style={styles.purchaseSummary}>
+                <View style={styles.purchaseSummaryCopy}>
+                  <ThemedText type="micro" themeColor="textTertiary">
+                    {plan === 'yearly' ? t('yearly') : t('monthly')}
+                  </ThemedText>
+                  <ThemedText type="subtitle" tabular>
+                    {displayPrice(plan)}
+                  </ThemedText>
+                </View>
+                <ThemedText
+                  type="meta"
+                  themeColor="textSecondary"
+                  style={[styles.chargeTiming, { textAlign: alignEnd() }]}>
+                  {selectedStorePrice
+                    ? tf(
+                        plan === 'yearly'
+                          ? 'proChargeTimingYear'
+                          : 'proChargeTimingMonth',
+                        { price: selectedStorePrice },
+                      )
+                    : t('proStoreConfirmsPrice')}
+                </ThemedText>
+              </View>
+              <Button
+                label={
+                  billingAction === 'buy'
+                    ? t('purchaseInProgress')
+                    : selectedStorePrice
+                      ? tf('startPlanWithPrice', {
+                          plan: plan === 'yearly' ? t('yearly') : t('monthly'),
+                          price: selectedStorePrice,
+                        })
+                      : t('getPro')
+                }
+                onPress={buy}
+                disabled={billingAction !== null || (billingAvailable && !storePrices?.[plan])}
+              />
+              <Button
+                variant="ghost"
+                label={t('restorePurchase')}
+                disabled={billingAction !== null}
+                onPress={restore}
+              />
+              <ThemedText type="nano" themeColor="textTertiary" style={styles.renewalTerms}>
+                {t(
+                  Platform.OS === 'ios'
+                    ? 'subscriptionRenewalTermsIos'
+                    : 'subscriptionRenewalTermsAndroid',
+                )}
+              </ThemedText>
+            </>
+          )}
+        </View>
       </SafeAreaView>
     </ThemedView>
   );
@@ -455,26 +591,54 @@ const styles = StyleSheet.create({
   headerWrap: {
     paddingHorizontal: ScreenPadding,
   },
+  scroll: {
+    flex: 1,
+  },
   content: {
     paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
-    gap: Spacing.four + 2,
+    paddingBottom: Spacing.four,
+    gap: Spacing.four,
   },
   hero: {
     alignItems: 'flex-start',
-    gap: Spacing.two + 2,
+    gap: Spacing.two,
     paddingTop: Spacing.two,
   },
-  featureIcon: {
-    width: 30,
+  heroMark: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.control,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.two,
+  },
+  statusPill: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.three,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: Radius.full,
+  },
+  sectionLabel: {
+    marginBottom: Spacing.two,
+  },
+  featureIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   featureText: {
     flex: 1,
     gap: Spacing.half,
-  },
-  buy: {
-    gap: Spacing.two + 2,
   },
   freeNote: {
     flexDirection: 'row',
@@ -484,27 +648,111 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sheet,
     padding: Spacing.three,
   },
+  planSection: {
+    gap: Spacing.two,
+  },
   plans: {
-    flexDirection: 'row',
-    gap: Spacing.two + 2,
+    gap: Spacing.two,
   },
   legalLinks: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.three,
   },
-  notice: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
-    gap: Spacing.half,
-  },
-  plan: {
-    flex: 1,
+  planRow: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
     borderRadius: Radius.sheet,
     borderWidth: 1,
-    padding: Spacing.three,
-    gap: Spacing.two - 2,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioDot: {
+    width: 12,
+    height: 12,
+    borderRadius: Radius.full,
+  },
+  planCopy: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  planHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  savingBadge: {
+    borderWidth: 1,
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+  },
+  planPrice: {
+    flexShrink: 0,
+  },
+  success: {
+    minHeight: 88,
+    flexDirection: 'row',
     alignItems: 'flex-start',
+    gap: Spacing.three,
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+  },
+  successIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successCopy: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  purchaseBar: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: ScreenPadding,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.two,
+    gap: Spacing.two,
+  },
+  purchaseSummary: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.three,
+  },
+  purchaseSummaryCopy: {
+    minWidth: 104,
+    gap: Spacing.one,
+  },
+  chargeTiming: {
+    flex: 1,
+  },
+  renewalTerms: {
+    textAlign: 'center',
+  },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    padding: Spacing.two,
+    gap: Spacing.two,
+  },
+  noticeCopy: {
+    flex: 1,
+    gap: Spacing.one,
   },
 });

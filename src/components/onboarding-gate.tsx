@@ -1,4 +1,5 @@
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
   Platform,
@@ -12,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { StorageRecovery } from '@/components/storage-recovery';
 import { ThemedText } from '@/components/themed-text';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
@@ -25,6 +27,9 @@ import {
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
+import { disableRelayBackgroundSync } from '@/lib/background-relay';
+import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
+import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
 
@@ -33,11 +38,8 @@ type Step =
   | 'capture'
   | 'scanning'
   | 'complete';
-
-// 'month' is deliberately absent. Asking a salary day up front is a question
-// the app can answer for itself later, and it sat between the user and the
-// thing they came for. The setting still exists in state with its default.
-const QUESTION_STEPS: readonly Step[] = ['capture'];
+type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
+type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
 /** Onboarding is night mode regardless of the OS theme: the first screen sets
  * the tone, and the mark is at its strongest on charcoal. */
@@ -90,9 +92,7 @@ function captureCopy(): { title: StringKey; body: StringKey } {
   return { title: 'onboardCaptureTitleWeb', body: 'onboardCaptureBodyWeb' };
 }
 
-function ProgressHeader({ step, onBack }: { step: Step; onBack: () => void }) {
-  const index = QUESTION_STEPS.indexOf(step);
-  const visibleIndex = index < 0 ? QUESTION_STEPS.length - 1 : index;
+function BackHeader({ onBack }: { onBack: () => void }) {
   return (
     <View style={styles.progressHeader}>
       <View style={styles.progressTopline}>
@@ -108,26 +108,6 @@ function ProgressHeader({ step, onBack }: { step: Step; onBack: () => void }) {
           <Icon name="chevron-left" size={18} color={night.textSecondary} />
           <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
         </Pressable>
-        <ThemedText style={styles.stepLabel}>
-          {tf('onboardStepOf', { step: visibleIndex + 1, total: QUESTION_STEPS.length })}
-        </ThemedText>
-      </View>
-      <View
-        style={styles.progressTrack}
-        accessibilityRole="progressbar"
-        accessibilityValue={{ min: 1, max: QUESTION_STEPS.length, now: visibleIndex + 1 }}>
-        {QUESTION_STEPS.map((item, itemIndex) => (
-          <View
-            key={item}
-            style={[
-              styles.progressSegment,
-              {
-                backgroundColor:
-                  itemIndex <= visibleIndex ? night.primary : night.backgroundSelected,
-              },
-            ]}
-          />
-        ))}
       </View>
     </View>
   );
@@ -154,11 +134,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     stageReviewAlerts,
     setMarket,
     setOnboarded,
+    setCaptureOptOut,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
   const [progress, setProgress] = useState({ scanned: 0, found: 0 });
   const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
   const [smsDenied, setSmsDenied] = useState(false);
+  const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
+  const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
 
   const activeStep: Step = params.onboarding === 'complete' ? 'complete' : step;
   const capture = captureCopy();
@@ -185,14 +168,27 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     NotificationReader?.isAvailable?.() === true;
 
   const startScan = async () => {
-    const granted = await requestSmsPermission();
-    if (!granted) {
-      setSmsDenied(true);
+    setSmsDenied(false);
+    let granted = false;
+    try {
+      granted = await requestSmsPermission();
+    } catch {
+      setCompletionOutcome('failed');
       setStep('complete');
       return;
     }
-    setStep('scanning');
+    if (!granted) {
+      setSmsDenied(true);
+      setCompletionOutcome('denied');
+      setStep('complete');
+      return;
+    }
     try {
+      // A user may return from the manual completion screen and choose
+      // automatic capture instead. Clear the durable opt-out before the first
+      // read so setup cannot report success over a permanently blocked pipe.
+      await setCaptureOptOut(false);
+      setStep('scanning');
       const {
         parsed,
         reviewCandidates,
@@ -215,16 +211,25 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       await importBatch(importPlan.batch).durable;
       await commit();
       setResult({ tx: importPlan.txCount, accounts: importPlan.newAccountCount });
+      setCompletionOutcome('automatic');
       setStep('complete');
       committed();
     } catch {
       setResult({ tx: 0, accounts: 0 });
+      setCompletionOutcome('failed');
       setStep('complete');
     }
   };
 
-  const beginCapture = () => {
+  const beginCapture = async () => {
     if (Platform.OS === 'ios') {
+      try {
+        await setCaptureOptOut(false);
+      } catch {
+        setCompletionOutcome('failed');
+        setStep('complete');
+        return;
+      }
       // The return query survives a cold route remount and tells the gate to
       // show the summary instead of restarting the questionnaire.
       router.push('/ios-setup?fromOnboarding=1');
@@ -234,20 +239,66 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       void startScan();
       return;
     }
+    setCompletionOutcome('manual');
     setStep('complete');
   };
 
+  const continueManually = async () => {
+    setSmsDenied(false);
+    setResult(null);
+    try {
+      // This choice says "no SMS access" even when Android retained a grant
+      // from an older install or test run. Persist the capture opt-out before
+      // showing success so a mounted foreground importer cannot race it.
+      await setCaptureOptOut(true);
+      if (Platform.OS === 'ios') {
+        // The user may have started Shortcut setup and then backed out. An
+        // app-only flag is not enough: that Shortcut would still send bank
+        // alerts and the background task could still collect them. Revoke the
+        // actual relay identity before calling this choice complete.
+        try {
+          const relay = await getRelayConfigStrict();
+          if (relay) {
+            // Revoke the server-side ingest token first. Removing only the
+            // local wake registration would still leave the installed
+            // Shortcut able to forward bank alerts over the network.
+            await unpairDevice(relay);
+            setShortcutCleanup('revoked');
+          }
+        } catch {
+          // A strict Keychain read failure is just as uncertain as a failed
+          // revoke: absence was not proven, so never claim the Shortcut's
+          // remote token is gone. Keep Retry available and show the immediate
+          // local stop (delete the Shortcut).
+          setShortcutCleanup('uncertain');
+          throw new Error('relay_cleanup_uncertain');
+        } finally {
+          // Once the app is opted out, the local background registration is
+          // redundant. Its cleanup is best-effort and must never prevent the
+          // more important authenticated relay revocation above.
+          try {
+            await disableRelayBackgroundSync();
+          } catch {
+            // CaptureExecutor still enforces the durable opt-out.
+          }
+        }
+      }
+      setCompletionOutcome('manual');
+      setStep('complete');
+    } catch {
+      setCompletionOutcome('failed');
+      setStep('complete');
+    }
+  };
+
   const goBack = () => {
-    const index = QUESTION_STEPS.indexOf(activeStep);
     if (activeStep === 'complete') {
       setStep('capture');
       if (params.onboarding) router.setParams({ onboarding: undefined });
     } else if (activeStep === 'scanning') {
       setStep('capture');
-    } else if (index <= 0) {
-      setStep('welcome');
     } else {
-      setStep(QUESTION_STEPS[index - 1]);
+      setStep('welcome');
     }
   };
 
@@ -269,12 +320,32 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     return <StorageRecovery failure={storageFailure} recoveryState={storageRecoveryState} />;
   }
 
+  // Do not render financial screens against the reducer's blank bootstrap
+  // state. Besides flashing false AED 0 figures, mounting every tab here used
+  // to start expensive ledger projections before encrypted hydration finished.
+  if (!state.hydrated) {
+    return (
+      <View style={styles.loadingRoot} accessibilityLiveRegion="polite">
+        <StatusBar style="light" />
+        <View style={styles.markHalo}>
+          <WafraMark size={44} color={night.primary} />
+        </View>
+        <ThemedText style={styles.loadingLabel}>{t('loadingLedger')}</ThemedText>
+      </View>
+    );
+  }
+
   if (!showOverlay) return <>{children}</>;
 
   const entering = reducedMotion ? undefined : FadeInDown.duration(320);
+  const automaticCompletion =
+    params.onboarding === 'complete' || completionOutcome === 'automatic';
+  const failedCompletion =
+    activeStep === 'complete' && !automaticCompletion && completionOutcome === 'failed';
 
   return (
     <View style={styles.container}>
+      <StatusBar style="light" />
       <View
         style={styles.hidden}
         pointerEvents="none"
@@ -293,7 +364,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                 <View style={styles.markHalo}>
                   <WafraMark size={44} color={night.primary} />
                 </View>
-                <ThemedText style={styles.headline} accessibilityRole="header">
+                <ThemedText
+                  style={styles.headline}
+                  accessibilityRole="header"
+                  // Display type must still fit as a heading at the largest
+                  // accessibility sizes; body/list text below remains fully
+                  // scalable and the whole surface remains scrollable.
+                  maxFontSizeMultiplier={1.6}>
                   {t(Platform.OS === 'ios' ? 'iosOnboardHeadline' : 'onboardHeadline')}
                 </ThemedText>
                 <ThemedText style={styles.sub}>
@@ -334,7 +411,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             </Animated.ScrollView>
           ) : (
             <>
-              {activeStep !== 'scanning' && <ProgressHeader step={activeStep} onBack={goBack} />}
+              {activeStep !== 'scanning' && <BackHeader onBack={goBack} />}
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
@@ -374,7 +451,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                                 ? t('onboardCaptureAndroidCta')
                                 : t('continueWord')
                           }
-                          onPress={beginCapture}
+                          onPress={() => void beginCapture()}
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
@@ -384,7 +461,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             label={t(Platform.OS === 'android'
                               ? 'onboardCaptureNoSms'
                               : 'iosContinueManual')}
-                            onPress={() => setStep('complete')}
+                            onPress={() => void continueManually()}
                             labelColor={night.text}
                             style={styles.ghost}
                           />
@@ -419,14 +496,35 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {activeStep === 'complete' && (
                     <>
                       <View style={styles.completeHero}>
-                        <View style={styles.completeMark}>
-                          <Icon name="check" size={30} color={night.onPrimary} strokeWidth={2.1} />
+                        <View
+                          style={[
+                            styles.completeMark,
+                            failedCompletion && { backgroundColor: night.warning },
+                          ]}>
+                          <Icon
+                            name={failedCompletion ? 'alert' : 'check'}
+                            size={30}
+                            color={night.onPrimary}
+                            strokeWidth={2.1}
+                          />
                         </View>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
-                          {t('onboardCompleteTitle')}
+                          {t(
+                            automaticCompletion
+                                ? 'onboardCompleteTitle'
+                                : completionOutcome === 'failed'
+                                  ? 'onboardCompleteNeedsAttentionTitle'
+                                  : 'onboardCompleteManualTitle'
+                          )}
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>
-                          {t('onboardCompleteBodyAutomatic')}
+                          {t(
+                            automaticCompletion
+                                ? 'onboardCompleteBodyAutomatic'
+                                : completionOutcome === 'failed'
+                                  ? 'onboardCompleteNeedsAttentionBody'
+                                  : 'onboardCompleteManualBody'
+                          )}
                         </ThemedText>
                         {smsDenied && (
                           <ThemedText
@@ -479,6 +577,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           )}
         </SafeAreaView>
       </View>
+      <ConfirmSheet
+        visible={shortcutCleanup !== null}
+        onClose={() => setShortcutCleanup(null)}
+        question={t('shortcutStillInstalledTitle')}
+        body={t(shortcutCleanup === 'uncertain'
+          ? 'shortcutCleanupUncertain'
+          : 'shortcutCleanupLeft')}
+        confirmLabel={t('iosOpenShortcutsApp')}
+        cancelLabel={t('iosDone')}
+        onConfirm={openShortcutsApp}
+      />
     </View>
   );
 }
@@ -487,6 +596,18 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   hidden: { ...StyleSheet.absoluteFillObject, opacity: 0 },
   root: { flex: 1, alignItems: 'center', backgroundColor: night.background },
+  loadingRoot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.three,
+    backgroundColor: night.background,
+  },
+  loadingLabel: {
+    color: night.textSecondary,
+    fontFamily: Fonts.sansMedium,
+    fontSize: 14,
+  },
   safe: { flex: 1, width: '100%', maxWidth: 520 },
   welcomeBody: {
     flex: 1,
@@ -535,9 +656,6 @@ const styles = StyleSheet.create({
   },
   back: { minHeight: 44, flexDirection: 'row', gap: 4, alignItems: 'center' },
   backLabel: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12 },
-  stepLabel: { color: night.textTertiary, fontFamily: Fonts.monoMedium, fontSize: 11 },
-  progressTrack: { flexDirection: 'row', gap: 5 },
-  progressSegment: { flex: 1, height: 3, borderRadius: 2 },
   scrollContent: { flexGrow: 1, paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four },
   questionBody: { flex: 1, paddingTop: Spacing.five },
   questionTitle: {

@@ -4,9 +4,10 @@ import Animated, { Easing, FadeOutDown, SlideInDown } from 'react-native-reanima
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Icon } from '@/components/ui/icon';
-import { EASE, Motion, Spacing } from '@/constants/theme';
+import { Icon, type IconName } from '@/components/ui/icon';
+import { Colors, EASE, Motion, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -15,13 +16,32 @@ export interface ToastAction {
   onPress: () => void;
 }
 
+export type ToastTone = 'success' | 'info' | 'warning' | 'error';
+
+export interface ToastOptions {
+  actions?: ToastAction[];
+  durationMs?: number;
+  tone?: ToastTone;
+}
+
 interface ToastState {
   message: string;
   actions: ToastAction[];
+  tone: ToastTone;
+}
+
+interface ToastShow {
+  (message: string, options?: ToastOptions): void;
+  (
+    message: string,
+    actions?: ToastAction[],
+    durationMs?: number,
+    tone?: ToastTone,
+  ): void;
 }
 
 interface ToastContextValue {
-  show: (message: string, actions?: ToastAction[], durationMs?: number) => void;
+  show: ToastShow;
 }
 
 const ToastContext = createContext<ToastContextValue>({ show: () => {} });
@@ -30,21 +50,43 @@ export function useToast(): ToastContextValue {
   return useContext(ToastContext);
 }
 
-/**
- * The success bar: solid ink, a mint check, and its undo.
- *
- * It is the loudest surface in the app on purpose — an undo with a deadline
- * has to be seen before the deadline passes.
- */
+const TONE_ICON: Record<ToastTone, IconName> = {
+  success: 'check',
+  info: 'spark',
+  warning: 'alert',
+  error: 'close',
+};
+
+const TONE_COLOR: Record<ToastTone, string> = {
+  success: Colors.dark.income,
+  info: Colors.dark.primary,
+  warning: Colors.dark.warning,
+  error: Colors.dark.expense,
+};
+
+/** A compact status surface with an optional, time-sensitive action. */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
+  const reducedMotion = useReducedMotion();
   const insets = useSafeAreaInsets();
   const [toast, setToast] = useState<ToastState | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const show = useCallback((message: string, actions: ToastAction[] = [], durationMs = 6000) => {
+  const show = useCallback((
+    message: string,
+    actionsOrOptions: ToastAction[] | ToastOptions = [],
+    legacyDurationMs: number = 6000,
+    legacyTone: ToastTone = 'info',
+  ) => {
+    const options = Array.isArray(actionsOrOptions)
+      ? { actions: actionsOrOptions, durationMs: legacyDurationMs, tone: legacyTone }
+      : actionsOrOptions;
+    const actions = options.actions ?? [];
+    const durationMs = options.durationMs ?? 6000;
+    const tone = options.tone ?? 'info';
+
     if (timer.current) clearTimeout(timer.current);
-    setToast({ message, actions });
+    setToast({ message, actions, tone });
     timer.current = setTimeout(() => setToast(null), durationMs);
 
     // A toast carrying Undo is a deadline. Six seconds is comfortable when you
@@ -60,7 +102,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         timer.current = setTimeout(() => setToast(null), durationMs * 3);
       })
       .catch(() => {});
-  }, []);
+  }, []) as ToastShow;
 
   const dismiss = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
@@ -72,11 +114,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       {toast && (
         <Animated.View
-          entering={SlideInDown.duration(Motion.sheet).easing(EASING)}
-          exiting={FadeOutDown.duration(200)}
+          entering={reducedMotion ? undefined : SlideInDown.duration(Motion.sheet).easing(EASING)}
+          exiting={reducedMotion ? undefined : FadeOutDown.duration(200)}
           // Clears the floating tab bar rather than sitting under it.
           style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) + 84 }]}
-          accessibilityLiveRegion="polite"
+          accessibilityLiveRegion={toast.tone === 'error' ? 'assertive' : 'polite'}
           pointerEvents="box-none">
           {/* The fill is a near-black by design, which in the dark theme is
               also the page. Floating over a list it read as loose text lying on
@@ -88,7 +130,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               styles.toast,
               { borderColor: theme.cardBorderStrong, shadowColor: '#000' },
             ]}>
-            <Icon name="check" size={16} color={theme.primary} strokeWidth={2.1} />
+            <Icon
+              name={TONE_ICON[toast.tone]}
+              size={16}
+              color={TONE_COLOR[toast.tone]}
+              strokeWidth={2.1}
+            />
             <ThemedText type="small" style={styles.message} numberOfLines={2}>
               {toast.message}
             </ThemedText>
@@ -96,12 +143,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               <Pressable
                 key={a.label}
                 accessibilityRole="button"
+                style={styles.action}
                 onPress={() => {
                   dismiss();
                   a.onPress();
                 }}
-                hitSlop={6}>
-                <ThemedText type="nano" style={{ color: theme.primary }}>
+                hitSlop={4}>
+                <ThemedText type="nano" style={{ color: Colors.dark.primary }}>
                   {a.label}
                 </ThemedText>
               </Pressable>
@@ -139,5 +187,11 @@ const styles = StyleSheet.create({
   message: {
     flexShrink: 1,
     color: '#F2EFE8',
+  },
+  action: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -121,7 +121,10 @@ export function StorageRecovery({
               <View style={[styles.halo, { backgroundColor: night.expenseSoftBg }]}>
                 <Icon name="trash" size={26} color={night.expense} />
               </View>
-              <ThemedText style={styles.headline} accessibilityRole="header">
+              <ThemedText
+                style={styles.headline}
+                accessibilityRole="header"
+                maxFontSizeMultiplier={1.6}>
                 {t('storageRecoveryEraseTitle')}
               </ThemedText>
               <ThemedText style={styles.sub}>{t('storageRecoveryEraseBody')}</ThemedText>
@@ -161,7 +164,10 @@ export function StorageRecovery({
             <View style={styles.halo}>
               <Icon name="lock" size={26} color={night.primary} />
             </View>
-            <ThemedText style={styles.headline} accessibilityRole="header">
+            <ThemedText
+              style={styles.headline}
+              accessibilityRole="header"
+              maxFontSizeMultiplier={1.6}>
               {t(erased ? 'storageRecoveryInitializeTitle' : 'storageRecoveryTitle')}
             </ThemedText>
             <ThemedText style={styles.sub} accessibilityLiveRegion="polite">

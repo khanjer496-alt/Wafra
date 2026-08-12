@@ -1,0 +1,10 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- extendedWaitUntil:
+    visible: "شاهد أموالك بوضوح."
+    timeout: 20000
+- assertVisible: "إعداد وفرة"
+- takeScreenshot: "welcome-rtl-${PLATFORM}"

@@ -50,7 +50,13 @@ const S = {
   heroSavedCaption: { en: 'Saved so far this month', ar: 'المدخر هذا الشهر' },
   heroNetCaption: { en: 'Net for this period', ar: 'الصافي لهذه الفترة' },
   inLabel: { en: 'In', ar: 'الدخل' },
-  outLabel: { en: 'Out', ar: 'المصروف' },
+  outLabel: { en: 'Spent', ar: 'الإنفاق' },
+  cashOutLabel: { en: 'Cash out', ar: 'النقد الخارج' },
+  cashOutHint: {
+    en: 'Money that actually left your accounts, including card payments once.',
+    ar: 'الأموال التي خرجت فعلياً من حساباتك، بما فيها دفعات البطاقات مرة واحدة.',
+  },
+  loadingLedger: { en: 'Loading your ledger', ar: 'جارٍ تحميل سجلك المالي' },
   insightsHeader: { en: 'INSIGHTS', ar: 'ملاحظات' },
   budgetsHeader: { en: 'BUDGETS', ar: 'الميزانيات' },
   recentHeader: { en: 'RECENT ACTIVITY', ar: 'أحدث العمليات' },
@@ -161,7 +167,8 @@ const S = {
     en: 'Could not save that change. The alert may return next time.',
     ar: 'تعذّر حفظ هذا التغيير. قد يعود التنبيه في المرة القادمة.',
   },
-  reviewAlertAdd: { en: 'Add', ar: 'إضافة' },
+  reviewAlertReview: { en: 'Check & add', ar: 'تحقق وأضف' },
+  reviewAlertAdd: { en: 'Add to Wafra', ar: 'أضف إلى وفرة' },
   reviewAlertAddHint: {
     en: 'Review the category, account, direction and date before adding it.',
     ar: 'راجع التصنيف والحساب والاتجاه والتاريخ قبل إضافتها.',
@@ -172,6 +179,19 @@ const S = {
     en: 'Could not add this alert. Check its currency, account and date.',
     ar: 'تعذّرت إضافة هذا التنبيه. تحقق من العملة والحساب والتاريخ.',
   },
+  reviewAlertChooseCategory: {
+    en: 'Choose the category before adding this alert.',
+    ar: 'اختر التصنيف قبل إضافة هذا التنبيه.',
+  },
+  reviewAlertChooseAccount: {
+    en: 'Choose the account this alert belongs to.',
+    ar: 'اختر الحساب الذي ينتمي إليه هذا التنبيه.',
+  },
+  reviewAlertCreateAccount: {
+    en: 'Create an account in Wallet first',
+    ar: 'أنشئ حساباً في المحفظة أولاً',
+  },
+  savingSecurely: { en: 'Saving securely…', ar: 'جارٍ الحفظ بأمان…' },
   reviewAlertOwnAccounts: {
     en: 'This moved money between my own accounts',
     ar: 'هذا تحويل بين حساباتي الشخصية',
@@ -825,6 +845,10 @@ const S = {
     en: 'Private Mode could not disconnect the relay. Connect to the internet and try again.',
     ar: 'تعذّر على الوضع الخاص فصل المرحّل. اتصل بالإنترنت وحاول مرة أخرى.',
   },
+  capturePreferenceFailed: {
+    en: 'Wafra could not save the automatic capture setting. Try again.',
+    ar: 'تعذّر على وفرة حفظ إعداد الالتقاط التلقائي. حاول مرة أخرى.',
+  },
   privacyRetentionExact: {
     en: 'Android alerts are parsed on-device. On iPhone, your Shortcut sends selected bank alerts to Wafra’s relay; it deletes the raw text immediately and keeps only a device-sealed transaction for up to 30 days. Private Mode is local-only and disables iPhone Shortcut capture.',
     ar: 'تُحلَّل تنبيهات أندرويد على الجهاز. وعلى الآيفون يرسل الاختصار تنبيهات البنوك المحددة إلى مرحّل وفرة؛ فيحذف النص فوراً ولا يحتفظ إلا بعملية مشفّرة لهذا الجهاز لمدة أقصاها ٣٠ يوماً. الوضع الخاص محلي فقط ويوقف التقاط الاختصار على الآيفون.',
@@ -923,6 +947,44 @@ const S = {
   // Paywall
   proTagline: { en: 'A few power features fund the app.', ar: 'ميزات إضافية تدعم استمرار التطبيق.' },
   proActiveThanks: { en: 'Active on this device. Thank you for supporting Wafra.', ar: 'مفعّل على هذا الجهاز. شكراً لدعمك وفرة.' },
+  proOutcomeTitle: {
+    en: 'Keep your ledger up to date, automatically.',
+    ar: 'حافظ على تحديث سجلك تلقائياً.',
+  },
+  proTrialActiveBody: {
+    en: 'Automatic capture is included for {left} more day{s}.',
+    ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
+  },
+  proTrialEndedBody: {
+    en: 'Automatic bank-alert capture is paused. Your ledger and manual entries still work.',
+    ar: 'توقف الالتقاط التلقائي لتنبيهات البنك. يظل سجلك والإدخال اليدوي متاحين.',
+  },
+  proBenefitsTitle: { en: 'Included with Pro', ar: 'مشمول مع برو' },
+  proChoosePlan: { en: 'Choose your plan', ar: 'اختر خطتك' },
+  proSavePercent: { en: 'Save {percent}%', ar: 'وفّر {percent}٪' },
+  proChargeTimingYear: {
+    en: 'Charged {price} when you confirm. Renews yearly until cancelled.',
+    ar: 'يُخصم {price} عند التأكيد، ثم يتجدد سنوياً حتى الإلغاء.',
+  },
+  proChargeTimingMonth: {
+    en: 'Charged {price} when you confirm. Renews monthly until cancelled.',
+    ar: 'يُخصم {price} عند التأكيد، ثم يتجدد شهرياً حتى الإلغاء.',
+  },
+  proStoreConfirmsPrice: {
+    en: 'Your store shows the exact charge and renewal details before you confirm.',
+    ar: 'يعرض المتجر المبلغ الدقيق وتفاصيل التجديد قبل التأكيد.',
+  },
+  proPurchaseSuccessTitle: { en: 'Wafra Pro is active', ar: 'وفرة برو مفعّل' },
+  proPurchaseSuccessBody: {
+    en: 'Your subscription is confirmed. You can manage it anytime from Settings.',
+    ar: 'تم تأكيد اشتراكك. يمكنك إدارته في أي وقت من الإعدادات.',
+  },
+  proRestoreSuccessTitle: { en: 'Purchase restored', ar: 'تمت استعادة الشراء' },
+  proRestoreSuccessBody: {
+    en: 'Wafra Pro is active again on this device.',
+    ar: 'وفرة برو مفعّل مجدداً على هذا الجهاز.',
+  },
+  proContinue: { en: 'Continue to Wafra', ar: 'متابعة إلى وفرة' },
   trialEndedPaywall: { en: 'Your free trial has ended and tracking is paused. Subscribe to keep Wafra working — your data never leaves your phone either way.', ar: 'انتهت تجربتك المجانية وتوقف التتبع. اشترك لمواصلة استخدام وفرة — بياناتك لا تغادر هاتفك في كل الأحوال.' },
   freeTrialActive: { en: 'FREE TRIAL ACTIVE', ar: 'التجربة المجانية مفعّلة' },
   getPro: { en: 'Get Wafra Pro', ar: 'اشترك في وفرة برو' },
@@ -1026,6 +1088,10 @@ const S = {
     en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. The Wafra Capture Shortcut is still installed and still forwards each bank alert you pointed it at over the network, where it is now refused. Only you can delete it: Shortcuts → Automation → delete the Wafra automation, then My Shortcuts → delete Wafra Capture.',
     ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. لكن اختصار «Wafra Capture» ما زال مثبّتاً وما زال يمرّر كل تنبيه بنكي وجّهته إليه عبر الشبكة حيث يُرفض الآن. أنت وحدك من يستطيع حذفه: الاختصارات ← الأتمتة ← احذف أتمتة وفرة، ثم اختصاراتي ← احذف Wafra Capture.',
   },
+  shortcutCleanupUncertain: {
+    en: 'Wafra could not confirm that this iPhone’s relay token was revoked. Automatic capture is off in Wafra, but the installed Shortcut may still forward selected bank alerts over the network. Delete it now in Shortcuts → Automation, then My Shortcuts, and retry disconnection when you are online.',
+    ar: 'تعذّر على وفرة تأكيد إلغاء رمز ترحيل هذا الآيفون. الالتقاط التلقائي متوقف داخل وفرة، لكن الاختصار المثبّت قد يستمر في تمرير تنبيهات البنوك المحددة عبر الشبكة. احذفه الآن من الاختصارات ← الأتمتة، ثم «اختصاراتي»، وأعد محاولة الفصل عند توفر الإنترنت.',
+  },
   /**
    * Removing SOMEBODY ELSE'S iPhone. Their Shortcut is on their phone, which
    * this app cannot reach at all — so this is guidance to pass on, not a
@@ -1082,7 +1148,7 @@ const S = {
   readInboxLater: { en: 'You can read your inbox later from Wallet.', ar: 'يمكنك قراءة رسائلك لاحقاً من المحفظة.' },
   dataStillLoading: { en: 'Your data is still loading. Try again in a second.', ar: 'ما زال تحميل بياناتك جارياً. أعد المحاولة بعد لحظة.' },
   historyIsIn: { en: 'Your history is in.', ar: 'تم إدخال سجلّك.' },
-  inVsOut6: { en: 'In vs out · 6 months', ar: 'الدخل مقابل المصروف · ٦ أشهر' },
+  inVsOut6: { en: 'Income vs spent · 6 months', ar: 'الدخل مقابل الإنفاق · ٦ أشهر' },
   noEntriesPeriod: { en: 'No entries in this period yet', ar: 'لا عمليات في هذه الفترة بعد' },
   totalCreditLimit: { en: 'Total credit limit', ar: 'إجمالي حد الائتمان' },
   parsePastedText: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
@@ -1240,10 +1306,20 @@ const S = {
     ar: 'يمرّر الالتقاط التلقائي التنبيهات فقط من محادثات البنوك التي تختارها. يحللها مُرحّل وفرة المشفر، ويتخلص فوراً من النص الخام، ولا يضع في الطابور إلا عملية مشفرة لجهازك. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
   },
   onboardSmsDenied: {
-    en: 'SMS access was not granted. Your plan is saved; you can enable capture later.',
-    ar: 'لم يُمنح إذن الرسائل. حُفظت خطتك ويمكنك تفعيل الالتقاط لاحقاً.',
+    en: 'SMS access was not granted. You can continue and enable capture later.',
+    ar: 'لم يُمنح إذن الرسائل. يمكنك المتابعة وتفعيل الالتقاط لاحقاً.',
   },
   onboardCompleteTitle: { en: 'Wafra is yours.', ar: 'وفرة أصبح لك.' },
+  onboardCompleteManualTitle: { en: 'Ready when you are.', ar: 'جاهز عندما تكون جاهزاً.' },
+  onboardCompleteManualBody: {
+    en: 'Start with a manual entry. You can turn on automatic bank-alert capture at any time.',
+    ar: 'ابدأ بإدخال يدوي. ويمكنك تفعيل التقاط تنبيهات البنك تلقائياً في أي وقت.',
+  },
+  onboardCompleteNeedsAttentionTitle: { en: 'You can still continue.', ar: 'لا يزال بإمكانك المتابعة.' },
+  onboardCompleteNeedsAttentionBody: {
+    en: 'Wafra could not finish checking your inbox. Your ledger is ready, and you can try automatic capture again later.',
+    ar: 'تعذّر على وفرة إكمال فحص الرسائل. سجلك جاهز، ويمكنك تجربة الالتقاط التلقائي لاحقاً.',
+  },
   onboardCompleteBody: {
     en: '{goals} goal{s}, {budgets} live budgets, and a money month from day {day}.',
     ar: '{goals} أهداف و{budgets} ميزانيات مفعّلة، وشهر مالي يبدأ في اليوم \u2066{day}\u2069.',
@@ -1300,7 +1376,7 @@ const S = {
     en: 'Android calls this broad “read, reply & control” access. Wafra only reads supported bank alerts; it never replies or changes a notification.',
     ar: 'يسمي أندرويد هذا الإذن الواسع «قراءة ورد وتحكم». وفرة يقرأ تنبيهات البنوك المدعومة فقط، ولا يرد على إشعار أو يغيّره.',
   },
-  nothingOutYet: { en: 'Nothing has gone out in this period yet.', ar: 'لم يخرج أي مبلغ في هذه الفترة بعد.' },
+  nothingOutYet: { en: 'No spending in this period yet.', ar: 'لا يوجد إنفاق في هذه الفترة بعد.' },
   noAccountsYet: { en: 'No bank or cash accounts yet.', ar: 'لا حسابات بنكية أو نقدية بعد.' },
   noStatementYet: { en: 'No statement message has arrived for this card yet.', ar: 'لم تصل رسالة كشف حساب لهذه البطاقة بعد.' },
   // Not "none yet" — none ever. A debit card spends the money already in the
@@ -1398,6 +1474,8 @@ const S = {
   // Hero caption
   saved: { en: 'Saved', ar: 'المدخر' },
   overspent: { en: 'Overspent', ar: 'تجاوزت' },
+  netAfterSpending: { en: 'Net after spending', ar: 'الصافي بعد الإنفاق' },
+  spentAboveIncome: { en: 'Spent above income', ar: 'الإنفاق فوق الدخل' },
   soFarThisMonth: { en: 'so far this month', ar: 'حتى الآن هذا الشهر' },
 
   /**
@@ -1415,27 +1493,27 @@ const S = {
    * they checked it against last month's total.
    */
   homeVsMorePartial: {
-    en: '{amount} more out than {period} at the same point',
+    en: '{amount} more spent than {period} at the same point',
     ar: 'صرفت {amount} أكثر من {period} عند النقطة نفسها',
   },
   homeVsLessPartial: {
-    en: '{amount} less out than {period} at the same point',
+    en: '{amount} less spent than {period} at the same point',
     ar: 'صرفت {amount} أقل من {period} عند النقطة نفسها',
   },
   homeVsSamePartial: {
-    en: 'The same going out as {period} at the same point',
+    en: 'The same spent as {period} at the same point',
     ar: 'الصرف نفسه مقارنةً بـ{period} عند النقطة نفسها',
   },
   homeVsMoreWhole: {
-    en: '{amount} more out than {period}',
+    en: '{amount} more spent than {period}',
     ar: 'صرفت {amount} أكثر من {period}',
   },
   homeVsLessWhole: {
-    en: '{amount} less out than {period}',
+    en: '{amount} less spent than {period}',
     ar: 'صرفت {amount} أقل من {period}',
   },
   homeVsSameWhole: {
-    en: 'The same going out as {period}',
+    en: 'The same spent as {period}',
     ar: 'الصرف نفسه مقارنةً بـ{period}',
   },
   allTime: { en: 'all time', ar: 'كل الفترات' },
@@ -1457,7 +1535,7 @@ const S = {
   cashflow6mo: { en: 'Cashflow · 6 months', ar: 'التدفق النقدي · ٦ أشهر' },
   whatNumbersSay: { en: 'What the numbers say', ar: 'ماذا تقول الأرقام' },
   tapMonthToOpen: { en: 'Tap a month to open it', ar: 'اضغط على شهر لفتحه' },
-  flowSummary: { en: 'Out {total}', ar: 'المصروف {total}' },
+  flowSummary: { en: 'Spent {total}', ar: 'الإنفاق {total}' },
   flowLimitSummary: {
     en: '{spent} of {limit} in limits',
     ar: '{spent} من {limit} ضمن الحدود',
@@ -1468,7 +1546,7 @@ const S = {
   flowMonthGone: { en: '{percent}% of the month gone', ar: 'انقضى {percent}% من الشهر' },
   moreCategories: { en: '{count} more', ar: '{count} أخرى' },
   limitsHeader: { en: 'Limits', ar: 'الحدود' },
-  totalOut: { en: 'Total out', ar: 'إجمالي المصروف' },
+  totalOut: { en: 'Total spent', ar: 'إجمالي الإنفاق' },
   limitedSpend: { en: 'With limits', ar: 'ضمن الحدود' },
   periodProgress: { en: 'Period progress', ar: 'تقدّم الفترة' },
   fixedPayments: { en: 'Fixed payments', ar: 'الدفعات الثابتة' },
@@ -2123,6 +2201,11 @@ const S = {
     ar: 'اسحب للأسفل لقراءة رسائلك، أو أضف آخر شيء دفعته — تكفي عملية واحدة لبدء الشهر.',
   },
   readInbox: { en: 'Read inbox', ar: 'قراءة الرسائل' },
+  checkBankAlerts: { en: 'Check alerts', ar: 'تحقق من التنبيهات' },
+  emptyMonthCaptureHelp: {
+    en: 'No activity yet. Check for supported bank alerts or add one manually.',
+    ar: 'لا توجد عمليات بعد. تحقق من تنبيهات البنك المدعومة أو أضف عملية يدوياً.',
+  },
   addManually: { en: 'Add manually', ar: 'إضافة يدوية' },
   smsAccessOff: { en: 'SMS access is off, so nothing can import', ar: 'إذن الرسائل متوقف، لذا لا يمكن استيراد شيء' },
   smsPermissionPath: {

@@ -44,6 +44,7 @@ import { PulseDot } from '@/components/ui/states';
 import { CategoryTile } from '@/components/ui/tile';
 import { EASE, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildImportPlan,
@@ -152,13 +153,17 @@ type Notice = { title: string; body: string };
  * The loading state: skeleton lines under a scan line sweeping down them.
  * No spinner — a spinner says "wait", this says what is being read.
  */
-function ScanPanel() {
+function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
   const theme = useTheme();
   const y = useSharedValue(0);
 
   useEffect(() => {
+    if (reducedMotion) {
+      y.value = 0.5;
+      return;
+    }
     y.value = withRepeat(withTiming(1, { duration: 2400, easing: EASING }), -1, false);
-  }, [y]);
+  }, [reducedMotion, y]);
 
   const line = useAnimatedStyle(() => ({ transform: [{ translateY: y.value * PANEL_HEIGHT }] }));
 
@@ -179,6 +184,7 @@ export default function ImportSmsScreen() {
   const theme = useTheme();
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
+  const reducedMotion = useReducedMotion();
   const { auto, history } = useLocalSearchParams<{ auto?: string; history?: string }>();
   const { state, importBatch, ensureDurable, stageReviewAlerts, addBill } = useStore();
 
@@ -509,6 +515,7 @@ export default function ImportSmsScreen() {
     let active = true;
     const load = async () => {
       setScanning(true);
+      setProgress(null);
       setNotice(null);
       setPasteVerdict(null);
       setPlan(null);
@@ -667,8 +674,16 @@ export default function ImportSmsScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           {scanning ? (
-            <Section index={0} style={styles.scanning}>
-              <ScanPanel />
+            <Section
+              index={0}
+              style={styles.scanning}
+              accessibilityRole="progressbar"
+              accessibilityState={{ busy: true }}
+              accessibilityLabel={tf('importProgressCounts', {
+                read: progress?.scanned ?? 0,
+                matched: progress?.found ?? 0,
+              })}>
+              <ScanPanel reducedMotion={reducedMotion} />
               <View style={styles.progressHead}>
                 <View style={styles.progressLabel}>
                   <PulseDot color={theme.primary} />
@@ -677,7 +692,7 @@ export default function ImportSmsScreen() {
                   </ThemedText>
                 </View>
                 <ThemedText type="small" tabular>
-                  {history
+                  {history && progress === null
                     ? t('historyPreparingReview')
                     : tf('importProgressCounts', {
                         read: progress?.scanned ?? 0,
@@ -969,7 +984,13 @@ export default function ImportSmsScreen() {
                     }
                   />
                   {previewRows.map((tx, i) => (
-                    <Animated.View key={`${tx.date}-${tx.title}-${i}`} entering={FadeInDown.delay(i * 100)}>
+                    <Animated.View
+                      key={`${tx.date}-${tx.title}-${i}`}
+                      entering={
+                        reducedMotion || i >= 6
+                          ? undefined
+                          : FadeInDown.delay(i * 45).duration(180)
+                      }>
                       <Row last={i === previewRows.length - 1}>
                         <CategoryTile category={tx.category} />
                         <View style={styles.rowText}>

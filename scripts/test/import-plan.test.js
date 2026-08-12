@@ -140,6 +140,63 @@ const afterFirst = apply(BASE, first);
   ok('re-reading creates no second card', plan.newAccountCount === 0, plan.newAccountCount);
 }
 
+/* ── parser-version reread after an amount/FX correction ────────────── */
+
+{
+  const original = scan([INBOX[0]]).parsed[0];
+  const existing = apply(BASE, buildImportPlan([original], BASE, original.smsTs));
+  // The legacy local-SMS identity includes amountFils. A corrected parser or
+  // updated fallback FX table therefore creates a different s-key for the
+  // exact same retained provider message unless timestamp identity catches it.
+  const corrected = { ...original, amountFils: original.amountFils + 123 };
+  const plan = buildImportPlan([corrected], existing, corrected.smsTs);
+  ok('an amount correction on the same retained SMS does not append a duplicate',
+    plan.txCount === 0, plan.batch.transactions);
+  ok('fallback/parser amount drift preserves the already-booked historical value',
+    plan.batch.updates.every((u) => u.amountFils === undefined), plan.batch.updates);
+
+  const pinned = {
+    ...existing,
+    transactions: existing.transactions.map((t) => ({
+      ...t, userEdited: true, title: 'My corrected shop', category: 'health',
+    })),
+  };
+  const pinnedPlan = buildImportPlan([corrected], pinned, corrected.smsTs);
+  ok('the same stable identity protects a user-edited row without duplicating it',
+    pinnedPlan.txCount === 0 && pinnedPlan.batch.updates.length === 0,
+    { tx: pinnedPlan.txCount, updates: pinnedPlan.batch.updates });
+
+  const conflictingRow = {
+    ...existing.transactions[0], id: 'same-ms-other-message', amountFils: 999,
+    smsKey: `s${original.smsTs}-999`, raw: 'A genuinely different retained message',
+  };
+  const ambiguousState = {
+    ...existing,
+    transactions: [...existing.transactions, conflictingRow],
+  };
+  const ambiguous = buildImportPlan([corrected], ambiguousState, corrected.smsTs);
+  ok('two stored rows on one millisecond disable timestamp-only identity',
+    ambiguous.txCount === 1, ambiguous.txCount);
+
+  const rawMismatchState = {
+    ...existing,
+    transactions: existing.transactions.map((t) => ({
+      ...t, raw: 'A genuinely different retained message',
+    })),
+  };
+  const rawMismatch = buildImportPlan([corrected], rawMismatchState, corrected.smsTs);
+  ok('retained source disagreement vetoes timestamp-only identity',
+    rawMismatch.txCount === 1, rawMismatch.txCount);
+
+  const sameMillisecondBatch = buildImportPlan(
+    [corrected, { ...corrected, amountFils: corrected.amountFils + 1 }],
+    existing,
+    corrected.smsTs,
+  );
+  ok('two incoming messages on one millisecond cannot claim one stored row',
+    sameMillisecondBatch.txCount === 2, sameMillisecondBatch.txCount);
+}
+
 /* ── the same message through a second channel ───────────────────────── */
 
 {

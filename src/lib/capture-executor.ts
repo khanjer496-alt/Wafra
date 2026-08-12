@@ -163,6 +163,15 @@ export const createCaptureExecutor = ({
     return ledger;
   };
 
+  const captureStopped = (
+    activeLedger: CaptureLedgerAdapter,
+    source: CaptureSource,
+  ): boolean => {
+    const current = activeLedger.getState();
+    return !current.hydrated || current.captureOptOut ||
+      (current.privateMode && source === 'relay');
+  };
+
   const executeRoutine = async (): Promise<CaptureExecutionOutcome> => {
     const activeLedger = requireLedger();
     const state = activeLedger.getState();
@@ -170,12 +179,20 @@ export const createCaptureExecutor = ({
 
     const collected = await dependencies.collectRoutine(state);
     if (collected.needsSetup) return { kind: 'needs-setup' };
-    alignLedgerMarket(activeLedger, collected.detectedLaunchMarket);
     // Inbox/relay I/O can overlap a hand edit or another import. Build the
     // batch against the authoritative state after collection, not the state
     // used only to choose the scan watermark and parser overrides.
     const stateAtPlan = activeLedger.getState();
     if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
+    // A user can turn capture off while an inbox or relay read is awaiting.
+    // Recheck the authoritative preference before staging, importing, moving
+    // a cursor, changing the ledger market, or acknowledging remote rows.
+    // Leaving the relay copy unacknowledged is intentional: it can be retried
+    // only after the user explicitly enables capture again.
+    if (captureStopped(activeLedger, collected.source)) {
+      return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+    }
+    alignLedgerMarket(activeLedger, collected.detectedLaunchMarket);
     const plan = dependencies.planRows(
       collected.parsed,
       stateAtPlan,
@@ -194,6 +211,9 @@ export const createCaptureExecutor = ({
         const receipt = activeLedger.stageReviewAlerts(reviewCandidates);
         reviewAlerts = receipt.admitted;
         await receipt.durable;
+        if (captureStopped(activeLedger, collected.source)) {
+          return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+        }
       }
       // A review-only Android scan still consumed the inbox up to newestTs.
       // Persist that cursor after the sanitized tray is durable; otherwise it
@@ -203,6 +223,9 @@ export const createCaptureExecutor = ({
         plan.batch.lastScanTs > stateAtPlan.lastScanTs) {
         const cursorReceipt = activeLedger.importBatch(plan.batch);
         await cursorReceipt.durable;
+        if (captureStopped(activeLedger, collected.source)) {
+          return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+        }
       }
       // A parser-version reread is complete only after every admitted review
       // item is encrypted. If staging failed, leaving the old version forces a
@@ -212,6 +235,12 @@ export const createCaptureExecutor = ({
       // an earlier encrypted write failed. Flush before dropping its sealed copy.
       if (collected.source === 'relay' && reviewCandidates.length === 0) {
         await activeLedger.ensureDurable();
+        if (captureStopped(activeLedger, collected.source)) {
+          return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+        }
+      }
+      if (captureStopped(activeLedger, collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
       await collected.commit();
       return {
@@ -232,9 +261,15 @@ export const createCaptureExecutor = ({
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
+      if (captureStopped(activeLedger, collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
     }
     const receipt = activeLedger.importBatch(plan.batch);
     await receipt.durable;
+    if (captureStopped(activeLedger, collected.source)) {
+      return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+    }
     await collected.commit();
     return {
       kind: 'imported',

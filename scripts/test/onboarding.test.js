@@ -93,11 +93,39 @@ const iosControllerSource = fs.readFileSync(
 
 ok(
   'first run never forces a country or writes guessed-currency plans',
-  gateSource.includes("const QUESTION_STEPS: readonly Step[] = ['capture']") &&
-    gateSource.includes("onPress={() => setStep('capture')}") &&
+  gateSource.includes("setStep('capture')") &&
+    !gateSource.includes('QUESTION_STEPS') &&
     !gateSource.includes('setMarket(plan.answers.marketId)') &&
     !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
     !gateSource.includes('plan.goals.forEach(addGoal)'),
+);
+ok(
+  'first run waits for encrypted hydration and never shows a fake one-step progress bar',
+  /if \(!state\.hydrated\)/.test(gateSource) &&
+    /loadingLedger/.test(gateSource) &&
+    !/onboardStepOf|progressbar/.test(gateSource),
+);
+ok(
+  'completion copy matches automatic, manual, denied, and failed outcomes',
+  /type CompletionOutcome = 'automatic' \| 'manual' \| 'denied' \| 'failed'/.test(gateSource) &&
+    /setCompletionOutcome\('denied'\)/.test(gateSource) &&
+    /setCompletionOutcome\('failed'\)/.test(gateSource) &&
+    /onboardCompleteManualBody/.test(gateSource) &&
+    /onboardCompleteNeedsAttentionBody/.test(gateSource),
+);
+ok(
+  'the no-SMS onboarding choice durably opts out before completion',
+  /const continueManually = async \(\) => \{[\s\S]*?await setCaptureOptOut\(true\)[\s\S]*?setCompletionOutcome\('manual'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+    gateSource.includes('onPress={() => void continueManually()}'),
+);
+ok(
+  'choosing automatic capture clears a prior durable opt-out before either platform starts',
+  /const startScan = async \(\) => \{[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?await scanInbox/.test(gateSource) &&
+    /const beginCapture = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?router\.push\('\/ios-setup\?fromOnboarding=1'\)/.test(gateSource),
+);
+ok(
+  'iOS manual opt-out revokes a setup that was started before returning to onboarding',
+  /await setCaptureOptOut\(true\)[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?try \{[\s\S]*?await getRelayConfigStrict\(\)[\s\S]*?await unpairDevice\(relay\)[\s\S]*?setShortcutCleanup\('revoked'\)[\s\S]*?catch[\s\S]*?setShortcutCleanup\('uncertain'\)[\s\S]*?finally[\s\S]*?await disableRelayBackgroundSync\(\)[\s\S]*?shortcutCleanupUncertain/.test(gateSource),
 );
 ok(
   'iOS Shortcut setup returns to the personalized completion',

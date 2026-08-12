@@ -140,6 +140,7 @@ const EMPTY_STATE: AppState = {
   themePreference: 'system',
   pro: false,
   privateMode: false,
+  captureOptOut: false,
   dailySummary: false,
   trialStartTs: 0,
   marketId: '',
@@ -595,6 +596,7 @@ type Action =
   | { type: 'deleteGoal'; id: string }
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
+  | { type: 'setCaptureOptOut'; enabled: boolean }
   | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
@@ -966,6 +968,8 @@ function reduceState(state: AppState, action: Action): AppState {
           ? state.transactions.map(({ raw: _discard, ...tx }) => tx)
           : state.transactions,
       };
+    case 'setCaptureOptOut':
+      return { ...state, captureOptOut: action.enabled };
     case 'applyFxUpdates': {
       const updates = new Map(action.updates.map((update) => [update.id, update]));
       if (updates.size === 0) return state;
@@ -987,6 +991,11 @@ function reduceState(state: AppState, action: Action): AppState {
         ...EMPTY_STATE,
         hydrated: true,
         onboarded: true,
+        // Erasing ledger data is not consent to restart capture. Android can
+        // retain READ_SMS across this in-app erase, so preserve the explicit
+        // opt-out or the forced post-erase scan would immediately rebuild the
+        // entries the user just deleted.
+        captureOptOut: state.captureOptOut,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1080,6 +1089,7 @@ interface StoreValue {
   markParserVersion: () => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
+  setCaptureOptOut: (enabled: boolean) => Promise<void>;
   setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
@@ -1708,6 +1718,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Private Mode could not be saved');
   }, [dispatch, persist]);
 
+  const setCaptureOptOut = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setCaptureOptOut', enabled });
+    const written = await persist(next);
+    if (!written) throw new Error('Capture preference could not be saved');
+  }, [dispatch, persist]);
+
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
     dispatch({ type: 'applyFxUpdates', updates });
   }, []);
@@ -1891,6 +1911,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAppLock,
       setDailySummary,
       setPrivateMode,
+      setCaptureOptOut,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -1941,6 +1962,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAppLock,
       setDailySummary,
       setPrivateMode,
+      setCaptureOptOut,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,

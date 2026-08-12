@@ -1,4 +1,8 @@
-import { STRUCTURAL_TITLES, type ParsedSms } from '@/lib/sms-parser';
+import {
+  overrideFitsDirection,
+  STRUCTURAL_TITLES,
+  type ParsedSms,
+} from '@/lib/sms-parser';
 import type { Transaction, TxHealUpdate } from '@/lib/types';
 
 /**
@@ -31,7 +35,9 @@ export function healPatch(
   if (
     p.merchant !== 'Card purchase' &&
     p.merchant !== prior.title &&
-    (prior.title === 'Card purchase' || prior.category === 'other')
+    (prior.title === 'Card purchase' ||
+      prior.category === 'other' ||
+      /(?:https?:|www\.|\b\d{7,}\b|@)/i.test(prior.title))
   ) {
     patch.title = p.merchant;
   }
@@ -47,6 +53,15 @@ export function healPatch(
     if (prior.isTransfer !== p.transferHint) patch.isTransfer = p.transferHint;
   }
   if (prior.category === 'other' && p.categoryGuess !== 'other' && !prior.isTransfer) {
+    patch.category = p.categoryGuess;
+  }
+  // An income-only category on an expense (or the reverse) cannot even be
+  // rendered by the entry sheet for that direction. Earlier vocabulary read
+  // words such as "salary" out of an outgoing payee and stored an impossible
+  // expense/Salary pair. Direction compatibility is stronger evidence than a
+  // low-confidence fallback, so a reread may repair this to Other while still
+  // preserving every user-edited row through the guard above.
+  if (!overrideFitsDirection(prior.category, p.type)) {
     patch.category = p.categoryGuess;
   }
   // A category the parser is now DELIBERATE about, disagreeing with what is

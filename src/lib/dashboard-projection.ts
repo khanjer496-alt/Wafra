@@ -9,6 +9,7 @@
  */
 import { unreadFormatCount, REPORT_PROMPT_THRESHOLD } from '@/lib/accuracy';
 import { periodComparison, type PeriodComparison } from '@/lib/analytics';
+import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { composition, buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
@@ -19,7 +20,7 @@ import {
   worthPrompting,
   type UncategorisedSummary,
 } from '@/lib/uncategorised';
-import type { AppState, Transaction } from '@/lib/types';
+import type { Account, AppState, Transaction } from '@/lib/types';
 
 export interface DashboardProjectionRequest {
   state: AppState;
@@ -33,6 +34,7 @@ export interface DashboardProjection {
   hero: {
     incomeFils: number;
     expenseFils: number;
+    cashOutFils: number;
     netFils: number;
   };
   comparison: PeriodComparison | null;
@@ -42,6 +44,7 @@ export interface DashboardProjection {
     items: Outgoing[];
   };
   activityRows: Transaction[];
+  accountById: ReadonlyMap<string, Account>;
   foreignActivity: ForeignActivitySummary;
   internalTransactionIds: ReadonlySet<string>;
   lastAutomaticCaptureDate?: string;
@@ -71,6 +74,10 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
   const expenseFils = composition(summary).totalFils;
   const incomeFils = Math.round(summary.incomeFils / 100) * 100;
+  const cashOutFils = summarizeCashOutflow(state, period, {
+    live: liveAccounts,
+    internal,
+  }).totalFils;
   const unreadCount = unreadFormatCount(state);
   const uncategorisedSummary = uncategorisedMerchants(state);
 
@@ -89,6 +96,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
     hero: {
       incomeFils,
       expenseFils,
+      cashOutFils,
       netFils: incomeFils - expenseFils,
     },
     comparison: periodComparison(state.transactions, period, liveAccounts, internal, now),
@@ -106,6 +114,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
           inPeriod(transaction.date, period),
       )
       .slice(0, 6),
+    accountById: new Map(state.accounts.map((account) => [account.id, account] as const)),
     foreignActivity: summarizeForeignActivity(
       state.transactions,
       (transaction) =>

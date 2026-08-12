@@ -123,6 +123,7 @@ setActiveMarket('AE');
   eq('an empty ledger has one reconciled zero hero', projected.hero, {
     incomeFils: 0,
     expenseFils: 0,
+    cashOutFils: 0,
     netFils: 0,
   });
   ok('the selected current month is marked live', projected.live === true);
@@ -210,6 +211,7 @@ setActiveMarket('AE');
   eq('hero figures share live-account, transfer, and display-rounding rules', projected.hero, {
     incomeFils: 10100,
     expenseFils: 6100,
+    cashOutFils: 6100,
     netFils: 4000,
   });
   eq('the comparison uses the same eligible current rows',

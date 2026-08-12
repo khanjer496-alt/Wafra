@@ -621,7 +621,10 @@ export default function BillsScreen() {
                       <View
                         style={[
                           styles.dueProgressFill,
-                          { width: `${Math.max(2, paidShare * 100)}%`, backgroundColor: theme.primary },
+                          {
+                            width: `${paidShare <= 0 ? 0 : Math.max(2, paidShare * 100)}%`,
+                            backgroundColor: theme.primary,
+                          },
                         ]}
                       />
                     </View>

@@ -326,7 +326,7 @@ function ktSources(dir) {
       !/onVersionTap/.test(settings));
 
   ok('the paywall renders the storefront price instead of ledger Money',
-    /storePrices\?\.\[p\]\?\.priceString/.test(pro) &&
+    /storePrices\?\.\[[a-zA-Z]+\]\?\.priceString/.test(pro) &&
       /loadStorePrices/.test(pro) &&
       !/<Money[^>]*PRO_PRICES/.test(pro));
   ok('native pricing never falls back to an unlabeled USD reference',
@@ -539,11 +539,17 @@ function ktSources(dir) {
   ok('Private Mode strips retained and newly imported raw text',
     /transactions: action\.enabled[\s\S]*raw: _discard/.test(store) &&
       /const base = authoritativeState\.current[\s\S]*raw: base\.privateMode \? undefined : t\.raw/.test(store));
-  ok('Private Mode stops the iOS relay but leaves Android capture first',
-    capture.indexOf('if (isSmsScanningAvailable())') <
-      capture.indexOf('if (state.privateMode) return EMPTY') &&
-      capture.indexOf('if (state.privateMode) return EMPTY') <
-      capture.indexOf('if (isRelayPlatform())'));
+  ok('capture opt-out is durable and stops every source before it can read messages',
+    /captureOptOut: boolean/.test(types) &&
+      capture.indexOf('if (state.captureOptOut') <
+        capture.indexOf('if (isSmsScanningAvailable())') &&
+      capture.indexOf('if (state.captureOptOut') <
+        capture.indexOf("if (isRelayPlatform())"));
+  ok('erasing data preserves capture opt-out while automatic enable clears it explicitly',
+    /captureOptOut: state\.captureOptOut/.test(store) &&
+      /setCaptureOptOut\(false\)/.test(settings));
+  ok('Private Mode blocks the non-local relay without disabling local Android parsing',
+    /state\.privateMode && isRelayPlatform\(\)/.test(capture));
   ok('enabling Private Mode disconnects an existing iOS relay first',
     settings.indexOf('await unpairDevice(relay)') <
       settings.indexOf('setPrivateMode(true)'));
@@ -862,7 +868,7 @@ function ktSources(dir) {
   ok('a failed pull-to-refresh tells the user instead of rejecting into nothing',
     /runAutoImport\(true\)\s*\.catch\(/.test(refresh) &&
       refresh.indexOf('.catch(') < refresh.indexOf('.finally(') &&
-      /toast\.show\(t\('captureRefreshFailed'\)\)/.test(refresh));
+      /toast\.show\(t\('captureRefreshFailed'\),\s*\{\s*tone:\s*'error'\s*\}\)/.test(refresh));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,
@@ -912,11 +918,12 @@ function ktSources(dir) {
   ok('a zero watermark reads the whole inbox, not just what is new',
     /state\.lastScanTs <= 0 \? 0 : state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
   ok('the foreground watch re-runs when the ledger is wiped',
-    /\}, \[state\.hydrated, state\.lastScanTs, watchForeground\]\);/.test(hook));
+    /if \(!state\.hydrated \|\| !state\.onboarded\) return;/.test(hook) &&
+      /state\.lastScanTs <= 0 \|\| captureJustEnabled/.test(hook));
   ok('the rebuild scan is not refused by the freshness throttle',
     /const scan = \(force = false\) => \{/.test(hook) &&
       /if \(!force && Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS\) return;/.test(hook) &&
-      /\n    scan\(state\.lastScanTs <= 0\);/.test(hook));
+      /if \(!state\.captureOptOut\) scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled\);/.test(hook));
   // Silent, not interactive. An interactive scan on an iPhone whose relay the
   // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
   // who has just erased everything and is being shown the Shortcut cleanup

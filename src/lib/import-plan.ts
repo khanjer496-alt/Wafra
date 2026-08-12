@@ -166,14 +166,59 @@ export function buildImportPlan(
     priorById.set(t.id, t);
     if (t.smsKey && t.source === 'sms') priorBySmsKey.set(t.smsKey, t);
   }
+  /**
+   * Stable identity for a local SMS across parser money corrections.
+   *
+   * The legacy key is `s{provider timestamp}-{parsed amount}`. That made a
+   * parser-version reread unsafe: correcting an amount (or updating an
+   * offline FX fallback) changed the key, so the same retained Message was
+   * appended beside its old row. The provider timestamp is the only stable
+   * identity older Android rows retained. Use it only when it is unique on
+   * both sides, belongs to a local SMS capture, is date-plausible, and any
+   * retained source text agrees byte-for-byte. Historical Shortcut timestamps
+   * are rounded and therefore stay on their GUID-derived `h...` identity.
+   */
+  const rowTimestamp = (t: Transaction): number | undefined => {
+    if (Number.isFinite(t.ts)) return t.ts;
+    const match = t.smsKey?.match(/^s(\d+)-/);
+    return match ? Number(match[1]) : undefined;
+  };
+  const rowsByTimestamp = new Map<number, Transaction[]>();
+  for (const t of state.transactions) {
+    if (t.source !== 'sms') continue;
+    const ts = rowTimestamp(t);
+    if (ts === undefined) continue;
+    const bucket = rowsByTimestamp.get(ts);
+    if (bucket) bucket.push(t);
+    else rowsByTimestamp.set(ts, [t]);
+  }
+  const parsedTimestampCounts = new Map<number, number>();
+  for (const p of parsed) {
+    if (p.sourceEventId || p.channel === 'push' || !Number.isFinite(p.smsTs)) continue;
+    parsedTimestampCounts.set(p.smsTs!, (parsedTimestampCounts.get(p.smsTs!) ?? 0) + 1);
+  }
+  const stableLocalPrior = (p: ScannedSms): Transaction | undefined => {
+    if (p.sourceEventId || p.channel === 'push' || !Number.isFinite(p.smsTs)) return undefined;
+    if (parsedTimestampCounts.get(p.smsTs!) !== 1) return undefined;
+    const rows = rowsByTimestamp.get(p.smsTs!);
+    if (!rows || rows.length !== 1) return undefined;
+    const prior = rows[0];
+    if (p.raw !== undefined && prior.raw !== undefined && p.raw !== prior.raw) return undefined;
+    const messageDate = Date.parse(`${p.date ?? toISODate(new Date(p.smsTs!))}T12:00:00Z`);
+    if (!Number.isFinite(messageDate) || Math.abs(messageDate - p.smsTs!) > 7 * 86400000) {
+      return undefined;
+    }
+    return prior;
+  };
   const updates: TxHealUpdate[] = [];
   const healFromReparse = (
     smsKey: string | undefined,
     p: ScannedSms,
     resolvedAccountId?: string,
     cardPaymentSide?: 'debit' | 'receipt',
+    stablePrior?: Transaction,
   ) => {
-    const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+    const prior = (smsKey ? priorBySmsKey.get(smsKey) : undefined) ?? stablePrior;
     if (!prior || prior.userEdited) return;
     // Older rows predate structured settlement sides. Pass the side resolved
     // from either the parser field or the Android-only raw fallback so a
@@ -538,7 +583,7 @@ export function buildImportPlan(
       // happened". The user who reported it carried twelve AED 775.81 e&
       // charges for bills that were only ever due.
       const staleKey = smsKeyOf(p);
-      const misread = staleKey ? priorBySmsKey.get(staleKey) : undefined;
+      const misread = (staleKey ? priorBySmsKey.get(staleKey) : undefined) ?? stableLocalPrior(p);
       if (misread && !misread.isTransfer && !misread.userEdited) {
         updates.push({ id: misread.id, remove: true });
       }
@@ -560,7 +605,7 @@ export function buildImportPlan(
       // A due reminder previously mis-imported as a fake expense gets
       // dropped now that the parser recognizes what it is.
       const staleKey = smsKeyOf(p);
-      const misread = staleKey ? priorBySmsKey.get(staleKey) : undefined;
+      const misread = (staleKey ? priorBySmsKey.get(staleKey) : undefined) ?? stableLocalPrior(p);
       if (misread && !misread.isTransfer && !misread.userEdited) {
         updates.push({ id: misread.id, remove: true });
       }
@@ -641,12 +686,24 @@ export function buildImportPlan(
     }
     if (p.kind === 'cardPayment') {
       const smsKey = smsKeyOf(p);
-      const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+      const exactPrior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+      const stablePrior = exactPrior ?? stableLocalPrior(p);
+      const prior = stablePrior;
       const resolution = resolveAccount(p, prior?.accountId);
       const { accountId } = resolution;
       if (!accountId) continue;
       if (resolution.confident) noteSnapshot(accountId, p);
       const cardPaymentSide = cardPaymentSideOf(p);
+      if (!exactPrior && stablePrior) {
+        healFromReparse(
+          undefined,
+          p,
+          resolution.confident ? accountId : undefined,
+          cardPaymentSide,
+          stablePrior,
+        );
+        continue;
+      }
       // A card payment lands as income into the card account.
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
@@ -702,7 +759,9 @@ export function buildImportPlan(
     // Plain transaction. transferHint = the bank-side leg of a card payment /
     // own-account transfer: keep it for balances, exclude it from spending.
     const smsKey = smsKeyOf(p);
-    const prior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+    const exactPrior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+    const stablePrior = exactPrior ?? stableLocalPrior(p);
+    const prior = stablePrior;
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel,
@@ -730,6 +789,16 @@ export function buildImportPlan(
     const { accountId } = resolution;
     if (!accountId) continue;
     if (resolution.confident) noteSnapshot(accountId, p);
+    if (!exactPrior && stablePrior) {
+      healFromReparse(
+        undefined,
+        p,
+        resolution.confident ? accountId : undefined,
+        undefined,
+        stablePrior,
+      );
+      continue;
+    }
     const candidate = { ...captureCandidate, accountId };
     if (guard.has(candidate)) {
       const matchedId = guard.takeMatchedId();

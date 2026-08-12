@@ -125,10 +125,14 @@ export function EmptyMonth({
   monthName,
   onReadInbox,
   onAddManually,
+  primaryLabel,
+  body,
 }: {
   monthName: string;
   onReadInbox?: () => void;
   onAddManually: () => void;
+  primaryLabel?: string;
+  body?: string;
 }) {
   const theme = useTheme();
   return (
@@ -141,10 +145,10 @@ export function EmptyMonth({
       </View>
       <ThemedText type="small">{tf('noEntriesInMonth', { month: monthName })}</ThemedText>
       <ThemedText type="default" themeColor="textSecondary">
-        {t('emptyMonthHelp')}
+        {body ?? t('emptyMonthHelp')}
       </ThemedText>
       <View style={styles.actions}>
-        {onReadInbox && <Button inline label={t('readInbox')} onPress={onReadInbox} />}
+        {onReadInbox && <Button inline label={primaryLabel ?? t('readInbox')} onPress={onReadInbox} />}
         <Button inline variant="outline" label={t('addManually')} onPress={onAddManually} />
       </View>
     </View>

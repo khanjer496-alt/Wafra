@@ -102,7 +102,7 @@ function AlertRow({
       <View style={styles.rowActions}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${t('reviewAlertAdd')}. ${t(family.label)}. ${amount}. ${bank}`}
+          accessibilityLabel={`${t('reviewAlertReview')}. ${t(family.label)}. ${amount}. ${bank}`}
           accessibilityHint={t('reviewAlertAddHint')}
           accessibilityState={{ disabled: busy }}
           disabled={busy}
@@ -116,7 +116,7 @@ function AlertRow({
           ]}>
           <Icon name="plus" size={14} color={theme.onPrimary} />
           <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-            {t('reviewAlertAdd')}
+            {t('reviewAlertReview')}
           </ThemedText>
         </Pressable>
         <Pressable
@@ -162,9 +162,9 @@ export default function ReviewAlertsScreen() {
     setBusyId(item.id);
     try {
       await dismissReviewAlert(item.id, 'dismissed');
-      toast.show(t('reviewAlertDismissed'));
+      toast.show(t('reviewAlertDismissed'), { tone: 'info' });
     } catch {
-      toast.show(t('reviewAlertDismissFailed'));
+      toast.show(t('reviewAlertDismissFailed'), { tone: 'error' });
     } finally {
       setBusyId(null);
     }

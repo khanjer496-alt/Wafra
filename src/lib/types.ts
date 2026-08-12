@@ -145,6 +145,17 @@ export interface Transaction {
    * collapse that pair without collapsing two genuine equal payments.
    */
   cardPaymentSide?: 'debit' | 'receipt';
+  /**
+   * Date cash left the funding account for a card settlement.
+   *
+   * The card can acknowledge receipt after midnight or after a weekend. Its
+   * row is the richer canonical settlement record, but reporting Cash out on
+   * the receipt date moves the payment into the wrong month. Set only while
+   * reconciling an independently observed debit-side alert.
+   */
+  cashOutDate?: string;
+  /** Funding account used for Cash out when the canonical row is a card receipt/manual claim. */
+  cashOutAccountId?: string;
   /** Credit-card payments etc — excluded from spending/income analytics. */
   isTransfer?: boolean;
   /**
@@ -313,6 +324,13 @@ export interface AppState {
    * the Shortcuts relay, because an HTTP Shortcut cannot be called "local-only".
    */
   privateMode: boolean;
+  /**
+   * Explicit automatic-capture opt-out. This is separate from Private Mode:
+   * on Android, Private Mode may still parse structured alerts locally while
+   * dropping raw diagnostic text, whereas this flag forbids inbox collection
+   * even when the OS still holds a previously granted SMS permission.
+   */
+  captureOptOut: boolean;
   /**
    * The nightly spend digest. Off until asked for: it is an interruption, the
    * same standing as the per-charge banner, and a finance app that pushes

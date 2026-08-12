@@ -171,6 +171,13 @@ function relayLaunchMarket(
  * background sync.
  */
 export async function collectNewMessages(state: AppState): Promise<CaptureResult> {
+  // An Android runtime permission can remain granted after the user turns
+  // capture off inside Wafra, so the durable app preference must stop before
+  // the inbox reader is called. Private Mode is a different promise on
+  // Android (structured local parsing with raw text dropped); on iOS it still
+  // blocks the non-local relay entirely.
+  if (state.captureOptOut || (state.privateMode && isRelayPlatform())) return EMPTY;
+
   if (isSmsScanningAvailable()) {
     // The routine scan reads only what arrived since last time. That is right
     // for a normal refresh and wrong after a parser change: a message is
@@ -215,11 +222,6 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
   // A parser fix therefore reaches iOS from the next message onward, while
   // Android heals its history. That asymmetry is a consequence of the
   // retention promise, not an oversight.
-
-  // Private Mode is local-only. Android already returned above through its
-  // on-device inbox pipe; iOS must stop here because a Shortcut can only hand
-  // its message to the app by making an HTTP request to the relay.
-  if (state.privateMode) return EMPTY;
 
   if (isRelayPlatform()) {
     // A headless wake may already have collected and acknowledged rows while

@@ -1,0 +1,23 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- extendedWaitUntil:
+    visible: "Set up Wafra"
+    timeout: 20000
+- tapOn: "Set up Wafra"
+- assertVisible: "Choose your message access."
+- assertVisible: "Maximum privacy · no Messages access"
+- tapOn: "Maximum privacy · no Messages access"
+- assertVisible: "Ready when you are."
+- assertVisible: "Open Wafra"
+- tapOn: "Open Wafra"
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 20000
+- assertNotVisible: "Watching bank alerts"
+- assertVisible: "Automatic capture. Connect your Shortcut once. One-time setup in Apple Shortcuts"
+- assertVisible: "Check alerts"
+- assertVisible: "Add manually"
+- takeScreenshot: "manual-home-ios"
