@@ -170,9 +170,9 @@ const emptyLedger = {
 };
 
 i18n.setLanguage('en');
-eq('partial net-worth copy resolves every placeholder',
-  i18n.tf('netWorthMissing', { count: 2 }),
-  'Accounts excluded until a reliable balance arrives: 2');
+eq('balance-coverage copy resolves every placeholder',
+  i18n.tf('balanceCoverage', { known: 2, total: 4 }),
+  'Reliable balances for 2 of 4 active accounts');
 
 /* Net worth: a sum of nothing is not an answer.
  *
@@ -204,20 +204,21 @@ eq('partial net-worth copy resolves every placeholder',
   eq('the auditable projection reports that missing coverage explicitly',
     [breakdown.knownAccountCount, breakdown.unknownAccountCount], [0, 1]);
 
-  // Which is why the screen consumes the auditable projection and prints the
-  // same dash its own rows print rather than that zero.
-  ok('Wallet uses the shared net-worth breakdown rather than rebuilding it in UI',
+  // Wallet consumes the auditable balance projection without presenting its
+  // incomplete subtraction as net worth.
+  ok('Wallet uses the shared balance breakdown rather than rebuilding it in UI',
     /netWorthBreakdown\(state\)/.test(walletSource) &&
-      /worth\.unknownAccountCount/.test(walletSource));
+      /balances\.balanceByAccountId/.test(walletSource));
   ok('Wallet prints a dash, not AED 0, when nothing is knowable',
-    /worth\.knownAccountCount > 0[\s\S]*?formatAmount\(worth\.totalFils, \{ decimals: false \}\)[\s\S]*?: '—'/.test(
+    /balanceAccountCoverage\.known > 0[\s\S]*?formatAmount\(balances\.balanceFils, \{ decimals: false \}\)[\s\S]*?: '—'/.test(
       walletSource,
     ));
-  ok('and a partial answer shows the equation and names its coverage',
-    /worth\.balanceFils/.test(walletSource) &&
-      /worth\.debtFils/.test(walletSource) &&
-      /netWorthCoverage/.test(walletSource) &&
-      /netWorthMissing/.test(walletSource));
+  ok('Wallet replaces net worth with balances, card dues and paid-from-account facts',
+    /availableBalances/.test(walletSource) &&
+      /balanceCoverage/.test(walletSource) &&
+      /paidFromAccounts/.test(walletSource) &&
+      /cashOutBreakdown/.test(walletSource) &&
+      !/estimatedNetWorth/.test(walletSource));
 }
 
 /* A paste the parser cannot read.

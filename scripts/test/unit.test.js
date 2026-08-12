@@ -324,7 +324,8 @@ const rentSubs = subsLib.detectSubscriptions([
   subTx('Netflix', '2026-07-03', 3900),
 ]);
 ok('groups: rent classified as housing', rentSubs.find(s => s.title === 'Apartment Rent')?.group === 'housing');
-ok('groups: DEWA classified as utility', rentSubs.find(s => s.title === 'DEWA Bill')?.group === 'utility');
+ok('groups: DEWA variants use one provider title and stay utilities',
+  rentSubs.find(s => s.title === 'DEWA')?.group === 'utility');
 ok('groups: Netflix stays a subscription', rentSubs.find(s => s.title === 'Netflix')?.group === 'subscription');
 ok('groups: trueSubscriptions excludes rent/utilities',
   subsLib.trueSubscriptions(rentSubs).length === 1 && subsLib.trueSubscriptions(rentSubs)[0].title === 'Netflix');
@@ -396,6 +397,23 @@ const realBill = subsLib.detectSubscriptions([
 ]);
 ok('bills: a swinging utility bill is still detected',
   realBill.length === 1 && realBill[0].group === 'utility');
+
+const etisalatVariants = subsLib.detectSubscriptions([
+  subTx('Etisalat Digital App', '2026-05-15', 31392, 'telecom'),
+  subTx('Etisalat Quickpay', '2026-06-15', 31392, 'telecom'),
+  subTx('Bnknt Utlty Pymnt-etisalat', '2026-07-15', 31392, 'telecom'),
+], [], new Date(2026, 6, 25));
+ok('bills: proven Etisalat payment-channel variants form one E& commitment',
+  etisalatVariants.length === 1 && etisalatVariants[0].title === 'E&' &&
+  etisalatVariants[0].group === 'utility' && etisalatVariants[0].chargeCount === 3);
+
+const unrelatedInternetShop = subsLib.detectSubscriptions([
+  subTx('Agoda.com Maitria Ho Internet', '2026-06-15', 108859, 'telecom'),
+  subTx('Agoda.com Maitria Ho Internet', '2026-07-15', 108859, 'telecom'),
+], [], new Date(2026, 6, 25));
+ok('bills: a generic internet word is not renamed to a telecom provider',
+  unrelatedInternetShop.length === 1 &&
+  unrelatedInternetShop[0].title === 'Agoda.com Maitria Ho Internet');
 
 // User dismissals remove a merchant from detection everywhere
 const dismissed = subsLib.detectSubscriptions(
@@ -4817,8 +4835,8 @@ eq('analytics: the category trend follows the split too',
       demoJul.subs.map((s) => s.title).join(', '));
     ok('demo: Bills → Cards is not empty', demoJul.dues.length > 0);
     ok('demo: the card due is real money', demoJul.dues.every((d) => d.remainingFils > 0));
-    ok('demo: du, Etisalat, DEWA and Salik are detected as fixed commitments',
-      ['du Home Internet', 'Etisalat Postpaid', 'DEWA Bill', 'Salik Auto Recharge']
+    ok('demo: du, E&, DEWA and Salik are detected as fixed commitments',
+      ['du', 'E&', 'DEWA', 'Salik Auto Recharge']
         .every((t) => demoJul.commitments.some((s) => s.title === t)),
       demoJul.commitments.map((s) => s.title).join(', '));
     ok('demo: one cancelled subscription to show', demoJul.stopped.length === 1,

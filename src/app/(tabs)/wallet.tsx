@@ -11,14 +11,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { TrendCurve } from '@/components/ui/charts';
 import { AmountSheet } from '@/components/ui/amount-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -31,19 +29,17 @@ import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
-import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
-import { netWorthSeries } from '@/lib/analytics';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { netWorthBreakdown } from '@/lib/balances';
+import { summarizeCashOutflow } from '@/lib/cash-flow';
 import {
   formatAED,
   formatAmount,
   monthKey,
-  monthLabel,
   parseAmountToFils,
   totalAsShown,
 } from '@/lib/format';
@@ -102,7 +98,6 @@ export default function WalletScreen() {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
   const language = useLanguage();
-  const enter = useScreenEntering();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
   const {
@@ -136,15 +131,9 @@ export default function WalletScreen() {
   // destructive answer to it opens second.
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const [worthExpanded, setWorthExpanded] = useState(false);
-
-  // The curve is an SVG, so it needs a pixel width rather than a percentage.
-  // Measured once from the row it sits in, which is what keeps it correct on a
-  // tablet and under RTL.
-  const [curveWidth, setCurveWidth] = useState(0);
 
   /**
-   * The headline figure, and how much of this screen it can actually speak for.
+   * Reliable balances and how much of this screen they can actually cover.
    *
    * Scans every transaction once per account, so it is kept off the render
    * path — and it counts as well as sums, because the sum alone lies.
@@ -154,40 +143,27 @@ export default function WalletScreen() {
    * a statement SMS was therefore told, in display type, that its net worth
    * was AED 0 — directly above rows that each said "no balance SMS yet".
    *
-   * So the headline gets the same three-state vocabulary those rows already
-   * use: nothing knowable is a dash, not a zero, and a partial answer says how
-   * many accounts it had to leave out so it can be reconciled against them.
+   * Wallet no longer turns those incomplete observations into "net worth".
+   * The useful fact here is the latest balance the banks actually reported;
+   * card debt remains beside its statements and payment state below.
    */
-  const worth = useMemo(() => netWorthBreakdown(state), [state]);
-  const worthCoverageText =
-    worth.activeAccountCount === 0
-      ? t('addAccountForEstimate')
-      : tf('netWorthCoverage', {
-          known: worth.knownAccountCount,
-          total: worth.activeAccountCount,
+  const balances = useMemo(() => netWorthBreakdown(state), [state]);
+  const balanceAccountCoverage = useMemo(() => {
+    const accounts = state.accounts.filter(
+      (account) => !account.archived && account.cardType !== 'credit',
+    );
+    return {
+      known: accounts.filter((account) => balances.balanceByAccountId[account.id] !== null).length,
+      total: accounts.length,
+    };
+  }, [state.accounts, balances.balanceByAccountId]);
+  const balanceCoverageText =
+    balanceAccountCoverage.total === 0
+      ? t('addAccountForBalances')
+      : tf('balanceCoverage', {
+          known: balanceAccountCoverage.known,
+          total: balanceAccountCoverage.total,
         });
-  const worthMissingText =
-    worth.unknownAccountCount > 0
-      ? tf('netWorthMissing', { count: worth.unknownAccountCount })
-      : null;
-
-  /**
-   * Movement since the start of the six-month window. A single figure with no
-   * direction is a number; with a direction it is an answer.
-   */
-  const worthSeries = useMemo(() => netWorthSeries(state).slice(-6), [state]);
-  const worthChange = useMemo(() => {
-    const series = worthSeries;
-    if (series.length < 2) return null;
-    const first = series[0];
-    // Both ends come from the series. Subtracting the headline `total` from
-    // it was subtracting two different definitions of net worth: the headline
-    // counts only bank-quoted balances on live accounts, the series counts
-    // opening balances plus every transaction. The difference between them is
-    // not a movement — it is the gap between two ways of measuring.
-    const last = series[series.length - 1];
-    return { fils: last.fils - first.fils, since: monthLabel(first.key, true) };
-  }, [worthSeries]);
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const reissues = useMemo(() => reissueSuggestions(state, now), [state, now]);
   // Totalled AS SHOWN, because this figure is printed directly above the
@@ -252,6 +228,10 @@ export default function WalletScreen() {
   const internal = useMemo(
     () => internalTransferIds(state.transactions, liveAccounts),
     [state.transactions, liveAccounts],
+  );
+  const cashOut = useMemo(
+    () => summarizeCashOutflow(state, monthKey(now), { live: liveAccounts, internal }),
+    [state, now, liveAccounts, internal],
   );
   /**
    * Both halves of a move between the user's own accounts are excluded, as
@@ -365,42 +345,26 @@ export default function WalletScreen() {
             </View>
           </View>
 
-          {/* An estimate should be auditable at the point it is shown. The old
-              headline silently treated every unknown balance as zero and put
-              a differently calculated chart directly underneath it. This card
-              exposes the equation, coverage and exclusions without making the
-              user visit a help page. */}
+          {/* Wallet answers concrete account questions. Inbox history is not
+              complete enough to make a defensible net-worth claim. */}
           <View
             style={[
-              styles.worthCard,
+              styles.overviewCard,
               { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
             ]}>
-            <View style={styles.worthHeader}>
-              <View style={styles.worthHeaderCopy}>
-                <ThemedText type="smallBold">{t('estimatedNetWorth')}</ThemedText>
-                <ThemedText
-                  type="meta"
-                  style={{
-                    color:
-                      worth.activeAccountCount === 0
-                        ? theme.textSecondary
-                        : worth.unknownAccountCount > 0
-                          ? theme.warning
-                          : theme.income,
-                  }}>
-                  {worth.activeAccountCount === 0
-                    ? t('noActiveAccounts')
-                    : worth.unknownAccountCount > 0
-                      ? t('partialEstimate')
-                      : t('allAccountsIncluded')}
+            <View style={styles.overviewHeader}>
+              <View style={styles.overviewHeaderCopy}>
+                <ThemedText type="smallBold">{t('availableBalances')}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {balanceCoverageText}
                 </ThemedText>
               </View>
-              <View style={[styles.worthMark, { backgroundColor: theme.primarySoft }]}>
-                <Icon name="wallet" size={18} color={theme.primary} />
+              <View style={[styles.overviewMark, { backgroundColor: theme.primarySoft }]}>
+                <Icon name="bank" size={18} color={theme.primary} />
               </View>
             </View>
 
-            <View style={styles.worthRow}>
+            <View style={styles.overviewAmount}>
               <ThemedText
                 accessible={false}
                 type="smallBold"
@@ -416,151 +380,73 @@ export default function WalletScreen() {
                 adjustsFontSizeToFit
                 minimumFontScale={0.58}
                 accessibilityLabel={
-                  worth.knownAccountCount > 0
-                    ? `${ledgerCurrencyDisplay()} ${formatAmount(worth.totalFils)}`
+                  balanceAccountCoverage.known > 0
+                    ? `${ledgerCurrencyDisplay()} ${formatAmount(balances.balanceFils)}`
                     : undefined
                 }>
-                {worth.knownAccountCount > 0
-                  ? formatAmount(worth.totalFils, { decimals: false })
+                {balanceAccountCoverage.known > 0
+                  ? formatAmount(balances.balanceFils, { decimals: false })
                   : '—'}
               </ThemedText>
             </View>
 
-            <View style={[styles.worthEquation, { borderColor: theme.cardBorder }]}>
-              <View style={styles.worthPart}>
-                <ThemedText type="micro" themeColor="textSecondary">
-                  {t('knownBalances')}
-                </ThemedText>
-                <ThemedText
-                  type="smallBold"
-                  tabular
-                  accessibilityLabel={`${t('knownBalances')}: ${formatAED(worth.balanceFils)}`}>
-                  {formatAED(worth.balanceFils, { decimals: false })}
-                </ThemedText>
-              </View>
-              <View style={[styles.worthPart, styles.worthDebtPart, { borderTopColor: theme.cardBorder }]}>
-                <ThemedText type="micro" themeColor="textSecondary">
-                  {t('amountsOwed')}
-                </ThemedText>
-                <ThemedText
-                  type="smallBold"
-                  tabular
-                  accessibilityLabel={`${t('amountsOwed')}: ${formatAED(worth.debtFils)}`}
-                  style={{ color: worth.debtFils > 0 ? theme.expense : theme.text }}>
-                  − {formatAED(worth.debtFils, { decimals: false })}
-                </ThemedText>
-              </View>
-            </View>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                [worthCoverageText, worthMissingText, t('howNetWorthCalculated')]
-                  .filter(Boolean)
-                  .join('. ')
-              }
-              accessibilityState={{ expanded: worthExpanded }}
-              onPress={() => {
-                tapped();
-                setWorthExpanded((expanded) => !expanded);
-              }}
-              style={({ pressed }) => [
-                styles.worthExplainButton,
-                { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
-              ]}>
-              <View style={styles.worthCoverage}>
-                <Icon
-                  name={worth.activeAccountCount === 0 ? 'plus' : worth.unknownAccountCount > 0 ? 'alert' : 'check'}
-                  size={16}
-                  color={
-                    worth.activeAccountCount === 0
-                      ? theme.primary
-                      : worth.unknownAccountCount > 0
-                        ? theme.warning
-                        : theme.income
-                  }
-                />
-                <View style={styles.worthCoverageCopy}>
-                  <ThemedText type="small" numberOfLines={2}>
-                    {worthCoverageText}
-                  </ThemedText>
-                  {worthMissingText && (
-                    <ThemedText type="meta" themeColor="textSecondary" numberOfLines={2}>
-                      {worthMissingText}
-                    </ThemedText>
-                  )}
+            <View style={[styles.overviewMetrics, { borderTopColor: theme.cardBorder }]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${t('cardPaymentsDue')}, ${formatAED(duesTotalFils, { decimals: false })}`}
+                onPress={() => {
+                  tapped();
+                  router.push('/bills');
+                }}
+                style={({ pressed }) => [
+                  styles.overviewMetric,
+                  { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
+                ]}>
+                <View style={[styles.metricIcon, { backgroundColor: theme.expenseSoftBg }]}>
+                  <Icon name="wallet" size={15} color={theme.expense} />
                 </View>
-              </View>
-              <View style={worthExpanded ? styles.chevronExpanded : undefined}>
-                <Icon name="chevron-down" size={16} color={theme.textSecondary} />
-              </View>
-            </Pressable>
+                <View style={styles.metricCopy}>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {t('cardPaymentsDue')}
+                  </ThemedText>
+                  <ThemedText type="smallBold" tabular>
+                    {formatAED(duesTotalFils, { decimals: false })}
+                  </ThemedText>
+                </View>
+                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+              </Pressable>
 
-            {worthExpanded && (
-              <View style={[styles.worthExplanation, { borderTopColor: theme.cardBorder }]}>
-                <ThemedText type="smallBold">{t('howNetWorthCalculated')}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {t('netWorthExplanation')}
-                </ThemedText>
-              </View>
-            )}
-          </View>
-
-          {/* A separate recorded-movement view — a line, not bars.
-              This was six columns scaled 10–40px across the window's own
-              min/max, so five of the six months rendered as near-identical
-              stubs beside one tall block and the view read as "you had nothing
-              until August". Bars are also the wrong mark: a bar says "these are
-              six separate amounts", and a balance is one amount that never
-              stopped existing between the months. TrendCurve is the shared
-              primitive for exactly that. */}
-          {worthSeries.length > 1 && (
-            <Animated.View
-              entering={enter(FadeInDown.duration(320))}
-              style={styles.section}>
-              <View style={styles.trendHeader}>
-                <SectionHeader title={t('ledgerTrend6mo')} />
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {t('ledgerTrendExplanation')}
-                </ThemedText>
-              </View>
               <View
                 accessible
-                accessibilityLabel={t('ledgerTrend6mo')}
-                onLayout={(e) => setCurveWidth(e.nativeEvent.layout.width)}>
-                {curveWidth > 0 && (
-                  <TrendCurve points={worthSeries} width={curveWidth} height={104} />
-                )}
-              </View>
-              {/* Every month named. Printing only the first and last left the
-                  four in between unlabelled on a chart whose whole subject is
-                  when things moved. */}
-              <View style={styles.axis}>
-                {worthSeries.map((point, index) => (
-                  <ThemedText
-                    key={point.key}
-                    type="nano"
-                    themeColor={index === worthSeries.length - 1 ? 'text' : 'textTertiary'}>
-                    {monthLabel(point.key, true).split(' ')[0]}
+                accessibilityLabel={`${t('paidFromAccounts')}, ${formatAED(cashOut.totalFils, { decimals: false })}. ${tf('cashOutBreakdown', {
+                  cards: formatAED(cashOut.cardPaymentsFils, { decimals: false }),
+                  accounts: formatAED(cashOut.accountOutflowFils, { decimals: false }),
+                })}`}
+                style={[
+                  styles.overviewMetric,
+                  styles.overviewMetricDivider,
+                  { borderTopColor: theme.cardBorder },
+                ]}>
+                <View style={[styles.metricIcon, { backgroundColor: theme.backgroundSelected }]}>
+                  <Icon name="cash" size={15} color={theme.textSecondary} />
+                </View>
+                <View style={styles.metricCopy}>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {t('paidFromAccounts')}
                   </ThemedText>
-                ))}
+                  <ThemedText type="smallBold" tabular>
+                    {formatAED(cashOut.totalFils, { decimals: false })}
+                  </ThemedText>
+                  <ThemedText type="nano" themeColor="textTertiary">
+                    {tf('cashOutBreakdown', {
+                      cards: formatAED(cashOut.cardPaymentsFils, { decimals: false }),
+                      accounts: formatAED(cashOut.accountOutflowFils, { decimals: false }),
+                    })}
+                  </ThemedText>
+                </View>
               </View>
-              {worthChange && (
-                <ThemedText
-                  type="meta"
-                  tabular
-                  style={{ color: worthChange.fils >= 0 ? theme.income : theme.expense }}>
-                  {tf('walletChangeSince', {
-                    amount: `${worthChange.fils >= 0 ? '+' : '−'}${formatAmount(
-                      Math.abs(worthChange.fils),
-                      { decimals: false },
-                    )}`,
-                    date: worthChange.since,
-                  })}
-                </ThemedText>
-              )}
-            </Animated.View>
-          )}
+            </View>
+          </View>
 
           {currencies.length > 0 && (
             <View style={styles.section}>
@@ -594,40 +480,6 @@ export default function WalletScreen() {
                 </View>
                 <ThemedText type="smallBold" tabular numberOfLines={1}>
                   {formatAED(currenciesTotalFils, { decimals: false })}
-                </ThemedText>
-                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-              </Pressable>
-            </View>
-          )}
-
-          {/* Card dues */}
-          {dues.length > 0 && (
-            <View style={styles.section}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('cardPaymentsDue')}
-                onPress={() => {
-                  tapped();
-                  router.push('/bills');
-                }}
-                style={({ pressed }) => [
-                  styles.summaryLink,
-                  {
-                    borderColor: theme.cardBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
-                  },
-                ]}>
-                <View style={[styles.summaryIcon, { backgroundColor: theme.expenseSoftBg }]}>
-                  <Icon name="wallet" size={17} color={theme.expense} />
-                </View>
-                <View style={styles.summaryCopy}>
-                  <ThemedText type="smallBold">{t('cardPaymentsDue')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textSecondary">
-                    {tf('itemsTracked', { count: dues.length })}
-                  </ThemedText>
-                </View>
-                <ThemedText type="smallBold" tabular numberOfLines={1}>
-                  {formatAED(duesTotalFils, { decimals: false })}
                 </ThemedText>
                 <Icon name="chevron-right" size={16} color={theme.textTertiary} />
               </Pressable>
@@ -889,7 +741,7 @@ export default function WalletScreen() {
             <SectionHeader title={t('accountsHeader')} />
             <View>
               {nonCardAccounts.map((account, i) => {
-                const balance = worth.balanceByAccountId[account.id] ?? null;
+                const balance = balances.balanceByAccountId[account.id] ?? null;
                 const fromBank = account.snapshotKind === 'balance' && account.snapshotFils !== undefined;
                 const meta = KIND_META[account.kind];
                 return (
@@ -1411,70 +1263,55 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     gap: Spacing.five,
   },
-  worthCard: {
+  overviewCard: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.bottomSheet,
     padding: Spacing.four,
     gap: Spacing.three,
     marginTop: -Spacing.two,
   },
-  worthHeader: {
+  overviewHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
-  worthHeaderCopy: { flex: 1, minWidth: 0, gap: 2 },
-  worthMark: {
+  overviewHeaderCopy: { flex: 1, minWidth: 0, gap: 2 },
+  overviewMark: {
     width: 38,
     height: 38,
     borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  worthRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  overviewAmount: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
-  worthEquation: {
+  overviewMetrics: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.three,
-    gap: Spacing.three,
+    paddingTop: Spacing.one,
   },
-  worthPart: { minWidth: 0, gap: Spacing.one },
-  worthDebtPart: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.three,
-  },
-  worthExplainButton: {
-    minHeight: 48,
+  overviewMetric: {
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
+    gap: Spacing.two + 2,
     marginHorizontal: -Spacing.two,
-    marginVertical: -Spacing.one,
     paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
+    paddingVertical: Spacing.two,
     borderRadius: Radius.control,
   },
-  worthCoverage: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  worthCoverageCopy: { flex: 1, minWidth: 0, gap: 1 },
-  chevronExpanded: { transform: [{ rotate: '180deg' }] },
-  worthExplanation: {
+  overviewMetricDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.three,
-    gap: Spacing.two,
+    borderRadius: 0,
   },
-  trendHeader: { gap: Spacing.one },
-  // One label per point, spread to the same width the curve is drawn to, so a
-  // month name sits under the part of the line it belongs to.
-  axis: { flexDirection: 'row', justifyContent: 'space-between' },
+  metricIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metricCopy: { flex: 1, minWidth: 0, gap: 1 },
   scan: {
     flexDirection: 'row',
     alignItems: 'center',

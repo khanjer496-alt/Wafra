@@ -23,14 +23,16 @@
  * slices run animation callbacks with no traversal at all — nothing measured,
  * laid out or drawn — and the first traversal/draw arrives 548ms after the tap.
  * The return tap cost 182ms. Those durations are the tab screens' own entering
- * animations: Home and Flow reach delay 120 + duration 320 = 440ms, Wallet's
- * net-worth columns reach 5 x 45 + 360 = 585ms, Bills' recurring rows reach
- * min(i, 8) x 40 + 300 = 620ms. `ScreenFragment` recycles the same `Screen`
+ * animations: Home and Flow reach delay 120 + duration 320 = 440ms and Bills'
+ * recurring rows reach min(i, 8) x 40 + 300 = 620ms. Wallet removed its
+ * decorative entrance while simplifying its overview. `ScreenFragment`
+ * recycles the same `Screen`
  * view across the fragment remove/add, so React never remounts and component
  * state survives — but the native subtree is detached from the window and
  * re-attached, and the entering animation can start again on that path.
  *
- * So every entrance in the four tab screens goes through `useScreenEntering`,
+ * So every remaining entrance in the animated tab screens goes through
+ * `useScreenEntering`,
  * which returns undefined on Android. That is easy to bypass by accident: the
  * next person adding a section to a tab copies the line above it, and if that
  * line says `entering={FadeInDown...}` the stall comes straight back for one
@@ -92,7 +94,6 @@ const TAB_SCREENS = [
   'src/app/(tabs)/index.tsx',
   'src/app/(tabs)/flow.tsx',
   'src/app/(tabs)/bills.tsx',
-  'src/app/(tabs)/wallet.tsx',
 ];
 
 // ---------------------------------------------------------------------------

@@ -42,6 +42,7 @@ function t(name, msg, expect, options) {
       // `raw` is not there to re-read — the side has to be decided here or not
       // at all, and dedupe.ts's pairing has 18 references to it.
       if (expect.side !== undefined && p.cardPaymentSide !== expect.side) errs.push(`cardPaymentSide ${p.cardPaymentSide} != ${expect.side}`);
+      if (expect.paymentFlowSide !== undefined && p.paymentFlowSide !== expect.paymentFlowSide) errs.push(`paymentFlowSide ${p.paymentFlowSide} != ${expect.paymentFlowSide}`);
       if (expect.reference !== undefined && p.reference !== expect.reference) errs.push(`reference ${p.reference} != ${expect.reference}`);
       if (expect.billIdentity !== undefined && p.billIdentity !== expect.billIdentity) errs.push(`billIdentity ${p.billIdentity} != ${expect.billIdentity}`);
       if (expect.currency !== undefined && p.currency !== expect.currency) errs.push(`currency ${p.currency} != ${expect.currency}`);
@@ -77,6 +78,10 @@ t('merchant stops at "with"',
 t('noon minutes → groceries, stops at with',
   'AED 43.00 was debited for payment to NOON MINUTES with Card no. XX99',
   { merchant: 'Noon Minutes', amountFils: 4300, category: 'groceries' });
+
+t('CAUSEWAY location cannot substring-match SEWA',
+  'Purchase of AED 33.81 with Credit Card ending 1234 at TIKTOK SHOP SELLER, CAUSEWAY BAY.',
+  { merchant: 'Tiktok Shop Seller', amountFils: 3381, category: 'shopping' });
 
 t('OTP messages are skipped entirely',
   'Your OTP for a purchase of AED 260.00 at AMAZON.AE is 482910. Do not share this code.',
@@ -554,7 +559,7 @@ t('YAP cash withdrawal is an ATM withdrawal',
 
 t('instant transfer is titled Outgoing transfer',
   'Dear Customer, AED 1,176.00 has been debited from your account 095XXX11XXX01 towards instant transfer. The available balance is AED 17,795.55.',
-  { merchant: 'Outgoing transfer', amountFils: 117600 });
+  { merchant: 'Outgoing transfer', amountFils: 117600, paymentFlowSide: 'funding' });
 
 t('FAB multi-line Keeta purchase ignores the instalment promo footer',
   'Credit Card Purchase \nCard No XXXX4711 \nAED 76.50 \nTAP*Keeta Dubai ARE \n15/12/25 22:34 \nAvailable Balance AED 7875.65\nYour December statement payment due date is 26/12/2025\n0% instalments up to 12 months, NO fees on international purchases. bit.ly/4nR8uHP Conditions apply.',
@@ -915,7 +920,7 @@ t('a named biller keeps its own category over the bill-pay default',
 
 t('an unknown consumer-number nickname does not invent a utility category',
   'Dear Customer, Your payment instructions of AED 12168.00 to Fishbasket for consumer number 1238865 has been processed on 01/08/2026 12:30',
-  { merchant: 'Fishbasket', category: 'other', type: 'expense' });
+  { merchant: 'Fishbasket', category: 'other', type: 'expense', paymentFlowSide: 'receipt' });
 
 t('utility direct debit names the biller instead of "Card purchase"',
   'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.',

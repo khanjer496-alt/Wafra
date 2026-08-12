@@ -57,8 +57,8 @@ const S = {
     ar: 'الأموال التي خرجت فعلياً من حساباتك، بما فيها دفعات البطاقات مرة واحدة.',
   },
   cashOutBreakdown: {
-    en: 'Card payments {cards} · other account outflow {accounts}',
-    ar: 'دفعات البطاقات {cards} · خروج آخر من الحسابات {accounts}',
+    en: 'Card repayments {cards} · bank, debit and cash {accounts}',
+    ar: 'سداد البطاقات {cards} · البنك والخصم والنقد {accounts}',
   },
   loadingLedger: { en: 'Loading your ledger', ar: 'جارٍ تحميل سجلك المالي' },
   insightsHeader: { en: 'INSIGHTS', ar: 'ملاحظات' },
@@ -357,6 +357,16 @@ const S = {
 
   // Wallet
   walletTitle: { en: 'Wallet', ar: 'المحفظة' },
+  availableBalances: { en: 'Available across accounts', ar: 'المتاح في الحسابات' },
+  balanceCoverage: {
+    en: 'Reliable balances for {known} of {total} active accounts',
+    ar: 'أرصدة موثوقة لـ {known} من أصل {total} حسابات نشطة',
+  },
+  addAccountForBalances: {
+    en: 'Add an account to see its latest reported balance.',
+    ar: 'أضف حساباً لعرض أحدث رصيد وارد من البنك.',
+  },
+  paidFromAccounts: { en: 'Paid from accounts this month', ar: 'المدفوع من الحسابات هذا الشهر' },
   netWorth: { en: 'Net worth', ar: 'صافي الثروة' },
   estimatedNetWorth: { en: 'Estimated net worth', ar: 'صافي الثروة التقديري' },
   partialEstimate: { en: 'Partial estimate', ar: 'تقدير جزئي' },

@@ -89,6 +89,9 @@ export function healPatch(
     patch.category = p.categoryGuess;
   }
   if (p.transferHint && !prior.isTransfer) patch.isTransfer = true;
+  if (p.paymentFlowSide && prior.paymentFlowSide !== p.paymentFlowSide) {
+    patch.paymentFlowSide = p.paymentFlowSide;
+  }
   // Older parser versions marked every inbound remittance as a transfer and
   // therefore removed genuine external money from Income. Inbound account
   // transfers now stay countable unless ledger pairing finds the matching
@@ -200,6 +203,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.smsKey !== undefined) next.smsKey = patch.smsKey;
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
+  if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
     else next.raw = patch.raw;

@@ -145,6 +145,8 @@ export interface Transaction {
    * collapse that pair without collapsing two genuine equal payments.
    */
   cardPaymentSide?: 'debit' | 'receipt';
+  /** Linked consumer-bill flow: internal funding or named biller receipt. */
+  paymentFlowSide?: 'funding' | 'receipt';
   /**
    * Date cash left the funding account for a card settlement.
    *
@@ -380,6 +382,7 @@ export interface TxHealUpdate {
   smsKey?: string;
   viaPush?: boolean;
   cardPaymentSide?: 'debit' | 'receipt';
+  paymentFlowSide?: 'funding' | 'receipt';
   /**
    * The stored source text, or `null` to CLEAR it.
    *

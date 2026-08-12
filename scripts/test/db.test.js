@@ -377,6 +377,7 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
     '@/lib/bills': require('./build/bills'),
     '@/lib/dedupe': dedupe,
+    '@/lib/payment-flow': require('./build/payment-flow'),
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
       LedgerResetError: class LedgerResetError extends Error {},
@@ -910,6 +911,25 @@ const tx = (id, extra = {}) => ({
   const reconciled = hydration.finalizeHydrationTransactions([poorer, edited]);
   ok('capture reconciliation preserves the userEdited winner byte-for-byte',
     reconciled.some((row) => row.id === edited.id && JSON.stringify(row) === before));
+
+  const funding = tx('liv-funding', {
+    title: 'Outgoing transfer',
+    amountFils: 1216800,
+    isTransfer: true,
+    paymentFlowSide: 'funding',
+    ts: Date.parse('2026-08-01T14:25:32Z'),
+    smsKey: 's1785594332000-1216800',
+  });
+  const receipt = tx('fishbasket-receipt', {
+    title: 'Fishbasket',
+    amountFils: 1216800,
+    paymentFlowSide: 'receipt',
+    ts: Date.parse('2026-08-01T14:27:27Z'),
+    smsKey: 's1785594447000-1216800',
+  });
+  const linkedPayment = hydration.finalizeHydrationTransactions([funding, receipt]);
+  ok('hydration collapses a retained funding alert into its named bill receipt',
+    linkedPayment.length === 1 && linkedPayment[0].id === receipt.id);
 }
 
 const persistedMigrationBody = bodyOf(store, 'export function migratePersistedState');

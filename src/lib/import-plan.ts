@@ -220,7 +220,10 @@ export function buildImportPlan(
     stablePrior?: Transaction,
   ) => {
     const prior = (smsKey ? priorBySmsKey.get(smsKey) : undefined) ?? stablePrior;
-    if (!prior || prior.userEdited) return;
+    // A hand-entered row may explain one bank alert for duplicate prevention,
+    // but it is never parser-owned. Do not attach parser roles or move it to a
+    // guessed account during a later inbox re-read.
+    if (!prior || prior.source !== 'sms' || prior.userEdited) return;
     // Older rows predate structured settlement sides. Pass the side resolved
     // from either the parser field or the Android-only raw fallback so a
     // reparse can make persisted one-to-one settlement reconciliation work.
@@ -803,6 +806,7 @@ export function buildImportPlan(
     const candidate = { ...captureCandidate, accountId };
     if (guard.has(candidate)) {
       const matchedId = guard.takeMatchedId();
+      const matchedPrior = matchedId ? priorById.get(matchedId) : undefined;
       if (p.sourceEventId && matchedId) {
         // Promote the matched live capture to the exact retained-Message key.
         // The next distinct history GUID can then survive reducer hydration.
@@ -816,8 +820,19 @@ export function buildImportPlan(
         // history match consumes it in both places or h2 can reuse the push
         // index after h1 consumed the title index.
         guard.consume(matchedId);
+      } else {
+        // An older notification row can match this authoritative SMS through
+        // the duplicate index while having a different timestamp/s-key. Heal
+        // the row we actually matched so newly learned accounting roles reach
+        // existing ledgers instead of only clean imports.
+        healFromReparse(
+          smsKey,
+          p,
+          resolution.confident ? accountId : undefined,
+          undefined,
+          matchedPrior,
+        );
       }
-      healFromReparse(smsKey, p, resolution.confident ? accountId : undefined);
       continue;
     }
     // The same charge already in the ledger from a bank-app notification.
@@ -835,6 +850,8 @@ export function buildImportPlan(
           ts: p.smsTs,
           smsKey,
           viaPush: false,
+          isTransfer: p.transferHint,
+          paymentFlowSide: p.paymentFlowSide,
         });
       }
       // One notification is one charge. Two AED 25 SMS a minute apart used to
@@ -876,6 +893,7 @@ export function buildImportPlan(
       smsKey,
       viaPush: p.channel === 'push' || undefined,
       isTransfer: p.transferHint || undefined,
+      paymentFlowSide: p.paymentFlowSide,
       // Relay/email/PDF ingestion deliberately discards the source body
       // before this device sees the structured row. Keep a diagnostic excerpt
       // only on Android's local parser path, where one actually exists.

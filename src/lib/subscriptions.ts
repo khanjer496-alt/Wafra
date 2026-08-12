@@ -131,6 +131,31 @@ function previousPriceRun(amounts: number[]): number[] {
   return run;
 }
 
+/**
+ * Stable provider identity for recurring utility payments.
+ *
+ * Bank acquirers describe the payment channel as part of the merchant — the
+ * same line appears as "Etisalat Digital App", "Etisalat Quickpay" and
+ * "Utility payment-Etisalat". Grouping on the raw title makes every variant a
+ * one-off, so the fixed-bills tab stays empty even though the provider is paid
+ * every month. Keep this deliberately closed to named UAE providers and to
+ * parser-assigned utility/telecom rows; an arbitrary shop containing "internet"
+ * must never become a household bill.
+ */
+function recurringProviderTitle(transaction: Transaction): string {
+  if (transaction.userEdited ||
+    (transaction.category !== 'utilities' && transaction.category !== 'telecom')) {
+    return transaction.title.trim();
+  }
+  const title = transaction.title.trim();
+  if (/\betisalat\b/i.test(title) || /^e\s*&\s*$/i.test(title)) return 'E&';
+  if (/\bdu\b/i.test(title)) return 'du';
+  if (/\bsewa\b/i.test(title)) return 'SEWA';
+  if (/\bdewa\b/i.test(title)) return 'DEWA';
+  if (/\b(?:fewa|etihadwe)\b/i.test(title)) return 'EtihadWE';
+  return title;
+}
+
 export function detectSubscriptions(
   transactions: Transaction[],
   notSubscriptions: string[] = [],
@@ -142,7 +167,8 @@ export function detectSubscriptions(
   const groups = new Map<string, Transaction[]>();
   for (const t of transactions) {
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
-    const k = t.title.trim().toLowerCase();
+    const providerTitle = recurringProviderTitle(t);
+    const k = providerTitle.toLowerCase();
     if (!k || dismissed.has(k)) continue;
     // A fee alert proves a posted fee, not a future commitment. Even an annual
     // fee needs stable card/account identity carried through the Subscription
@@ -150,7 +176,7 @@ export function detectSubscriptions(
     // parser-minted fee stays out of automatic recurrence detection.
     if (/fee$/.test(k) || k === 'service charge') continue;
     const list = groups.get(k) ?? [];
-    list.push(t);
+    list.push(providerTitle === t.title ? t : { ...t, title: providerTitle });
     groups.set(k, list);
   }
 

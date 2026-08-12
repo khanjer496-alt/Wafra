@@ -34,6 +34,7 @@ Module._resolveFilename = function resolveWafraAlias(request, parent, isMain, op
 
 const { summarizeCashOutflow } = require('../../src/lib/cash-flow.ts');
 const { reconcileCaptureDuplicates } = require('../../src/lib/dedupe.ts');
+const { reconcilePaymentFlows } = require('../../src/lib/payment-flow.ts');
 const { setMonthStartDay } = require('../../src/lib/format.ts');
 const { summarizeMonth } = require('../../src/lib/insights.ts');
 const { internalTransferIds, liveAccountIds } = require('../../src/lib/ledger.ts');
@@ -522,6 +523,78 @@ eq('a legacy reverse pair is absent from the receipt salary-cycle month',
 eq('a legacy reverse pair appears once in the debit salary-cycle month',
   summarizeCashOutflow(legacyMoneyMonthState, { mode: 'month', key: '2026-08' }).totalFils, 110000);
 setMonthStartDay(1);
+
+const linkedUtilityFlowRows = reconcilePaymentFlows([
+  tx('liv-funding', 1216800, {
+    accountId: 'bank', isTransfer: true, paymentFlowSide: 'funding',
+    title: 'Outgoing transfer', date: '2026-08-01',
+    ts: Date.parse('2026-08-01T14:25:32Z'),
+  }),
+  tx('fishbasket-receipt', 1216800, {
+    accountId: 'bank', paymentFlowSide: 'receipt',
+    title: 'Fishbasket', category: 'utilities', date: '2026-08-01',
+    ts: Date.parse('2026-08-01T14:27:27Z'),
+  }),
+]);
+ok('a Liv funding alert and named SEWA receipt become one visible payment',
+  linkedUtilityFlowRows.length === 1 && linkedUtilityFlowRows[0].id === 'fishbasket-receipt');
+eq('the linked SEWA flow contributes to cash out once, not twice',
+  summarizeCashOutflow(
+    { ...state, transactions: linkedUtilityFlowRows },
+    { mode: 'month', key: '2026-08' },
+  ).totalFils,
+  1216800);
+
+const cardUtilityFlowRows = linkedUtilityFlowRows.map((row) => ({
+  ...row,
+  accountId: 'credit',
+}));
+eq('once assigned to a credit card, the SEWA purchase is spending but not cash out',
+  summarizeCashOutflow(
+    { ...state, transactions: cardUtilityFlowRows },
+    { mode: 'month', key: '2026-08' },
+  ).totalFils,
+  0);
+
+const distantUtilityRows = reconcilePaymentFlows([
+  tx('distant-funding', 100000, {
+    isTransfer: true, paymentFlowSide: 'funding',
+    ts: Date.parse('2026-08-01T10:00:00Z'), date: '2026-08-01',
+  }),
+  tx('distant-receipt', 100000, {
+    paymentFlowSide: 'receipt',
+    ts: Date.parse('2026-08-01T10:06:00Z'), date: '2026-08-01',
+  }),
+]);
+eq('same-amount alerts outside the proven five-minute window remain separate',
+  distantUtilityRows.length,
+  2);
+
+const reverseUtilityRows = reconcilePaymentFlows([
+  tx('receipt-first', 100000, {
+    paymentFlowSide: 'receipt',
+    ts: Date.parse('2026-08-01T10:00:00Z'), date: '2026-08-01',
+  }),
+  tx('later-transfer', 100000, {
+    isTransfer: true, paymentFlowSide: 'funding',
+    ts: Date.parse('2026-08-01T10:04:59Z'), date: '2026-08-01',
+  }),
+]);
+eq('a later same-amount transfer cannot fund an earlier bill receipt',
+  reverseUtilityRows.length,
+  2);
+
+const editedFundingRows = reconcilePaymentFlows([
+  tx('edited-funding', 100000, {
+    isTransfer: true, paymentFlowSide: 'funding', userEdited: true,
+    ts: Date.parse('2026-08-01T10:00:00Z'), date: '2026-08-01',
+  }),
+  tx('edited-flow-receipt', 100000, {
+    paymentFlowSide: 'receipt',
+    ts: Date.parse('2026-08-01T10:01:00Z'), date: '2026-08-01',
+  }),
+]);
+eq('a user-edited funding row is never removed automatically', editedFundingRows.length, 2);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

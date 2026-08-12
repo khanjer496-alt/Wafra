@@ -901,6 +901,18 @@ async function queueItem(id, row, publicKey) {
       relay.isParsedRelayRow({ ...paymentRow, cardPaymentSide: 'receipt' }) &&
       !relay.isParsedRelayRow({ ...paymentRow, cardPaymentSide: 'forged' }) &&
       !relay.isParsedRelayRow({ ...row, cardPaymentSide: 'debit' }));
+  ok('row: linked bill-flow sides accept only their accounting direction',
+    relay.isParsedRelayRow({ ...row, paymentFlowSide: 'receipt' }) &&
+      relay.isParsedRelayRow({
+        ...row,
+        merchant: 'Outgoing transfer',
+        transferHint: true,
+        paymentFlowSide: 'funding',
+      }) &&
+      !relay.isParsedRelayRow({ ...row, paymentFlowSide: 'funding' }) &&
+      !relay.isParsedRelayRow({ ...row, transferHint: true, paymentFlowSide: 'receipt' }) &&
+      !relay.isParsedRelayRow({ ...row, paymentFlowSide: 'forged' }) &&
+      !relay.isParsedRelayRow({ ...statementRow, paymentFlowSide: 'receipt' }));
   ok('row: a complete no-PAN card statement remains valid for sender-bank resolution',
     relay.isParsedRelayRow(statementRow) &&
       relay.isParsedRelayRow({ ...statementRow, card: { last4: '1234', kind: 'credit' } }));

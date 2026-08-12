@@ -193,8 +193,13 @@ export interface ParsedCard {
  * incoming transfer; SEWA reminders use their pay-by date; and current
  * utility/telecom reminders enter the same durable capture batch as ledger
  * rows. Unknown consumer-number nicknames no longer invent a utility category.
+ *
+ * 21: owner-ledger recovery retry. Re-read retained Android history after the
+ * restricted-inbox fix so Talabat settlements and current utility reminders
+ * that version 20 could not reach are offered again. Utility acronyms are now
+ * whole words, so a merchant location such as CAUSEWAY cannot become SEWA.
  */
-export const PARSER_VERSION = 20;
+export const PARSER_VERSION = 21;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -248,6 +253,13 @@ export interface ParsedSms {
   billIdentity?: string;
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
+  /**
+   * Two alerts can describe one bill-pay flow: a generic instant-transfer
+   * funding leg and the bank's named consumer-biller confirmation. Keeping
+   * the side lets the ledger retain the named purchase without counting the
+   * internal funding movement as a second payment.
+   */
+  paymentFlowSide?: 'funding' | 'receipt';
   /** Balance / available-limit / outstanding figure the bank quoted, if any. */
   /**
    * The bank this message NAMES, when it names one before a card noun. Stronger
@@ -2297,7 +2309,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // "deducted ... for VAT on toll transaction(s)", which is a Salik charge and
   // belongs beside Salik.
   [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bcar\s+rentals?\b|\brent-?\s?a-?\s?car\b|\bprkn\b|\bmetro\b|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility|cars\s?24|\bferr(?:y|ies)\b|\btolls?\b(?!\s*-?\s*free)/i, 'transport'],
-  [/dewa|sewa|fewa|addc|aadc|empower|lootah|tabreed|btu\b|chilled water|electricity|water|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder|\bwater\b(?!\s*park)/i, 'utilities'],
+  [/\b(?:dewa|sewa|sewapayment|fewa|addc|aadc|empower|lootah|tabreed|btu)\b|chilled water|electricity|water|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder|\bwater\b(?!\s*park)/i, 'utilities'],
   // "out of credit call service" is Etisalat's own product name for the
   // airtime overdraft a top-up settles; a bare "recharge" is deliberately NOT
   // here, because Salik and nol are recharged too and those are transport.
@@ -4287,6 +4299,7 @@ function parseSmsInner(
       minDueFils: null,
       card,
       transferHint: false,
+      paymentFlowSide: 'receipt',
       snapshotFils,
       snapshotKind,
       // A consumer-number payment proves a registered biller, not what kind
@@ -5169,6 +5182,10 @@ function parseSmsInner(
     minDueFils: null,
     card,
     transferHint,
+    ...(type === 'expense' && transferHint &&
+    /\btowards\s+(?:an?\s+)?instant\s+transfer\b/i.test(raw)
+      ? { paymentFlowSide: 'funding' as const }
+      : {}),
     snapshotFils,
     snapshotKind,
     // When the title is pinned, the TITLE is all guessCategory gets to read —

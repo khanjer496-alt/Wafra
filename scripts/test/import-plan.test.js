@@ -2009,6 +2009,121 @@ const DECLINE_SMS = [{
 
 /* ── utility reminders survive routine capture ───────────────────────── */
 {
+  const utilityFlow = scan([
+    {
+      body: 'Dear Customer, AED 12,168.00 has been debited from your account 095XXX11XXX01 towards instant transfer. The available balance is AED 15,000.00.',
+      ts: Date.parse('2026-08-01T14:25:32Z'),
+      sender: 'Liv',
+    },
+    {
+      body: 'Dear Customer, Your payment instructions of AED 12168.00 to Fishbasket for consumer number 1318124036 has been processed on 01/08/2026 18:27',
+      ts: Date.parse('2026-08-01T14:27:27Z'),
+      sender: 'FAB',
+    },
+  ]);
+  const utilityFlowPlan = buildImportPlan(
+    utilityFlow.parsed,
+    {
+      ...BASE,
+      accounts: [{
+        id: 'bank-account', name: 'Bank account', kind: 'bank', openingFils: 0, color: '#fff',
+      }],
+    },
+    utilityFlow.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('the durable import carries both sides of the linked bill-payment flow',
+    utilityFlowPlan.batch.transactions.length === 2 &&
+      utilityFlowPlan.batch.transactions.some((row) =>
+        row.paymentFlowSide === 'funding' && row.isTransfer === true) &&
+      utilityFlowPlan.batch.transactions.some((row) =>
+        row.paymentFlowSide === 'receipt' && row.title === 'Fishbasket'),
+    utilityFlowPlan.batch.transactions);
+
+  const legacyPushState = {
+    ...BASE,
+    accounts: [{
+      id: 'bank-account', name: 'Bank account', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    transactions: [
+      {
+        id: 'old-funding', type: 'expense', amountFils: 1216800, category: 'other',
+        accountId: 'bank-account', title: 'Outgoing transfer', date: '2026-08-01',
+        source: 'sms', viaPush: true, isTransfer: true,
+        ts: Date.parse('2026-08-01T14:25:30Z'), smsKey: 's1785594330000-1216800',
+      },
+      {
+        id: 'old-receipt', type: 'expense', amountFils: 1216800, category: 'other',
+        accountId: 'bank-account', title: 'Fishbasket', date: '2026-08-01',
+        source: 'sms', viaPush: true,
+        ts: Date.parse('2026-08-01T14:27:25Z'), smsKey: 's1785594445000-1216800',
+      },
+    ],
+  };
+  const legacyPushPlan = buildImportPlan(
+    utilityFlow.parsed,
+    legacyPushState,
+    utilityFlow.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  const { applyHealUpdates } = require('./build/heal.js');
+  const { reconcilePaymentFlows } = require('./build/payment-flow.js');
+  const healedLegacyPush = reconcilePaymentFlows(
+    applyHealUpdates(legacyPushState.transactions, legacyPushPlan.batch.updates),
+  );
+  ok('a parser-version reread repairs and collapses both legacy notification rows',
+    legacyPushPlan.txCount === 0 &&
+      legacyPushPlan.batch.updates.some((row) => row.paymentFlowSide === 'funding') &&
+      legacyPushPlan.batch.updates.some((row) => row.paymentFlowSide === 'receipt') &&
+      healedLegacyPush.length === 1 && healedLegacyPush[0].title === 'Fishbasket',
+    { updates: legacyPushPlan.batch.updates, rows: healedLegacyPush });
+
+  const manualFlowState = {
+    ...legacyPushState,
+    transactions: [{
+      id: 'manual-fishbasket', type: 'expense', amountFils: 1216800, category: 'utilities',
+      accountId: 'chosen-account', title: 'Fishbasket', date: '2026-08-01',
+      source: 'manual', ts: Date.parse('2026-08-01T14:27:25Z'),
+    }],
+  };
+  const manualFlowPlan = buildImportPlan(
+    [utilityFlow.parsed[1]],
+    manualFlowState,
+    utilityFlow.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('a matching manual bill stays deduped without parser metadata or account reassignment',
+    manualFlowPlan.txCount === 0 &&
+      !manualFlowPlan.batch.updates.some((row) => row.id === 'manual-fishbasket'),
+    manualFlowPlan.batch);
+
+  const talabatTs = Date.parse('2026-08-11T08:00:00Z');
+  const talabatBody = 'AED 1,165.33 has been credited to your account. B/O DELIVERY HERO TALABAT DB LLC Talabat Biweekly Payment till 10-Aug-2026.';
+  const talabatParsed = parseSms(talabatBody, undefined, { sender: 'Liv' });
+  const talabat = {
+    parsed: talabatParsed ? [{ ...talabatParsed, smsTs: talabatTs, sender: 'Liv', channel: 'inbox' }] : [],
+    newestTs: talabatTs,
+  };
+  const talabatPlan = buildImportPlan(
+    talabat.parsed,
+    {
+      ...BASE,
+      accounts: [{
+        id: 'liv-account', name: 'Liv Account', kind: 'bank', bankName: 'Liv',
+        openingFils: 0, color: '#fff',
+      }],
+    },
+    talabat.newestTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('a Talabat merchant settlement reaches the durable ledger as income',
+    talabatPlan.batch.transactions.length === 1 &&
+      talabatPlan.batch.transactions[0].title === 'Talabat sales' &&
+      talabatPlan.batch.transactions[0].type === 'income' &&
+      talabatPlan.batch.transactions[0].category === 'business' &&
+      talabatPlan.batch.transactions[0].isTransfer !== true,
+    talabatPlan.batch.transactions);
+
   const current = scan([{
     body: 'Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due on 15-08-2026. To pay your bill, please visit businessonline.etisalat.ae/quickpay.',
     ts: Date.parse('2026-08-10T08:00:00Z'),

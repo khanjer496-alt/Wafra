@@ -259,9 +259,6 @@ function Hero({
   netFils,
   incomeFils,
   expenseFils,
-  cashOutFils,
-  cardPaymentsFils,
-  accountOutflowFils,
   comparison,
 }: {
   period: Period;
@@ -269,9 +266,6 @@ function Hero({
   netFils: number;
   incomeFils: number;
   expenseFils: number;
-  cashOutFils: number;
-  cardPaymentsFils: number;
-  accountOutflowFils: number;
   comparison: PeriodComparison | null;
 }) {
   const theme = useTheme();
@@ -376,23 +370,6 @@ function Hero({
             </ThemedText>
           </Pressable>
         ))}
-      </View>
-      <View
-        accessible
-        accessibilityLabel={`${t('cashOutLabel')}, ${formatAED(cashOutFils, { decimals: false })}. ${t('cashOutHint')}`}
-        style={[styles.cashOutRow, { borderTopColor: theme.cardBorder }]}>
-        <View style={styles.cashOutCopy}>
-          <ThemedText type="small">{t('cashOutLabel')}</ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">
-            {tf('cashOutBreakdown', {
-              cards: formatAED(cardPaymentsFils, { decimals: false }),
-              accounts: formatAED(accountOutflowFils, { decimals: false }),
-            })}
-          </ThemedText>
-        </View>
-        <ThemedText type="smallBold" tabular>
-          {formatAmount(cashOutFils, { decimals: false })}
-        </ThemedText>
       </View>
     </Animated.View>
   );
@@ -800,14 +777,10 @@ export default function HomeScreen() {
             //
             // Spent is the composition total, which Flow prints above the
             // category split; in is rounded the same way; and the net is the
-            // difference between those two, not a third measurement. Cash out
-            // is separate: actual account movement, never subtracted again.
+            // difference between those two, not a third measurement.
             netFils={dashboard.hero.netFils}
             incomeFils={dashboard.hero.incomeFils}
             expenseFils={dashboard.hero.expenseFils}
-            cashOutFils={dashboard.hero.cashOutFils}
-            cardPaymentsFils={dashboard.hero.cardPaymentsFils}
-            accountOutflowFils={dashboard.hero.accountOutflowFils}
           />
 
           <AutomaticCapture
@@ -1022,16 +995,6 @@ const styles = StyleSheet.create({
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   splitFigure: { fontSize: 17, lineHeight: 22 },
   dot: { width: 5, height: 5, borderRadius: 3 },
-  cashOutRow: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.three,
-  },
-  cashOutCopy: { flex: 1, gap: Spacing.half },
-
   currencyPreview: {
     marginTop: Spacing.four,
     borderWidth: StyleSheet.hairlineWidth,

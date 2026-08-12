@@ -1342,6 +1342,20 @@ export function isParsedRelayRow(
       /[\u0000-\u001F\u007F-\u009F]/u.test(row.reference))
   ) return false;
   if (typeof row.transferHint !== 'boolean') return false;
+  if (
+    row.paymentFlowSide !== undefined &&
+    row.paymentFlowSide !== 'funding' &&
+    row.paymentFlowSide !== 'receipt'
+  ) return false;
+  if (row.paymentFlowSide !== undefined && row.kind !== 'transaction') return false;
+  if (
+    row.paymentFlowSide === 'funding' &&
+    (row.type !== 'expense' || row.transferHint !== true)
+  ) return false;
+  if (
+    row.paymentFlowSide === 'receipt' &&
+    (row.type !== 'expense' || row.transferHint !== false)
+  ) return false;
   if (!RELAY_CATEGORIES.has(row.categoryGuess as string)) return false;
   if (row.categoryDeliberate !== undefined && typeof row.categoryDeliberate !== 'boolean') {
     return false;

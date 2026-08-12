@@ -66,6 +66,7 @@ import {
 } from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
+import { reconcilePaymentFlows } from '@/lib/payment-flow';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
@@ -192,7 +193,7 @@ export function finalizeHydrationTransactions(
   return sortTxs(
     preserveUserEditedTransactions(
       authoritativeOriginal,
-      reconcileCaptureDuplicates(transactions),
+      reconcilePaymentFlows(reconcileCaptureDuplicates(transactions)),
     ),
   );
 }
@@ -828,7 +829,9 @@ function reduceState(state: AppState, action: Action): AppState {
           repaired === merged
             ? merged.cardDues
             : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
-        transactions: sortTxs(reconcileCaptureDuplicates(merged.transactions)),
+        transactions: sortTxs(
+          reconcilePaymentFlows(reconcileCaptureDuplicates(merged.transactions)),
+        ),
       };
     }
     case 'undoBatch': {
