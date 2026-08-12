@@ -19,8 +19,8 @@ private class SmsInboxAccessException(
  * error, not an empty inbox: JavaScript must never advance a scan watermark
  * or tell the user they are up to date when Android refused the query.
  *
- * Paged: pass untilMs from a previous page's oldest timestamp to walk the
- * full inbox history in batches without loading everything at once.
+ * Paged by (date, _id), because Android may assign the same millisecond to
+ * several messages. A date-only cursor can skip a row at a page boundary.
  */
 class SmsReaderModule : Module() {
   override fun definition() = ModuleDefinition {
@@ -40,30 +40,49 @@ class SmsReaderModule : Module() {
       }
     }
 
-    AsyncFunction("getInboxSms") { sinceMs: Double, untilMs: Double, max: Int ->
+    AsyncFunction("getInboxSms") {
+        sinceMs: Double,
+        beforeDateMs: Double,
+        beforeId: Double,
+        max: Int ->
       val context = appContext.reactContext
         ?: throw SmsInboxAccessException("SMS reader context is unavailable")
       if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
         throw SmsInboxAccessException("SMS inbox permission is unavailable")
       }
       val messages = mutableListOf<Map<String, Any>>()
+      val pageSize = max.coerceIn(1, 1_000)
       try {
         val cursor = context.contentResolver.query(
           Telephony.Sms.Inbox.CONTENT_URI,
-          arrayOf(Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
-          "${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.DATE} < ?",
-          arrayOf(sinceMs.toLong().toString(), untilMs.toLong().toString()),
-          "${Telephony.Sms.DATE} DESC"
+          arrayOf(
+            Telephony.Sms._ID,
+            Telephony.Sms.ADDRESS,
+            Telephony.Sms.BODY,
+            Telephony.Sms.DATE
+          ),
+          "${Telephony.Sms.DATE} >= ? AND (" +
+            "${Telephony.Sms.DATE} < ? OR (" +
+            "${Telephony.Sms.DATE} = ? AND ${Telephony.Sms._ID} < ?))",
+          arrayOf(
+            sinceMs.toLong().toString(),
+            beforeDateMs.toLong().toString(),
+            beforeDateMs.toLong().toString(),
+            beforeId.toLong().toString()
+          ),
+          "${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC"
         ) ?: throw SmsInboxAccessException("SMS inbox query returned no cursor")
         cursor.use {
+          val idIdx = it.getColumnIndex(Telephony.Sms._ID)
           val addressIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
           val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
           val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
-          while (it.moveToNext() && messages.size < max) {
+          while (it.moveToNext() && messages.size < pageSize) {
             val body = it.getString(bodyIdx) ?: ""
             if (SensitiveMessageFilter.shouldReject(body)) continue
             messages.add(
               mapOf(
+                "id" to it.getLong(idIdx).toDouble(),
                 "address" to (it.getString(addressIdx) ?: ""),
                 "body" to body,
                 "date" to it.getLong(dateIdx).toDouble()

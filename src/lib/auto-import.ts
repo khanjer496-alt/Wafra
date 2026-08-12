@@ -3,18 +3,13 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 import NotificationReader from '../../modules/notification-reader';
-import SmsReader, { type RawSms } from '../../modules/sms-reader';
-import { inspectUniversalAlert } from '@/lib/alert-market-detection';
+import SmsReader, { type InboxSms } from '../../modules/sms-reader';
+import type { UniversalAlertReview } from '@/lib/alert-market-detection';
 import { prepareReviewAlert, type ReviewAlert } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { nonPostingReason, parseSms, type ParsedSms } from '@/lib/sms-parser';
-import {
-  detectLaunchMarketFromAlert,
-  getActiveMarket,
-  pinnedLedgerCurrencyCode,
-  withMarketPackForParsing,
-} from '@/lib/markets';
+import { nonPostingReason, type ParsedSms } from '@/lib/sms-parser';
+import { createLaunchAlertSession, REVIEW_MONEY_HINT } from '@/lib/launch-alert-parser';
 import {
   trustedBankNotificationMarket,
   trustedBankNotificationSender,
@@ -27,8 +22,6 @@ const MAX_REVIEW_CANDIDATES = 50;
 // Cheap superset of currencies the worldwide reviewer can currently ground.
 // It avoids running fourteen market packs over ordinary personal SMS, while
 // false positives merely reach the review module and are refused there.
-const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
-const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 /**
  * Parsing is synchronous JavaScript. A 1,000-message page takes roughly
  * 100 ms even on a desktop Hermes-class CPU and several times that on a
@@ -194,7 +187,12 @@ export async function scanInbox(
     };
   }
 
-  const parsed: (ParsedSms & { smsTs: number; sender: string; channel: CaptureChannel })[] = [];
+  const parsed: (ParsedSms & {
+    smsTs: number;
+    sender: string;
+    channel: CaptureChannel;
+    sourceEventId?: string;
+  })[] = [];
   const reviewCandidates: ReviewAlert[] = [];
   const reviewSourceKeys = new Set<string>();
   let databaseKeyPromise: Promise<string | null> | null = null;
@@ -204,50 +202,9 @@ export async function scanInbox(
   };
   const declined: DeclinedSms[] = [];
   const notificationIds = new Set<string>();
-  const pinnedCurrency = pinnedLedgerCurrencyCode();
-  let sessionLaunchMarket: 'AE' | 'SA' | null =
-    pinnedCurrency === 'AED' ? 'AE' : pinnedCurrency === 'SAR' ? 'SA' : null;
-  let detectedLaunchMarket: 'AE' | 'SA' | null = null;
-  const inspectWorldwide = (body: string, sender: string) => {
-    if (!REVIEW_MONEY_HINT.test(body)) return null;
-    try {
-      return inspectUniversalAlert({ source: body, sender, regionHint });
-    } catch {
-      return null;
-    }
-  };
-  const parseLaunchAlert = (
-    body: string,
-    sender: string,
-    inspection: ReturnType<typeof inspectUniversalAlert> | null,
-    forcedMarket?: string,
-  ): ParsedSms | null => {
-    // A confidently global issuer is review-only, never converted through a
-    // Gulf parser because one happens to be active. AE/SA routes are the
-    // launch-tested parser path and must still accept foreign-card postings.
-    if (inspection?.route.decision === 'single' &&
-      inspection.route.market !== 'AE' && inspection.route.market !== 'SA') return null;
-    const routed = forcedMarket === 'AE' || forcedMarket === 'SA'
-      ? forcedMarket
-      : inspection?.route.decision === 'single' &&
-          (inspection.route.market === 'AE' || inspection.route.market === 'SA')
-        ? inspection.route.market
-        : detectLaunchMarketFromAlert(body, sender);
-    // Foreign money needs positive Gulf sender evidence; local AED/SAR money
-    // must also resolve its own pack before parsing. This is what stops a
-    // Saudi alert on an en-US phone falling through the default UAE pack.
-    if ((REVIEW_MONEY_HINT.test(body) || LAUNCH_MONEY_HINT.test(body)) && !routed) return null;
-    const desired = routed ?? sessionLaunchMarket ?? getActiveMarket().id;
-    if (desired !== 'AE' && desired !== 'SA') return null;
-    if (sessionLaunchMarket && desired !== sessionLaunchMarket) return null;
-    const result = withMarketPackForParsing(desired, () =>
-      parseSms(body, overrides, { sender }));
-    if (result && routed) {
-      sessionLaunchMarket ??= routed;
-      detectedLaunchMarket = routed;
-    }
-    return result;
-  };
+  const launchSession = createLaunchAlertSession({ overrides, regionHint });
+  const inspectWorldwide = launchSession.inspect;
+  const parseLaunchAlert = launchSession.parse;
   /**
    * Called only where the launch parser returned null. Declines keep their
    * existing healing fingerprint and stop there. Every other refusal may be
@@ -259,14 +216,15 @@ export async function scanInbox(
     ts: number,
     sender: string,
     channel: CaptureChannel,
-    existingInspection: ReturnType<typeof inspectUniversalAlert> | null = null,
+    existingInspection: UniversalAlertReview | null = null,
+    sourceEventId?: string,
   ): Promise<void> => {
     // A refusal, code challenge, hold or returned instrument is affirmative
     // proof that no settled money movement happened. It belongs only in the
     // guarded healing channel and must never become a reviewable charge.
     const reason = nonPostingReason(body);
     if (reason) {
-      declined.push({ smsTs: ts, sender, channel, reason });
+      declined.push({ smsTs: ts, sender, channel, reason, sourceEventId });
       return;
     }
     if (!REVIEW_MONEY_HINT.test(body)) return;
@@ -300,15 +258,22 @@ export async function scanInbox(
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
   let newestTs = sinceMs;
-  let untilMs = Date.now() + 60_000;
+  let beforeDateMs = Date.now() + 60_000;
+  let beforeId = Number.MAX_SAFE_INTEGER;
   let scannedCount = 0;
 
   for (let page = 0; page < MAX_PAGES; page++) {
-    const batch: RawSms[] = await SmsReader.getInboxSms(sinceMs, untilMs, PAGE_SIZE);
+    const batch: InboxSms[] = await SmsReader.getInboxSms(
+      sinceMs,
+      beforeDateMs,
+      beforeId,
+      PAGE_SIZE,
+    );
     if (batch.length === 0) break;
     scannedCount += batch.length;
     for (let i = 0; i < batch.length; i++) {
       const sms = batch[i];
+      const sourceEventId = `a${sms.id}`;
       if (sms.date > newestTs) newestTs = sms.date;
       inboxBodies.add(bodyPrint(sms.body));
       // The sender ID is the ONLY thing that says which bank sent a message —
@@ -330,9 +295,17 @@ export async function scanInbox(
           smsTs: sms.date,
           sender: sms.address,
           channel: 'inbox',
+          sourceEventId,
         });
       } else {
-        await inspectRefused(sms.body, sms.date, sms.address, 'inbox', worldwide);
+        await inspectRefused(
+          sms.body,
+          sms.date,
+          sms.address,
+          'inbox',
+          worldwide,
+          sourceEventId,
+        );
       }
       // The native inbox query is already asynchronous; the expensive part is
       // the regex grammar above after the 1,000 bodies cross the bridge. A
@@ -342,7 +315,8 @@ export async function scanInbox(
       }
     }
     onProgress?.(scannedCount, parsed.length);
-    untilMs = batch[batch.length - 1].date; // page ends exclusive, walk backwards
+    beforeDateMs = batch[batch.length - 1].date;
+    beforeId = batch[batch.length - 1].id;
     if (batch.length < PAGE_SIZE) break;
   }
 
@@ -458,7 +432,7 @@ export async function scanInbox(
     declined,
     newestTs,
     scannedCount,
-    detectedLaunchMarket,
+    detectedLaunchMarket: launchSession.detectedMarket(),
     commit: notificationIds.size > 0 && notificationReader
       ? async () => {
           const acknowledged = await notificationReader.ackCaptured([...notificationIds]);

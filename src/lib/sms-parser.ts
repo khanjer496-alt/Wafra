@@ -198,8 +198,13 @@ export interface ParsedCard {
  * restricted-inbox fix so Talabat settlements and current utility reminders
  * that version 20 could not reach are offered again. Utility acronyms are now
  * whole words, so a merchant location such as CAUSEWAY cannot become SEWA.
+ *
+ * 22: stable Android inbox identity. Routine scans now retain the provider row
+ * id and page by (date,id), so distinct same-millisecond/same-value alerts no
+ * longer share an import key or disappear at a page boundary. Re-read history
+ * once to promote legacy timestamp keys and recover any previously merged leg.
  */
-export const PARSER_VERSION = 21;
+export const PARSER_VERSION = 22;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

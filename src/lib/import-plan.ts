@@ -46,11 +46,11 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   /** Launch pack that produced this body-free relay row. */
   market?: 'AE' | 'SA';
   /**
-   * Opaque, locally generated identity for a historical Apple Message.
+   * Opaque, locally generated identity for one provider-backed message.
    *
-   * The Shortcut hashes the Message GUID before Wafra sees it. Keeping that
-   * stable value in smsKey makes repeating a history import exactly
-   * idempotent without persisting the GUID or body.
+   * The iOS Shortcut hashes the Message GUID before Wafra sees it; Android
+   * prefixes the stable inbox row id. Keeping either value in smsKey makes a
+   * repeated history import exactly idempotent without persisting the body.
    */
   sourceEventId?: string;
 };

@@ -34,6 +34,12 @@ ok('OTP and security-code bodies stop at the native Android bridge/buffer bounda
     nativeInbox.indexOf('SensitiveMessageFilter.shouldReject(body)') <
       nativeInbox.indexOf('"body" to body'),
   JSON.stringify({ nativeFilter: nativeFilter.length, nativeInbox: nativeInbox.length }));
+ok('routine Android inbox paging and identity use the lossless date/id cursor',
+  nativeInbox.includes('Telephony.Sms._ID') &&
+    nativeInbox.includes('${Telephony.Sms.DATE} DESC, ${Telephony.Sms._ID} DESC') &&
+    nativeInbox.includes('beforeId.toLong().toString()') &&
+    nativeInbox.includes('"id" to it.getLong(idIdx).toDouble()'),
+  nativeInbox.length);
 const notificationRoot = path.resolve(
   __dirname,
   '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader',
@@ -66,6 +72,7 @@ let receivedRows = [{ address: 'BNPPARIBAS', body: france, date: NOW + 1_500 }];
 let notificationsEnabled = true;
 const acknowledgedNotifications = [];
 const notificationReadSince = [];
+const inboxReadCursors = [];
 let notificationRows = [{
   id: 'notification-row-0001',
   pkg: 'net.bnpparibas.mescomptes',
@@ -74,8 +81,9 @@ let notificationRows = [{
   ts: NOW + 5_000,
 }];
 const smsReader = {
-  async getInboxSms() {
-    return inboxRows;
+  async getInboxSms(sinceMs, beforeDateMs, beforeId, max) {
+    inboxReadCursors.push({ sinceMs, beforeDateMs, beforeId, max });
+    return inboxRows.map((row, index) => ({ id: row.id ?? index + 1, ...row }));
   },
   async getReceived() {
     // The inbox body guard must keep the receiver's copy out of review too.
@@ -128,8 +136,14 @@ const { scanInbox } = require('./build/auto-import.js');
   const first = await scanInbox(0, {}, undefined, 'fr-FR');
   ok('launch-tested UAE parsing still produces the ordinary import row',
     first.parsed.length === 1 && first.parsed[0].currency === 'AED' &&
-      first.parsed[0].merchant === 'Carrefour' && first.detectedLaunchMarket === 'AE',
+      first.parsed[0].merchant === 'Carrefour' && first.parsed[0].sourceEventId === 'a2' &&
+      first.detectedLaunchMarket === 'AE',
     JSON.stringify(first.parsed));
+  ok('the first routine page starts from a date/id cursor rather than timestamp alone',
+    inboxReadCursors[0]?.sinceMs === 0 &&
+      inboxReadCursors[0]?.beforeId === Number.MAX_SAFE_INTEGER &&
+      inboxReadCursors[0]?.max === 1000,
+    JSON.stringify(inboxReadCursors[0]));
   ok('a parse-null, institution-backed global alert becomes review evidence only',
     first.reviewCandidates.length === 3 && first.reviewCandidates[0].market === 'FR' &&
       first.reviewCandidates[0].amount.currency === 'EUR' &&
@@ -157,8 +171,10 @@ const { scanInbox } = require('./build/auto-import.js');
   ok('non-posting alerts stay exclusively in the metadata-only healing channel',
     first.declined.length === 2 &&
       first.declined[0].smsTs === NOW + 3_000 &&
+      first.declined[0].sourceEventId === 'a3' &&
       first.declined[0].reason === 'declined' &&
       first.declined[1].smsTs === NOW + 4_000 &&
+      first.declined[1].sourceEventId === 'a4' &&
       first.declined[1].reason === 'security-challenge' &&
       first.declined.every((item) => !Object.prototype.hasOwnProperty.call(item, 'raw')) &&
       first.reviewCandidates.every(
@@ -319,6 +335,29 @@ const { scanInbox } = require('./build/auto-import.js');
       uaeForeign.detectedLaunchMarket === 'AE' &&
       uaeForeign.reviewCandidates.length === 0,
     JSON.stringify(uaeForeign));
+
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+  inboxRows = [
+    {
+      id: 901,
+      address: 'ADCB',
+      body: 'Purchase of AED 25.00 at STORE ONE with Debit Card ending 1234',
+      date: NOW + 8_000,
+    },
+    {
+      id: 902,
+      address: 'ADCB',
+      body: 'Purchase of AED 25.00 at STORE TWO with Debit Card ending 1234',
+      date: NOW + 8_000,
+    },
+  ];
+  const sameTimestamp = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('same-timestamp same-value Android alerts retain distinct provider identities',
+    sameTimestamp.parsed.length === 2 &&
+      sameTimestamp.parsed[0].sourceEventId === 'a901' &&
+      sameTimestamp.parsed[1].sourceEventId === 'a902',
+    JSON.stringify(sameTimestamp.parsed));
 
   reactNative.Platform.OS = 'ios';
   const ios = await scanInbox(123, {}, undefined, 'fr-FR');

@@ -378,6 +378,7 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/bills': require('./build/bills'),
     '@/lib/dedupe': dedupe,
     '@/lib/payment-flow': require('./build/payment-flow'),
+    '@/lib/ledger-import': require('./build/ledger-import'),
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
       LedgerResetError: class LedgerResetError extends Error {},

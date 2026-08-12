@@ -536,6 +536,7 @@ function ktSources(dir) {
 {
   const types = read('src/lib/types.ts');
   const store = read('src/lib/store.tsx');
+  const ledgerImport = read('src/lib/ledger-import.ts');
   const capture = read('src/lib/capture.ts');
   const settings = read('src/app/settings.tsx');
   const copy = read('src/lib/i18n.ts');
@@ -543,7 +544,8 @@ function ktSources(dir) {
   ok('Private Mode is persisted as part of app state', /privateMode: boolean/.test(types));
   ok('Private Mode strips retained and newly imported raw text',
     /transactions: action\.enabled[\s\S]*raw: _discard/.test(store) &&
-      /const base = authoritativeState\.current[\s\S]*raw: base\.privateMode \? undefined : t\.raw/.test(store));
+      /raw: state\.privateMode \? undefined : transaction\.raw/.test(ledgerImport) &&
+      /materializeImportBatch\(input, base, makeId\)/.test(store));
   ok('capture opt-out is durable and stops every source before it can read messages',
     /captureOptOut: boolean/.test(types) &&
       capture.indexOf('if (state.captureOptOut') <

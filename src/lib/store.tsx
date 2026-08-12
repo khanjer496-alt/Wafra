@@ -35,7 +35,7 @@ import {
   SEED_BILLS,
   SEED_BUDGETS,
 } from '@/lib/seed';
-import { applyHealPatch, applyHealUpdates, healPatch } from '@/lib/heal';
+import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
@@ -44,7 +44,6 @@ import {
   PARSER_VERSION,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
-import { mergeImportedBills } from '@/lib/bills';
 import {
   createLedgerPersistence,
   LedgerResetError,
@@ -67,6 +66,11 @@ import {
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
+import {
+  applyMaterializedImportBatch,
+  materializeImportBatch,
+  type MaterializedImportBatch,
+} from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
@@ -82,7 +86,6 @@ import type {
   CategoryId,
   Goal,
   Transaction,
-  TxHealUpdate,
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -565,19 +568,7 @@ type Action =
   | { type: 'addTransaction'; transaction: Transaction }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
   | { type: 'deleteTransaction'; id: string }
-  | {
-      type: 'importBatch';
-      transactions: Transaction[];
-      newAccounts: Account[];
-      newHints: Record<string, string>;
-      newDues: CardDue[];
-      newBills: Bill[];
-      snapshots: Record<string, { fils: number; kind: 'balance' | 'limit' | 'outstanding'; ts: number }>;
-      bankNames: Record<string, string>;
-      cardTypes: Record<string, 'credit' | 'debit'>;
-      lastScanTs: number;
-      updates: TxHealUpdate[];
-    }
+  | ({ type: 'importBatch' } & MaterializedImportBatch)
   | { type: 'undoBatch'; ids: string[] }
   | { type: 'upsertBudget'; budget: Budget }
   | { type: 'deleteBudget'; category: Budget['category'] }
@@ -779,60 +770,7 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
     case 'importBatch': {
-      const accounts = [...state.accounts, ...action.newAccounts].map((a) => {
-        const snap = action.snapshots[a.id];
-        const bank = !a.bankName ? action.bankNames[a.id] : undefined;
-        const learnedType = action.cardTypes[a.id];
-        let next = a;
-        if (snap && snap.ts > (a.snapshotTs ?? 0)) {
-          next = { ...next, snapshotFils: snap.fils, snapshotKind: snap.kind, snapshotTs: snap.ts };
-        }
-        if (bank) next = { ...next, bankName: bank };
-        if (
-          learnedType &&
-          (learnedType === 'credit' || next.cardType === undefined) &&
-          next.cardType !== learnedType
-        ) {
-          next = { ...next, kind: 'card', cardType: learnedType };
-        }
-        // A balance-shaped snapshot captured before the parser learned this
-        // is a credit card is available headroom, not cash in an account.
-        // Normalize persisted snapshots too, including batches where no newer
-        // snapshot arrived alongside the authoritative card type.
-        if (learnedType === 'credit' && next.snapshotKind === 'balance') {
-          next = { ...next, snapshotKind: 'limit' };
-        }
-        return next;
-      });
-      const dues = mergeImportedCardDues(state.cardDues, action.newDues, accounts);
-      const bills = mergeImportedBills(state.bills, action.newBills);
-      // Heal existing rows the parser now reads better.
-      const existing = applyHealUpdates(state.transactions, action.updates);
-      const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
-        ...state,
-        transactions: [...action.transactions, ...existing],
-        accounts,
-        accountHints: { ...state.accountHints, ...action.newHints },
-        cardDues: dues,
-        bills,
-        lastScanTs: Math.max(state.lastScanTs, action.lastScanTs),
-        parserVersion: PARSER_VERSION,
-      }));
-      // A statement the bank named by a number that is not the card's is only
-      // recognisable once the batch's own dues are in state beside the ones
-      // already there. Moving it changes which (account, due date) pairs exist,
-      // so the per-statement collapse has to run again over the result.
-      const repaired = repairDuplicateStatements(merged);
-      return {
-        ...repaired,
-        cardDues:
-          repaired === merged
-            ? merged.cardDues
-            : mergeImportedCardDues([], repaired.cardDues, repaired.accounts),
-        transactions: sortTxs(
-          reconcilePaymentFlows(reconcileCaptureDuplicates(merged.transactions)),
-        ),
-      };
+      return applyMaterializedImportBatch(state, action);
     }
     case 'undoBatch': {
       const ids = new Set(action.ids);
@@ -1453,77 +1391,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         durable: Promise.reject(new Error('Ledger persistence is blocked')),
       };
     }
-    const newAccounts: Account[] = input.newAccounts.map((a) => ({ ...a, id: makeId('acc') }));
-    // Hints pointing at a numeric index refer to a just-created account.
-    const newHints: Record<string, string> = {};
-    for (const [last4, ref] of Object.entries(input.newHints)) {
-      const idx = Number(ref);
-      newHints[last4] = Number.isInteger(idx) && idx >= 0 && idx < newAccounts.length && String(idx) === ref
-        ? newAccounts[idx].id
-        : ref;
-    }
     const base = authoritativeState.current;
-    const transactions: Transaction[] = input.transactions.map((t) => ({
-      ...t,
-      // Private Mode keeps the structured row and drops source text at the
-      // ingestion boundary, before it can reach React state or persistence.
-      raw: base.privateMode ? undefined : t.raw,
-      // Resolve index-refs in accountId the same way.
-      accountId:
-        /^\d+$/.test(t.accountId) && Number(t.accountId) < newAccounts.length
-          ? newAccounts[Number(t.accountId)].id
-          : t.accountId,
-      id: makeId('tx'),
-    }));
-    const newDues: CardDue[] = input.newDues.map((d) => ({
-      ...d,
-      accountId:
-        /^\d+$/.test(d.accountId) && Number(d.accountId) < newAccounts.length
-          ? newAccounts[Number(d.accountId)].id
-          : d.accountId,
-      id: makeId('due'),
-    }));
-    const newBills: Bill[] = (input.newBills ?? []).map((bill) => ({
-      ...bill,
-      paidMonths: [],
-      id: makeId('bill'),
-    }));
-    const snapshots: ImportBatchInput['snapshots'] = {};
-    for (const [ref, snap] of Object.entries(input.snapshots ?? {})) {
-      const id =
-        /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
-      snapshots[id] = snap;
-    }
-    const bankNames: Record<string, string> = {};
-    for (const [ref, bank] of Object.entries(input.bankNames ?? {})) {
-      const id =
-        /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
-      bankNames[id] = bank;
-    }
-    const cardTypes: NonNullable<ImportBatchInput['cardTypes']> = {};
-    for (const [ref, cardType] of Object.entries(input.cardTypes ?? {})) {
-      const id =
-        /^\d+$/.test(ref) && Number(ref) < newAccounts.length ? newAccounts[Number(ref)].id : ref;
-      cardTypes[id] = cardType;
-    }
     const action: Action = {
       type: 'importBatch',
-      transactions,
-      newAccounts,
-      newHints,
-      newDues,
-      newBills,
-      snapshots,
-      bankNames,
-      cardTypes,
-      lastScanTs: input.lastScanTs,
-      updates: (input.updates ?? []).map((update) => ({
-        ...update,
-        accountId:
-          update.accountId && /^\d+$/.test(update.accountId) && Number(update.accountId) < newAccounts.length
-            ? newAccounts[Number(update.accountId)].id
-            : update.accountId,
-      })),
+      ...materializeImportBatch(input, base, makeId),
     };
     // React dispatch is intentionally not treated as persistence. Compute the
     // exact next snapshot from the same action and enqueue its encrypted write
@@ -1539,7 +1410,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted ledger write failed');
     });
-    return { ids: transactions.map((t) => t.id), durable };
+    return { ids: action.transactions.map((t) => t.id), durable };
   }, [dispatch, persist]);
 
   const ensureDurable = useCallback(async () => {
