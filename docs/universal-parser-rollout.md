@@ -56,10 +56,13 @@ and are capped at 50. Add/dismiss decisions leave only an opaque, expiring
 tombstone so rescans do not nag the user. The tray is excluded from editable
 backups and never creates transactions, bills or subscriptions automatically.
 
-The current first integration is Android on-device capture. iOS requires a
-separately threat-modelled, origin-device-only sealed review envelope because
-the existing relay deliberately drops unparsed Message content. Until that
-exists, the app must not claim iOS worldwide review parity.
+Android performs review admission on-device. The iOS relay now provides the
+same review fallback for known UAE/Saudi bank senders: it discards the message
+text and sender, then seals only exact money, direction, institution, family,
+masked instrument and opaque keyed identities to the phone. The app persists
+that item in its encrypted tray before acknowledging the relay row. This is
+launch-market parity, not worldwide parity; non-UAE/Saudi relay misses remain
+discarded until their own threat model and rollout evidence exist.
 
 ## Ledger money staging
 

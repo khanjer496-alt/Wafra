@@ -15,6 +15,9 @@ import type { CategoryId } from '@/lib/types';
 export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
 const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 
+export const hasBankAlertMoneyHint = (source: string): boolean =>
+  REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source);
+
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
   parse(
@@ -81,7 +84,7 @@ export const createLaunchAlertSession = ({
           (inspection.route.market === 'AE' || inspection.route.market === 'SA')
         ? inspection.route.market
         : detectLaunchMarketFromAlert(source, sender);
-    if ((REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source)) && !routed) return null;
+    if (hasBankAlertMoneyHint(source) && !routed) return null;
     const desired = routed ?? sessionMarket ?? activeMarket;
     if (desired !== 'AE' && desired !== 'SA') return null;
     if (sessionMarket && desired !== sessionMarket) return null;

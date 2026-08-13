@@ -32,6 +32,10 @@ import {
 } from '@/lib/markets';
 import { parseSms } from '@/lib/sms-parser';
 import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
+import {
+  inspectUnparsedLaunchAlert,
+  normalizeUnparsedLaunchTemplate,
+} from '@/lib/unparsed-launch-alert';
 
 import {
   b64encode,
@@ -656,6 +660,11 @@ async function queueStructuredRow(
     .map((target) => target.id);
 }
 
+const opaqueFingerprint = (value: string): string => value
+  .replace(/\+/g, '-')
+  .replace(/\//g, '_')
+  .replace(/=+$/g, '');
+
 async function queueEmailRows(
   env: Env,
   device: Device,
@@ -1132,35 +1141,18 @@ export default {
         ? null
         : withMarketPackForParsing(parsedMarket as 'AE' | 'SA', () =>
             parseSms(text, undefined, { sender: sender ?? undefined }));
+      const launchReview = !parsed && !isTest && sender
+        ? inspectUnparsedLaunchAlert(text, sender)
+        : null;
+      const review = launchReview?.outcome === 'review' ? launchReview.review : null;
       // Not a transaction — an OTP, a promo, a delivery notice. Nothing is
       // stored and nothing is echoed back: the Shortcut fires on every message
       // from the sender, and most of them are none of our business.
-      if (!parsed && !isTest) return empty(204);
+      if (!parsed && !isTest && !review) return empty(204);
 
-      // `raw` is deliberately dropped here. It is the one field the app's own
-      // importer keeps for its "unrecognised format" report, and keeping it
-      // server-side would turn this database into a readable archive of the
-      // user's bank messages — the thing this design exists to avoid.
-      const row = (() => {
-        if (isTest) return { relayTest: true as const };
-        const { raw: _discard, ...structured } = parsed!;
-        return structured;
-      })();
-      const rowWithReceipt = {
-        ...row,
-        ...(!isTest && { captureSource: 'shortcut' as const }),
-        // Sealed alongside the parsed row and nowhere else. The setup probe is
-        // not a bank message, so it gets no bank label.
-        ...(!isTest && sender ? { sender } : {}),
-        // Which pack this row was parsed under, sealed with it. Not a column.
-        ...(!isTest ? { market: parsedMarket } : {}),
-        // The MESSAGE's time when the Shortcut sent a plausible one, this
-        // relay's receipt time otherwise — see resolveReceivedAt. A probe is
-        // not a bank message and is always stamped now.
-        receivedAt: new Date(
-          isTest ? Date.now() : resolveReceivedAt(body?.receivedAt, Date.now()),
-        ).toISOString(),
-      };
+      const receivedAt = new Date(
+        isTest ? Date.now() : resolveReceivedAt(body?.receivedAt, Date.now()),
+      ).toISOString();
       const replayMaterial =
         typeof eventId === 'string'
           ? `event:${eventId}`
@@ -1170,6 +1162,43 @@ export default {
             // transaction. Absent sender leaves the old material untouched.
             `body:${sender ? `${sender}:` : ''}${text.trim().replace(/\s+/g, ' ')}`;
       const replayKey = await keyedFingerprint(device.requestSecret, replayMaterial);
+
+      // `raw` is deliberately dropped here. It is the one field the app's own
+      // importer keeps for its "unrecognised format" report, and keeping it
+      // server-side would turn this database into a readable archive of the
+      // user's bank messages — the thing this design exists to avoid.
+      const row = await (async () => {
+        if (isTest) return { relayTest: true as const };
+        if (parsed) {
+          const { raw: _discard, ...structured } = parsed;
+          return structured;
+        }
+        const sourceDigest = opaqueFingerprint(replayKey);
+        const templateDigest = opaqueFingerprint(await keyedFingerprint(
+          device.requestSecret,
+          `review-template:${sender ?? ''}:${normalizeUnparsedLaunchTemplate(text)}`,
+        ));
+        return {
+          relayReview: true as const,
+          id: `ari1_${sourceDigest}`,
+          sourceKey: `arc1_${sourceDigest}`,
+          templateKey: `art1_${templateDigest}`,
+          review,
+        };
+      })();
+      const rowWithReceipt = {
+        ...row,
+        ...(!isTest && { captureSource: 'shortcut' as const }),
+        // Sealed alongside the parsed row and nowhere else. The setup probe is
+        // not a bank message, so it gets no bank label.
+        ...(!isTest && parsed && sender ? { sender } : {}),
+        // Which pack this row was parsed under, sealed with it. Not a column.
+        ...(!isTest && parsed ? { market: parsedMarket } : {}),
+        // The MESSAGE's time when the Shortcut sent a plausible one, this
+        // relay's receipt time otherwise — see resolveReceivedAt. A probe is
+        // not a bank message and is always stamped now.
+        receivedAt,
+      };
       // A SETUP PROBE IS NEVER A REPLAY, and treating it as one locked users
       // out of onboarding entirely.
       //

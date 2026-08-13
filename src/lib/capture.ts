@@ -248,11 +248,11 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
   }
 
   // Note there is no relay equivalent of the re-read above, and there cannot
-  // be: the relay drops the message text as it parses (server/src/index.ts)
-  // and deletes each queue row once acknowledged. Nothing is kept to re-read.
-  // A parser fix therefore reaches iOS from the next message onward, while
-  // Android heals its history. That asymmetry is a consequence of the
-  // retention promise, not an oversight.
+  // be: the relay drops the message text after producing either a parsed row
+  // or a sanitized review row, then deletes that row once acknowledged.
+  // Nothing is kept to re-read. A parser fix therefore reaches iOS from the
+  // next message onward, while Android heals its history. That asymmetry is a
+  // consequence of the retention promise, not an oversight.
 
   if (isRelayPlatform()) {
     // A headless wake may already have collected and acknowledged rows while
@@ -301,13 +301,13 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       throw error;
     });
     if (!queued) return stagedOnly();
-    const { parsed, ids, testIds } = queued;
+    const { parsed, reviewCandidates = [], ids, testIds } = queued;
     const collected = [...staged.rows, ...parsed];
     const detectedLaunchMarket = relayLaunchMarket(collected, cfg.market);
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
     return {
       parsed: collected,
-      reviewCandidates: [],
+      reviewCandidates,
       // No body ever reached this device; see CaptureResult.declined.
       declined: [],
       newestTs,

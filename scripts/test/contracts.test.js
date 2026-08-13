@@ -1737,7 +1737,7 @@ ok('the spoken label agrees with the sign on screen',
     offenders.slice(0, 3).join(' | '));
 }
 
-/* ── the worldwide inspector is not a production import path yet ───────── */
+/* ── uncertain inspectors can reach review, never automatic import ─────── */
 {
   const shipping = [...sources('src'), ...sources('server/src')];
   const alertConsumers = shipping
@@ -1766,12 +1766,29 @@ ok('the spoken label agrees with the sign on screen',
     .filter((file) => /(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:alert-semantics|alert-market-packs|alert-rollout)['"]/.test(
       fs.readFileSync(file, 'utf8'),
     ));
-  ok('the review-only alert inspector has no shipping importer',
-    alertConsumers.length === 0, alertConsumers.join(' | '));
+  const launchFallback = read('src/lib/unparsed-launch-alert.ts');
+  const aiSuggestion = read('src/lib/alert-ai-suggestion.ts');
+  const capture = read('src/lib/auto-import.ts');
+  ok('only the sanitized Gulf fallback consumes alert drafts in shipping capture',
+    alertConsumers.length === 1 &&
+      alertConsumers[0].endsWith(`${path.sep}unparsed-launch-alert.ts`),
+    alertConsumers.join(' | '));
+  ok('the Gulf fallback can reach only the explicit encrypted review path',
+    !/(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import)['"]/.test(
+      launchFallback,
+    ) &&
+      /prepareLaunchReviewAlert/.test(capture) &&
+      /reviewCandidates\.push\(\{ \.\.\.reviewPrepared, \.\.\.identity \}\)/.test(capture),
+    'an uncertain alert must never become parsed or mutate the ledger directly');
   ok('ISO draft metadata reaches shipping code only through the isolated inspector',
     metadataConsumers.length === 0, metadataConsumers.join(' | '));
   ok('first-wave market review logic has no shipping importer',
     marketReviewConsumers.length === 0, marketReviewConsumers.join(' | '));
+  ok('optional alert AI can suggest labels but has no network or ledger write capability',
+    !/(?:fetch\s*\(|https?:|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(
+      aiSuggestion,
+    ) && /FORBIDDEN_OUTPUT_KEYS/.test(aiSuggestion) && /constrainAlertAiProposal/.test(aiSuggestion),
+    'AI suggestions must remain local, optional, and outside the money/import boundary');
 }
 
 /* ── a manual workflow run cannot bypass third-party-AI consent ─────────── */

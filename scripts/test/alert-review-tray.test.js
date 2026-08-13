@@ -102,7 +102,7 @@ const malformed = normalizeAlertReviewTray({ schemaVersion: 1, pending: [{ raw: 
 ok('hydration drops malformed or raw-only review records', malformed.pending.length === 0);
 
 for (const [name, mutation] of [
-  ['market', { market: 'AE' }],
+  ['market', { market: 'ZZ' }],
   ['channel', { channel: 'unknown' }],
   ['currency', { amount: { ...stored.amount, currency: 'usd' } }],
   ['direction', { direction: 'none' }],
@@ -118,6 +118,19 @@ for (const [name, mutation] of [
   ok(`hydration rejects malformed ${name} evidence before it can become money`,
     normalized.pending.length === 0, JSON.stringify(normalized));
 }
+
+const crossCurrencyLaunch = normalizeAlertReviewTray({
+  schemaVersion: 1,
+  pending: [{
+    ...stored,
+    market: 'AE',
+    amount: { currency: 'USD', minorUnits: '1850', exponent: 2 },
+    grammar: { ...stored.grammar, provenance: 'launch-registry' },
+  }],
+  tombstones: [],
+}, NOW);
+ok('hydration cannot relabel UAE review money as a foreign ledger amount',
+  crossCurrencyLaunch.pending.length === 0, JSON.stringify(crossCurrencyLaunch));
 
 console.log(`\nalert-review-tray: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

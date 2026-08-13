@@ -19,7 +19,7 @@ export interface InstitutionGrammarMetadata {
   version: number;
   channel: 'bank-alert';
   status: InstitutionGrammarStatus;
-  provenance: 'synthetic-seed' | 'consented-redacted' | 'public-template';
+  provenance: 'synthetic-seed' | 'consented-redacted' | 'public-template' | 'launch-registry';
 }
 
 export type AlertTemplateId =

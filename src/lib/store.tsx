@@ -602,6 +602,7 @@ type Action =
   | {
       type: 'promoteReviewAlert';
       transaction: Transaction;
+      counterpartId?: string;
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
     }
@@ -717,7 +718,13 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         ledgerMoney: action.ledgerMoney,
         reviewTray: action.reviewTray,
-        transactions: sortTxs([action.transaction, ...state.transactions]),
+        transactions: sortTxs([
+          action.transaction,
+          ...state.transactions.map((transaction) =>
+            transaction.id === action.counterpartId
+              ? { ...transaction, isTransfer: true }
+              : transaction),
+        ]),
       };
     case 'setThemePreference': {
       // Applied here as well as on hydrate, so the palette turns over on the
@@ -1482,6 +1489,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       : dispatch({
           type: 'promoteReviewAlert',
           transaction: plan.transaction,
+          counterpartId: plan.counterpartId,
           reviewTray: plan.reviewTray,
           ledgerMoney: plan.ledgerMoney,
         });

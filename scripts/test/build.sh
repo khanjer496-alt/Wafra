@@ -64,8 +64,8 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft \
-         alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray \
-         ledger-money review-promotion trusted-bank-notification-packages \
+         alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray unparsed-launch-alert \
+         ledger-money review-promotion alert-ai-suggestion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import; do

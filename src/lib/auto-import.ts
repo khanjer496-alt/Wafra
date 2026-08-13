@@ -5,11 +5,19 @@ import * as SecureStore from 'expo-secure-store';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader, { type InboxSms } from '../../modules/sms-reader';
 import type { UniversalAlertReview } from '@/lib/alert-market-detection';
-import { prepareReviewAlert, type ReviewAlert } from '@/lib/alert-review-tray';
+import {
+  prepareLaunchReviewAlert,
+  prepareReviewAlert,
+  type ReviewAlert,
+} from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
 import { nonPostingReason, type ParsedSms } from '@/lib/sms-parser';
-import { createLaunchAlertSession, REVIEW_MONEY_HINT } from '@/lib/launch-alert-parser';
+import { createLaunchAlertSession, hasBankAlertMoneyHint } from '@/lib/launch-alert-parser';
+import {
+  inspectUnparsedLaunchAlert,
+  normalizeUnparsedLaunchTemplate,
+} from '@/lib/unparsed-launch-alert';
 import {
   trustedBankNotificationMarket,
   trustedBankNotificationSender,
@@ -146,6 +154,7 @@ function deviceRegionHint(): string | null {
 
 const DATABASE_KEY_NAME = 'wafra.database.key.v1';
 const REVIEW_IDENTITY_DOMAIN = 'wafra.alert-review-identity.v1';
+const REVIEW_TEMPLATE_DOMAIN = 'wafra.alert-review-template.v1';
 
 class ReviewIdentityError extends Error {
   constructor(message: string) {
@@ -181,7 +190,7 @@ async function reviewCaptureIdentity(
   observedAt: number,
   channel: CaptureChannel,
   databaseKey: string,
-): Promise<{ id: string; sourceKey: string } | null> {
+): Promise<{ id: string; sourceKey: string; templateKey: string } | null> {
   if (!/^[0-9a-f]{64}$/i.test(databaseKey)) return null;
   const material = [
     channel,
@@ -191,8 +200,19 @@ async function reviewCaptureIdentity(
   ].join('\u0000');
   const identityKey = await sha256(`${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`);
   const digest = await sha256(`${identityKey}\u0000${material}`);
-  if (!/^[0-9a-f]{64}$/i.test(digest)) return null;
-  return { sourceKey: `arc1_${digest}`, id: `ari1_${digest}` };
+  const template = normalizeUnparsedLaunchTemplate(source);
+  const templateIdentityKey = await sha256(`${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`);
+  const templateDigest = await sha256([
+    templateIdentityKey,
+    bodyPrint(sender.normalize('NFKC')),
+    template,
+  ].join('\u0000'));
+  if (!/^[0-9a-f]{64}$/i.test(digest) || !/^[0-9a-f]{64}$/i.test(templateDigest)) return null;
+  return {
+    sourceKey: `arc1_${digest}`,
+    id: `ari1_${digest}`,
+    templateKey: `art1_${templateDigest}`,
+  };
 }
 
 /**
@@ -245,35 +265,51 @@ export async function scanInbox(
     channel: CaptureChannel,
     existingInspection: UniversalAlertReview | null = null,
     sourceEventId?: string,
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     // A refusal, code challenge, hold or returned instrument is affirmative
     // proof that no settled money movement happened. It belongs only in the
     // guarded healing channel and must never become a reviewable charge.
     const reason = nonPostingReason(body);
     if (reason) {
       declined.push({ smsTs: ts, sender, channel, reason, sourceEventId });
-      return;
+      return false;
     }
-    if (!REVIEW_MONEY_HINT.test(body)) return;
+    if (!hasBankAlertMoneyHint(body)) return false;
     const inspection = existingInspection ?? inspectWorldwide(body, sender);
-    if (!inspection) return;
     // Refuse unsafe/global-ambiguous evidence before touching Keychain or
     // hashing source-derived material.
-    const prepared = prepareReviewAlert({
-      id: 'capture_probe_id_0001',
-      sourceKey: 'capture_probe_key_001',
-      observedAt: ts,
-      channel,
-      inspection,
-    });
-    if (!prepared) return;
+    const prepared = inspection
+      ? prepareReviewAlert({
+          id: 'capture_probe_id_0001',
+          sourceKey: 'capture_probe_key_001',
+          observedAt: ts,
+          channel,
+          inspection,
+        })
+      : null;
+    // A globally routed/ambiguous alert has already been judged by the global
+    // inspector. Never let a Gulf sender alias bypass that refusal. The launch
+    // fallback is reserved for alerts that have no global route at all.
+    const launchReview = inspection === null
+      ? inspectUnparsedLaunchAlert(body, sender)
+      : null;
+    const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
+      ? prepareLaunchReviewAlert({
+          id: 'capture_probe_id_0001',
+          sourceKey: 'capture_probe_key_001',
+          observedAt: ts,
+          channel,
+          review: launchReview.review,
+        })
+      : null);
+    if (!reviewPrepared) return false;
     const key = await databaseKey();
     if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
     const identity = await reviewCaptureIdentity(body, sender, ts, channel, key);
     if (!identity) throw new ReviewIdentityError('Encrypted review identity is invalid');
-    if (reviewSourceKeys.has(identity.sourceKey)) return;
+    if (reviewSourceKeys.has(identity.sourceKey)) return true;
     reviewSourceKeys.add(identity.sourceKey);
-    reviewCandidates.push({ ...prepared, ...identity });
+    reviewCandidates.push({ ...reviewPrepared, ...identity });
     // Inbox, delivery and push are collected in different phases. Keep the
     // newest bounded set by event time—not whichever channel happened to run
     // first—so a full inbox cannot crowd out a fresh bank-app alert.
@@ -281,7 +317,11 @@ export async function scanInbox(
     if (reviewCandidates.length > MAX_REVIEW_CANDIDATES) {
       reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
     }
+    return true;
   };
+  const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
+    parsedAlert.type === 'income' && !parsedAlert.transferHint &&
+    parsedAlert.categoryGuess === 'other' && !parsedAlert.categoryDeliberate;
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
   let newestTs = sinceMs;
@@ -318,7 +358,12 @@ export async function scanInbox(
       // foreign-card purchase merely because that launch pack is active. The
       // routed alert remains review-only until its own bank/template gates pass.
       const p = parseLaunchAlert(sms.body, sms.address, worldwide);
-      if (p) {
+      const reviewed = p && shouldReviewParsedIncome(p)
+        ? await inspectRefused(
+            sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
+          )
+        : false;
+      if (p && !reviewed) {
         parsed.push({
           ...p,
           date: p.date ?? toISODate(new Date(sms.date)),
@@ -327,7 +372,7 @@ export async function scanInbox(
           channel: 'inbox',
           sourceEventId,
         });
-      } else {
+      } else if (!p) {
         await inspectRefused(
           sms.body,
           sms.date,
@@ -371,7 +416,10 @@ export async function scanInbox(
         if (!inboxBodies.has(bodyPrint(sms.body))) {
           const worldwide = inspectWorldwide(sms.body, sms.address);
           const p = parseLaunchAlert(sms.body, sms.address, worldwide);
-          if (p) {
+          const reviewed = p && shouldReviewParsedIncome(p)
+            ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
+            : false;
+          if (p && !reviewed) {
             parsed.push({
               ...p,
               date: p.date ?? toISODate(new Date(sms.date)),
@@ -379,7 +427,7 @@ export async function scanInbox(
               sender: sms.address,
               channel: 'delivery',
             });
-          } else {
+          } else if (!p) {
             await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide);
           }
         }
@@ -425,7 +473,10 @@ export async function scanInbox(
         const p = trustedMarket === 'AE' || trustedMarket === 'SA'
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket)
           : null;
-        if (p) {
+        const reviewed = p && shouldReviewParsedIncome(p)
+          ? await inspectRefused(source, n.ts, sender, 'push', worldwide)
+          : false;
+        if (p && !reviewed) {
           parsed.push({
             ...p,
             date: p.date ?? toISODate(new Date(n.ts)),
@@ -434,7 +485,7 @@ export async function scanInbox(
             sender: `${n.pkg} ${n.title}`,
             channel: 'push',
           });
-        } else {
+        } else if (!p) {
           await inspectRefused(
             source,
             n.ts,

@@ -104,10 +104,13 @@ of UAE bank messages is a breach target, and "we cannot read it" is the
 product's main claim.
 
 **One thing that must be said out loud in the app, not just here.** The
-Shortcut's filter is coarse (see below), so messages that are not from a bank
-*do* reach this Worker. They are parsed, they return `204`, and nothing is
-stored — but the text left the phone. Any onboarding copy telling an iPhone
-user "there is no server" is false and has to be rewritten before this ships.
+Shortcut's filter is coarse (see below), so messages that are not transactions
+*do* reach this Worker. Most are parsed, return `204`, and leave nothing behind.
+A narrowly grounded UAE/Saudi bank alert that the launch parser cannot file may
+instead become a sealed, structured review row; its text and sender are still
+discarded. In both cases the text left the phone temporarily. Any onboarding
+copy telling an iPhone user "there is no server" is false and has to be
+rewritten before this ships.
 
 ## The parser is not duplicated
 
@@ -242,7 +245,7 @@ which stays in the foreground app.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/v1/pair` | `{publicKey, market?, deviceName?}` (base64 X25519, 32 bytes) → `{deviceId, ingestToken, syncToken, adminToken, market}` |
-| `POST` | `/v1/ingest` | Ingest bearer + `{text, sender?, receivedAt?, eventId?}` → `202`, or `204` when the message was not a transaction |
+| `POST` | `/v1/ingest` | Ingest bearer + `{text, sender?, receivedAt?, eventId?}` → `202` for a parsed or safe structured-review row, or `204` when intentionally ignored |
 | `GET` | `/v1/sync` | Sync bearer → `{items: [{id, epk, iv, ct}]}` |
 | `POST` | `/v1/ack` | Sync bearer + `{ids}` → `204`, rows deleted |
 | `PATCH` | `/v1/device` | Admin bearer + `{market}` → `{market}` |
@@ -271,7 +274,8 @@ loses nothing — the app asks again and the row is still there.
 
 `204` on ingest is the common case and is not an error: the Shortcut fires on
 every message matching the user's filter, and most of them are OTPs, promos and
-delivery notices that are none of our business.
+delivery notices that are none of our business. A `202` review fallback is not
+an imported transaction; the phone must show and confirm it explicitly.
 
 `PATCH /v1/device` exists so changing country does not mean re-pairing.
 Re-pairing mints a new ingest token, and the old one is baked into the user's

@@ -15,6 +15,7 @@ const uae = 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234';
 const declined = 'Your transaction of AED 500.00 at SHARAF DG was declined due to insufficient funds.';
 const otp = 'BNP Paribas: OTP 123456 pour EUR 12,34. Ne partagez jamais ce code.';
 const chase = 'Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.';
+const unfamiliarFabSalary = 'WPS AED 8,500.00 posted to A/C XXXX1234.';
 
 const nativeRoot = path.resolve(
   __dirname,
@@ -67,6 +68,7 @@ let inboxRows = [
   { address: 'ADCB', body: declined, date: NOW + 3_000 },
       { address: 'BNPPARIBAS', body: otp, date: NOW + 4_000 },
       { address: 'CHASE', body: chase, date: NOW + 4_500 },
+      { address: 'FAB', body: unfamiliarFabSalary, date: NOW + 4_750 },
 ];
 let receivedRows = [{ address: 'BNPPARIBAS', body: france, date: NOW + 1_500 }];
 let notificationsEnabled = true;
@@ -145,13 +147,13 @@ const { scanInbox } = require('./build/auto-import.js');
       inboxReadCursors[0]?.max === 1000,
     JSON.stringify(inboxReadCursors[0]));
   ok('a parse-null, institution-backed global alert becomes review evidence only',
-    first.reviewCandidates.length === 3 && first.reviewCandidates[0].market === 'FR' &&
+    first.reviewCandidates.length === 4 && first.reviewCandidates[0].market === 'FR' &&
       first.reviewCandidates[0].amount.currency === 'EUR' &&
       first.reviewCandidates[0].amount.minorUnits === '1234' &&
       first.reviewCandidates[0].channel === 'inbox', JSON.stringify(first.reviewCandidates));
   ok('parse-null bank-app notifications use the same review-only seam',
-    first.reviewCandidates[2]?.channel === 'push' &&
-      first.reviewCandidates[2]?.amount.minorUnits === '999',
+    first.reviewCandidates[3]?.channel === 'push' &&
+      first.reviewCandidates[3]?.amount.minorUnits === '999',
     JSON.stringify(first.reviewCandidates));
   ok('reading a notification does not delete it before ledger durability',
     acknowledgedNotifications.length === 0, JSON.stringify(acknowledgedNotifications));
@@ -163,6 +165,17 @@ const { scanInbox } = require('./build/auto-import.js');
       first.reviewCandidates[1]?.amount.minorUnits === '2000' &&
       first.parsed.every((item) => item.originalCurrency !== 'USD'),
     JSON.stringify({ parsed: first.parsed, reviews: first.reviewCandidates }));
+  ok('an unfamiliar Gulf salary reaches review instead of disappearing or auto-posting',
+    first.reviewCandidates[2]?.market === 'AE' &&
+      first.reviewCandidates[2]?.direction === 'credit' &&
+      first.reviewCandidates[2]?.family === 'transfer' &&
+      first.reviewCandidates[2]?.amount.currency === 'AED' &&
+      first.reviewCandidates[2]?.amount.minorUnits === '850000' &&
+      first.parsed.every((item) => item.amountFils !== 850000),
+    JSON.stringify({ parsed: first.parsed, reviews: first.reviewCandidates }));
+  ok('review template identity is opaque and retained without source text',
+    /^art1_[0-9a-f]{64}$/.test(first.reviewCandidates[2]?.templateKey ?? ''),
+    JSON.stringify(first.reviewCandidates[2]));
   ok('review evidence contains no source or sender text',
     !JSON.stringify(first.reviewCandidates).includes('PRIVATE-BOUTIQUE') &&
       !JSON.stringify(first.reviewCandidates).includes('PRIVATE-CAFE') &&
@@ -182,7 +195,7 @@ const { scanInbox } = require('./build/auto-import.js');
       ),
     JSON.stringify({ declined: first.declined, reviews: first.reviewCandidates }));
   ok('OTP and duplicate delivery copies never enter review',
-    first.reviewCandidates.length === 3 && first.scannedCount === 7,
+    first.reviewCandidates.length === 4 && first.scannedCount === 8,
     JSON.stringify(first));
   await first.commit();
   ok('the scan exposes an explicit post-durability notification acknowledgement',
@@ -212,6 +225,7 @@ const { scanInbox } = require('./build/auto-import.js');
     { address: 'ADCB', body: declined, date: NOW + 3_000 },
     { address: 'BNPPARIBAS', body: otp, date: NOW + 4_000 },
     { address: 'CHASE', body: chase, date: NOW + 4_500 },
+    { address: 'FAB', body: unfamiliarFabSalary, date: NOW + 4_750 },
   ];
   receivedRows = [{ address: 'BNPPARIBAS', body: france, date: NOW + 1_500 }];
   notificationRows = [{
@@ -227,6 +241,47 @@ const { scanInbox } = require('./build/auto-import.js');
     second.reviewCandidates[0]?.sourceKey === first.reviewCandidates[0]?.sourceKey &&
       second.reviewCandidates[0]?.id === first.reviewCandidates[0]?.id,
     JSON.stringify({ first: first.reviewCandidates, second: second.reviewCandidates }));
+
+  inboxRows = [{
+    address: 'FAB', body: 'WPS AED 9,100.00 posted to A/C XXXX1234.', date: NOW + 86_404_750,
+  }];
+  receivedRows = [];
+  notificationRows = [];
+  const nextSalary = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('changed amount and date keep the same private template but a distinct event identity',
+    nextSalary.reviewCandidates[0]?.templateKey === first.reviewCandidates[2]?.templateKey &&
+      nextSalary.reviewCandidates[0]?.sourceKey !== first.reviewCandidates[2]?.sourceKey,
+    JSON.stringify({ first: first.reviewCandidates[2], next: nextSalary.reviewCandidates[0] }));
+
+  inboxRows = [{
+    address: 'FAB',
+    body: 'AED 2,500.00 has been transferred to your FAB account from JOHN DOE',
+    date: NOW + 172_804_750,
+  }];
+  const uncertainIncoming = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('a parser-readable but unclassified incoming transfer is reviewed instead of guessed as income',
+    uncertainIncoming.parsed.length === 0 && uncertainIncoming.reviewCandidates.length === 1 &&
+      uncertainIncoming.reviewCandidates[0]?.direction === 'credit' &&
+      uncertainIncoming.reviewCandidates[0]?.family === 'transfer' &&
+      uncertainIncoming.reviewCandidates[0]?.amount.minorUnits === '250000',
+    JSON.stringify(uncertainIncoming));
+
+  inboxRows = [
+    { address: 'BNPPARIBAS', body: france, date: NOW + 1_000 },
+    { address: 'ADCB', body: uae, date: NOW + 2_000 },
+    { address: 'ADCB', body: declined, date: NOW + 3_000 },
+    { address: 'BNPPARIBAS', body: otp, date: NOW + 4_000 },
+    { address: 'CHASE', body: chase, date: NOW + 4_500 },
+    { address: 'FAB', body: unfamiliarFabSalary, date: NOW + 4_750 },
+  ];
+  receivedRows = [{ address: 'BNPPARIBAS', body: france, date: NOW + 1_500 }];
+  notificationRows = [{
+    id: 'notification-row-0001',
+    pkg: 'net.bnpparibas.mescomptes',
+    title: 'BNP Paribas',
+    text: 'Paiement par carte débité de EUR 9,99 chez PRIVATE-CAFE',
+    ts: NOW + 5_000,
+  }];
 
   secureStore.__keychain.items.set('wafra.database.key.v1', '5a'.repeat(32));
   const afterKeyRotation = await scanInbox(0, {}, undefined, 'fr-FR');

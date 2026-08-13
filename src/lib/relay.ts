@@ -49,6 +49,10 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
 import type { ScannedSms } from '@/lib/auto-import';
+import {
+  prepareLaunchReviewAlert,
+  type ReviewAlert,
+} from '@/lib/alert-review-tray';
 import { MARKETS, bankFromName, bankFromSender, getActiveMarket } from '@/lib/markets';
 import {
   decodeKey,
@@ -59,6 +63,7 @@ import {
 } from '@/lib/relay-crypto';
 import { isRelayTestPayload } from '@/lib/relay-protocol';
 import type { ParsedSms } from '@/lib/sms-parser';
+import type { UnparsedLaunchAlertReview } from '@/lib/unparsed-launch-alert';
 import {
   parseTrustedDevices,
   validTrustedDeviceName,
@@ -1037,6 +1042,10 @@ export interface RelaySyncResult {
   testReceived: number;
   /** Probe ids are reserved for the foreground setup verifier. */
   testIds: string[];
+  /** Sanitized parser misses that require explicit user confirmation. */
+  reviewCandidates?: ReviewAlert[];
+  /** Review rows stay queued until their encrypted tray write is durable. */
+  reviewIds?: string[];
   /**
    * Shortcut-delivered rows in this page, and how many of them carried enough
    * evidence to name their bank. See `shortcutCaptureHealth`.
@@ -1048,6 +1057,56 @@ export interface RelaySyncResult {
   shortcutRows: number;
   shortcutRowsWithBank: number;
 }
+
+export interface RelayReviewRow {
+  relayReview: true;
+  id: string;
+  sourceKey: string;
+  templateKey: string;
+  review: UnparsedLaunchAlertReview;
+  receivedAt: string;
+  captureSource: 'shortcut';
+}
+
+const opaqueReviewKey = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(value);
+
+export const isRelayReviewRow = (value: unknown): value is RelayReviewRow => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  if (row.relayReview !== true || row.captureSource !== 'shortcut' ||
+    !opaqueReviewKey(row.id) || !opaqueReviewKey(row.sourceKey) ||
+    !opaqueReviewKey(row.templateKey) || typeof row.receivedAt !== 'string' ||
+    !Number.isFinite(Date.parse(row.receivedAt)) || 'raw' in row || 'text' in row || 'sender' in row) {
+    return false;
+  }
+  if (typeof row.review !== 'object' || row.review === null || Array.isArray(row.review)) {
+    return false;
+  }
+  try {
+    return prepareLaunchReviewAlert({
+      id: row.id,
+      sourceKey: row.sourceKey,
+      observedAt: Date.parse(row.receivedAt),
+      channel: 'shortcut',
+      review: row.review as UnparsedLaunchAlertReview,
+    }) !== null;
+  } catch {
+    return false;
+  }
+};
+
+export const relayReviewRowToReviewAlert = (row: RelayReviewRow): ReviewAlert => {
+  const prepared = prepareLaunchReviewAlert({
+    id: row.id,
+    sourceKey: row.sourceKey,
+    observedAt: Date.parse(row.receivedAt),
+    channel: 'shortcut',
+    review: row.review,
+  });
+  if (!prepared) throw new Error('Invalid relay review row');
+  return { ...prepared, templateKey: row.templateKey };
+};
 
 /**
  * Collect whatever the Shortcut has pushed since last time. Returns rows in
@@ -1155,12 +1214,14 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   }
   const items = body.items;
   const parsed: ScannedSms[] = [];
+  const reviewCandidates: ReviewAlert[] = [];
   const ids: string[] = [];
   let unreadable = 0;
   let shortcutRows = 0;
   let shortcutRowsWithBank = 0;
   let testReceived = 0;
   const testIds: string[] = [];
+  const reviewIds: string[] = [];
   // Decoded once per sync rather than once per row: a page is up to 200 rows,
   // and this is the one value in the file that must not be re-derived casually.
   const secretKey = decodeKey(cfg.privateKey);
@@ -1199,6 +1260,14 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
       testIds.push(sealed.id);
       continue;
     }
+    if (isRelayReviewRow(row)) {
+      reviewCandidates.push(relayReviewRowToReviewAlert(row));
+      shortcutRows += 1;
+      shortcutRowsWithBank += 1;
+      ids.push(sealed.id);
+      reviewIds.push(sealed.id);
+      continue;
+    }
     if (!isParsedRelayRow(row)) {
       unreadable += 1;
       ids.push(sealed.id);
@@ -1217,7 +1286,18 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   // Oldest first, the order buildImportPlan() expects so that account
   // auto-creation sees a card's earliest appearance first.
   parsed.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
-  return { parsed, ids, unreadable, testReceived, testIds, shortcutRows, shortcutRowsWithBank };
+  reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
+  return {
+    parsed,
+    reviewCandidates,
+    ids,
+    unreadable,
+    testReceived,
+    testIds,
+    reviewIds,
+    shortcutRows,
+    shortcutRowsWithBank,
+  };
 }
 
 export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {

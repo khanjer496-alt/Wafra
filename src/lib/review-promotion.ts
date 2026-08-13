@@ -1,6 +1,12 @@
-import { getCategory } from '@/lib/categories';
+import { CATEGORIES, getCategory } from '@/lib/categories';
 import { ledgerMoneySpec, type LedgerMoneySpec } from '@/lib/ledger-money';
-import { resolveReviewAlert, type AlertReviewTrayState } from '@/lib/alert-review-tray';
+import {
+  pruneAlertReviewTray,
+  resolveReviewAlert,
+  type AlertReviewTrayState,
+  type ReviewAlert,
+  type ReviewTemplateRule,
+} from '@/lib/alert-review-tray';
 import type { Account, AppState, CategoryId, Transaction, TransactionType } from '@/lib/types';
 
 export interface PromoteReviewAlertInput {
@@ -28,6 +34,8 @@ export type ReviewPromotionPlan =
   | {
       outcome: 'added';
       transaction: Transaction;
+      /** Existing opposite SMS leg proven by this explicit own-transfer decision. */
+      counterpartId?: string;
       reviewTray: AlertReviewTrayState;
       ledgerMoney: LedgerMoneySpec;
     }
@@ -43,12 +51,97 @@ const validDate = (value: string): boolean => {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
 
+const transactionTime = (transaction: Transaction): number =>
+  transaction.ts ?? Date.parse(`${transaction.date}T12:00:00Z`);
+
+const ownTransferCounterpart = (
+  state: AppState,
+  item: ReviewAlert,
+  input: PromoteReviewAlertInput,
+  amountFils: number,
+): string | undefined => {
+  if (!input.betweenOwnAccounts || item.family !== 'transfer') return undefined;
+  const oppositeType: TransactionType = {
+    income: 'expense' as const,
+    expense: 'income' as const,
+  }[input.type];
+  // Opposite bank alerts for one transfer arrive together. A multi-day amount
+  // match is not identity—it can silently rewrite an unrelated payment.
+  const windowMs = 15 * 60 * 1000;
+  const candidates = state.transactions.filter((transaction) =>
+    transaction.type === oppositeType && transaction.amountFils === amountFils &&
+    transaction.accountId !== input.accountId && transaction.source === 'sms' &&
+    !transaction.userEdited && !transaction.cardPaymentSide && !transaction.paymentFlowSide &&
+    transaction.category !== 'salary' &&
+    (transaction.isTransfer === true || transaction.category === 'other' ||
+      /\b(?:transfer|remittance|account movement|savings)\b/i.test(transaction.title)) &&
+    Number.isFinite(transactionTime(transaction)) &&
+    Math.abs(transactionTime(transaction) - item.observedAt) <= windowMs);
+  return candidates.length === 1 ? candidates[0].id : undefined;
+};
+
 const accountMatchesInstrument = (
   account: Account,
   instrument: { kind: 'card' | 'account' | 'wallet'; last4: string | null } | null,
 ): boolean => {
   if (!instrument?.last4 || !account.last4) return true;
   return instrument.last4 === account.last4;
+};
+
+const sameCorrection = (
+  rule: ReviewTemplateRule,
+  input: PromoteReviewAlertInput,
+): boolean => rule.type === input.type && rule.title === input.title.trim() &&
+  rule.category === input.category && rule.accountId === input.accountId &&
+  rule.betweenOwnAccounts === input.betweenOwnAccounts;
+
+const rememberTemplateRule = (
+  tray: AlertReviewTrayState,
+  item: ReviewAlert,
+  input: PromoteReviewAlertInput,
+  now: number,
+): AlertReviewTrayState => {
+  if (!item.templateKey) return tray;
+  const previous = tray.templateRules.find((rule) => rule.templateKey === item.templateKey);
+  const rule: ReviewTemplateRule = {
+    templateKey: item.templateKey,
+    market: item.market,
+    institution: item.institution,
+    direction: item.direction,
+    family: item.family,
+    type: input.type,
+    title: input.title.trim(),
+    category: input.category,
+    accountId: input.accountId,
+    betweenOwnAccounts: input.betweenOwnAccounts,
+    confirmations: previous && sameCorrection(previous, input) ? previous.confirmations + 1 : 1,
+    updatedAt: now,
+  };
+  return pruneAlertReviewTray({
+    ...tray,
+    templateRules: [...tray.templateRules.filter(
+      (candidate) => candidate.templateKey !== item.templateKey,
+    ), rule],
+  }, now);
+};
+
+/** Return only a still-valid correction for the same sanitized alert shape. */
+export const reviewTemplateRuleFor = (
+  state: AppState,
+  item: ReviewAlert,
+): ReviewTemplateRule | null => {
+  if (!item.templateKey) return null;
+  const rule = state.reviewTray.templateRules.find(
+    (candidate) => candidate.templateKey === item.templateKey,
+  );
+  if (!rule || rule.market !== item.market || rule.institution !== item.institution ||
+    rule.direction !== item.direction || rule.family !== item.family ||
+    rule.type !== (item.direction === 'credit' ? 'income' : 'expense') ||
+    !state.accounts.some((account) => account.id === rule.accountId) ||
+    !CATEGORIES.some((category) => category.id === rule.category && category.type === rule.type)) {
+    return null;
+  }
+  return rule;
 };
 
 /**
@@ -106,14 +199,17 @@ export const planReviewPromotion = (
     };
   }
 
+  const resolvedTray = resolveReviewAlert(state.reviewTray, item.id, 'added', now);
+  const amountFils = Number(amount);
   return {
     outcome: 'added',
+    counterpartId: ownTransferCounterpart(state, item, input, amountFils),
     ledgerMoney: state.ledgerMoney ?? expectedMoney,
-    reviewTray: resolveReviewAlert(state.reviewTray, item.id, 'added', now),
+    reviewTray: rememberTemplateRule(resolvedTray, item, input, now),
     transaction: {
       id: transactionId,
       type: input.type,
-      amountFils: Number(amount),
+      amountFils,
       category: input.category,
       accountId: account.id,
       title,

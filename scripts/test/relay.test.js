@@ -54,6 +54,7 @@ const { seal } = require('./build/crypto');
 const { deviceKeypair, encodeKey, decodeKey } = require('./build/relay-crypto.cjs');
 const { parseSms } = require('./build/sms-parser');
 const { setActiveMarket } = require('./build/markets');
+const { inspectUnparsedLaunchAlert } = require('./build/unparsed-launch-alert.js');
 const secure = require('./build/stub-secure-store');
 const rn = require('./build/stub-react-native');
 const worker = require('./build/worker').default;
@@ -163,6 +164,21 @@ const ADIB_CARD =
   'Your ADIB Card ending 4417 was used for AED 120.00 at LULU HYPERMARKET. Your available limit is AED 8,240.00.';
 const SA_PURCHASE =
   'Purchase of SAR 45.00 with mada Card ending 4733 at PANDA, RIYADH. Avl Balance is SAR 1,200.00.';
+const FALLBACK_SALARY = 'FAB payroll: AED 8,500.00 WPS credit posted to A/C XXXX1234.';
+
+function reviewRowFor(text, sender = 'FAB') {
+  const decision = inspectUnparsedLaunchAlert(text, sender);
+  if (decision.outcome !== 'review') throw new Error('fixture is not reviewable');
+  return {
+    relayReview: true,
+    id: `ari1_${'a'.repeat(43)}`,
+    sourceKey: `arc1_${'b'.repeat(43)}`,
+    templateKey: `art1_${'c'.repeat(43)}`,
+    review: decision.review,
+    captureSource: 'shortcut',
+    receivedAt: '2026-07-17T09:00:00.000Z',
+  };
+}
 
 /** A parsed row shaped exactly as the Worker seals it. */
 function rowFor(text, extra = {}) {
@@ -591,6 +607,28 @@ async function queueItem(id, row, publicKey) {
     eq('probe: it is counted as what it is', result.testReceived, 1);
     eq('probe: and reserved for the screen that is waiting for it',
       result.testIds, ['55555555-5555-4555-8555-555555555555']);
+  }
+
+  {
+    const { net, cfg } = await paired();
+    const reviewItem = await queueItem(
+      '56565656-5656-4656-8656-565656565656',
+      reviewRowFor(FALLBACK_SALARY),
+    );
+    net.on('GET /v1/sync', () => json(200, { items: [reviewItem] }));
+    const result = await relay.syncRelay(cfg);
+    eq('review row: uncertain money never enters the parsed ledger path', result.parsed.length, 0);
+    eq('review row: the phone receives one sanitized review candidate',
+      result.reviewCandidates.length, 1);
+    eq('review row: exact money and masked instrument survive without message text',
+      [result.reviewCandidates[0].amount, result.reviewCandidates[0].instrument],
+      [{ currency: 'AED', minorUnits: '850000', exponent: 2 },
+        { kind: 'account', last4: '1234' }]);
+    ok('review row: neither plaintext nor sender exists in the opened candidate',
+      !JSON.stringify(result.reviewCandidates).includes('WPS') &&
+        !JSON.stringify(result.reviewCandidates).includes('FAB payroll'));
+    eq('review row: its queue id stays distinguishable until tray persistence',
+      result.reviewIds, ['56565656-5656-4656-8656-565656565656']);
   }
 
   /* ═════════════════ Revoked from another device ═════════════════
@@ -1081,6 +1119,23 @@ async function queueItem(id, row, publicKey) {
     eq('e2e: acknowledging does', db.prepare('SELECT COUNT(*) n FROM queue').get().n, 0);
     const again = await relay.syncRelay(cfg);
     eq('e2e: and nothing is left to collect twice', again.parsed.length, 0);
+
+    const reviewAccepted = await shortcutPost(
+      FALLBACK_SALARY,
+      'FAB',
+      '2026-07-17T10:00:00.000Z',
+      'fallback-salary-01',
+    );
+    eq('review e2e: a safe launch-parser miss is accepted for review', reviewAccepted.status, 202);
+    const reviewCollected = await relay.syncRelay(cfg);
+    eq('review e2e: it cannot become an automatic transaction',
+      reviewCollected.parsed.length, 0);
+    eq('review e2e: it arrives as one structured review item',
+      reviewCollected.reviewCandidates.length, 1);
+    ok('review e2e: plaintext and sender remain absent from D1 and the phone result',
+      !dumpAll().includes('FAB payroll') && !dumpAll().includes('WPS credit') &&
+        !JSON.stringify(reviewCollected.reviewCandidates).includes('WPS'));
+    await relay.ackRelay(cfg, reviewCollected.reviewIds);
 
     // A Shortcut whose HTTP action retries. The relay's keyed replay receipt
     // collapses it, so one purchase cannot be filed as two.
@@ -1840,6 +1895,36 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
+        const cfg = { baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k' };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            ...ledger(Promise.resolve(), events),
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return { admitted: 1, durable: Promise.resolve().then(() => events.push('review-durable')) };
+            },
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [], reviewCandidates: [{ id: 'structured-review' }],
+              ids: ['review-row', 'setup-probe'], reviewIds: ['review-row'],
+              testIds: ['setup-probe'], unreadable: 0, testReceived: 1,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => emptyPlan,
+            acknowledge: async (_cfg, ids) => void events.push(`ack:${ids.join(',')}`),
+          },
+        });
+        const outcome = await executor.execute('supplemental');
+        eq('capture executor: supplemental review is encrypted before its relay row is acknowledged',
+          events, ['review-stage', 'review-durable', 'ack:review-row']);
+        ok('capture executor: supplemental reports the review count without an import',
+          outcome.kind === 'up-to-date' && outcome.reviewAlerts === 1);
+      }
+
+      {
+        const events = [];
         const cfg = {
           baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE',
         };
@@ -2157,6 +2242,31 @@ async function queueItem(id, row, publicKey) {
         await executor.execute('background');
         eq('capture executor: background staging and proof precede ack while probes remain reserved',
           events, ['stage', 'announce', 'proof', 'ack:bank-row']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          background: {
+            stage: async (rows) => { events.push(`stage:${rows.length}`); return rows; },
+            announce: async () => void events.push('announce'),
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+          dependencies: {
+            getBackgroundRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
+            }),
+            sync: async () => ({
+              parsed: [], reviewCandidates: [{ id: 'structured-review' }],
+              ids: ['review-row'], reviewIds: ['review-row'], testIds: [],
+              unreadable: 0, testReceived: 0, shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        await executor.execute('background');
+        eq('capture executor: background leaves review rows queued for encrypted foreground staging',
+          events, ['stage:0', 'announce']);
       }
 
       {

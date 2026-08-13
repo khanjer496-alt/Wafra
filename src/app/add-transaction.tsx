@@ -25,6 +25,7 @@ import { committed } from '@/lib/haptics';
 import { t as tUi } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
+import { reviewTemplateRuleFor } from '@/lib/review-promotion';
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
@@ -59,14 +60,16 @@ export default function AddTransactionScreen() {
   const reviewItem = reviewId
     ? state.reviewTray.pending.find((item) => item.id === reviewId) ?? null
     : null;
+  const rememberedReview = reviewItem ? reviewTemplateRuleFor(state, reviewItem) : null;
 
-  const reviewType: TransactionType = reviewItem?.direction === 'credit' ? 'income' : 'expense';
+  const reviewType: TransactionType = rememberedReview?.type ??
+    (reviewItem?.direction === 'credit' ? 'income' : 'expense');
   const reviewCategory: CategoryId | null = reviewItem?.family === 'utility'
       ? 'utilities'
       : reviewItem?.family === 'cash-withdrawal'
         ? 'cash-withdrawal'
         : null;
-  const reviewTitle = reviewItem ? defaultReviewTitle(reviewItem) : '';
+  const reviewTitle = rememberedReview?.title ?? (reviewItem ? defaultReviewTitle(reviewItem) : '');
   const matchedAccount = reviewItem?.instrument?.last4
     ? state.accounts.find((account) => account.last4 === reviewItem.instrument?.last4)
     : null;
@@ -74,17 +77,19 @@ export default function AddTransactionScreen() {
   const [type, setType] = useState<TransactionType>(reviewType);
   const [amountText, setAmountText] = useState('');
   const [category, setCategory] = useState<CategoryId | null>(
-    reviewItem ? reviewCategory : 'groceries',
+    rememberedReview ? rememberedReview.category as CategoryId : reviewItem ? reviewCategory : 'groceries',
   );
   const [accountId, setAccountId] = useState(
-    reviewItem ? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',
+    reviewItem ? rememberedReview?.accountId ?? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',
   );
   const [title, setTitle] = useState(reviewTitle);
   const [dayOffset, setDayOffset] = useState(0);
   const [reviewDate, setReviewDate] = useState(
     reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '',
   );
-  const [betweenOwnAccounts, setBetweenOwnAccounts] = useState(false);
+  const [betweenOwnAccounts, setBetweenOwnAccounts] = useState(
+    rememberedReview?.betweenOwnAccounts ?? false,
+  );
   const [saving, setSaving] = useState(false);
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;

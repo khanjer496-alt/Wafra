@@ -89,7 +89,7 @@ ok('retained queue rows get scheduled wake retries',
   /SELECT DISTINCT q\.device_id AS id[\s\S]*JOIN push_registrations/.test(worker) &&
     /pending \?\? \[\][\s\S]*wakeDevice\(env, row\.id\)/.test(worker));
 ok('server drops parser raw before sealing',
-  /const \{ raw: _discard, \.\.\.structured \} = parsed!/.test(worker));
+  /const \{ raw: _discard, \.\.\.structured \} = parsed;/.test(worker));
 ok('Shortcut rows are explicitly distinguished from email, PDF, and CSV imports',
   /captureSource: 'shortcut'/.test(worker) &&
     /captureSource: 'email'/.test(worker) &&
@@ -174,9 +174,13 @@ ok('the sender is bounded and never truncated into the row',
   /export const MAX_RELAY_SENDER_LENGTH = \d{1,3};/.test(ingestRow) &&
     /if \(\[\.\.\.normalized\]\.length > MAX_RELAY_SENDER_LENGTH\) return undefined;/.test(ingestRow));
 ok('the sender reaches the sealed row and nothing else',
-  /\.\.\.\(!isTest && sender \? \{ sender \} : \{\}\),/.test(ingest) &&
+  /\.\.\.\(!isTest && parsed && sender \? \{ sender \} : \{\}\),/.test(ingest) &&
     !/\.bind\([^)]*\bsender\b/.test(worker) &&
     !/\bsender\w*\s+(?:TEXT|BLOB|INTEGER)\b/i.test(schema));
+ok('review fallback seals structured evidence without source or sender',
+  /relayReview: true as const/.test(ingest) &&
+    /review-template:\$\{sender \?\? ''\}:\$\{normalizeUnparsedLaunchTemplate\(text\)\}/.test(ingest) &&
+    /\.\.\.\(!isTest && parsed && sender \? \{ sender \} : \{\}\),/.test(ingest));
 ok('a malformed sender is not echoed back to the caller',
   !/json\(\{[^}]*\bsender\b[^}]*\}, 4\d\d\)/.test(worker));
 ok('the sender module has no persistence or logging surface',
@@ -241,7 +245,7 @@ ok('no route logs anything at all',
 ok('structured parser fields cross the raw discard by spread, not by allow-list',
   /const \{ raw: _discard, \.\.\.structured \} = parsed;/.test(worker) &&
     /return structured;/.test(worker) &&
-    /const \{ raw: _discard, \.\.\.structured \} = parsed!;/.test(ingest));
+    /const \{ raw: _discard, \.\.\.structured \} = parsed;/.test(ingest));
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -116,8 +116,14 @@ const summary = (
   reviewAlerts,
 });
 
-const acknowledgementsFor = (queued: RelaySyncResult): string[] => {
+const acknowledgementsFor = (
+  queued: RelaySyncResult,
+  includeReviews = false,
+): string[] => {
   const reserved = new Set(queued.testIds);
+  if (!includeReviews) {
+    for (const id of queued.reviewIds ?? []) reserved.add(id);
+  }
   return queued.ids.filter((id) => !reserved.has(id));
 };
 
@@ -296,6 +302,16 @@ export const createCaptureExecutor = ({
     // happened to be current when the request started.
     const state = activeLedger.getState();
     if (!state.hydrated) return { kind: 'not-hydrated' };
+    let reviewAlerts = 0;
+    const reviewCandidates = queued.reviewCandidates ?? [];
+    if (reviewCandidates.length > 0) {
+      if (!activeLedger.stageReviewAlerts) {
+        throw new Error('Capture executor requires review staging for review candidates');
+      }
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      reviewAlerts = reviewReceipt.admitted;
+      await reviewReceipt.durable;
+    }
     const newestTs = queued.parsed.reduce(
       (max, row) => Math.max(max, row.smsTs ?? 0),
       state.lastScanTs,
@@ -306,15 +322,15 @@ export const createCaptureExecutor = ({
       const receipt = activeLedger.importBatch(plan.batch);
       transactionIds = receipt.ids;
       await receipt.durable;
-    } else {
+    } else if (reviewCandidates.length === 0) {
       await activeLedger.ensureDurable();
     }
 
-    const acknowledge = acknowledgementsFor(queued);
+    const acknowledge = acknowledgementsFor(queued, true);
     if (acknowledge.length > 0) await dependencies.acknowledge(cfg, acknowledge);
     return hasChanges(plan)
-      ? { kind: 'imported', source: 'relay', ...summary(plan, transactionIds) }
-      : { kind: 'up-to-date', source: 'relay', ...summary(plan, transactionIds) };
+      ? { kind: 'imported', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) }
+      : { kind: 'up-to-date', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) };
   };
 
   const executeBackground = async (): Promise<CaptureExecutionOutcome> => {
@@ -350,6 +366,14 @@ export const createCaptureExecutor = ({
     alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     const shortcutRow = queued.parsed.find((row) => row.captureSource === 'shortcut');
     const proofObserved = queued.testReceived > 0 || shortcutRow !== undefined;
+
+    const reviewCandidates = queued.reviewCandidates ?? [];
+    if (reviewCandidates.length > 0) {
+      if (!activeLedger.stageReviewAlerts) {
+        throw new Error('Capture executor requires review staging for review candidates');
+      }
+      await activeLedger.stageReviewAlerts(reviewCandidates).durable;
+    }
 
     if (queued.parsed.length > 0) {
       // The sync can overlap another import. Plan only after it returns, using

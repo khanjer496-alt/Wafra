@@ -40,9 +40,10 @@ ok('review route offers explicit correction before promotion, never silent impor
     /reviewAlertDateA11y/.test(add) &&
     /type:\s*['"]promoteReviewAlert['"]/.test(store) &&
     /dismissReviewAlert\(item\.id, ['"]dismissed['"]\)/.test(route));
-ok('review candidates require explicit uncertain account and category choices',
-  /reviewItem \? matchedAccount\?\.id \?\? ''/.test(add) &&
-    /reviewItem \? reviewCategory : 'groceries'/.test(add) &&
+ok('review candidates require explicit choices unless a prior local correction supplies them',
+  /rememberedReview\?\.accountId \?\? matchedAccount\?\.id \?\? ''/.test(add) &&
+    /rememberedReview \? rememberedReview\.category as CategoryId : reviewItem \? reviewCategory/.test(add) &&
+    /reviewTemplateRuleFor/.test(add) &&
     /!!category/.test(add) &&
     /reviewAlertChooseAccount/.test(add) &&
     /reviewAlertChooseCategory/.test(add));
