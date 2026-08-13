@@ -618,10 +618,10 @@ export default function HomeScreen() {
   const toast = useToast();
   const { state, applyFxUpdates, setCaptureOptOut } = useStore();
   const { period } = usePeriod();
-  // `true`: Home is the screen that scans on mount and on foreground resume.
-  // The other tabs take the same hook without that flag — they get the shared
-  // scan for pull-to-refresh and leave the watching to Home.
-  const { runAutoImport, needsPermission, captureState } = useAutoImport(true);
+  // The tabs shell owns launch/foreground scanning so a restored Bills, Flow
+  // or Wallet tab still runs parser migrations. Home owns only this visible
+  // status surface and joins the shell's module-level in-flight scan on tap.
+  const { runAutoImport, needsPermission, captureState } = useAutoImport(false, true);
   // One value for what the card SAYS and what tapping it DOES. They used to be
   // written out separately and drifted: the tap handler branched on the
   // platform alone, so a fully verified iOS user — card reading "Shortcut

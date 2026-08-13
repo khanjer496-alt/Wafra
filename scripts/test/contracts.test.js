@@ -703,8 +703,8 @@ function ktSources(dir) {
 // syncRelay() reports a probe's queue id in BOTH `ids` and `testIds`. It does
 // have to be acknowledged eventually — but only by /ios-setup, which is the
 // screen polling for it. Any other collector that acks the whole `ids` array
-// eats the proof, and because Home mounts useAutoImport(true) UNDERNEATH the
-// setup flow, that is not an unlucky interleaving, it is the ordinary one: the
+// eats the proof, and because the tabs shell mounts useAutoImport(true) UNDERNEATH
+// the setup flow, that is not an unlucky interleaving, it is the ordinary one: the
 // user leaves Wafra to run the Shortcut, comes back, the AppState 'active'
 // scan fires, and step 3 times out on a phone that is configured correctly.
 // The "Try again" it offers resends a byte-identical probe, which the relay's
@@ -888,11 +888,21 @@ function ktSources(dir) {
       /usePullToRefresh\(\)/.test(src) &&
         /<RefreshControl refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(src));
   }
-  // Home keeps the mount + foreground watch; the others deliberately do not,
-  // so a tab switch does not fire a native permission query for a card that
-  // tab never renders.
+  // The tabs shell keeps the mount + foreground watch regardless of which tab
+  // Android restores after an update. Home separately owns the visible status
+  // query, so a tab switch does not start another parser migration.
   const home = read('src/app/(tabs)/index.tsx');
-  ok('Home is the screen that watches the foreground', /useAutoImport\(true\)/.test(home));
+  const tabsLayout = read('src/app/(tabs)/_layout.tsx');
+  ok('the tabs shell owns parser migrations independent of the active tab',
+    /function CaptureOwner/.test(tabsLayout) &&
+      /useAutoImport\(true, false\)/.test(tabsLayout) &&
+      /<CaptureOwner \/>/.test(tabsLayout));
+  ok('Home observes status without registering a second foreground scan',
+    /useAutoImport\(false, true\)/.test(home));
+  ok('a hidden shell access failure reaches Home capture status',
+    /React\.useSyncExternalStore\(\s*subscribeSmsAccess/.test(hook) &&
+      /setSharedSmsAccessUnavailable\(true\)/.test(hook) &&
+      /captureState: sharedAccessUnavailable \? 'off' : captureState/.test(hook));
   ok('Home refresh surfaces a native inbox failure',
     /await runAutoImport\(true\);[\s\S]*?catch \{[\s\S]*?captureRefreshFailed/.test(home));
 }

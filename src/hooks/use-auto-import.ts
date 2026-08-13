@@ -56,6 +56,31 @@ const RESCAN_AFTER_MS = 30_000;
 let lastScanAt = 0;
 
 /**
+ * Android provider access is a process-wide fact, not a screen-local one.
+ *
+ * The tabs shell owns the actual foreground scan while Home owns the visible
+ * status card. Keeping this in either hook's useState lets a restricted OEM
+ * provider fail invisibly in the shell while Home independently sees the
+ * runtime permission bit and says ON. This tiny external store keeps those
+ * adapters on one truthful answer; it contains no financial data.
+ */
+let sharedSmsAccessUnavailable = false;
+const smsAccessListeners = new Set<() => void>();
+
+const setSharedSmsAccessUnavailable = (unavailable: boolean): void => {
+  if (sharedSmsAccessUnavailable === unavailable) return;
+  sharedSmsAccessUnavailable = unavailable;
+  for (const listener of smsAccessListeners) listener();
+};
+
+const subscribeSmsAccess = (listener: () => void): (() => void) => {
+  smsAccessListeners.add(listener);
+  return () => smsAccessListeners.delete(listener);
+};
+
+const smsAccessSnapshot = (): boolean => sharedSmsAccessUnavailable;
+
+/**
  * What a scan attempt actually did, so a caller who only *joined* it — rather
  * than starting it — can tell whether it still owes its own interactive
  * feedback. `'imported'` is the one outcome that already shows a toast
@@ -121,7 +146,10 @@ export type AutoImport = {
  * visits deliberately does not need to, because the throttle and the in-flight
  * join make a second watcher redundant rather than harmful.
  */
-export function useAutoImport(watchForeground = false): AutoImport {
+export function useAutoImport(
+  watchForeground = false,
+  watchStatus = watchForeground,
+): AutoImport {
   const {
     state,
     importBatch,
@@ -151,6 +179,11 @@ export function useAutoImport(watchForeground = false): AutoImport {
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
   const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
+  const sharedAccessUnavailable = React.useSyncExternalStore(
+    subscribeSmsAccess,
+    smsAccessSnapshot,
+    smsAccessSnapshot,
+  );
   const previousCaptureOptOut = useRef(state.captureOptOut);
 
   // Read the real platform capability whenever the screen regains focus. This
@@ -162,7 +195,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
   // permission query and two relay reads to update a status nobody displays.
   useFocusEffect(
     useCallback(() => {
-      if (!watchForeground) return;
+      if (!watchStatus) return;
       let current = true;
       void (async () => {
         if (state.captureOptOut) {
@@ -199,8 +232,9 @@ export function useAutoImport(watchForeground = false): AutoImport {
         if (Platform.OS === 'android' && isSmsScanningAvailable()) {
           const granted = await hasSmsPermission().catch(() => false);
           if (!current) return;
+          if (!granted) setSharedSmsAccessUnavailable(true);
           setNeedsPermission(!granted);
-          setCaptureState(granted ? 'active' : 'off');
+          setCaptureState(granted && !sharedAccessUnavailable ? 'active' : 'off');
           return;
         }
         if (current) setCaptureState('unsupported');
@@ -208,7 +242,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
       return () => {
         current = false;
       };
-    }, [state.captureOptOut, watchForeground]),
+    }, [sharedAccessUnavailable, state.captureOptOut, watchStatus]),
   );
 
   const performAutoImport = useCallback(
@@ -239,6 +273,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
         let granted = await hasSmsPermission();
         if (!granted && interactive) granted = await requestSmsPermission();
         if (!granted) {
+          setSharedSmsAccessUnavailable(true);
           setNeedsPermission(true);
           setCaptureState('off');
           if (interactive) {
@@ -261,6 +296,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
         outcome = await captureExecutor.execute('routine');
       } catch (error) {
         if (!isSmsInboxAccessError(error)) throw error;
+        setSharedSmsAccessUnavailable(true);
         setNeedsPermission(true);
         setCaptureState('off');
         if (interactive) {
@@ -274,6 +310,7 @@ export function useAutoImport(watchForeground = false): AutoImport {
         }
         return 'no-permission';
       }
+      setSharedSmsAccessUnavailable(false);
       // Only a completed native/relay read makes capture fresh. A provider
       // restriction thrown above must not suppress the immediate retry after
       // the user returns from Android settings.
@@ -516,7 +553,11 @@ export function useAutoImport(watchForeground = false): AutoImport {
     });
   }, [state, watchForeground]);
 
-  return { runAutoImport, needsPermission, captureState };
+  return {
+    runAutoImport,
+    needsPermission: needsPermission || sharedAccessUnavailable,
+    captureState: sharedAccessUnavailable ? 'off' : captureState,
+  };
 }
 
 /**

@@ -58,6 +58,12 @@ export interface CaptureResult {
   declined: DeclinedSms[];
   /** Newest message timestamp seen, for the next incremental scan. */
   newestTs: number;
+  /** Rows the platform actually yielded, including safe refusals. */
+  scannedCount?: number;
+  /** Rows yielded by Android's inbox provider, excluding push/delivery buffers. */
+  inboxScannedCount?: number;
+  /** Android deliberately started at the beginning for a parser migration. */
+  historicalReread?: boolean;
   /** Strong per-alert evidence for the launch-tested UAE/Saudi parser pack. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
   source: CaptureSource;
@@ -72,6 +78,15 @@ export interface CaptureResult {
 }
 
 const NOOP = async () => {};
+
+class SmsHistoryUnavailableError extends Error {
+  readonly code = 'ERR_SMS_HISTORY_UNAVAILABLE';
+
+  constructor() {
+    super('SMS history was unavailable during parser migration');
+    this.name = 'SmsHistoryUnavailableError';
+  }
+}
 
 /**
  * The staging queue key. background-relay.ts owns every write to it and
@@ -198,17 +213,33 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       reviewCandidates = [],
       declined = [],
       newestTs,
+      inboxScannedCount = 0,
+      scannedCount = 0,
       detectedLaunchMarket = null,
       commit,
     } = await scanInbox(
       sinceMs,
       state.merchantOverrides,
     );
+    // A parser migration is only complete when Android actually yielded the
+    // history it was asked to re-read. Some OEM restricted-access layers keep
+    // READ_SMS looking granted but return an empty provider cursor. Calling
+    // that a successful zero-change scan stamps PARSER_VERSION and strands all
+    // older Fishbasket/Fbinter/Nazemhome receipts forever. An established SMS
+    // ledger proves that zero rows is not a credible full-history result.
+    const hasStoredSmsHistory =
+      state.lastScanTs > 0 || state.transactions.some((row) => row.source === 'sms');
+    if (reread && inboxScannedCount === 0 && hasStoredSmsHistory) {
+      throw new SmsHistoryUnavailableError();
+    }
     return {
       parsed,
       reviewCandidates,
       declined,
       newestTs,
+      inboxScannedCount,
+      scannedCount,
+      historicalReread: reread,
       detectedLaunchMarket,
       source: 'sms',
       commit,

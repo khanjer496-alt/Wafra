@@ -1134,7 +1134,7 @@ async function queueItem(id, row, publicKey) {
   // neither was visible from either side alone:
   //
   //   • THE SETUP PROBE. syncRelay() reports a probe id in both `ids` and
-  //     `testIds`, and only /ios-setup may acknowledge it. Home mounts
+  //     `testIds`, and only /ios-setup may acknowledge it. The tabs shell mounts
   //     useAutoImport(true) underneath the setup flow, so returning to Wafra
   //     after running the Shortcut fires a foreground scan; that scan acked the
   //     probe, the setup screen's poll timed out, and the retry it offered was
@@ -1231,6 +1231,64 @@ async function queueItem(id, row, publicKey) {
 
     const capture = execute('src/lib/capture.ts', captureDep);
     const state = { parserVersion: 1, lastScanTs: 0, privateMode: false, merchantOverrides: {} };
+
+    /* A restricted OEM provider can keep READ_SMS looking granted while
+     * yielding no history. That must not stamp a parser migration complete
+     * over an established SMS ledger, or historical recurring payments can
+     * never be offered again. */
+    {
+      let requestedSince = null;
+      const historyCapture = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
+        if (id === '@/lib/background-relay') {
+          return {
+            readBackgroundRelayRows: async () => [],
+            clearBackgroundRelayRows: async () => {},
+          };
+        }
+        if (id === '@/lib/relay') {
+          return {
+            isRelayPlatform: () => false,
+            getRelayConfig: async () => null,
+            syncRelay: async () => ({ parsed: [], ids: [], testIds: [] }),
+            ackRelay: async () => {},
+            isRelayRevokedError: () => false,
+          };
+        }
+        if (id === '@/lib/auto-import') {
+          return {
+            isSmsScanningAvailable: () => true,
+            scanInbox: async (since) => {
+              requestedSince = since;
+              return {
+                parsed: [], reviewCandidates: [], declined: [], newestTs: 900,
+                inboxScannedCount: 0, scannedCount: 1,
+                detectedLaunchMarket: null, commit: async () => {},
+              };
+            },
+          };
+        }
+        if (id === '@/lib/sms-parser') return { PARSER_VERSION: 24 };
+        throw new Error(`unexpected history-capture dependency ${id}`);
+      });
+      let code = null;
+      try {
+        await historyCapture.collectNewMessages({
+          hydrated: true,
+          parserVersion: 23,
+          lastScanTs: 900,
+          privateMode: false,
+          captureOptOut: false,
+          merchantOverrides: {},
+          transactions: [{ source: 'sms' }],
+        });
+      } catch (error) {
+        code = error?.code;
+      }
+      eq('parser migration: a version change requests the complete inbox', requestedSince, 0);
+      eq('parser migration: an empty restricted history cannot be stamped complete',
+        code, 'ERR_SMS_HISTORY_UNAVAILABLE');
+    }
 
     /* Defect A — the foreground scan must not eat the setup probe. */
     {

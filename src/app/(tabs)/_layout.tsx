@@ -2,6 +2,21 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 
 import { WafraTabBar } from '@/components/tab-bar';
+import { useAutoImport } from '@/hooks/use-auto-import';
+
+/**
+ * Capture belongs to the signed-in tab shell, not to whichever tab happened
+ * to render first. Android can restore directly onto Bills/Flow/Wallet after
+ * an app update; mounting the parser migration only inside Home left those
+ * sessions showing the old ledger indefinitely.
+ *
+ * Status rendering remains on Home. This owner watches launch/foreground and
+ * owns the once-per-session notification work without creating a second UI.
+ */
+function CaptureOwner() {
+  useAutoImport(true, false);
+  return null;
+}
 
 /**
  * No `detachInactiveScreens` override here, and it is not an oversight.
@@ -30,13 +45,16 @@ import { WafraTabBar } from '@/components/tab-bar';
  */
 export default function TabsLayout() {
   return (
-    <Tabs
-      screenOptions={{ headerShown: false }}
-      tabBar={(props) => <WafraTabBar {...props} />}>
-      <Tabs.Screen name="index" />
-      <Tabs.Screen name="flow" />
-      <Tabs.Screen name="bills" />
-      <Tabs.Screen name="wallet" />
-    </Tabs>
+    <>
+      <CaptureOwner />
+      <Tabs
+        screenOptions={{ headerShown: false }}
+        tabBar={(props) => <WafraTabBar {...props} />}>
+        <Tabs.Screen name="index" />
+        <Tabs.Screen name="flow" />
+        <Tabs.Screen name="bills" />
+        <Tabs.Screen name="wallet" />
+      </Tabs>
+    </>
   );
 }

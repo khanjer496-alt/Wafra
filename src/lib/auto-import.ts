@@ -84,7 +84,10 @@ export async function openSmsPermissionSettings(): Promise<void> {
 /** Stable native error boundary; never inspect or expose platform error text. */
 export function isSmsInboxAccessError(error: unknown): boolean {
   return typeof error === 'object' && error !== null &&
-    'code' in error && (error as { code?: unknown }).code === 'ERR_SMS_INBOX_ACCESS';
+    'code' in error && (
+      (error as { code?: unknown }).code === 'ERR_SMS_INBOX_ACCESS' ||
+      (error as { code?: unknown }).code === 'ERR_SMS_HISTORY_UNAVAILABLE'
+    );
 }
 
 export async function requestSmsDeliveryPermission(): Promise<boolean> {
@@ -121,6 +124,8 @@ export interface ScanResult {
   declined: DeclinedSms[];
   /** Timestamp of the newest message seen, for incremental scans. */
   newestTs: number;
+  /** Rows yielded specifically by Android's SMS inbox provider. */
+  inboxScannedCount: number;
   scannedCount: number;
   /** Strong launch-pack evidence observed while parsing this scan. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
@@ -202,7 +207,8 @@ export async function scanInbox(
 ): Promise<ScanResult> {
   if (!isSmsScanningAvailable() || !SmsReader) {
     return {
-      parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs, scannedCount: 0,
+      parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs,
+      inboxScannedCount: 0, scannedCount: 0,
       detectedLaunchMarket: null,
       commit: NOOP_SCAN_COMMIT,
     };
@@ -281,6 +287,7 @@ export async function scanInbox(
   let newestTs = sinceMs;
   let beforeDateMs = Date.now() + 60_000;
   let beforeId = Number.MAX_SAFE_INTEGER;
+  let inboxScannedCount = 0;
   let scannedCount = 0;
 
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -291,6 +298,7 @@ export async function scanInbox(
       PAGE_SIZE,
     );
     if (batch.length === 0) break;
+    inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
     for (let i = 0; i < batch.length; i++) {
@@ -458,6 +466,7 @@ export async function scanInbox(
     reviewCandidates,
     declined,
     newestTs,
+    inboxScannedCount,
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
     commit: notificationIds.size > 0 && notificationReader

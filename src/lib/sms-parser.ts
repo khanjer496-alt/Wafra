@@ -208,8 +208,13 @@ export interface ParsedCard {
  * due reminder with a masked account identity, and the history re-read gives
  * the commitment detector the complete registered-payee sequence it needs to
  * recover monthly utilities paid early or late.
+ *
+ * 24: reliable recurring-bill migration. Run the registered-payee history
+ * repair again after moving parser-upgrade capture out of Home and into the
+ * tabs shell, so opening directly onto Bills/Flow/Wallet cannot leave
+ * Fishbasket, Fbinter, Nazemhome or other proven histories on the old parser.
  */
-export const PARSER_VERSION = 23;
+export const PARSER_VERSION = 24;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
