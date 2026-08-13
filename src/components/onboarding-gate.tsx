@@ -16,7 +16,7 @@ import { StorageRecovery } from '@/components/storage-recovery';
 import { ThemedText } from '@/components/themed-text';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
-import { Icon, type IconName } from '@/components/ui/icon';
+import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
@@ -47,43 +47,6 @@ type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
  * the tone, and the mark is at its strongest on charcoal. */
 const night = Colors.dark;
 
-/**
- * THE PRIVACY CLAIM IS DIFFERENT ON IPHONE, AND IT HAS TO STILL BE TRUE.
- *
- * Do not collapse these two lists back into one. On Android the capture path is
- * modules/sms-reader: the inbox is parsed on-device and no bank-message text
- * ever leaves the phone, so the on-device claim is literally true and is stated
- * at full strength. On iPhone it is false. Apple lets no app read Messages, so
- * the only route is a Shortcuts automation the user builds, which POSTs each
- * alert to Wafra's relay. Telling an iPhone user the text never leaves the
- * phone would be a lie told on the exact screen where trust is established —
- * and it is the kind of claim App Review reads on a finance app.
- *
- * What replaces it on iOS is not a softer claim, it is a more specific one, and
- * it is the argument server/README.md actually makes: the relay parses, DROPS
- * the message text (no table for it, no log line), and seals the parsed row to
- * a key only this iPhone holds. Anything added here must survive that split —
- * a new bullet needs an iOS wording and an Android wording, not one that is
- * only checked on the platform the author happened to be testing on.
- *
- * The branch is Platform.OS, not a relay-capability probe, so the copy is
- * decided before any relay state is loaded and cannot flip mid-screen.
- */
-function points(): [IconName, string, string][] {
-  if (Platform.OS === 'ios') {
-    return [
-      ['mail', t('iosOnboardAutomatic'), t('iosOnboardAutomaticBody')],
-      ['calendar', t('warnsBeforeMoneyLeaves'), t('onboardWarnsDetail')],
-      ['lock', t('iosOnboardPrivate'), t('iosOnboardPrivateBody')],
-    ];
-  }
-  return [
-    ['mail', t('onboardReadsSms'), t('onboardPrivacyBody')],
-    ['calendar', t('warnsBeforeMoneyLeaves'), t('onboardWarnsDetail')],
-    ['lock', t('noServerTitle'), t('onboardNoServerDetail')],
-  ];
-}
-
 function captureCopy(): { title: StringKey; body: StringKey } {
   if (Platform.OS === 'ios') {
     return { title: 'onboardCaptureTitleIos', body: 'onboardCaptureBodyIos' };
@@ -92,6 +55,91 @@ function captureCopy(): { title: StringKey; body: StringKey } {
     return { title: 'onboardCaptureTitleAndroid', body: 'onboardCaptureBodyAndroid' };
   }
   return { title: 'onboardCaptureTitleWeb', body: 'onboardCaptureBodyWeb' };
+}
+
+function MoneyPreview({ reducedMotion }: { reducedMotion: boolean }) {
+  const items = [
+    { icon: 'briefcase' as const, label: t('onboardPreviewIncome'), detail: t('onboardPreviewIncomeDetail'), tone: night.income },
+    { icon: 'bolt' as const, label: t('onboardPreviewBill'), detail: t('onboardPreviewBillDetail'), tone: night.warning },
+    { icon: 'check' as const, label: t('onboardPreviewCard'), detail: t('onboardPreviewCardDetail'), tone: night.primary },
+  ];
+  return (
+    <View
+      style={styles.moneyPreview}
+      accessible
+      accessibilityLabel={t('onboardPreviewAccessibility')}>
+      <View style={styles.previewHeader}>
+        <ThemedText style={styles.previewOverline}>{t('onboardPreviewOverline')}</ThemedText>
+        <View style={styles.livePill}>
+          <ThemedText style={styles.liveLabel}>{t('onboardPreviewLive')}</ThemedText>
+        </View>
+      </View>
+      <View style={styles.previewRows}>
+        {items.map((item, index) => (
+          <Animated.View
+            key={item.label}
+            entering={reducedMotion ? undefined : FadeInDown.delay(160 + index * 70).duration(360)}
+            style={[styles.previewRow, index > 0 && styles.previewRowBorder]}>
+            <View style={[styles.previewIcon, { backgroundColor: `${item.tone}1A` }]}>
+              <Icon name={item.icon} size={17} color={item.tone} />
+            </View>
+            <View style={styles.previewCopy}>
+              <ThemedText style={styles.previewLabel}>{item.label}</ThemedText>
+              <ThemedText style={styles.previewDetail}>{item.detail}</ThemedText>
+            </View>
+            <Icon name="chevron-right" size={16} color={night.textTertiary} />
+          </Animated.View>
+        ))}
+      </View>
+      <View style={styles.previewFooter}>
+        <Icon name="spark" size={15} color={night.primary} />
+        <ThemedText style={styles.previewFooterText}>{t('onboardPreviewFooter')}</ThemedText>
+      </View>
+    </View>
+  );
+}
+
+function StartOption({
+  automatic,
+  onPress,
+}: {
+  automatic: boolean;
+  onPress: () => void;
+}) {
+  const title = t(automatic ? 'onboardAutomaticChoice' : 'onboardManualChoice');
+  const body = t(automatic
+    ? Platform.OS === 'ios' ? 'onboardAutomaticChoiceIosBody' : 'onboardAutomaticChoiceAndroidBody'
+    : 'onboardManualChoiceBody');
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${title}. ${body}`}
+      onPress={() => {
+        tapped();
+        onPress();
+      }}
+      style={({ pressed }) => [
+        styles.startOption,
+        automatic && styles.startOptionFeatured,
+        { opacity: pressed ? 0.72 : 1, transform: [{ scale: pressed ? 0.985 : 1 }] },
+      ]}>
+      <View style={[styles.startOptionIcon, automatic && styles.startOptionIconFeatured]}>
+        <Icon name={automatic ? 'spark' : 'plus'} size={20} color={automatic ? night.primary : night.textSecondary} />
+      </View>
+      <View style={styles.startOptionCopy}>
+        <View style={styles.startOptionTitleLine}>
+          <ThemedText style={styles.startOptionTitle}>{title}</ThemedText>
+          {automatic && (
+            <View style={styles.recommendedPill}>
+              <ThemedText style={styles.recommendedText}>{t('recommended')}</ThemedText>
+            </View>
+          )}
+        </View>
+        <ThemedText style={styles.startOptionBody}>{body}</ThemedText>
+      </View>
+      <Icon name="chevron-right" size={18} color={automatic ? night.primary : night.textTertiary} />
+    </Pressable>
+  );
 }
 
 function BackHeader({ onBack }: { onBack: () => void }) {
@@ -368,9 +416,13 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.welcomeBody}>
               <View style={styles.welcomeTop}>
-                <View style={styles.markHalo}>
-                  <WafraMark size={44} color={night.primary} />
+                <View style={styles.brandLine}>
+                  <View style={styles.markHalo}>
+                    <WafraMark size={32} color={night.primary} />
+                  </View>
+                  <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
                 </View>
+                <ThemedText style={styles.eyebrow}>{t('onboardEyebrow')}</ThemedText>
                 <ThemedText
                   style={styles.headline}
                   accessibilityRole="header"
@@ -384,36 +436,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {t(Platform.OS === 'ios' ? 'iosOnboardSub' : 'onboardSub')}
                 </ThemedText>
               </View>
-
-              <View style={styles.points}>
-                {points().map(([icon, title, detail], index) => (
-                  <View
-                    key={title}
-                    style={[
-                      styles.point,
-                      index > 0 && {
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: night.cardBorder,
-                      },
-                    ]}>
-                    <View style={styles.pointIcon}>
-                      <Icon name={icon} size={19} color={night.textSecondary} />
-                    </View>
-                    <View style={styles.pointText}>
-                      <ThemedText style={styles.pointTitle}>{title}</ThemedText>
-                      <ThemedText style={styles.pointDetail}>{detail}</ThemedText>
-                    </View>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.actions}>
+              <MoneyPreview reducedMotion={reducedMotion} />
+              <View style={styles.welcomeActions}>
                 <Button
                   label={t('onboardPersonalizeCta')}
                   onPress={() => setStep('capture')}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
+                <View style={styles.setupTime}>
+                  <Icon name="lock" size={14} color={night.textTertiary} />
+                  <ThemedText style={styles.setupTimeText}>{t('onboardSetupTime')}</ThemedText>
+                </View>
               </View>
             </Animated.ScrollView>
           ) : (
@@ -439,6 +473,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                         </ThemedText>
                         <ThemedText style={styles.questionBodyCopy}>{t(capture.body)}</ThemedText>
                       </View>
+                      <View style={styles.startOptions}>
+                        <StartOption automatic onPress={() => void beginCapture()} />
+                        {Platform.OS !== 'web' && (
+                          <StartOption automatic={false} onPress={() => void continueManually()} />
+                        )}
+                      </View>
                       {Platform.OS !== 'web' && (
                         <View style={styles.capturePrivacy}>
                           <Icon name="lock" size={17} color={night.textSecondary} />
@@ -449,31 +489,16 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           </ThemedText>
                         </View>
                       )}
-                      <View style={styles.captureActions}>
-                        <Button
-                          label={
-                            Platform.OS === 'ios'
-                              ? t('onboardCaptureIosCta')
-                              : Platform.OS === 'android'
-                                ? t('onboardCaptureAndroidCta')
-                                : t('continueWord')
-                          }
-                          onPress={() => void beginCapture()}
-                          labelColor={night.onPrimary}
-                          style={styles.primaryButton}
-                        />
-                        {Platform.OS !== 'web' && (
+                      {Platform.OS === 'web' && (
+                        <View style={styles.captureActions}>
                           <Button
-                            variant="outline"
-                            label={t(Platform.OS === 'android'
-                              ? 'onboardCaptureNoSms'
-                              : 'iosContinueManual')}
-                            onPress={() => void continueManually()}
-                            labelColor={night.text}
-                            style={styles.ghost}
+                            label={t('continueWord')}
+                            onPress={() => void beginCapture()}
+                            labelColor={night.onPrimary}
+                            style={styles.primaryButton}
                           />
-                        )}
-                      </View>
+                        </View>
+                      )}
                     </>
                   )}
 
@@ -497,6 +522,19 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           matched: progress.found,
                         })}
                       </ThemedText>
+                      <View style={styles.scanStats}>
+                        <View style={styles.scanStat}>
+                          <ThemedText style={styles.scanNumber}>{progress.scanned}</ThemedText>
+                          <ThemedText style={styles.scanLabel}>{t('onboardAlertsChecked')}</ThemedText>
+                        </View>
+                        <View style={styles.scanDivider} />
+                        <View style={styles.scanStat}>
+                          <ThemedText style={[styles.scanNumber, { color: night.primary }]}>
+                            {progress.found}
+                          </ThemedText>
+                          <ThemedText style={styles.scanLabel}>{t('onboardMoneyFound')}</ThemedText>
+                        </View>
+                      </View>
                     </View>
                   )}
 
@@ -557,19 +595,21 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           </View>
                         )}
                         {result && result.tx > 0 && (
-                          <ThemedText style={[styles.inlineNote, { color: night.primary }]}>
-                            {tf('onboardImportResult', {
-                              entries: result.tx,
-                              ending: result.tx === 1 ? 'y' : 'ies',
-                              cards:
-                                result.accounts > 0
-                                  ? tf('onboardCardsFound', {
-                                      count: result.accounts,
-                                      s: result.accounts === 1 ? '' : 's',
-                                    })
-                                  : '',
-                            })}
-                          </ThemedText>
+                          <View style={styles.resultCard}>
+                            <View style={styles.resultCell}>
+                              <ThemedText style={styles.resultNumber}>{result.tx}</ThemedText>
+                              <ThemedText style={styles.resultLabel}>
+                                {t(result.tx === 1 ? 'onboardEntryFound' : 'onboardEntriesFound')}
+                              </ThemedText>
+                            </View>
+                            <View style={styles.resultDivider} />
+                            <View style={styles.resultCell}>
+                              <ThemedText style={styles.resultNumber}>{result.accounts}</ThemedText>
+                              <ThemedText style={styles.resultLabel}>
+                                {t(result.accounts === 1 ? 'onboardAccountFound' : 'onboardAccountsFound')}
+                              </ThemedText>
+                            </View>
+                          </View>
                         )}
                       </View>
 
@@ -633,42 +673,89 @@ const styles = StyleSheet.create({
   },
   safe: { flex: 1, width: '100%', maxWidth: 520 },
   welcomeBody: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.four,
     alignItems: 'stretch',
-    justifyContent: 'space-between',
+    gap: Spacing.four,
   },
-  welcomeTop: { paddingTop: Spacing.five, gap: Spacing.three },
+  welcomeTop: { paddingTop: Spacing.three, gap: Spacing.two },
+  brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   markHalo: {
-    width: 58,
-    height: 58,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: night.primarySoft,
   },
+  brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
+  eyebrow: {
+    paddingTop: Spacing.three,
+    color: night.primary,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 11,
+    lineHeight: 16,
+    letterSpacing: 1.1,
+  },
   headline: {
     fontFamily: Fonts.sansSemi,
-    fontSize: 32,
-    lineHeight: 39,
-    letterSpacing: -1.05,
+    fontSize: 34,
+    lineHeight: 40,
+    letterSpacing: -1.25,
     color: night.text,
-    maxWidth: 360,
+    maxWidth: 430,
   },
-  sub: { fontFamily: Fonts.sans, fontSize: 14, lineHeight: 22, color: night.textSecondary },
-  points: { paddingVertical: Spacing.three },
-  point: {
+  sub: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 23, color: night.textSecondary },
+  moneyPreview: {
+    overflow: 'hidden',
+    borderRadius: Radius.bottomSheet,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: night.cardBorder,
+    backgroundColor: night.backgroundElement,
+  },
+  previewHeader: {
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.two,
+  },
+  previewOverline: { color: night.textTertiary, fontFamily: Fonts.sansSemi, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
+  livePill: {
+    alignSelf: 'stretch',
+    minHeight: 24,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three - 2,
-    paddingVertical: Spacing.three,
+    gap: 6,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    borderRadius: Radius.full,
+    backgroundColor: night.primarySoft,
   },
-  pointIcon: { width: 30, alignItems: 'center' },
-  pointText: { flex: 1, gap: 2 },
-  pointTitle: { fontFamily: Fonts.sansMedium, fontSize: 14.5, lineHeight: 20, color: night.text },
-  pointDetail: { fontFamily: Fonts.sans, fontSize: 12, lineHeight: 18, color: night.textTertiary },
-  actions: { gap: Spacing.two + 2 },
+  liveLabel: { flexShrink: 1, color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 9, lineHeight: 14, letterSpacing: 0.6 },
+  previewRows: { paddingHorizontal: Spacing.three },
+  previewRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  previewRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: night.cardBorder },
+  previewIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  previewCopy: { flex: 1, gap: 2 },
+  previewLabel: { color: night.text, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 19 },
+  previewDetail: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 11.5, lineHeight: 16 },
+  previewFooter: {
+    minHeight: 43,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: night.primaryBorder,
+    backgroundColor: night.primarySoft,
+  },
+  previewFooterText: { flex: 1, color: night.primary, fontFamily: Fonts.sansMedium, fontSize: 11.5 },
+  welcomeActions: { marginTop: 'auto', gap: Spacing.two },
+  setupTime: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  setupTimeText: { flexShrink: 1, color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 11.5, textAlign: 'center' },
   ghost: { borderWidth: 1, borderColor: night.cardBorderStrong },
   progressHeader: { paddingHorizontal: ScreenPadding, paddingTop: Spacing.two },
   progressTopline: {
@@ -702,7 +789,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   captureActions: { marginTop: 'auto', paddingTop: Spacing.five, gap: Spacing.two },
+  startOptions: { paddingTop: Spacing.four, gap: Spacing.two },
+  startOption: {
+    minHeight: 92,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    padding: Spacing.three,
+    borderRadius: Radius.sheet,
+    borderCurve: 'continuous',
+    borderWidth: 1,
+    borderColor: night.cardBorder,
+    backgroundColor: night.backgroundElement,
+  },
+  startOptionFeatured: { borderColor: night.primary, backgroundColor: night.primarySoft },
+  startOptionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: night.backgroundSelected,
+  },
+  startOptionIconFeatured: { backgroundColor: night.backgroundElement },
+  startOptionCopy: { flex: 1, gap: Spacing.one },
+  startOptionTitleLine: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
+  startOptionTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
+  startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 12, lineHeight: 18 },
+  recommendedPill: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: Radius.full, backgroundColor: night.primary },
+  recommendedText: { color: night.onPrimary, fontFamily: Fonts.sansSemi, fontSize: 8.5, letterSpacing: 0.35 },
   scanning: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
+  scanStats: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginTop: Spacing.three,
+    paddingVertical: Spacing.three,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: night.cardBorder,
+  },
+  scanStat: { flex: 1, alignItems: 'center', gap: Spacing.one },
+  scanNumber: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 24, fontVariant: ['tabular-nums'] },
+  scanLabel: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 10.5, textAlign: 'center' },
+  scanDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.cardBorder },
   completeHero: { gap: Spacing.three, alignItems: 'flex-start' },
   completeMark: {
     width: 62,
@@ -713,6 +843,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   notifNote: { color: night.textSecondary, fontSize: 12, lineHeight: 18 },
+  resultCard: {
+    width: '100%',
+    minHeight: 96,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginTop: Spacing.two,
+    paddingVertical: Spacing.three,
+    borderRadius: Radius.sheet,
+    borderCurve: 'continuous',
+    backgroundColor: night.primarySoft,
+  },
+  resultCell: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.one },
+  resultNumber: { color: night.primary, fontFamily: Fonts.monoSemi, fontSize: 28, fontVariant: ['tabular-nums'] },
+  resultLabel: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 11, textAlign: 'center' },
+  resultDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
   capturePrivacy: {
     flexDirection: 'row',
     alignItems: 'flex-start',

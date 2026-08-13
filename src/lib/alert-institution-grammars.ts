@@ -200,6 +200,30 @@ const senderMatches = (
   return !!envelope && envelope.route !== 'P' && envelope.core === expected;
 };
 
+const UNIVERSAL_SENDER_KEYS = new Set(
+  Object.values(INSTITUTIONS).flatMap((institutions) =>
+    institutions.flatMap((institution) => institution.senders.map(senderKey))),
+);
+const INDIA_SENDER_KEYS = new Set(
+  INSTITUTIONS.IN.flatMap((institution) => institution.senders.map(senderKey)),
+);
+
+/**
+ * Cheap sender-only guard for the Gulf launch fast path.
+ *
+ * A name such as HSBC is valid in the UAE registry and a worldwide registry.
+ * Those senders must still run full market routing because the body may prove
+ * that the alert belongs to the global institution. Exact non-overlapping
+ * Gulf senders can safely avoid that work.
+ */
+export const hasUniversalInstitutionSender = (sender?: string | null): boolean => {
+  const bounded = sender?.slice(0, 256) ?? '';
+  if (!bounded) return false;
+  if (UNIVERSAL_SENDER_KEYS.has(senderKey(bounded))) return true;
+  const indiaEnvelope = indiaSenderEnvelope(bounded);
+  return !!indiaEnvelope && indiaEnvelope.route !== 'P' && INDIA_SENDER_KEYS.has(indiaEnvelope.core);
+};
+
 const templateEvidence = (source: string): AlertTemplateEvidence | null => {
   const normalized = source.normalize('NFKC');
   const rule = TEMPLATE_RULES.find(({ pattern }) => pattern.test(normalized));

@@ -90,8 +90,14 @@ const currencyMarkets = (source: string): Set<DetectedMarket> => {
   return markets;
 };
 
-const evidenceFor = (input: AlertMarketRoutingInput): Map<DetectedMarket, Set<MarketRouteEvidence>> => {
+interface MarketRouteEvidenceSummary {
+  evidence: Map<DetectedMarket, Set<MarketRouteEvidence>>;
+  institutionConflict: boolean;
+}
+
+const evidenceFor = (input: AlertMarketRoutingInput): MarketRouteEvidenceSummary => {
   const evidence = new Map<DetectedMarket, Set<MarketRouteEvidence>>();
+  let institutionConflict = false;
   const add = (market: DetectedMarket, kind: MarketRouteEvidence) => {
     const kinds = evidence.get(market) ?? new Set<MarketRouteEvidence>();
     kinds.add(kind);
@@ -106,6 +112,17 @@ const evidenceFor = (input: AlertMarketRoutingInput): Map<DetectedMarket, Set<Ma
       if (candidate.evidence.includes('sender')) add(market, 'sender');
       if (candidate.evidence.includes('body')) add(market, 'institution');
     }
+    // The old implementation called inspectAlertInstitutionGrammar a second
+    // time for every market solely to derive this boolean. Carry the result
+    // out of the same pass so route semantics stay identical while global
+    // candidates do half the institution-grammar work.
+    if (
+      review.decision === 'ambiguous' &&
+      review.candidates.some((candidate) => candidate.evidence.includes('sender')) &&
+      review.candidates.some((candidate) => candidate.evidence.includes('body'))
+    ) {
+      institutionConflict = true;
+    }
   }
   for (const market of MARKETS) {
     if (!sender || (market.id !== 'AE' && market.id !== 'SA')) continue;
@@ -117,7 +134,7 @@ const evidenceFor = (input: AlertMarketRoutingInput): Map<DetectedMarket, Set<Ma
   }
   const region = regionMarket(input.regionHint);
   if (region && evidence.has(region)) add(region, 'region-hint');
-  return evidence;
+  return { evidence, institutionConflict };
 };
 
 const candidatesFrom = (
@@ -127,23 +144,11 @@ const candidatesFrom = (
   evidence: [...kinds].sort(),
 })).sort((a, b) => a.market.localeCompare(b.market));
 
-const hasInstitutionConflict = (input: AlertMarketRoutingInput): boolean => {
-  const source = input.source.slice(0, 4096);
-  const sender = input.sender?.slice(0, 256) ?? '';
-  if (!sender) return false;
-  return UNIVERSAL_MARKETS.some((market) => {
-    const review = inspectAlertInstitutionGrammar(source, market, sender);
-    return review.decision === 'ambiguous' &&
-      review.candidates.some((candidate) => candidate.evidence.includes('sender')) &&
-      review.candidates.some((candidate) => candidate.evidence.includes('body'));
-  });
-};
-
 /** Resolve one alert's issuer/grammar market without retaining its source or sender. */
 export const routeAlertMarket = (input: AlertMarketRoutingInput): AlertMarketRoute => {
-  const evidence = evidenceFor(input);
+  const { evidence, institutionConflict } = evidenceFor(input);
   const candidates = candidatesFrom(evidence);
-  if (hasInstitutionConflict(input)) {
+  if (institutionConflict) {
     return { decision: 'ambiguous', market: null, candidates, reasons: ['sender-institution-conflict'] };
   }
   const withKind = (kind: MarketRouteEvidence) =>

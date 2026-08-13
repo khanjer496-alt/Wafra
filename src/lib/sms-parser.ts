@@ -203,8 +203,13 @@ export interface ParsedCard {
  * id and page by (date,id), so distinct same-millisecond/same-value alerts no
  * longer share an import key or disappear at a page boundary. Re-read history
  * once to promote legacy timestamp keys and recover any previously merged leg.
+ *
+ * 23: recurring-bill recovery. Arabic e& monthly statements now contribute a
+ * due reminder with a masked account identity, and the history re-read gives
+ * the commitment detector the complete registered-payee sequence it needs to
+ * recover monthly utilities paid early or late.
  */
-export const PARSER_VERSION = 22;
+export const PARSER_VERSION = 23;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -1764,11 +1769,19 @@ function extractBillIdentity(raw: string): string | null {
   const match = raw.match(
     /\b(account|consumer|party|customer|contract|service)(?:\s*-?\s*(?:number|no\.?|id))?\s*[:#-]?\s*([A-Z0-9X*·•-]{4,40})\b/i,
   );
-  if (!match) return null;
-  const value = match[2].replace(/[^A-Z0-9]/gi, '').toUpperCase();
-  if (value.length < 4) return null;
-  const kind = match[1].toLowerCase();
-  return `${kind}:${value.slice(-4)}`;
+  if (match) {
+    const value = match[2].replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    if (value.length >= 4) {
+      const kind = match[1].toLowerCase();
+      return `${kind}:${value.slice(-4)}`;
+    }
+  }
+  // e&'s Arabic eBill starts "للحساب رقم 065591849". Keep the same privacy
+  // boundary as the English path: only the final four digits survive.
+  const arabic = normalizeArabic(raw).match(/(?:للحساب|حساب)\s+رقم\s*[:#-]?\s*([0-9X*·•-]{4,40})/);
+  if (!arabic) return null;
+  const value = arabic[1].replace(/[^0-9X]/gi, '').toUpperCase();
+  return value.length >= 4 ? `account:${value.slice(-4)}` : null;
 }
 
 // Auxiliaries and conjunctions end the descriptor and start a sentence about
@@ -3825,6 +3838,23 @@ const DUE_BY_NUMERIC_RE = /\b(?:by|before)\s+(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4
 const DUE_BY_NAMED_RE = /\b(?:by|before)\s+([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/i;
 const DUE_BY_DAY_NAMED_RE =
   /\b(?:by|before)\s+(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s](\d{2,4})\b/i;
+const ARABIC_MONTHS: Record<string, number> = {
+  يناير: 1,
+  فبراير: 2,
+  مارس: 3,
+  ابريل: 4,
+  مايو: 5,
+  يونيو: 6,
+  يوليو: 7,
+  اغسطس: 8,
+  سبتمبر: 9,
+  اكتوبر: 10,
+  نوفمبر: 11,
+  ديسمبر: 12,
+};
+const ARABIC_DUE_DATE_RE = new RegExp(
+  `قبل\\s+تاريخ\\s+(\\d{1,2})\\s+(${Object.keys(ARABIC_MONTHS).join('|')})\\s+(\\d{4})`,
+);
 /**
  * A DEADLINE clause and the date it introduces — the same footer read from the
  * other side.
@@ -3871,6 +3901,11 @@ function namedDate(monthWord: string, day: string, year: string): string | null 
  * still reads exactly as it did before.
  */
 function extractDueDate(raw: string): string | null {
+  const arabic = normalizeArabic(raw).match(ARABIC_DUE_DATE_RE);
+  if (arabic) {
+    const iso = isoDate(Number(arabic[3]), ARABIC_MONTHS[arabic[2]], Number(arabic[1]));
+    if (iso) return iso;
+  }
   // An explicit "due date ... is X" is the most specific claim in the message.
   const phrase = raw.match(DUE_PHRASE_NUMERIC_RE);
   if (phrase) {
@@ -4648,6 +4683,42 @@ function parseSmsInner(
       snapshotFils,
       snapshotKind,
       categoryGuess: 'other',
+      currency,
+      reference,
+      raw: source,
+    };
+  }
+
+  // e& Arabic eBills are reminders, not postings. The same statement also
+  // lists the previous balance and payments received, so the generic
+  // direction detector sees credit language and refuses the bill-due path.
+  // Read only the exact labelled total/deadline sentence, and require e&'s
+  // own bill markers so an arbitrary Arabic amount cannot become a reminder.
+  const arabicEandBill = raw.match(
+    /اجمالي\s+المبلغ\s+المستحق\s+دفعه\s+قبل\s+تاريخ\s+\d{1,2}\s+[\u0600-\u06ff]+\s+\d{4}\s+هو\s*:\s*([\d,]+(?:\.\d{1,2})?)\s*درهم(?:ا)?/,
+  );
+  if (
+    arabicEandBill &&
+    /فاتورتك\s+لشهر/.test(raw) &&
+    /(?:e&\s*uae|eand\.ae|اي\s+اند)/i.test(raw)
+  ) {
+    const dueDate = extractDueDate(raw);
+    const amountFils = Math.round(Number(arabicEandBill[1].replace(/,/g, '')) * 100);
+    if (!dueDate || !Number.isSafeInteger(amountFils) || amountFils <= 0) return null;
+    return {
+      kind: 'billDue',
+      type: 'expense',
+      amountFils,
+      merchant: 'E&',
+      date: dueDate,
+      dueDay: Number(dueDate.slice(8)),
+      minDueFils: null,
+      card: null,
+      transferHint: false,
+      snapshotFils,
+      snapshotKind,
+      categoryGuess: 'telecom',
+      categoryDeliberate: true,
       currency,
       reference,
       raw: source,

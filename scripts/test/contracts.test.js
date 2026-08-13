@@ -829,11 +829,14 @@ function ktSources(dir) {
 {
   const scan = read('src/lib/auto-import.ts');
   const home = read('src/hooks/use-auto-import.ts');
-  const slice = Number(scan.match(/const PARSE_SLICE_SIZE = (\d+)/)?.[1]);
+  const budget = Number(scan.match(/const PARSE_TIME_BUDGET_MS = (\d+)/)?.[1]);
+  const maxSlice = Number(scan.match(/const MAX_PARSE_SLICE_SIZE = (\d+)/)?.[1]);
 
-  ok('SMS parsing yields frequently enough for responsive input',
-    slice > 0 && slice <= 32 && /await yieldToUi\(\)/.test(scan),
-    `slice=${slice}`);
+  ok('SMS parsing yields by elapsed time with a bounded fast-device ceiling',
+    budget >= 4 && budget <= 12 && maxSlice > 32 && maxSlice <= 96 &&
+      /Date\.now\(\) - state\.startedAt < PARSE_TIME_BUDGET_MS/.test(scan) &&
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 3,
+    `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
     /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&
       /importInFlight = \{ promise: operation, interactive \}/.test(home));

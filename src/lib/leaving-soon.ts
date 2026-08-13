@@ -110,6 +110,10 @@ export function leavingSoon(
       detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
     );
     for (const sub of subs) {
+      // Frequent prepaid top-ups are real commitments without a schedule.
+      // They stay visible in Bills but cannot honestly be placed on a
+      // "leaving soon" timeline.
+      if (sub.cadence === 'as-needed') continue;
       // A bill and a detected subscription can describe the same debit; the
       // bill wins, because the user set it up by hand.
       const key = sub.title.trim().toLowerCase();

@@ -92,6 +92,9 @@ export function healPatch(
   if (p.paymentFlowSide && prior.paymentFlowSide !== p.paymentFlowSide) {
     patch.paymentFlowSide = p.paymentFlowSide;
   }
+  // Instrument provenance is deliberately NOT inferred here. `healPatch`
+  // understands parser fields but not whether account resolution was unique;
+  // import-plan adds the marker only after it has proved one account.
   // Older parser versions marked every inbound remittance as a transfer and
   // therefore removed genuine external money from Income. Inbound account
   // transfers now stay countable unless ledger pairing finds the matching
@@ -204,6 +207,9 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
+  if (patch.paymentInstrumentSource !== undefined) {
+    next.paymentInstrumentSource = patch.paymentInstrumentSource;
+  }
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
     else next.raw = patch.raw;

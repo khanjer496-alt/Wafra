@@ -101,6 +101,30 @@ ok(
     !gateSource.includes('plan.goals.forEach(addGoal)'),
 );
 ok(
+  'first run opens with a visual money story instead of a generic feature list',
+  /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
+    /onboardPreviewIncome/.test(gateSource) &&
+    /onboardPreviewBill/.test(gateSource) &&
+    /onboardPreviewCard/.test(gateSource) &&
+    !/function points\(/.test(gateSource),
+);
+ok(
+  'capture choice is presented as two explicit accessible start modes',
+  /<StartOption automatic onPress=/.test(gateSource) &&
+    /<StartOption automatic=\{false\}/.test(gateSource) &&
+    /accessibilityRole="button"/.test(gateSource) &&
+    /onboardAutomaticChoice/.test(gateSource) &&
+    /onboardManualChoice/.test(gateSource),
+);
+ok(
+  'onboarding uses real scan and import results rather than fake personalization delays',
+  /progress\.scanned/.test(gateSource) &&
+    /progress\.found/.test(gateSource) &&
+    /result\.tx/.test(gateSource) &&
+    /result\.accounts/.test(gateSource) &&
+    !/setTimeout|personalizing/i.test(gateSource),
+);
+ok(
   'first run waits for encrypted hydration and never shows a fake one-step progress bar',
   /if \(!state\.hydrated\)/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&

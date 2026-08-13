@@ -1,6 +1,8 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
+import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import {
   detectLaunchMarketFromAlert,
+  detectLaunchMarketFromSender,
   getActiveMarket,
   pinnedLedgerCurrencyCode,
   withMarketPackForParsing,
@@ -49,6 +51,12 @@ export const createLaunchAlertSession = ({
 
   const inspect = (source: string, sender: string): UniversalAlertReview | null => {
     if (!REVIEW_MONEY_HINT.test(source)) return null;
+    // A launch-tested issuer can quote any foreign transaction currency. Its
+    // exact sender evidence already outranks that currency, and the universal
+    // result cannot change the launch parser's decision. Avoid walking every
+    // worldwide institution grammar for the common UAE/Saudi foreign-card
+    // path; unknown and overlapping senders still take the full safe route.
+    if (detectLaunchMarketFromSender(sender) && !hasUniversalInstitutionSender(sender)) return null;
     try {
       return inspectUniversalAlert({ source, sender, regionHint });
     } catch {

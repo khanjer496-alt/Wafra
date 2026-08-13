@@ -363,6 +363,25 @@ export function setActiveMarket(id: string): boolean {
 const AED_ALERT = /\b(?:AED|Dhs?\.?)\b|د\.?[إا]\.?|دراهم|درهم/iu;
 const SAR_ALERT = /\b(?:SAR|SR)\b|ر\.?\s?س\.?|ريال/iu;
 
+const launchMarketsFromSender = (sender?: string): MarketPack[] => {
+  const senderText = sender?.trim() ?? '';
+  if (!senderText) return [];
+  return MARKETS.filter((market) => market.banks.some((bank) => bank.re.test(senderText)));
+};
+
+/**
+ * Resolve only explicit UAE/Saudi sender evidence.
+ *
+ * This intentionally ignores the message body and currency. Capture uses it
+ * as a cheap fast path before the worldwide reviewer: a known Gulf issuer can
+ * legitimately quote USD/EUR/INR for a foreign card purchase, so scanning all
+ * global institution packs first adds work but no useful routing evidence.
+ */
+export function detectLaunchMarketFromSender(sender?: string): 'AE' | 'SA' | null {
+  const senderMarkets = launchMarketsFromSender(sender);
+  return senderMarkets.length === 1 ? senderMarkets[0].id as 'AE' | 'SA' : null;
+}
+
 /**
  * Route the launch-tested Gulf parser from this alert's evidence.
  *
@@ -375,10 +394,7 @@ export function detectLaunchMarketFromAlert(
   source: string,
   sender?: string,
 ): 'AE' | 'SA' | null {
-  const senderText = sender?.trim() ?? '';
-  const senderMarkets = senderText
-    ? MARKETS.filter((market) => market.banks.some((bank) => bank.re.test(senderText)))
-    : [];
+  const senderMarkets = launchMarketsFromSender(sender);
   if (senderMarkets.length === 1) return senderMarkets[0].id as 'AE' | 'SA';
   if (senderMarkets.length > 1) return null;
   const aed = AED_ALERT.test(source);

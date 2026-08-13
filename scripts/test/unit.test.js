@@ -280,6 +280,39 @@ const subTx = (title, date, fils, cat = 'entertainment') => ({
   accountId: 'a', title, date,
 });
 
+{
+  const accounts = [
+    { id: 'fallback', name: 'Liv Debit Card •4822', kind: 'card', openingFils: 0, color: '#fff' },
+    { id: 'chosen', name: 'FAB Credit Card •5444', kind: 'card', openingFils: 0, color: '#fff' },
+  ];
+  const receipt = {
+    ...subTx('Fishbasket', '2026-08-01', 1216800, 'other'),
+    accountId: 'fallback', paymentFlowSide: 'receipt', source: 'sms',
+  };
+  ok('a cardless bill receipt never presents the fallback account as evidence',
+    subsLib.recurringPaymentAccount(receipt, accounts) === undefined);
+  ok('an unrelated edit does not turn a fallback receipt account into evidence',
+    subsLib.recurringPaymentAccount({ ...receipt, userEdited: true }, accounts) === undefined);
+  ok('an explicitly stated receipt card is shown in recurring history',
+    subsLib.recurringPaymentAccount({ ...receipt, accountId: 'chosen', paymentInstrumentSource: 'alert' }, accounts)?.id ===
+      'chosen');
+  ok('an explicit user account correction is shown in recurring history',
+    subsLib.recurringPaymentAccount({ ...receipt, accountId: 'chosen', paymentInstrumentSource: 'user' }, accounts)?.id ===
+      'chosen');
+  ok('ordinary card charges retain their proven payment account',
+    subsLib.recurringPaymentAccount({ ...receipt, paymentFlowSide: undefined }, accounts)?.id ===
+      'fallback');
+  const instrumentHeal = require('./build/heal');
+  const instrumentPatch = instrumentHeal.healPatch(receipt, {
+    kind: 'transaction', type: 'expense', merchant: 'Fishbasket', categoryGuess: 'other',
+    categoryDeliberate: true, transferHint: false, paymentFlowSide: 'receipt',
+    card: { last4: '5444', kind: 'credit' },
+  });
+  ok('the parser-only heal seam cannot claim an account without resolution evidence',
+    instrumentPatch?.paymentInstrumentSource === undefined,
+    instrumentPatch);
+}
+
 const netflix = subsLib.detectSubscriptions([
   subTx('Netflix', '2026-04-03', 3900),
   subTx('Netflix', '2026-05-03', 3900),
@@ -347,6 +380,73 @@ ok('groups: commitments never count in trueSubscriptions',
   subsLib.trueSubscriptions(supplier).length === 0);
 ok('groups: commitments listed under fixedCommitments',
   subsLib.fixedCommitments(supplier).length === 2);
+
+{
+  const receipt = (title, date, fils) => ({
+    ...subTx(title, date, fils, 'other'),
+    id: `${title}-${date}-${fils}`,
+    paymentFlowSide: 'receipt',
+  });
+  const registeredBills = subsLib.detectSubscriptions([
+    receipt('Fishbasket', '2026-04-03', 708100),
+    receipt('Fishbasket', '2026-05-03', 741600),
+    receipt('Fishbasket', '2026-06-02', 1045900),
+    receipt('Fishbasket', '2026-07-03', 1070000),
+    receipt('Fishbasket', '2026-08-01', 1216800),
+    receipt('Fbinter', '2026-04-03', 31395),
+    receipt('Fbinter', '2026-05-09', 31395),
+    receipt('Fbinter', '2026-06-13', 31395),
+    receipt('Fbinter', '2026-07-13', 31395),
+    receipt('Nazemhome', '2026-05-01', 45045),
+    receipt('Nazemhome', '2026-06-04', 45045),
+    receipt('Nazemhome', '2026-07-02', 45045),
+    receipt('Nazemhome', '2026-08-03', 45045),
+  ], [], new Date(2026, 7, 12));
+  ok('registered monthly payees tolerate early and late payment days',
+    ['Fbinter', 'Fishbasket', 'Nazemhome'].every((title) =>
+      registeredBills.some((bill) => bill.title === title && bill.cadence === 'monthly' &&
+        bill.group === 'commitment' && bill.status === 'active')),
+    JSON.stringify(registeredBills));
+
+  const tank = subsLib.detectSubscriptions([
+    receipt('Tank300', '2026-04-29', 15000),
+    receipt('Tank300', '2026-05-05', 20000),
+    receipt('Tank300', '2026-05-14', 20000),
+    receipt('Tank300', '2026-06-06', 25000),
+    receipt('Tank300', '2026-07-02', 25000),
+  ], [], new Date(2026, 7, 12));
+  ok('registered irregular top-up is visible without a fake due date',
+    tank.length === 1 && tank[0].title === 'Tank300' && tank[0].cadence === 'as-needed' &&
+      tank[0].group === 'commitment' && tank[0].status === 'active',
+    JSON.stringify(tank));
+
+  const ordinaryShop = ['2026-04-30', '2026-05-01', '2026-06-30', '2026-07-01']
+    .map((date) => subTx('Ordinary Shop', date, 31395, 'other'));
+  ok('calendar-month relaxation is exclusive to registered payment receipts',
+    subsLib.detectSubscriptions(ordinaryShop, [], new Date(2026, 7, 12)).length === 0);
+
+  const mixedSameDay = [
+    receipt('Mixed Payee', '2026-04-30', 31395),
+    subTx('Mixed Payee', '2026-04-30', 31395, 'other'),
+    receipt('Mixed Payee', '2026-05-01', 31395),
+    receipt('Mixed Payee', '2026-06-30', 31395),
+    receipt('Mixed Payee', '2026-07-01', 31395),
+  ];
+  ok('same-day mixed evidence cannot inherit registered-receipt status',
+    subsLib.detectSubscriptions(mixedSameDay, [], new Date(2026, 7, 12)).length === 0 &&
+    subsLib.detectSubscriptions([...mixedSameDay].reverse(), [], new Date(2026, 7, 12)).length === 0);
+
+  const sparse = subsLib.detectSubscriptions([
+    receipt('Sparse Topup', '2026-04-04', 10000),
+    receipt('Sparse Topup', '2026-04-20', 10000),
+    receipt('Sparse Topup', '2026-06-01', 10000),
+    receipt('Sparse Topup', '2026-08-01', 10000),
+  ], [], new Date(2026, 7, 12))[0];
+  ok('as-needed average includes inactive time inside its observation window',
+    sparse?.cadence === 'as-needed' && sparse.monthlyEquivalentFils >= 10000 &&
+      sparse.monthlyEquivalentFils <= 10200,
+    JSON.stringify(sparse));
+}
 
 {
   const annualFee = (accountId, date, fils) => ({

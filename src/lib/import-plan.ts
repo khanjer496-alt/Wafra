@@ -233,10 +233,16 @@ export function buildImportPlan(
     );
     const accountChanged =
       resolvedAccountId !== undefined && resolvedAccountId !== prior.accountId;
-    if (patch || accountChanged) {
+    const instrumentProven =
+      resolvedAccountId !== undefined &&
+      p.paymentFlowSide === 'receipt' &&
+      p.card != null &&
+      prior.paymentInstrumentSource !== 'alert';
+    if (patch || accountChanged || instrumentProven) {
       updates.push({
         ...(patch ?? { id: prior.id }),
         ...(accountChanged ? { accountId: resolvedAccountId } : {}),
+        ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
       });
     }
   };
@@ -265,10 +271,17 @@ export function buildImportPlan(
       resolvedAccountId !== prior.accountId;
     const identityChanged =
       prior.smsKey !== smsKey || prior.ts !== p.smsTs || prior.viaPush === true;
-    if (!patch && !accountChanged && !identityChanged) return;
+    const instrumentProven =
+      !prior.userEdited &&
+      resolvedAccountId !== undefined &&
+      p.paymentFlowSide === 'receipt' &&
+      p.card != null &&
+      prior.paymentInstrumentSource !== 'alert';
+    if (!patch && !accountChanged && !identityChanged && !instrumentProven) return;
     updates.push({
       ...(patch ?? { id: matchedId }),
       ...(accountChanged ? { accountId: resolvedAccountId } : {}),
+      ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
       smsKey,
       ts: p.smsTs,
       viaPush: false,
@@ -852,6 +865,10 @@ export function buildImportPlan(
           viaPush: false,
           isTransfer: p.transferHint,
           paymentFlowSide: p.paymentFlowSide,
+          paymentInstrumentSource:
+            resolution.confident && p.paymentFlowSide === 'receipt' && p.card
+              ? 'alert'
+              : undefined,
         });
       }
       // One notification is one charge. Two AED 25 SMS a minute apart used to
@@ -894,6 +911,10 @@ export function buildImportPlan(
       viaPush: p.channel === 'push' || undefined,
       isTransfer: p.transferHint || undefined,
       paymentFlowSide: p.paymentFlowSide,
+      paymentInstrumentSource:
+        resolution.confident && p.paymentFlowSide === 'receipt' && p.card
+          ? 'alert'
+          : undefined,
       // Relay/email/PDF ingestion deliberately discards the source body
       // before this device sees the structured row. Keep a diagnostic excerpt
       // only on Android's local parser path, where one actually exists.

@@ -737,6 +737,23 @@ t('e& due-date notice is a reminder, not a charge',
   { kind: 'billDue', merchant: 'E&', amountFils: 77581, date: '2026-08-15', dueDay: 15,
     category: 'telecom', billIdentity: 'party:4835' });
 
+t('Arabic e& monthly statement creates one telecom reminder',
+  'عزيزي العميل،\nفاتورتك لشهر يوليو للحساب رقم 123456789 متاحة الآن.\n' +
+  'إجمالي المبلغ المستحق دفعه قبل تاريخ 15 أغسطس 2026 هو: 450.45 درهماً (يشمل ضريبة القيمة المضافة).\n' +
+  'اضغط هنا لدفع فاتورتك عبر تطبيق e& UAE\nhttps://www.eand.ae/smsebill',
+  { kind: 'billDue', merchant: 'E&', amountFils: 45045, date: '2026-08-15', dueDay: 15,
+    category: 'telecom', billIdentity: 'account:6789', deliberate: true });
+
+t('Arabic e& bill with an impossible deadline is refused',
+  'فاتورتك لشهر فبراير للحساب رقم 123456789 متاحة الآن. ' +
+  'إجمالي المبلغ المستحق دفعه قبل تاريخ 31 فبراير 2026 هو: 450.45 درهماً. ' +
+  'ادفع عبر تطبيق e& UAE https://www.eand.ae/smsebill',
+  null);
+
+t('Arabic price deadline outside an identified bill is not a reminder',
+  'عرض خاص بسعر 450.45 درهماً عند الحجز قبل تاريخ 15 أغسطس 2026. احجز الآن.',
+  null);
+
 // The article at the front of that sentence used to win the merchant: the
 // capture ran from "the" all the way to "e&" and titled the row
 // "Due Date For Your E&".

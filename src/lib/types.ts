@@ -148,6 +148,15 @@ export interface Transaction {
   /** Linked consumer-bill flow: internal funding or named biller receipt. */
   paymentFlowSide?: 'funding' | 'receipt';
   /**
+   * Why the account shown for a named biller receipt is trustworthy.
+   *
+   * Receipt alerts that omit a card still need a ledger account, so import
+   * attaches them to a fallback. That routing choice must never be presented
+   * as "paid with" evidence. `alert` means the message stated an instrument;
+   * `user` means the person explicitly changed the receipt's account.
+   */
+  paymentInstrumentSource?: 'alert' | 'user';
+  /**
    * Date cash left the funding account for a card settlement.
    *
    * The card can acknowledge receipt after midnight or after a weekend. Its
@@ -383,6 +392,7 @@ export interface TxHealUpdate {
   viaPush?: boolean;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
+  paymentInstrumentSource?: 'alert' | 'user';
   /**
    * The stored source text, or `null` to CLEAR it.
    *

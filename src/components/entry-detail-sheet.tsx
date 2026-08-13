@@ -128,6 +128,8 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   const save = () => {
     if (!canSave || !amountFils) return;
     const categoryChanged = category !== transaction.category;
+    const receiptAccountChanged =
+      transaction.paymentFlowSide === 'receipt' && accountId !== transaction.accountId;
     editTransaction(transaction.id, {
       title: title.trim(),
       amountFils,
@@ -135,6 +137,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
       accountId,
       date: dateText,
       isTransfer: isTransfer || undefined,
+      ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
     });
     const merchant = title.trim();
     if (categoryChanged && merchant.length > 2) {

@@ -29,6 +29,7 @@ import { EXPENSE_CATEGORIES } from '@/lib/categories';
 import {
   formatAED,
   formatAmount,
+  fullDateTime,
   monthKey,
   parseAmountToFils,
   shortDate,
@@ -43,6 +44,7 @@ import {
   daysUntilNext,
   fixedCommitments,
   otherCommitments,
+  recurringPaymentAccount,
   stoppedSubscriptions,
   trueSubscriptions,
   type Subscription,
@@ -109,7 +111,9 @@ export default function BillsScreen() {
       ? t('cadenceWeekly')
       : cadence === 'monthly'
         ? t('cadenceMonthly')
-        : t('cadenceYearly');
+        : cadence === 'yearly'
+          ? t('cadenceYearly')
+          : t('cadenceAsNeeded');
 
   const scheduleWhen = (days: number): string => {
     if (days === 0) return t('today');
@@ -223,7 +227,12 @@ export default function BillsScreen() {
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     if (txs.length === 0) return null;
     const firstISO = txs[txs.length - 1].date;
-    const accounts = [...new Set(txs.map((t) => t.accountId))]
+    const paymentAccounts = txs.map((transaction) =>
+      recurringPaymentAccount(transaction, state.accounts));
+    const accounts = [...new Set(
+      paymentAccounts.map((account) => account?.id)
+        .filter((id): id is string => Boolean(id)),
+    )]
       .map((id) => state.accounts.find((a) => a.id === id))
       .filter((a): a is NonNullable<typeof a> => a != null);
     // Totalled as the history rows below are shown. Rounding the raw sum once
@@ -232,7 +241,14 @@ export default function BillsScreen() {
     const totalFils = totalAsShown(txs.map((t) => t.amountFils));
     const sortedAmounts = txs.map((t) => t.amountFils).sort((a, b) => a - b);
     const medianFils = sortedAmounts[Math.floor(sortedAmounts.length / 2)];
-    return { txs, firstISO, accounts, totalFils, medianFils };
+    return {
+      txs,
+      firstISO,
+      accounts,
+      unknownInstrumentCount: paymentAccounts.filter((account) => account === undefined).length,
+      totalFils,
+      medianFils,
+    };
   }, [detail, state.transactions, state.accounts, liveAccounts, internal]);
 
   const subscribedFor = (firstISO: string): string => {
@@ -258,7 +274,8 @@ export default function BillsScreen() {
    * case below in the opposite direction. An affordance that can only produce
    * a wrong number is worse than no affordance.
    */
-  const remindable = (sub: Subscription): boolean => sub.cadence !== 'weekly';
+  const remindable = (sub: Subscription): boolean =>
+    sub.cadence !== 'weekly' && sub.cadence !== 'as-needed';
 
   /**
    * The reminder a subscription becomes.
@@ -438,6 +455,8 @@ export default function BillsScreen() {
             <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
               {sub.status === 'stopped'
                 ? tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })
+                : sub.cadence === 'as-needed'
+                  ? tf('asNeededScheduleList', { date: shortDate(sub.lastChargedISO) })
                 : next >= 0
                   ? tf('cadenceScheduleList', {
                       cadence: cadenceLabel(sub.cadence),
@@ -467,7 +486,7 @@ export default function BillsScreen() {
             {/* The monthly equivalent above adds to the section total. For
                 non-monthly charges this smaller figure preserves the actual
                 debit that the conversion was derived from. */}
-            {sub.cadence !== 'monthly' && sub.status !== 'stopped' ? (
+            {sub.cadence !== 'monthly' && sub.cadence !== 'as-needed' && sub.status !== 'stopped' ? (
               <ThemedText type="nano" themeColor="textTertiary" tabular numberOfLines={1}>
                 {`${formatAED(sub.avgAmountFils, { decimals: false })}${
                   sub.cadence === 'yearly' ? t('perYearShort') : t('perWeekShort')
@@ -1047,7 +1066,11 @@ export default function BillsScreen() {
                 <View style={styles.factRow}>
                   <View style={styles.fact}>
                     <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                      {detail.category === 'loan' ? t('payingFor') : t('subscribedFor')}
+                      {detail.category === 'loan'
+                        ? t('payingFor')
+                        : detail.group === 'subscription'
+                          ? t('subscribedFor')
+                          : t('trackingSince')}
                     </ThemedText>
                     <ThemedText type="smallBold">{subscribedFor(detailData.firstISO)}</ThemedText>
                     <ThemedText type="micro" themeColor="textSecondary">
@@ -1056,7 +1079,7 @@ export default function BillsScreen() {
                   </View>
                   <View style={styles.fact}>
                     <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                      {detail.category === 'loan' ? t('payments') : t('charges')}
+                      {detail.group === 'subscription' ? t('charges') : t('payments')}
                     </ThemedText>
                     <ThemedText type="smallBold" tabular>
                       {detailData.txs.length}
@@ -1078,25 +1101,32 @@ export default function BillsScreen() {
                     {t('paidWith')}
                   </ThemedText>
                   <ThemedText type="small" numberOfLines={2}>
-                    {detailData.accounts.length > 0
-                      ? detailData.accounts.map((a) => a.name).join(', ')
-                      : t('unknownAccount')}
+                    {[
+                      detailData.accounts.map((account) => account.name).join(', '),
+                      detailData.unknownInstrumentCount > 0
+                        ? tf('paymentInstrumentMissingCount', {
+                            count: detailData.unknownInstrumentCount,
+                            s: detailData.unknownInstrumentCount === 1 ? '' : 's',
+                          })
+                        : '',
+                    ].filter(Boolean).join(' · ')}
                   </ThemedText>
                 </View>
 
                 {/* Charge history */}
                 <View style={styles.historyBlock}>
                   <ThemedText type="micro" themeColor="textSecondary">
-                    {t('history')}
+                    {detail.group === 'subscription' ? t('history') : t('paymentHistory')}
                   </ThemedText>
                   <ScrollView style={styles.historyScroll} showsVerticalScrollIndicator={false}>
-                    {detailData.txs.slice(0, 36).map((t, i) => {
-                      const acc = state.accounts.find((a) => a.id === t.accountId);
+                    {detailData.txs.slice(0, 36).map((transaction, i) => {
+                      const acc = recurringPaymentAccount(transaction, state.accounts);
                       const offMedian =
-                        detailData.medianFils > 0 && t.amountFils > detailData.medianFils * 1.1;
+                        detailData.medianFils > 0 &&
+                        transaction.amountFils > detailData.medianFils * 1.1;
                       return (
                         <View
-                          key={t.id}
+                          key={transaction.id}
                           style={[
                             styles.historyRow,
                             i > 0 && {
@@ -1104,19 +1134,17 @@ export default function BillsScreen() {
                               borderTopColor: theme.cardBorder,
                             },
                           ]}>
-                          <View>
-                            <ThemedText type="small">{shortDate(t.date)}</ThemedText>
-                            {acc?.last4 && (
-                              <ThemedText type="micro" themeColor="textSecondary">
-                                ••{acc.last4}
-                              </ThemedText>
-                            )}
+                          <View style={styles.historyIdentity}>
+                            <ThemedText type="small">{fullDateTime(transaction)}</ThemedText>
+                            <ThemedText type="micro" themeColor="textSecondary" numberOfLines={2}>
+                              {acc?.name ?? t('paymentInstrumentNotStated')}
+                            </ThemedText>
                           </View>
                           <ThemedText
                             type="smallBold"
                             tabular
                             style={offMedian ? { color: theme.warning } : undefined}>
-                            {formatAED(t.amountFils, { decimals: false })}
+                            {formatAED(transaction.amountFils, { decimals: false })}
                           </ThemedText>
                         </View>
                       );
@@ -1576,6 +1604,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: Spacing.two,
+  },
+  historyIdentity: {
+    flex: 1,
+    paddingEnd: Spacing.two,
   },
   historyMore: {
     paddingVertical: Spacing.two,

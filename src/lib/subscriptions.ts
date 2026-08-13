@@ -1,8 +1,8 @@
 import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
 import { isSpending } from '@/lib/ledger';
-import type { CategoryId, Transaction } from '@/lib/types';
+import type { Account, CategoryId, Transaction } from '@/lib/types';
 
-export type Cadence = 'weekly' | 'monthly' | 'yearly';
+export type Cadence = 'weekly' | 'monthly' | 'yearly' | 'as-needed';
 
 /**
  * subscription — cancellable online/lifestyle services (streaming, apps, gym);
@@ -38,6 +38,26 @@ export interface Subscription {
   monthlyEquivalentFils: number;
 }
 
+/**
+ * Account/card evidence safe enough to print beside a recurring payment.
+ *
+ * A registered-payee receipt names the biller and amount but often no funding
+ * instrument. Import keeps the money visible on a fallback account because a
+ * ledger row cannot be unattached; that fallback is routing, not proof. Show
+ * a receipt account only when the alert named it or the user selected it.
+ * Ordinary card alerts carry their own instrument evidence and remain visible
+ * as before.
+ */
+export const recurringPaymentAccount = (
+  transaction: Transaction,
+  accounts: Account[],
+): Account | undefined => {
+  if (transaction.paymentFlowSide === 'receipt' && !transaction.paymentInstrumentSource) {
+    return undefined;
+  }
+  return accounts.find((account) => account.id === transaction.accountId);
+};
+
 interface CadenceWindow {
   cadence: Cadence;
   minDays: number;
@@ -50,6 +70,51 @@ const WINDOWS: CadenceWindow[] = [
   { cadence: 'monthly', minDays: 26, maxDays: 35, typicalDays: 30 },
   { cadence: 'yearly', minDays: 350, maxDays: 380, typicalDays: 365 },
 ];
+
+const monthOrdinal = (iso: string): number =>
+  Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7)) - 1;
+
+/**
+ * The latest one-payment-per-month run from a registered bill-payee.
+ *
+ * Bills are commonly paid early or late, so their day gaps can be 20 then 40
+ * even though one obligation was settled in every calendar month. Looking at
+ * calendar coverage preserves that evidence. Requiring exactly one payment in
+ * each month keeps an on-demand wallet top-up out of the monthly bucket.
+ */
+const latestMonthlyReceiptRun = (charges: Transaction[]): Transaction[] => {
+  const byMonth = new Map<number, Transaction[]>();
+  for (const charge of charges) {
+    const ordinal = monthOrdinal(charge.date);
+    const month = byMonth.get(ordinal) ?? [];
+    month.push(charge);
+    byMonth.set(ordinal, month);
+  }
+  const lastMonth = Math.max(...byMonth.keys());
+  const descending: Transaction[] = [];
+  for (let month = lastMonth; ; month -= 1) {
+    const rows = byMonth.get(month);
+    if (!rows || rows.length !== 1) break;
+    descending.push(rows[0]);
+  }
+  return descending.length >= 3 ? descending.reverse() : [];
+};
+
+/**
+ * Repeated registered payments with no honest calendar cadence.
+ *
+ * A prepaid toll/phone wallet can be topped up several times in one month and
+ * not at all in another. It is still a real repeating commitment, but it must
+ * be labelled "as needed" and must never generate a made-up due-date alert.
+ */
+const latestAsNeededReceiptRun = (charges: Transaction[]): Transaction[] => {
+  const last = charges.at(-1);
+  if (!last) return [];
+  const cutoff = shiftISO(last.date, -120);
+  const recent = charges.filter((charge) => charge.date >= cutoff);
+  const months = new Set(recent.map((charge) => charge.date.slice(0, 7)));
+  return recent.length >= 4 && months.size >= 3 ? recent : [];
+};
 
 /**
  * Merchants that are subscriptions by nature: one observed interval (or even a
@@ -185,6 +250,11 @@ export function detectSubscriptions(
     txs.sort((a, b) => (a.date < b.date ? -1 : 1));
     const title = txs[txs.length - 1].title;
     const known = KNOWN_SUBSCRIPTION_MERCHANTS.test(title);
+    // This evidence belongs to every source observation, not to the collapsed
+    // row below. A receipt and an ordinary purchase on the same day are mixed
+    // evidence; whichever happens to sort first must not decide for both.
+    const registeredReceipt =
+      txs.length > 0 && txs.every((transaction) => transaction.paymentFlowSide === 'receipt');
 
     // Collapse same-day duplicates (split payments) into one charge.
     const charges: Transaction[] = [];
@@ -194,6 +264,17 @@ export function detectSubscriptions(
       else charges.push({ ...t });
     }
 
+    const monthlyReceiptRun = registeredReceipt ? latestMonthlyReceiptRun(charges) : [];
+    const asNeededReceiptRun =
+      registeredReceipt && monthlyReceiptRun.length === 0
+        ? latestAsNeededReceiptRun(charges)
+        : [];
+    const cadenceCharges = monthlyReceiptRun.length > 0
+      ? monthlyReceiptRun
+      : asNeededReceiptRun.length > 0
+        ? asNeededReceiptRun
+        : charges;
+
     // A utility bill is recurring precisely BECAUSE it is a bill, and its
     // amount is never stable — SEWA is 280 one month and 450 the next. The
     // ±15% gate below is the right test for a subscription and the wrong one
@@ -201,12 +282,12 @@ export function detectSubscriptions(
     // user who pays four of them every month. For these, cadence alone is the
     // evidence.
     const billLike =
-      charges[charges.length - 1].category === 'utilities' ||
-      charges[charges.length - 1].category === 'telecom' ||
-      charges[charges.length - 1].category === 'rent' ||
-      charges[charges.length - 1].category === 'loan';
+      cadenceCharges[cadenceCharges.length - 1].category === 'utilities' ||
+      cadenceCharges[cadenceCharges.length - 1].category === 'telecom' ||
+      cadenceCharges[cadenceCharges.length - 1].category === 'rent' ||
+      cadenceCharges[cadenceCharges.length - 1].category === 'loan';
 
-    const amounts = charges.map((c) => c.amountFils);
+    const amounts = cadenceCharges.map((c) => c.amountFils);
     const mid = median(amounts);
     if (mid <= 0) continue;
     const stable = amounts.every((a) => a >= mid * 0.85 && a <= mid * 1.15);
@@ -220,7 +301,12 @@ export function detectSubscriptions(
     // median. SEWA at 280 one month and 450 the next passes; two payments that
     // have nothing to do with each other do not.
     const billShaped = amounts.every((a) => a >= mid / 3 && a <= mid * 3);
-    if (!stable && !known && !(billLike && billShaped)) continue;
+    if (
+      !stable &&
+      !known &&
+      !(billLike && billShaped) &&
+      !((monthlyReceiptRun.length > 0 || asNeededReceiptRun.length > 0) && billShaped)
+    ) continue;
 
     // Known merchants skip the stability gate, which let a single misparsed
     // charge set the price: one bad row put Canva on the list at AED 18,313 a
@@ -231,12 +317,21 @@ export function detectSubscriptions(
     if (typical.length === 0) continue;
 
     const gaps: number[] = [];
-    for (let i = 1; i < charges.length; i++) {
-      gaps.push(daysBetween(charges[i - 1].date, charges[i].date));
+    for (let i = 1; i < cadenceCharges.length; i++) {
+      gaps.push(daysBetween(cadenceCharges[i - 1].date, cadenceCharges[i].date));
     }
 
     let window: CadenceWindow | null = null;
-    if (gaps.length > 0) {
+    if (monthlyReceiptRun.length > 0) {
+      window = WINDOWS.find((candidate) => candidate.cadence === 'monthly') ?? null;
+    } else if (asNeededReceiptRun.length > 0) {
+      window = {
+        cadence: 'as-needed',
+        minDays: 0,
+        maxDays: Number.POSITIVE_INFINITY,
+        typicalDays: median(gaps.filter((gap) => gap > 0)),
+      };
+    } else if (gaps.length > 0) {
       for (const w of WINDOWS) {
         const inWindow = gaps.filter((g) => g >= w.minDays && g <= w.maxDays).length;
         if (inWindow >= Math.max(1, Math.ceil(gaps.length * 0.6))) {
@@ -254,7 +349,7 @@ export function detectSubscriptions(
     const requiredIntervals = known || billLike ? 1 : 2;
     if (!window || gaps.length < requiredIntervals) continue;
 
-    const last = charges[charges.length - 1];
+    const last = cadenceCharges[cadenceCharges.length - 1];
     // Compare against the MEDIAN of prior charges, and only once there are at
     // least two of them. A mean over one prorated first charge made every
     // steady subscription look like a price rise — Google One was flagged
@@ -290,7 +385,12 @@ export function detectSubscriptions(
     const recent = amounts.slice(-3);
     const avg = median(recent);
     const monthlyEquivalentFils =
-      window.cadence === 'monthly'
+      window.cadence === 'as-needed'
+        ? Math.round(
+            amounts.reduce((sum, amount) => sum + amount, 0) /
+              (120 / 30.4375),
+          )
+        : window.cadence === 'monthly'
         ? avg
         : window.cadence === 'weekly'
           ? Math.round(avg * 4.33)
@@ -308,7 +408,9 @@ export function detectSubscriptions(
     // Silence for ~2 cycles past the last charge means it was cancelled.
     const silentDays = daysBetween(last.date, toISODate(today));
     const status: Subscription['status'] =
-      silentDays > window.typicalDays * 2.2 + 5 ? 'stopped' : 'active';
+      silentDays > (window.cadence === 'as-needed' ? 75 : window.typicalDays * 2.2 + 5)
+        ? 'stopped'
+        : 'active';
 
     subs.push({
       title,
@@ -320,8 +422,11 @@ export function detectSubscriptions(
       lastAmountFils: last.amountFils,
       lastChargedISO: last.date,
       nextExpectedISO: addDays(last.date, window.typicalDays),
-      chargeCount: charges.length,
-      priceIncreased: priorAmounts.length >= 2 && last.amountFils > priorTypical * 1.1,
+      chargeCount: cadenceCharges.length,
+      priceIncreased:
+        window.cadence !== 'as-needed' &&
+        priorAmounts.length >= 2 &&
+        last.amountFils > priorTypical * 1.1,
       priorTypicalFils: priorTypical,
       monthlyEquivalentFils,
     });

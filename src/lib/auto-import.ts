@@ -23,16 +23,37 @@ const MAX_REVIEW_CANDIDATES = 50;
 // It avoids running fourteen market packs over ordinary personal SMS, while
 // false positives merely reach the review module and are refused there.
 /**
- * Parsing is synchronous JavaScript. A 1,000-message page takes roughly
- * 100 ms even on a desktop Hermes-class CPU and several times that on a
- * mid-range phone, so doing the whole page in one turn visibly freezes taps
- * and scrolling. Yield often enough to keep each slice below a frame while
- * preserving the exact same ordered parse result.
+ * Parsing is synchronous JavaScript, but phone speeds and message shapes vary
+ * too much for one fixed row count. Yield when a slice consumes a frame-sized
+ * time budget, with a row-count ceiling for fast clocks/devices. This keeps
+ * the exact ordered result while avoiding 40+ timer turns per 1,000 simple
+ * alerts on a fast phone.
  */
-const PARSE_SLICE_SIZE = 24;
+const PARSE_TIME_BUDGET_MS = 8;
+const MAX_PARSE_SLICE_SIZE = 64;
+
+interface ParseYieldState {
+  startedAt: number;
+  parsed: number;
+}
 
 function yieldToUi(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+const createParseYieldState = (): ParseYieldState => ({ startedAt: Date.now(), parsed: 0 });
+
+function parseYieldDue(state: ParseYieldState, hasMore: boolean): boolean {
+  state.parsed += 1;
+  if (!hasMore) return false;
+  const withinCount = state.parsed < MAX_PARSE_SLICE_SIZE;
+  const withinTime = Date.now() - state.startedAt < PARSE_TIME_BUDGET_MS;
+  return !withinCount || !withinTime;
+}
+
+function resetParseYieldState(state: ParseYieldState): void {
+  state.startedAt = Date.now();
+  state.parsed = 0;
 }
 
 export function isSmsScanningAvailable(): boolean {
@@ -271,6 +292,7 @@ export async function scanInbox(
     );
     if (batch.length === 0) break;
     scannedCount += batch.length;
+    const pageYield = createParseYieldState();
     for (let i = 0; i < batch.length; i++) {
       const sms = batch[i];
       const sourceEventId = `a${sms.id}`;
@@ -310,8 +332,9 @@ export async function scanInbox(
       // The native inbox query is already asynchronous; the expensive part is
       // the regex grammar above after the 1,000 bodies cross the bridge. A
       // timer turn lets React Native present pending frames and input events.
-      if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < batch.length) {
+      if (parseYieldDue(pageYield, i + 1 < batch.length)) {
         await yieldToUi();
+        resetParseYieldState(pageYield);
       }
     }
     onProgress?.(scannedCount, parsed.length);
@@ -327,6 +350,7 @@ export async function scanInbox(
   if (SmsReader.getReceived) {
     try {
       const received = await SmsReader.getReceived(sinceMs);
+      const deliveryYield = createParseYieldState();
       for (let i = 0; i < received.length; i++) {
         const sms = received[i];
         scannedCount += 1;
@@ -351,8 +375,9 @@ export async function scanInbox(
             await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide);
           }
         }
-        if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < received.length) {
+        if (parseYieldDue(deliveryYield, i + 1 < received.length)) {
           await yieldToUi();
+          resetParseYieldState(deliveryYield);
         }
       }
       onProgress?.(scannedCount, parsed.length);
@@ -371,6 +396,7 @@ export async function scanInbox(
       // retained row: using the ledger watermark here could strand an older
       // unacknowledged notification forever after a newer SMS advances it.
       const captured = await notificationReader.getCaptured(0);
+      const notificationYield = createParseYieldState();
       for (let i = 0; i < captured.length; i++) {
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
@@ -412,8 +438,9 @@ export async function scanInbox(
         // Claim the row only after all parser/review work for it completed.
         // If anything above throws, this ciphertext remains for the next run.
         notificationIds.add(n.id);
-        if ((i + 1) % PARSE_SLICE_SIZE === 0 && i + 1 < captured.length) {
+        if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
           await yieldToUi();
+          resetParseYieldState(notificationYield);
         }
       }
       onProgress?.(scannedCount, parsed.length);

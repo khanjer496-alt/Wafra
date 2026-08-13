@@ -1,8 +1,13 @@
+const assert = require('assert');
 const {
   inferCaptureMarket,
   routeAlertMarket,
   inspectUniversalAlert,
 } = require('./build/alert-market-detection.js');
+const { createLaunchAlertSession, REVIEW_MONEY_HINT } = require('./build/launch-alert-parser.js');
+const { detectLaunchMarketFromSender } = require('./build/markets.js');
+const uaeFixtures = require('./fixtures/uae-bank-formats.js');
+const saudiFixtures = require('./fixtures/saudi-bank-formats.js');
 
 let pass = 0;
 let fail = 0;
@@ -91,6 +96,69 @@ ok('route result never retains source or sender',
   !JSON.stringify(privateResult).includes('TARGET') &&
     !JSON.stringify(privateResult).includes('PRIVATE'),
   JSON.stringify(privateResult));
+
+ok('launch sender routing is exact and refuses overlapping or unknown identities',
+  detectLaunchMarketFromSender('ADCB') === 'AE' &&
+    detectLaunchMarketFromSender('ALRAJHI') === 'SA' &&
+    detectLaunchMarketFromSender('ADCB ALRAJHI') === null &&
+    detectLaunchMarketFromSender('CAPITALONE') === null);
+
+// Differential safety gate for the launch-sender fast path. The reference
+// deliberately forces the full universal inspection that capture used before
+// the optimization; every parsed field must remain deeply identical.
+const differentialCases = [
+  ...uaeFixtures.map((fixture) => ({
+    source: fixture.body,
+    sender: fixture.bank,
+    activeMarket: 'AE',
+  })),
+  ...saudiFixtures.map((fixture) => ({
+    source: fixture.body,
+    sender: fixture.bank,
+    activeMarket: 'SA',
+  })),
+  {
+    source: 'Chase Bank: Card purchase USD 18.50 at TARGET completed',
+    sender: 'CHASE',
+    activeMarket: 'AE',
+  },
+  {
+    source: 'BNP Paribas: Paiement par carte débité de EUR 12,34 chez CAFE',
+    sender: 'BNPPARIBAS',
+    activeMarket: 'AE',
+  },
+  {
+    source: 'ADCB: Purchase of USD 9.99 (AED 36.70) at APPLE with card ending 1234',
+    sender: 'ADCB',
+    activeMarket: 'AE',
+  },
+  {
+    source: 'HSBC UK: Card purchase GBP 18.50 completed',
+    sender: 'HSBC',
+    activeMarket: 'AE',
+  },
+];
+let differentialMatch = true;
+let differentialFailure = '';
+for (const row of differentialCases) {
+  const fast = createLaunchAlertSession({ overrides: {}, activeMarket: row.activeMarket });
+  const reference = createLaunchAlertSession({ overrides: {}, activeMarket: row.activeMarket });
+  const fastInspection = fast.inspect(row.source, row.sender);
+  const referenceInspection = REVIEW_MONEY_HINT.test(row.source)
+    ? inspectUniversalAlert({ source: row.source, sender: row.sender, regionHint: null })
+    : null;
+  const actual = fast.parse(row.source, row.sender, fastInspection);
+  const expected = reference.parse(row.source, row.sender, referenceInspection);
+  try {
+    assert.deepStrictEqual(actual, expected);
+  } catch (error) {
+    differentialMatch = false;
+    differentialFailure = `${row.sender}: ${error.message}`;
+    break;
+  }
+}
+ok('optimized launch routing preserves every parser output field',
+  differentialMatch, differentialFailure);
 
 const autoUs = inferCaptureMarket({
   regionHint: 'US',

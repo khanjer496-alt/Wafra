@@ -2039,6 +2039,86 @@ const DECLINE_SMS = [{
       utilityFlowPlan.batch.transactions.some((row) =>
         row.paymentFlowSide === 'receipt' && row.title === 'Fishbasket'),
     utilityFlowPlan.batch.transactions);
+  const cardlessReceipt = utilityFlowPlan.batch.transactions.find(
+    (row) => row.paymentFlowSide === 'receipt',
+  );
+  ok('a cardless bill receipt does not promote its fallback account to payment evidence',
+    cardlessReceipt?.paymentInstrumentSource === undefined,
+    cardlessReceipt);
+
+  const statedCardReceipt = {
+    ...utilityFlow.parsed[1],
+    smsTs: Date.parse('2026-08-02T14:27:27Z'),
+    date: '2026-08-02',
+    card: { last4: '5444', kind: 'credit' },
+  };
+  const statedCardPlan = buildImportPlan(
+    [statedCardReceipt],
+    {
+      ...BASE,
+      accounts: [{
+        id: 'fab-card', name: 'FAB Credit Card •5444', kind: 'card', bankName: 'FAB',
+        last4: '5444', cardKind: 'credit', openingFils: 0, color: '#fff',
+      }],
+    },
+    statedCardReceipt.smsTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('a bill receipt that explicitly states a card preserves that proof for history',
+    statedCardPlan.batch.transactions.length === 1 &&
+      statedCardPlan.batch.transactions[0].accountId === 'fab-card' &&
+      statedCardPlan.batch.transactions[0].paymentInstrumentSource === 'alert',
+    statedCardPlan.batch.transactions);
+
+  const statedSmsKey = `s${statedCardReceipt.smsTs}-${statedCardReceipt.amountFils}`;
+  const legacyStatedReceipt = {
+    ...statedCardPlan.batch.transactions[0],
+    id: 'legacy-stated-receipt', smsKey: statedSmsKey,
+    paymentInstrumentSource: undefined,
+  };
+  const statedCardReread = buildImportPlan(
+    [statedCardReceipt],
+    {
+      ...BASE,
+      accounts: [{
+        id: 'fab-card', name: 'FAB Credit Card •5444', kind: 'card', bankName: 'FAB',
+        last4: '5444', cardType: 'credit', openingFils: 0, color: '#fff',
+      }],
+      transactions: [legacyStatedReceipt],
+    },
+    statedCardReceipt.smsTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('a unique-card reread heals payment-instrument provenance onto a legacy receipt',
+    statedCardReread.txCount === 0 &&
+      statedCardReread.batch.updates.some((row) =>
+        row.id === legacyStatedReceipt.id && row.paymentInstrumentSource === 'alert'),
+    statedCardReread.batch.updates);
+
+  const ambiguousStatedReread = buildImportPlan(
+    [statedCardReceipt],
+    {
+      ...BASE,
+      accounts: [
+        {
+          id: 'fab-card-a', name: 'FAB Credit Card A •5444', kind: 'card', bankName: 'FAB',
+          last4: '5444', cardType: 'credit', openingFils: 0, color: '#fff',
+        },
+        {
+          id: 'fab-card-b', name: 'FAB Credit Card B •5444', kind: 'card', bankName: 'FAB',
+          last4: '5444', cardType: 'credit', openingFils: 0, color: '#fff',
+        },
+      ],
+      transactions: [{ ...legacyStatedReceipt, accountId: 'fab-card-a' }],
+    },
+    statedCardReceipt.smsTs,
+    new Date('2026-08-12T12:00:00Z'),
+  );
+  ok('an ambiguous same-bank same-suffix reread never blesses the retained account as proven',
+    ambiguousStatedReread.txCount === 0 &&
+      !ambiguousStatedReread.batch.updates.some((row) =>
+        row.id === legacyStatedReceipt.id && row.paymentInstrumentSource === 'alert'),
+    ambiguousStatedReread.batch.updates);
 
   const legacyPushState = {
     ...BASE,

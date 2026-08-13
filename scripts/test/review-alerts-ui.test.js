@@ -83,8 +83,9 @@ ok('review copy is localized in both supported UI languages',
     /reviewAlertDismissQuestion:\s*\{\s*en:[^\n]+ar:/.test(copy));
 
 ok('SMS access is visibly optional and the no-access path is explicit',
-  /onboardCaptureNoSms/.test(onboarding) &&
-    /iosContinueManual/.test(onboarding) &&
+  /<StartOption automatic=\{false\}/.test(onboarding) &&
+    /onboardManualChoice/.test(onboarding) &&
+    /continueManually/.test(onboarding) &&
     /Maximum privacy · no SMS access/.test(copy) &&
     /Maximum privacy · no Messages access/.test(copy) &&
     /choose maximum privacy for no SMS access/i.test(copy));

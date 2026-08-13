@@ -152,6 +152,10 @@ export function buildPaymentReminders(
     internal,
   )) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
+    // An on-demand top-up has no due date. It belongs in Fixed so the user can
+    // see the recurring cash requirement, but predicting a day would create a
+    // false reminder.
+    if (sub.cadence === 'as-needed') continue;
     if (billTitles.has(sub.title.toLowerCase())) continue;
     const days = daysUntilNext(sub, now);
     if (days < 1 || days > 30) continue;
