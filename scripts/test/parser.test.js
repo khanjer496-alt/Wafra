@@ -366,6 +366,34 @@ if (canvasShop && canvasShop.merchant !== 'Canva') {
   fail++; console.log('✗ CANVAS merchant does not become Canva', JSON.stringify(canvasShop && canvasShop.merchant));
 }
 
+t('multi-line Viator descriptor keeps the service before the acquirer reference',
+  'Credit Card Purchase\nCard No XXXX9960\nUSD 398.00\nVIATOR *IT-····7243 London GBR\n21/06/24 11:44\nAvailable Balance AED ····1053.72 Your June statement payment due date is 26/06/2024',
+  { merchant: 'Viator', category: 'travel', date: '2024-06-21', originalCurrency: 'USD' });
+
+t('multi-line Canva descriptor keeps the service before the acquirer reference',
+  'Credit Card Purchase\nCard No XXXX9960\nAED 47.99\nCANVA* I····3335-····8428 CAMDEN DE\n18/02/22 15:19\nAvailable Balance AED 3663.70 Your February statement payment due date is 26/02/2022\nGet up to 10% cashback on online shopping with SHOPSMART. Visit Offers Page on the FAB Mobile app',
+  { merchant: 'Canva', category: 'software', amountFils: 4799, date: '2022-02-18' });
+
+t('Wolt multi-line descriptor is a dining merchant',
+  'Credit Card Purchase\nCard No XXXX3644\nGEL 44.99\nWolt Tbilisi GEO\n26/06/24 21:04\nAvailable Balance AED 9714.33',
+  { merchant: 'Wolt', category: 'dining', date: '2024-06-26', originalCurrency: 'GEL' });
+
+t('a bare Leto proper name is not enough to claim dining',
+  'Purchase of AED 88.00 at LETO TECHNOLOGIES with Credit Card ending 4821',
+  { merchant: 'Leto Technologies', category: 'other', deliberate: false });
+
+t('Tradeling descriptor is a shopping merchant',
+  'Credit Card Purchase\nCard No XXXX9960\nAED 299.98\nWWW TRADELING COM DUBAI ARE\n16/03/22 15:30\nAvailable Balance AED 2259.60',
+  { merchant: 'Tradeling', category: 'shopping', amountFils: 29998 });
+
+t('Zoho Books descriptor is software',
+  'Credit Card Purchase\nCard No XXXX9960\nAED 135.45\nZOHO-BOOKS +····6118 SGP\n06/06/22 14:29\nAvailable Balance AED 460.39',
+  { merchant: 'Zoho Books', category: 'software', amountFils: 13545 });
+
+t('TemplateMonster descriptor is software',
+  'Credit Card Purchase\nCard No XXXX9960\nUSD 22.00\nTEMPLATEMONSTER +····4770 FL\n15/04/22 19:54\nAvailable Balance AED 6038.26',
+  { merchant: 'TemplateMonster', category: 'software', originalCurrency: 'USD' });
+
 // ── multi-line FAB-style format: header kind, own-line merchant, Avl Bal on credit = limit ──
 const FAB_ALLDEBRID =
   'Credit Card Purchase\nCard No XXXX4711\nEUR 2.99\nALLDEBRID.COM MONTROUGE FRA\n' +
@@ -935,9 +963,43 @@ t('a named biller keeps its own category over the bill-pay default',
   'Dear Customer, Your payment instructions of AED 417.9 to Du for consumer number 1238865 has been processed on 21/10/2022 17:03',
   { merchant: 'Du', category: 'telecom' });
 
-t('an unknown consumer-number nickname does not invent a utility category',
+t('an owner-created Fishbasket nickname does not get a global category',
   'Dear Customer, Your payment instructions of AED 12168.00 to Fishbasket for consumer number 1238865 has been processed on 01/08/2026 12:30',
-  { merchant: 'Fishbasket', category: 'other', type: 'expense', paymentFlowSide: 'receipt' });
+  { merchant: 'Fishbasket', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
+
+t('an owner-created Fbinter nickname does not get a global category',
+  'Dear Customer, Your payment instructions of AED 313.95 to fbinter for consumer number 1234026 has been processed on 13/07/2026 22:01',
+  { merchant: 'Fbinter', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
+
+t('an owner-created Nazemhome nickname does not get a global category',
+  'Dear Customer, Your payment instructions of AED 450.45 to nazemhome for consumer number 1231849 has been processed on 10/07/2026 17:41',
+  { merchant: 'Nazemhome', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
+
+t('an owner-created Tank300 nickname does not get a global category',
+  'Dear Customer, Your payment instructions of AED 250.0 to tank300 for consumer number 1231711 has been processed on 02/07/2026 19:47',
+  { merchant: 'Tank300', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
+
+t('the owner nickname does not classify an ordinary Fishbasket card purchase',
+  'Purchase of AED 125.00 at FISHBASKET with Credit Card ending 4821',
+  { merchant: 'Fishbasket', category: 'other', type: 'expense', deliberate: false });
+
+const correctedFishbasket = parseSms(
+  'Dear Customer, Your payment instructions of AED 125.00 to Fishbasket for consumer number 1234036 has been processed on 01/08/2026 18:27',
+  { fishbasket: 'shopping' },
+);
+if (correctedFishbasket?.categoryGuess === 'shopping' && correctedFishbasket.categoryPinned === true) {
+  pass++; console.log('✓ the user category rule still outranks the corpus-backed biller hint');
+} else {
+  fail++; console.log('✗ the user category rule still outranks the corpus-backed biller hint',
+    JSON.stringify(correctedFishbasket && {
+      category: correctedFishbasket.categoryGuess,
+      pinned: correctedFishbasket.categoryPinned,
+    }));
+}
+
+t('an unknown consumer-number nickname still does not invent a utility category',
+  'Dear Customer, Your payment instructions of AED 12168.00 to Mysterybasket for consumer number 1238865 has been processed on 01/08/2026 12:30',
+  { merchant: 'Mysterybasket', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
 
 t('utility direct debit names the biller instead of "Card purchase"',
   'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.',

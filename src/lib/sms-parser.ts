@@ -213,8 +213,12 @@ export interface ParsedCard {
  * repair again after moving parser-upgrade capture out of Home and into the
  * tabs shell, so opening directly onto Bills/Flow/Wallet cannot leave
  * Fishbasket, Fbinter, Nazemhome or other proven histories on the old parser.
+ *
+ * 25: multi-line descriptor recovery. Preserve Viator/Canva when their card
+ * descriptor contains an opaque acquirer reference, and re-file other closed,
+ * public merchant brands without assigning global meaning to user nicknames.
  */
-export const PARSER_VERSION = 24;
+export const PARSER_VERSION = 25;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -2211,6 +2215,12 @@ function merchantFromLines(raw: string): string {
     if (LINE_PROMO_RE.test(line)) continue;
     if (amountLineRe.test(line)) continue;
     if ((line.match(/[A-Za-z]/g) ?? []).length < 3) continue;
+    // A known service before an opaque acquirer reference is still the
+    // merchant: "VIATOR *IT-1234 London" and "CANVA* I1234-8428 Camden".
+    // cleanDescriptor intentionally peels the token before a star for normal
+    // gateway/sub-merchant shapes, so preserve a closed service match first.
+    const service = normalizeServiceName(line);
+    if (service) return service;
     // Acquirer descriptors are fixed-width fields padded with spaces:
     // "EXINITY ME LTD        Dubai           AE" and
     // "WL *STEAM PURCHASE    425-889-9642 WA US". Only drop the tail when it
@@ -2324,7 +2334,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // filed as a grocery shop, which overstates consumption for exactly the
   // users who send money home every month.
   [/carrefour|lulu(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|hypermarket|supermarket|grocer|fresh market|baqala/i, 'groceries'],
-  [/talabat|deliveroo|zomato|noon food|careem food|eateasy|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
+  [/talabat|deliveroo|zomato|noon food|careem food|eateasy|\bwolt\b|mamaesh|al deek al soori|restaurant|cafe|coffee|starbucks|costa|tim hortons|mcdonald|kfc|hardee|subway|shawarma|cafeteria|dining|bakery|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|\bfoods?\b|beverages/i, 'dining'],
   // `toll` carries a NEGATIVE LOOKAHEAD and it is not decoration: "call our
   // toll free number 600 54 0000" is a footer on ordinary purchase alerts from
   // several UAE banks, and a bare \btoll\b would have filed every one of them
@@ -2392,7 +2402,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // 3. `[a-z]+cart` is the e-commerce naming convention (Cococart, Instacart),
   //    and the required prefix is what makes it safe: a BARE "cart" is a word
   //    in ordinary prose, "…cart" as one token is a storefront.
-  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun\s*(?:&|and)\s*sands?\b|todd ?snyder|\b[a-z]+cart\b|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|hou[es]{2} ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
+  [/tabby|tamara|postpay|cashew|amazon|noon(?!\s*(?:food|minutes))|shein|temu|aliexpress|tradeling|namshi|ounass|\bsivvi\b|ikea|home centre|homebox|home box|pan emirates|danube home|ace hardware|dragon ?mart|sharaf|jumbo|emax|virgin megastore|decathlon|sun\s*(?:&|and)\s*sands?\b|todd ?snyder|\b[a-z]+cart\b|nike|adidas|puma\b|\bh ?& ?m\b|zara\b|bershka|pull ?& ?bear|matalan|max fashion|centrepoint|splash\b|lifestyle|brands for less|daiso|miniso|mumzworld|firstcry|toys ?r ?us|dubizzle|mall\b|store|shop|boutique|tailor|tailo\b|perfume|jewel|gold ?souk|florist|flower|fashion|garment|abaya|red ?tag|landmark retail|citywalk|matajer|american eagle|hennes|uniqlo|sephora|skechers|lc waikiki|\basos\b|alibaba|duty ?free|dufry|\boutlet\b|jashanmal|hou[es]{2} ?hold|majid al futtaim|\bmaf\b|gmg consumer|al ?shaya|pull ?(?:&|and) ?bear|under armour|crc sports|yzy sply|\byeezy\b|\baiiz\b|brand folio|\bg o a t\b|\bqdf\b|\baneeq\b|\boff ?price\b/i, 'shopping'],
   // `\bphy\b` is the acquirer's abbreviation for a pharmacy — "CITY LIFE PHY
   // BR5-1303" — and it doubles as the stub of "physiotherapy". Both are health,
   // which is why one short token is safe here and would not be anywhere else.
@@ -2433,7 +2443,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   //
   // `hopper hq` is spelled with its suffix ON PURPOSE: bare `hopper` is the
   // flight-booking app, which is travel.
-  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|openai|chat\s*gpt|anthropic|\bclaude\b|getresponse|domain\.com|godaddy|hostinger|\bhosting\b|pandadoc|copy\.?ai|hopper ?hq|yamm\.com|yet another mail merge|\bmail ?merge\b|grubtech|\bfoodics\b|\bdeliverect\b/i, 'software'],
+  [/\bcursor\b|\blovable\b|\bcluely\b|\brork\b|\bloopcv\b|skywork|beautiful\.ai|resume-?now|\brezi\b|bettercv|kickresume|nanonoble|hostgator|namecheap|name\.com|hetzner|openrouter|presentations ?ai|mailsuite|vercel|netlify|supabase|railway\.app|replit|midjourney|perplexity|elevenlabs|runway\b|google ?one|fiverr|mailtrack|\bvpn\b|protonmail|openai|chat\s*gpt|anthropic|\bclaude\b|getresponse|domain\.com|godaddy|hostinger|\bhosting\b|pandadoc|copy\.?ai|hopper ?hq|yamm\.com|yet another mail merge|\bmail ?merge\b|grubtech|zoho(?:-books|\s+books)|template ?monster|\bfoodics\b|\bdeliverect\b/i, 'software'],
   // Leisure venues and cinema distributors. Deliberately no district names
   // here — "City Walk" appears in the descriptor of every shop and cafe in
   // it, and matching it sent a coffee roastery to entertainment.
@@ -2945,6 +2955,11 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/\badobe\b/i, 'Adobe'],
   // Word-bounded: "CANVAS TRADING" or "CANVAS HOME" must not become Canva.
   [/\bcanva\b/i, 'Canva'],
+  [/\bviator\b/i, 'Viator'],
+  [/\bwolt\b/i, 'Wolt'],
+  [/zoho(?:-books|\s+books)/i, 'Zoho Books'],
+  [/template ?monster/i, 'TemplateMonster'],
+  [/tradeling/i, 'Tradeling'],
   [/microsoft\s*365|office\s*365/i, 'Microsoft 365'],
   [/steam\s*(?:purchase|games)|steampowered/i, 'Steam'],
   [/capital\.com/i, 'Capital.com'],
