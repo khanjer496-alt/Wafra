@@ -11,7 +11,12 @@
 // close the app, open it again, and the same messages are read a second time.
 
 const { buildImportPlan } = require('./build/import-plan.js');
-const { parseSms, isDeclinedMessage, nonPostingReason } = require('./build/sms-parser.js');
+const {
+  PARSER_VERSION,
+  parseSms,
+  isDeclinedMessage,
+  nonPostingReason,
+} = require('./build/sms-parser.js');
 const { setActiveMarket } = require('./build/markets.js');
 
 let pass = 0;
@@ -2291,6 +2296,10 @@ const DECLINE_SMS = [{
 }
 
 {
+  ok('the provider-duplicate repair forces an upgrade reread',
+    PARSER_VERSION >= 29,
+    PARSER_VERSION);
+
   const duplicateState = {
     ...BASE,
     accounts: [{

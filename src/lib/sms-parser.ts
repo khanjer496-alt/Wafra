@@ -238,8 +238,13 @@ export interface ParsedCard {
  * now retain only their masked last four digits, allowing a later provider
  * reminder for the same account to be reconciled without title or amount
  * guessing. Existing Android history is reread once to add that safe identity.
+ *
+ * 29: exact Android provider-duplicate repair. Some OEM inbox providers store
+ * one byte-identical bank alert twice under consecutive row ids less than one
+ * second apart. Re-read existing Android history so the older proven duplicate
+ * is retired; ordinary repeated payments and user-edited rows remain intact.
  */
-export const PARSER_VERSION = 28;
+export const PARSER_VERSION = 29;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
