@@ -54,7 +54,6 @@ export interface CaptureLedgerAdapter {
   getState: () => AppState;
   importBatch: (input: ImportBatchInput) => { ids: string[]; durable: Promise<void> };
   ensureDurable: () => Promise<void>;
-  markParserVersion: () => void;
   /** Persist a launch pack selected from strong per-alert AED/SAR evidence. */
   setMarket?: (id: 'AE' | 'SA') => boolean;
   stageReviewAlerts?: (items: ReviewAlert[]) => { admitted: number; durable: Promise<void> };
@@ -189,11 +188,10 @@ export const createCaptureExecutor = ({
 
     const collected = await dependencies.collectRoutine(state);
     if (collected.needsSetup) return { kind: 'needs-setup' };
-    // Inbox/relay I/O can overlap a hand edit or another import. Build the
-    // batch against the authoritative state after collection, not the state
-    // used only to choose the scan watermark and parser overrides.
-    const stateAtPlan = activeLedger.getState();
-    if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
+    // Inbox/relay I/O can overlap a hand edit or another import. Do not use
+    // the state that was read only to choose the scan watermark and parser
+    // overrides for any mutation below.
+    if (!activeLedger.getState().hydrated) return { kind: 'not-hydrated' };
     // A user can turn capture off while an inbox or relay read is awaiting.
     // Recheck the authoritative preference before staging, importing, moving
     // a cursor, changing the ledger market, or acknowledging remote rows.
@@ -202,7 +200,29 @@ export const createCaptureExecutor = ({
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
+    const reviewCandidates = collected.reviewCandidates ?? [];
+    let reviewAlerts = 0;
+    if (reviewCandidates.length > 0) {
+      if (!activeLedger.stageReviewAlerts) {
+        throw new Error('Capture executor requires review staging for review candidates');
+      }
+      // Review first, before an SMS cursor can advance. The authoritative
+      // ledger is read again after this durability await: Restore may replace
+      // the entire ledger while encrypted review staging is in flight.
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      reviewAlerts = reviewReceipt.admitted;
+      await reviewReceipt.durable;
+      if (captureStopped(activeLedger, collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
+    }
+
     alignLedgerMarket(activeLedger, collected.detectedLaunchMarket);
+    // This is deliberately after the final pre-import await. importBatch
+    // dispatches synchronously below, so a stale plan can never stamp a
+    // restored ledger as having completed a historical parser migration.
+    const stateAtPlan = activeLedger.getState();
+    if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
     const plan = dependencies.planRows(
       collected.parsed,
       stateAtPlan,
@@ -210,37 +230,29 @@ export const createCaptureExecutor = ({
       new Date(),
       collected.declined,
     );
-    const reviewCandidates = collected.reviewCandidates ?? [];
+    // The parser version is a durable migration receipt. Only the collection
+    // that actually started at the beginning of the Android inbox may carry
+    // it into the atomic ledger write. A routine scan can finish after an old
+    // backup is restored; stamping that partial scan would prevent the next
+    // launch from repairing the restored history.
+    const importBatch: ImportBatchInput = collected.historicalReread
+      ? { ...plan.batch, parserRereadComplete: true }
+      : plan.batch;
 
     if (!hasChanges(plan)) {
-      let reviewAlerts = 0;
-      if (reviewCandidates.length > 0) {
-        if (!activeLedger.stageReviewAlerts) {
-          throw new Error('Capture executor requires review staging for review candidates');
-        }
-        const receipt = activeLedger.stageReviewAlerts(reviewCandidates);
-        reviewAlerts = receipt.admitted;
-        await receipt.durable;
-        if (captureStopped(activeLedger, collected.source)) {
-          return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
-        }
-      }
       // A review-only Android scan still consumed the inbox up to newestTs.
       // Persist that cursor after the sanitized tray is durable; otherwise it
       // rereads the same bounded review window forever. Alerts older than the
       // privacy cap are intentionally not retained. Relay rows use ACKs.
       if (collected.source === 'sms' &&
-        plan.batch.lastScanTs > stateAtPlan.lastScanTs) {
-        const cursorReceipt = activeLedger.importBatch(plan.batch);
+        (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
+          importBatch.parserRereadComplete === true)) {
+        const cursorReceipt = activeLedger.importBatch(importBatch);
         await cursorReceipt.durable;
         if (captureStopped(activeLedger, collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
       }
-      // A parser-version reread is complete only after every admitted review
-      // item is encrypted. If staging failed, leaving the old version forces a
-      // safe historical retry instead of skipping those older alerts in-memory.
-      activeLedger.markParserVersion();
       // A deduplicated relay row may only exist in current React state because
       // an earlier encrypted write failed. Flush before dropping its sealed copy.
       if (collected.source === 'relay' && reviewCandidates.length === 0) {
@@ -261,21 +273,7 @@ export const createCaptureExecutor = ({
       };
     }
 
-    let reviewAlerts = 0;
-    if (reviewCandidates.length > 0) {
-      if (!activeLedger.stageReviewAlerts) {
-        throw new Error('Capture executor requires review staging for review candidates');
-      }
-      // Review first, before the import advances the SMS watermark. If the
-      // later ledger write fails, a reread safely dedupes this tray item.
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
-      reviewAlerts = reviewReceipt.admitted;
-      await reviewReceipt.durable;
-      if (captureStopped(activeLedger, collected.source)) {
-        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
-      }
-    }
-    const receipt = activeLedger.importBatch(plan.batch);
+    const receipt = activeLedger.importBatch(importBatch);
     await receipt.durable;
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };

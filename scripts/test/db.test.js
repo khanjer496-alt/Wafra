@@ -384,6 +384,11 @@ function loadHydrationExports(realModules = {}) {
       LedgerResetError: class LedgerResetError extends Error {},
     },
     '@/lib/ledger-money': require('./build/ledger-money'),
+    '@/lib/onboarding': {
+      allOnboardingGoalTitles: () => [],
+      buildDeferredOnboardingPlan: () => null,
+      mergeDeferredOnboardingPlan: (budgets, goals) => ({ budgets, goals }),
+    },
     '@/lib/alert-review-tray': require('./build/alert-review-tray'),
     '@/lib/review-promotion': require('./build/review-promotion'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },

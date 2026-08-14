@@ -1320,7 +1320,7 @@ async function queueItem(id, row, publicKey) {
               requestedSince = since;
               return {
                 parsed: [], reviewCandidates: [], declined: [], newestTs: 900,
-                inboxScannedCount: 0, scannedCount: 1,
+                inboxScannedCount: 0, inboxHistoryComplete: true, scannedCount: 1,
                 detectedLaunchMarket: null, commit: async () => {},
               };
             },
@@ -1346,6 +1346,19 @@ async function queueItem(id, row, publicKey) {
       eq('parser migration: a version change requests the complete inbox', requestedSince, 0);
       eq('parser migration: an empty restricted history cannot be stamped complete',
         code, 'ERR_SMS_HISTORY_UNAVAILABLE');
+
+      const pushOnly = await historyCapture.collectNewMessages({
+        hydrated: true,
+        parserVersion: 23,
+        lastScanTs: 900,
+        privateMode: false,
+        captureOptOut: false,
+        merchantOverrides: {},
+        transactions: [{ source: 'sms', viaPush: true }],
+      });
+      ok('parser migration: push-only rows do not impersonate prior SMS inbox history',
+        pushOnly.historicalReread === true,
+        JSON.stringify(pushOnly));
     }
 
     /* Defect A — the foreground scan must not eat the setup probe. */
@@ -1663,7 +1676,63 @@ async function queueItem(id, row, publicKey) {
         });
         await executor.execute('routine');
         eq('capture executor: a deduplicated relay row flushes the ledger before acknowledgement',
-          events, ['parser', 'flush', 'ack']);
+          events, ['flush', 'ack']);
+      }
+
+      {
+        const imported = [];
+        let current = { hydrated: true, lastScanTs: 900, parserVersion: 18 };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: (batch) => {
+              imported.push(batch);
+              return { ids: [], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => {},
+            markParserVersion: () => {},
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [row(1, 'SHOP')], declined: [], newestTs: 901,
+              historicalReread: false,
+              source: 'sms', needsSetup: false, commit: async () => {},
+            }),
+            planRows: () => changedPlan,
+          },
+        });
+        await executor.execute('routine');
+        ok('capture executor: an incremental scan after restore carries no migration proof',
+          imported.length === 1 && imported[0].parserRereadComplete !== true,
+          JSON.stringify(imported));
+      }
+
+      {
+        const imported = [];
+        const current = { hydrated: true, lastScanTs: 900, parserVersion: 18 };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: (batch) => {
+              imported.push(batch);
+              return { ids: [], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => {},
+            markParserVersion: () => {},
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [], declined: [], newestTs: 900,
+              historicalReread: true,
+              source: 'sms', needsSetup: false, commit: async () => {},
+            }),
+            planRows: () => emptyPlan,
+          },
+        });
+        await executor.execute('routine');
+        ok('capture executor: a zero-change full reread still durably carries migration proof',
+          imported.length === 1 && imported[0].parserRereadComplete === true,
+          JSON.stringify(imported));
       }
 
       {
@@ -1691,8 +1760,44 @@ async function queueItem(id, row, publicKey) {
           },
         });
         await executor.execute('routine');
-        eq('capture executor: routine planning re-reads the ledger after inbox collection',
+      eq('capture executor: routine planning re-reads the ledger after inbox collection',
           plannedAt, 900);
+      }
+
+      {
+        let releaseReview;
+        let current = { hydrated: true, lastScanTs: 1, ledgerId: 'before-review' };
+        let plannedLedger = null;
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => ({ ids: [], durable: Promise.resolve() }),
+            ensureDurable: async () => {},
+            stageReviewAlerts: () => ({
+              admitted: 1,
+              durable: new Promise((resolve) => { releaseReview = resolve; }),
+            }),
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [row(1, 'SHOP')], declined: [], newestTs: 2,
+              reviewCandidates: [{ id: 'structured-review' }],
+              historicalReread: true,
+              source: 'sms', needsSetup: false, commit: async () => {},
+            }),
+            planRows: (_rows, stateAtPlan) => {
+              plannedLedger = stateAtPlan.ledgerId;
+              return changedPlan;
+            },
+          },
+        });
+        const running = executor.execute('routine');
+        await Promise.resolve();
+        current = { hydrated: true, lastScanTs: 0, ledgerId: 'restored-during-review' };
+        releaseReview();
+        await running;
+        eq('capture executor: review durability cannot leave a stale migration plan',
+          plannedLedger, 'restored-during-review');
       }
 
       {
@@ -1768,7 +1873,7 @@ async function queueItem(id, row, publicKey) {
         releaseReview();
         const outcome = await running;
         eq('capture executor: review-only commit follows encrypted staging',
-          events, ['review-stage', 'parser', 'commit']);
+          events, ['review-stage', 'commit']);
         ok('capture executor: review-only outcome reports an aggregate count',
           outcome.kind === 'up-to-date' && outcome.reviewAlerts === 1,
           JSON.stringify(outcome));
@@ -1836,7 +1941,7 @@ async function queueItem(id, row, publicKey) {
         });
         await executor.execute('routine');
         eq('capture executor: review-only SMS cursor is durable before completion',
-          events, ['review-stage', 'persist', 'parser', 'commit']);
+          events, ['review-stage', 'persist', 'commit']);
       }
 
       {

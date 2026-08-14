@@ -123,6 +123,22 @@ function emptyPlan(): ImportPlan {
 }
 
 /**
+ * Currency proof for deferred onboarding plans must come from the alert, not
+ * the device locale or active parser fallback. A local-currency amount has no
+ * `originalCurrency`; a foreign-only charge does, so it cannot silently pin
+ * AED/SAR from the current pack.
+ */
+function confirmedLedgerCurrency(rows: readonly ScannedSms[]): 'AED' | 'SAR' | undefined {
+  const observed = new Set<'AED' | 'SAR'>();
+  for (const row of rows) {
+    if (row.currency !== 'AED' && row.currency !== 'SAR') continue;
+    if (row.originalCurrency && row.originalCurrency !== row.currency) continue;
+    observed.add(row.currency);
+  }
+  return observed.size === 1 ? [...observed][0] : undefined;
+}
+
+/**
  * Turns parsed messages into a single importable batch:
  * maps card hints to accounts (auto-creating unseen cards), skips duplicates,
  * converts card payments to transfers, and statements to card dues.
@@ -1074,6 +1090,7 @@ export function buildImportPlan(
       snapshots,
       bankNames,
       cardTypes,
+      confirmedLedgerCurrency: confirmedLedgerCurrency(parsed),
       lastScanTs: newestTs,
       updates,
     },

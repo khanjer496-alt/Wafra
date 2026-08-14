@@ -1,9 +1,14 @@
 import { t, type Lang, type StringKey } from '@/lib/i18n';
-import type { Budget, CategoryId, Goal } from '@/lib/types';
+import type {
+  Budget,
+  CategoryId,
+  Goal,
+  OnboardingPlanPreferences,
+} from '@/lib/types';
 
 export type OnboardingMarketId = 'AE' | 'SA';
-export type OnboardingGoalId = 'emergency' | 'travel' | 'home';
-export type OnboardingBudgetId = 'essentials' | 'balanced' | 'flexible';
+export type OnboardingGoalId = OnboardingPlanPreferences['goalIds'][number];
+export type OnboardingBudgetId = OnboardingPlanPreferences['budgetId'];
 
 export interface OnboardingAnswers {
   marketId: OnboardingMarketId;
@@ -125,6 +130,11 @@ export const DEFAULT_ONBOARDING_ANSWERS: OnboardingAnswers = {
   monthStartDay: 1,
 };
 
+export const DEFAULT_ONBOARDING_PLAN: OnboardingPlanPreferences = {
+  goalIds: ['emergency'],
+  budgetId: 'balanced',
+};
+
 export function normalizeOnboardingAnswers(
   answers: Partial<OnboardingAnswers>,
 ): OnboardingAnswers {
@@ -175,6 +185,63 @@ export function buildOnboardingPlan(
   });
 
   return { answers, budgets, goals };
+}
+
+/**
+ * Resolve currency-free first-run choices only after the ledger has a proven
+ * launch currency. Other currencies stay pending until Wafra ships matching
+ * budget presets; they are never relabelled as AED by fallback.
+ */
+export function buildDeferredOnboardingPlan(
+  preferences: OnboardingPlanPreferences,
+  ledgerCurrency: string | null | undefined,
+  confirmedCurrency: 'AED' | 'SAR' | null | undefined,
+  monthStartDay: number,
+  language: Lang,
+): ReturnType<typeof buildOnboardingPlan> | null {
+  if (!confirmedCurrency || confirmedCurrency !== ledgerCurrency) {
+    return null;
+  }
+  const marketId: OnboardingMarketId | null = ledgerCurrency === 'AED'
+    ? 'AE'
+    : ledgerCurrency === 'SAR'
+      ? 'SA'
+      : null;
+  if (!marketId) return null;
+  return buildOnboardingPlan({
+    goalIds: preferences.goalIds,
+    budgetId: preferences.budgetId,
+    marketId,
+    monthStartDay,
+  }, language);
+}
+
+/**
+ * Add starter rows without ever replacing work the user did while a deferred
+ * plan was waiting for currency evidence.
+ */
+export function mergeDeferredOnboardingPlan(
+  existingBudgets: readonly Budget[],
+  existingGoals: readonly Goal[],
+  starterBudgets: readonly Budget[],
+  starterGoals: readonly Goal[],
+): { budgets: Budget[]; goals: Goal[] } {
+  const existingCategories = new Set(existingBudgets.map((budget) => budget.category));
+  const existingGoalTitles = new Set(
+    existingGoals.map((goal) => goal.title.trim().toLocaleLowerCase()),
+  );
+  return {
+    budgets: [
+      ...existingBudgets,
+      ...starterBudgets.filter((budget) => !existingCategories.has(budget.category)),
+    ],
+    goals: [
+      ...existingGoals,
+      ...starterGoals.filter(
+        (goal) => !existingGoalTitles.has(goal.title.trim().toLocaleLowerCase()),
+      ),
+    ],
+  };
 }
 
 export function allOnboardingGoalTitles(): string[] {

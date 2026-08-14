@@ -51,6 +51,7 @@ import {
   isSmsScanningAvailable,
   requestSmsPermission,
   scanInbox,
+  type DeclinedSms,
   type ImportPlan,
   type ScannedSms,
 } from '@/lib/auto-import';
@@ -64,6 +65,13 @@ import { isProActive, requiresPro } from '@/lib/purchases';
 import { parseSmsBatch } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
+
+interface PendingInboxResult {
+  parsed: ScannedSms[];
+  declined: DeclinedSms[];
+  newestTs: number;
+  parserRereadComplete: true;
+}
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -209,6 +217,7 @@ export default function ImportSmsScreen() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const [applying, setApplying] = useState(false);
   const [historyResult, setHistoryResult] = useState<HistoricalImportResult | null>(null);
+  const [pendingInboxResult, setPendingInboxResult] = useState<PendingInboxResult | null>(null);
   const [pendingScanCommit, setPendingScanCommit] = useState<(() => Promise<void>) | null>(null);
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [historyCommitState, setHistoryCommitState] = useState<
@@ -238,6 +247,7 @@ export default function ImportSmsScreen() {
     setProgress(null);
     setPasteVerdict(null);
     setNotice(null);
+    setPendingInboxResult(null);
     try {
       const granted = await requestSmsPermission();
       if (!granted) {
@@ -248,11 +258,15 @@ export default function ImportSmsScreen() {
         return;
       }
       // Full history: fingerprints make rescans safe (no duplicates).
-      const { parsed, reviewCandidates, newestTs, declined, commit } = await scanInbox(
-        0,
-        state.merchantOverrides,
-        (scanned, found) => setProgress({ scanned, found }),
-      );
+      const {
+        parsed,
+        reviewCandidates,
+        newestTs,
+        declined,
+        inboxHistoryComplete,
+        commit,
+      } = await scanInbox(0, state.merchantOverrides, (scanned, found) =>
+        setProgress({ scanned, found }));
       const reviewReceipt = stageReviewAlerts(reviewCandidates);
       await reviewReceipt.durable;
       // `declined` carried through, exactly as the automatic path does. Without
@@ -260,15 +274,25 @@ export default function ImportSmsScreen() {
       // is the one path that cannot clear a refused transaction the ledger
       // recorded as spending.
       const p = buildImportPlan(parsed, state, newestTs, new Date(), declined);
+      if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
+      p.batch.parserRereadComplete = true;
+      const completedInbox: PendingInboxResult = {
+        parsed,
+        declined,
+        newestTs,
+        parserRereadComplete: true,
+      };
       const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
       setSkippedCount(Math.max(0, txLike.length - p.txCount));
       setPlan(p);
       setTrackedBills(new Set());
       if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
+        await importBatch(p.batch).durable;
         await commit();
         setNotice({ title: t('upToDate'), body: t('inboxAlreadyFiled') });
         setPendingScanCommit(null);
       } else {
+        setPendingInboxResult(completedInbox);
         setPendingScanCommit(() => commit);
       }
     } finally {
@@ -286,6 +310,7 @@ export default function ImportSmsScreen() {
       return;
     }
     setNotice(null);
+    setPendingInboxResult(null);
     // Deliberately NO isProActive gate here. Pasting is the only ingestion
     // path an iPhone has without a Shortcut, so paywalling it charged an
     // iPhone user for the privilege of doing the work by hand that an Android
@@ -370,7 +395,18 @@ export default function ImportSmsScreen() {
           buildImportPlan(historyResult.parsed, state, 0, new Date(), historyResult.declined),
           state.bills.map((bill) => bill.title),
         )
-      : plan;
+      : pendingInboxResult
+        ? buildImportPlan(
+            pendingInboxResult.parsed,
+            state,
+            pendingInboxResult.newestTs,
+            new Date(),
+            pendingInboxResult.declined,
+          )
+        : plan;
+    if (pendingInboxResult?.parserRereadComplete) {
+      currentPlan.batch.parserRereadComplete = true;
+    }
     if (
       currentPlan.txCount === 0 &&
       currentPlan.dueCount === 0 &&
@@ -381,6 +417,9 @@ export default function ImportSmsScreen() {
       setHistoryCommitState('idle');
       if (!history && pendingScanCommit) {
         try {
+          if (pendingInboxResult?.parserRereadComplete) {
+            await importBatch(currentPlan.batch).durable;
+          }
           // The preview became a no-op because a concurrent live capture
           // durably filed the same rows. They are now safe to retire from the
           // native encrypted queue even though this confirmation has no new

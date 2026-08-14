@@ -121,7 +121,6 @@ export default function IosSetupScreen() {
     importBatch,
     stageReviewAlerts,
     ensureDurable,
-    markParserVersion,
     setMarket,
     setOnboarded,
     setPrivateMode,
@@ -139,7 +138,6 @@ export default function IosSetupScreen() {
         importBatch,
         stageReviewAlerts,
         ensureDurable,
-        markParserVersion,
         setMarket: (market) => setMarket(market),
       },
       leavePrivateMode: () => setPrivateMode(false),
@@ -152,7 +150,7 @@ export default function IosSetupScreen() {
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [ensureDurable, importBatch, markParserVersion, setMarket, setPrivateMode, stageReviewAlerts]);
+  }, [ensureDurable, importBatch, setMarket, setPrivateMode, stageReviewAlerts]);
 
   const send = useCallback((intent: IosSetupIntent): Promise<void> =>
     controllerRef.current?.send(intent) ?? Promise.resolve(), []);

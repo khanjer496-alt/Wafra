@@ -18,7 +18,7 @@ const {
   materializeImportBatch,
 } = require('./build/ledger-import.js');
 const { setActiveMarket, setLedgerCurrency } = require('./build/markets.js');
-const { parseSms } = require('./build/sms-parser.js');
+const { parseSms, PARSER_VERSION } = require('./build/sms-parser.js');
 
 let pass = 0;
 const ok = (name, condition, detail) => {
@@ -138,6 +138,46 @@ ok('every golden bank alert is understood', parsed.length === messages.length, p
 
 const newestTs = Math.max(...messages.map((message) => message.ts));
 const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
+{
+  let incrementalId = 0;
+  const restoredState = { ...BASE, parserVersion: 18 };
+  const incremental = materializeImportBatch(
+    plan.batch,
+    restoredState,
+    (prefix) => `incremental-${prefix}-${++incrementalId}`,
+  );
+  const afterIncremental = applyMaterializedImportBatch(restoredState, incremental);
+  ok('an incremental import cannot claim an older restored ledger was fully reread',
+    afterIncremental.parserVersion === 18,
+    afterIncremental.parserVersion);
+
+  let rereadId = 0;
+  const reread = materializeImportBatch(
+    { ...plan.batch, parserRereadComplete: true },
+    restoredState,
+    (prefix) => `reread-${prefix}-${++rereadId}`,
+  );
+  const afterReread = applyMaterializedImportBatch(restoredState, reread);
+  ok('only a completed full-history batch advances the durable parser version',
+    afterReread.parserVersion === PARSER_VERSION,
+    afterReread.parserVersion);
+}
+{
+  let proofId = 0;
+  const pendingState = {
+    ...BASE,
+    onboardingPlan: { goalIds: ['emergency'], budgetId: 'balanced' },
+  };
+  const proofBatch = materializeImportBatch(
+    plan.batch,
+    pendingState,
+    (prefix) => `proof-${prefix}-${++proofId}`,
+  );
+  const provedState = applyMaterializedImportBatch(pendingState, proofBatch);
+  ok('a bank-alert batch durably records its observed onboarding currency',
+    provedState.onboardingCurrencyEvidence === 'AED',
+    provedState.onboardingCurrencyEvidence);
+}
 let id = 0;
 const batch = materializeImportBatch(plan.batch, BASE, (prefix) => `gold-${prefix}-${++id}`);
 let state = applyMaterializedImportBatch(BASE, batch);

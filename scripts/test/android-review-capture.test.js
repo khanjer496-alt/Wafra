@@ -85,7 +85,12 @@ let notificationRows = [{
 const smsReader = {
   async getInboxSms(sinceMs, beforeDateMs, beforeId, max) {
     inboxReadCursors.push({ sinceMs, beforeDateMs, beforeId, max });
-    return inboxRows.map((row, index) => ({ id: row.id ?? index + 1, ...row }));
+    return inboxRows
+      .map((row, index) => ({ id: row.id ?? index + 1, ...row }))
+      .filter((row) => row.date >= sinceMs &&
+        (row.date < beforeDateMs || (row.date === beforeDateMs && row.id < beforeId)))
+      .sort((a, b) => b.date - a.date || b.id - a.id)
+      .slice(0, max);
   },
   async getReceived() {
     // The inbox body guard must keep the receiver's copy out of review too.
@@ -183,12 +188,10 @@ const { scanInbox } = require('./build/auto-import.js');
     JSON.stringify(first.reviewCandidates));
   ok('non-posting alerts stay exclusively in the metadata-only healing channel',
     first.declined.length === 2 &&
-      first.declined[0].smsTs === NOW + 3_000 &&
-      first.declined[0].sourceEventId === 'a3' &&
-      first.declined[0].reason === 'declined' &&
-      first.declined[1].smsTs === NOW + 4_000 &&
-      first.declined[1].sourceEventId === 'a4' &&
-      first.declined[1].reason === 'security-challenge' &&
+      first.declined.some((item) => item.smsTs === NOW + 3_000 &&
+        item.sourceEventId === 'a3' && item.reason === 'declined') &&
+      first.declined.some((item) => item.smsTs === NOW + 4_000 &&
+        item.sourceEventId === 'a4' && item.reason === 'security-challenge') &&
       first.declined.every((item) => !Object.prototype.hasOwnProperty.call(item, 'raw')) &&
       first.reviewCandidates.every(
         (item) => item.observedAt !== NOW + 3_000 && item.observedAt !== NOW + 4_000,
@@ -409,11 +412,30 @@ const { scanInbox } = require('./build/auto-import.js');
     },
   ];
   const sameTimestamp = await scanInbox(0, {}, undefined, 'en-AE');
+  const sameTimestampIds = new Set(sameTimestamp.parsed.map((item) => item.sourceEventId));
   ok('same-timestamp same-value Android alerts retain distinct provider identities',
     sameTimestamp.parsed.length === 2 &&
-      sameTimestamp.parsed[0].sourceEventId === 'a901' &&
-      sameTimestamp.parsed[1].sourceEventId === 'a902',
+      sameTimestampIds.has('a901') && sameTimestampIds.has('a902'),
     JSON.stringify(sameTimestamp.parsed));
+
+  inboxRows = Array.from({ length: 1001 }, (_, index) => ({
+    id: 2_000 + index,
+    address: 'ADCB',
+    body: `Purchase of AED 1.00 at PAGE SHOP ${index} with Debit Card ending 1234`,
+    date: NOW + 20_000 + index,
+  }));
+  receivedRows = [];
+  notificationsEnabled = false;
+  inboxReadCursors.length = 0;
+  const multipage = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('a full inbox page continues until the provider proves end of history',
+    multipage.inboxScannedCount === 1001 && multipage.inboxHistoryComplete === true &&
+      inboxReadCursors.length === 2 && inboxReadCursors[0].max === 1000,
+    JSON.stringify({
+      count: multipage.inboxScannedCount,
+      complete: multipage.inboxHistoryComplete,
+      pages: inboxReadCursors.length,
+    }));
 
   reactNative.Platform.OS = 'ios';
   const ios = await scanInbox(123, {}, undefined, 'fr-FR');

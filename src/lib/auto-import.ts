@@ -25,7 +25,6 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 
 const PAGE_SIZE = 1000;
-const MAX_PAGES = 40; // 40k messages is far beyond any real inbox
 const MAX_REVIEW_CANDIDATES = 50;
 // Cheap superset of currencies the worldwide reviewer can currently ground.
 // It avoids running fourteen market packs over ordinary personal SMS, while
@@ -134,6 +133,8 @@ export interface ScanResult {
   newestTs: number;
   /** Rows yielded specifically by Android's SMS inbox provider. */
   inboxScannedCount: number;
+  /** The inbox provider reached a real end-of-history page. */
+  inboxHistoryComplete: boolean;
   scannedCount: number;
   /** Strong launch-pack evidence observed while parsing this scan. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
@@ -228,7 +229,7 @@ export async function scanInbox(
   if (!isSmsScanningAvailable() || !SmsReader) {
     return {
       parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs,
-      inboxScannedCount: 0, scannedCount: 0,
+      inboxScannedCount: 0, inboxHistoryComplete: false, scannedCount: 0,
       detectedLaunchMarket: null,
       commit: NOOP_SCAN_COMMIT,
     };
@@ -328,16 +329,20 @@ export async function scanInbox(
   let beforeDateMs = Date.now() + 60_000;
   let beforeId = Number.MAX_SAFE_INTEGER;
   let inboxScannedCount = 0;
+  let inboxHistoryComplete = false;
   let scannedCount = 0;
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (;;) {
     const batch: InboxSms[] = await SmsReader.getInboxSms(
       sinceMs,
       beforeDateMs,
       beforeId,
       PAGE_SIZE,
     );
-    if (batch.length === 0) break;
+    if (batch.length === 0) {
+      inboxHistoryComplete = true;
+      break;
+    }
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
@@ -391,9 +396,17 @@ export async function scanInbox(
       }
     }
     onProgress?.(scannedCount, parsed.length);
-    beforeDateMs = batch[batch.length - 1].date;
-    beforeId = batch[batch.length - 1].id;
-    if (batch.length < PAGE_SIZE) break;
+    const nextBeforeDateMs = batch[batch.length - 1].date;
+    const nextBeforeId = batch[batch.length - 1].id;
+    if (nextBeforeDateMs === beforeDateMs && nextBeforeId === beforeId) {
+      throw new Error('SMS inbox pagination did not advance');
+    }
+    beforeDateMs = nextBeforeDateMs;
+    beforeId = nextBeforeId;
+    if (batch.length < PAGE_SIZE) {
+      inboxHistoryComplete = true;
+      break;
+    }
   }
 
   // Alerts the delivery receiver caught as they arrived. Usually the inbox
@@ -518,6 +531,7 @@ export async function scanInbox(
     declined,
     newestTs,
     inboxScannedCount,
+    inboxHistoryComplete,
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
     commit: notificationIds.size > 0 && notificationReader

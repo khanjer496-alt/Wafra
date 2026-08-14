@@ -298,6 +298,18 @@ export interface Goal {
   savedFils: number;
 }
 
+/**
+ * Currency-free choices collected during first-run setup.
+ *
+ * They deliberately do not contain money. A fresh install has not yet proved
+ * whether its ledger is AED or SAR, so the matching budgets and goal targets
+ * are materialised only after the first real money entry pins that fact.
+ */
+export interface OnboardingPlanPreferences {
+  goalIds: ('emergency' | 'travel' | 'home')[];
+  budgetId: 'essentials' | 'balanced' | 'flexible';
+}
+
 export interface AppState {
   hydrated: boolean;
   /** Explicit meaning of every legacy `*Fils` integer; null before a ledger has money. */
@@ -310,6 +322,10 @@ export interface AppState {
   bills: Bill[];
   cardDues: CardDue[];
   goals: Goal[];
+  /** First-run plan waiting for a real ledger currency before activation. */
+  onboardingPlan: OnboardingPlanPreferences | null;
+  /** Local currency explicitly observed in an imported bank alert. */
+  onboardingCurrencyEvidence: 'AED' | 'SAR' | null;
   /** Learned merchant → category corrections, keyed by lowercased merchant. */
   merchantOverrides: Record<string, CategoryId>;
   /** Card/account last4 → accountId, learned from SMS. */
@@ -431,6 +447,15 @@ export interface ImportBatchInput {
    * fallback, while a later debit-worded purchase never downgrades it.
    */
   cardTypes?: Record<string, 'credit' | 'debit'>;
+  /** Supported local currency explicitly observed in this bank-alert batch. */
+  confirmedLedgerCurrency?: 'AED' | 'SAR';
+  /**
+   * True only when Android completed a scan from the beginning of the SMS
+   * inbox for the current parser. Incremental scans must never set this: an
+   * older backup can be restored while one is in flight, and treating that
+   * partial scan as migration proof permanently strands older messages.
+   */
+  parserRereadComplete?: boolean;
   lastScanTs: number;
   updates?: TxHealUpdate[];
 }

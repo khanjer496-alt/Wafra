@@ -62,7 +62,7 @@ export interface CaptureResult {
   scannedCount?: number;
   /** Rows yielded by Android's inbox provider, excluding push/delivery buffers. */
   inboxScannedCount?: number;
-  /** Android deliberately started at the beginning for a parser migration. */
+  /** Android reached the end of the inbox after starting at the beginning. */
   historicalReread?: boolean;
   /** Strong per-alert evidence for the launch-tested UAE/Saudi parser pack. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
@@ -214,6 +214,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       declined = [],
       newestTs,
       inboxScannedCount = 0,
+      inboxHistoryComplete = false,
       scannedCount = 0,
       detectedLaunchMarket = null,
       commit,
@@ -227,9 +228,13 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     // that a successful zero-change scan stamps PARSER_VERSION and strands all
     // older Fishbasket/Fbinter/Nazemhome receipts forever. An established SMS
     // ledger proves that zero rows is not a credible full-history result.
-    const hasStoredSmsHistory =
-      state.lastScanTs > 0 || state.transactions.some((row) => row.source === 'sms');
-    if (reread && inboxScannedCount === 0 && hasStoredSmsHistory) {
+    const hasStoredInboxHistory = state.transactions.some(
+      (row) => row.source === 'sms' && row.viaPush !== true,
+    );
+    if (reread && inboxScannedCount === 0 && hasStoredInboxHistory) {
+      throw new SmsHistoryUnavailableError();
+    }
+    if (reread && !inboxHistoryComplete) {
       throw new SmsHistoryUnavailableError();
     }
     return {
@@ -239,7 +244,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
       newestTs,
       inboxScannedCount,
       scannedCount,
-      historicalReread: reread,
+      historicalReread: reread && inboxHistoryComplete,
       detectedLaunchMarket,
       source: 'sms',
       commit,

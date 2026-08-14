@@ -156,7 +156,6 @@ export function useAutoImport(
     stageReviewAlerts,
     undoBatch,
     ensureDurable,
-    markParserVersion,
     setMarket,
   } = useStore();
   const stateRef = useRef(state);
@@ -169,11 +168,10 @@ export function useAutoImport(
           importBatch,
           stageReviewAlerts,
           ensureDurable,
-          markParserVersion,
           setMarket,
         },
       }),
-    [ensureDurable, importBatch, markParserVersion, setMarket, stageReviewAlerts],
+    [ensureDurable, importBatch, setMarket, stageReviewAlerts],
   );
   const toast = useToast();
   const router = useRouter();

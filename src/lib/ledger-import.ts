@@ -37,6 +37,8 @@ export interface MaterializedImportBatch {
   snapshots: ImportBatchInput['snapshots'];
   bankNames: Record<string, string>;
   cardTypes: NonNullable<ImportBatchInput['cardTypes']>;
+  confirmedLedgerCurrency?: 'AED' | 'SAR';
+  parserRereadComplete: boolean;
   lastScanTs: number;
   updates: TxHealUpdate[];
 }
@@ -81,6 +83,8 @@ export const materializeImportBatch = (
     snapshots: mapRefs(input.snapshots),
     bankNames: mapRefs(input.bankNames),
     cardTypes: mapRefs(input.cardTypes),
+    confirmedLedgerCurrency: input.confirmedLedgerCurrency,
+    parserRereadComplete: input.parserRereadComplete === true,
     lastScanTs: input.lastScanTs,
     updates: (input.updates ?? []).map((update) => ({
       ...update,
@@ -127,13 +131,18 @@ export const applyMaterializedImportBatch = (
   const existing = applyHealUpdates(state.transactions, batch.updates);
   const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
     ...state,
+    onboardingCurrencyEvidence:
+      batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
     transactions: [...batch.transactions, ...existing],
     accounts,
     accountHints: { ...state.accountHints, ...batch.newHints },
     cardDues: dues,
     bills,
     lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
-    parserVersion: PARSER_VERSION,
+    // Parser version is proof of a completed full-history reread, not merely
+    // proof that one new alert was imported. This distinction matters when a
+    // backup is restored while an incremental capture is already in flight.
+    parserVersion: batch.parserRereadComplete ? PARSER_VERSION : state.parserVersion,
   }));
   const repaired = repairDuplicateStatements(merged);
 

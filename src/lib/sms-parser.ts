@@ -219,6 +219,12 @@ export interface ParsedCard {
  * public merchant brands without assigning global meaning to user nicknames.
  */
 /**
+ * 27: parser-version completion is now recorded only by a durable, completed
+ * full Android inbox reread. Version 26 could be stamped by an incremental
+ * scan that finished after an older backup was restored, leaving older salary,
+ * business-payout and registered-bill receipts permanently unvisited. The
+ * grammar is unchanged; this bump deliberately forces one truthful repair.
+ *
  * 26: semantic accounting interpretation. Explicit posted-language evidence
  * now recognizes salary/payroll/WPS/remuneration, business payouts and
  * delivery/acquirer settlements, owned and external
@@ -229,7 +235,7 @@ export interface ParsedCard {
  * meaning corrections can heal in place. Ambiguous and future alerts remain
  * review-only or refused.
  */
-export const PARSER_VERSION = 26;
+export const PARSER_VERSION = 27;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 

@@ -126,6 +126,18 @@ const INBOX = [
 
 const first = buildImportPlan(scan(INBOX).parsed, BASE, scan(INBOX).newestTs);
 ok('a first scan imports every message', first.txCount === 3, first.txCount);
+ok('an explicitly stated AED amount confirms the deferred ledger currency',
+  first.batch.confirmedLedgerCurrency === 'AED', first.batch.confirmedLedgerCurrency);
+{
+  const foreignOnly = scan([{
+    body: 'Purchase of USD 20.00 with Debit Card ending 1234 at SAMPLE SHOP, NEW YORK.',
+    ts: T0 + 180_000,
+  }]);
+  const foreignPlan = buildImportPlan(foreignOnly.parsed, BASE, foreignOnly.newestTs);
+  ok('a foreign-only charge cannot confirm AED from the active parser fallback',
+    foreignPlan.batch.confirmedLedgerCurrency === undefined,
+    foreignPlan.batch.confirmedLedgerCurrency);
+}
 const afterFirst = apply(BASE, first);
 
 /* ── close and reopen: the SAME messages are read again ──────────────── */

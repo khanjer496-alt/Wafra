@@ -41,7 +41,6 @@ import {
   normalizeServiceName,
   overrideFitsDirection,
   parseSms,
-  PARSER_VERSION,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
 import {
@@ -75,6 +74,10 @@ import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import type { FxUpdate } from '@/lib/fx';
+import {
+  buildDeferredOnboardingPlan,
+  mergeDeferredOnboardingPlan,
+} from '@/lib/onboarding';
 
 import type {
   ImportBatchInput,
@@ -85,6 +88,7 @@ import type {
   CardDue,
   CategoryId,
   Goal,
+  OnboardingPlanPreferences,
   Transaction,
 } from '@/lib/types';
 
@@ -134,6 +138,8 @@ const EMPTY_STATE: AppState = {
   bills: [],
   cardDues: [],
   goals: [],
+  onboardingPlan: null,
+  onboardingCurrencyEvidence: null,
   merchantOverrides: {},
   accountHints: {},
   notSubscriptions: [],
@@ -588,6 +594,12 @@ type Action =
   | { type: 'addGoal'; goal: Goal }
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
+  | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
+  | {
+      type: 'activateOnboardingPlan';
+      budgets: Budget[];
+      goals: Goal[];
+    }
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
@@ -606,7 +618,6 @@ type Action =
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
     }
-  | { type: 'markParserVersion' }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -691,13 +702,6 @@ function reduceState(state: AppState, action: Action): AppState {
         cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
       };
     }
-    case 'markParserVersion':
-      // A full re-read that changed nothing still proves the stored rows were
-      // read with this parser. Without recording it, the app would re-read the
-      // entire inbox on every single launch.
-      return state.parserVersion === PARSER_VERSION
-        ? state
-        : { ...state, parserVersion: PARSER_VERSION };
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'setMarket':
@@ -906,6 +910,25 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'deleteGoal':
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
+    case 'setOnboardingPlan':
+      return { ...state, onboardingPlan: action.plan };
+    case 'activateOnboardingPlan': {
+      // React Strict Mode may replay an effect. Clearing the pending plan in
+      // the same reducer action makes activation idempotent even then.
+      if (!state.onboardingPlan) return state;
+      const merged = mergeDeferredOnboardingPlan(
+        state.budgets,
+        state.goals,
+        action.budgets,
+        action.goals,
+      );
+      return {
+        ...state,
+        onboardingPlan: null,
+        budgets: merged.budgets,
+        goals: merged.goals,
+      };
+    }
     case 'setAppLock':
       return { ...state, appLock: action.enabled };
     case 'setDailySummary':
@@ -1038,7 +1061,7 @@ interface StoreValue {
   addGoal: (g: Omit<Goal, 'id'>) => void;
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
-  markParserVersion: () => void;
+  setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
@@ -1359,6 +1382,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }, SAVE_DEBOUNCE_MS);
   }, [state, persist]);
 
+  useEffect(() => {
+    const pending = state.onboardingPlan;
+    if (!pending) return;
+
+    const plan = buildDeferredOnboardingPlan(
+      pending,
+      state.ledgerMoney?.currency,
+      state.onboardingCurrencyEvidence,
+      state.monthStartDay,
+      state.language === 'ar' ? 'ar' : 'en',
+    );
+    if (!plan) return;
+    dispatch({
+      type: 'activateOnboardingPlan',
+      budgets: plan.budgets,
+      goals: plan.goals.map((goal) => ({ ...goal, id: makeId('goal') })),
+    });
+  }, [
+    dispatch,
+    state.language,
+    state.ledgerMoney?.currency,
+    state.monthStartDay,
+    state.onboardingCurrencyEvidence,
+    state.onboardingPlan,
+  ]);
+
   // A debounce that loses the last write when the app is swiped away is a data
   // loss bug, so leaving the foreground flushes immediately.
   useEffect(() => {
@@ -1588,8 +1637,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteGoal', id });
   }, []);
 
-  const markParserVersion = useCallback(() => {
-    dispatch({ type: 'markParserVersion' });
+  const setOnboardingPlan = useCallback((plan: OnboardingPlanPreferences) => {
+    dispatch({ type: 'setOnboardingPlan', plan });
   }, []);
 
   const setAppLock = useCallback((enabled: boolean) => {
@@ -1799,7 +1848,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
-      markParserVersion,
+      setOnboardingPlan,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -1850,7 +1899,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
-      markParserVersion,
+      setOnboardingPlan,
       setAppLock,
       setDailySummary,
       setPrivateMode,
