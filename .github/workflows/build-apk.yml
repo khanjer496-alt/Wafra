@@ -19,10 +19,6 @@ on:
         description: 'Internal ARM64 APK with the temporary full-inbox parser corpus exporter'
         type: boolean
         default: false
-      local_ai:
-        description: 'Internal ARM64 APK with the on-device Local AI lab and Ask Wafra'
-        type: boolean
-        default: false
   push:
     branches:
       - main
@@ -67,10 +63,6 @@ jobs:
       # enable them together.
       EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
       WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
-      # The model runtime is intentionally absent from ordinary/store builds.
-      # This explicit manual-build switch is the only GitHub Actions path that
-      # includes llama.rn and exposes the internal Local AI lab.
-      EXPO_PUBLIC_WAFRA_LOCAL_AI_EVAL: ${{ github.event.inputs.local_ai == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -246,7 +238,7 @@ jobs:
         env:
           CORPUS_BUILD: ${{ github.event.inputs.corpus == 'true' && 'true' || 'false' }}
         run: |
-          if [ "$CORPUS_BUILD" = "true" ] || [ "${{ github.event.inputs.local_ai }}" = "true" ]; then
+          if [ "$CORPUS_BUILD" = "true" ]; then
             ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
           else
             ./gradlew assembleRelease --no-daemon
@@ -254,7 +246,7 @@ jobs:
 
       # Only needed to upload to Play, which is not what most builds are for.
       - name: Build Play Store bundle (AAB)
-        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true' && github.event.inputs.local_ai != 'true'
+        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true'
         working-directory: android
         run: ./gradlew bundleRelease --no-daemon
 
@@ -268,12 +260,12 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || github.event.inputs.local_ai == 'true' && 'wafra-local-ai-apk' || 'wafra-apk' }}
+          name: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
           path: wafra.apk
           retention-days: 30
 
       - name: Upload Play bundle artifact
-        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true' && github.event.inputs.local_ai != 'true'
+        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wafra-aab

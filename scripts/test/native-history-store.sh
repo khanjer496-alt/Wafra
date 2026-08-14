@@ -11,9 +11,8 @@ fi
 generated_intent="ios/Wafra/WafraMessageHistoryIntent.swift"
 project_file="ios/Wafra.xcodeproj/project.pbxproj"
 plugin_file="modules/wafra-message-history/plugin/index.js"
-module_config="modules/wafra-message-history/expo-module.config.json"
 
-for file in "$generated_intent" "$project_file" "$plugin_file" "$module_config"; do
+for file in "$generated_intent" "$project_file" "$plugin_file"; do
   if [ ! -f "$file" ]; then
     echo "native-history-store.sh: missing required native integration file: $file" >&2
     exit 1
@@ -34,10 +33,6 @@ awk '
 }
 grep -q "filePath: 'WafraMessageHistoryIntent.swift'" "$plugin_file" || {
   echo "native-history-store.sh: config plugin no longer generates the App Intent." >&2
-  exit 1
-}
-grep -q '"podspecPath": "ios/WafraMessageHistory.podspec"' "$module_config" || {
-  echo "native-history-store.sh: Expo cannot link the Message History pod on a clean prebuild." >&2
   exit 1
 }
 

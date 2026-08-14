@@ -71,7 +71,6 @@ import {
   requestSmsPermission,
 } from '@/lib/auto-import';
 import { tapped } from '@/lib/haptics';
-import { LOCAL_AI_EVALUATION_ENABLED } from '@/lib/local-ai-model';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { canSelectMarket, ledgerCurrencyDisplay, MARKETS } from '@/lib/markets';
@@ -1073,18 +1072,6 @@ export default function SettingsScreen() {
                   : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
             )}
-            {LOCAL_AI_EVALUATION_ENABLED &&
-              linkRow(
-                t('assistantTitle'),
-                t('assistantSettingsDetail'),
-                () => router.push('/assistant'),
-              )}
-            {LOCAL_AI_EVALUATION_ENABLED &&
-              linkRow(
-                t('localAiTitle'),
-                t('localAiSettingsDetail'),
-                () => router.push('/local-ai-eval'),
-              )}
             {isSmsCorpusExportAvailable() &&
               linkRow(
                 t('smsCorpusExportTitle'),

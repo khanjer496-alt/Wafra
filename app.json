@@ -96,17 +96,7 @@
         }
       ],
       "expo-sharing",
-      "./modules/wafra-message-history/plugin",
-      "expo-build-properties",
-      [
-        "llama.rn",
-        {
-          "enableEntitlements": true,
-          "entitlementsProfile": "local-ai-preview",
-          "forceCxx20": true,
-          "enableOpenCLAndHexagon": false
-        }
-      ]
+      "./modules/wafra-message-history/plugin"
     ],
     "experiments": {
       "typedRoutes": true,

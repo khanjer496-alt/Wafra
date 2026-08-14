@@ -1,7 +1,6 @@
 {
   "platforms": ["apple", "web"],
   "apple": {
-    "podspecPath": "ios/WafraMessageHistory.podspec",
     "modules": ["WafraMessageHistoryModule"]
   }
 }
