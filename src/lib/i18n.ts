@@ -328,6 +328,14 @@ const S = {
   scheduleInFewDays: { en: 'in {days} days', ar: 'خلال {days} أيام' },
   scheduleInManyDays: { en: 'in {days} days', ar: 'خلال {days} يوماً' },
   cadenceExpectedAgo: { en: '{cadence} · expected {days}d ago', ar: '{cadence} · كان متوقعاً قبل {days} يوم' },
+  recurringPaidObserved: {
+    en: 'Paid {date} · {cadence}',
+    ar: 'دُفع في {date} · {cadence}',
+  },
+  recurringLastPaidObserved: {
+    en: 'Last paid {date} · {cadence}',
+    ar: 'آخر دفع في {date} · {cadence}',
+  },
   perMonthShort: { en: '/mo', ar: 'شهرياً' },
   monthlyTotal: {
     en: '{amount} / month',

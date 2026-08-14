@@ -835,7 +835,9 @@ function ktSources(dir) {
   ok('SMS parsing yields by elapsed time with a bounded fast-device ceiling',
     budget >= 4 && budget <= 12 && maxSlice > 32 && maxSlice <= 96 &&
       /Date\.now\(\) - state\.startedAt < PARSE_TIME_BUDGET_MS/.test(scan) &&
-      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 3,
+      // Inbox parsing, its proven-duplicate fast path, the retired delivery
+      // buffer and trusted bank notifications each keep the same UI yield.
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 4,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
     /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&

@@ -405,7 +405,7 @@ ok('groups: commitments listed under fixedCommitments',
   ok('registered monthly payees tolerate early and late payment days',
     ['Fbinter', 'Fishbasket', 'Nazemhome'].every((title) =>
       registeredBills.some((bill) => bill.title === title && bill.cadence === 'monthly' &&
-        bill.group === 'commitment' && bill.status === 'active')),
+        bill.group === 'commitment' && bill.status === 'active' && bill.paymentHistory === true)),
     JSON.stringify(registeredBills));
 
   const tank = subsLib.detectSubscriptions([
@@ -417,7 +417,7 @@ ok('groups: commitments listed under fixedCommitments',
   ], [], new Date(2026, 7, 12));
   ok('registered irregular top-up is visible without a fake due date',
     tank.length === 1 && tank[0].title === 'Tank300' && tank[0].cadence === 'as-needed' &&
-      tank[0].group === 'commitment' && tank[0].status === 'active',
+      tank[0].group === 'commitment' && tank[0].status === 'active' && tank[0].paymentHistory === true,
     JSON.stringify(tank));
 
   const ordinaryShop = ['2026-04-30', '2026-05-01', '2026-06-30', '2026-07-01']
@@ -820,6 +820,14 @@ const dewaBill = { id: 'b-dewa', title: 'DEWA Bill', category: 'utilities', amou
 const dewaTx = [{ id: 'x1', type: 'expense', amountFils: 45500, category: 'utilities', accountId: 'a', title: 'DEWA', date: '2026-07-12', source: 'sms' }];
 const recon1 = bills.billsForMonth([dewaBill], dewaTx, new Date(2026, 6, 18))[0];
 ok('reconcile: imported DEWA debit marks bill paid', recon1.status === 'paid' && recon1.autoReconciled === true);
+const eandBill = { id: 'b-eand', title: 'E&', category: 'telecom', amountFils: 45045, dueDay: 15, importIdentity: 'account:1849', paidMonths: [] };
+const namedReceipt = [{ id: 'x-nazem', type: 'expense', amountFils: 45045, category: 'other', accountId: 'a', title: 'Nazemhome', date: '2026-08-03', source: 'sms', paymentFlowSide: 'receipt', billIdentity: 'consumer:1849' }];
+ok('reconcile: consumer receipt settles differently named provider account',
+  bills.billsForMonth([eandBill], namedReceipt, new Date(2026, 7, 14))[0].status === 'paid');
+ok('reconcile: prior-month consumer receipt cannot settle current bill',
+  bills.billsForMonth([eandBill], [{ ...namedReceipt[0], date: '2026-07-10' }], new Date(2026, 7, 14))[0].status !== 'paid');
+ok('reconcile: matching amount without bill identity cannot settle a differently named bill',
+  bills.billsForMonth([eandBill], [{ ...namedReceipt[0], billIdentity: undefined }], new Date(2026, 7, 14))[0].status !== 'paid');
 const wrongAmount = [{ ...dewaTx[0], amountFils: 90000 }];
 ok('reconcile: amount outside ±15% does not match',
   bills.billsForMonth([dewaBill], wrongAmount, new Date(2026, 6, 18))[0].status !== 'paid');

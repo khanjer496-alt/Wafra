@@ -24,6 +24,8 @@ export interface Subscription {
   lastChargedISO: string;
   nextExpectedISO: string;
   chargeCount: number;
+  /** Every observation is a bank-confirmed registered-biller payment receipt. */
+  paymentHistory: boolean;
   /** Latest charge is >10% above the average of prior charges. */
   priceIncreased: boolean;
   /**
@@ -423,6 +425,7 @@ export function detectSubscriptions(
       lastChargedISO: last.date,
       nextExpectedISO: addDays(last.date, window.typicalDays),
       chargeCount: cadenceCharges.length,
+      paymentHistory: registeredReceipt,
       priceIncreased:
         window.cadence !== 'as-needed' &&
         priorAmounts.length >= 2 &&

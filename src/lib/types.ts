@@ -148,6 +148,15 @@ export interface Transaction {
   /** Linked consumer-bill flow: internal funding or named biller receipt. */
   paymentFlowSide?: 'funding' | 'receipt';
   /**
+   * Privacy-safe identity of the bill account named by a payment alert.
+   *
+   * Only a closed label and masked last four digits are stored. This lets a
+   * bank's "consumer number" payment confirmation settle a provider reminder
+   * that calls the same obligation an account or party ID, without retaining
+   * the full customer number or guessing from amount/title alone.
+   */
+  billIdentity?: string;
+  /**
    * Why the account shown for a named biller receipt is trustworthy.
    *
    * Receipt alerts that omit a card still need a ledger account, so import
@@ -408,6 +417,7 @@ export interface TxHealUpdate {
   viaPush?: boolean;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
+  billIdentity?: string;
   paymentInstrumentSource?: 'alert' | 'user';
   /**
    * The stored source text, or `null` to CLEAR it.

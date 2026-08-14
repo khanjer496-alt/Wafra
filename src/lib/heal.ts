@@ -95,6 +95,9 @@ export function healPatch(
   if (p.paymentFlowSide && prior.paymentFlowSide !== p.paymentFlowSide) {
     patch.paymentFlowSide = p.paymentFlowSide;
   }
+  if (p.billIdentity && prior.billIdentity !== p.billIdentity) {
+    patch.billIdentity = p.billIdentity;
+  }
   // Instrument provenance is deliberately NOT inferred here. `healPatch`
   // understands parser fields but not whether account resolution was unique;
   // import-plan adds the marker only after it has proved one account.
@@ -210,6 +213,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
+  if (patch.billIdentity !== undefined) next.billIdentity = patch.billIdentity;
   if (patch.paymentInstrumentSource !== undefined) {
     next.paymentInstrumentSource = patch.paymentInstrumentSource;
   }

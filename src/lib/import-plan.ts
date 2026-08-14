@@ -56,11 +56,12 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
 };
 
 /**
- * A message the scan affirmatively identified as non-posted.
+ * A message the scan affirmatively suppressed from ordinary importing.
  *
- * Only identity metadata travels. The body is tested against the parser's own
- * `nonPostingReason` at the point it is read (auto-import.ts) and then dropped,
- * so nothing that is not already a fingerprint leaves the scanner.
+ * Only identity metadata travels. Most rows are tested against the parser's
+ * own `nonPostingReason`; Android can also prove that two consecutive provider
+ * rows have byte-identical sender/body evidence. The body is then dropped, so
+ * nothing that is not already a fingerprint leaves the scanner.
  *
  * This exists because the evidence for deleting a declined row is at SCAN
  * time and used to be thrown away. `parseSms` returns null for a decline, so
@@ -75,9 +76,13 @@ export interface DeclinedSms {
   smsTs: number;
   sender?: string;
   channel?: CaptureChannel;
-  /** Closed evidence class; optional for older relay/history callers. */
-  reason?: NonPostingReason;
-  /** Opaque GUID-derived identity when the decline came from iOS history. */
+  /**
+   * Closed evidence class; optional for older relay/history callers.
+   * `exact-provider-duplicate` means Android stored one byte-identical alert
+   * twice; it is carried here so older ledgers can retire that exact row id.
+   */
+  reason?: NonPostingReason | 'exact-provider-duplicate';
+  /** Opaque iOS history identity or stable Android provider-row identity. */
   sourceEventId?: string;
 }
 
@@ -881,6 +886,7 @@ export function buildImportPlan(
           viaPush: false,
           isTransfer: p.transferHint,
           paymentFlowSide: p.paymentFlowSide,
+          billIdentity: p.billIdentity,
           paymentInstrumentSource:
             resolution.confident && p.paymentFlowSide === 'receipt' && p.card
               ? 'alert'
@@ -927,6 +933,7 @@ export function buildImportPlan(
       viaPush: p.channel === 'push' || undefined,
       isTransfer: p.transferHint || undefined,
       paymentFlowSide: p.paymentFlowSide,
+      billIdentity: p.billIdentity,
       paymentInstrumentSource:
         resolution.confident && p.paymentFlowSide === 'receipt' && p.card
           ? 'alert'
@@ -995,6 +1002,17 @@ export function buildImportPlan(
     const NEAR_MS = 7 * 86400000;
     const swept = new Set<string>();
     for (const d of declined) {
+      if (d.reason === 'exact-provider-duplicate') {
+        if (!d.sourceEventId) continue;
+        const row = priorBySmsKey.get(`h${d.sourceEventId}`);
+        if (!row || swept.has(row.id)) continue;
+        // The scanner already proved byte-identical body, sender, adjacent
+        // provider ids and sub-second delivery. Preserve anything user-owned.
+        if (row.source !== 'sms' || row.userEdited || row.splits) continue;
+        swept.add(row.id);
+        updates.push({ id: row.id, remove: true });
+        continue;
+      }
       if (d.sourceEventId) {
         // Historical Shortcut timestamps are commonly rounded to a second,
         // so timestamp equality is not identity. Only a row imported from the

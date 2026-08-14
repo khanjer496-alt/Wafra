@@ -217,13 +217,6 @@ export interface ParsedCard {
  * 25: multi-line descriptor recovery. Preserve Viator/Canva when their card
  * descriptor contains an opaque acquirer reference, and re-file other closed,
  * public merchant brands without assigning global meaning to user nicknames.
- */
-/**
- * 27: parser-version completion is now recorded only by a durable, completed
- * full Android inbox reread. Version 26 could be stamped by an incremental
- * scan that finished after an older backup was restored, leaving older salary,
- * business-payout and registered-bill receipts permanently unvisited. The
- * grammar is unchanged; this bump deliberately forces one truthful repair.
  *
  * 26: semantic accounting interpretation. Explicit posted-language evidence
  * now recognizes salary/payroll/WPS/remuneration, business payouts and
@@ -234,8 +227,19 @@ export interface ParsedCard {
  * categories; the next Android scan revisits parser-owned rows only so safe
  * meaning corrections can heal in place. Ambiguous and future alerts remain
  * review-only or refused.
+ *
+ * 27: parser-version completion is now recorded only by a durable, completed
+ * full Android inbox reread. Version 26 could be stamped by an incremental
+ * scan that finished after an older backup was restored, leaving older salary,
+ * business-payout and registered-bill receipts permanently unvisited. The
+ * grammar is unchanged; this bump deliberately forces one truthful repair.
+ *
+ * 28: registered-biller identity recovery. Consumer-number payment receipts
+ * now retain only their masked last four digits, allowing a later provider
+ * reminder for the same account to be reconciled without title or amount
+ * guessing. Existing Android history is reread once to add that safe identity.
  */
-export const PARSER_VERSION = 27;
+export const PARSER_VERSION = 28;
 
 export type SnapshotKind = 'balance' | 'limit' | 'outstanding';
 
@@ -5535,7 +5539,15 @@ export function parseSms(
 ): ParsedSms | null {
   const parsed = parseSmsInner(message, overrides, options);
   if (!parsed) return null;
-  const billIdentity = parsed.kind === 'billDue' ? extractBillIdentity(message) : null;
+  // The same obligation is named on both sides of its lifecycle: a provider
+  // reminder calls it an account/party ID, while a bank bill-pay receipt often
+  // calls it a consumer number. Keep the closed label + last4 on both. The
+  // bills module may compare the tails only after month, amount and
+  // one-to-one-claim checks have also succeeded.
+  const billIdentity =
+    parsed.kind === 'billDue' || parsed.paymentFlowSide === 'receipt'
+      ? extractBillIdentity(message)
+      : null;
   const named = bankFromMessage(message);
   return {
     ...parsed,

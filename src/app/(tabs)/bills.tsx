@@ -416,6 +416,7 @@ export default function BillsScreen() {
   const renderRecurringRow = (sub: Subscription, i: number) => {
     const next = daysUntilNext(sub, now);
     const tracked = trackedTitles.has(sub.title.toLowerCase());
+    const paymentObservedThisMonth = monthKey(sub.lastChargedISO) === monthKey(now);
     return (
       <Animated.View
         key={sub.title}
@@ -455,6 +456,16 @@ export default function BillsScreen() {
             <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
               {sub.status === 'stopped'
                 ? tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })
+                : sub.paymentHistory
+                  ? tf(
+                      paymentObservedThisMonth
+                        ? 'recurringPaidObserved'
+                        : 'recurringLastPaidObserved',
+                      {
+                        date: shortDate(sub.lastChargedISO),
+                        cadence: cadenceLabel(sub.cadence),
+                      },
+                    )
                 : sub.cadence === 'as-needed'
                   ? tf('asNeededScheduleList', { date: shortDate(sub.lastChargedISO) })
                 : next >= 0

@@ -38,6 +38,9 @@ const MAX_REVIEW_CANDIDATES = 50;
  */
 const PARSE_TIME_BUDGET_MS = 8;
 const MAX_PARSE_SLICE_SIZE = 64;
+// Some Android providers insert one SMS twice. Collapse only byte-identical,
+// same-sender, consecutive inbox rows delivered less than one second apart.
+const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
 
 interface ParseYieldState {
   startedAt: number;
@@ -118,9 +121,9 @@ export interface ScanResult {
    */
   reviewCandidates: ReviewAlert[];
   /**
-   * Fingerprints of the messages this scan refused as DECLINES.
+   * Body-free identities of non-posting alerts and proven provider duplicates.
    *
-   * A suppressed message yields no ParsedSms and used to end here: the `if (p)`
+   * A non-posting message yields no ParsedSms and used to end here: the `if (p)`
    * below dropped it, and with it the only proof left anywhere that the alert
    * an older parser had booked as a real expense says the money never moved.
    * `raw` on the stored row cannot substitute — retention is recent, and the
@@ -331,6 +334,7 @@ export async function scanInbox(
   let inboxScannedCount = 0;
   let inboxHistoryComplete = false;
   let scannedCount = 0;
+  let previousInboxSms: InboxSms | null = null;
 
   for (;;) {
     const batch: InboxSms[] = await SmsReader.getInboxSms(
@@ -351,6 +355,29 @@ export async function scanInbox(
       const sourceEventId = `a${sms.id}`;
       if (sms.date > newestTs) newestTs = sms.date;
       inboxBodies.add(bodyPrint(sms.body));
+      const previous = previousInboxSms;
+      previousInboxSms = sms;
+      if (
+        previous &&
+        previous.id === sms.id + 1 &&
+        previous.date >= sms.date &&
+        previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
+        previous.address === sms.address &&
+        previous.body === sms.body
+      ) {
+        declined.push({
+          smsTs: sms.date,
+          sender: sms.address,
+          channel: 'inbox',
+          reason: 'exact-provider-duplicate',
+          sourceEventId,
+        });
+        if (parseYieldDue(pageYield, i + 1 < batch.length)) {
+          await yieldToUi();
+          resetParseYieldState(pageYield);
+        }
+        continue;
+      }
       // The sender ID is the ONLY thing that says which bank sent a message —
       // no UAE bank but HSBC names itself in the body — so it is passed INTO
       // the parser, not merely recorded on the row. Three rules need it and

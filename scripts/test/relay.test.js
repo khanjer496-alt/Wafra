@@ -951,6 +951,11 @@ async function queueItem(id, row, publicKey) {
       !relay.isParsedRelayRow({ ...row, transferHint: true, paymentFlowSide: 'receipt' }) &&
       !relay.isParsedRelayRow({ ...row, paymentFlowSide: 'forged' }) &&
       !relay.isParsedRelayRow({ ...statementRow, paymentFlowSide: 'receipt' }));
+  ok('row: bill identity retains only a closed label and masked last four',
+    relay.isParsedRelayRow({ ...row, paymentFlowSide: 'receipt', billIdentity: 'consumer:4026' }) &&
+      !relay.isParsedRelayRow({ ...row, paymentFlowSide: 'receipt', billIdentity: 'consumer:5554026' }) &&
+      !relay.isParsedRelayRow({ ...row, paymentFlowSide: 'receipt', billIdentity: 'reference:4026' }) &&
+      !relay.isParsedRelayRow({ ...row, paymentFlowSide: 'receipt', billIdentity: 4026 }));
   ok('row: a complete no-PAN card statement remains valid for sender-bank resolution',
     relay.isParsedRelayRow(statementRow) &&
       relay.isParsedRelayRow({ ...statementRow, card: { last4: '1234', kind: 'credit' } }));

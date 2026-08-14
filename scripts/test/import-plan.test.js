@@ -2049,7 +2049,8 @@ const DECLINE_SMS = [{
       utilityFlowPlan.batch.transactions.some((row) =>
         row.paymentFlowSide === 'funding' && row.isTransfer === true) &&
       utilityFlowPlan.batch.transactions.some((row) =>
-        row.paymentFlowSide === 'receipt' && row.title === 'Fishbasket'),
+        row.paymentFlowSide === 'receipt' && row.title === 'Fishbasket' &&
+        row.billIdentity === 'consumer:4036'),
     utilityFlowPlan.batch.transactions);
   const cardlessReceipt = utilityFlowPlan.batch.transactions.find(
     (row) => row.paymentFlowSide === 'receipt',
@@ -2166,8 +2167,10 @@ const DECLINE_SMS = [{
   ok('a parser-version reread repairs and collapses both legacy notification rows',
     legacyPushPlan.txCount === 0 &&
       legacyPushPlan.batch.updates.some((row) => row.paymentFlowSide === 'funding') &&
-      legacyPushPlan.batch.updates.some((row) => row.paymentFlowSide === 'receipt') &&
-      healedLegacyPush.length === 1 && healedLegacyPush[0].title === 'Fishbasket',
+      legacyPushPlan.batch.updates.some((row) =>
+        row.paymentFlowSide === 'receipt' && row.billIdentity === 'consumer:4036') &&
+      healedLegacyPush.length === 1 && healedLegacyPush[0].title === 'Fishbasket' &&
+      healedLegacyPush[0].billIdentity === 'consumer:4036',
     { updates: legacyPushPlan.batch.updates, rows: healedLegacyPush });
 
   const manualFlowState = {
@@ -2285,6 +2288,46 @@ const DECLINE_SMS = [{
   ok('a full reread does not resurrect a years-old utility reminder',
     oldPlan.batch.newBills?.length === 0,
     oldPlan.batch.newBills);
+}
+
+{
+  const duplicateState = {
+    ...BASE,
+    accounts: [{
+      id: 'fab-0004', name: 'FAB Account •0004', kind: 'bank', openingFils: 0, color: '#fff',
+    }],
+    transactions: [
+      {
+        id: 'canonical-1405', type: 'income', amountFils: 140500, category: 'other',
+        accountId: 'fab-0004', title: 'Incoming transfer', date: '2026-08-12',
+        source: 'sms', smsKey: 'ha30850', ts: 1786544431861,
+      },
+      {
+        id: 'duplicate-1405', type: 'income', amountFils: 140500, category: 'other',
+        accountId: 'fab-0004', title: 'Incoming transfer', date: '2026-08-12',
+        source: 'sms', smsKey: 'ha30849', ts: 1786544431105,
+      },
+    ],
+  };
+  const duplicateRepair = buildImportPlan(
+    [],
+    duplicateState,
+    1786544431861,
+    new Date('2026-08-14T12:00:00Z'),
+    [{
+      smsTs: 1786544431105,
+      sender: 'FAB',
+      channel: 'inbox',
+      sourceEventId: 'a30849',
+      reason: 'exact-provider-duplicate',
+    }],
+  );
+  ok('a full reread retires only the proven duplicate Android provider identity',
+    duplicateRepair.txCount === 0 &&
+      duplicateRepair.batch.updates.length === 1 &&
+      duplicateRepair.batch.updates[0].id === 'duplicate-1405' &&
+      duplicateRepair.batch.updates[0].remove === true,
+    duplicateRepair.batch.updates);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

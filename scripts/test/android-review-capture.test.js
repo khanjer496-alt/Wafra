@@ -418,6 +418,28 @@ const { scanInbox } = require('./build/auto-import.js');
       sameTimestampIds.has('a901') && sameTimestampIds.has('a902'),
     JSON.stringify(sameTimestamp.parsed));
 
+  const duplicatedProviderBody =
+    'Purchase of AED 14.05 at DUPLICATE CONTROL with Debit Card ending 1234';
+  inboxRows = [
+    { id: 30_850, address: 'FAB', body: duplicatedProviderBody, date: NOW + 10_000 },
+    { id: 30_849, address: 'FAB', body: duplicatedProviderBody, date: NOW + 9_244 },
+    // Same real-looking alert after the strict sub-second window is a distinct
+    // event and must remain visible even though its body is byte-identical.
+    { id: 30_848, address: 'FAB', body: duplicatedProviderBody, date: NOW + 7_000 },
+  ];
+  const providerDuplicate = await scanInbox(0, {}, undefined, 'en-AE');
+  const providerDuplicateIds = new Set(
+    providerDuplicate.parsed.map((item) => item.sourceEventId),
+  );
+  ok('byte-identical consecutive Android provider rows within one second collapse once',
+    providerDuplicate.parsed.length === 2 &&
+      providerDuplicateIds.has('a30850') && providerDuplicateIds.has('a30848') &&
+      providerDuplicate.declined.some((item) =>
+        item.sourceEventId === 'a30849' && item.reason === 'exact-provider-duplicate') &&
+      providerDuplicate.declined.every((item) =>
+        !Object.prototype.hasOwnProperty.call(item, 'raw')),
+    JSON.stringify({ parsed: providerDuplicate.parsed, declined: providerDuplicate.declined }));
+
   inboxRows = Array.from({ length: 1001 }, (_, index) => ({
     id: 2_000 + index,
     address: 'ADCB',
