@@ -22,7 +22,7 @@ export const US_EU_ALERT_MARKET_PACKS = {
     recurringTerms: ['récurrent', 'abonnement'],
     postedTerms: ['débité', 'crédité', 'effectué', 'payé', 'payée'],
     failedTerms: ['refusé', 'rejeté', 'échoué', 'non payé', 'non payée', 'pas été payé', 'pas été payée'],
-    futureTerms: ['sera débité', 'à venir'],
+    futureTerms: ['sera débité', 'sera crédité', 'à venir'],
     debitTerms: ['débité', 'payé', 'payée'], creditTerms: ['crédité'],
   },
   DE: {
@@ -31,7 +31,7 @@ export const US_EU_ALERT_MARKET_PACKS = {
     utilityTerms: ['strom', 'gas', 'wasser', 'telefon'],
     recurringTerms: ['dauerauftrag', 'abonnement'],
     failedTerms: ['abgelehnt', 'fehlgeschlagen', 'nicht bezahlt', 'nicht abgebucht'],
-    futureTerms: ['wird abgebucht', 'wird morgen abgebucht', 'fällig'],
+    futureTerms: ['wird abgebucht', 'wird morgen abgebucht', 'wird morgen gutgeschrieben', 'fällig'],
     debitTerms: ['belastet', 'abgebucht', 'bezahlt'], creditTerms: ['gutgeschrieben'],
   },
   ES: {
@@ -39,7 +39,8 @@ export const US_EU_ALERT_MARKET_PACKS = {
     rails: ['sepa', 'bizum'], transferTerms: ['transferencia'],
     utilityTerms: ['suministros', 'electricidad', 'agua', 'teléfono'],
     recurringTerms: ['recurrente', 'suscripción'],
-    failedTerms: ['rechazado', 'fallido', 'no pagado', 'no cargado'], futureTerms: ['se cargará', 'próximo'],
+    failedTerms: ['rechazado', 'fallido', 'no pagado', 'no cargado'],
+    futureTerms: ['se cargará', 'será abonado', 'próximo'],
     debitTerms: ['cargado', 'pagado'], creditTerms: ['abonado'],
   },
   IT: {
@@ -49,7 +50,7 @@ export const US_EU_ALERT_MARKET_PACKS = {
     recurringTerms: ['ricorrente', 'abbonamento'],
     postedTerms: ['pagato', 'pagata'],
     failedTerms: ['rifiutato', 'fallito', 'non pagato', 'non addebitato'],
-    futureTerms: ['sarà addebitato', 'in scadenza'],
+    futureTerms: ['sarà addebitato', 'sarà accreditato', 'in scadenza'],
     debitTerms: ['addebitato', 'pagato', 'pagata'], creditTerms: ['accreditato'],
   },
   NL: {
@@ -58,7 +59,7 @@ export const US_EU_ALERT_MARKET_PACKS = {
     utilityTerms: ['energie', 'water', 'telefoon'],
     recurringTerms: ['periodiek', 'abonnement'],
     failedTerms: ['geweigerd', 'mislukt', 'niet betaald', 'niet afgeschreven'],
-    futureTerms: ['wordt afgeschreven', 'wordt morgen afgeschreven', 'aankomend'],
+    futureTerms: ['wordt afgeschreven', 'wordt morgen afgeschreven', 'wordt morgen bijgeschreven', 'aankomend'],
     debitTerms: ['afgeschreven', 'betaald'], creditTerms: ['bijgeschreven'],
   },
 } as const satisfies Record<string, AlertMarketPack>;

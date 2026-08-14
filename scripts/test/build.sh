@@ -63,7 +63,8 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
-         background-relay-storage uncategorised currency-metadata alert-draft \
+         background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
+         bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray unparsed-launch-alert \
          ledger-money review-promotion alert-ai-suggestion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus \

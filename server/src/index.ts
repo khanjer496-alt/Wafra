@@ -30,12 +30,10 @@ import {
   MARKETS,
   withMarketPackForParsing,
 } from '@/lib/markets';
+import { interpretBankAlert } from '@/lib/bank-alert-interpreter';
 import { parseSms } from '@/lib/sms-parser';
 import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
-import {
-  inspectUnparsedLaunchAlert,
-  normalizeUnparsedLaunchTemplate,
-} from '@/lib/unparsed-launch-alert';
+import { normalizeUnparsedLaunchTemplate } from '@/lib/unparsed-launch-alert';
 
 import {
   b64encode,
@@ -675,8 +673,14 @@ async function queueEmailRows(
   // Shortcut. The paired device market remains the default only for
   // currency-less statement rows and older evidence-free templates.
   const alertMarket = detectLaunchMarketFromAlert(normalized) ?? device.market;
-  const alert = withMarketPackForParsing(alertMarket as 'AE' | 'SA', () =>
-    parseSms(normalized));
+  const alertInterpretation = interpretBankAlert({
+    source: normalized,
+    sender: '',
+    market: alertMarket as 'AE' | 'SA',
+  });
+  const alert = alertInterpretation.outcome === 'parsed'
+    ? alertInterpretation.parsed
+    : null;
   const parsedRows = alert
     ? [alert]
     : parseStatementText(normalized, statementCurrencyForMarket(device.market));
@@ -1137,14 +1141,20 @@ export default {
       const parsedMarket = isTest
         ? device.market
         : detectLaunchMarketFromAlert(text, sender ?? undefined) ?? device.market;
-      const parsed = isTest
-        ? null
-        : withMarketPackForParsing(parsedMarket as 'AE' | 'SA', () =>
-            parseSms(text, undefined, { sender: sender ?? undefined }));
-      const launchReview = !parsed && !isTest && sender
-        ? inspectUnparsedLaunchAlert(text, sender)
+      const interpretation = !isTest && sender
+        ? interpretBankAlert({
+            source: text,
+            sender,
+            market: parsedMarket as 'AE' | 'SA',
+          })
         : null;
-      const review = launchReview?.outcome === 'review' ? launchReview.review : null;
+      const parsedWithoutSender = !isTest && !sender
+        ? withMarketPackForParsing(parsedMarket as 'AE' | 'SA', () => parseSms(text))
+        : null;
+      const parsed = interpretation?.outcome === 'parsed'
+        ? interpretation.parsed
+        : parsedWithoutSender;
+      const review = interpretation?.outcome === 'review' ? interpretation.review : null;
       // Not a transaction — an OTP, a promo, a delivery notice. Nothing is
       // stored and nothing is echoed back: the Shortcut fires on every message
       // from the sender, and most of them are none of our business.

@@ -1126,16 +1126,19 @@ async function queueItem(id, row, publicKey) {
       '2026-07-17T10:00:00.000Z',
       'fallback-salary-01',
     );
-    eq('review e2e: a safe launch-parser miss is accepted for review', reviewAccepted.status, 202);
+    eq('semantic salary e2e: a proven launch-parser miss is accepted', reviewAccepted.status, 202);
     const reviewCollected = await relay.syncRelay(cfg);
-    eq('review e2e: it cannot become an automatic transaction',
-      reviewCollected.parsed.length, 0);
-    eq('review e2e: it arrives as one structured review item',
-      reviewCollected.reviewCandidates.length, 1);
-    ok('review e2e: plaintext and sender remain absent from D1 and the phone result',
+    eq('semantic salary e2e: it becomes one exact automatic income transaction',
+      reviewCollected.parsed.length, 1);
+    eq('semantic salary e2e: it no longer produces a review item',
+      reviewCollected.reviewCandidates.length, 0);
+    ok('semantic salary e2e: direction, money and category survive without raw text',
+      reviewCollected.parsed[0]?.type === 'income' &&
+        reviewCollected.parsed[0]?.amountFils === 850000 &&
+        reviewCollected.parsed[0]?.categoryGuess === 'salary' &&
       !dumpAll().includes('FAB payroll') && !dumpAll().includes('WPS credit') &&
-        !JSON.stringify(reviewCollected.reviewCandidates).includes('WPS'));
-    await relay.ackRelay(cfg, reviewCollected.reviewIds);
+        !JSON.stringify(reviewCollected.parsed).includes('WPS'));
+    await relay.ackRelay(cfg, reviewCollected.ids);
 
     // A Shortcut whose HTTP action retries. The relay's keyed replay receipt
     // collapses it, so one purchase cannot be filed as two.

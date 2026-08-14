@@ -1,8 +1,7 @@
 import { toISODate } from '@/lib/format';
+import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import {
   nonPostingReason,
-  parseSms,
-  type ParsedSms,
 } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
@@ -125,8 +124,9 @@ function decodeRecord(input: string, nowMs: number): {
 /**
  * Parse a staged iOS history session entirely on-device.
  *
- * Raw text exists only while `parseSms` is running. It is explicitly removed
- * before a row leaves this function, including unreadable and declined rows.
+ * Raw text exists only while the launch interpreter is running. It is
+ * explicitly removed before a row leaves this function, including unreadable
+ * and declined rows.
  */
 export function parseHistoricalMessageRecords(
   inputs: string[],
@@ -141,6 +141,7 @@ export function parseHistoricalMessageRecords(
   let newestTs = 0;
   const parsed: ScannedSms[] = [];
   const declined: DeclinedSms[] = [];
+  const launchSession = createLaunchAlertSession({ overrides: overrides ?? {} });
 
   for (const input of limited) {
     const decoded = typeof input === 'string' ? decodeRecord(input, now.getTime()) : null;
@@ -157,11 +158,9 @@ export function parseHistoricalMessageRecords(
     newestTs = Math.max(newestTs, timestamp);
 
     const sender = record.sender?.trim();
-    const result: ParsedSms | null = parseSms(
-      record.text,
-      overrides,
-      sender ? { sender } : undefined,
-    );
+    const senderLabel = sender ?? '';
+    const inspection = launchSession.inspect(record.text, senderLabel);
+    const result = launchSession.parse(record.text, senderLabel, inspection);
     if (!result) {
       const reason = nonPostingReason(record.text);
       if (reason) {

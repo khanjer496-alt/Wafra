@@ -12,6 +12,7 @@ const { isDeepStrictEqual } = require('util');
 const { summarizeCashOutflow } = require('./build/cash-flow.js');
 const { summarizeMonth } = require('./build/insights.js');
 const { buildImportPlan } = require('./build/import-plan.js');
+const { createLaunchAlertSession } = require('./build/launch-alert-parser.js');
 const {
   applyMaterializedImportBatch,
   materializeImportBatch,
@@ -194,5 +195,214 @@ const replayBatch = materializeImportBatch(
 const replayState = applyMaterializedImportBatch(state, replayBatch);
 ok('replaying the complete bank history makes no ledger or accounting change',
   isDeepStrictEqual(replayState, state));
+
+// Semantic fallback crosses the same durable accounting path. These messages
+// are intentionally not bank-template fixtures: their status, direction,
+// exact money and meaning are stated in ordinary banking language.
+const semanticMessages = [
+  {
+    id: 201,
+    ts: Date.parse('2026-08-12T08:00:00Z'),
+    sender: 'FAB',
+    body: 'Payroll credit: AED 7,500.00 was posted to your account 1234.',
+  },
+  {
+    id: 202,
+    ts: Date.parse('2026-08-12T09:00:00Z'),
+    sender: 'ADCB',
+    body: 'AED 5,000.00 moved from your account 002 to your own account 004 successfully.',
+  },
+  {
+    id: 203,
+    ts: Date.parse('2026-08-12T09:10:00Z'),
+    sender: 'FAB',
+    body: 'Merchant payout of AED 1,250.00 was credited to your account 0004 successfully.',
+  },
+  {
+    id: 204,
+    ts: Date.parse('2026-08-12T09:20:00Z'),
+    sender: 'FAB',
+    body: 'Refund of AED 125.00 was credited to your account 0004 successfully.',
+  },
+  {
+    id: 205,
+    ts: Date.parse('2026-08-12T09:30:00Z'),
+    sender: 'ADCB',
+    body: 'AED 700.00 was transferred from your account 0002 to AHMED successfully.',
+  },
+  {
+    id: 206,
+    ts: Date.parse('2026-08-12T09:40:00Z'),
+    sender: 'ADCB',
+    body: 'Your electricity bill payment of AED 410.00 was processed successfully for account 7777.',
+  },
+  {
+    id: 207,
+    ts: Date.parse('2026-08-12T09:50:00Z'),
+    sender: 'ENBD',
+    body: 'Cash withdrawal of AED 600.00 was completed at ATM using card ending 6666.',
+  },
+  {
+    id: 208,
+    ts: Date.parse('2026-08-12T10:00:00Z'),
+    sender: 'FAB',
+    body: 'Annual card fee of AED 250.00 was debited from your card ending 5555.',
+  },
+  {
+    id: 209,
+    ts: Date.parse('2026-08-12T10:10:00Z'),
+    sender: 'FAB',
+    body: 'Payment of AED 900.00 was received for your credit card ending 5444.',
+  },
+];
+const semanticSession = createLaunchAlertSession({
+  overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE',
+});
+const semanticParsed = semanticMessages.flatMap((message) => {
+  const inspection = semanticSession.inspect(message.body, message.sender);
+  const result = semanticSession.parse(message.body, message.sender, inspection);
+  return result ? [{
+    ...result,
+    date: result.date ?? new Date(message.ts).toISOString().slice(0, 10),
+    smsTs: message.ts,
+    sender: message.sender,
+    channel: 'inbox',
+    sourceEventId: `a${message.id}`,
+  }] : [];
+});
+ok('semantic salary and own transfer both survive the launch capture seam',
+  semanticParsed.length === semanticMessages.length && semanticParsed[0].type === 'income' &&
+    semanticParsed[0].categoryGuess === 'salary' &&
+    semanticParsed[1].type === 'expense' && semanticParsed[1].transferHint === true &&
+    semanticParsed[2].categoryGuess === 'business' &&
+    semanticParsed[3].merchant === 'Refund' &&
+    semanticParsed[4].transferHint === false &&
+    semanticParsed[5].paymentFlowSide === 'receipt' &&
+    semanticParsed[6].categoryGuess === 'cash-withdrawal' &&
+    semanticParsed[7].merchant === 'Annual card fee' &&
+    semanticParsed[8].kind === 'cardPayment' &&
+    semanticParsed[8].cardPaymentSide === 'receipt',
+  JSON.stringify(semanticParsed));
+const semanticPlan = buildImportPlan(
+  semanticParsed,
+  BASE,
+  Math.max(...semanticMessages.map((message) => message.ts)),
+  NOW,
+);
+const semanticBatch = materializeImportBatch(
+  semanticPlan.batch,
+  BASE,
+  (prefix) => `semantic-${prefix}-${++id}`,
+);
+const semanticState = applyMaterializedImportBatch(BASE, semanticBatch);
+const semanticSummary = summarizeMonth(semanticState.transactions, month);
+const semanticCashOut = summarizeCashOutflow(semanticState, month);
+ok('semantic meanings produce one reconciled set of income, spending and cash movement',
+  semanticSummary.incomeFils === 887500 && semanticSummary.expenseFils === 196000 &&
+    semanticCashOut.totalFils === 286000 && semanticCashOut.cardPaymentsFils === 90000 &&
+    semanticCashOut.accountOutflowFils === 196000,
+  JSON.stringify({ semanticSummary, semanticCashOut, rows: semanticState.transactions }));
+const semanticReplayPlan = buildImportPlan(
+  semanticParsed,
+  semanticState,
+  Math.max(...semanticMessages.map((message) => message.ts)),
+  NOW,
+);
+const semanticReplayBatch = materializeImportBatch(
+  semanticReplayPlan.batch,
+  semanticState,
+  (prefix) => `semantic-replay-${prefix}-${++id}`,
+);
+ok('semantic accounting replay is idempotent',
+  isDeepStrictEqual(
+    applyMaterializedImportBatch(semanticState, semanticReplayBatch),
+    semanticState,
+  ));
+
+// Compact bank shorthand must cross the same launch and accounting boundary.
+// These deliberately use field-list order, abbreviations and no prose. The
+// semantic matrix proves each interpretation in isolation; this block proves
+// that import, account resolution, transfer exclusion and cash-out reporting
+// preserve those meanings together.
+const compactMessages = [
+  ['FAB', 'SAL PAY AED 7,500.00 CR TO AC 0004'],
+  ['FAB', 'TALABAT PAYOUT AED 1,250.00 CR TO A/C 0004'],
+  ['Liv', 'OWN A/C TRF AED 5,000.00 DR A/C 0002 CR A/C 0004'],
+  ['Liv', 'TRF AED 700.00 DR A/C 0002 BEN AHMED'],
+  ['FAB', 'POS AED 47.99 DR CARD 5444 CANVA'],
+  ['FAB', 'CC 5444 CR AED 900.00 CARD PYMT RECEIVED'],
+  ['FAB', 'BILLPAY AED 410.00 DR A/C 0002 SEWA CONSUMER 9999'],
+  ['Liv', 'ATM WDL AED 600.00 DR A/C 0002'],
+  ['FAB', 'ANNUAL FEE DR AED 250.00 CARD 5444'],
+  ['FAB', 'REFUND CR AED 125.00 TO CARD 5444'],
+].map(([sender, body], index) => ({
+  id: 301 + index,
+  ts: Date.parse('2026-08-12T11:00:00Z') + index,
+  sender,
+  body,
+}));
+const compactSession = createLaunchAlertSession({
+  overrides: {}, pinnedCurrency: 'AED', activeMarket: 'AE',
+});
+const compactParsed = compactMessages.flatMap((message) => {
+  const inspection = compactSession.inspect(message.body, message.sender);
+  const result = compactSession.parse(message.body, message.sender, inspection);
+  return result ? [{
+    ...result,
+    date: result.date ?? new Date(message.ts).toISOString().slice(0, 10),
+    smsTs: message.ts,
+    sender: message.sender,
+    channel: 'inbox',
+    sourceEventId: `a${message.id}`,
+  }] : [];
+});
+ok('every compact bank shorthand alert survives the launch parser',
+  compactParsed.length === compactMessages.length, compactParsed.length);
+ok('compact meanings retain their accounting roles before import',
+  compactParsed[0].type === 'income' && compactParsed[0].categoryGuess === 'salary' &&
+    compactParsed[1].type === 'income' && compactParsed[1].categoryGuess === 'business' &&
+    compactParsed[2].transferHint === true && compactParsed[3].transferHint === false &&
+    compactParsed[4].type === 'expense' && compactParsed[4].transferHint === false &&
+    compactParsed[5].kind === 'cardPayment' && compactParsed[5].cardPaymentSide === 'receipt' &&
+    compactParsed[6].categoryGuess === 'utilities' &&
+    compactParsed[6].paymentFlowSide === 'receipt' &&
+    compactParsed[7].categoryGuess === 'cash-withdrawal' &&
+    compactParsed[8].merchant === 'Annual card fee' &&
+    compactParsed[9].type === 'income' && compactParsed[9].merchant === 'Refund');
+const compactPlan = buildImportPlan(
+  compactParsed,
+  BASE,
+  Math.max(...compactMessages.map((message) => message.ts)),
+  NOW,
+);
+const compactBatch = materializeImportBatch(
+  compactPlan.batch,
+  BASE,
+  (prefix) => `compact-${prefix}-${++id}`,
+);
+const compactState = applyMaterializedImportBatch(BASE, compactBatch);
+const compactSummary = summarizeMonth(compactState.transactions, month);
+const compactCashOut = summarizeCashOutflow(compactState, month);
+ok('compact bank shorthand produces exact income, spending and cash-out totals',
+  compactSummary.incomeFils === 887500 && compactSummary.expenseFils === 200799 &&
+    compactCashOut.totalFils === 261000 && compactCashOut.cardPaymentsFils === 90000 &&
+    compactCashOut.accountOutflowFils === 171000,
+  JSON.stringify({ compactSummary, compactCashOut }));
+const compactReplayPlan = buildImportPlan(
+  compactParsed,
+  compactState,
+  Math.max(...compactMessages.map((message) => message.ts)),
+  NOW,
+);
+const compactReplayBatch = materializeImportBatch(
+  compactReplayPlan.batch,
+  compactState,
+  (prefix) => `compact-replay-${prefix}-${++id}`,
+);
+ok('compact bank shorthand replay is idempotent',
+  isDeepStrictEqual(
+    applyMaterializedImportBatch(compactState, compactReplayBatch),
+    compactState,
+  ));
 
 console.log(`\naccounting-pipeline: ${pass} passed, 0 failed`);

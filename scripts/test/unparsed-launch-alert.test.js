@@ -57,10 +57,23 @@ for (const [name, source] of [
   ['future salary', 'FAB: Salary AED 8,500.00 will be credited to your account tomorrow'],
   ['decline', 'FAB: AED 8,500.00 transfer to your account failed'],
   ['balance', 'FAB: Available balance AED 8,500.00'],
+  ['marketing spend target', 'FAB offer: Spend AED 6,000.00 this month and get up to 10% cashback'],
+  ['plural offer', 'FAB offers AED 6,000.00 cash advance eligibility. Apply now.'],
 ]) {
   const result = inspectUnparsedLaunchAlert(source, 'FAB');
   ok(`${name} cannot become reviewable posted money`, result.outcome === 'refuse', JSON.stringify(result));
 }
+
+const unfamiliarPurchase = inspectUnparsedLaunchAlert(
+  'FAB alert: Purchase of AED 47.99 using card ending 9960 at CANVA was processed.',
+  'FAB',
+);
+ok('an explicit completed card purchase remains reviewable',
+  unfamiliarPurchase.outcome === 'review' &&
+    unfamiliarPurchase.review.direction === 'debit' &&
+    unfamiliarPurchase.review.family === 'purchase' &&
+    unfamiliarPurchase.review.amount.minorUnits === '4799',
+  JSON.stringify(unfamiliarPurchase));
 
 const ambiguous = inspectUnparsedLaunchAlert(
   'FAB: AED 500.00 and AED 700.00 were transferred to your account.',

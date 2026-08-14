@@ -61,7 +61,10 @@ export function healPatch(
   // expense/Salary pair. Direction compatibility is stronger evidence than a
   // low-confidence fallback, so a reread may repair this to Other while still
   // preserving every user-edited row through the guard above.
-  if (!overrideFitsDirection(prior.category, p.type)) {
+  if (
+    !overrideFitsDirection(prior.category, p.type) &&
+    prior.category !== p.categoryGuess
+  ) {
     patch.category = p.categoryGuess;
   }
   // A category the parser is now DELIBERATE about, disagreeing with what is
