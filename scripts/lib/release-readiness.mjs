@@ -104,6 +104,7 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
     publicEnv,
   );
   const smsCorpusNative = publicValue('WAFRA_SMS_CORPUS_EXPORT', env, publicEnv);
+  const localAiEvaluation = publicValue('EXPO_PUBLIC_WAFRA_LOCAL_AI_EVAL', env, publicEnv);
 
   if (e2eDemo === '1') {
     findings.push(finding(
@@ -120,6 +121,15 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
       'The temporary raw SMS corpus exporter is enabled in production',
       'A store build must not expose the internal full-inbox export path.',
       'Remove both SMS corpus export flags from the production profile and environment.',
+    ));
+  }
+
+  if (localAiEvaluation === '1') {
+    findings.push(finding(
+      'local-ai-evaluation',
+      'The unapproved local AI evaluator is enabled in production',
+      'The current model is a shadow benchmark tool and must not appear in a store build.',
+      'Set EXPO_PUBLIC_WAFRA_LOCAL_AI_EVAL to 0 in the production profile and environment.',
     ));
   }
 

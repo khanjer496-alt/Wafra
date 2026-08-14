@@ -167,6 +167,7 @@ export default function RootLayout() {
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="assistant" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
             {/* Every name below has a file behind it in src/app, and nothing that
@@ -182,6 +183,7 @@ export default function RootLayout() {
                 it, per the rule above. */}
             <Stack.Screen name="categorise" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="settings" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="local-ai-eval" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="trusted-devices" options={{ animation: 'slide_from_right' }} />
             {/* The iOS setup wizard shipped under two filenames during the
                 merge — ios-setup.tsx and iphone-setup.tsx. ios-setup.tsx won:

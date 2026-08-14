@@ -71,6 +71,18 @@ const validFixture = () => {
     const root = validFixture();
     const report = await assessReleaseReadiness({
       root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+      publicEnv: { EXPO_PUBLIC_WAFRA_LOCAL_AI_EVAL: '1' },
+    });
+    ok('production rejects the unapproved local AI evaluation surface',
+      report.findings.some(({ code }) => code === 'local-ai-evaluation'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const report = await assessReleaseReadiness({
+      root,
       intent: { kind: 'build', platform: 'android', profile: 'production', submit: true },
       publicEnv: {
         EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '1',

@@ -96,7 +96,17 @@
         }
       ],
       "expo-sharing",
-      "./modules/wafra-message-history/plugin"
+      "./modules/wafra-message-history/plugin",
+      "expo-build-properties",
+      [
+        "llama.rn",
+        {
+          "enableEntitlements": true,
+          "entitlementsProfile": "local-ai-preview",
+          "forceCxx20": true,
+          "enableOpenCLAndHexagon": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

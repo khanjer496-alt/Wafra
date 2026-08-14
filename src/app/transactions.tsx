@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -84,11 +84,13 @@ export default function TransactionsScreen() {
     type: typeParam,
     category: categoryParam,
     merchant: merchantParam,
+    transactionId,
   } = useLocalSearchParams<{
     source?: string;
     type?: string;
     category?: string;
     merchant?: string;
+    transactionId?: string;
   }>();
   // One category, or several — Flow's pooled "N more" slice hands over every
   // category behind it, so the drill-down covers exactly what the row totalled.
@@ -168,6 +170,15 @@ export default function TransactionsScreen() {
    */
   const [rangeDraft, setRangeDraft] = useState({ dateFrom: '', dateTo: '' });
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const openedTransactionId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!transactionId || openedTransactionId.current === transactionId) return;
+    const transaction = state.transactions.find((row) => row.id === transactionId);
+    if (!transaction) return;
+    openedTransactionId.current = transactionId;
+    setEditing(transaction);
+  }, [state.transactions, transactionId]);
 
   const todayISO = toISODate(new Date());
   const currentKey = monthKey(new Date());
