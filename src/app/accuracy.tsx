@@ -63,10 +63,10 @@ export default function AccuracyScreen() {
   const misses =
     coverage.measured - coverage.named + (coverage.categoryMeasured - coverage.categorised);
 
-  // Two headings, not one. The old export called every row "could not read",
-  // which was wrong about most of them — the merchant was read fine, it just
-  // had no category — and that made a long list look like a broken parser.
-  const shareAll = () => {
+  // Only a format with no merchant leaves the phone from this screen. A named
+  // private alias is useful for the local Sort-shops flow, not evidence for a
+  // global grammar rule and not something the developer needs to receive.
+  const shareUnread = () => {
     const section = (label: string, list: typeof rows) =>
       list.length === 0
         ? ''
@@ -86,8 +86,7 @@ export default function AccuracyScreen() {
     Share.share({
       message:
         t('accuracyShareTitle') +
-        section(t('accuracyShareUnread'), unread) +
-        section(t('accuracyShareUncategorized'), uncategorized),
+        section(t('accuracyShareUnread'), unread),
     }).catch(() => {});
   };
 
@@ -182,11 +181,19 @@ export default function AccuracyScreen() {
                     : 'improveAccuracyHint',
               )}
             </ThemedText>
-            {rows.length > 0 && (
+            {uncategorized.length > 0 && (
               <Button
-                label={`${t('shareUnrecognized')} · ${rows.length}`}
+                label={t('sortShops')}
+                icon="filter"
+                onPress={() => router.push('/categorise')}
+              />
+            )}
+            {unread.length > 0 && (
+              <Button
+                label={`${t('shareUnrecognized')} · ${unread.length}`}
                 icon="upload"
-                onPress={shareAll}
+                variant="outline"
+                onPress={shareUnread}
               />
             )}
             {/* Always offered, even when nothing is unread: the card bugs this

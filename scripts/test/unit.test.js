@@ -3063,6 +3063,10 @@ ok('stale: a stale statement that gets paid leaves openDues',
   const named = { ...unread, title: 'Hutong', raw: raw.replace('CARREFOUR MARKET', 'HUTONG') };
   ok('accuracy: a named merchant with no category is marked uncategorized',
     accuracy.unreadFormats([named], label)[0].reason === 'uncategorized');
+  ok('accuracy: a named row already categorised by a local rule is no longer reported',
+    accuracy.unreadFormats([{ ...named, category: 'utilities' }], label).length === 0);
+  ok('accuracy: an intentionally Other accounting role is no longer reported',
+    accuracy.unreadFormats([{ ...named, title: 'Transfer to Ahmed' }], label).length === 0);
   ok('accuracy: unread formats sort ahead of uncategorized ones',
     accuracy.unreadFormats([named, named, unread], label)[0].reason === 'unread');
 

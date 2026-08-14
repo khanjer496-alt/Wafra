@@ -454,8 +454,8 @@ const S = {
   },
   sortShopsNone: { en: 'Every shop has a category', ar: 'كل متجر له تصنيف' },
   improveAccuracyHint: {
-    en: 'Bank messages the app is not reading well. Some have no merchant name at all; most read the name correctly but have no category yet. Share the list with the developer and the next update will handle them. Long account numbers are masked.',
-    ar: 'رسائل بنكية لا يقرأها التطبيق جيداً. بعضها بلا اسم متجر إطلاقاً، ومعظمها يُقرأ الاسم فيه بشكل صحيح لكن بلا تصنيف بعد. شارك القائمة مع المطوّر وسيعالجها التحديث القادم. الأرقام الطويلة مخفية.',
+    en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
+    ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
   },
   couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
   noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },
@@ -2443,10 +2443,6 @@ const S = {
     ar: 'وفرة — رسائل بنكية لا يقرأها التطبيق جيداً:',
   },
   accuracyShareUnread: { en: 'COULD NOT READ — no merchant found', ar: 'تعذّرت القراءة — لم يُعثر على متجر' },
-  accuracyShareUncategorized: {
-    en: 'READ, BUT NO CATEGORY — merchant name is correct',
-    ar: 'مقروءة بلا تصنيف — اسم المتجر صحيح',
-  },
   accuracyShareRow: {
     en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
     ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',

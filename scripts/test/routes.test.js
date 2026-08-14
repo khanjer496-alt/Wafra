@@ -54,6 +54,21 @@ ok('the route table was read off disk', available.size >= 8, [...available].join
 ok('the tab routes are there', ['/', '/flow', '/bills', '/wallet'].every((r) => available.has(r)),
   [...available].join(' '));
 
+{
+  // Improve Accuracy has two different jobs. A truly unread bank format is
+  // useful parser evidence and may be shared after masking. A private merchant
+  // nickname is not a global grammar rule: it stays on-device and belongs in
+  // the bulk categorisation flow. Mixing them produced reports full of names
+  // that the parser had already read correctly, including rows the owner had
+  // already categorised.
+  const accuracy = fs.readFileSync(path.join(APP, 'accuracy.tsx'), 'utf8');
+  ok('Improve Accuracy sends named uncategorised shops to the local sorter',
+    /uncategorized\.length > 0[\s\S]{0,300}router\.push\('\/categorise'\)/.test(accuracy));
+  ok('Improve Accuracy shares only genuinely unread formats',
+    /section\(t\('accuracyShareUnread'\), unread\)/.test(accuracy) &&
+      !/accuracyShareUncategorized/.test(accuracy));
+}
+
 /** Every file under src/, so nothing is missed by only checking screens. */
 function sources(dir = SRC) {
   const out = [];

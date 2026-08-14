@@ -382,7 +382,7 @@ for (const detail of FEEDBACK_DETAILS) {
   ok('shapes: the amounts from the ledger are nowhere in the report',
     !text.includes('45.75') && !text.includes('4,523.00') && !text.includes('18,750.40'));
   ok('shapes: the shape is still recognisable as a bank message',
-    shapes.shapes.some((s) => /Avl Cr\. limit AED/.test(s.shape)));
+    shapes.shapes.some((s) => /ADCB: Purchase of AED/.test(s.shape)));
   ok('shapes: identical formats are collapsed and counted',
     shapes.shapes.every((s) => s.count >= 1));
 }
