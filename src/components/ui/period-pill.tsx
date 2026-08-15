@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { SpringPressable } from '@/components/ui/spring-pressable';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
@@ -24,26 +25,25 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
   const { period } = usePeriod();
 
   return (
-    <Pressable
+    <SpringPressable
       onPress={() => {
         tapped();
         onPress();
       }}
       accessibilityRole="button"
       accessibilityLabel={tf('reportingPeriod', { period: periodLabel(period) }, language)}
-      style={({ pressed }) => [
+      style={[
         styles.pill,
         {
           backgroundColor: theme.backgroundElement,
           borderColor: theme.cardBorder,
-          opacity: pressed ? 0.7 : 1,
         },
       ]}>
       <ThemedText type="micro" themeColor="textSecondary">
         {periodLabel(period)}
       </ThemedText>
       <Icon name="chevron-down" size={12} color={theme.textTertiary} />
-    </Pressable>
+    </SpringPressable>
   );
 }
 
@@ -62,7 +62,7 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
 export function LinkPill({ label, onPress }: { label: string; onPress: () => void }) {
   const theme = useTheme();
   return (
-    <Pressable
+    <SpringPressable
       // Same tapped() as PeriodPill and IconButton. A pill that navigates
       // without the tick feels dead next to the two beside it in the header.
       onPress={() => {
@@ -72,19 +72,18 @@ export function LinkPill({ label, onPress }: { label: string; onPress: () => voi
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={6}
-      style={({ pressed }) => [
+      style={[
         styles.pill,
         {
           backgroundColor: theme.backgroundElement,
           borderColor: theme.primaryBorder,
-          opacity: pressed ? 0.7 : 1,
         },
       ]}>
       <ThemedText type="micro" themeColor="primary">
         {label}
       </ThemedText>
       <Icon name="chevron-right" size={12} color={theme.primary} />
-    </Pressable>
+    </SpringPressable>
   );
 }
 
@@ -100,7 +99,7 @@ export function IconButton({
 }) {
   const theme = useTheme();
   return (
-    <Pressable
+    <SpringPressable
       onPress={() => {
         tapped();
         onPress();
@@ -108,16 +107,15 @@ export function IconButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={6}
-      style={({ pressed }) => [
+      style={[
         styles.iconBtn,
         {
           backgroundColor: theme.backgroundElement,
           borderColor: theme.cardBorder,
-          opacity: pressed ? 0.7 : 1,
         },
       ]}>
       <Icon name={name} size={17} color={theme.textSecondary} />
-    </Pressable>
+    </SpringPressable>
   );
 }
 

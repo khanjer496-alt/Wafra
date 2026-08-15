@@ -28,6 +28,8 @@ import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { Icon } from '@/components/ui/icon';
+import { CountUpAmount } from '@/components/ui/count-up';
+import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useToast } from '@/components/ui/toast';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
@@ -133,7 +135,7 @@ function AutomaticCapture({
 
   return (
     <Animated.View entering={enter(FadeInDown.duration(280))}>
-      <Pressable
+      <SpringPressable
         accessibilityRole="button"
         accessibilityLabel={[t('automaticCapture'), title, detail].filter(Boolean).join('. ')}
         disabled={status === 'checking' || status === 'unsupported'}
@@ -141,13 +143,13 @@ function AutomaticCapture({
           tapped();
           onPress();
         }}
-        style={({ pressed }) => [
+        scaleTo={0.985}
+        style={[
           styles.capture,
           active && styles.captureHealthy,
           {
             backgroundColor: active ? 'transparent' : theme.backgroundElement,
             borderColor: active ? 'transparent' : theme.cardBorder,
-            transform: [{ scale: pressed ? 0.985 : 1 }],
           },
         ]}>
         <View
@@ -178,7 +180,7 @@ function AutomaticCapture({
         {status !== 'checking' && status !== 'unsupported' ? (
           <Icon name="chevron-right" size={15} color={theme.textTertiary} />
         ) : null}
-      </Pressable>
+      </SpringPressable>
     </Animated.View>
   );
 }
@@ -198,7 +200,7 @@ function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => 
 
   return (
     <Animated.View entering={enter(FadeInDown.delay(40).duration(280))}>
-      <Pressable
+      <SpringPressable
         accessibilityRole="button"
         accessibilityLabel={`${t('reviewAlertsTitle')}. ${label}`}
         accessibilityHint={t('reviewAlertsPrivacy')}
@@ -206,12 +208,12 @@ function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => 
           tapped();
           onPress();
         }}
-        style={({ pressed }) => [
+        scaleTo={0.985}
+        style={[
           styles.reviewPrompt,
           {
             borderColor: theme.cardBorder,
             backgroundColor: theme.backgroundElement,
-            transform: [{ scale: pressed ? 0.985 : 1 }],
           },
         ]}>
         <View style={[styles.reviewPromptIcon, { backgroundColor: theme.backgroundSelected }]}>
@@ -224,7 +226,7 @@ function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => 
           {t('review')}
         </ThemedText>
         <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-      </Pressable>
+      </SpringPressable>
     </Animated.View>
   );
 }
@@ -330,10 +332,12 @@ function Hero({
           <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
             {ledgerCurrencyDisplay()}
           </ThemedText>
-          <ThemedText type="display" tabular>
-            {netFils < 0 ? '−' : ''}
-            {formatAmount(Math.abs(netFils), { decimals: false })}
-          </ThemedText>
+          <View style={styles.heroAmount}>
+            {netFils < 0 ? (
+              <ThemedText type="display" tabular>−</ThemedText>
+            ) : null}
+            <CountUpAmount type="display" fils={Math.abs(netFils)} prefix="" />
+          </View>
         </View>
       )}
 
@@ -346,7 +350,7 @@ function Hero({
             [t('spentLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
         ).map(([label, fils, color, href], i) => (
-          <Pressable
+          <SpringPressable
             key={label}
             accessibilityRole={href ? 'button' : 'text'}
             accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
@@ -354,6 +358,8 @@ function Hero({
               tapped();
               router.push(href);
             } : undefined}
+            scaleTo={0.985}
+            opacityTo={0.94}
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
@@ -368,7 +374,7 @@ function Hero({
             <ThemedText type="small" tabular style={styles.splitFigure}>
               {formatAmount(fils, { decimals: false })}
             </ThemedText>
-          </Pressable>
+          </SpringPressable>
         ))}
       </View>
     </Animated.View>
@@ -429,11 +435,12 @@ function LeavingSoon({
       {shown.map((x, i) => {
         const alarming = x.overdue || x.urgent;
         return (
-          <Pressable
+          <SpringPressable
             key={x.id}
             accessibilityRole="button"
             accessibilityLabel={x.title}
             onPress={() => onOpen(x)}
+            scaleTo={0.99}
             style={[
               styles.leaveRow,
               i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
@@ -453,11 +460,11 @@ function LeavingSoon({
             <ThemedText type="small" tabular style={x.overdue ? { color: theme.expense } : undefined}>
               {formatAmount(x.amountFils, { decimals: false })}
             </ThemedText>
-          </Pressable>
+          </SpringPressable>
         );
       })}
       {hidden > 0 && (
-        <Pressable
+        <SpringPressable
           accessibilityRole="button"
           accessibilityLabel={tf('seeUpcomingPaymentsA11y', { count: items.length })}
           // Expand in place. This used to push to Bills, which opens on its
@@ -468,6 +475,7 @@ function LeavingSoon({
             tapped();
             setExpanded(true);
           }}
+          scaleTo={0.99}
           style={[
             styles.leaveRow,
             { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
@@ -483,7 +491,7 @@ function LeavingSoon({
               decimals: false,
             })}
           </ThemedText>
-        </Pressable>
+        </SpringPressable>
       )}
     </Animated.View>
   );
@@ -981,6 +989,7 @@ const styles = StyleSheet.create({
   heroLabel: { marginBottom: Spacing.two },
   heroCompare: { marginTop: Spacing.two, marginBottom: Spacing.two },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  heroAmount: { flexDirection: 'row', alignItems: 'baseline' },
   aed: { fontSize: 15, lineHeight: 20 },
   split: { flexDirection: 'row', marginTop: Spacing.four },
   splitCell: {

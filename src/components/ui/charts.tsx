@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withSpring,
+} from 'react-native-reanimated';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAED } from '@/lib/format';
 import { isRTL, t, tf } from '@/lib/i18n';
@@ -32,48 +40,7 @@ export function useRamp(): string[] {
 
 /* ── Progress ────────────────────────────────────────────────────────── */
 
-interface ProgressBarProps {
-  /** 0..1; above 1 is clamped, but the caller picks the colour that says so. */
-  ratio: number;
-  color: string;
-  height?: number;
-  /** Overrides the track on surfaces that ignore the OS theme. */
-  trackColor?: string;
-  accessibilityLabel?: string;
-}
-
-export function ProgressBar({
-  ratio,
-  color,
-  height = 6,
-  trackColor,
-  accessibilityLabel,
-}: ProgressBarProps) {
-  const theme = useTheme();
-  // Clamped at 0, not at 0.02. The old floor drew a sliver of fill for a
-  // category that had not been spent on at all, so an untouched budget read as
-  // already started.
-  const clamped = Math.max(0, Math.min(ratio, 1));
-  return (
-    <View
-      accessibilityRole="progressbar"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(clamped * 100) }}
-      style={[
-        styles.track,
-        { backgroundColor: trackColor ?? theme.track, height, borderRadius: height / 2 },
-      ]}>
-      <View
-        style={{
-          width: `${clamped * 100}%`,
-          height: '100%',
-          backgroundColor: color,
-          borderRadius: height / 2,
-        }}
-      />
-    </View>
-  );
-}
+export { ProgressBar } from '@/components/ui/progress-bar';
 
 /* ── Composition bar ─────────────────────────────────────────────────── */
 
@@ -157,6 +124,44 @@ export interface MonthPair {
   current?: boolean;
 }
 
+const BAR_SPRING = {
+  damping: 23,
+  stiffness: 250,
+  mass: 0.82,
+  overshootClamping: true,
+  reduceMotion: ReduceMotion.System,
+} as const;
+
+function AnimatedChartBar({
+  color,
+  delay,
+  height,
+  style,
+}: {
+  color: string;
+  delay: number;
+  height: number;
+  style: object;
+}) {
+  const reducedMotion = useReducedMotion();
+  const animatedHeight = useSharedValue(reducedMotion ? height : 0);
+
+  useEffect(() => {
+    animatedHeight.value = reducedMotion
+      ? height
+      : withDelay(delay, withSpring(height, BAR_SPRING), ReduceMotion.System);
+  }, [animatedHeight, delay, height, reducedMotion]);
+
+  const animatedStyle = useAnimatedStyle(() => ({ height: animatedHeight.value }));
+
+  return (
+    <Animated.View
+      accessible={false}
+      style={[style, { backgroundColor: color }, animatedStyle]}
+    />
+  );
+}
+
 /** A colour and what it means. Two bars per column need saying out loud. */
 function LegendKey({ color, label }: { color: string; label: string }) {
   return (
@@ -226,19 +231,17 @@ export function PairedBars({
             onPress={() => onPressMonth?.(i)}
             style={styles.pairColumn}>
             <View style={[styles.pairBars, { height }]}>
-              <Animated.View
-                entering={FadeIn.delay(i * 50).duration(Motion.sectionEnter)}
-                style={[
-                  styles.pairBar,
-                  { height: Math.max(3, (m.inFils / max) * height), backgroundColor: inColor },
-                ]}
+              <AnimatedChartBar
+                color={inColor}
+                delay={i * 36}
+                height={Math.max(3, (m.inFils / max) * height)}
+                style={styles.pairBar}
               />
-              <Animated.View
-                entering={FadeIn.delay(i * 50 + 30).duration(Motion.sectionEnter)}
-                style={[
-                  styles.pairBar,
-                  { height: Math.max(3, (m.outFils / max) * height), backgroundColor: outColor },
-                ]}
+              <AnimatedChartBar
+                color={outColor}
+                delay={i * 36 + 24}
+                height={Math.max(3, (m.outFils / max) * height)}
+                style={styles.pairBar}
               />
             </View>
             <ThemedText type="nano" themeColor={m.current ? 'text' : 'textTertiary'}>
@@ -395,15 +398,11 @@ export function HistoryStrip({
           accessibilityLabel={`${m.label}, ${formatAED(m.fils)}`}
           style={styles.pairColumn}>
           <View style={[styles.historyBarWrap, { height }]}>
-            <View
-              style={[
-                styles.bar,
-                styles.historyBar,
-                {
-                  height: Math.max(4, (m.fils / max) * height),
-                  backgroundColor: m.current ? theme.primary : theme.track,
-                },
-              ]}
+            <AnimatedChartBar
+              color={m.current ? theme.primary : theme.track}
+              delay={i * 36}
+              height={Math.max(4, (m.fils / max) * height)}
+              style={[styles.bar, styles.historyBar]}
             />
           </View>
           <ThemedText type="nano" themeColor={m.current ? 'text' : 'textTertiary'}>
