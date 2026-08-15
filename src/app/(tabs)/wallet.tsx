@@ -1,5 +1,4 @@
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo, useState } from 'react';
 import {
   Modal,
@@ -26,15 +25,15 @@ import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
-import { cardFigure, groupCardsByBank, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
+import { cardFigure, isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { netWorthBreakdown } from '@/lib/balances';
+import { bankBrandForName, ledgerCurrencyDisplay } from '@/lib/markets';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import {
   formatAED,
@@ -46,7 +45,6 @@ import {
 import { useStore } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
-import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 
 const KIND_META: Record<AccountKind, { labelKey: StringKey; icon: import('@/components/ui/icon').IconName }> = {
@@ -96,7 +94,6 @@ type AccountAction = 'visibility' | 'delete';
 
 export default function WalletScreen() {
   const theme = useTheme();
-  const dark = useColorScheme() === 'dark';
   const language = useLanguage();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
@@ -175,45 +172,58 @@ export default function WalletScreen() {
     [dues],
   );
 
-  // Cards (auto-discovered from SMS or added manually) get their own section.
+  // Active accounts and cards share one institution-grouped source list.
   // Expired/unused ones (silent 90+ days, or hidden) live in a drawer below.
   const [showInactive, setShowInactive] = useState(false);
+  const [showAllSources, setShowAllSources] = useState(false);
+  const activeSources = useMemo(
+    () => state.accounts.filter((account) => !isInactiveAccount(state, account, now)),
+    [state, now],
+  );
   const cards = useMemo(
-    () =>
-      state.accounts.filter(
-        (a) => (a.kind === 'card' || a.cardType) && !isInactiveAccount(state, a, now),
-      ),
-    [state, now],
+    () => activeSources.filter((account) => account.kind === 'card' || account.cardType),
+    [activeSources],
   );
-  const cardGroups = useMemo(() => groupCardsByBank(cards), [cards]);
-  // One physical-feeling object gives Wallet an immediate anchor. The same
-  // account is omitted from the compact rows below, so this is hierarchy —
-  // not duplicated financial information.
-  const featuredCard = cards[0] ?? null;
-  // Wallet is the overview, not the card inventory. Keep the hero plus three
-  // useful rows here and leave the complete list to the dedicated Cards
-  // screen. This removes the longest source of scroll without hiding access.
-  const previewCardIds = useMemo(
-    () => new Set(cards.slice(0, 4).map((account) => account.id)),
-    [cards],
+  const institutionGroups = useMemo(() => {
+    const groups = new Map<string, { name: string; accounts: Account[] }>();
+    for (const account of activeSources) {
+      const reportedName = account.bankName?.trim();
+      const name = reportedName
+        ? bankBrandForName(reportedName)?.name ?? reportedName
+        : t('otherSources', language);
+      const key = name.toLocaleLowerCase('en-US');
+      const group = groups.get(key) ?? { name, accounts: [] };
+      group.accounts.push(account);
+      groups.set(key, group);
+    }
+    return [...groups.entries()]
+      .map(([key, group]) => ({
+        key,
+        name: group.name,
+        totalCount: group.accounts.length,
+        hasNamedInstitution: group.accounts.some((account) => Boolean(account.bankName?.trim())),
+        accounts: [...group.accounts].sort(
+          (a, b) =>
+            Number(a.kind === 'card' || Boolean(a.cardType)) -
+              Number(b.kind === 'card' || Boolean(b.cardType)) ||
+            a.name.localeCompare(b.name),
+        ),
+      }))
+      .sort(
+        (a, b) => b.accounts.length - a.accounts.length || a.name.localeCompare(b.name),
+      );
+  }, [activeSources, language]);
+  const visibleInstitutionGroups = useMemo(() => {
+    if (showAllSources) return institutionGroups;
+    return institutionGroups
+      .slice(0, 4)
+      .map((group) => ({ ...group, accounts: group.accounts.slice(0, 2) }));
+  }, [institutionGroups, showAllSources]);
+  const visibleSourceCount = useMemo(
+    () => visibleInstitutionGroups.reduce((total, group) => total + group.accounts.length, 0),
+    [visibleInstitutionGroups],
   );
-  const previewCardGroups = useMemo(
-    () =>
-      cardGroups
-        .map((group) => ({
-          ...group,
-          accounts: group.accounts.filter((account) => previewCardIds.has(account.id)),
-        }))
-        .filter((group) => group.accounts.length > 0),
-    [cardGroups, previewCardIds],
-  );
-  const nonCardAccounts = useMemo(
-    () =>
-      state.accounts.filter(
-        (a) => a.kind !== 'card' && !a.cardType && !isInactiveAccount(state, a, now),
-      ),
-    [state, now],
-  );
+  const hiddenSourceCount = Math.max(0, activeSources.length - visibleSourceCount);
   const inactiveAccounts = useMemo(
     () => state.accounts.filter((a) => isInactiveAccount(state, a, now)),
     [state, now],
@@ -390,7 +400,7 @@ export default function WalletScreen() {
               </ThemedText>
             </View>
 
-            <View style={[styles.overviewMetrics, { borderTopColor: theme.cardBorder }]}>
+            <View style={styles.snapshotGrid}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${t('cardPaymentsDue')}, ${formatAED(duesTotalFils, { decimals: false })}`}
@@ -399,21 +409,18 @@ export default function WalletScreen() {
                   router.push('/bills');
                 }}
                 style={({ pressed }) => [
-                  styles.overviewMetric,
-                  { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
+                  styles.snapshotFact,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : theme.background,
+                  },
                 ]}>
-                <View style={[styles.metricIcon, { backgroundColor: theme.expenseSoftBg }]}>
-                  <Icon name="wallet" size={15} color={theme.expense} />
-                </View>
-                <View style={styles.metricCopy}>
-                  <ThemedText type="meta" themeColor="textSecondary">
-                    {t('cardPaymentsDue')}
-                  </ThemedText>
-                  <ThemedText type="smallBold" tabular>
-                    {formatAED(duesTotalFils, { decimals: false })}
-                  </ThemedText>
-                </View>
-                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {t('cardPaymentsDue')}
+                </ThemedText>
+                <ThemedText type="smallBold" tabular style={{ color: theme.expense }}>
+                  {formatAED(duesTotalFils, { decimals: false })}
+                </ThemedText>
               </Pressable>
 
               <View
@@ -423,272 +430,242 @@ export default function WalletScreen() {
                   accounts: formatAED(cashOut.accountOutflowFils, { decimals: false }),
                 })}`}
                 style={[
-                  styles.overviewMetric,
-                  styles.overviewMetricDivider,
-                  { borderTopColor: theme.cardBorder },
+                  styles.snapshotFact,
+                  { borderColor: theme.cardBorder, backgroundColor: theme.background },
                 ]}>
-                <View style={[styles.metricIcon, { backgroundColor: theme.backgroundSelected }]}>
-                  <Icon name="cash" size={15} color={theme.textSecondary} />
-                </View>
-                <View style={styles.metricCopy}>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {t('paidFromAccounts')}
+                </ThemedText>
+                <ThemedText type="smallBold" tabular>
+                  {formatAED(cashOut.totalFils, { decimals: false })}
+                </ThemedText>
+              </View>
+
+              {currencies.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`${t('currencyActivityTitle')}, ${formatAED(currenciesTotalFils, { decimals: false })}`}
+                  onPress={() => router.push('/currency')}
+                  style={({ pressed }) => [
+                    styles.snapshotFact,
+                    {
+                      borderColor: theme.cardBorder,
+                      backgroundColor: pressed ? theme.backgroundSelected : theme.background,
+                    },
+                  ]}>
                   <ThemedText type="meta" themeColor="textSecondary">
-                    {t('paidFromAccounts')}
+                    {t('currencyActivityTitle')}
                   </ThemedText>
                   <ThemedText type="smallBold" tabular>
-                    {formatAED(cashOut.totalFils, { decimals: false })}
+                    {formatAED(currenciesTotalFils, { decimals: false })}
                   </ThemedText>
-                  <ThemedText type="nano" themeColor="textTertiary">
-                    {tf('cashOutBreakdown', {
-                      cards: formatAED(cashOut.cardPaymentsFils, { decimals: false }),
-                      accounts: formatAED(cashOut.accountOutflowFils, { decimals: false }),
-                    })}
+                  <ThemedText type="nano" themeColor="textTertiary" numberOfLines={1}>
+                    {currencies.slice(0, 3).map((group) => group.currency).join(' · ')}
+                  </ThemedText>
+                </Pressable>
+              )}
+
+              {currencies.length === 0 && (
+                <View
+                  accessible
+                  accessibilityLabel={`${t('moneySourcesHeader')}, ${activeSources.length}`}
+                  style={[
+                    styles.snapshotFact,
+                    { borderColor: theme.cardBorder, backgroundColor: theme.background },
+                  ]}>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {t('moneySourcesHeader')}
+                  </ThemedText>
+                  <ThemedText type="smallBold" tabular>
+                    {activeSources.length}
                   </ThemedText>
                 </View>
-              </View>
+              )}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${t('cardsHeader')}, ${cards.length}`}
+                onPress={() => router.push('/cards')}
+                style={({ pressed }) => [
+                  styles.snapshotFact,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : theme.background,
+                  },
+                ]}>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {t('cardsHeader')}
+                </ThemedText>
+                <ThemedText type="smallBold" tabular>
+                  {cards.length}
+                </ThemedText>
+              </Pressable>
             </View>
           </View>
 
-          {currencies.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title={t('walletCurrencies')}
-                right={t('review')}
-                onPressRight={() => router.push('/currency')}
-              />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t('walletCurrencies')}
-                onPress={() => {
-                  tapped();
-                  router.push('/currency');
-                }}
-                style={({ pressed }) => [
-                  styles.summaryLink,
+          {/* Option F's compact snapshot flows into Option D's bank grouping.
+              A bank heading is a display group learned from message senders,
+              never a claim that Wafra is connected to that bank. */}
+          <View style={styles.section}>
+            <SectionHeader
+              title={`${t('moneySourcesHeader')} (${activeSources.length})`}
+              right={t('cardsHeader')}
+              onPressRight={() => router.push('/cards')}
+            />
+
+            {reissues.map((r) => {
+              const fresh = state.accounts.find((a) => a.id === r.newAccountId);
+              const prior = state.accounts.find((a) => a.id === r.candidateIds[0]);
+              if (!fresh || !prior) return null;
+              return (
+                <View
+                  key={r.newAccountId}
+                  style={[
+                    styles.reissue,
+                    {
+                      borderColor: theme.cardBorder,
+                      backgroundColor: theme.backgroundElement,
+                    },
+                  ]}>
+                  <ThemedText type="small">{t('sameCardRenewed')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {tf('renewedCardDetected', {
+                      last4: fresh.last4 ?? '••••',
+                      name: prior.name,
+                    })}
+                  </ThemedText>
+                  <View style={styles.reissueActions}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={tf('linkCardsA11y', {
+                        old: prior.last4 ?? '••••',
+                        next: fresh.last4 ?? '••••',
+                      })}
+                      onPress={() => {
+                        tapped();
+                        mergeRenewedCard(prior.id, fresh.id);
+                      }}
+                      style={[styles.reissueBtn, { backgroundColor: theme.primary }]}>
+                      <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                        {tf('sameAsCard', { last4: prior.last4 ?? '••••' })}
+                      </ThemedText>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={tf('keepCardSeparateA11y', {
+                        last4: fresh.last4 ?? '••••',
+                      })}
+                      onPress={() => {
+                        tapped();
+                        markCardsDistinct(fresh.id);
+                      }}
+                      style={[
+                        styles.reissueBtn,
+                        { borderWidth: 1, borderColor: theme.cardBorder },
+                      ]}>
+                      <ThemedText type="nano" themeColor="textSecondary">
+                        {t('differentCard')}
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })}
+
+            {visibleInstitutionGroups.map((group) => (
+              <View
+                key={group.key}
+                style={[
+                  styles.institutionGroup,
                   {
+                    backgroundColor: theme.backgroundElement,
                     borderColor: theme.cardBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
                   },
                 ]}>
-                <View style={[styles.summaryIcon, { backgroundColor: theme.primarySoft }]}>
-                  <Icon name="plane" size={17} color={theme.primary} />
-                </View>
-                <View style={styles.summaryCopy}>
-                  <ThemedText type="smallBold">{t('currencyActivityTitle')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
-                    {currencies.slice(0, 3).map((group) => group.currency).join(' · ')}
-                  </ThemedText>
-                </View>
-                <ThemedText type="smallBold" tabular numberOfLines={1}>
-                  {formatAED(currenciesTotalFils, { decimals: false })}
-                </ThemedText>
-                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-              </Pressable>
-            </View>
-          )}
-
-          {/* Cards */}
-          {cards.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader
-                title={`${t('cardsHeader')} (${cards.length})`}
-                right={t('seeAll')}
-                onPressRight={() => router.push('/cards')}
-              />
-              {/* A card that has a statement but has never been spent on is
-                  almost certainly a reissue: the bank kept the account and
-                  changed the digits, so the history is on the old number and
-                  the bill arrived on the new one. Offered, never done — a
-                  brand-new card looks identical, and merging two real cards
-                  is a corruption the user cannot see. */}
-              {reissues.map((r) => {
-                const fresh = state.accounts.find((a) => a.id === r.newAccountId);
-                const prior = state.accounts.find((a) => a.id === r.candidateIds[0]);
-                if (!fresh || !prior) return null;
-                return (
-                  <View
-                    key={r.newAccountId}
-                    style={[styles.reissue, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-                    <ThemedText type="small">{t('sameCardRenewed')}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">
-                      {tf('renewedCardDetected', { last4: fresh.last4 ?? '••••', name: prior.name })}
-                    </ThemedText>
-                    <View style={styles.reissueActions}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={tf('linkCardsA11y', {
-                          old: prior.last4 ?? '••••',
-                          next: fresh.last4 ?? '••••',
-                        })}
-                        onPress={() => {
-                          tapped();
-                          mergeRenewedCard(prior.id, fresh.id);
-                        }}
-                        style={[styles.reissueBtn, { backgroundColor: theme.primary }]}>
-                        <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                          {tf('sameAsCard', { last4: prior.last4 ?? '••••' })}
-                        </ThemedText>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={tf('keepCardSeparateA11y', { last4: fresh.last4 ?? '••••' })}
-                        onPress={() => {
-                          tapped();
-                          markCardsDistinct(fresh.id);
-                        }}
-                        style={[styles.reissueBtn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
-                        <ThemedText type="nano" themeColor="textSecondary">
-                          {t('differentCard')}
-                        </ThemedText>
-                      </Pressable>
-                    </View>
-                  </View>
-                );
-              })}
-              {featuredCard && (() => {
-                const figure = cardFigure(state, featuredCard, now);
-                const spent = monthSpendByAccount.get(featuredCard.id) ?? 0;
-                const issuer =
-                  cardGroups.find((group) =>
-                    group.accounts.some((account) => account.id === featuredCard.id),
-                  )?.bank ?? featuredCard.name;
-                return (
-                  <Pressable
-                    accessibilityLabel={`${featuredCard.name} ${featuredCard.last4 ?? ''}`}
-                    onLongPress={() => setOptionsFor(featuredCard)}
-                    style={({ pressed }) => [
-                      styles.featuredCard,
-                      {
-                        borderColor: dark ? '#4C7A69' : '#285D4C',
-                        transform: [{ scale: pressed ? 0.985 : 1 }],
-                      },
-                    ]}>
-                    <LinearGradient
-                      pointerEvents="none"
-                      colors={dark ? ['#285D4C', '#183C31', '#152820'] : ['#2D725A', '#1D503F', '#193A30']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={StyleSheet.absoluteFillObject}
+                <View style={styles.institutionHeader}>
+                  <View style={[styles.institutionBadge, { backgroundColor: theme.primarySoft }]}>
+                    <Icon
+                      name={group.hasNamedInstitution ? 'bank' : 'wallet'}
+                      size={15}
+                      color={theme.primary}
                     />
-                    <View pointerEvents="none" style={styles.featuredOrbLarge} />
-                    <View pointerEvents="none" style={styles.featuredOrbSmall} />
-
-                    <View style={styles.featuredTop}>
-                      <View style={styles.featuredIssuer}>
-                        <View style={styles.featuredMark}>
-                          <Icon name="bank" size={15} color="#F7FBF8" strokeWidth={1.9} />
-                        </View>
-                        <ThemedText type="smallBold" numberOfLines={1} style={styles.featuredText}>
-                          {issuer}
-                        </ThemedText>
-                      </View>
-                      <ThemedText type="micro" style={styles.featuredMuted}>
-                        {featuredCard.cardType === 'credit' ? t('credit') : t('debit')}
-                      </ThemedText>
-                    </View>
-
-                    <View style={styles.featuredChip}>
-                      <View style={styles.featuredChipLine} />
-                      <View style={styles.featuredChipLine} />
-                    </View>
-
-                    <View style={styles.featuredBalanceRow}>
-                      <View style={styles.featuredBalanceCopy}>
-                        <ThemedText type="micro" style={styles.featuredMuted}>
-                          {figure.kind === 'owed'
-                            ? t('owed')
-                            : figure.kind === 'balance'
-                              ? t('perBankSms')
-                              : t('noBalanceYet')}
-                        </ThemedText>
-                        <View style={styles.featuredMoney}>
-                          <ThemedText type="micro" style={styles.featuredMuted}>{ledgerCurrencyDisplay()}</ThemedText>
-                          <ThemedText type="heading" tabular style={styles.featuredText}>
-                            {figure.fils === null
-                              ? '—'
-                              : formatAmount(Math.abs(figure.fils), { decimals: false })}
-                          </ThemedText>
-                        </View>
-                      </View>
-                      <ThemedText type="small" tabular style={styles.featuredText}>
-                        •••• {featuredCard.last4 ?? '••••'}
-                      </ThemedText>
-                    </View>
-
-                    <View style={styles.featuredFooter}>
-                      <ThemedText type="meta" numberOfLines={1} style={styles.featuredMuted}>
-                        {featuredCard.name}
-                      </ThemedText>
-                      <View style={styles.featuredSpend}>
-                        <ThemedText type="nano" style={styles.featuredMuted}>
-                          {t('thisMonth')}
-                        </ThemedText>
-                        <ThemedText type="smallBold" tabular numberOfLines={1} style={styles.featuredText}>
-                          {spent > 0
-                            ? formatAED(spent, { decimals: false })
-                            : t('nothingSpentThisMonth')}
-                        </ThemedText>
-                      </View>
-                    </View>
-                  </Pressable>
-                );
-              })()}
-              {/* Grouped under the bank that issued them. Eleven flat rows,
-                  six of them called "FAB Credit Card", told the user nothing
-                  about whether that was six cards or one card the app had
-                  failed to recognise. Under a FAB heading it is obviously
-                  six FAB cards — and if that is wrong, it is obviously
-                  wrong. */}
-              {previewCardGroups.map((group) => {
-                const compactAccounts = group.accounts.filter(
-                  (account) => account.id !== featuredCard?.id,
-                );
-                if (compactAccounts.length === 0) return null;
-                return (
-                <View key={group.bank} style={styles.bankGroup}>
-                  <ThemedText type="micro" themeColor="textTertiary" style={styles.bankName}>
-                    {group.bank}
-                    {compactAccounts.length > 1 ? ` · ${compactAccounts.length}` : ''}
+                  </View>
+                  <ThemedText type="smallBold" style={styles.institutionName}>
+                    {group.name}
                   </ThemedText>
-                  {compactAccounts.map((account, i) => {
-                    const isCredit = account.cardType === 'credit';
-                    // One meaning per row: what you owe, or what you have.
-                    // Spending moves to the second line, where it reads as
-                    // context rather than as money.
-                    const figure = cardFigure(state, account, now);
-                    const spent = monthSpendByAccount.get(account.id) ?? 0;
-                    return (
-                      <Pressable
-                        key={account.id}
-                        onLongPress={() => setOptionsFor(account)}
-                        accessibilityLabel={`${account.name} ${account.last4 ?? ''}`}
-                        style={[
-                          styles.accountRow,
-                          i > 0 && {
-                            borderTopWidth: StyleSheet.hairlineWidth,
-                            borderTopColor: theme.cardBorder,
-                          },
-                        ]}>
-                        <AccountTile account={account} />
-                        <View style={styles.accountInfo}>
-                          <ThemedText type="default" numberOfLines={1}>
-                            {isCredit ? t('credit') : t('debit')}
-                            {account.last4 ? ` ·· ${account.last4}` : ''}
+                  {group.totalCount > 1 && (
+                    <ThemedText type="meta" themeColor="textTertiary" tabular>
+                      {group.totalCount}
+                    </ThemedText>
+                  )}
+                </View>
+
+                {group.accounts.map((account, index) => {
+                  const isCard = account.kind === 'card' || Boolean(account.cardType);
+                  const figure = cardFigure(state, account, now);
+                  const spent = monthSpendByAccount.get(account.id) ?? 0;
+                  const meta = KIND_META[account.kind];
+                  const caption =
+                    figure.kind === 'owed'
+                      ? t('owed')
+                      : figure.fils === null
+                        ? t('noBalanceYet')
+                        : account.snapshotKind === 'balance'
+                          ? t('perBankSms')
+                          : t('trackedManually');
+                  const displayFils =
+                    figure.fils === null
+                      ? null
+                      : figure.kind === 'owed'
+                        ? Math.abs(figure.fils)
+                        : figure.fils;
+                  const activityDescription = isCard
+                    ? spent > 0
+                      ? tf('cardSpentThisMonth', {
+                          amount: formatAED(spent, { decimals: false }),
+                        })
+                      : t('nothingSpentThisMonth')
+                    : `${t(meta.labelKey)}${account.last4 ? ` ·· ${account.last4}` : ''}`;
+                  const figureDescription = displayFils === null
+                    ? caption
+                    : `${ledgerCurrencyDisplay()} ${formatAmount(displayFils, {
+                        decimals: false,
+                      })}. ${caption}`;
+                  const accessibilityActivityDescription = isCard
+                    ? activityDescription
+                    : t(meta.labelKey);
+
+                  return (
+                    <Pressable
+                      key={account.id}
+                      onLongPress={() => setOptionsFor(account)}
+                      accessibilityLabel={`${account.name}${account.last4 ? ` ${account.last4}` : ''}. ${accessibilityActivityDescription}. ${figureDescription}`}
+                      style={[
+                        styles.accountRow,
+                        styles.institutionRow,
+                        index > 0 && {
+                          borderTopWidth: StyleSheet.hairlineWidth,
+                          borderTopColor: theme.cardBorder,
+                        },
+                      ]}>
+                      <AccountTile account={account} />
+                      <View style={styles.accountInfo}>
+                        <ThemedText type="default" numberOfLines={1}>
+                          {account.name}
+                        </ThemedText>
+                        <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                          {activityDescription}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.accountRight}>
+                        <View style={styles.compactMoney}>
+                          <ThemedText type="micro" themeColor="textTertiary">
+                            {ledgerCurrencyDisplay()}
                           </ThemedText>
-                          <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-                            {spent > 0
-                              ? tf('cardSpentThisMonth', {
-                                  amount: formatAED(spent, { decimals: false }),
-                                })
-                              : t('nothingSpentThisMonth')}
-                          </ThemedText>
-                        </View>
-                        <View style={styles.accountRight}>
-                          <View style={styles.compactMoney}>
-                            <ThemedText type="micro" themeColor="textTertiary">{ledgerCurrencyDisplay()}</ThemedText>
-                            <ThemedText
-                              type="smallBold"
-                              tabular
-                              numberOfLines={1}
+                          <ThemedText
+                            type="smallBold"
+                            tabular
+                            numberOfLines={1}
                             style={{
                               color:
                                 figure.kind === 'owed' && (figure.fils ?? 0) > 0
@@ -696,100 +673,47 @@ export default function WalletScreen() {
                                   : theme.text,
                               fontSize: 15,
                             }}>
-                              {figure.fils === null
-                                ? '—'
-                                : formatAmount(Math.abs(figure.fils), { decimals: false })}
-                            </ThemedText>
-                          </View>
-                          <ThemedText type="micro" themeColor="textSecondary">
-                            {figure.kind === 'owed'
-                              ? t('owed')
-                              : figure.kind === 'balance'
-                                ? t('perBankSms')
-                                : t('noBalanceYet')}
+                            {displayFils === null
+                              ? '—'
+                              : formatAmount(displayFils, { decimals: false })}
                           </ThemedText>
                         </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                );
-              })}
-              {cards.length > 4 && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={tf('moreCards', { count: cards.length - 4 })}
-                  onPress={() => {
-                    tapped();
-                    router.push('/cards');
-                  }}
-                  style={({ pressed }) => [
-                    styles.moreCards,
-                    { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
-                  ]}>
-                  <ThemedText type="smallBold" themeColor="primary">
-                    {tf('moreCards', { count: cards.length - 4 })}
-                  </ThemedText>
-                  <Icon name="chevron-right" size={16} color={theme.primary} />
-                </Pressable>
-              )}
-            </View>
-          )}
-
-          {/* Accounts */}
-          <View style={styles.section}>
-            <SectionHeader title={t('accountsHeader')} />
-            <View>
-              {nonCardAccounts.map((account, i) => {
-                const balance = balances.balanceByAccountId[account.id] ?? null;
-                const fromBank = account.snapshotKind === 'balance' && account.snapshotFils !== undefined;
-                const meta = KIND_META[account.kind];
-                return (
-                  <Pressable
-                    key={account.id}
-                    onLongPress={() => setOptionsFor(account)}
-                    style={[
-                      styles.accountRow,
-                      i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-                    ]}>
-                    <AccountTile account={account} />
-                    <View style={styles.accountInfo}>
-                      <ThemedText type="default" numberOfLines={1}>
-                        {account.name}
-                      </ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {t(meta.labelKey)}
-                        {account.last4 ? ` ·· ${account.last4}` : ''}
-                      </ThemedText>
-                    </View>
-                    <View style={styles.accountRight}>
-                      <View style={styles.compactMoney}>
-                        <ThemedText type="micro" themeColor="textTertiary">{ledgerCurrencyDisplay()}</ThemedText>
-                        <ThemedText type="smallBold" tabular numberOfLines={1} style={{ fontSize: 15 }}>
-                          {balance !== null ? formatAmount(balance, { decimals: false }) : '—'}
+                        <ThemedText type="micro" themeColor="textSecondary">
+                          {caption}
                         </ThemedText>
                       </View>
-                      {fromBank ? (
-                        <ThemedText type="micro" themeColor="textSecondary">
-                          {t('perBankSms')}
-                        </ThemedText>
-                      ) : balance === null ? (
-                        <ThemedText type="micro" themeColor="textSecondary">
-                          {t('noBalanceYet')}
-                        </ThemedText>
-                      ) : null}
-                    </View>
-                  </Pressable>
-                );
-              })}
-              {nonCardAccounts.length === 0 && (
-                <ThemedText type="small" themeColor="textSecondary">
-                  {t('noAccountsYet')}
-                </ThemedText>
-              )}
-            </View>
-          </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
 
+            {activeSources.length === 0 && (
+              <ThemedText type="small" themeColor="textSecondary">
+                {t('noMoneySourcesYet')}
+              </ThemedText>
+            )}
+
+            {(hiddenSourceCount > 0 || showAllSources) && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: showAllSources }}
+                onPress={() => setShowAllSources((current) => !current)}
+                style={({ pressed }) => [
+                  styles.moreSources,
+                  { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' },
+                ]}>
+                <ThemedText type="smallBold" themeColor="primary">
+                  {showAllSources
+                    ? t('showFewerSources')
+                    : tf('showMoreSources', { count: hiddenSourceCount })}
+                </ThemedText>
+                <View style={showAllSources ? styles.chevronExpanded : undefined}>
+                  <Icon name="chevron-down" size={16} color={theme.primary} />
+                </View>
+              </Pressable>
+            )}
+          </View>
           {/* Inactive: expired/unused cards and accounts */}
           {inactiveAccounts.length > 0 && (
             <View style={styles.section}>
@@ -1139,99 +1063,6 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
-  featuredCard: {
-    minHeight: 184,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.bottomSheet,
-    padding: Spacing.four,
-    overflow: 'hidden',
-    justifyContent: 'space-between',
-    // A floor on the separation between the four blocks. `space-between` alone
-    // distributes only the SLACK, and there was almost none: 48 of padding plus
-    // ~125 of content inside a 184 minimum left about 3px per gap, so the gold
-    // chip sat directly on top of the OWED label — visible on the first card on
-    // Wallet. With a gap the card grows to fit instead of packing.
-    gap: Spacing.three,
-  },
-  featuredOrbLarge: {
-    position: 'absolute',
-    width: 190,
-    height: 190,
-    borderRadius: 95,
-    borderWidth: 32,
-    borderColor: 'rgba(255,255,255,0.055)',
-    top: -92,
-    right: -58,
-  },
-  featuredOrbSmall: {
-    position: 'absolute',
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    backgroundColor: 'rgba(255,255,255,0.035)',
-    bottom: -52,
-    left: 52,
-  },
-  featuredTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  featuredIssuer: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-  },
-  featuredMark: {
-    width: 30,
-    height: 30,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  featuredChip: {
-    width: 30,
-    height: 23,
-    borderRadius: 6,
-    paddingVertical: 5,
-    justifyContent: 'space-around',
-    backgroundColor: '#D8B873',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.42)',
-  },
-  featuredChipLine: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(72,55,24,0.55)',
-  },
-  featuredBalanceRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  featuredBalanceCopy: { gap: 1 },
-  featuredMoney: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
-  featuredFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  featuredSpend: { flexShrink: 0, alignItems: 'flex-end', gap: 1 },
-  featuredText: { color: '#F7FBF8' },
-  featuredMuted: { color: 'rgba(247,251,248,0.72)' },
-  bankGroup: {
-    paddingTop: Spacing.two,
-  },
-  bankName: {
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-    paddingBottom: Spacing.two - 4,
-  },
   reissue: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.tile,
@@ -1286,32 +1117,21 @@ const styles = StyleSheet.create({
   },
   overviewAmount: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
   aed: { fontSize: 15, lineHeight: 20 },
-  overviewMetrics: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.one,
-  },
-  overviewMetric: {
-    minHeight: 56,
+  snapshotGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    marginHorizontal: -Spacing.two,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.control,
+    flexWrap: 'wrap',
+    gap: Spacing.two,
   },
-  overviewMetricDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderRadius: 0,
+  snapshotFact: {
+    flexBasis: '47%',
+    flexGrow: 1,
+    minHeight: 76,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+    padding: Spacing.three,
+    justifyContent: 'space-between',
+    gap: Spacing.half,
   },
-  metricIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  metricCopy: { flex: 1, minWidth: 0, gap: 1 },
   scan: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1331,8 +1151,8 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   addBtn: {
-    width: 34,
-    height: 34,
+    width: 44,
+    height: 44,
     borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1340,7 +1160,33 @@ const styles = StyleSheet.create({
   section: {
     gap: Spacing.two,
   },
-  moreCards: {
+  institutionGroup: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.sheet,
+    overflow: 'hidden',
+  },
+  institutionHeader: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.three,
+  },
+  institutionBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  institutionName: {
+    flex: 1,
+    minWidth: 0,
+  },
+  institutionRow: {
+    paddingHorizontal: Spacing.three,
+  },
+  moreSources: {
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1349,22 +1195,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.control,
     marginTop: Spacing.one,
   },
-  summaryLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
-    gap: Spacing.two + 2,
+  chevronExpanded: {
+    transform: [{ rotate: '180deg' }],
   },
-  summaryIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryCopy: { flex: 1, minWidth: 0, gap: 1 },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

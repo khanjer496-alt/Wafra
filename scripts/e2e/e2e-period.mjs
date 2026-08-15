@@ -124,7 +124,7 @@ const shortMonth = (offset = 0) => {
 
 // 1) Home opens on the current month, live.
 ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
-ok('home: hero reads live', !!(await visibleText(page, /SAVED SO FAR|OVERSPENT SO FAR/i)));
+ok('home: hero reads live', !!(await visibleText(page, /Net after spending.*so far this month/i)));
 
 // 2) The pill opens the sheet; Last month re-scopes the hero.
 await tapLabel(page, /Reporting period/, 1200);
@@ -135,7 +135,7 @@ ok('home: past month names itself in the hero', !!(await visibleText(page, `in $
 // 3) Flow follows the same period.
 await tapTab(page, 'Flow');
 ok('flow: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
-ok('flow: summary rail states the out total', !!(await visibleText(page, /^Total out$/i)));
+ok('flow: summary rail states total spending', !!(await visibleText(page, /^Total spent$/i)));
 
 // 4) All time from Flow's own pill.
 await tapLabel(page, /Reporting period/, 1200);
@@ -149,14 +149,14 @@ await tapText(page, 'THIS YEAR', 1200);
 const yr = String(new Date().getFullYear());
 ok('home: year mode applies', !!(await visibleText(page, yr)));
 
-await tapLabel(page, 'See all', 1600);
+await tapText(page, 'All activity', 1600);
 ok('activity: header carries the selected scope', !!(await visibleText(page, `· ${yr}`)));
 await tapLabel(page, 'Back', 1200);
 
-// 6) Home's Out cell deep-links to Activity, pre-filtered to spending. Caps
-// are a CSS transform, so the DOM text is still "Out".
-await tapText(page, /^Out$/, 1600);
-ok('activity: Out deep-link arrives pre-filtered', !!(await visibleText(page, /\d+ filters?/i)));
+// 6) Home's Spent cell deep-links to Activity, pre-filtered to spending. Caps
+// are a CSS transform, so the DOM text is still "Spent".
+await tapText(page, /^Spent$/, 1600);
+ok('activity: Spent deep-link arrives pre-filtered', !!(await visibleText(page, /\d+ filters?/i)));
 await tapLabel(page, 'Back', 1200);
 
 // 7) Persistence: a reload must not show onboarding again (chunked storage).
@@ -164,7 +164,7 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 ok('persistence: reload keeps onboarded state',
   !(await visibleText(page, 'Your bank already texts you', 2500)));
-ok('persistence: reload keeps the ledger', !!(await visibleText(page, /Saved|Overspent/i)));
+ok('persistence: reload keeps the ledger', !!(await visibleText(page, /Net after spending/i)));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

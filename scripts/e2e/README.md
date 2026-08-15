@@ -40,7 +40,7 @@ Settings means pressing all 28 bars of the money-month picker, so the app is
 left reporting a month that starts on the 28th. `resetPreferences()` runs
 after that sweep for exactly this reason — without it the arithmetic
 assertions read an empty month and pass vacuously ("the hero equals In minus
-Out (0 − 0 = 0)").
+Spent (0 − 0 = 0)").
 
 Both expect the app on http://localhost:8126 and chromium at
 /opt/pw-browsers/chromium (set executablePath for other machines).

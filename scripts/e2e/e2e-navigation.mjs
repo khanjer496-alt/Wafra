@@ -336,7 +336,7 @@ await pressEverything('bills · subs', bills);
 await pressEverything('bills · cards', async () => { await bills(); await tapKey(page, 'Cards 1'); await page.waitForTimeout(700); });
 await pressEverything('bills · fixed', async () => { await bills(); await tapKey(page, 'Fixed 6'); await page.waitForTimeout(700); });
 await pressEverything('wallet', wallet);
-await pressEverything('transactions', async () => { await home(); await tapKey(page, 'See all'); await page.waitForTimeout(1200); });
+await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForTimeout(1200); });
 await pressEverything('settings', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1300); },
   // Erasing the ledger is the one control here the sweep must not press.
   // Country and Language are back in: they used to be one-tap cycles that
@@ -355,7 +355,7 @@ await pressEverything('settings', async () => { await home(); await tapKey(page,
  * which "Jul 2026" runs 28 Jun to 27 Jul and today is its last day. Every
  * arithmetic assertion below reads a different month than the one the seed was
  * written for, which is how a green sweep produced "the hero equals In minus
- * Out (0 − 0 = 0)".
+ * Spent (0 − 0 = 0)".
  */
 const resetPreferences = async () => {
   await page.evaluate(() => {
@@ -369,7 +369,7 @@ const resetPreferences = async () => {
   await reload();
 };
 await resetPreferences();
-await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'See all'); await page.waitForTimeout(1300); });
+await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'Cards'); await page.waitForTimeout(1300); });
 await pressEverything('pro', async () => {
   await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200);
   await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
@@ -447,9 +447,9 @@ const goesTo = async (name, enter, key, pattern) => {
 };
 
 await goesTo('home: the In cell opens income', home, 'In', /type=income/);
-await goesTo('home: the Out cell opens spending', home, 'Out', /type=expense/);
+await goesTo('home: the Spent cell opens spending', home, 'Spent', /type=expense/);
 await goesTo('home: "All activity" opens the ledger', home, 'All activity', /^\/transactions/);
-await goesTo('home: the search action opens the ledger', home, 'See all', /^\/transactions/);
+await goesTo('home: the search action opens the ledger', home, 'Search merchants or categories', /^\/transactions/);
 await goesTo('home: the sliders action opens settings', home, 'Settings', /^\/settings/);
 await goesTo('flow: a composition row drills into its category', flow, 'Rent, see entries', /category=rent/);
 await flow();
@@ -463,7 +463,7 @@ if (pooledSlice) {
 } else {
   ok('flow: the pooled slice is absent only when every category is shown', true);
 }
-await goesTo('wallet: "See all" opens the cards screen', wallet, 'See all', /^\/cards/);
+await goesTo('wallet: the Cards action opens the cards screen', wallet, 'Cards', /^\/cards/);
 await goesTo('wallet: the scan block opens the import screen', wallet, 'Paste a bank message', /^\/import-sms/);
 await goesTo('settings: Wafra Pro opens the paywall',
   async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
@@ -471,14 +471,18 @@ await goesTo('settings: Wafra Pro opens the paywall',
 await goesTo('settings: "Improve accuracy" opens the report screen',
   async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
   'Improve accuracy', /^\/accuracy/);
+await goesTo('settings: "Send feedback" opens the feedback screen',
+  async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
+  'Send feedback', /^\/feedback/);
 
 /* ── 4. Back gets you out of every pushed screen ──────────────────────── */
 
 for (const [name, enter] of [
-  ['transactions', async () => { await home(); await tapKey(page, 'See all'); }],
+  ['transactions', async () => { await home(); await tapKey(page, 'All activity'); }],
   ['settings', async () => { await home(); await tapKey(page, 'Settings'); }],
-  ['cards', async () => { await wallet(); await tapKey(page, 'See all'); }],
+  ['cards', async () => { await wallet(); await tapKey(page, 'Cards'); }],
   ['import-sms', async () => { await wallet(); await tapKey(page, 'Paste a bank message'); }],
+  ['feedback', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); await tapKey(page, 'Send feedback'); }],
 ]) {
   await enter();
   await page.waitForTimeout(1300);
@@ -493,7 +497,7 @@ for (const [name, enter] of [
 
 /**
  * Home's hero is three figures that have to be one arithmetic. It once read
- * "63,039 in, 8,815 out, saved 54,223" — a subtraction off by one, in 40px
+ * "63,039 in, 8,815 spent, net 54,223" — a subtraction off by one, in 40px
  * type, because each cell rounded itself and the net was measured separately.
  */
 {
@@ -501,18 +505,18 @@ for (const [name, enter] of [
   const t = await paintedText(page);
   const hero = t.find((x) => /^[\d,]+$/.test(x.t) && x.h > 34);
   const inCell = t.find((x) => /^in$/i.test(x.t));
-  const outCell = t.find((x) => /^out$/i.test(x.t));
+  const spentCell = t.find((x) => /^spent$/i.test(x.t));
   const figureUnder = (label) => {
     if (!label) return NaN;
     const c = t.filter((x) => /^[\d,]+$/.test(x.t) && x.y > label.y && x.y < label.y + 60
       && Math.abs(x.x - label.x) < 40);
     return c.length ? money(c[0].t) : NaN;
   };
-  const inFils = figureUnder(inCell), outFils = figureUnder(outCell);
+  const inFils = figureUnder(inCell), spentFils = figureUnder(spentCell);
   // Both cells have to carry a real figure, or "0 − 0 = 0" passes and says
   // nothing — which is exactly what it did when the month had been moved.
-  ok(`home: the hero equals In minus Out (${inFils} − ${outFils} = ${money(hero?.t ?? '')})`,
-    !!hero && inFils > 0 && outFils > 0 && money(hero.t) === inFils - outFils);
+  ok(`home: the hero equals In minus Spent (${inFils} − ${spentFils} = ${money(hero?.t ?? '')})`,
+    !!hero && inFils > 0 && spentFils > 0 && money(hero.t) === inFils - spentFils);
 }
 
 /**
@@ -549,14 +553,14 @@ for (const [name, enter] of [
     !!spent && rows.length > 0 && money(spent) === sum);
 }
 
-/** Wallet's focal figure must remain readable after the width-safe money split. */
+/** Wallet's focal available-balance figure must remain readable. */
 {
   await wallet();
   const t = await paintedText(page);
-  const label = t.find((x) => /^net worth$/i.test(x.t));
-  const worth = label && t.find((x) => x.y > label.y && x.y < label.y + 70 && /^[\d,]+$/.test(x.t) && x.h > 30);
-  ok(`wallet: net worth remains a complete width-safe figure (${worth?.t})`,
-    !!worth && money(worth.t) > 0 && !worth.clipped);
+  const label = t.find((x) => /^available across accounts$/i.test(x.t));
+  const balance = label && t.find((x) => x.y > label.y && x.y < label.y + 130 && /^[\d,]+$/.test(x.t) && x.h > 30);
+  ok(`wallet: the available balance remains a complete width-safe figure (${balance?.t})`,
+    !!balance && money(balance.t) > 0 && !balance.clipped);
 }
 
 /* ── 6. Arabic ────────────────────────────────────────────────────────── */
@@ -702,7 +706,7 @@ for (const [name, enter] of [
     };
     const tab = leaf('Bills');
     return {
-      card: surfaceAbove(leaf('Total out')),
+      card: surfaceAbove(leaf('Total spent')),
       ink: tab ? getComputedStyle(tab).color : null,
     };
   });

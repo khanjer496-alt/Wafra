@@ -867,6 +867,43 @@ export default function SettingsScreen() {
     </Row>
   );
   const trial = trialDaysLeft(state);
+  const captureAvailable = isSmsScanningAvailable() || isRelayPlatform();
+  const captureActive = !state.privateMode && !state.captureOptOut && (
+    isSmsScanningAvailable()
+      ? smsGranted
+      : relay?.setupState === 'verified'
+  );
+  const captureStatus = state.privateMode || state.captureOptOut
+    ? t('settingStatusOff')
+    : isSmsScanningAvailable()
+      ? t(smsGranted ? 'settingStatusOn' : 'settingStatusOff')
+      : relay === undefined
+        ? t('settingStatusChecking')
+        : relay?.setupState === 'verified'
+          ? t('settingStatusOn')
+          : t('settingStatusSetup');
+  const statusFacts = [
+    {
+      key: 'summary',
+      label: t('dailySummarySetting'),
+      value: t(state.dailySummary ? 'settingStatusOn' : 'settingStatusOff'),
+      active: state.dailySummary,
+    },
+    ...(captureAvailable
+      ? [{
+          key: 'capture',
+          label: t('automaticCapture'),
+          value: captureStatus,
+          active: captureActive,
+        }]
+      : []),
+    {
+      key: 'private',
+      label: t('privateMode'),
+      value: t(state.privateMode ? 'settingStatusOn' : 'settingStatusOff'),
+      active: state.privateMode,
+    },
+  ];
 
   return (
     <ThemedView style={styles.root}>
@@ -900,6 +937,40 @@ export default function SettingsScreen() {
             </Block>
           </Section>
 
+          <Section index={1}>
+            <SectionHeader title={t('settingsStatusHeader')} />
+            <Block style={styles.statusGrid}>
+              {statusFacts.map((fact) => (
+                <View
+                  key={fact.key}
+                  accessible
+                  accessibilityLabel={`${fact.label}: ${fact.value}`}
+                  style={[styles.statusFact, { backgroundColor: theme.backgroundSelected }]}>
+                  <ThemedText type="meta" themeColor="textSecondary" numberOfLines={2}>
+                    {fact.label}
+                  </ThemedText>
+                  <View
+                    style={[
+                      styles.statusPill,
+                      { backgroundColor: fact.active ? theme.primarySoft : theme.backgroundElement },
+                    ]}>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        { backgroundColor: fact.active ? theme.primary : theme.textTertiary },
+                      ]}
+                    />
+                    <ThemedText
+                      type="micro"
+                      style={{ color: fact.active ? theme.primary : theme.textSecondary }}>
+                      {fact.value}
+                    </ThemedText>
+                  </View>
+                </View>
+              ))}
+            </Block>
+          </Section>
+
           {/* Notifications, out of "Privacy" and up here.
               A 9pm digest of what you spent is not a privacy setting by any
               reading, and neither is a per-charge banner — they were filed
@@ -908,7 +979,7 @@ export default function SettingsScreen() {
               people actually open this screen to do, so it goes above the
               things they do twice a year. The group carries no header until
               one exists in both languages; the rows say what they are. */}
-          <Section index={1}>
+          <Section index={2}>
             {switchRow(
               t('dailySummarySetting'),
               state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
@@ -956,7 +1027,17 @@ export default function SettingsScreen() {
               )}
           </Section>
 
-          <Section index={2}>
+          <Section index={3}>
+            <SectionHeader title={t('supportHeader')} />
+            {linkRow(
+              t('sendFeedback'),
+              t('sendFeedbackDetail'),
+              () => router.push('/feedback'),
+              { last: true },
+            )}
+          </Section>
+
+          <Section index={4}>
             <SectionHeader title={t('privacyHeader')} />
             {switchRow(
               t('privateMode'),
@@ -1031,7 +1112,7 @@ export default function SettingsScreen() {
             </Block>
           </Section>
 
-          <Section index={3}>
+          <Section index={5}>
             <SectionHeader title={t('dataHeader')} />
             {/* Review and the two "teach the app" chores first: each carries a
                 live state, each is why someone opens this section on an
@@ -1088,23 +1169,13 @@ export default function SettingsScreen() {
                   });
                 },
               )}
-            {/* Directly under "Improve accuracy", because it is the same
-                errand one step further on: that screen tells you WHAT the app
-                read wrong and hands you a diagnostic, and this one is how the
-                diagnostic reaches somebody who can fix it. Free, and not
-                gated: a bug report is not a feature, and a paywall on the only
-                channel back from the user would cost far more than it earns.
-                The sub-line names the choice rather than promising anything,
-                because the whole design of that screen is that nothing is
-                attached until the user picks it. */}
-            {linkRow(t('sendFeedback'), t('sendFeedbackDetail'), () => router.push('/feedback'))}
             {linkRow(t('backupJson'), null, gated(backupJson), { pro: true })}
             {linkRow(t('restoreBackup'), null, gated(restoreFromFile), { pro: true })}
             {linkRow(t('exportCsv'), null, exportCsv)}
             {linkRow(t('exportExpensePdf'), null, () => setReportScopeSheet(true), { last: true })}
           </Section>
 
-          <Section index={4}>
+          <Section index={6}>
             <SectionHeader title={t('appearanceHeader')} />
             <Block>
               {/* The handoff said to follow the OS and offer no picker. That is
@@ -1132,7 +1203,7 @@ export default function SettingsScreen() {
             </Block>
           </Section>
 
-          <Section index={5}>
+          <Section index={7}>
             <SectionHeader title={t('regionHeader')} />
             {hasGlobalLedger ? (
               <Row>
@@ -1158,7 +1229,7 @@ export default function SettingsScreen() {
             })}
           </Section>
 
-          <Section index={6} style={styles.about}>
+          <Section index={8} style={styles.about}>
             <WafraMark size={34} />
             <ThemedText type="default" themeColor="textSecondary">
               {t('settingsTagline')}
@@ -1178,7 +1249,7 @@ export default function SettingsScreen() {
               here", and the gap above it is there to be crossed deliberately.
               The confirmation copy behind it is untouched; it is the best
               writing on the screen. */}
-          <Section index={7} style={styles.danger}>
+          <Section index={9} style={styles.danger}>
             <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
           </Section>
         </ScrollView>
@@ -1249,6 +1320,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
+  },
+  statusGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  statusFact: {
+    flexBasis: 92,
+    flexGrow: 1,
+    minHeight: 82,
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    borderRadius: 12,
+    padding: Spacing.two,
+  },
+  statusPill: {
+    minHeight: 26,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+    borderRadius: 999,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   rowText: {
     flex: 1,
