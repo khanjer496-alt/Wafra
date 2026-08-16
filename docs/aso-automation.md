@@ -51,6 +51,13 @@ art.
 Install a current Ruby and run `bundle install`. The system Ruby bundled with
 macOS may be too old for current Fastlane releases.
 
+For Apple, the preferred workflow is the pinned App Store Connect CLI described
+in [`app-store-connect-cli.md`](./app-store-connect-cli.md). It provides local
+validation, remote dry runs, TestFlight diagnostics, subscription inventory,
+and guarded metadata/screenshot uploads. The Fastlane Apple lane remains a
+transition fallback until the first authenticated `asc` dry run and live
+read-back have both succeeded. Fastlane remains the Google Play uploader.
+
 Apple requires `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_FILE`. Google requires
 `GOOGLE_PLAY_JSON_KEY`, pointing to a least-privilege service-account JSON file.
 Do not commit either credential.
