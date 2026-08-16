@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  type AccessibilityRole,
 } from 'react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,7 +17,7 @@ import { StorageRecovery } from '@/components/storage-recovery';
 import { ThemedText } from '@/components/themed-text';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
@@ -30,6 +31,13 @@ import {
 import { committed, tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
+import {
+  BUDGET_PRESETS,
+  DEFAULT_ONBOARDING_PLAN,
+  GOAL_PRESETS,
+  type OnboardingBudgetId,
+  type OnboardingGoalId,
+} from '@/lib/onboarding';
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
@@ -37,9 +45,12 @@ import NotificationReader from '../../modules/notification-reader';
 
 type Step =
   | 'welcome'
+  | 'goals'
+  | 'budget'
   | 'capture'
   | 'scanning'
   | 'complete';
+const QUESTION_STEPS: readonly Step[] = ['goals', 'budget', 'capture'];
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
@@ -142,7 +153,70 @@ function StartOption({
   );
 }
 
-function BackHeader({ onBack }: { onBack: () => void }) {
+function SelectionRow({
+  title,
+  detail,
+  icon,
+  selected,
+  onPress,
+  role = 'radio',
+  hint,
+}: {
+  title: string;
+  detail: string;
+  icon: IconName;
+  selected: boolean;
+  onPress: () => void;
+  role?: AccessibilityRole;
+  hint?: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole={role}
+      accessibilityLabel={`${title}. ${detail}`}
+      accessibilityHint={hint}
+      accessibilityState={role === 'checkbox' ? { checked: selected } : { selected }}
+      onPress={() => {
+        tapped();
+        onPress();
+      }}
+      style={({ pressed }) => [
+        styles.choice,
+        {
+          backgroundColor: selected ? night.primarySoft : night.backgroundElement,
+          borderColor: selected ? night.primary : night.cardBorder,
+          opacity: pressed ? 0.82 : 1,
+          transform: [{ scale: pressed ? 0.99 : 1 }],
+        },
+      ]}>
+      <View
+        style={[
+          styles.choiceIcon,
+          { backgroundColor: selected ? night.primary : night.backgroundSelected },
+        ]}>
+        <Icon name={icon} size={19} color={selected ? night.onPrimary : night.textSecondary} />
+      </View>
+      <View style={styles.choiceCopy}>
+        <ThemedText style={styles.choiceTitle}>{title}</ThemedText>
+        <ThemedText style={styles.choiceDetail}>{detail}</ThemedText>
+      </View>
+      <View
+        style={[
+          styles.selectionMark,
+          {
+            backgroundColor: selected ? night.primary : 'transparent',
+            borderColor: selected ? night.primary : night.cardBorderStrong,
+          },
+        ]}>
+        {selected && <Icon name="check" size={13} color={night.onPrimary} strokeWidth={2.2} />}
+      </View>
+    </Pressable>
+  );
+}
+
+function BackHeader({ step, onBack }: { step: Step; onBack: () => void }) {
+  const index = QUESTION_STEPS.indexOf(step);
+  const visibleIndex = index < 0 ? QUESTION_STEPS.length - 1 : index;
   return (
     <View style={styles.progressHeader}>
       <View style={styles.progressTopline}>
@@ -158,6 +232,26 @@ function BackHeader({ onBack }: { onBack: () => void }) {
           <Icon name="chevron-left" size={18} color={night.textSecondary} />
           <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
         </Pressable>
+        <ThemedText style={styles.stepLabel}>
+          {tf('onboardStepOf', { step: visibleIndex + 1, total: QUESTION_STEPS.length })}
+        </ThemedText>
+      </View>
+      <View
+        style={styles.progressTrack}
+        accessibilityRole="progressbar"
+        accessibilityValue={{ min: 1, max: QUESTION_STEPS.length, now: visibleIndex + 1 }}>
+        {QUESTION_STEPS.map((item, itemIndex) => (
+          <View
+            key={item}
+            style={[
+              styles.progressSegment,
+              {
+                backgroundColor:
+                  itemIndex <= visibleIndex ? night.primary : night.backgroundSelected,
+              },
+            ]}
+          />
+        ))}
       </View>
     </View>
   );
@@ -184,9 +278,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     stageReviewAlerts,
     setMarket,
     setOnboarded,
+    setOnboardingPlan,
     setCaptureOptOut,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
+  const [plan, setPlan] = useState(() => ({
+    ...DEFAULT_ONBOARDING_PLAN,
+    goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds],
+  }));
+  const [goalLimitAnnounced, setGoalLimitAnnounced] = useState(false);
   const [progress, setProgress] = useState({ scanned: 0, found: 0 });
   const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
   const [smsDenied, setSmsDenied] = useState(false);
@@ -217,6 +317,25 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const notifAvailable = Platform.OS === 'android' &&
     NotificationReader?.isAvailable?.() === true;
 
+  const chooseGoal = (id: OnboardingGoalId) => {
+    setGoalLimitAnnounced(false);
+    setPlan((current) => {
+      if (current.goalIds.includes(id)) {
+        return { ...current, goalIds: current.goalIds.filter((goalId) => goalId !== id) };
+      }
+      if (current.goalIds.length >= 2) {
+        setGoalLimitAnnounced(true);
+        return current;
+      }
+      return { ...current, goalIds: [...current.goalIds, id] };
+    });
+  };
+
+  const finishPreferences = () => {
+    setOnboardingPlan(plan);
+    setStep('capture');
+  };
+
   const startScan = async () => {
     setSmsDenied(false);
     let granted = false;
@@ -243,6 +362,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         parsed,
         reviewCandidates,
         newestTs,
+        inboxHistoryComplete,
         detectedLaunchMarket,
         commit,
       } = await scanInbox(0, {}, (scanned, found) => setProgress({ scanned, found }));
@@ -258,7 +378,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         detectedLaunchMarket ? { ...state, marketId: detectedLaunchMarket } : state,
         newestTs,
       );
-      await importBatch(importPlan.batch).durable;
+      if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
+      await importBatch({ ...importPlan.batch, parserRereadComplete: true }).durable;
       await commit();
       setResult({ tx: importPlan.txCount, accounts: importPlan.newAccountCount });
       setCompletionOutcome('automatic');
@@ -347,11 +468,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   };
 
   const goBack = () => {
+    const index = QUESTION_STEPS.indexOf(activeStep);
     if (activeStep === 'complete') {
       setStep('capture');
       if (params.onboarding) router.setParams({ onboarding: undefined });
     } else if (activeStep === 'scanning') {
       setStep('capture');
+    } else if (index > 0) {
+      setStep(QUESTION_STEPS[index - 1]);
     } else {
       setStep('welcome');
     }
@@ -440,7 +564,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               <View style={styles.welcomeActions}>
                 <Button
                   label={t('onboardPersonalizeCta')}
-                  onPress={() => setStep('capture')}
+                  onPress={() => setStep('goals')}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
                 />
@@ -452,12 +576,104 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             </Animated.ScrollView>
           ) : (
             <>
-              {activeStep !== 'scanning' && <BackHeader onBack={goBack} />}
+              {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack} />}
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
                 <Animated.View key={activeStep} entering={entering} style={styles.questionBody}>
+                  {activeStep === 'goals' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardGoalsTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>
+                          {t('onboardGoalsBody')}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.choiceList}>
+                        {GOAL_PRESETS.map((preset) => (
+                          <SelectionRow
+                            key={preset.id}
+                            title={t(preset.titleKey)}
+                            detail={t(preset.detailKey)}
+                            icon={preset.icon}
+                            selected={plan.goalIds.includes(preset.id)}
+                            onPress={() => chooseGoal(preset.id)}
+                            role="checkbox"
+                            hint={t('onboardGoalSelectionHint')}
+                          />
+                        ))}
+                      </View>
+                      {goalLimitAnnounced && (
+                        <ThemedText
+                          accessibilityLiveRegion="polite"
+                          style={[styles.inlineNote, { color: night.warning }]}>
+                          {t('onboardGoalMax')}
+                        </ThemedText>
+                      )}
+                      <View style={styles.questionActions}>
+                        <Button
+                          label={t('continueWord')}
+                          disabled={plan.goalIds.length === 0}
+                          onPress={() => setStep('budget')}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
+                  {activeStep === 'budget' && (
+                    <>
+                      <View style={styles.questionTop}>
+                        <ThemedText style={styles.questionTitle} accessibilityRole="header">
+                          {t('onboardBudgetTitle')}
+                        </ThemedText>
+                        <ThemedText style={styles.questionBodyCopy}>
+                          {t('onboardBudgetBody')}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.choiceList}>
+                        {BUDGET_PRESETS.map((preset) => {
+                          const icon: IconName = preset.id === 'essentials'
+                            ? 'lock'
+                            : preset.id === 'balanced'
+                              ? 'target'
+                              : 'spark';
+                          return (
+                            <SelectionRow
+                              key={preset.id}
+                              title={t(preset.titleKey)}
+                              detail={t(preset.detailKey)}
+                              icon={icon}
+                              selected={plan.budgetId === preset.id}
+                              onPress={() => setPlan((current) => ({
+                                ...current,
+                                budgetId: preset.id as OnboardingBudgetId,
+                              }))}
+                            />
+                          );
+                        })}
+                      </View>
+                      <View style={styles.deferredPlanNote}>
+                        <Icon name="lock" size={16} color={night.primary} />
+                        <ThemedText style={styles.deferredPlanText}>
+                          {t('onboardPlanActivatesLater')}
+                        </ThemedText>
+                      </View>
+                      <View style={styles.questionActions}>
+                        <Button
+                          label={t('onboardBudgetContinue')}
+                          onPress={finishPreferences}
+                          labelColor={night.onPrimary}
+                          style={styles.primaryButton}
+                        />
+                      </View>
+                    </>
+                  )}
+
                   {activeStep === 'capture' && (
                     <>
                       <View style={styles.captureHero}>
@@ -611,6 +827,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             </View>
                           </View>
                         )}
+                        {state.onboardingPlan && (
+                          <View style={styles.deferredPlanNote}>
+                            <Icon name="target" size={16} color={night.primary} />
+                            <ThemedText style={styles.deferredPlanText}>
+                              {t('onboardPlanPending')}
+                            </ThemedText>
+                          </View>
+                        )}
                       </View>
 
                       <View style={styles.captureActions}>
@@ -722,7 +946,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     paddingBottom: Spacing.two,
   },
-  previewOverline: { color: night.textTertiary, fontFamily: Fonts.sansSemi, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
+  previewOverline: { color: night.textTertiary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.7 },
   livePill: {
     alignSelf: 'stretch',
     minHeight: 24,
@@ -734,7 +958,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     backgroundColor: night.primarySoft,
   },
-  liveLabel: { flexShrink: 1, color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 9, lineHeight: 14, letterSpacing: 0.6 },
+  liveLabel: { flexShrink: 1, color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.5 },
   previewRows: { paddingHorizontal: Spacing.three },
   previewRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   previewRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: night.cardBorder },
@@ -766,8 +990,12 @@ const styles = StyleSheet.create({
   },
   back: { minHeight: 44, flexDirection: 'row', gap: 4, alignItems: 'center' },
   backLabel: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 12 },
+  stepLabel: { color: night.textTertiary, fontFamily: Fonts.monoMedium, fontSize: 11 },
+  progressTrack: { flexDirection: 'row', gap: 5 },
+  progressSegment: { flex: 1, height: 3, borderRadius: 2 },
   scrollContent: { flexGrow: 1, paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four },
   questionBody: { flex: 1, paddingTop: Spacing.five },
+  questionTop: { gap: Spacing.two, marginBottom: Spacing.four },
   questionTitle: {
     fontFamily: Fonts.sansSemi,
     fontSize: 29,
@@ -776,6 +1004,46 @@ const styles = StyleSheet.create({
     color: night.text,
   },
   questionBodyCopy: { color: night.textSecondary, fontSize: 14, lineHeight: 22 },
+  choiceList: { gap: Spacing.two + 2 },
+  choice: {
+    minHeight: 76,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three - 2,
+  },
+  choiceIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: Radius.tile,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  choiceCopy: { flex: 1, minWidth: 0, gap: 2 },
+  choiceTitle: { color: night.text, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 20 },
+  choiceDetail: { color: night.textTertiary, fontSize: 11.5, lineHeight: 17 },
+  selectionMark: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  questionActions: { marginTop: 'auto', paddingTop: Spacing.five },
+  deferredPlanNote: {
+    marginTop: Spacing.three,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    borderRadius: Radius.md,
+    padding: Spacing.three,
+    backgroundColor: night.primarySoft,
+  },
+  deferredPlanText: { flex: 1, color: night.textSecondary, fontSize: 12, lineHeight: 18 },
   inlineNote: { marginTop: Spacing.three, fontSize: 12, lineHeight: 18 },
   permissionRecovery: { gap: Spacing.two, width: '100%' },
   primaryButton: { marginTop: Spacing.four, backgroundColor: night.primary },
@@ -817,7 +1085,7 @@ const styles = StyleSheet.create({
   startOptionTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
   startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 12, lineHeight: 18 },
   recommendedPill: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: Radius.full, backgroundColor: night.primary },
-  recommendedText: { color: night.onPrimary, fontFamily: Fonts.sansSemi, fontSize: 8.5, letterSpacing: 0.35 },
+  recommendedText: { color: night.onPrimary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.3 },
   scanning: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   scanStats: {
     width: '100%',
@@ -831,7 +1099,7 @@ const styles = StyleSheet.create({
   },
   scanStat: { flex: 1, alignItems: 'center', gap: Spacing.one },
   scanNumber: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 24, fontVariant: ['tabular-nums'] },
-  scanLabel: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 10.5, textAlign: 'center' },
+  scanLabel: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   scanDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.cardBorder },
   completeHero: { gap: Spacing.three, alignItems: 'flex-start' },
   completeMark: {

@@ -272,8 +272,8 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2200);
 
 // ── Home ──────────────────────────────────────────────────────────────
-ok('home hero states the saved result', !!(await visibleText(page, /Saved so far this month/i)));
-ok('home splits in and out', !!(await visibleText(page, /^OUT$/i)));
+ok('home hero states the net result', !!(await visibleText(page, /Net after spending/i)));
+ok('home splits income and spending', !!(await visibleText(page, /^SPENT$/i)));
 ok('home lists what leaves next', !!(await visibleText(page, /LEAVING IN \d+ DAYS/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 
@@ -386,7 +386,7 @@ await tapTab(page, 'Flow');
 ok('flow titles the screen', !!(await visibleText(page, /^Flow$/)));
 ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 /**
- * The "Out AED X" heading and the composition list beneath it are the same
+ * The "Total spent AED X" heading and the composition list beneath it are the same
  * quantity: the list covers 100% of the total, tail pooled into "N more". So
  * the heading has to be totalled the way the rows are SHOWN — rounding once
  * over rows that each round themselves is how three categories of AED 10.50
@@ -395,7 +395,7 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 {
   const tiles = await compTiles(page);
   const t = await paintedText(page);
-  // "Out AED 11,375 · …" is one paragraph; the figure is its first AED run,
+  // "Total spent AED 11,375 · …" is one paragraph; the figure is its first AED run,
   // and it sits above the composition bar.
   const heading = t.find((x) => /^AED [\d,]+$/.test(x.t) && x.y < 110);
   const rows = t.filter((x) => /^[\d,]+$/.test(x.t));
@@ -413,7 +413,7 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
     return on.length ? money(on[on.length - 1].t) : NaN;
   });
   const sum = perTile.reduce((a, b) => a + b, 0);
-  ok(`flow: the Out heading equals the category rows (${heading?.t} vs ${sum})`,
+  ok(`flow: the Total spent heading equals the category rows (${heading?.t} vs ${sum})`,
     !!heading && perTile.length > 0 && perTile.every(Number.isFinite) && money(heading.t) === sum);
 
   // The glyph on a ramp tile is a graphical object: 3:1 or it is decoration.
@@ -424,7 +424,7 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
     tiles.length > 0 && tiles.every((x) => x.contrast >= 3));
 }
 
-ok('flow shows the six-month pair chart', !!(await visibleText(page, /IN VS OUT/i)));
+ok('flow shows the six-month pair chart', !!(await visibleText(page, /INCOME VS SPENT · 6 MONTHS/i)));
 
 // Bring the chart body itself into view. Finding the section heading is not
 // enough on a phone viewport: the header can sit just above the floating tab
@@ -441,7 +441,7 @@ await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
   const t = await paintedText(page);
   const months = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i;
   const cols = t.filter((x) => months.test(x.t)).sort((a, b) => a.x - b.x);
-  // The pair is written once above its column; the month sits under the bars.
+  // The pair is stacked above its column; the month sits under the bars.
   const above = (x) => cols.length && x.y < cols[0].y && x.y > cols[0].y - 200;
   const values = t.filter((x) => /^[\d.]+[kM]?$/.test(x.t) && above(x));
   // A month with no ledger at all writes one em dash, not two zeros: two
@@ -461,7 +461,7 @@ await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
  * one month would show a set that cannot add up to it.
  *
  * Read off the row ELEMENT, not off screen coordinates: every screen stays
- * mounted, so Home's "Out 12,465" sits at the same y as a Flow row and a
+ * mounted, so Home's "Spent 12,465" sits at the same y as a Flow row and a
  * coordinate scan picks it up first.
  */
 {
@@ -532,24 +532,43 @@ await tapText(page, /Subs \d/i, 900);
     t.filter((x) => x.clipped).length === 0);
 }
 
-// The subscription sheet prints "Total paid" directly above the charges it is
-// the total of, so the same rule applies as on Flow: total it the way the
-// rows are shown, or the column visibly fails to add up.
+// The subscription sheet prints "Total paid" above a scrollable history. Sum
+// the complete scroll region, not only the rows currently inside the viewport:
+// a correct lifetime total must include the rows the user can reach by scrolling.
 await tapText(page, /^Netflix$/, 1400);
 {
   const t = await paintedText(page);
   const label = t.find((x) => /^total paid$/i.test(x.t));
   const total = label && t.find((x) => x.y > label.y && x.y < label.y + 40 && /^AED/.test(x.t));
-  const history = t.find((x) => /^history$/i.test(x.t));
-  const charges = history ? t.filter((x) => x.y > history.y && /^AED [\d,]+$/.test(x.t)).map((x) => money(x.t)) : [];
+  const chargeTexts = await page.evaluate(() => {
+    const history = [...document.querySelectorAll('div,span')].find((node) => {
+      if (node.children.length || !/^history$/i.test((node.textContent || '').trim())) return false;
+      const box = node.getBoundingClientRect();
+      return box.width > 0 && box.height > 0;
+    });
+    if (!history) return [];
+
+    let block = history.parentElement;
+    while (block) {
+      const scroller = [...block.querySelectorAll('div')].find(
+        (node) => node.scrollHeight > node.clientHeight + 4,
+      );
+      if (scroller) {
+        return [...scroller.querySelectorAll('div,span')]
+          .filter((node) => node.children.length === 0)
+          .map((node) => (node.textContent || '').trim())
+          .filter((text) => /^AED [\d,]+$/.test(text));
+      }
+      block = block.parentElement;
+    }
+    return [];
+  });
+  const charges = chargeTexts.map((text) => money(text));
   const sum = charges.reduce((a, b) => a + b, 0);
   ok(`bills: the subscription sheet's total equals its history rows (${total?.t} vs ${sum})`,
     !!total && charges.length > 0 && money(total.t) === sum);
 }
-// This sheet's close control carries no accessibility label, so dismiss it
-// the other way it offers: a tap on the backdrop.
-await page.mouse.click(206, 40);
-await page.waitForTimeout(900);
+await tapLabel(page, 'Close', 900);
 
 await tapText(page, /Fixed \d/i, 1200);
 {
@@ -576,13 +595,13 @@ await tapText(page, /Fixed \d/i, 1200);
 
 // ── Wallet ────────────────────────────────────────────────────────────
 await tapTab(page, 'Wallet');
-ok('wallet shows net worth', !!(await visibleText(page, /NET WORTH/i)));
-ok('wallet lists accounts', !!(await visibleText(page, /^ACCOUNTS$/i)));
+ok('wallet shows the available-balance snapshot', !!(await visibleText(page, /AVAILABLE ACROSS ACCOUNTS/i)));
+ok('wallet groups accounts and cards as money sources', !!(await visibleText(page, /MONEY SOURCES/i)));
 ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
 
 // ── Activity ──────────────────────────────────────────────────────────
 await tapTab(page, 'Home');
-await tapLabel(page, 'See all', 1600);
+await tapText(page, 'All activity', 1600);
 ok('activity opens scoped to the period', !!(await visibleText(page, /\d+ transactions? ·/i)));
 ok('activity offers a search field', !!(await page.getByPlaceholder(/Search merchants/i).count()));
 await tapLabel(page, 'Back', 1200);
@@ -591,6 +610,8 @@ await tapLabel(page, 'Back', 1200);
 await tapLabel(page, 'Settings', 1400);
 ok('settings leads with Pro', !!(await visibleText(page, 'Wafra Pro')));
 ok('settings shows the trial state', !!(await visibleText(page, /Free trial · \d day/)));
+ok('settings summarizes the current state', !!(await visibleText(page, 'Current state')));
+ok('settings keeps feedback easy to find', !!(await visibleText(page, 'Send feedback')));
 ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
 
 /**
@@ -656,7 +677,7 @@ await tapTab(page, 'Home');
 await tapLabel(page, 'Settings', 1400);
 await tapText(page, 'Wafra Pro', 1400);
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
-ok('paywall shows the trial chip', !!(await visibleText(page, /FREE TRIAL ACTIVE/i)));
+ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial · \d day/)));
 
 // ── Hidden-unlock defense: repeated VERSION taps must not grant Pro ──
 //

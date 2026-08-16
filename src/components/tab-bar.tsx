@@ -1,13 +1,20 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import React, { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
+import Animated, {
+  ReduceMotion,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
+import { SpringPressable } from '@/components/ui/spring-pressable';
 import { Spacing } from '@/constants/theme';
-import { useScreenEntering } from '@/hooks/use-screen-entering';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
 import { t, type Lang, type StringKey } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
@@ -27,28 +34,95 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
+const TAB_SPRING = {
+  damping: 18,
+  stiffness: 330,
+  mass: 0.7,
+  overshootClamping: true,
+  reduceMotion: ReduceMotion.System,
+} as const;
+
+const AnimatedTabButton = ({
+  focused,
+  icon,
+  label,
+  onPress,
+}: {
+  focused: boolean;
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+}) => {
+  const theme = useTheme();
+  const reducedMotion = useReducedMotion();
+  const focus = useSharedValue(focused ? 1 : 0);
+
+  useEffect(() => {
+    const next = focused ? 1 : 0;
+    focus.value = reducedMotion ? next : withSpring(next, TAB_SPRING);
+  }, [focus, focused, reducedMotion]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    opacity: focus.value,
+    transform: [
+      { scaleX: interpolate(focus.value, [0, 1], [0.55, 1]) },
+      { scaleY: interpolate(focus.value, [0, 1], [0.8, 1]) },
+    ],
+  }));
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: interpolate(focus.value, [0, 1], [0, -2]) },
+      { scale: interpolate(focus.value, [0, 1], [1, 1.08]) },
+    ],
+  }));
+  const labelStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(focus.value, [0, 1], [0.72, 1]),
+    transform: [{ translateY: interpolate(focus.value, [0, 1], [0, -1]) }],
+  }));
+
+  return (
+    <SpringPressable
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: focused }}
+      opacityTo={0.8}
+      scaleTo={0.92}
+      style={styles.tab}
+      onPress={onPress}>
+      <View style={styles.iconStage}>
+        <Animated.View
+          style={[
+            styles.activePill,
+            { backgroundColor: theme.backgroundSelected },
+            pillStyle,
+          ]}
+        />
+        <Animated.View style={iconStyle}>
+          <Icon
+            name={icon}
+            size={21}
+            color={focused ? theme.primary : theme.textTertiary}
+            strokeWidth={focused ? 2.1 : 1.8}
+          />
+        </Animated.View>
+      </View>
+      <Animated.View style={labelStyle}>
+        <ThemedText
+          type="meta"
+          style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
+          {label}
+        </ThemedText>
+      </Animated.View>
+    </SpringPressable>
+  );
+};
+
 /** Four durable destinations. Manual cash entry belongs in the ledger, not in
  * the centre of the product's navigation: Wafra's promise is automatic
  * capture, so the bar no longer makes hand-entry its largest control. */
 export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  /**
-   * The bar's own entrance, and the last thing still replaying on Android.
-   *
-   * v43 (358f8b2) took a warm tab switch from 7-8 frames to 1 — 65/73/85ms,
-   * with ACTION_UP to Record View draw down from 548ms to 124ms. What is left
-   * in front of that draw is a train of consecutive `Choreographer` animation
-   * callbacks starting 4ms after the tap, and 180ms is exactly what this view
-   * asks for. React-navigation re-renders the tab bar whenever NAVIGATION
-   * state changes — which is every tab press — so a `FadeIn` configured here
-   * is a fade the user pays for on each switch, not once on first paint.
-   *
-   * Same reasoning and the same hook as the four tab screens: undefined on
-   * Android so Reanimated never registers the animation, kept on iOS where
-   * these views are not detached from the window and the motion is free.
-   */
-  const enter = useScreenEntering();
   /**
    * The language, read off the store and passed into every `t()` below.
    *
@@ -69,12 +143,11 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
     const index = state.routes.findIndex((r) => r.key === route.key);
     const focused = state.index === index;
     return (
-      <Pressable
+      <AnimatedTabButton
         key={route.key}
-        accessibilityRole="tab"
-        accessibilityLabel={t(TAB_LABELS[route.name], lang)}
-        accessibilityState={{ selected: focused }}
-        style={styles.tab}
+        focused={focused}
+        icon={TAB_ICONS[route.name]}
+        label={t(TAB_LABELS[route.name], lang)}
         onPress={() => {
           const event = navigation.emit({
             type: 'tabPress',
@@ -88,19 +161,8 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
             tapped();
             navigation.navigate(route.name);
           }
-        }}>
-        <Icon
-          name={TAB_ICONS[route.name]}
-          size={21}
-          color={focused ? theme.primary : theme.textTertiary}
-          strokeWidth={focused ? 2.1 : 1.8}
-        />
-        <ThemedText
-          type="meta"
-          style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
-          {t(TAB_LABELS[route.name], lang)}
-        </ThemedText>
-      </Pressable>
+        }}
+      />
     );
   };
 
@@ -110,11 +172,9 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
         styles.wrap,
         { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
       ]}>
-      <Animated.View
-        entering={enter(FadeIn.duration(180))}
-        style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
+      <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
         {routes.map(renderTab)}
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -144,8 +204,18 @@ const styles = StyleSheet.create({
     gap: 3,
     paddingVertical: 5,
   },
+  iconStage: {
+    width: 46,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activePill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 14,
+  },
   tabLabel: {
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 14,
   },
 });

@@ -94,6 +94,34 @@ function applyLikeStore(state, plan) {
 
 {
   const result = parseHistoricalMessageRecords([
+    record({
+      id: id('s'),
+      sender: 'FAB',
+      text: 'Payroll credit: AED 7,500.00 was posted to your account 1234.',
+    }),
+    record({
+      id: id('o'),
+      sender: 'ADCB',
+      receivedAt: '2019-02-03T10:31:00.000Z',
+      text: 'AED 5,000.00 moved from your account 002 to your own account 004 successfully.',
+    }),
+  ], {}, NOW);
+  ok('history uses the same semantic salary and own-account meanings as live capture',
+    result.parsed.length === 2 &&
+      result.parsed[0].type === 'income' &&
+      result.parsed[0].amountFils === 750000 &&
+      result.parsed[0].categoryGuess === 'salary' &&
+      result.parsed[0].merchant === 'Salary' &&
+      result.parsed[1].type === 'expense' &&
+      result.parsed[1].amountFils === 500000 &&
+      result.parsed[1].transferHint === true &&
+      result.parsed[1].merchant === 'Own account transfer' &&
+      result.parsed.every((row) => !Object.prototype.hasOwnProperty.call(row, 'raw')),
+    result.parsed);
+}
+
+{
+  const result = parseHistoricalMessageRecords([
     record(),
     record(),
     record({ id: id('b'), text: 'Your card transaction was declined for AED 22.00.' }),

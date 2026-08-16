@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useLocales } from 'expo-localization';
 
 import {
   markCardsDistinct,
@@ -20,6 +21,10 @@ import {
 import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, setLanguage } from '@/lib/i18n';
+import {
+  resolveUiLanguage,
+  type LanguagePreference,
+} from '@/lib/system-language';
 import {
   canSelectMarket,
   detectMarketId,
@@ -41,7 +46,6 @@ import {
   normalizeServiceName,
   overrideFitsDirection,
   parseSms,
-  PARSER_VERSION,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
 import {
@@ -75,6 +79,10 @@ import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import type { FxUpdate } from '@/lib/fx';
+import {
+  buildDeferredOnboardingPlan,
+  mergeDeferredOnboardingPlan,
+} from '@/lib/onboarding';
 
 import type {
   ImportBatchInput,
@@ -85,6 +93,7 @@ import type {
   CardDue,
   CategoryId,
   Goal,
+  OnboardingPlanPreferences,
   Transaction,
 } from '@/lib/types';
 
@@ -134,6 +143,8 @@ const EMPTY_STATE: AppState = {
   bills: [],
   cardDues: [],
   goals: [],
+  onboardingPlan: null,
+  onboardingCurrencyEvidence: null,
   merchantOverrides: {},
   accountHints: {},
   notSubscriptions: [],
@@ -150,6 +161,7 @@ const EMPTY_STATE: AppState = {
   trialStartTs: 0,
   marketId: '',
   language: '',
+  languagePreference: 'system',
 };
 
 let idCounter = 0;
@@ -588,6 +600,12 @@ type Action =
   | { type: 'addGoal'; goal: Goal }
   | { type: 'editGoal'; id: string; patch: Partial<Omit<Goal, 'id'>> }
   | { type: 'deleteGoal'; id: string }
+  | { type: 'setOnboardingPlan'; plan: OnboardingPlanPreferences }
+  | {
+      type: 'activateOnboardingPlan';
+      budgets: Budget[];
+      goals: Goal[];
+    }
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
@@ -597,7 +615,8 @@ type Action =
   | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
   | { type: 'setMarket'; id: string }
-  | { type: 'setUiLanguage'; language: string }
+  | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
+  | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
   | { type: 'setReviewTray'; reviewTray: AppState['reviewTray'] }
   | {
       type: 'promoteReviewAlert';
@@ -606,7 +625,6 @@ type Action =
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
     }
-  | { type: 'markParserVersion' }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'loadDemo'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -691,13 +709,6 @@ function reduceState(state: AppState, action: Action): AppState {
         cardDues: mergeImportedCardDues([], declinesRemoved.cardDues, declinesRemoved.accounts),
       };
     }
-    case 'markParserVersion':
-      // A full re-read that changed nothing still proves the stored rows were
-      // read with this parser. Without recording it, the app would re-read the
-      // entire inbox on every single launch.
-      return state.parserVersion === PARSER_VERSION
-        ? state
-        : { ...state, parserVersion: PARSER_VERSION };
     case 'setPro':
       return { ...state, pro: action.pro };
     case 'setMarket':
@@ -709,8 +720,16 @@ function reduceState(state: AppState, action: Action): AppState {
       if (!setActiveMarket(action.id)) return state;
       return { ...state, marketId: action.id };
     case 'setUiLanguage':
-      setLanguage(action.language === 'ar' ? 'ar' : 'en');
-      return { ...state, language: action.language };
+      setLanguage(action.language);
+      return {
+        ...state,
+        language: action.language,
+        languagePreference: action.preference,
+      };
+    case 'syncSystemLanguage':
+      if ((state.languagePreference ?? 'system') !== 'system') return state;
+      setLanguage(action.language);
+      return state.language === action.language ? state : { ...state, language: action.language };
     case 'setReviewTray':
       return { ...state, reviewTray: action.reviewTray };
     case 'promoteReviewAlert':
@@ -906,6 +925,25 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'deleteGoal':
       return { ...state, goals: state.goals.filter((g) => g.id !== action.id) };
+    case 'setOnboardingPlan':
+      return { ...state, onboardingPlan: action.plan };
+    case 'activateOnboardingPlan': {
+      // React Strict Mode may replay an effect. Clearing the pending plan in
+      // the same reducer action makes activation idempotent even then.
+      if (!state.onboardingPlan) return state;
+      const merged = mergeDeferredOnboardingPlan(
+        state.budgets,
+        state.goals,
+        action.budgets,
+        action.goals,
+      );
+      return {
+        ...state,
+        onboardingPlan: null,
+        budgets: merged.budgets,
+        goals: merged.goals,
+      };
+    }
     case 'setAppLock':
       return { ...state, appLock: action.enabled };
     case 'setDailySummary':
@@ -1038,7 +1076,7 @@ interface StoreValue {
   addGoal: (g: Omit<Goal, 'id'>) => void;
   editGoal: (id: string, patch: Partial<Omit<Goal, 'id'>>) => void;
   deleteGoal: (id: string) => void;
-  markParserVersion: () => void;
+  setOnboardingPlan: (plan: OnboardingPlanPreferences) => void;
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
@@ -1169,6 +1207,8 @@ function createAppLedgerPersistence(): LedgerPersistence {
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
+  const locales = useLocales();
+  const systemLanguage = resolveUiLanguage('system', locales);
   const persistenceRef = useRef<LedgerPersistence | null>(null);
   if (!persistenceRef.current) persistenceRef.current = createAppLedgerPersistence();
   const persistence = persistenceRef.current;
@@ -1221,6 +1261,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       I18nManager.forceRTL(wantRTL);
     }
   }, [state.hydrated, state.language]);
+
+  // iOS and Android per-app Language changes are observable through
+  // expo-localization. Follow them while Settings is on System; an explicit
+  // English/Arabic choice remains pinned.
+  useEffect(() => {
+    if (!state.hydrated || (state.languagePreference ?? 'system') !== 'system') return;
+    dispatch({ type: 'syncSystemLanguage', language: systemLanguage });
+  }, [dispatch, state.hydrated, state.languagePreference, systemLanguage]);
 
   /**
    * Read the ledger and present it — on launch, and again on every retry.
@@ -1359,6 +1407,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }, SAVE_DEBOUNCE_MS);
   }, [state, persist]);
 
+  useEffect(() => {
+    const pending = state.onboardingPlan;
+    if (!pending) return;
+
+    const plan = buildDeferredOnboardingPlan(
+      pending,
+      state.ledgerMoney?.currency,
+      state.onboardingCurrencyEvidence,
+      state.monthStartDay,
+      state.language === 'ar' ? 'ar' : 'en',
+    );
+    if (!plan) return;
+    dispatch({
+      type: 'activateOnboardingPlan',
+      budgets: plan.budgets,
+      goals: plan.goals.map((goal) => ({ ...goal, id: makeId('goal') })),
+    });
+  }, [
+    dispatch,
+    state.language,
+    state.ledgerMoney?.currency,
+    state.monthStartDay,
+    state.onboardingCurrencyEvidence,
+    state.onboardingPlan,
+  ]);
+
   // A debounce that loses the last write when the app is swiped away is a data
   // loss bug, so leaving the foreground flushes immediately.
   useEffect(() => {
@@ -1381,15 +1455,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addTransaction = useCallback((t: Omit<Transaction, 'id'>) => {
     dispatch({ type: 'addTransaction', transaction: { ...t, id: makeId('tx') } });
-  }, []);
+  }, [dispatch]);
 
   const editTransaction = useCallback((id: string, patch: Partial<Omit<Transaction, 'id'>>) => {
     dispatch({ type: 'editTransaction', id, patch });
-  }, []);
+  }, [dispatch]);
 
   const deleteTransaction = useCallback((id: string) => {
     dispatch({ type: 'deleteTransaction', id });
-  }, []);
+  }, [dispatch]);
 
   const importBatch = useCallback((input: ImportBatchInput): ImportReceipt => {
     if (!authoritativeState.current.hydrated) {
@@ -1499,54 +1573,54 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const undoBatch = useCallback((ids: string[]) => {
     dispatch({ type: 'undoBatch', ids });
-  }, []);
+  }, [dispatch]);
 
   const upsertBudget = useCallback((budget: Budget) => {
     dispatch({ type: 'upsertBudget', budget });
-  }, []);
+  }, [dispatch]);
 
   const deleteBudget = useCallback((category: Budget['category']) => {
     dispatch({ type: 'deleteBudget', category });
-  }, []);
+  }, [dispatch]);
 
   const addAccount = useCallback((a: Omit<Account, 'id'>) => {
     dispatch({ type: 'addAccount', account: { ...a, id: makeId('acc') } });
-  }, []);
+  }, [dispatch]);
 
   const editAccount = useCallback((id: string, patch: Partial<Omit<Account, 'id'>>) => {
     dispatch({ type: 'editAccount', id, patch });
-  }, []);
+  }, [dispatch]);
 
   const deleteAccount = useCallback((id: string) => {
     dispatch({ type: 'deleteAccount', id });
-  }, []);
+  }, [dispatch]);
 
   const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
     dispatch({ type: 'mergeRenewedCard', oldId, newId });
-  }, []);
+  }, [dispatch]);
 
   const markCardsDistinctAction = useCallback((id: string) => {
     dispatch({ type: 'markCardsDistinct', id });
-  }, []);
+  }, [dispatch]);
 
   const addBill = useCallback((b: Omit<Bill, 'id' | 'paidMonths'>) => {
     dispatch({ type: 'addBill', bill: { ...b, id: makeId('bill'), paidMonths: [] } });
-  }, []);
+  }, [dispatch]);
 
   const deleteBill = useCallback((id: string) => {
     dispatch({ type: 'deleteBill', id });
-  }, []);
+  }, [dispatch]);
 
   const markBillPaid = useCallback(
     (id: string, month: string, transaction: Omit<Transaction, 'id'>) => {
       dispatch({ type: 'markBillPaid', id, month, transaction: { ...transaction, id: makeId('tx') } });
     },
-    [],
+    [dispatch],
   );
 
   const upsertCardDue = useCallback((due: Omit<CardDue, 'id'>) => {
     dispatch({ type: 'upsertCardDue', due: { ...due, id: makeId('due') } });
-  }, []);
+  }, [dispatch]);
 
   const payCardDue = useCallback(
     (id: string, amountFils: number, transaction: Omit<Transaction, 'id'> | null, settled: boolean) => {
@@ -1558,47 +1632,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         settledAt: settled ? new Date().toISOString() : null,
       });
     },
-    [],
+    [dispatch],
   );
 
   const setMerchantOverride = useCallback(
     (merchant: string, category: CategoryId, applyToExisting: boolean) => {
       dispatch({ type: 'setMerchantOverride', merchant, category, applyToExisting });
     },
-    [],
+    [dispatch],
   );
 
   const setNotSubscription = useCallback((merchant: string, dismissed: boolean) => {
     dispatch({ type: 'setNotSubscription', merchant, dismissed });
-  }, []);
+  }, [dispatch]);
 
   const reassignAccountHint = useCallback((last4: string, accountId: string) => {
     dispatch({ type: 'reassignAccountHint', last4, accountId });
-  }, []);
+  }, [dispatch]);
 
   const addGoal = useCallback((g: Omit<Goal, 'id'>) => {
     dispatch({ type: 'addGoal', goal: { ...g, id: makeId('goal') } });
-  }, []);
+  }, [dispatch]);
 
   const editGoal = useCallback((id: string, patch: Partial<Omit<Goal, 'id'>>) => {
     dispatch({ type: 'editGoal', id, patch });
-  }, []);
+  }, [dispatch]);
 
   const deleteGoal = useCallback((id: string) => {
     dispatch({ type: 'deleteGoal', id });
-  }, []);
+  }, [dispatch]);
 
-  const markParserVersion = useCallback(() => {
-    dispatch({ type: 'markParserVersion' });
-  }, []);
+  const setOnboardingPlan = useCallback((plan: OnboardingPlanPreferences) => {
+    dispatch({ type: 'setOnboardingPlan', plan });
+  }, [dispatch]);
 
   const setAppLock = useCallback((enabled: boolean) => {
     dispatch({ type: 'setAppLock', enabled });
-  }, []);
+  }, [dispatch]);
 
   const setDailySummary = useCallback((enabled: boolean) => {
     dispatch({ type: 'setDailySummary', enabled });
-  }, []);
+  }, [dispatch]);
 
   const setPrivateMode = useCallback(async (enabled: boolean) => {
     if (saveTimer.current) {
@@ -1622,33 +1696,40 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
     dispatch({ type: 'applyFxUpdates', updates });
-  }, []);
+  }, [dispatch]);
 
   const setOnboarded = useCallback(() => {
     dispatch({ type: 'setOnboarded' });
-  }, []);
+  }, [dispatch]);
 
   const setThemePreference = useCallback((preference: string) => {
     dispatch({ type: 'setThemePreference', preference });
-  }, []);
+  }, [dispatch]);
 
   const setMonthStartDay = useCallback((day: number) => {
     dispatch({ type: 'setMonthStartDay', day });
-  }, []);
+  }, [dispatch]);
 
   const setPro = useCallback((pro: boolean) => {
     dispatch({ type: 'setPro', pro });
-  }, []);
+  }, [dispatch]);
 
   const setMarket = useCallback((id: string) => {
     if (!canSelectMarket(id)) return false;
     dispatch({ type: 'setMarket', id });
     return true;
-  }, []);
+  }, [dispatch]);
 
-  const setUiLanguage = useCallback((language: string) => {
-    dispatch({ type: 'setUiLanguage', language });
-  }, []);
+  const setUiLanguage = useCallback((preference: string) => {
+    const normalized: LanguagePreference = preference === 'en' || preference === 'ar'
+      ? preference
+      : 'system';
+    dispatch({
+      type: 'setUiLanguage',
+      preference: normalized,
+      language: resolveUiLanguage(normalized, locales),
+    });
+  }, [dispatch, locales]);
 
   const exportBackup = useCallback(() => {
     // Store entitlements and the local trial clock are not ledger data. They
@@ -1681,7 +1762,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const loadDemoData = useCallback(() => {
     dispatch({ type: 'loadDemo', state: demoState() });
-  }, []);
+  }, [dispatch]);
 
   const clearAll = useCallback(async (afterErase?: () => Promise<void>) => {
     if (saveTimer.current) {
@@ -1799,7 +1880,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
-      markParserVersion,
+      setOnboardingPlan,
       setAppLock,
       setDailySummary,
       setPrivateMode,
@@ -1850,7 +1931,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addGoal,
       editGoal,
       deleteGoal,
-      markParserVersion,
+      setOnboardingPlan,
       setAppLock,
       setDailySummary,
       setPrivateMode,

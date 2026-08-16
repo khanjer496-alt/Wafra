@@ -84,6 +84,7 @@ const GENERIC_CAPTURE_TITLES = new Set([
   'refund',
   'inward remittance',
   'bank transfer',
+  'own account transfer',
   'card payment',
   'account debit',
   'telegraphic transfer',

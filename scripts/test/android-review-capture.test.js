@@ -85,7 +85,12 @@ let notificationRows = [{
 const smsReader = {
   async getInboxSms(sinceMs, beforeDateMs, beforeId, max) {
     inboxReadCursors.push({ sinceMs, beforeDateMs, beforeId, max });
-    return inboxRows.map((row, index) => ({ id: row.id ?? index + 1, ...row }));
+    return inboxRows
+      .map((row, index) => ({ id: row.id ?? index + 1, ...row }))
+      .filter((row) => row.date >= sinceMs &&
+        (row.date < beforeDateMs || (row.date === beforeDateMs && row.id < beforeId)))
+      .sort((a, b) => b.date - a.date || b.id - a.id)
+      .slice(0, max);
   },
   async getReceived() {
     // The inbox body guard must keep the receiver's copy out of review too.
@@ -136,9 +141,11 @@ const { scanInbox } = require('./build/auto-import.js');
 
 (async () => {
   const first = await scanInbox(0, {}, undefined, 'fr-FR');
-  ok('launch-tested UAE parsing still produces the ordinary import row',
-    first.parsed.length === 1 && first.parsed[0].currency === 'AED' &&
+  ok('launch-tested UAE parsing and explicit salary produce ordinary import rows',
+    first.parsed.length === 2 && first.parsed[0].currency === 'AED' &&
       first.parsed[0].merchant === 'Carrefour' && first.parsed[0].sourceEventId === 'a2' &&
+      first.parsed[1].merchant === 'Salary' && first.parsed[1].type === 'income' &&
+      first.parsed[1].amountFils === 850000 && first.parsed[1].sourceEventId === 'a6' &&
       first.detectedLaunchMarket === 'AE',
     JSON.stringify(first.parsed));
   ok('the first routine page starts from a date/id cursor rather than timestamp alone',
@@ -147,13 +154,13 @@ const { scanInbox } = require('./build/auto-import.js');
       inboxReadCursors[0]?.max === 1000,
     JSON.stringify(inboxReadCursors[0]));
   ok('a parse-null, institution-backed global alert becomes review evidence only',
-    first.reviewCandidates.length === 4 && first.reviewCandidates[0].market === 'FR' &&
+    first.reviewCandidates.length === 3 && first.reviewCandidates[0].market === 'FR' &&
       first.reviewCandidates[0].amount.currency === 'EUR' &&
       first.reviewCandidates[0].amount.minorUnits === '1234' &&
       first.reviewCandidates[0].channel === 'inbox', JSON.stringify(first.reviewCandidates));
   ok('parse-null bank-app notifications use the same review-only seam',
-    first.reviewCandidates[3]?.channel === 'push' &&
-      first.reviewCandidates[3]?.amount.minorUnits === '999',
+    first.reviewCandidates[2]?.channel === 'push' &&
+      first.reviewCandidates[2]?.amount.minorUnits === '999',
     JSON.stringify(first.reviewCandidates));
   ok('reading a notification does not delete it before ledger durability',
     acknowledgedNotifications.length === 0, JSON.stringify(acknowledgedNotifications));
@@ -165,13 +172,11 @@ const { scanInbox } = require('./build/auto-import.js');
       first.reviewCandidates[1]?.amount.minorUnits === '2000' &&
       first.parsed.every((item) => item.originalCurrency !== 'USD'),
     JSON.stringify({ parsed: first.parsed, reviews: first.reviewCandidates }));
-  ok('an unfamiliar Gulf salary reaches review instead of disappearing or auto-posting',
-    first.reviewCandidates[2]?.market === 'AE' &&
-      first.reviewCandidates[2]?.direction === 'credit' &&
-      first.reviewCandidates[2]?.family === 'transfer' &&
-      first.reviewCandidates[2]?.amount.currency === 'AED' &&
-      first.reviewCandidates[2]?.amount.minorUnits === '850000' &&
-      first.parsed.every((item) => item.amountFils !== 850000),
+  ok('an explicit posted Gulf salary auto-posts with exact money and salary meaning',
+    first.parsed[1]?.currency === 'AED' && first.parsed[1]?.amountFils === 850000 &&
+      first.parsed[1]?.type === 'income' && first.parsed[1]?.categoryGuess === 'salary' &&
+      first.parsed[1]?.transferHint === false &&
+      first.reviewCandidates.every((item) => item.amount.minorUnits !== '850000'),
     JSON.stringify({ parsed: first.parsed, reviews: first.reviewCandidates }));
   ok('review template identity is opaque and retained without source text',
     /^art1_[0-9a-f]{64}$/.test(first.reviewCandidates[2]?.templateKey ?? ''),
@@ -183,19 +188,17 @@ const { scanInbox } = require('./build/auto-import.js');
     JSON.stringify(first.reviewCandidates));
   ok('non-posting alerts stay exclusively in the metadata-only healing channel',
     first.declined.length === 2 &&
-      first.declined[0].smsTs === NOW + 3_000 &&
-      first.declined[0].sourceEventId === 'a3' &&
-      first.declined[0].reason === 'declined' &&
-      first.declined[1].smsTs === NOW + 4_000 &&
-      first.declined[1].sourceEventId === 'a4' &&
-      first.declined[1].reason === 'security-challenge' &&
+      first.declined.some((item) => item.smsTs === NOW + 3_000 &&
+        item.sourceEventId === 'a3' && item.reason === 'declined') &&
+      first.declined.some((item) => item.smsTs === NOW + 4_000 &&
+        item.sourceEventId === 'a4' && item.reason === 'security-challenge') &&
       first.declined.every((item) => !Object.prototype.hasOwnProperty.call(item, 'raw')) &&
       first.reviewCandidates.every(
         (item) => item.observedAt !== NOW + 3_000 && item.observedAt !== NOW + 4_000,
       ),
     JSON.stringify({ declined: first.declined, reviews: first.reviewCandidates }));
   ok('OTP and duplicate delivery copies never enter review',
-    first.reviewCandidates.length === 4 && first.scannedCount === 8,
+    first.reviewCandidates.length === 3 && first.scannedCount === 8,
     JSON.stringify(first));
   await first.commit();
   ok('the scan exposes an explicit post-durability notification acknowledgement',
@@ -248,10 +251,11 @@ const { scanInbox } = require('./build/auto-import.js');
   receivedRows = [];
   notificationRows = [];
   const nextSalary = await scanInbox(0, {}, undefined, 'en-AE');
-  ok('changed amount and date keep the same private template but a distinct event identity',
-    nextSalary.reviewCandidates[0]?.templateKey === first.reviewCandidates[2]?.templateKey &&
-      nextSalary.reviewCandidates[0]?.sourceKey !== first.reviewCandidates[2]?.sourceKey,
-    JSON.stringify({ first: first.reviewCandidates[2], next: nextSalary.reviewCandidates[0] }));
+  ok('a second explicit salary is another exact automatic income event',
+    nextSalary.parsed.length === 1 && nextSalary.reviewCandidates.length === 0 &&
+      nextSalary.parsed[0]?.merchant === 'Salary' &&
+      nextSalary.parsed[0]?.type === 'income' && nextSalary.parsed[0]?.amountFils === 910000,
+    JSON.stringify(nextSalary));
 
   inboxRows = [{
     address: 'FAB',
@@ -408,11 +412,52 @@ const { scanInbox } = require('./build/auto-import.js');
     },
   ];
   const sameTimestamp = await scanInbox(0, {}, undefined, 'en-AE');
+  const sameTimestampIds = new Set(sameTimestamp.parsed.map((item) => item.sourceEventId));
   ok('same-timestamp same-value Android alerts retain distinct provider identities',
     sameTimestamp.parsed.length === 2 &&
-      sameTimestamp.parsed[0].sourceEventId === 'a901' &&
-      sameTimestamp.parsed[1].sourceEventId === 'a902',
+      sameTimestampIds.has('a901') && sameTimestampIds.has('a902'),
     JSON.stringify(sameTimestamp.parsed));
+
+  const duplicatedProviderBody =
+    'Purchase of AED 14.05 at DUPLICATE CONTROL with Debit Card ending 1234';
+  inboxRows = [
+    { id: 30_850, address: 'FAB', body: duplicatedProviderBody, date: NOW + 10_000 },
+    { id: 30_849, address: 'FAB', body: duplicatedProviderBody, date: NOW + 9_244 },
+    // Same real-looking alert after the strict sub-second window is a distinct
+    // event and must remain visible even though its body is byte-identical.
+    { id: 30_848, address: 'FAB', body: duplicatedProviderBody, date: NOW + 7_000 },
+  ];
+  const providerDuplicate = await scanInbox(0, {}, undefined, 'en-AE');
+  const providerDuplicateIds = new Set(
+    providerDuplicate.parsed.map((item) => item.sourceEventId),
+  );
+  ok('byte-identical consecutive Android provider rows within one second collapse once',
+    providerDuplicate.parsed.length === 2 &&
+      providerDuplicateIds.has('a30850') && providerDuplicateIds.has('a30848') &&
+      providerDuplicate.declined.some((item) =>
+        item.sourceEventId === 'a30849' && item.reason === 'exact-provider-duplicate') &&
+      providerDuplicate.declined.every((item) =>
+        !Object.prototype.hasOwnProperty.call(item, 'raw')),
+    JSON.stringify({ parsed: providerDuplicate.parsed, declined: providerDuplicate.declined }));
+
+  inboxRows = Array.from({ length: 1001 }, (_, index) => ({
+    id: 2_000 + index,
+    address: 'ADCB',
+    body: `Purchase of AED 1.00 at PAGE SHOP ${index} with Debit Card ending 1234`,
+    date: NOW + 20_000 + index,
+  }));
+  receivedRows = [];
+  notificationsEnabled = false;
+  inboxReadCursors.length = 0;
+  const multipage = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('a full inbox page continues until the provider proves end of history',
+    multipage.inboxScannedCount === 1001 && multipage.inboxHistoryComplete === true &&
+      inboxReadCursors.length === 2 && inboxReadCursors[0].max === 1000,
+    JSON.stringify({
+      count: multipage.inboxScannedCount,
+      complete: multipage.inboxHistoryComplete,
+      pages: inboxReadCursors.length,
+    }));
 
   reactNative.Platform.OS = 'ios';
   const ios = await scanInbox(123, {}, undefined, 'fr-FR');

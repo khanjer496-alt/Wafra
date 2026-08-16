@@ -6,6 +6,12 @@ const metadata = JSON.parse(
 
 const errors = [];
 const length = (value) => [...value].length;
+const exactValues = (actual, expected, label) => {
+  const normalized = [...actual].sort();
+  if (JSON.stringify(normalized) !== JSON.stringify(expected)) {
+    errors.push(`${label} must be exactly ${expected.join(', ')}`);
+  }
+};
 const limit = (value, max, label) => {
   if (typeof value !== 'string' || value.trim() === '') {
     errors.push(`${label} is empty`);
@@ -14,6 +20,7 @@ const limit = (value, max, label) => {
   }
 };
 
+exactValues(Object.keys(metadata.apple.locales), ['ar-SA', 'en-US'], 'Apple launch locales');
 for (const [locale, entry] of Object.entries(metadata.apple.locales)) {
   limit(entry.name, 30, `Apple ${locale} name`);
   limit(entry.subtitle, 30, `Apple ${locale} subtitle`);
@@ -38,14 +45,59 @@ for (const [locale, entry] of Object.entries(metadata.apple.locales)) {
 }
 
 for (const [listing, entry] of Object.entries(metadata.googlePlay.listings)) {
+  limit(entry.languageCode, 20, `Google Play ${listing} language code`);
   limit(entry.title, 30, `Google Play ${listing} title`);
   limit(entry.shortDescription, 80, `Google Play ${listing} short description`);
   limit(entry.fullDescription, 4000, `Google Play ${listing} full description`);
 }
 
+const launchListings = metadata.googlePlay.launchListings ?? [];
+if (new Set(launchListings).size !== launchListings.length || launchListings.length < 1) {
+  errors.push('Google Play launch listings must be a non-empty unique list');
+}
+for (const listing of launchListings) {
+  const entry = metadata.googlePlay.listings[listing];
+  if (!entry) {
+    errors.push(`Google Play launch listing ${listing} does not exist`);
+  } else if (entry.status?.startsWith('future-')) {
+    errors.push(`Google Play launch listing ${listing} is marked as a future draft`);
+  }
+}
+exactValues(
+  launchListings.map((listing) => metadata.googlePlay.listings[listing]?.languageCode),
+  ['ar', 'en-US'],
+  'Google Play launch language codes',
+);
+
+const productIds = ['wafra_pro_monthly', 'wafra_pro_yearly'];
+for (const productId of productIds) {
+  const apple = metadata.apple.subscriptionLocalizations?.[productId] ?? {};
+  for (const locale of ['en-US', 'ar-SA']) {
+    const entry = apple[locale] ?? {};
+    limit(entry.displayName, 30, `Apple ${productId} ${locale} display name`);
+    limit(entry.description, 45, `Apple ${productId} ${locale} description`);
+  }
+
+  const google = metadata.googlePlay.subscriptionLocalizations?.[productId] ?? {};
+  for (const locale of ['en-US', 'ar']) {
+    const entry = google[locale] ?? {};
+    limit(entry.title, 55, `Google Play ${productId} ${locale} title`);
+    limit(entry.description, 200, `Google Play ${productId} ${locale} description`);
+    if (!Array.isArray(entry.benefits) || entry.benefits.length < 1 || entry.benefits.length > 4) {
+      errors.push(`Google Play ${productId} ${locale} must have 1–4 benefits`);
+      continue;
+    }
+    entry.benefits.forEach((benefit, index) => {
+      limit(benefit, 40, `Google Play ${productId} ${locale} benefit ${index + 1}`);
+    });
+  }
+}
+
 const customerFacing = JSON.stringify({
   apple: metadata.apple.locales,
+  appleSubscriptions: metadata.apple.subscriptionLocalizations,
   googlePlay: metadata.googlePlay.listings,
+  googlePlaySubscriptions: metadata.googlePlay.subscriptionLocalizations,
   screenshots: metadata.screenshots,
 });
 for (const claim of [

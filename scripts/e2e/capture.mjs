@@ -157,7 +157,7 @@ async function waitForStable(page, { tries = 40, needed = 3, gap = 150 } = {}) {
 async function bootWithDemoLedger(page) {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
   await settle(page, 2200);
-  return !!(await page.getByText(/Saved so far this month/i).first().isVisible().catch(() => false));
+  return !!(await page.getByText(/Net after spending.*so far this month/i).first().isVisible().catch(() => false));
 }
 
 /**

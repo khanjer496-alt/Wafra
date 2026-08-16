@@ -4,6 +4,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { SpringPressable } from '@/components/ui/spring-pressable';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
@@ -124,21 +125,16 @@ export function Row({
     return <View style={[styles.row, border, style]}>{children}</View>;
   }
   return (
-    <Pressable
+    <SpringPressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       onPress={onPress}
       onLongPress={onLongPress}
-      style={({ pressed }) => [
-        styles.row,
-        border,
-        // Row press is scale only — no opacity change, so the figure never
-        // fades out from under the thumb.
-        pressed && { transform: [{ scale: 0.985 }] },
-        style,
-      ]}>
+      opacityTo={1}
+      scaleTo={0.985}
+      style={[styles.row, border, style]}>
       {children}
-    </Pressable>
+    </SpringPressable>
   );
 }
 
@@ -162,17 +158,14 @@ export function Block({
 
   if (!onPress) return <View style={[styles.block, surface, style]}>{children}</View>;
   return (
-    <Pressable
+    <SpringPressable
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.block,
-        surface,
-        pressed && { transform: [{ scale: 0.985 }] },
-        style,
-      ]}>
+      opacityTo={1}
+      scaleTo={0.985}
+      style={[styles.block, surface, style]}>
       {children}
-    </Pressable>
+    </SpringPressable>
   );
 }
 

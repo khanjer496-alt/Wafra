@@ -48,6 +48,16 @@ export function unreadFormats(
   const byFormat = new Map<string, UnreadFormat>();
   for (const tx of transactions) {
     if (!tx.raw) continue;
+    // `raw` is retained on a user-pinned row so a future parser-version repair
+    // can still reach it. Retention is not evidence that categorisation is
+    // unresolved: the current ledger category is authoritative for this
+    // report. Without this guard, a Fishbasket row already pinned to Utilities
+    // is still exported under "READ, BUT NO CATEGORY".
+    if (tx.category !== 'other') continue;
+    // Some accounting roles deliberately live in Other (own transfers, card
+    // settlements, named bill payments). They need no merchant category and
+    // must not be presented as work for the user or the global parser.
+    if (isDeliberateOtherTitle(tx.title)) continue;
     const key = tx.raw.replace(/\d/g, '#');
     const cur = byFormat.get(key);
     if (cur) {

@@ -61,7 +61,10 @@ export function healPatch(
   // expense/Salary pair. Direction compatibility is stronger evidence than a
   // low-confidence fallback, so a reread may repair this to Other while still
   // preserving every user-edited row through the guard above.
-  if (!overrideFitsDirection(prior.category, p.type)) {
+  if (
+    !overrideFitsDirection(prior.category, p.type) &&
+    prior.category !== p.categoryGuess
+  ) {
     patch.category = p.categoryGuess;
   }
   // A category the parser is now DELIBERATE about, disagreeing with what is
@@ -91,6 +94,9 @@ export function healPatch(
   if (p.transferHint && !prior.isTransfer) patch.isTransfer = true;
   if (p.paymentFlowSide && prior.paymentFlowSide !== p.paymentFlowSide) {
     patch.paymentFlowSide = p.paymentFlowSide;
+  }
+  if (p.billIdentity && prior.billIdentity !== p.billIdentity) {
+    patch.billIdentity = p.billIdentity;
   }
   // Instrument provenance is deliberately NOT inferred here. `healPatch`
   // understands parser fields but not whether account resolution was unique;
@@ -207,6 +213,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
+  if (patch.billIdentity !== undefined) next.billIdentity = patch.billIdentity;
   if (patch.paymentInstrumentSource !== undefined) {
     next.paymentInstrumentSource = patch.paymentInstrumentSource;
   }

@@ -52,7 +52,6 @@ export function SupplementImports() {
     importBatch,
     stageReviewAlerts,
     ensureDurable,
-    markParserVersion,
     setMarket,
   } = useStore();
   const stateRef = useRef(state);
@@ -65,11 +64,10 @@ export function SupplementImports() {
           importBatch,
           stageReviewAlerts,
           ensureDurable,
-          markParserVersion,
           setMarket: (market) => setMarket(market),
         },
       }),
-    [ensureDurable, importBatch, markParserVersion, setMarket, stageReviewAlerts],
+    [ensureDurable, importBatch, setMarket, stageReviewAlerts],
   );
   const clipboardTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedAddress = useRef<string | null>(null);

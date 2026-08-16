@@ -1,13 +1,16 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import {
+  interpretBankAlert,
+  type BankAlertInterpretation,
+} from '@/lib/bank-alert-interpreter';
+import {
   detectLaunchMarketFromAlert,
   detectLaunchMarketFromSender,
   getActiveMarket,
   pinnedLedgerCurrencyCode,
-  withMarketPackForParsing,
 } from '@/lib/markets';
-import { parseSms, type ParsedSms } from '@/lib/sms-parser';
+import type { ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 
 // Cheap supersets used only to decide whether market routing must run. The
@@ -20,6 +23,12 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
 
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
+  interpret(
+    source: string,
+    sender: string,
+    inspection?: UniversalAlertReview | null,
+    forcedMarket?: string,
+  ): Extract<BankAlertInterpretation, { outcome: 'parsed' }> | null;
   parse(
     source: string,
     sender: string,
@@ -67,12 +76,12 @@ export const createLaunchAlertSession = ({
     }
   };
 
-  const parse = (
+  const interpret = (
     source: string,
     sender: string,
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
-  ): ParsedSms | null => {
+  ): Extract<BankAlertInterpretation, { outcome: 'parsed' }> | null => {
     if (
       inspection?.route.decision === 'single' &&
       inspection.route.market !== 'AE' &&
@@ -88,8 +97,13 @@ export const createLaunchAlertSession = ({
     const desired = routed ?? sessionMarket ?? activeMarket;
     if (desired !== 'AE' && desired !== 'SA') return null;
     if (sessionMarket && desired !== sessionMarket) return null;
-    const result = withMarketPackForParsing(desired, () =>
-      parseSms(source, overrides, { sender }));
+    const interpretation = interpretBankAlert({
+      source,
+      sender,
+      market: desired,
+      overrides,
+    });
+    const result = interpretation.outcome === 'parsed' ? interpretation : null;
     if (result && routed) {
       sessionMarket ??= routed;
       detected = routed;
@@ -97,5 +111,12 @@ export const createLaunchAlertSession = ({
     return result;
   };
 
-  return { inspect, parse, detectedMarket: () => detected };
+  const parse = (
+    source: string,
+    sender: string,
+    inspection: UniversalAlertReview | null = null,
+    forcedMarket?: string,
+  ): ParsedSms | null => interpret(source, sender, inspection, forcedMarket)?.parsed ?? null;
+
+  return { inspect, interpret, parse, detectedMarket: () => detected };
 };

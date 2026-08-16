@@ -26,6 +26,9 @@ const validFixture = () => {
     slug: 'wafra', version: '1.0.0',
     ios: { bundleIdentifier: 'app.wafra.ios' },
     android: { package: 'app.wafra.android' },
+    plugins: [['expo-localization', {
+      supportedLocales: { ios: ['en', 'ar'], android: ['en', 'ar'] },
+    }]],
     extra: {
       eas: { projectId: 'fa920e7b-c661-4517-917d-26e8b4878721' },
       revenueCatAndroidKey: 'goog_PUBLIC123',
@@ -45,7 +48,7 @@ const validFixture = () => {
         EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/historyGood2',
       } },
     },
-    submit: { production: {} },
+    submit: { production: { android: { track: 'internal' } } },
   });
   write(root, 'server/wrangler.toml', 'database_id = "fa920e7b-c661-4517-917d-26e8b4878721"\n');
   write(root, 'docs/privacy-policy.md', 'Contact support@wafra.example. Relay by Wafra LLC, UAE.');
@@ -64,6 +67,35 @@ const validFixture = () => {
       intent: { kind: 'build', platform: 'ios', profile: 'preview', submit: false },
     });
     ok('preview build checks only what that build needs', report.ready, JSON.stringify(report.findings));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const app = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'));
+    app.expo.plugins = [];
+    write(root, 'app.json', app);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'store-release', platform: 'all' },
+    });
+    ok('store release requires OS-visible English and Arabic app languages',
+      report.findings.some(({ code }) => code === 'supported-locales:ios') &&
+      report.findings.some(({ code }) => code === 'supported-locales:android'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    delete eas.submit.production.android;
+    write(root, 'eas.json', eas);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'store-release', platform: 'all' },
+    });
+    ok('store release keeps the first automated Android submission internal',
+      report.findings.some(({ code }) => code === 'android-submit-track'));
     fs.rmSync(root, { recursive: true, force: true });
   }
 

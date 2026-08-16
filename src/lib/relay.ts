@@ -1429,6 +1429,11 @@ export function isParsedRelayRow(
   ) return false;
   if (row.paymentFlowSide !== undefined && row.kind !== 'transaction') return false;
   if (
+    row.billIdentity !== undefined &&
+    (typeof row.billIdentity !== 'string' ||
+      !/^(?:account|consumer|party|customer|contract|service):[A-Z0-9]{4}$/i.test(row.billIdentity))
+  ) return false;
+  if (
     row.paymentFlowSide === 'funding' &&
     (row.type !== 'expense' || row.transferHint !== true)
   ) return false;

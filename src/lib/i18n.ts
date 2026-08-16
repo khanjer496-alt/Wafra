@@ -328,6 +328,14 @@ const S = {
   scheduleInFewDays: { en: 'in {days} days', ar: 'خلال {days} أيام' },
   scheduleInManyDays: { en: 'in {days} days', ar: 'خلال {days} يوماً' },
   cadenceExpectedAgo: { en: '{cadence} · expected {days}d ago', ar: '{cadence} · كان متوقعاً قبل {days} يوم' },
+  recurringPaidObserved: {
+    en: 'Paid {date} · {cadence}',
+    ar: 'دُفع في {date} · {cadence}',
+  },
+  recurringLastPaidObserved: {
+    en: 'Last paid {date} · {cadence}',
+    ar: 'آخر دفع في {date} · {cadence}',
+  },
   perMonthShort: { en: '/mo', ar: 'شهرياً' },
   monthlyTotal: {
     en: '{amount} / month',
@@ -412,7 +420,12 @@ const S = {
     ar: 'استناداً إلى الأرصدة الافتتاحية والعمليات المسجلة، وليس التقدير أعلاه.',
   },
   moreCards: { en: 'View more cards · {count}', ar: 'عرض بطاقات أخرى · {count}' },
-  cardsHeader: { en: 'Cards', ar: 'البطاقات' },
+  cardsHeader: { en: 'Payment cards', ar: 'بطاقات الدفع' },
+  moneySourcesHeader: { en: 'Money sources', ar: 'مصادر الأموال' },
+  otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
+  showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
+  showFewerSources: { en: 'Show fewer', ar: 'عرض أقل' },
+  noMoneySourcesYet: { en: 'No money sources yet.', ar: 'لا توجد مصادر أموال بعد.' },
   accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
   inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },
   goalsHeader: { en: 'Savings goals', ar: 'أهداف الادخار' },
@@ -446,8 +459,8 @@ const S = {
   },
   sortShopsNone: { en: 'Every shop has a category', ar: 'كل متجر له تصنيف' },
   improveAccuracyHint: {
-    en: 'Bank messages the app is not reading well. Some have no merchant name at all; most read the name correctly but have no category yet. Share the list with the developer and the next update will handle them. Long account numbers are masked.',
-    ar: 'رسائل بنكية لا يقرأها التطبيق جيداً. بعضها بلا اسم متجر إطلاقاً، ومعظمها يُقرأ الاسم فيه بشكل صحيح لكن بلا تصنيف بعد. شارك القائمة مع المطوّر وسيعالجها التحديث القادم. الأرقام الطويلة مخفية.',
+    en: 'Messages still needing attention. Share formats with no merchant so the parser can improve. For a named shop, sort it once on this phone and Wafra remembers your choice for past and future entries. Long account numbers are masked.',
+    ar: 'رسائل ما زالت تحتاج إلى مراجعة. شارك الصيغ التي بلا اسم متجر لتحسين القارئ. أما المتجر المعروف فصنّفه مرة واحدة على هذا الهاتف، وستتذكر وفرة اختيارك للعمليات السابقة والقادمة. الأرقام الطويلة مخفية.',
   },
   couldNotRead: { en: 'Could not read', ar: 'تعذّرت القراءة' },
   noCategoryYet: { en: 'Read, but no category', ar: 'مقروءة بلا تصنيف' },
@@ -1301,11 +1314,11 @@ const S = {
   onboardSetupTime: { en: 'No bank login required', ar: 'لا يتطلب تسجيل الدخول إلى البنك' },
   onboardPreviewOverline: { en: 'EXAMPLE MONEY STORY', ar: 'مثال لصورة مالية' },
   onboardPreviewLive: { en: 'WHAT WAFRA CAN ORGANISE', ar: 'ما يمكن لوفرة تنظيمه' },
-  onboardPreviewIncome: { en: 'Talabat payout', ar: 'دفعة طلبات' },
-  onboardPreviewIncomeDetail: { en: 'Income recognised', ar: 'تم التعرف عليها كدخل' },
-  onboardPreviewBill: { en: 'SEWA bill', ar: 'فاتورة سيوا' },
-  onboardPreviewBillDetail: { en: 'Due date brought forward', ar: 'موعد الاستحقاق أمامك' },
-  onboardPreviewCard: { en: 'Card payment', ar: 'دفعة بطاقة' },
+  onboardPreviewIncome: { en: 'Income received', ar: 'دخل مستلم' },
+  onboardPreviewIncomeDetail: { en: 'Incoming money recognised', ar: 'تم التعرف على المال الوارد' },
+  onboardPreviewBill: { en: 'Upcoming bill', ar: 'فاتورة قادمة' },
+  onboardPreviewBillDetail: { en: 'Due date kept visible', ar: 'موعد الاستحقاق يبقى واضحاً' },
+  onboardPreviewCard: { en: 'Card repayment', ar: 'سداد بطاقة' },
   onboardPreviewCardDetail: { en: 'Matched and counted once', ar: 'تمت مطابقتها واحتسابها مرة واحدة' },
   onboardPreviewFooter: { en: 'One timeline. No spreadsheet cleanup.', ar: 'مسار واحد، دون ترتيب جداول.' },
   onboardPreviewAccessibility: {
@@ -1325,8 +1338,12 @@ const S = {
   onboardMarketSaudiDetail: { en: 'SAR · Saudi money format', ar: 'ريال · تنسيق الأموال السعودي' },
   onboardGoalsTitle: { en: 'What are you building towards?', ar: 'نحو ماذا تدّخر؟' },
   onboardGoalsBody: {
-    en: 'Choose up to two. Wafra will add them to your wallet now.',
-    ar: 'اختر هدفين كحد أقصى. سيضيفهما وفرة إلى محفظتك الآن.',
+    en: 'Choose up to two. Wafra will create starter targets after a supported ledger currency is confirmed.',
+    ar: 'اختر هدفين كحد أقصى. سينشئ وفرة أهدافاً مبدئية بعد تأكيد عملة مدعومة لسجلك.',
+  },
+  onboardGoalSelectionHint: {
+    en: 'Choose up to two goals.',
+    ar: 'اختر هدفين كحد أقصى.',
   },
   onboardGoalMax: { en: 'Two goals is the limit for setup.', ar: 'يمكن اختيار هدفين أثناء الإعداد.' },
   onboardGoalEmergency: { en: 'Emergency fund', ar: 'صندوق الطوارئ' },
@@ -1335,10 +1352,10 @@ const S = {
   onboardGoalTravelDetail: { en: 'Flights, stays, and spending money', ar: 'رحلات وإقامة ومصروف' },
   onboardGoalHome: { en: 'A home deposit', ar: 'دفعة منزل أولى' },
   onboardGoalHomeDetail: { en: 'Make the first big milestone visible', ar: 'اجعل أول محطة كبيرة واضحة' },
-  onboardBudgetTitle: { en: 'Choose your starting limits.', ar: 'اختر حدودك المبدئية.' },
+  onboardBudgetTitle: { en: 'How should your month feel?', ar: 'كيف تريد أن يبدو شهرك؟' },
   onboardBudgetBody: {
-    en: 'Five real category budgets are ready now. Change any of them later.',
-    ar: 'خمس ميزانيات فعلية جاهزة الآن. يمكنك تعديل أي منها لاحقاً.',
+    en: 'Choose a starting style. Wafra will create five editable category limits after a supported currency is confirmed.',
+    ar: 'اختر أسلوباً مبدئياً. سينشئ وفرة خمسة حدود قابلة للتعديل بعد تأكيد عملة مدعومة.',
   },
   onboardBudgetEssentials: { en: 'Essentials first', ar: 'الأساسيات أولاً' },
   onboardBudgetEssentialsDetail: { en: 'A tighter plan for focused months', ar: 'خطة أدق للأشهر المنضبطة' },
@@ -1346,6 +1363,15 @@ const S = {
   onboardBudgetBalancedDetail: { en: 'Comfort with clear guardrails', ar: 'راحة مع حدود واضحة' },
   onboardBudgetFlexible: { en: 'More flexible', ar: 'أكثر مرونة' },
   onboardBudgetFlexibleDetail: { en: 'More room for dining and shopping', ar: 'مساحة أكبر للمطاعم والتسوق' },
+  onboardPlanActivatesLater: {
+    en: 'No currency is guessed. Your plan activates when real money confirms a supported ledger currency.',
+    ar: 'لن نخمن العملة. تتفعّل خطتك عندما تؤكد عملية مالية حقيقية عملة مدعومة للسجل.',
+  },
+  onboardPlanPending: {
+    en: 'Your starting plan is saved. It will activate when Wafra confirms a supported ledger currency.',
+    ar: 'حُفظت خطتك المبدئية. ستتفعّل عندما يؤكد وفرة عملة مدعومة للسجل.',
+  },
+  onboardBudgetContinue: { en: 'Save my starting plan', ar: 'احفظ خطتي المبدئية' },
   onboardBudgetPreview: {
     en: '{count} limits · {amount} per month',
     ar: '{count} حدود · {amount} شهرياً',
@@ -1378,12 +1404,12 @@ const S = {
   onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
   onboardAutomaticChoice: { en: 'Keep it automatic', ar: 'اجعله تلقائياً' },
   onboardAutomaticChoiceAndroidBody: {
-    en: 'Build history now, then file supported bank SMS as they arrive.',
-    ar: 'أنشئ السجل الآن، ثم صنّف رسائل البنوك المدعومة عند وصولها.',
+    en: 'Build history now, then file supported bank SMS as they arrive. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
+    ar: 'أنشئ السجل الآن، ثم صنّف رسائل البنوك المدعومة عند وصولها. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
   },
   onboardAutomaticChoiceIosBody: {
-    en: 'Connect a personal Shortcut for the bank conversations you choose.',
-    ar: 'اربط اختصاراً شخصياً لمحادثات البنوك التي تختارها.',
+    en: 'Connect a personal Shortcut for the bank conversations you choose. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
+    ar: 'اربط اختصاراً شخصياً لمحادثات البنوك التي تختارها. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
   },
   onboardManualChoice: { en: 'I’ll add things myself', ar: 'سأضيف العمليات بنفسي' },
   onboardManualChoiceBody: {
@@ -1563,9 +1589,6 @@ const S = {
   featInsightsText: { en: 'Auto-detected subscriptions, due-date countdowns, plain-language insights.', ar: 'اكتشاف تلقائي للاشتراكات وتذكير بالمستحقات وتحليلات واضحة.' },
   featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
   featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
-  featBackup: { en: 'Backup & restore', ar: 'نسخ احتياطي واستعادة' },
-  featBackupText: { en: 'Move your full history to a new phone with one file.', ar: 'انقل سجلك كاملاً إلى هاتف جديد بملف واحد.' },
-
   // Onboarding
   obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
   obSubtitle: { en: 'Track an AED or SAR ledger privately.', ar: 'تتبّع سجلاً بالدرهم أو الريال بخصوصية.' },
@@ -1750,7 +1773,11 @@ const S = {
   // Other screens
   transactionsTitle: { en: 'Transactions', ar: 'العمليات' },
   budgetsTitle: { en: 'Budgets', ar: 'الميزانيات' },
-  cardsTitle: { en: 'Cards', ar: 'البطاقات' },
+  cardsTitle: { en: 'Payment cards', ar: 'بطاقات الدفع' },
+  cardsPurpose: {
+    en: 'Group purchases, balances, and amounts due by card. These are records in Wafra, not bank connections.',
+    ar: 'اجمع المشتريات والأرصدة والمبالغ المستحقة حسب البطاقة. هذه سجلات داخل وفرة وليست روابط مصرفية.',
+  },
   inactiveCards: { en: 'Inactive cards', ar: 'بطاقات غير نشطة' },
   lastUsed: { en: 'Last used', ar: 'آخر استخدام' },
   addTransactionTitle: { en: 'Add transaction', ar: 'إضافة عملية' },
@@ -2320,6 +2347,10 @@ const S = {
     en: '{month}, income {income}, spending {spending}',
     ar: '{month}، الدخل {income}، المصروف {spending}',
   },
+  monthCashflowNoDataA11y: {
+    en: '{month}, no activity recorded',
+    ar: '{month}، لا توجد عمليات مسجلة',
+  },
 
   accountKindBank: { en: 'Bank', ar: 'حساب بنكي' },
   accountKindCard: { en: 'Card', ar: 'بطاقة' },
@@ -2422,10 +2453,6 @@ const S = {
     ar: 'وفرة — رسائل بنكية لا يقرأها التطبيق جيداً:',
   },
   accuracyShareUnread: { en: 'COULD NOT READ — no merchant found', ar: 'تعذّرت القراءة — لم يُعثر على متجر' },
-  accuracyShareUncategorized: {
-    en: 'READ, BUT NO CATEGORY — merchant name is correct',
-    ar: 'مقروءة بلا تصنيف — اسم المتجر صحيح',
-  },
   accuracyShareRow: {
     en: '#{index} (seen {count}x, read as “{title}” / {category}):\n{raw}',
     ar: '#{index} (ظهرت {count}x، قُرئت كـ «{title}» / {category}):\n{raw}',
@@ -2440,6 +2467,12 @@ const S = {
     en: 'Report a bug, and choose what to attach',
     ar: 'أبلغ عن خلل، واختر ما تُرفقه',
   },
+  supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
+  settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
+  settingStatusOn: { en: 'On', ar: 'مفعّل' },
+  settingStatusOff: { en: 'Off', ar: 'متوقف' },
+  settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
+  settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
   feedbackIntro: {
     en: 'Say what went wrong. Nothing leaves this phone until you tap Send. The report is kept for at most 14 days for Wafra maintainers and is not sent to third-party AI.',
     ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال. يُحتفظ بالتقرير لمدة أقصاها 14 يوماً لمشرفي وفرة ولا يُرسل إلى ذكاء اصطناعي خارجي.',
@@ -2699,6 +2732,7 @@ const S = {
   titleOutwardRemittance: { en: 'Outward remittance', ar: 'حوالة صادرة' },
   titleTelegraphicTransfer: { en: 'Telegraphic transfer', ar: 'حوالة برقية' },
   titleBankTransfer: { en: 'Bank transfer', ar: 'تحويل بنكي' },
+  titleOwnAccountTransfer: { en: 'Own account transfer', ar: 'تحويل بين حساباتك' },
   titleSavingsTransfer: { en: 'Savings transfer', ar: 'تحويل إلى الادخار' },
   titleCardPayment: { en: 'Card payment', ar: 'دفعة بطاقة' },
   titleAccountDebit: { en: 'Account debit', ar: 'خصم من الحساب' },
@@ -2830,6 +2864,7 @@ const STRUCTURAL_TITLE_KEYS: Record<string, StringKey> = {
   'Outward remittance': 'titleOutwardRemittance',
   'Telegraphic transfer': 'titleTelegraphicTransfer',
   'Bank transfer': 'titleBankTransfer',
+  'Own account transfer': 'titleOwnAccountTransfer',
   'Savings transfer': 'titleSavingsTransfer',
   'Card payment': 'titleCardPayment',
   'Account debit': 'titleAccountDebit',

@@ -148,6 +148,15 @@ export interface Transaction {
   /** Linked consumer-bill flow: internal funding or named biller receipt. */
   paymentFlowSide?: 'funding' | 'receipt';
   /**
+   * Privacy-safe identity of the bill account named by a payment alert.
+   *
+   * Only a closed label and masked last four digits are stored. This lets a
+   * bank's "consumer number" payment confirmation settle a provider reminder
+   * that calls the same obligation an account or party ID, without retaining
+   * the full customer number or guessing from amount/title alone.
+   */
+  billIdentity?: string;
+  /**
    * Why the account shown for a named biller receipt is trustworthy.
    *
    * Receipt alerts that omit a card still need a ledger account, so import
@@ -298,6 +307,18 @@ export interface Goal {
   savedFils: number;
 }
 
+/**
+ * Currency-free choices collected during first-run setup.
+ *
+ * They deliberately do not contain money. A fresh install has not yet proved
+ * whether its ledger is AED or SAR, so the matching budgets and goal targets
+ * are materialised only after the first real money entry pins that fact.
+ */
+export interface OnboardingPlanPreferences {
+  goalIds: ('emergency' | 'travel' | 'home')[];
+  budgetId: 'essentials' | 'balanced' | 'flexible';
+}
+
 export interface AppState {
   hydrated: boolean;
   /** Explicit meaning of every legacy `*Fils` integer; null before a ledger has money. */
@@ -310,6 +331,10 @@ export interface AppState {
   bills: Bill[];
   cardDues: CardDue[];
   goals: Goal[];
+  /** First-run plan waiting for a real ledger currency before activation. */
+  onboardingPlan: OnboardingPlanPreferences | null;
+  /** Local currency explicitly observed in an imported bank alert. */
+  onboardingCurrencyEvidence: 'AED' | 'SAR' | null;
   /** Learned merchant → category corrections, keyed by lowercased merchant. */
   merchantOverrides: Record<string, CategoryId>;
   /** Card/account last4 → accountId, learned from SMS. */
@@ -360,6 +385,8 @@ export interface AppState {
   marketId: string;
   /** UI language ('en' | 'ar'). Auto-detected on first launch. */
   language: string;
+  /** Whether UI language follows the OS/app locale or is explicitly pinned. */
+  languagePreference?: 'system' | 'en' | 'ar';
   /** Palette choice: 'system' follows the OS, 'light'/'dark' pin it. */
   themePreference: string;
 }
@@ -392,6 +419,7 @@ export interface TxHealUpdate {
   viaPush?: boolean;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
+  billIdentity?: string;
   paymentInstrumentSource?: 'alert' | 'user';
   /**
    * The stored source text, or `null` to CLEAR it.
@@ -431,6 +459,15 @@ export interface ImportBatchInput {
    * fallback, while a later debit-worded purchase never downgrades it.
    */
   cardTypes?: Record<string, 'credit' | 'debit'>;
+  /** Supported local currency explicitly observed in this bank-alert batch. */
+  confirmedLedgerCurrency?: 'AED' | 'SAR';
+  /**
+   * True only when Android completed a scan from the beginning of the SMS
+   * inbox for the current parser. Incremental scans must never set this: an
+   * older backup can be restored while one is in flight, and treating that
+   * partial scan as migration proof permanently strands older messages.
+   */
+  parserRereadComplete?: boolean;
   lastScanTs: number;
   updates?: TxHealUpdate[];
 }

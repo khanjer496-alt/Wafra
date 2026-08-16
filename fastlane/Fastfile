@@ -1,0 +1,64 @@
+ROOT = File.expand_path("..", __dir__)
+PACKAGE_ROOT = File.join(ROOT, "artifacts", "store-package")
+
+def required_env!(name)
+  value = ENV[name]
+  UI.user_error!("#{name} is required") if value.nil? || value.strip.empty?
+  value
+end
+
+def confirm_store_upload!
+  return if ENV["WAFRA_STORE_UPLOAD_CONFIRM"] == "UPLOAD_REVIEWED_ASSETS"
+
+  UI.user_error!(
+    "Live store writes are blocked. Review npm run store:plan and set " \
+    "WAFRA_STORE_UPLOAD_CONFIRM=UPLOAD_REVIEWED_ASSETS for this command only."
+  )
+end
+
+def prepare_store_package!
+  sh("npm", "run", "check:store")
+  sh("npm", "run", "check:store-pricing")
+  sh("npm", "run", "store:prepare:assets")
+end
+
+platform :ios do
+  desc "Upload reviewed localized metadata and screenshots; never submits for review"
+  lane :upload_store do
+    confirm_store_upload!
+    prepare_store_package!
+    api_key = app_store_connect_api_key(
+      key_id: required_env!("ASC_KEY_ID"),
+      issuer_id: required_env!("ASC_ISSUER_ID"),
+      key_filepath: required_env!("ASC_KEY_FILE")
+    )
+    upload_to_app_store(
+      api_key: api_key,
+      app_identifier: "app.wafra.ios",
+      metadata_path: File.join(PACKAGE_ROOT, "apple", "metadata"),
+      screenshots_path: File.join(PACKAGE_ROOT, "apple", "screenshots"),
+      skip_binary_upload: true,
+      skip_app_version_update: true,
+      submit_for_review: false,
+      automatic_release: false,
+      force: false
+    )
+  end
+end
+
+platform :android do
+  desc "Upload reviewed localized metadata and screenshots; never uploads an AAB"
+  lane :upload_store do
+    confirm_store_upload!
+    prepare_store_package!
+    upload_to_play_store(
+      package_name: "app.wafra.android",
+      json_key: required_env!("GOOGLE_PLAY_JSON_KEY"),
+      metadata_path: File.join(PACKAGE_ROOT, "google", "metadata", "android"),
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_changelogs: true,
+      track: "internal"
+    )
+  end
+end

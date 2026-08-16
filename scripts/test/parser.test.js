@@ -506,7 +506,7 @@ if (payInstr && payInstr.merchant === 'Card •4711 payment' && payInstr.transfe
 
 t('payment instructions to a named biller keeps the biller name',
   'Dear Customer, Your payment instructions of AED 313.95 to homeinet for consumer number 5554026 has been processed on 13/07/2026 22:01',
-  { merchant: 'Homeinet', amountFils: 31395 });
+  { merchant: 'Homeinet', amountFils: 31395, billIdentity: 'consumer:4026' });
 
 const towardsCard = parseSms(
   'AED 1,027.60 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 4722.');
@@ -969,11 +969,11 @@ t('an owner-created Fishbasket nickname does not get a global category',
 
 t('an owner-created Fbinter nickname does not get a global category',
   'Dear Customer, Your payment instructions of AED 313.95 to fbinter for consumer number 1234026 has been processed on 13/07/2026 22:01',
-  { merchant: 'Fbinter', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
+  { merchant: 'Fbinter', category: 'other', type: 'expense', paymentFlowSide: 'receipt', billIdentity: 'consumer:4026', deliberate: false });
 
 t('an owner-created Nazemhome nickname does not get a global category',
   'Dear Customer, Your payment instructions of AED 450.45 to nazemhome for consumer number 1231849 has been processed on 10/07/2026 17:41',
-  { merchant: 'Nazemhome', category: 'other', type: 'expense', paymentFlowSide: 'receipt', deliberate: false });
+  { merchant: 'Nazemhome', category: 'other', type: 'expense', paymentFlowSide: 'receipt', billIdentity: 'consumer:1849', deliberate: false });
 
 t('an owner-created Tank300 nickname does not get a global category',
   'Dear Customer, Your payment instructions of AED 250.0 to tank300 for consumer number 1231711 has been processed on 02/07/2026 19:47',

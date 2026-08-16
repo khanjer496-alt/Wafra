@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wafra — Wallet & Settings concepts</title>
+  <style>
+    @font-face { font-family: Geist; src: url('../../assets/fonts/Geist-Regular.ttf'); font-weight: 400; }
+    @font-face { font-family: Geist; src: url('../../assets/fonts/Geist-Medium.ttf'); font-weight: 500; }
+    @font-face { font-family: Geist; src: url('../../assets/fonts/Geist-SemiBold.ttf'); font-weight: 600; }
+    @font-face { font-family: Geist Mono; src: url('../../assets/fonts/GeistMono-Medium.ttf'); font-weight: 500; }
+
+    :root {
+      --ink: #f4f3ef;
+      --muted: #9b9e98;
+      --faint: #686d68;
+      --base: #090b0a;
+      --surface: #111411;
+      --surface-2: #171b18;
+      --line: rgba(255,255,255,.085);
+      --mint: #4fd0a3;
+      --mint-soft: rgba(79,208,163,.12);
+      --coral: #ef846e;
+      --amber: #e8b85f;
+      --phone-w: 376px;
+      --phone-h: 940px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #050706; color: var(--ink); font-family: Geist, sans-serif; }
+    body { padding: 48px; display: grid; gap: 48px; justify-content: center; }
+
+    .concept {
+      width: 1320px;
+      min-height: 1070px;
+      padding: 48px;
+      display: grid;
+      grid-template-columns: 250px var(--phone-w) var(--phone-w);
+      gap: 54px;
+      align-items: center;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(800px 520px at 92% -10%, rgba(58,152,117,.13), transparent 70%),
+        linear-gradient(145deg, #0c0f0d, #070907 60%);
+      border: 1px solid #242925;
+      border-radius: 40px;
+    }
+    .concept::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: .22;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.12'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+    }
+
+    .concept-copy { align-self: start; padding-top: 34px; position: relative; z-index: 1; }
+    .eyebrow { color: var(--mint); font-size: 12px; line-height: 1; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; }
+    .concept h1 { font-size: 34px; line-height: 1.02; letter-spacing: -.045em; margin: 18px 0 22px; }
+    .concept-copy > p { color: #aeb3ad; font-size: 15px; line-height: 1.55; margin: 0 0 28px; }
+    .principle { border-top: 1px solid var(--line); padding: 14px 0; color: #d9dad6; font-size: 13px; line-height: 1.4; }
+    .principle span { display: block; color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; margin-bottom: 5px; }
+    .truth { margin-top: 24px; border-radius: 14px; padding: 14px; background: var(--mint-soft); color: #bcebd9; font-size: 12px; line-height: 1.45; }
+
+    .phone-shell { position: relative; z-index: 1; width: var(--phone-w); }
+    .phone-label { color: #717772; margin: 0 0 11px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: .14em; }
+    .phone {
+      width: var(--phone-w);
+      height: var(--phone-h);
+      border-radius: 38px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.15);
+      box-shadow: 0 32px 80px rgba(0,0,0,.58), inset 0 0 0 5px #020302;
+      background: var(--base);
+      display: flex;
+      flex-direction: column;
+    }
+    .status { height: 32px; padding: 13px 19px 0; display: flex; align-items: center; justify-content: space-between; font-size: 9px; color: #e6e9e5; flex: 0 0 auto; }
+    .status .icons { letter-spacing: .08em; color: #b6bbb6; }
+    .screen { flex: 1; min-height: 0; padding: 16px 17px 0; overflow: hidden; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 21px; }
+    .title { font-size: 24px; font-weight: 600; letter-spacing: -.045em; }
+    .title.small { font-size: 20px; }
+    .top-actions { display: flex; gap: 9px; }
+    .round { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: #adb2ad; background: var(--surface); border: 1px solid var(--line); font-size: 15px; }
+    .round.primary { color: #07110d; background: var(--mint); border-color: transparent; font-size: 20px; }
+    .back { color: #9ea39e; font-size: 19px; margin-right: 8px; }
+    .back-title { display: flex; align-items: center; }
+
+    .label { font-size: 9px; color: var(--muted); letter-spacing: .115em; text-transform: uppercase; font-weight: 500; }
+    .section-title { display: flex; justify-content: space-between; align-items: baseline; margin: 19px 1px 8px; }
+    .section-title b { color: #b6bbb6; font-size: 9px; letter-spacing: .115em; text-transform: uppercase; }
+    .section-title a { color: var(--mint); font-size: 9px; letter-spacing: .06em; text-decoration: none; text-transform: uppercase; }
+    .subtle { color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .mono { font-family: Geist Mono, monospace; font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+    .amount { font-family: Geist Mono, monospace; font-size: 35px; line-height: 1; letter-spacing: -.055em; }
+    .currency { color: var(--muted); font-size: 11px; margin-right: 6px; }
+    .money { display: flex; align-items: baseline; }
+    .value { font-family: Geist Mono, monospace; font-size: 13px; font-weight: 500; white-space: nowrap; }
+    .value.owed { color: var(--coral); }
+
+    .hero { border: 1px solid var(--line); border-radius: 19px; background: var(--surface); padding: 16px; }
+    .hero-top { display: flex; justify-content: space-between; align-items: start; }
+    .hero-mark { width: 31px; height: 31px; border-radius: 10px; display: grid; place-items: center; color: var(--mint); background: var(--mint-soft); }
+    .hero-money { margin-top: 13px; }
+    .metrics { border-top: 1px solid var(--line); margin: 15px -16px -16px; display: grid; grid-template-columns: 1fr 1fr; }
+    .metric { padding: 12px 12px 13px; }
+    .metric + .metric { border-left: 1px solid var(--line); }
+    .metric strong { display: block; font-family: Geist Mono, monospace; font-size: 14px; margin-top: 4px; }
+    .metric .warn { color: var(--coral); }
+
+    .list { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .row { min-height: 57px; display: flex; align-items: center; padding: 10px 12px; gap: 10px; }
+    .row + .row { border-top: 1px solid var(--line); }
+    .tile { width: 31px; height: 31px; border-radius: 9px; display: grid; place-items: center; flex: 0 0 auto; color: var(--mint); background: var(--mint-soft); font-size: 14px; }
+    .tile.coral { color: var(--coral); background: rgba(239,132,110,.10); }
+    .tile.gold { color: var(--amber); background: rgba(232,184,95,.11); }
+    .row-copy { min-width: 0; flex: 1; }
+    .row-copy strong { display: block; font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-copy small { display: block; color: var(--muted); font-size: 9px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row-side { text-align: right; }
+    .row-side small { display: block; color: var(--muted); font-size: 8px; margin-top: 3px; text-transform: uppercase; }
+    .chev { color: #59605b; font-size: 16px; margin-left: 2px; }
+    .pill { display: inline-flex; align-items: center; min-height: 22px; border-radius: 999px; padding: 4px 8px; background: var(--mint-soft); color: var(--mint); font-size: 8px; font-weight: 600; letter-spacing: .03em; }
+    .pill.warn { color: var(--coral); background: rgba(239,132,110,.11); }
+
+    .progress { height: 5px; border-radius: 9px; background: #252a26; overflow: hidden; margin-top: 9px; }
+    .progress i { display: block; width: 42%; height: 100%; border-radius: inherit; background: var(--mint); }
+    .goal { border: 1px solid var(--line); border-radius: 15px; padding: 12px; background: var(--surface); }
+    .goal-top { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+
+    .scan { margin-top: 14px; min-height: 52px; border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,.018); }
+    .scan .row-copy strong { font-size: 10px; }
+
+    .switch { width: 35px; height: 21px; padding: 2px; border-radius: 20px; background: #303531; flex: 0 0 auto; }
+    .switch i { display: block; width: 17px; height: 17px; border-radius: 50%; background: #8b908b; }
+    .switch.on { background: var(--mint); }
+    .switch.on i { transform: translateX(14px); background: #06100c; }
+    .pro { background: linear-gradient(135deg, rgba(232,184,95,.12), rgba(232,184,95,.025)); }
+    .segmented { display: grid; grid-template-columns: repeat(3, 1fr); background: #0b0e0c; padding: 3px; border-radius: 10px; margin: 10px 12px; }
+    .segmented span { text-align: center; color: var(--muted); font-size: 9px; padding: 7px 4px; border-radius: 8px; }
+    .segmented .active { background: #252a26; color: var(--ink); }
+    .destructive { color: var(--coral); border: 1px solid rgba(239,132,110,.22); background: rgba(239,132,110,.08); border-radius: 14px; padding: 13px; text-align: center; font-size: 10px; margin-top: 18px; }
+
+    .tabbar { height: 64px; flex: 0 0 auto; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(4, 1fr); padding: 8px 8px 12px; background: rgba(12,15,13,.97); }
+    .tab { display: grid; place-items: center; align-content: center; gap: 3px; color: #707570; font-size: 8px; }
+    .tab i { font-style: normal; font-size: 15px; }
+    .tab.active { color: var(--mint); }
+
+    /* Option B — priority stack */
+    #option-b { --surface: #141815; --surface-2: #1b211d; --mint: #6fd0a3; --mint-soft: rgba(111,208,163,.11); }
+    #option-b { background: radial-gradient(680px 480px at 50% 105%, rgba(111,208,163,.10), transparent 70%), #0b0e0c; }
+    .balance-strip { display: flex; align-items: end; justify-content: space-between; padding: 2px 2px 18px; border-bottom: 1px solid var(--line); }
+    .balance-strip .amount { font-size: 31px; }
+    .attention { border-radius: 18px; padding: 14px; background: #1a1715; border: 1px solid rgba(239,132,110,.16); }
+    .attention-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .attention-head strong { font-size: 12px; }
+    .attention-head .count { width: 20px; height: 20px; border-radius: 50%; background: var(--coral); color: #180907; display: grid; place-items: center; font: 600 10px Geist; }
+    .attention .row { padding-left: 0; padding-right: 0; }
+    .bank-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 12px 6px; }
+    .bank-head strong { font-size: 10px; letter-spacing: .05em; }
+    .bank-head span { color: var(--muted); font-size: 9px; }
+    .status-card { border: 1px solid rgba(79,208,163,.17); background: linear-gradient(145deg, rgba(79,208,163,.10), rgba(79,208,163,.025)); border-radius: 18px; padding: 15px; }
+    .status-card h3 { margin: 4px 0 2px; font-size: 17px; letter-spacing: -.02em; }
+    .checks { display: flex; gap: 7px; margin-top: 12px; }
+    .check { flex: 1; border-top: 1px solid rgba(79,208,163,.17); padding-top: 8px; color: #b8c9c0; font-size: 8px; line-height: 1.35; }
+    .check b { color: var(--mint); margin-right: 3px; }
+    .category-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .category { min-height: 83px; padding: 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); }
+    .category .tile { width: 28px; height: 28px; margin-bottom: 9px; }
+    .category strong { display: block; font-size: 11px; }
+    .category small { display: block; color: var(--muted); font-size: 8px; margin-top: 3px; }
+
+    /* Option C — ledger */
+    #option-c { --ink: #f1eee5; --muted: #a09d94; --faint: #6f706a; --mint: #87c8a8; --mint-soft: rgba(135,200,168,.10); }
+    #option-c { background: linear-gradient(120deg, #11120f, #080907 74%); }
+    #option-c .phone { background: #0c0d0b; }
+    .editorial-title { margin: 0 0 22px; }
+    .editorial-title small { display: block; color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: .02em; margin-bottom: 6px; }
+    .editorial-title strong { display: block; font: 500 28px/1 Geist; letter-spacing: -.055em; }
+    .ledger-hero { padding: 0 1px 20px; }
+    .ledger-hero .amount { font-size: 39px; }
+    .coverage { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 9px; }
+    .coverage i { width: 38px; height: 3px; background: linear-gradient(90deg, var(--mint) 62%, #262a26 62%); border-radius: 5px; }
+    .rule-section { border-top: 1px solid var(--line); padding: 15px 0 1px; }
+    .rule-title { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .rule-title strong { font-size: 11px; font-weight: 500; }
+    .rule-title span { color: var(--muted); font-size: 9px; }
+    .ledger-row { min-height: 49px; display: grid; grid-template-columns: 1fr auto; align-items: center; border-top: 1px solid rgba(255,255,255,.055); }
+    .ledger-row:first-of-type { border-top: 0; }
+    .ledger-row strong { display: block; font-size: 11px; font-weight: 500; }
+    .ledger-row small { display: block; color: var(--muted); font-size: 8px; margin-top: 3px; }
+    .ledger-row .right { text-align: right; }
+    .quiet-action { color: var(--mint); font-size: 9px; }
+    .settings-index { display: flex; gap: 7px; overflow: hidden; margin: -3px 0 18px; }
+    .settings-index span { border: 1px solid var(--line); color: var(--muted); border-radius: 999px; font-size: 8px; padding: 7px 10px; white-space: nowrap; }
+    .settings-index .active { color: #08110d; background: var(--mint); border-color: var(--mint); }
+    .plain-group { border-top: 1px solid var(--line); }
+    .plain-row { min-height: 58px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid rgba(255,255,255,.055); }
+    .plain-row .number { width: 24px; color: var(--faint); font: 500 9px Geist Mono; }
+    .plain-row .row-copy strong { font-size: 11px; }
+
+    /* Option D — grouped by institution */
+    #option-d { --mint: #55d6bd; --mint-soft: rgba(85,214,189,.11); --surface: #111817; --surface-2: #17211f; }
+    #option-d { background: radial-gradient(700px 560px at 48% 20%, rgba(57,126,118,.13), transparent 68%), linear-gradient(140deg,#08100f,#070908 72%); }
+    .bank-book { border: 1px solid var(--line); border-radius: 17px; overflow: hidden; background: var(--surface); margin-bottom: 9px; }
+    .bank-book-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 12px; background: rgba(255,255,255,.025); }
+    .bank-identity { display: flex; align-items: center; gap: 9px; }
+    .bank-badge { width: 27px; height: 27px; border-radius: 9px; display: grid; place-items: center; color: var(--mint); background: var(--mint-soft); font-size: 10px; font-weight: 600; }
+    .bank-book-head strong { font-size: 11px; }
+    .bank-book-head .value { font-size: 11px; }
+    .book-row { min-height: 44px; display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line); }
+    .book-row strong { display: block; font-size: 10px; font-weight: 500; }
+    .book-row small { display: block; color: var(--muted); font-size: 8px; margin-top: 2px; }
+    .setting-band { display: grid; grid-template-columns: 42px 1fr auto; align-items: center; min-height: 59px; border-bottom: 1px solid var(--line); }
+    .setting-band .index { color: #9ca39d; font: 500 10px Geist Mono; }
+    .setting-band strong { display: block; font-size: 11px; }
+    .setting-band small { display: block; color: #a2a8a3; font-size: 9px; margin-top: 3px; }
+    .state { color: var(--muted); font-size: 8px; border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; }
+    .state.on { color: var(--mint); border-color: rgba(85,214,189,.25); background: var(--mint-soft); }
+
+    /* Option E — warm light mode */
+    #option-e {
+      --ink: #142018; --muted: #69726b; --faint: #929990; --base: #f6f3eb;
+      --surface: #fffdf8; --surface-2: #ece9df; --line: rgba(25,44,32,.12);
+      --mint: #167d5f; --mint-soft: rgba(22,125,95,.09); --coral: #bd553f; --amber: #9f741c;
+      color: #142018;
+      background: radial-gradient(650px 520px at 88% 0%, rgba(45,136,102,.13), transparent 66%), #e8e4da;
+      border-color: #cbc7bd;
+    }
+    #option-e::after { opacity: .10; }
+    #option-e .concept-copy h1 { color: #142018; }
+    #option-e .concept-copy > p { color: #526057; }
+    #option-e .principle { color: #26372c; border-color: rgba(25,44,32,.14); }
+    #option-e .principle span, #option-e .phone-label { color: #7f877f; }
+    #option-e .truth { color: #195a45; background: rgba(22,125,95,.10); }
+    #option-e .phone { border-color: rgba(25,44,32,.22); box-shadow: 0 32px 80px rgba(42,48,42,.26), inset 0 0 0 5px #d8d5cc; }
+    #option-e .status { color: #26372c; }
+    #option-e .status .icons { color: #738078; }
+    #option-e .tabbar { background: rgba(248,246,239,.97); }
+    #option-e .round { background: #ece9df; color: #3f4c43; width: 44px; height: 44px; }
+    #option-e .round.primary { color: #fff; background: var(--mint); }
+    #option-e .switch { background: #7d877f; }
+    #option-e .switch i { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.16); }
+    #option-e .switch.on { background: var(--mint); }
+    #option-e .switch.on i { background: #fff; }
+    #option-e .segmented { background: #ece9df; }
+    #option-e .segmented .active { background: #fffdf8; box-shadow: 0 1px 4px rgba(31,42,34,.10); }
+    #option-e .destructive { background: rgba(189,85,63,.06); }
+    #option-e .section-title b { color: #4a574e; }
+    #option-e .tab { color: #4e5b52; font-size: 9px; }
+    .paper-hero { padding: 8px 2px 18px; border-bottom: 1px solid var(--line); }
+    .paper-hero .amount { font-size: 42px; }
+    .paper-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 14px; }
+    .paper-fact { padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+    .paper-fact strong { display: block; font: 500 13px Geist Mono; margin-top: 5px; }
+
+    /* Option F — compact status snapshot */
+    #option-f { --mint: #55d19a; --mint-soft: rgba(85,209,154,.10); --surface: #121512; }
+    #option-f { background: linear-gradient(120deg,#0c0f0c,#070807 70%); }
+    .snapshot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .snapshot-item { min-height: 72px; padding: 11px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); }
+    .snapshot-item span { display: block; color: #a0a6a1; font-size: 9px; line-height: 1.25; }
+    .snapshot-item strong { display: block; font: 500 14px Geist Mono; margin-top: 8px; }
+    .snapshot-item.alert strong { color: var(--coral); }
+    .compact-group { border-top: 1px solid var(--line); }
+    .compact-line { min-height: 48px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid rgba(255,255,255,.055); }
+    .compact-line .tile { width: 27px; height: 27px; border-radius: 8px; }
+    .compact-line .row-copy strong { font-size: 10px; }
+    .compact-line .row-copy small { color: #a0a6a1; font-size: 9px; }
+    .summary-head { border: 1px solid rgba(85,209,154,.16); background: var(--mint-soft); border-radius: 16px; padding: 13px; }
+    .summary-head-grid { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(85,209,154,.16); }
+    .summary-head-grid div { font-size: 8px; color: var(--muted); }
+    .summary-head-grid b { display: block; color: var(--ink); font-size: 10px; margin-bottom: 3px; }
+    #option-d .round, #option-f .round { width: 44px; height: 44px; }
+    #option-d .tab, #option-f .tab { color: #9ba19c; font-size: 9px; }
+    #option-d .tab.active, #option-f .tab.active { color: var(--mint); }
+  </style>
+</head>
+<body>
+
+  <section class="concept" id="option-a">
+    <aside class="concept-copy">
+      <div class="eyebrow">Option A</div>
+      <h1>Calm layers</h1>
+      <p>Balance first, then the few money sources that explain it. Everything else remains available without turning the Wallet into an inventory dump.</p>
+      <div class="principle"><span>Wallet</span>Reported money → obligations → sources → goal</div>
+      <div class="principle"><span>Settings</span>Frequent controls first; rare maintenance below</div>
+      <div class="truth">No transfers, freeze-card controls, live bank connections, cash-flow forecasts, or security scores.</div>
+    </aside>
+
+    <div class="phone-shell">
+      <div class="phone-label">Wallet · overview-first</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="title">Wallet</div><div class="top-actions"><div class="round">≡</div><div class="round primary">+</div></div></header>
+          <section class="hero">
+            <div class="hero-top"><div><div class="label">Available balances</div><div class="subtle" style="margin-top:4px">Reliable balances for 12 of 31 active accounts</div></div><div class="hero-mark">⌂</div></div>
+            <div class="money hero-money"><span class="currency">AED</span><span class="amount">588,329</span></div>
+            <div class="metrics">
+              <div class="metric"><span class="subtle">Card payments due</span><strong class="warn">AED 1,748</strong></div>
+              <div class="metric"><span class="subtle">Paid from accounts this month</span><strong>AED 35,193</strong></div>
+            </div>
+          </section>
+
+          <div class="section-title"><b>Money sources</b><span class="subtle">31 active</span></div>
+          <section class="list">
+            <div class="row"><div class="tile">⌂</div><div class="row-copy"><strong>FAB Account ··0004</strong><small>Balance per bank message</small></div><div class="row-side"><div class="value">AED 424,950</div></div><div class="chev">›</div></div>
+            <div class="row"><div class="tile">▭</div><div class="row-copy"><strong>LIV Debit ··1354</strong><small>AED 7,296 spent this month</small></div><div class="row-side"><div class="value">AED 13,859</div><small>per bank SMS</small></div><div class="chev">›</div></div>
+            <div class="row"><div class="tile coral">▭</div><div class="row-copy"><strong>ADCB Credit ··7720</strong><small>AED 32 spent this month</small></div><div class="row-side"><div class="value owed">AED 170</div><small>owed</small></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Other activity</b><a>Review</a></div>
+          <section class="list"><div class="row"><div class="tile">↗</div><div class="row-copy"><strong>Foreign activity</strong><small>USD · EUR</small></div><div class="row-side"><div class="value">AED 84</div></div><div class="chev">›</div></div></section>
+
+          <div class="section-title"><b>Savings goals</b><a>New goal</a></div>
+          <section class="goal"><div class="row" style="padding:0"><div class="tile">◎</div><div class="row-copy"><strong>Set a savings goal</strong><small>Umrah, a car, a rainy-day fund — track it here</small></div><div class="chev">›</div></div></section>
+          <div class="scan"><div class="tile">✉</div><div class="row-copy"><strong>Inbox scanned 19h ago</strong><small>14,922 entries read on this device</small></div><div class="chev">›</div></div>
+        </main>
+        <nav class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>▥</i>Flow</div><div class="tab"><i>↻</i>Bills</div><div class="tab active"><i>▣</i>Wallet</div></nav>
+      </div>
+    </div>
+
+    <div class="phone-shell">
+      <div class="phone-label">Settings · grouped by intent</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="back-title"><span class="back">‹</span><div class="title small">Settings</div></div></header>
+          <section class="list pro"><div class="row"><div class="tile gold">◇</div><div class="row-copy"><strong>Wafra Pro</strong><small>Free trial · 3 days left</small></div><div class="chev">›</div></div></section>
+
+          <div class="section-title"><b>Alerts</b></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Daily spend summary</strong><small>Every evening at 9pm</small></div><div class="switch on"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Alert me on every charge</strong><small>On for bank SMS</small></div><div class="switch on"><i></i></div></div>
+          </section>
+
+          <div class="section-title"><b>Privacy & capture</b></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Private Mode</strong><small>Off · low-confidence text may stay on phone</small></div><div class="switch"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>App Lock</strong><small>Use your phone screen lock</small></div><div class="switch"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Read bank SMS</strong><small>Granted · processed on this phone</small></div><div class="switch on"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Trusted devices & family</strong><small>Share future relay captures with up to 8 devices</small></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Data</b></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Alerts to review</strong><small>Nothing waiting</small></div><div class="chev">›</div></div>
+            <div class="row"><div class="row-copy"><strong>Sort your shops</strong><small>96 shops with no category yet</small></div><div class="chev">›</div></div>
+            <div class="row"><div class="row-copy"><strong>Improve accuracy</strong><small>123 unread message formats</small></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Appearance</b></div>
+          <section class="list"><div class="segmented"><span class="active">System</span><span>Light</span><span>Dark</span></div></section>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="concept" id="option-b">
+    <aside class="concept-copy">
+      <div class="eyebrow">Option B</div>
+      <h1>Priority stack</h1>
+      <p>Designed for the user asking “what needs my attention?” Obligations and review items rise above the account directory.</p>
+      <div class="principle"><span>Wallet</span>Attention → balances → banks → goal</div>
+      <div class="principle"><span>Settings</span>Current state → common toggles → destinations</div>
+      <div class="truth">The status summary reports existing settings only. It does not claim Wafra monitors bank security.</div>
+    </aside>
+
+    <div class="phone-shell">
+      <div class="phone-label">Wallet · attention-first</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="title">Wallet</div><div class="top-actions"><div class="round">≡</div><div class="round primary">+</div></div></header>
+          <section class="balance-strip"><div><div class="label">Available balances</div><div class="money" style="margin-top:7px"><span class="currency">AED</span><span class="amount">588,329</span></div></div><div class="subtle" style="text-align:right">12 of 31 active<br/>reported</div></section>
+
+          <div class="section-title"><b>Needs attention</b></div>
+          <section class="attention">
+            <div class="attention-head"><strong>Payment needs review</strong><span class="count">1</span></div>
+            <div class="row"><div class="tile coral">!</div><div class="row-copy"><strong>Card payments due</strong><small>Open statements</small></div><div class="row-side"><div class="value owed">AED 1,748</div></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Other activity</b><a>Review currencies</a></div>
+          <section class="list"><div class="row"><div class="tile">↗</div><div class="row-copy"><strong>Foreign activity</strong><small>USD · EUR</small></div><div class="row-side"><div class="value">AED 84</div></div><div class="chev">›</div></div></section>
+
+          <div class="section-title"><b>By bank</b><span class="subtle">31 active</span></div>
+          <section class="list">
+            <div class="bank-head"><strong>FAB</strong><span class="mono">AED 432,716</span></div>
+            <div class="row"><div class="tile">⌂</div><div class="row-copy"><strong>Account ··0004</strong><small>Balance per bank SMS</small></div><div class="row-side"><div class="value">424,950</div></div><div class="chev">›</div></div>
+            <div class="row"><div class="tile">⌂</div><div class="row-copy"><strong>Account ··0002</strong><small>Balance per bank SMS</small></div><div class="row-side"><div class="value">7,766</div></div><div class="chev">›</div></div>
+            <div class="bank-head" style="border-top:1px solid var(--line)"><strong>LIV</strong><span class="mono">AED 13,859</span></div>
+            <div class="row"><div class="tile">▭</div><div class="row-copy"><strong>Debit ··1354</strong><small>AED 7,296 spent this month</small></div><div class="row-side"><div class="value">13,859</div></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Savings goals</b><a>New goal</a></div>
+          <section class="goal"><div class="row" style="padding:0"><div class="tile">◎</div><div class="row-copy"><strong>Set a savings goal</strong><small>Umrah, a car, a rainy-day fund</small></div><div class="chev">›</div></div></section>
+        </main>
+        <nav class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>▥</i>Flow</div><div class="tab"><i>↻</i>Bills</div><div class="tab active"><i>▣</i>Wallet</div></nav>
+      </div>
+    </div>
+
+    <div class="phone-shell">
+      <div class="phone-label">Settings · state-first</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="back-title"><span class="back">‹</span><div class="title small">Settings</div></div></header>
+          <section class="status-card">
+            <div class="label" style="color:var(--mint)">Capture & privacy</div>
+            <h3>Bank SMS is on</h3>
+            <div class="subtle">Processed locally on this phone</div>
+            <div class="checks"><div class="check"><b>●</b> Private Mode<br/>Off</div><div class="check"><b>●</b> App Lock<br/>Off</div><div class="check"><b>●</b> Relay sharing<br/>Available</div></div>
+          </section>
+
+          <div class="section-title"><b>Quick settings</b></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Daily spend summary</strong><small>Every evening at 9pm</small></div><div class="switch on"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Alert me on every charge</strong><small>On for bank SMS</small></div><div class="switch on"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Read bank SMS</strong><small>Granted</small></div><div class="switch on"><i></i></div></div>
+          </section>
+
+          <div class="section-title"><b>Everything else</b></div>
+          <section class="category-grid">
+            <div class="category"><div class="tile">♙</div><strong>Privacy</strong><small>Private Mode, App Lock, trusted devices</small></div>
+            <div class="category"><div class="tile gold">◇</div><strong>Wafra Pro</strong><small>Trial and subscription</small></div>
+            <div class="category"><div class="tile">✓</div><strong>Review & accuracy</strong><small>Nothing waiting · 96 shops · 123 formats</small></div>
+            <div class="category"><div class="tile">⇩</div><strong>Data & exports</strong><small>Backup, CSV, PDF</small></div>
+            <div class="category"><div class="tile">◐</div><strong>Appearance</strong><small>System · following phone</small></div>
+            <div class="category"><div class="tile">文</div><strong>Region & language</strong><small>UAE · English</small></div>
+          </section>
+
+          <section class="list" style="margin-top:16px"><div class="row"><div class="tile">✉</div><div class="row-copy"><strong>Send feedback</strong><small>Choose what to share</small></div><div class="chev">›</div></div></section>
+          <div class="destructive">Erase all data on this phone</div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="concept" id="option-c">
+    <aside class="concept-copy">
+      <div class="eyebrow">Option C</div>
+      <h1>Ledger, refined</h1>
+      <p>A quieter, more editorial treatment. It removes most card containers and lets labels, rules, and exact figures create the hierarchy.</p>
+      <div class="principle"><span>Wallet</span>Reported balance → accounts → credit due → goals</div>
+      <div class="principle"><span>Settings</span>Plain index with honest state summaries</div>
+      <div class="truth">Cards appear only as transaction sources or credit obligations—never as decorative banking products.</div>
+    </aside>
+
+    <div class="phone-shell">
+      <div class="phone-label">Wallet · ledger-first</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="editorial-title"><small>Your money record</small><strong>Wallet</strong></div><div class="top-actions"><div class="round">≡</div><div class="round primary">+</div></div></header>
+          <section class="ledger-hero">
+            <div class="label">Available balances</div>
+            <div class="money" style="margin-top:9px"><span class="currency">AED</span><span class="amount">588,329</span></div>
+            <div class="coverage"><i></i><span>12 of 31 active accounts have a reported balance</span></div>
+          </section>
+
+          <section class="rule-section">
+            <div class="rule-title"><strong>Accounts</strong><span>Balance per bank SMS</span></div>
+            <div class="ledger-row"><div><strong>FAB ··0004</strong><small>Bank account</small></div><div class="right"><strong class="mono">AED 424,950</strong></div></div>
+            <div class="ledger-row"><div><strong>FAB ··0002</strong><small>Bank account</small></div><div class="right"><strong class="mono">AED 7,766</strong></div></div>
+            <div class="ledger-row"><div><strong>LIV ··1354</strong><small>Debit · AED 7,296 spent this month</small></div><div class="right"><strong class="mono">AED 13,859</strong></div></div>
+            <div class="ledger-row"><div><span class="quiet-action">Show 28 more active accounts</span></div><div class="right"><span class="chev">⌄</span></div></div>
+          </section>
+
+          <section class="rule-section" style="margin-top:8px">
+            <div class="rule-title"><strong>Credit due</strong><span class="mono" style="color:var(--coral)">AED 1,748</span></div>
+            <div class="ledger-row"><div><strong>ADCB ··7720</strong><small>AED 32 spent this month</small></div><div class="right"><strong class="mono" style="color:var(--coral)">AED 170</strong><small>owed</small></div></div>
+            <div class="ledger-row"><div><strong>Review open statements</strong><small>See every due amount and date</small></div><div class="right"><span class="chev">›</span></div></div>
+          </section>
+
+          <section class="rule-section" style="margin-top:8px">
+            <div class="ledger-row"><div><strong>Set a savings goal</strong><small>Umrah, a car, a rainy-day fund</small></div><div class="right"><span class="chev">›</span></div></div>
+          </section>
+          <div class="scan" style="border-left:0;border-right:0;border-radius:0;padding-left:0;padding-right:0"><div class="row-copy"><strong>Inbox scanned 19h ago</strong><small>14,922 entries read on this device</small></div><div class="chev">›</div></div>
+        </main>
+        <nav class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>▥</i>Flow</div><div class="tab"><i>↻</i>Bills</div><div class="tab active"><i>▣</i>Wallet</div></nav>
+      </div>
+    </div>
+
+    <div class="phone-shell">
+      <div class="phone-label">Settings · editorial index</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="back-title"><span class="back">‹</span><div class="editorial-title" style="margin:0"><small>Wafra Pro · 3 days left</small><strong style="font-size:26px">Settings</strong></div></div></header>
+          <div class="settings-index"><span class="active">All</span><span>Alerts</span><span>Privacy</span><span>Data</span></div>
+
+          <div class="section-title"><b>Alerts</b></div>
+          <section class="plain-group">
+            <div class="plain-row"><span class="number">01</span><div class="row-copy"><strong>Daily spend summary</strong><small>Every evening at 9pm</small></div><div class="switch on"><i></i></div></div>
+            <div class="plain-row"><span class="number">02</span><div class="row-copy"><strong>Alert me on every charge</strong><small>On for bank SMS</small></div><div class="switch on"><i></i></div></div>
+          </section>
+
+          <div class="section-title"><b>Privacy & capture</b></div>
+          <section class="plain-group">
+            <div class="plain-row"><span class="number">03</span><div class="row-copy"><strong>Private Mode</strong><small>Off · low-confidence text may stay on phone</small></div><div class="switch"><i></i></div></div>
+            <div class="plain-row"><span class="number">04</span><div class="row-copy"><strong>App Lock</strong><small>Off</small></div><div class="switch"><i></i></div></div>
+            <div class="plain-row"><span class="number">05</span><div class="row-copy"><strong>Read bank SMS</strong><small>On · processed locally</small></div><div class="switch on"><i></i></div></div>
+            <div class="plain-row"><span class="number">06</span><div class="row-copy"><strong>Trusted devices & family</strong><small>Future relay captures only</small></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Data</b><span class="subtle">Nothing waiting</span></div>
+          <section class="plain-group">
+            <div class="plain-row"><span class="number">07</span><div class="row-copy"><strong>Review & improve</strong><small>96 shops · 123 unread message formats</small></div><div class="chev">›</div></div>
+            <div class="plain-row"><span class="number">08</span><div class="row-copy"><strong>Backups & exports</strong><small>JSON, CSV, expense PDF</small></div><div class="chev">›</div></div>
+          </section>
+
+          <div class="section-title"><b>Display & region</b></div>
+          <section class="plain-group">
+            <div class="plain-row"><span class="number">09</span><div class="row-copy"><strong>Appearance</strong><small>System · following phone</small></div><div class="chev">›</div></div>
+            <div class="plain-row"><span class="number">10</span><div class="row-copy"><strong>Region & language</strong><small>UAE · English</small></div><div class="chev">›</div></div>
+          </section>
+          <div class="destructive" style="background:transparent">Erase all data on this phone</div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="concept" id="option-d">
+    <aside class="concept-copy">
+      <div class="eyebrow">Option D</div>
+      <h1>Bank books</h1>
+      <p>Organises Wafra the way many people already think about their money: by institution first, then by account or card within it.</p>
+      <div class="principle"><span>Wallet</span>Reported total → banks → obligations → setup</div>
+      <div class="principle"><span>Settings</span>A numbered control list with visible states</div>
+      <div class="truth">Bank headings are derived groupings—not live bank connections and not separate bank logins.</div>
+    </aside>
+
+    <div class="phone-shell">
+      <div class="phone-label">Wallet · grouped by bank</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="title">Wallet</div><div class="top-actions"><div class="round">≡</div><div class="round primary">+</div></div></header>
+          <section class="balance-strip"><div><div class="label">Available balances</div><div class="money" style="margin-top:7px"><span class="currency">AED</span><span class="amount">588,329</span></div></div><div class="subtle" style="text-align:right">12 of 31 active<br/>reported</div></section>
+
+          <div class="section-title"><b>Institutions</b><span class="subtle">Grouped from messages</span></div>
+          <section class="bank-book">
+            <div class="bank-book-head"><div class="bank-identity"><div class="bank-badge">F</div><strong>FAB</strong></div><span class="value">AED 432,716</span></div>
+            <div class="book-row"><div><strong>Account ··0004</strong><small>Balance per bank SMS</small></div><span class="value">424,950</span></div>
+            <div class="book-row"><div><strong>Account ··0002</strong><small>Balance per bank SMS</small></div><span class="value">7,766</span></div>
+            <div class="book-row"><div><strong>Credit ··3644</strong><small>Nothing spent this month</small></div><span class="value">AED 0 owed</span></div>
+          </section>
+          <section class="bank-book">
+            <div class="bank-book-head"><div class="bank-identity"><div class="bank-badge">L</div><strong>LIV</strong></div><span class="value">AED 13,859</span></div>
+            <div class="book-row"><div><strong>Debit ··1354</strong><small>AED 7,296 spent this month</small></div><span class="value">Per bank SMS</span></div>
+          </section>
+          <section class="bank-book">
+            <div class="bank-book-head"><div class="bank-identity"><div class="bank-badge">A</div><strong>ADCB</strong></div><span class="value owed">AED 170 owed</span></div>
+            <div class="book-row"><div><strong>Credit ··7720</strong><small>AED 32 spent this month</small></div><span class="value">Statement source</span></div>
+          </section>
+
+          <div class="section-title"><b>Across banks</b></div>
+          <section class="list">
+            <div class="row"><div class="tile coral">!</div><div class="row-copy"><strong>Card payments due</strong><small>Review open statements</small></div><div class="value owed">AED 1,748</div><div class="chev">›</div></div>
+            <div class="row"><div class="tile">↗</div><div class="row-copy"><strong>Foreign activity</strong><small>USD · EUR</small></div><div class="value">AED 84</div><div class="chev">›</div></div>
+          </section>
+          <div class="scan"><div class="row-copy"><strong>Set a savings goal</strong><small>Umrah, a car, a rainy-day fund</small></div><div class="chev">›</div></div>
+        </main>
+        <nav class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>▥</i>Flow</div><div class="tab"><i>↻</i>Bills</div><div class="tab active"><i>▣</i>Wallet</div></nav>
+      </div>
+    </div>
+
+    <div class="phone-shell">
+      <div class="phone-label">Settings · visible state list</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="back-title"><span class="back">‹</span><div class="title small">Settings</div></div><span class="pill">TRIAL · 3 DAYS</span></header>
+          <div class="section-title"><b>Alerts</b></div>
+          <section class="plain-group">
+            <div class="setting-band"><span class="index">01</span><div><strong>Daily spend summary</strong><small>Every evening at 9pm</small></div><div class="switch on"><i></i></div></div>
+            <div class="setting-band"><span class="index">02</span><div><strong>Alert me on every charge</strong><small>On for bank SMS</small></div><div class="switch on"><i></i></div></div>
+          </section>
+          <div class="section-title"><b>On this phone</b></div>
+          <section class="plain-group">
+            <div class="setting-band"><span class="index">03</span><div><strong>Private Mode</strong><small>Low-confidence text may stay on phone</small></div><span class="state">OFF</span></div>
+            <div class="setting-band"><span class="index">04</span><div><strong>App Lock</strong><small>Use your phone screen lock</small></div><span class="state">OFF</span></div>
+            <div class="setting-band"><span class="index">05</span><div><strong>Read bank SMS</strong><small>Processed locally</small></div><span class="state on">ON</span></div>
+            <div class="setting-band"><span class="index">06</span><div><strong>Trusted devices & family</strong><small>Future relay captures · up to 8 devices</small></div><span class="chev">›</span></div>
+          </section>
+          <div class="section-title"><b>Review & data</b><span class="subtle">Nothing waiting</span></div>
+          <section class="plain-group">
+            <div class="setting-band"><span class="index">07</span><div><strong>Alerts to review</strong><small>Nothing waiting</small></div><span class="chev">›</span></div>
+            <div class="setting-band"><span class="index">08</span><div><strong>Sort your shops</strong><small>96 shops with no category yet</small></div><span class="chev">›</span></div>
+            <div class="setting-band"><span class="index">09</span><div><strong>Improve accuracy</strong><small>123 unread message formats</small></div><span class="chev">›</span></div>
+          </section>
+          <div class="section-title"><b>Appearance</b><span class="subtle">Following phone</span></div>
+          <section class="list"><div class="segmented"><span class="active">System</span><span>Light</span><span>Dark</span></div></section>
+          <div class="destructive">Erase all data on this phone</div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="concept" id="option-e">
+    <aside class="concept-copy">
+      <div class="eyebrow">Option E</div>
+      <h1>Paper statement</h1>
+      <p>A warm light-mode direction for daylight use. It feels closer to a carefully typeset financial record than a dark banking dashboard.</p>
+      <div class="principle"><span>Wallet</span>Reported balance → compact facts → sources</div>
+      <div class="principle"><span>Settings</span>Soft grouped controls with familiar switches</div>
+      <div class="truth">Light mode already exists in Wafra; this explores its visual direction without changing any capability.</div>
+    </aside>
+
+    <div class="phone-shell">
+      <div class="phone-label">Wallet · warm light mode</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="editorial-title" style="margin:0"><small>Balances reported by your banks</small><strong style="font-size:27px">Wallet</strong></div><div class="top-actions"><div class="round">≡</div><div class="round primary">+</div></div></header>
+          <section class="paper-hero">
+            <div class="money"><span class="currency">AED</span><span class="amount">588,329</span></div>
+            <div class="coverage"><i></i><span>Reliable balances for 12 of 31 active accounts</span></div>
+            <div class="paper-facts">
+              <div class="paper-fact"><span class="subtle">Card payments due</span><strong style="color:var(--coral)">AED 1,748</strong></div>
+              <div class="paper-fact"><span class="subtle">Paid from accounts this month</span><strong>AED 35,193</strong></div>
+            </div>
+          </section>
+          <div class="section-title"><b>At a glance</b><span class="subtle">31 active</span></div>
+          <section class="list">
+            <div class="row"><div class="tile">F</div><div class="row-copy"><strong>FAB Account ··0004</strong><small>Balance per bank SMS</small></div><div class="value">AED 424,950</div></div>
+            <div class="row"><div class="tile">L</div><div class="row-copy"><strong>LIV Debit ··1354</strong><small>AED 7,296 spent this month</small></div><div class="value">AED 13,859</div></div>
+            <div class="row"><div class="tile coral">A</div><div class="row-copy"><strong>ADCB Credit ··7720</strong><small>AED 32 spent this month</small></div><div class="value owed">AED 170</div></div>
+          </section>
+          <div class="section-title"><b>Activity</b></div>
+          <section class="list"><div class="row"><div class="tile">↗</div><div class="row-copy"><strong>Foreign activity</strong><small>USD · EUR</small></div><div class="value">AED 84</div><div class="chev">›</div></div></section>
+          <div class="section-title"><b>Savings goals</b><a>New goal</a></div>
+          <section class="goal"><div class="row" style="padding:0"><div class="tile">◎</div><div class="row-copy"><strong>Set a savings goal</strong><small>Umrah, a car, a rainy-day fund</small></div><div class="chev">›</div></div></section>
+          <div class="scan"><div class="tile">✉</div><div class="row-copy"><strong>Inbox scanned 19h ago</strong><small>14,922 entries read on this device</small></div><div class="chev">›</div></div>
+        </main>
+        <nav class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>▥</i>Flow</div><div class="tab"><i>↻</i>Bills</div><div class="tab active"><i>▣</i>Wallet</div></nav>
+      </div>
+    </div>
+
+    <div class="phone-shell">
+      <div class="phone-label">Settings · warm light mode</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="back-title"><span class="back">‹</span><div class="title small">Settings</div></div></header>
+          <section class="list pro"><div class="row"><div class="tile gold">◇</div><div class="row-copy"><strong>Wafra Pro</strong><small>Free trial · 3 days left</small></div><div class="chev">›</div></div></section>
+          <div class="section-title"><b>Everyday</b></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Daily spend summary</strong><small>Every evening at 9pm</small></div><div class="switch on"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Alert me on every charge</strong><small>On for bank SMS</small></div><div class="switch on"><i></i></div></div>
+          </section>
+          <div class="section-title"><b>Privacy & capture</b></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Private Mode</strong><small>Off · low-confidence text may stay on phone</small></div><div class="switch"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>App Lock</strong><small>Off</small></div><div class="switch"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Read bank SMS</strong><small>On · processed locally</small></div><div class="switch on"><i></i></div></div>
+            <div class="row"><div class="row-copy"><strong>Trusted devices & family</strong><small>Future relay captures · up to 8 devices</small></div><div class="chev">›</div></div>
+          </section>
+          <div class="section-title"><b>Review & improve</b><span class="subtle">Nothing waiting</span></div>
+          <section class="list">
+            <div class="row"><div class="row-copy"><strong>Alerts to review</strong><small>Nothing waiting</small></div><div class="chev">›</div></div>
+            <div class="row"><div class="row-copy"><strong>Sort your shops</strong><small>96 shops with no category yet</small></div><div class="chev">›</div></div>
+            <div class="row"><div class="row-copy"><strong>Improve accuracy</strong><small>123 unread message formats</small></div><div class="chev">›</div></div>
+          </section>
+          <div class="section-title"><b>Appearance</b><span class="subtle">Following phone</span></div>
+          <section class="list"><div class="segmented"><span class="active">System</span><span>Light</span><span>Dark</span></div></section>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="concept" id="option-f">
+    <aside class="concept-copy">
+      <div class="eyebrow">Option F</div>
+      <h1>One-screen snapshot</h1>
+      <p>A compact power-user direction that answers the important questions without decorative cards or a long sequence of equally weighted sections.</p>
+      <div class="principle"><span>Wallet</span>Balance → four facts → sources → setup</div>
+      <div class="principle"><span>Settings</span>Current state summary → focused destinations</div>
+      <div class="truth">Every number is already present in Wafra: balances, dues, outflow, foreign activity, and the real card count.</div>
+    </aside>
+
+    <div class="phone-shell">
+      <div class="phone-label">Wallet · compact snapshot</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div><div class="label">Wallet</div><div class="money" style="margin-top:7px"><span class="currency">AED</span><span class="amount">588,329</span></div><div class="subtle" style="margin-top:6px">12 of 31 active accounts reported</div></div><div class="top-actions"><div class="round">≡</div><div class="round primary">+</div></div></header>
+          <section class="snapshot">
+            <div class="snapshot-item alert"><span>Card payments due</span><strong>AED 1,748</strong></div>
+            <div class="snapshot-item"><span>Paid from accounts this month</span><strong>AED 35,193</strong></div>
+            <div class="snapshot-item"><span>Foreign activity · USD · EUR</span><strong>AED 84</strong></div>
+            <div class="snapshot-item"><span>Cards</span><strong>14</strong></div>
+          </section>
+          <div class="section-title"><b>Sources</b><span class="subtle">31 active</span></div>
+          <section class="compact-group">
+            <div class="compact-line"><div class="tile">F</div><div class="row-copy"><strong>FAB Account ··0004</strong><small>Balance per bank SMS</small></div><div class="value">AED 424,950</div></div>
+            <div class="compact-line"><div class="tile">F</div><div class="row-copy"><strong>FAB Account ··0002</strong><small>Balance per bank SMS</small></div><div class="value">AED 7,766</div></div>
+            <div class="compact-line"><div class="tile">L</div><div class="row-copy"><strong>LIV Debit ··1354</strong><small>AED 7,296 spent this month</small></div><div class="value">AED 13,859</div></div>
+            <div class="compact-line"><div class="tile coral">A</div><div class="row-copy"><strong>ADCB Credit ··7720</strong><small>AED 32 spent this month</small></div><div class="value owed">AED 170</div></div>
+          </section>
+          <div class="section-title"><b>Set up next</b></div>
+          <section class="list">
+            <div class="row"><div class="tile">◎</div><div class="row-copy"><strong>Set a savings goal</strong><small>Umrah, a car, a rainy-day fund</small></div><div class="chev">›</div></div>
+            <div class="row"><div class="tile">✉</div><div class="row-copy"><strong>Inbox scanned 19h ago</strong><small>14,922 entries read on this device</small></div><div class="chev">›</div></div>
+          </section>
+        </main>
+        <nav class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>▥</i>Flow</div><div class="tab"><i>↻</i>Bills</div><div class="tab active"><i>▣</i>Wallet</div></nav>
+      </div>
+    </div>
+
+    <div class="phone-shell">
+      <div class="phone-label">Settings · compact status</div>
+      <div class="phone">
+        <div class="status"><b>1:23</b><span class="icons">● ◒ 5G ▮ 71%</span></div>
+        <main class="screen">
+          <header class="topbar"><div class="back-title"><span class="back">‹</span><div class="title small">Settings</div></div><span class="pill">TRIAL · 3 DAYS</span></header>
+          <section class="summary-head">
+            <div class="label" style="color:var(--mint)">Current state</div>
+            <div class="summary-head-grid"><div><b>Daily + charge</b>Alerts on</div><div><b>Bank SMS</b>On</div><div><b>Private Mode</b>Off</div></div>
+          </section>
+          <div class="section-title"><b>Privacy & capture</b></div>
+          <section class="compact-group">
+            <div class="compact-line"><div class="tile">◉</div><div class="row-copy"><strong>Private Mode</strong><small>Low-confidence text may stay on phone</small></div><span class="state">OFF</span></div>
+            <div class="compact-line"><div class="tile">⌾</div><div class="row-copy"><strong>App Lock</strong><small>Use your phone screen lock</small></div><span class="state">OFF</span></div>
+            <div class="compact-line"><div class="tile">✉</div><div class="row-copy"><strong>Read bank SMS</strong><small>Processed locally</small></div><span class="state on">ON</span></div>
+            <div class="compact-line"><div class="tile">⌁</div><div class="row-copy"><strong>Trusted devices & family</strong><small>Future relay captures · up to 8 devices</small></div><div class="chev">›</div></div>
+          </section>
+          <div class="section-title"><b>Review & accuracy</b><span class="subtle">Nothing waiting</span></div>
+          <section class="compact-group"><div class="compact-line"><div class="tile">✓</div><div class="row-copy"><strong>Alerts to review</strong><small>Nothing waiting</small></div><div class="chev">›</div></div></section>
+          <section class="snapshot">
+            <div class="snapshot-item"><span>Shops without a category</span><strong>96</strong></div>
+            <div class="snapshot-item"><span>Unread message formats</span><strong>123</strong></div>
+          </section>
+          <div class="section-title"><b>Data</b></div>
+          <section class="compact-group">
+            <div class="compact-line"><div class="tile">⇩</div><div class="row-copy"><strong>Back up everything (JSON)</strong><small>Wafra Pro</small></div><span class="pill">PRO</span></div>
+            <div class="compact-line"><div class="tile">↥</div><div class="row-copy"><strong>Restore from backup</strong><small>Wafra Pro</small></div><span class="pill">PRO</span></div>
+            <div class="compact-line"><div class="tile">↗</div><div class="row-copy"><strong>Export transactions (CSV)</strong><small>Share a transaction file</small></div><div class="chev">›</div></div>
+          </section>
+          <div class="section-title"><b>Appearance</b><span class="subtle">Following phone</span></div>
+          <section class="list"><div class="segmented"><span class="active">System</span><span>Light</span><span>Dark</span></div></section>
+          <div class="destructive">Erase all data on this phone</div>
+        </main>
+      </div>
+    </div>
+  </section>
+</body>
+</html>

@@ -45,7 +45,7 @@ const NEGATED_POSTING = [
   /\bnicht\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:bezahlt|abgebucht|belastet|gutgeschrieben|erstattet)(?=$|[^\p{L}\p{N}])/iu,
   /\bniet\s+(?:[\p{L}\p{M}'’-]+\s+){0,3}(?:betaald|afgeschreven|bijgeschreven|terugbetaald)(?=$|[^\p{L}\p{N}])/iu,
 ] as const;
-const FUTURE = /\b(?:will be (?:debited|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل)|طلب تحصيل|مستحق|डेबिट किया जाएगा|भुगतान देय/i;
+const FUTURE = /\b(?:will be (?:debited|credited|deposited|refunded|charged|deducted|collected)|will apply|pre[ -]?debit|collect request|payment request|scheduled|due on|payment due|upcoming|mandate (?:created|registered))\b|سيتم (?:خصم|سحب|تحصيل|إيداع|رد)|طلب تحصيل|مستحق|डेबिट किया जाएगा|क्रेडिट किया जाएगा|भुगतान देय/i;
 const STATEMENT = /\b(?:statement|credit card bill|card bill|minimum (?:amount )?due|amount due|payment due date|kontoauszug|extracto|estratto conto|rekeningoverzicht)\b|relev[ée]|كشف حساب|الحد الأدنى المستحق/i;
 const BALANCE = /\b(?:available balance|current balance|avl bal|available limit|credit limit|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)|الحد (?:المتاح|الائتماني)/i;
 const POSTED = /\b(?:spent|purchase(?:d)?|paid|debited|credited|received|sent|withdrawn|deposited|refund(?:ed)?|revers(?:al|ed)|completed|successful|charged|posted|débité|crédité|effectué|belastet|abgebucht|gutgeschrieben|bezahlt|cargado|abonado|pagado|addebitato|accreditato|afgeschreven|bijgeschreven|betaald)\b|تم (?:الخصم|الإيداع|الدفع|التحويل)|سحب|شراء|دفع|استرداد|डेबिट किया गया|क्रेडिट किया गया|जमा किया गया|भुगतान किया गया/i;
@@ -64,25 +64,54 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
 
 const findTerm = (text: string, terms: readonly string[]): string | null => {
   for (const term of terms) {
-    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(term)}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+    const flexibleTerm = term.trim().split(/\s+/u).map(escapeRegExp).join('\\s+');
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${flexibleTerm}(?=$|[^\\p{L}\\p{N}])`, 'iu');
     if (pattern.test(text)) return term;
   }
   return null;
 };
 
+const isClauseBoundary = (text: string, index: number): boolean => {
+  const character = text[index];
+  if (character === '\n' || character === '\r' || character === ';') return true;
+  if (character !== '.' && character !== '!' && character !== '?') return false;
+  // A decimal/grouping point inside a money candidate is not a sentence end.
+  return !/\d/u.test(text[index - 1] ?? '') || !/\d/u.test(text[index + 1] ?? '');
+};
+
+/**
+ * Keep boilerplate in the source for issuer evidence and safety limits, but
+ * classify posting status from the sentence that actually owns the selected
+ * amount. Banks routinely append balance, due-date and OTP-safety sentences
+ * to an already-posted transaction; those footers must not erase the posting.
+ */
+const semanticClause = (
+  text: string,
+  span: { start: number; end: number } | null,
+): string => {
+  if (!span) return text;
+  let start = Math.max(0, Math.min(span.start, text.length));
+  let end = Math.max(start, Math.min(span.end, text.length));
+  while (start > 0 && !isClauseBoundary(text, start - 1)) start -= 1;
+  while (end < text.length && !isClauseBoundary(text, end)) end += 1;
+  return text.slice(start, end).trim() || text;
+};
+
 const moneyCandidateRole = (
   text: string,
   span: { start: number; end: number },
+  pack: ReturnType<typeof alertMarketPack>,
 ): MoneyCandidateRole => {
-  const before = text.slice(Math.max(0, span.start - 48), span.start);
-  const after = text.slice(span.end, Math.min(text.length, span.end + 32));
-  const nearby = `${before} [amount] ${after}`;
+  const nearby = semanticClause(text, span).replace(/\s+/gu, ' ');
   if (NEAR_LIMIT.test(nearby)) return 'limit';
   if (NEAR_DUE.test(nearby)) return 'due';
   if (NEAR_BALANCE.test(nearby)) return 'balance';
   if (FEE.test(nearby)) return 'fee';
   if (DEBIT.test(nearby) || CREDIT.test(nearby) || PURCHASE.test(nearby) ||
-    CASH.test(nearby) || REFUND.test(nearby)) return 'transaction';
+    CASH.test(nearby) || REFUND.test(nearby) ||
+    findTerm(nearby, pack.postedTerms ?? []) ||
+    findTerm(nearby, pack.debitTerms ?? []) ||
+    findTerm(nearby, pack.creditTerms ?? [])) return 'transaction';
   return 'unknown';
 };
 
@@ -136,13 +165,25 @@ export const inspectMarketAlert = (
   const pack = alertMarketPack(market);
   const draft = inspectAlertDraft(source, { currencyAliases: pack.currencyAliases });
   const text = draft.normalizedText.toLowerCase();
-  const initialStatus = postingStatus(text, pack.postedTerms, pack.failedTerms, pack.futureTerms);
-  const rail = findTerm(text, pack.rails);
-  const transfer = findTerm(text, pack.transferTerms);
-  const utility = findTerm(text, pack.utilityTerms);
-  const recurring = findTerm(text, pack.recurringTerms);
-  const moneyRoles = draft.candidates.map((candidate) => moneyCandidateRole(text, candidate.span));
+  const moneyRoles = draft.candidates.map((candidate) =>
+    moneyCandidateRole(text, candidate.span, pack));
   const primaryCandidateIndex = primaryCandidate(moneyRoles);
+  const primarySpan = primaryCandidateIndex === null
+    ? null
+    : draft.candidates[primaryCandidateIndex]?.span ?? null;
+  const semanticText = semanticClause(text, primarySpan);
+  const semanticDraft = inspectAlertDraft(semanticText, { currencyAliases: pack.currencyAliases });
+  const classificationText = semanticText.replace(/\s+/gu, ' ');
+  const initialStatus = postingStatus(
+    classificationText,
+    pack.postedTerms,
+    pack.failedTerms,
+    pack.futureTerms,
+  );
+  const rail = findTerm(classificationText, pack.rails);
+  const transfer = findTerm(classificationText, pack.transferTerms);
+  const utility = findTerm(classificationText, pack.utilityTerms);
+  const recurring = findTerm(classificationText, pack.recurringTerms);
   const eventEvidence = inspectAlertEventEvidence(text, {
     recurringTerm: recurring,
     utilityTerm: utility,
@@ -164,18 +205,22 @@ export const inspectMarketAlert = (
   );
 
   let family: AlertFamily = 'unknown';
-  if (AUTHENTICATION.test(text)) family = 'authentication';
-  else if (status === 'informational' && STATEMENT.test(text)) family = 'statement';
-  else if (status === 'informational' && BALANCE.test(text)) family = 'balance';
-  else if (REFUND.test(text)) family = 'refund';
-  else if (CASH.test(text)) family = 'cash-withdrawal';
-  else if (FEE.test(text) || eventEvidence.fee) family = 'fee';
+  if (AUTHENTICATION.test(classificationText)) family = 'authentication';
+  else if (status === 'informational' && STATEMENT.test(classificationText)) family = 'statement';
+  else if (status === 'informational' && BALANCE.test(classificationText)) family = 'balance';
+  else if (REFUND.test(classificationText)) family = 'refund';
+  else if (CASH.test(classificationText)) family = 'cash-withdrawal';
+  else if (FEE.test(classificationText) || eventEvidence.fee) family = 'fee';
   else if (status === 'posted' && utility) family = 'utility';
   else if (status === 'posted' && recurring) family = 'recurring-payment';
   else if (status === 'posted' && transfer) family = 'transfer';
-  else if (PURCHASE.test(text)) family = 'purchase';
+  else if (PURCHASE.test(classificationText)) family = 'purchase';
 
-  const reasons = [...draft.reasons];
+  const reasons = [
+    ...semanticDraft.reasons,
+    ...draft.reasons.filter((reason) =>
+      reason === 'input-too-long' || reason === 'too-many-money-candidates'),
+  ];
   if (status !== 'posted') reasons.push(`posting-status:${status}`);
   if (family === 'unknown') reasons.push('unknown-family');
   if (draft.candidates.length && primaryCandidateIndex === null) {
@@ -184,7 +229,9 @@ export const inspectMarketAlert = (
   if (eventEvidence.scheduledDebit) {
     reasons.push(`scheduled-debit:${eventEvidence.scheduledDebit.event}`);
   }
-  const decision = draft.decision === 'review' && status === 'posted' &&
+  const fullMessageSafe = !draft.reasons.includes('input-too-long') &&
+    !draft.reasons.includes('too-many-money-candidates');
+  const decision = semanticDraft.decision === 'review' && fullMessageSafe && status === 'posted' &&
     primaryCandidateIndex !== null ? 'review' : 'refuse';
   return {
     market,
@@ -192,7 +239,7 @@ export const inspectMarketAlert = (
     status,
     family,
     direction: status === 'posted'
-      ? moneyDirection(text, pack.debitTerms, pack.creditTerms)
+      ? moneyDirection(classificationText, pack.debitTerms, pack.creditTerms)
       : 'none',
     rail,
     moneyRoles,

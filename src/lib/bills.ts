@@ -166,6 +166,12 @@ function payeeTokens(title: string): Set<string> {
   );
 }
 
+/** Last four from a parser-owned bill identity; malformed/legacy values fail closed. */
+function billIdentityTail(identity: string | undefined): string | null {
+  const match = identity?.match(/^(?:account|consumer|party|customer|contract|service):([A-Z0-9]{4})$/i);
+  return match?.[1].toUpperCase() ?? null;
+}
+
 /**
  * Transactions that could be this bill's payment: same month, amount within
  * ±15%, and a title that either CONTAINS the bill's (or is contained by it) or
@@ -192,6 +198,7 @@ function candidatePayments(
   const billTitle = normalize(bill.title);
   if (!billTitle) return [];
   const billTokens = payeeTokens(bill.title);
+  const billTail = billIdentityTail(bill.importIdentity);
   const out: Transaction[] = [];
   for (const t of transactions) {
     // `live`/`internal` are what stop a bill settling against money the rest
@@ -202,11 +209,19 @@ function candidatePayments(
     // the importer) still gets the transfer rule; see ledger.ts.
     if (!isSpending(t, live, internal) || monthKey(t.date) !== key) continue;
     if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
+    // A provider may call this "account 1849" while the bank's registered
+    // payee receipt calls it "consumer number 1849". The tail is accepted
+    // only alongside same-month spending and the amount band above. The
+    // claims pass below then refuses it if two obligations want the same row.
+    if (billTail && billIdentityTail(t.billIdentity) === billTail) {
+      out.push(t);
+      continue;
+    }
     const txTitle = normalize(t.title);
     // Every string contains "", so a title that normalizes to nothing (a row
     // titled "—" or "***") would otherwise mark any similar-sized bill paid.
     if (!txTitle) continue;
-    if (txTitle.includes(billTitle) || billTitle.includes(txTitle)) {
+    if (nests(bill, t)) {
       out.push(t);
       continue;
     }
@@ -224,7 +239,14 @@ function candidatePayments(
 function nests(bill: Bill, t: Transaction): boolean {
   const b = normalize(bill.title);
   const x = normalize(t.title);
-  return Boolean(b) && Boolean(x) && (x.includes(b) || b.includes(x));
+  if (!b || !x) return false;
+  if (b === x) return true;
+  // A short provider title such as "E&" normalizes to "e". Treating one
+  // character as containment made any similarly priced merchant containing
+  // that letter look like proof the telecom bill was paid. Short names need
+  // exact title equality or the structured identity path above.
+  if (b.length < 4 || x.length < 4) return false;
+  return x.includes(b) || b.includes(x);
 }
 
 /** Status of each bill for the month containing `today`, sorted most urgent first. */

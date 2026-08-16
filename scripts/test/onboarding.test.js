@@ -82,6 +82,78 @@ eq(
   ],
 );
 
+eq(
+  'onboarding never creates money plans before currency is proven',
+  onboarding.buildDeferredOnboardingPlan(
+    { goalIds: ['emergency'], budgetId: 'balanced' },
+    null,
+    null,
+    1,
+    'en',
+  ),
+  null,
+);
+eq(
+  'unsupported ledger currencies stay pending instead of becoming AED',
+  onboarding.buildDeferredOnboardingPlan(
+    { goalIds: ['travel'], budgetId: 'flexible' },
+    'USD',
+    null,
+    1,
+    'en',
+  ),
+  null,
+);
+eq(
+  'a proven SAR ledger activates the selected plan',
+  onboarding.buildDeferredOnboardingPlan(
+    { goalIds: ['home'], budgetId: 'essentials' },
+    'SAR',
+    'SAR',
+    25,
+    'en',
+  )?.answers,
+  { marketId: 'SA', goalIds: ['home'], budgetId: 'essentials', monthStartDay: 25 },
+);
+eq(
+  'locale-derived SAR money does not activate a plan without bank-alert proof',
+  onboarding.buildDeferredOnboardingPlan(
+    { goalIds: ['home'], budgetId: 'essentials' },
+    'SAR',
+    null,
+    25,
+    'en',
+  ),
+  null,
+);
+
+{
+  const existingBudget = { category: 'dining', limitFils: 12345 };
+  const existingGoal = {
+    id: 'manual-goal', title: 'Emergency fund', emoji: 'target',
+    targetFils: 50000, savedFils: 10000,
+  };
+  const merged = onboarding.mergeDeferredOnboardingPlan(
+    [existingBudget],
+    [existingGoal],
+    [
+      { category: 'dining', limitFils: 99999 },
+      { category: 'shopping', limitFils: 20000 },
+    ],
+    [
+      { id: 'starter-duplicate', title: 'Emergency fund', emoji: 'target', targetFils: 1, savedFils: 0 },
+      { id: 'starter-travel', title: 'A proper holiday', emoji: 'plane', targetFils: 2, savedFils: 0 },
+    ],
+  );
+  eq('deferred activation preserves a budget the user already configured', merged.budgets[0], existingBudget);
+  eq('deferred activation adds only missing budget categories', merged.budgets.length, 2);
+  eq('deferred activation preserves a matching user goal and its progress', merged.goals[0], existingGoal);
+  eq('deferred activation adds only missing starter goals', merged.goals.length, 2);
+}
+
+eq('welcome preview uses a universal income example', i18n.t('onboardPreviewIncome', 'en'), 'Income received');
+eq('welcome preview uses a universal bill example', i18n.t('onboardPreviewBill', 'en'), 'Upcoming bill');
+
 const gateSource = fs.readFileSync(
   path.join(__dirname, '../../src/components/onboarding-gate.tsx'),
   'utf8',
@@ -93,9 +165,9 @@ const iosControllerSource = fs.readFileSync(
 );
 
 ok(
-  'first run never forces a country or writes guessed-currency plans',
-  gateSource.includes("setStep('capture')") &&
-    !gateSource.includes('QUESTION_STEPS') &&
+  'first run collects goals and a budget plan without forcing a country',
+  gateSource.includes("const QUESTION_STEPS: readonly Step[] = ['goals', 'budget', 'capture']") &&
+    gateSource.includes('setOnboardingPlan(plan)') &&
     !gateSource.includes('setMarket(plan.answers.marketId)') &&
     !gateSource.includes('plan.budgets.forEach(upsertBudget)') &&
     !gateSource.includes('plan.goals.forEach(addGoal)'),
@@ -116,6 +188,21 @@ ok(
     /onboardAutomaticChoice/.test(gateSource) &&
     /onboardManualChoice/.test(gateSource),
 );
+{
+  const automaticBodies = [
+    'onboardAutomaticChoiceAndroidBody',
+    'onboardAutomaticChoiceIosBody',
+  ];
+  ok(
+    'automatic capture discloses its three-day Pro boundary before selection',
+    automaticBodies.every((key) => {
+      const en = i18n.t(key, 'en');
+      const ar = i18n.t(key, 'ar');
+      return /first 3 app days/.test(en) && /Wafra Pro/.test(en) &&
+        /٣ أيام/.test(ar) && /وفرة برو/.test(ar);
+    }),
+  );
+}
 ok(
   'onboarding uses real scan and import results rather than fake personalization delays',
   /progress\.scanned/.test(gateSource) &&
@@ -125,10 +212,11 @@ ok(
     !/setTimeout|personalizing/i.test(gateSource),
 );
 ok(
-  'first run waits for encrypted hydration and never shows a fake one-step progress bar',
+  'first run waits for encrypted hydration and shows truthful three-step progress',
   /if \(!state\.hydrated\)/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
-    !/onboardStepOf|progressbar/.test(gateSource),
+    /onboardStepOf|progressbar/.test(gateSource) &&
+    /QUESTION_STEPS\.length/.test(gateSource),
 );
 ok(
   'completion copy matches automatic, manual, denied, and failed outcomes',
@@ -182,6 +270,18 @@ const walletSource = fs.readFileSync(
   'utf8',
 );
 const importSource = fs.readFileSync(path.join(__dirname, '../../src/app/import-sms.tsx'), 'utf8');
+
+ok('a completed onboarding inbox read records the parser migration in its ledger write',
+  /inboxHistoryComplete[\s\S]*?parserRereadComplete: true/.test(gateSource));
+ok('a completed Settings history scan records the migration even when nothing changed',
+  /inboxHistoryComplete[\s\S]*?p\.batch\.parserRereadComplete = true[\s\S]*?await importBatch\(p\.batch\)\.durable/.test(
+    importSource,
+  ));
+ok('Settings rebuilds a completed Android scan against the latest ledger before confirmation',
+  /pendingInboxResult[\s\S]*?buildImportPlan\([\s\S]*?pendingInboxResult\.parsed,[\s\S]*?state,[\s\S]*?pendingInboxResult\.newestTs,[\s\S]*?pendingInboxResult\.declined/.test(
+    importSource,
+  ) &&
+    /currentPlan\.batch\.parserRereadComplete = true/.test(importSource));
 
 const emptyLedger = {
   hydrated: true,

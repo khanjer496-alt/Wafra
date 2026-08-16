@@ -60,6 +60,14 @@ export function summarizeCashOutflow(
     const fundingAccountId = settlement?.cashOutAccountId ?? transaction.accountId;
     if (!live.has(fundingAccountId)) continue;
     if (internal.has(transaction.id)) continue;
+    // An explicitly owned destination is proof even when the other bank's
+    // alert/account is absent from this device. Generic "Bank transfer" and
+    // named-person transfers remain cash out; only parser-owned structural
+    // titles that state self/own/savings movement qualify.
+    if (
+      transaction.isTransfer === true &&
+      /^(?:own account|self|savings) transfer$/i.test(transaction.title.trim())
+    ) continue;
     const isSettlement = settlement !== undefined;
     const isAbsorbedSettlementObservation =
       transaction.isTransfer === true && transaction.cardPaymentSide !== undefined;

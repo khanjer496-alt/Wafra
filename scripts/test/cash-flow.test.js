@@ -161,6 +161,14 @@ ok('both deliberate manual payment claims survive the compat prefilter',
   summarizeCashOutflow(twoManualsOneReceiptState, period).transactionIds.size === 2);
 ok('neither half of a paired own-account transfer is cash out',
   !cashOut.transactionIds.has('own-out') && !cashOut.transactionIds.has('own-in'));
+const explicitOwnOnly = summarizeCashOutflow({
+  ...state,
+  transactions: [tx('explicit-own-only', 71000, {
+    isTransfer: true, title: 'Own account transfer',
+  })],
+}, period);
+ok('an explicitly owned transfer needs no counterpart alert to stay out of cash out',
+  explicitOwnOnly.totalFils === 0 && !explicitOwnOnly.transactionIds.has('explicit-own-only'));
 ok('external outgoing transfers remain visible as cash leaving the ledger',
   cashOut.transactionIds.has('external-transfer'));
 ok('archived accounts and other periods stay outside the figure',

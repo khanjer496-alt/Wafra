@@ -330,6 +330,34 @@ function ktSources(dir) {
       !/tapCount\.current >= 7/.test(settings) &&
       !/onVersionTap/.test(settings));
 
+  const storeMetadata = JSON.parse(
+    fs.readFileSync(path.join(ROOT, 'docs/store-metadata.json'), 'utf8'),
+  );
+  const googleBenefits = Object.values(storeMetadata.googlePlay.subscriptionLocalizations)
+    .flatMap((product) => Object.values(product))
+    .flatMap((localization) => localization.benefits);
+  const subscriptionCopy = [
+    ...Object.values(storeMetadata.apple.subscriptionLocalizations)
+      .flatMap((product) => Object.values(product))
+      .map((localization) => localization.description),
+    ...Object.values(storeMetadata.googlePlay.subscriptionLocalizations)
+      .flatMap((product) => Object.values(product))
+      .flatMap((localization) => [localization.description, ...localization.benefits]),
+  ].join('\n');
+  const releaseGuide = fs.readFileSync(path.join(ROOT, 'docs/play-release.md'), 'utf8');
+  const listingCopy = [
+    ...Object.values(storeMetadata.apple.locales).map((locale) => locale.description),
+    ...Object.values(storeMetadata.googlePlay.listings).map((listing) => listing.fullDescription),
+  ].join('\n');
+  ok('free recovery and salary-day months are not sold as Pro benefits',
+    !/feat(?:Backup|SalaryMonths)/.test(pro) &&
+      googleBenefits.length > 0 &&
+      googleBenefits.every((benefit) =>
+        benefit === 'Automatic capture' || benefit === 'الالتقاط التلقائي') &&
+      !/backup|salary-day|نسخ احتياطي|الراتب/i.test(subscriptionCopy) &&
+      /backup\/restore remain free/.test(listingCopy) &&
+      /backup\/restore keep working without Pro/.test(releaseGuide));
+
   ok('the paywall renders the storefront price instead of ledger Money',
     /storePrices\?\.\[[a-zA-Z]+\]\?\.priceString/.test(pro) &&
       /loadStorePrices/.test(pro) &&
@@ -513,6 +541,30 @@ function ktSources(dir) {
   );
   ok('native SQLite is built with SQLCipher', sqlite?.[1]?.useSQLCipher === true);
   ok('Android does not cloud-backup the encrypted database', config.android?.allowBackup === false);
+
+  const collectedData = config.ios?.privacyManifests?.NSPrivacyCollectedDataTypes ?? [];
+  const collectedTypes = new Set(collectedData.map((entry) => entry.NSPrivacyCollectedDataType));
+  const expectedCollectedTypes = [
+    'NSPrivacyCollectedDataTypeOtherFinancialInfo',
+    'NSPrivacyCollectedDataTypePurchaseHistory',
+    'NSPrivacyCollectedDataTypeDeviceID',
+    'NSPrivacyCollectedDataTypeCustomerSupport',
+    'NSPrivacyCollectedDataTypeOtherUserContent',
+  ];
+  ok('the iOS config declares the data retained by Wafra services',
+    expectedCollectedTypes.every((type) => collectedTypes.has(type)) &&
+      collectedData.every((entry) =>
+        typeof entry.NSPrivacyCollectedDataTypeLinked === 'boolean' &&
+        entry.NSPrivacyCollectedDataTypeTracking === false &&
+        entry.NSPrivacyCollectedDataTypePurposes?.includes(
+          'NSPrivacyCollectedDataTypePurposeAppFunctionality',
+        )));
+  const purchaseHistory = collectedData.find((entry) =>
+    entry.NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypePurchaseHistory');
+  ok('RevenueCat purchase history declares both entitlement and dashboard use',
+    purchaseHistory?.NSPrivacyCollectedDataTypePurposes?.includes(
+      'NSPrivacyCollectedDataTypePurposeAnalytics',
+    ));
 
   const storage = read('src/lib/state-storage.native.ts');
   const store = read('src/lib/store.tsx');
@@ -835,7 +887,9 @@ function ktSources(dir) {
   ok('SMS parsing yields by elapsed time with a bounded fast-device ceiling',
     budget >= 4 && budget <= 12 && maxSlice > 32 && maxSlice <= 96 &&
       /Date\.now\(\) - state\.startedAt < PARSE_TIME_BUDGET_MS/.test(scan) &&
-      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 3,
+      // Inbox parsing, its proven-duplicate fast path, the retired delivery
+      // buffer and trusted bank notifications each keep the same UI yield.
+      (scan.match(/await yieldToUi\(\)/g) ?? []).length === 4,
     `budget=${budget}, maxSlice=${maxSlice}`);
   ok('concurrent capture requests join one scan',
     /const existing = importInFlight;[\s\S]*if \(!existing\) return startAutoImport\(interactive\)/.test(home) &&

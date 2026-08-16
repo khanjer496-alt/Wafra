@@ -83,6 +83,8 @@ const launchSession = createLaunchAlertSession({
 });
 let newestTs = 0;
 let refused = 0;
+let semanticAutoRows = 0;
+const semanticMeanings = {};
 for (const [messageIndex, message] of corpus.messages.entries()) {
   const body = typeof message.body === 'string' ? message.body : '';
   const sender = typeof message.sender === 'string' ? message.sender : '';
@@ -90,8 +92,8 @@ for (const [messageIndex, message] of corpus.messages.entries()) {
   if (!body || !Number.isFinite(smsTs)) continue;
   newestTs = Math.max(newestTs, smsTs);
   const inspection = launchSession.inspect(body, sender);
-  const result = launchSession.parse(body, sender, inspection);
-  if (!result) {
+  const interpretation = launchSession.interpret(body, sender, inspection);
+  if (!interpretation) {
     const reason = nonPostingReason(body);
     if (reason) {
       declined.push({
@@ -104,6 +106,12 @@ for (const [messageIndex, message] of corpus.messages.entries()) {
     }
     else refused += 1;
     continue;
+  }
+  const result = interpretation.parsed;
+  if (interpretation.origin === 'semantic') {
+    semanticAutoRows += 1;
+    semanticMeanings[interpretation.meaning] =
+      (semanticMeanings[interpretation.meaning] ?? 0) + 1;
   }
   parsed.push({
     ...result,
@@ -259,6 +267,8 @@ const report = {
     parsed: parsed.length,
     declined: declined.length,
     refused,
+    semanticAutoRows,
+    semanticMeanings,
   },
   import: {
     existingTransactions: state.transactions.length,

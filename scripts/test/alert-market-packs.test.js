@@ -444,7 +444,7 @@ for (const [label, market, text, family] of [
     fixture.expected.decision === 'review'
       ? {
           ...fixture,
-          source: `Card charged GBP 10.00 at SHOP. Available balance GBP 800.00 Ref refuse-${index}`,
+          source: `Card charged GBP 10.00 and GBP 11.00 at SHOP. Ref refuse-${index}`,
         }
       : fixture);
   const refusedReviewReport = runMarketBenchmark('GB', refusedReviews);

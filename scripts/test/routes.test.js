@@ -54,6 +54,21 @@ ok('the route table was read off disk', available.size >= 8, [...available].join
 ok('the tab routes are there', ['/', '/flow', '/bills', '/wallet'].every((r) => available.has(r)),
   [...available].join(' '));
 
+{
+  // Improve Accuracy has two different jobs. A truly unread bank format is
+  // useful parser evidence and may be shared after masking. A private merchant
+  // nickname is not a global grammar rule: it stays on-device and belongs in
+  // the bulk categorisation flow. Mixing them produced reports full of names
+  // that the parser had already read correctly, including rows the owner had
+  // already categorised.
+  const accuracy = fs.readFileSync(path.join(APP, 'accuracy.tsx'), 'utf8');
+  ok('Improve Accuracy sends named uncategorised shops to the local sorter',
+    /uncategorized\.length > 0[\s\S]{0,300}router\.push\('\/categorise'\)/.test(accuracy));
+  ok('Improve Accuracy shares only genuinely unread formats',
+    /section\(t\('accuracyShareUnread'\), unread\)/.test(accuracy) &&
+      !/accuracyShareUncategorized/.test(accuracy));
+}
+
 /** Every file under src/, so nothing is missed by only checking screens. */
 function sources(dir = SRC) {
   const out = [];
@@ -193,7 +208,31 @@ function sources(dir = SRC) {
   // The row now answers "which language am I in", which the old subtitle
   // ("English · العربية is available instantly") never did.
   ok('the language row shows the language that is on',
-    /linkRow\(t\('language'\), LANGUAGE_NAMES\[language\]/.test(settings));
+    /linkRow\(t\('language'\), languagePreference === 'system'[\s\S]{0,180}LANGUAGE_NAMES\[language\]/
+      .test(settings));
+
+  ok('ledger backup and restore remain available without Pro',
+    /linkRow\(t\('backupJson'\), null, backupJson\)/.test(settings) &&
+      /linkRow\(t\('restoreBackup'\), null, restoreFromFile\)/.test(settings));
+
+  const cards = fs.readFileSync(path.join(SRC, 'app/cards.tsx'), 'utf8');
+  ok('Payment cards explains its purpose and does not imply a bank connection',
+    /title=\{t\('cardsTitle'\)\}/.test(cards) && /t\('cardsPurpose'\)/.test(cards));
+
+  const flow = fs.readFileSync(path.join(SRC, 'app/(tabs)/flow.tsx'), 'utf8');
+  ok('large text moves six-month figures into a wrapping readable list',
+    /useWindowDimensions\(\)/.test(flow) &&
+      /const showTrendValues = trendColumnWidth >= 38 \* fontScale/.test(flow) &&
+      /!showTrendValues && \(/.test(flow) &&
+      /tf\('monthCashflowA11y'/.test(flow) &&
+      /flexWrap: 'wrap'/.test(flow));
+  ok('large-text Arabic labels keep their language font while figures stay tabular',
+    /\{t\('incomeLabel'\)\}\{' '\}\s*<ThemedText type="default" tabular/.test(flow) &&
+      /\{t\('spentLabel'\)\}\{' '\}\s*<ThemedText\s+type="default"\s+tabular/.test(flow) &&
+      !/<ThemedText\s+type="default"\s+tabular\s+style=\{\[styles\.trendDetailFigure/.test(flow));
+  ok('empty large-text months remain no-data rather than two zero balances',
+    /m\.income === 0 && m\.expense === 0\s*\? tf\('monthCashflowNoDataA11y'/.test(flow) &&
+      /m\.income === 0 && m\.expense === 0 \? \([\s\S]{0,250}>\s*—\s*</.test(flow));
 
   ok('erase is a destructive button, not a chevron row',
     !/linkRow\(t\('eraseAll'\)/.test(settings) &&
