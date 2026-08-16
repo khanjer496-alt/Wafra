@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   tabLabel: {
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 14,
   },
 });

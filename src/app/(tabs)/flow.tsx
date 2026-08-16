@@ -11,7 +11,14 @@
  */
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -56,11 +63,21 @@ export default function FlowScreen() {
   const router = useRouter();
   const dark = useColorScheme() === 'dark';
   const clearance = useTabBarClearance();
+  const { width: screenWidth, fontScale } = useWindowDimensions();
   const { state } = useStore();
   // Every tab that shows money the inbox produces can now go and refresh it.
   const { refreshing, onRefresh } = usePullToRefresh();
   const { period } = usePeriod();
   const now = useMemo(() => new Date(), []);
+
+  // Five-character compact figures (for example 13.5k) need more width than
+  // one of six columns can provide on a narrow screen at large Dynamic Type.
+  // Keep figures beside the bars only while a conservative monospace estimate
+  // fits. Otherwise the bars stay comparable and a wrapping detail list below
+  // carries the readable values without shrinking or clipping them.
+  const trendColumnWidth =
+    (Math.min(screenWidth, MaxContentWidth) - ScreenPadding * 2 - Spacing.two * 5) / 6;
+  const showTrendValues = trendColumnWidth >= 38 * fontScale;
 
   const [periodOpen, setPeriodOpen] = useState(false);
   const [limitFor, setLimitFor] = useState<CategoryId | null | 'new'>(null);
@@ -505,7 +522,11 @@ export default function FlowScreen() {
               title={t('inVsOut6')}
               right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} ${t('averageSuffix')}`}
             />
-            <View style={styles.trend}>
+            <View
+              style={[
+                styles.trend,
+                showTrendValues ? styles.trendWithValues : styles.trendWithoutValues,
+              ]}>
               {trend.map((m) => {
                 const current = m.key === key;
                 const empty = m.income === 0 && m.expense === 0;
@@ -513,10 +534,11 @@ export default function FlowScreen() {
                   <View key={m.key} style={styles.trendCol}>
                     {/* A bar you cannot read a number off is a shape, not a
                         figure. A 14px bar cannot carry its own label without
-                        colliding with its neighbour, so the pair is written
-                        once above the column — in first, out second, each in
-                        its bar's colour, which is what ties number to bar. */}
-                    <View style={styles.trendValues}>
+                        colliding with its neighbour, so the pair is stacked
+                        above the column — in first, out second, each in its
+                        bar's colour. Stacking gives both figures the full
+                        column width while preserving an 11px minimum. */}
+                    {showTrendValues && <View style={styles.trendValues}>
                       {empty ? (
                         // Nothing was recorded that month. Two 2%-floor stubs
                         // labelled "0 0" claim a month of perfect balance;
@@ -526,26 +548,26 @@ export default function FlowScreen() {
                         </ThemedText>
                       ) : (
                         <>
-                      <ThemedText type="nano" tabular style={[styles.trendValue, { color: theme.primary }]}>
-                        {formatCompactAED(m.income)}
-                      </ThemedText>
-                      <ThemedText
-                        type="nano"
-                        tabular
-                        style={[
-                          styles.trendValue,
-                          // Tied to its own bar, as the in figure is. Leaving
-                          // it textTertiary made it the same grey as the month
-                          // label below, so on the current column a red bar
-                          // sat under a grey number and only half the pair
-                          // was legible as a pair.
-                          { color: current ? theme.expense : dark ? '#8A7E76' : '#9B8C84' },
-                        ]}>
-                        {formatCompactAED(m.expense)}
-                      </ThemedText>
-                      </>
+                          <ThemedText type="nano" tabular style={[styles.trendValue, { color: theme.primary }]}>
+                            {formatCompactAED(m.income)}
+                          </ThemedText>
+                          <ThemedText
+                            type="nano"
+                            tabular
+                            style={[
+                              styles.trendValue,
+                              // Tied to its own bar, as the in figure is. Leaving
+                              // it textTertiary made it the same grey as the month
+                              // label below, so on the current column a red bar
+                              // sat under a grey number and only half the pair
+                              // was legible as a pair.
+                              { color: current ? theme.expense : dark ? '#8A7E76' : '#9B8C84' },
+                            ]}>
+                            {formatCompactAED(m.expense)}
+                          </ThemedText>
+                        </>
                       )}
-                    </View>
+                    </View>}
                     <View style={styles.trendBars}>
                       <View
                         style={[
@@ -580,6 +602,60 @@ export default function FlowScreen() {
                 );
               })}
             </View>
+            {!showTrendValues && (
+              <View style={styles.trendDetails}>
+                {trend.map((m) => (
+                  <View
+                    key={m.key}
+                    accessible
+                    accessibilityLabel={m.income === 0 && m.expense === 0
+                      ? tf('monthCashflowNoDataA11y', { month: m.label }, language)
+                      : tf('monthCashflowA11y', {
+                          month: m.label,
+                          income: formatAED(m.income, { decimals: false }),
+                          spending: formatAED(m.expense, { decimals: false }),
+                        }, language)}
+                    style={[styles.trendDetailRow, { borderBottomColor: theme.cardBorder }]}>
+                    <ThemedText type="smallBold" style={styles.trendDetailMonth}>
+                      {m.label}
+                    </ThemedText>
+                    {m.income === 0 && m.expense === 0 ? (
+                      <ThemedText type="default" themeColor="textTertiary" style={styles.trendDetailEmpty}>
+                        —
+                      </ThemedText>
+                    ) : (
+                      <>
+                        {/* Keep translated labels in their language font. Only
+                            the numeric child is monospaced/tabular; Geist Mono
+                            intentionally has no Arabic glyph set. */}
+                        <ThemedText
+                          type="default"
+                          style={[styles.trendDetailFigure, { color: theme.primary }]}>
+                          {t('incomeLabel')}{' '}
+                          <ThemedText type="default" tabular style={{ color: theme.primary }}>
+                            {formatCompactAED(m.income)}
+                          </ThemedText>
+                        </ThemedText>
+                        <ThemedText
+                          type="default"
+                          style={[
+                            styles.trendDetailFigure,
+                            { color: m.key === key ? theme.expense : theme.textSecondary },
+                          ]}>
+                          {t('spentLabel')}{' '}
+                          <ThemedText
+                            type="default"
+                            tabular
+                            style={{ color: m.key === key ? theme.expense : theme.textSecondary }}>
+                            {formatCompactAED(m.expense)}
+                          </ThemedText>
+                        </ThemedText>
+                      </>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
           </Animated.View>
 
           {/* ── What that adds up to ── */}
@@ -713,10 +789,9 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
 
-  // The extra 16 at the top is headroom for the value sitting above the
-  // tallest bar, which would otherwise be clipped by the row.
-  // 118 of bars, plus a line for the figures above and the month below.
-  trend: { flexDirection: 'row', gap: Spacing.two, height: 118 + 18 + 14, marginTop: Spacing.three },
+  trend: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three },
+  trendWithValues: { height: 118 + 28 + 14 },
+  trendWithoutValues: { height: 118 + 14 },
   trendCol: { flex: 1, gap: Spacing.one },
   trendBars: {
     flex: 1,
@@ -732,20 +807,32 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 3,
   },
   trendValues: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 5,
+    minHeight: 28,
+    alignItems: 'stretch',
   },
-  // `nano` is 10.5px with 1.05 of tracking and a caps transform — right for a
-  // section label, far too wide here: at column width it truncated "13.5k" to
-  // "1…". These three overrides are the whole reason the style exists.
+  // `nano` is a compact caps label with tracking — right for a section label,
+  // far too wide here. Each value receives the full column width so a readable
+  // 11px figure does not regress to the former clipped "1…" rendering.
   trendValue: {
-    fontSize: 8.5,
-    lineHeight: 12,
+    fontSize: 11,
+    lineHeight: 14,
     letterSpacing: 0,
     textTransform: 'none',
+    textAlign: 'center',
   },
   trendLabel: { textAlign: 'center' },
+  trendDetails: { marginTop: Spacing.two },
+  trendDetailRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+    paddingVertical: Spacing.two,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  trendDetailMonth: { flexBasis: '100%' },
+  trendDetailFigure: { flexGrow: 1, flexBasis: 112 },
+  trendDetailEmpty: { flexBasis: '100%' },
 
   insights: { gap: Spacing.two },
 });

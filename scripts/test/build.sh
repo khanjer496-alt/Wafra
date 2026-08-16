@@ -59,7 +59,7 @@ rewrite() {
 # ESM-only subpath exports, which the node10 resolution implied by
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
 for f in types routes format categories ledger dedupe arabic-sms sms-parser import-plan bills \
-         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics period purchases markets i18n balances \
+         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics period purchases markets i18n system-language balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
          relay-protocol trusted-device-contract cloud-import-contract reimbursement-report fx \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \

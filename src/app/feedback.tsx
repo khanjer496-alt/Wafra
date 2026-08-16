@@ -26,7 +26,6 @@ import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  InteractionManager,
   Platform,
   ScrollView,
   StyleSheet,
@@ -178,12 +177,13 @@ export default function FeedbackScreen() {
    * That was right and is kept; it was never the problem. The problem was that
    * the one render it did run on was a render the user was watching.
    *
-   * `runAfterInteractions` waits for the sheet's own dismissal animation, so
-   * the frame showing "preparing" actually paints before the thread is taken.
-   * This DEFERS the cost, it does not remove it — the work is still one
-   * synchronous pass when it fires. What it buys is that the app says what it
-   * is doing instead of appearing dead, and that Send cannot fire against a
-   * payload that has not been built.
+   * `requestIdleCallback` yields until the JS thread has room after the choice
+   * tap, so React can paint the "preparing" state before the work begins. It
+   * does not promise that the sheet animation has finished. This DEFERS the
+   * cost, it does not remove it — the work is still one synchronous pass when
+   * it fires. What it buys is that the app says what it is doing instead of
+   * appearing dead, and that Send cannot fire against a payload that has not
+   * been built.
    */
   const cheapest = useMemo(
     () => buildFeedbackPayload({ message: '', detail: 'none', build, ledger: EMPTY_LEDGER }),
@@ -196,7 +196,7 @@ export default function FeedbackScreen() {
   useEffect(() => {
     let cancelled = false;
     setPreparing(true);
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = requestIdleCallback(() => {
       if (cancelled) return;
       const next = buildFeedbackPayload({
         message: '',
@@ -207,10 +207,10 @@ export default function FeedbackScreen() {
       if (cancelled) return;
       setAttachment(next);
       setPreparing(false);
-    });
+    }, { timeout: 500 });
     return () => {
       cancelled = true;
-      task.cancel();
+      cancelIdleCallback(task);
     };
   }, [detail, build, accounts, transactions, cardDues, merchantOverrides]);
 

@@ -188,10 +188,10 @@ these three facts.
 
 ## Monetization — Wafra Pro
 
-- Model: 3-day free trial, then subscription required. Trial = everything
-  unlocked from first launch. After trial, SMS/notification importing
-  pauses until subscribed (viewing existing data and manual entry keep
-  working). Salary-day months and backup/restore are Pro-gated too.
+- Model: 3-day free trial, then subscription required for automatic capture.
+  After the included period, SMS/notification importing pauses until
+  subscribed. Viewing existing data, manual entry, pasted alerts, salary-day
+  months, and backup/restore keep working without Pro.
 - Do not configure a Play introductory trial while the app grants three days
   locally from first launch. The two clocks would stack. If the local trial is
   removed later, the store offer and all paywall/listing copy must change in the

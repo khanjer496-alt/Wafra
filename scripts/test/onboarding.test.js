@@ -188,6 +188,21 @@ ok(
     /onboardAutomaticChoice/.test(gateSource) &&
     /onboardManualChoice/.test(gateSource),
 );
+{
+  const automaticBodies = [
+    'onboardAutomaticChoiceAndroidBody',
+    'onboardAutomaticChoiceIosBody',
+  ];
+  ok(
+    'automatic capture discloses its three-day Pro boundary before selection',
+    automaticBodies.every((key) => {
+      const en = i18n.t(key, 'en');
+      const ar = i18n.t(key, 'ar');
+      return /first 3 app days/.test(en) && /Wafra Pro/.test(en) &&
+        /٣ أيام/.test(ar) && /وفرة برو/.test(ar);
+    }),
+  );
+}
 ok(
   'onboarding uses real scan and import results rather than fake personalization delays',
   /progress\.scanned/.test(gateSource) &&

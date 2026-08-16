@@ -483,8 +483,9 @@ export default function SettingsScreen() {
     };
   });
 
-  const applyLanguage = (next: 'en' | 'ar') => {
-    if (next === language) return;
+  const languagePreference = state.languagePreference ?? 'system';
+  const applyLanguage = (next: 'system' | 'en' | 'ar') => {
+    if (next === languagePreference) return;
     // No alert, and nothing to restart. The strings re-render from this and
     // the layout mirrors from the `direction` style on the root — see the
     // Direction component in app/_layout.tsx for why I18nManager could never
@@ -494,8 +495,9 @@ export default function SettingsScreen() {
     // which reads I18nManager rather than the layout. That part is the only
     // thing left waiting for a restart.
     if (Platform.OS !== 'web') {
-      I18nManager.allowRTL(next === 'ar');
-      I18nManager.forceRTL(next === 'ar');
+      const resolved = next === 'system' ? language : next;
+      I18nManager.allowRTL(resolved === 'ar');
+      I18nManager.forceRTL(resolved === 'ar');
     }
   };
 
@@ -507,10 +509,13 @@ export default function SettingsScreen() {
    * same row again in a mirrored UI they could not read. Naming both languages
    * up front costs one extra tap and removes that trap.
    */
-  const languageChoices = (['en', 'ar'] as const).map((code) => ({
-    value: code,
-    label: LANGUAGE_NAMES[code],
-  }));
+  const languageChoices = [
+    { value: 'system' as const, label: t('themeSystem') },
+    ...(['en', 'ar'] as const).map((code) => ({
+      value: code,
+      label: LANGUAGE_NAMES[code],
+    })),
+  ];
 
   /* ── Data ───────────────────────────────────────────────────────────── */
 
@@ -1169,8 +1174,8 @@ export default function SettingsScreen() {
                   });
                 },
               )}
-            {linkRow(t('backupJson'), null, gated(backupJson), { pro: true })}
-            {linkRow(t('restoreBackup'), null, gated(restoreFromFile), { pro: true })}
+            {linkRow(t('backupJson'), null, backupJson)}
+            {linkRow(t('restoreBackup'), null, restoreFromFile)}
             {linkRow(t('exportCsv'), null, exportCsv)}
             {linkRow(t('exportExpensePdf'), null, () => setReportScopeSheet(true), { last: true })}
           </Section>
@@ -1224,7 +1229,9 @@ export default function SettingsScreen() {
             )}
             {/* The sub-line is the language that is ON, in that language —
                 the one thing a glance needs and the old one never said. */}
-            {linkRow(t('language'), LANGUAGE_NAMES[language], () => setRegionSheet('language'), {
+            {linkRow(t('language'), languagePreference === 'system'
+              ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
+              : LANGUAGE_NAMES[language], () => setRegionSheet('language'), {
               last: true,
             })}
           </Section>
@@ -1271,7 +1278,7 @@ export default function SettingsScreen() {
         onClose={() => setRegionSheet(null)}
         title={t('language')}
         options={languageChoices}
-        value={language}
+        value={languagePreference}
         onSelect={applyLanguage}
       />
       <ChoiceSheet

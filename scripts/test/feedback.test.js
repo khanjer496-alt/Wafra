@@ -550,6 +550,7 @@ async function transportTests() {
 
 const fs = require('fs');
 const path = require('path');
+const ts = require('typescript');
 const ROOT = path.join(__dirname, '..', '..');
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
@@ -622,7 +623,7 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
    * from a real phone as "lags and stops working".
    */
   ok('the attachment is built off the render path',
-    effectBodies.some((body) => /runAfterInteractions/.test(body) && /buildFeedbackPayload\(/.test(body)),
+    effectBodies.some((body) => /requestIdleCallback/.test(body) && /buildFeedbackPayload\(/.test(body)),
     'the figures build must not run during render');
   ok('Send is blocked while the attachment is still being built',
     /const ready = [^;]*!preparing/.test(screen),
@@ -698,10 +699,31 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   ok('the screen file exists behind it', fs.existsSync(path.join(ROOT, 'src/app/feedback.tsx')));
 
   const settings = read('src/app/settings.tsx');
-  ok('Settings reaches it', /router\.push\('\/feedback'\)/.test(settings));
+  const sourceFile = ts.createSourceFile(
+    'settings.tsx',
+    settings,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  let feedbackRow = null;
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
+        node.expression.text === 'linkRow') {
+      const first = node.arguments[0];
+      if (first && ts.isCallExpression(first) && ts.isIdentifier(first.expression) &&
+          first.expression.text === 't' && ts.isStringLiteral(first.arguments[0]) &&
+          first.arguments[0].text === 'sendFeedback') {
+        feedbackRow = node;
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  const feedbackRowText = feedbackRow?.getText(sourceFile) ?? '';
+  ok('Settings reaches it', /router\.push\('\/feedback'\)/.test(feedbackRowText));
   ok('the Settings row is not paywalled',
-    /linkRow\(t\('sendFeedback'\), t\('sendFeedbackDetail'\), \(\) => router\.push\('\/feedback'\)\)/
-      .test(settings));
+    feedbackRow !== null && !/\bgated\(|\bpro\s*:/.test(feedbackRowText));
 
   // Every string the two files ask for exists in both languages. contracts.js
   // checks this repo-wide; doing it here means a missing Arabic value fails in

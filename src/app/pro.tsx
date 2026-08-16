@@ -72,7 +72,6 @@ function features(): FeatureRow[] {
       textKey:
         autoCaptureMethod() === 'relayCapture' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
     },
-    { icon: 'download', titleKey: 'featBackup', textKey: 'featBackupText' },
   ];
 }
 

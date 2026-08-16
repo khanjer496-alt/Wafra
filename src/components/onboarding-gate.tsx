@@ -946,7 +946,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     paddingBottom: Spacing.two,
   },
-  previewOverline: { color: night.textTertiary, fontFamily: Fonts.sansSemi, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
+  previewOverline: { color: night.textTertiary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.7 },
   livePill: {
     alignSelf: 'stretch',
     minHeight: 24,
@@ -958,7 +958,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     backgroundColor: night.primarySoft,
   },
-  liveLabel: { flexShrink: 1, color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 9, lineHeight: 14, letterSpacing: 0.6 },
+  liveLabel: { flexShrink: 1, color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.5 },
   previewRows: { paddingHorizontal: Spacing.three },
   previewRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   previewRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: night.cardBorder },
@@ -1085,7 +1085,7 @@ const styles = StyleSheet.create({
   startOptionTitle: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 15, lineHeight: 20 },
   startOptionBody: { color: night.textSecondary, fontFamily: Fonts.sans, fontSize: 12, lineHeight: 18 },
   recommendedPill: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: Radius.full, backgroundColor: night.primary },
-  recommendedText: { color: night.onPrimary, fontFamily: Fonts.sansSemi, fontSize: 8.5, letterSpacing: 0.35 },
+  recommendedText: { color: night.onPrimary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.3 },
   scanning: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.three },
   scanStats: {
     width: '100%',
@@ -1099,7 +1099,7 @@ const styles = StyleSheet.create({
   },
   scanStat: { flex: 1, alignItems: 'center', gap: Spacing.one },
   scanNumber: { color: night.text, fontFamily: Fonts.monoSemi, fontSize: 24, fontVariant: ['tabular-nums'] },
-  scanLabel: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 10.5, textAlign: 'center' },
+  scanLabel: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   scanDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.cardBorder },
   completeHero: { gap: Spacing.three, alignItems: 'flex-start' },
   completeMark: {

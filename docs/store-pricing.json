@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "approvalStatus": "pending-commercial-approval",
+  "launchStorefronts": ["AE", "SA"],
+  "strategy": "storefront-native-price-points",
+  "rules": {
+    "preserveExistingSubscribers": true,
+    "introductoryOffer": false,
+    "reason": "Wafra grants its own local three-day access period; a store trial would create a second clock.",
+    "display": "Always use the Apple or Google storefront-formatted price returned by RevenueCat."
+  },
+  "products": {
+    "monthly": {
+      "productId": "wafra_pro_monthly",
+      "googleBasePlanId": "monthly",
+      "referencePrice": { "currency": "USD", "amount": "9.99" },
+      "approvedStorefrontPrices": {
+        "AE": null,
+        "SA": null
+      }
+    },
+    "yearly": {
+      "productId": "wafra_pro_yearly",
+      "googleBasePlanId": "yearly",
+      "referencePrice": { "currency": "USD", "amount": "74.99" },
+      "approvedStorefrontPrices": {
+        "AE": null,
+        "SA": null
+      }
+    }
+  }
+}

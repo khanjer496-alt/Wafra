@@ -270,7 +270,7 @@ const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
   /** The smallest caps label — chart axes, tab labels, urgency tags. */
   nano: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 10.5,
+    fontSize: 11,
     lineHeight: 14,
     letterSpacing: 0.55,
     textTransform: 'uppercase',

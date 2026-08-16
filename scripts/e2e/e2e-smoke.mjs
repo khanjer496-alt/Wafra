@@ -441,7 +441,7 @@ await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
   const t = await paintedText(page);
   const months = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i;
   const cols = t.filter((x) => months.test(x.t)).sort((a, b) => a.x - b.x);
-  // The pair is written once above its column; the month sits under the bars.
+  // The pair is stacked above its column; the month sits under the bars.
   const above = (x) => cols.length && x.y < cols[0].y && x.y > cols[0].y - 200;
   const values = t.filter((x) => /^[\d.]+[kM]?$/.test(x.t) && above(x));
   // A month with no ledger at all writes one em dash, not two zeros: two

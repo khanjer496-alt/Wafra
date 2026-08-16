@@ -82,6 +82,34 @@ const checkPlatformIdentity = (expo, platform, findings) => {
   }
 };
 
+const checkStoreLocalization = (expo, findings) => {
+  const localization = (expo?.plugins ?? []).find(
+    (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-localization',
+  );
+  const locales = localization?.[1]?.supportedLocales;
+  for (const platform of ['ios', 'android']) {
+    if (JSON.stringify(locales?.[platform]) !== JSON.stringify(['en', 'ar'])) {
+      findings.push(finding(
+        `supported-locales:${platform}`,
+        `${platform} supported app languages are incomplete`,
+        'The launch listing and in-app language set must both expose English and Arabic.',
+        `Configure expo-localization supportedLocales.${platform} as ["en", "ar"].`,
+      ));
+    }
+  }
+};
+
+const checkStoreSubmitProfiles = (eas, findings) => {
+  if (eas?.submit?.production?.android?.track !== 'internal') {
+    findings.push(finding(
+      'android-submit-track',
+      'The Android production submit profile does not target internal testing',
+      'The first automated Play submission must remain on the internal track.',
+      'Set eas.json submit.production.android.track to internal.',
+    ));
+  }
+};
+
 const checkBuildProfile = (eas, profile, submit, findings) => {
   if (!eas?.build?.[profile]) {
     findings.push(finding('build-profile', `Build profile ${profile} is missing`, 'The selected EAS build profile does not exist.', `Add eas.json build.${profile} or choose an existing profile.`));
@@ -186,6 +214,10 @@ export const assessReleaseReadiness = async ({ root, intent, publicEnv = {} }) =
     checkBuildProfile(eas, profile, submit, findings);
     if (intent.kind === 'store-release' && eas?.build?.development?.developmentClient !== true) {
       findings.push(finding('development-client', 'The development profile is not a development client', 'Device debugging would no longer use the expected client profile.', 'Set eas.json build.development.developmentClient to true.'));
+    }
+    if (intent.kind === 'store-release') {
+      checkStoreLocalization(expo, findings);
+      checkStoreSubmitProfiles(eas, findings);
     }
     if (profile === 'production' || intent.kind === 'store-release') {
       checkProductionRuntime(expo, eas, platform, publicEnv, findings);

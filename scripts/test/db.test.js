@@ -347,6 +347,7 @@ function loadHydrationExports(realModules = {}) {
   const modules = {
     'react/jsx-runtime': { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') },
     react,
+    'expo-localization': { useLocales: () => [{ languageCode: 'en' }] },
     'react-native': {
       AppState: { addEventListener: () => ({ remove() {} }) },
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
@@ -361,6 +362,7 @@ function loadHydrationExports(realModules = {}) {
     '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
     '@/lib/theme-preference': { setThemePreference() {} },
     '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
+    '@/lib/system-language': require('./build/system-language'),
     // `setActiveMarket` returns whether the pack was applied: it refuses a pack
     // denominated differently from money the ledger already holds. The stub
     // says yes, which is the empty-ledger answer these fixtures start from.

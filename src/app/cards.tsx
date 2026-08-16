@@ -239,6 +239,9 @@ export default function CardsScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <ThemedText type="meta" themeColor="textSecondary" style={styles.intro}>
+            {t('cardsPurpose')}
+          </ThemedText>
           <Section index={0}>
             {activeCards.map((c, i) => renderCard(c, i, activeCards, false))}
             {activeCards.length === 0 && (
@@ -321,6 +324,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.six,
     gap: Spacing.four + 2,
+  },
+  intro: {
+    maxWidth: 560,
   },
   rowText: {
     flex: 1,

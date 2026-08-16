@@ -420,7 +420,7 @@ const S = {
     ar: 'استناداً إلى الأرصدة الافتتاحية والعمليات المسجلة، وليس التقدير أعلاه.',
   },
   moreCards: { en: 'View more cards · {count}', ar: 'عرض بطاقات أخرى · {count}' },
-  cardsHeader: { en: 'Cards', ar: 'البطاقات' },
+  cardsHeader: { en: 'Payment cards', ar: 'بطاقات الدفع' },
   moneySourcesHeader: { en: 'Money sources', ar: 'مصادر الأموال' },
   otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
   showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
@@ -1404,12 +1404,12 @@ const S = {
   onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
   onboardAutomaticChoice: { en: 'Keep it automatic', ar: 'اجعله تلقائياً' },
   onboardAutomaticChoiceAndroidBody: {
-    en: 'Build history now, then file supported bank SMS as they arrive.',
-    ar: 'أنشئ السجل الآن، ثم صنّف رسائل البنوك المدعومة عند وصولها.',
+    en: 'Build history now, then file supported bank SMS as they arrive. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
+    ar: 'أنشئ السجل الآن، ثم صنّف رسائل البنوك المدعومة عند وصولها. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
   },
   onboardAutomaticChoiceIosBody: {
-    en: 'Connect a personal Shortcut for the bank conversations you choose.',
-    ar: 'اربط اختصاراً شخصياً لمحادثات البنوك التي تختارها.',
+    en: 'Connect a personal Shortcut for the bank conversations you choose. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
+    ar: 'اربط اختصاراً شخصياً لمحادثات البنوك التي تختارها. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
   },
   onboardManualChoice: { en: 'I’ll add things myself', ar: 'سأضيف العمليات بنفسي' },
   onboardManualChoiceBody: {
@@ -1589,9 +1589,6 @@ const S = {
   featInsightsText: { en: 'Auto-detected subscriptions, due-date countdowns, plain-language insights.', ar: 'اكتشاف تلقائي للاشتراكات وتذكير بالمستحقات وتحليلات واضحة.' },
   featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
   featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
-  featBackup: { en: 'Backup & restore', ar: 'نسخ احتياطي واستعادة' },
-  featBackupText: { en: 'Move your full history to a new phone with one file.', ar: 'انقل سجلك كاملاً إلى هاتف جديد بملف واحد.' },
-
   // Onboarding
   obTagline: { en: 'Know where it goes. Watch it grow.', ar: 'اعرف أين تذهب أموالك. وراقبها تنمو.' },
   obSubtitle: { en: 'Track an AED or SAR ledger privately.', ar: 'تتبّع سجلاً بالدرهم أو الريال بخصوصية.' },
@@ -1776,7 +1773,11 @@ const S = {
   // Other screens
   transactionsTitle: { en: 'Transactions', ar: 'العمليات' },
   budgetsTitle: { en: 'Budgets', ar: 'الميزانيات' },
-  cardsTitle: { en: 'Cards', ar: 'البطاقات' },
+  cardsTitle: { en: 'Payment cards', ar: 'بطاقات الدفع' },
+  cardsPurpose: {
+    en: 'Group purchases, balances, and amounts due by card. These are records in Wafra, not bank connections.',
+    ar: 'اجمع المشتريات والأرصدة والمبالغ المستحقة حسب البطاقة. هذه سجلات داخل وفرة وليست روابط مصرفية.',
+  },
   inactiveCards: { en: 'Inactive cards', ar: 'بطاقات غير نشطة' },
   lastUsed: { en: 'Last used', ar: 'آخر استخدام' },
   addTransactionTitle: { en: 'Add transaction', ar: 'إضافة عملية' },
@@ -2345,6 +2346,10 @@ const S = {
   monthCashflowA11y: {
     en: '{month}, income {income}, spending {spending}',
     ar: '{month}، الدخل {income}، المصروف {spending}',
+  },
+  monthCashflowNoDataA11y: {
+    en: '{month}, no activity recorded',
+    ar: '{month}، لا توجد عمليات مسجلة',
   },
 
   accountKindBank: { en: 'Bank', ar: 'حساب بنكي' },

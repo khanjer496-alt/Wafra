@@ -369,7 +369,7 @@ const resetPreferences = async () => {
   await reload();
 };
 await resetPreferences();
-await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'Cards'); await page.waitForTimeout(1300); });
+await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); await page.waitForTimeout(1300); });
 await pressEverything('pro', async () => {
   await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200);
   await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
@@ -463,7 +463,7 @@ if (pooledSlice) {
 } else {
   ok('flow: the pooled slice is absent only when every category is shown', true);
 }
-await goesTo('wallet: the Cards action opens the cards screen', wallet, 'Cards', /^\/cards/);
+await goesTo('wallet: the Payment cards action opens the cards screen', wallet, 'Payment cards', /^\/cards/);
 await goesTo('wallet: the scan block opens the import screen', wallet, 'Paste a bank message', /^\/import-sms/);
 await goesTo('settings: Wafra Pro opens the paywall',
   async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
@@ -480,7 +480,7 @@ await goesTo('settings: "Send feedback" opens the feedback screen',
 for (const [name, enter] of [
   ['transactions', async () => { await home(); await tapKey(page, 'All activity'); }],
   ['settings', async () => { await home(); await tapKey(page, 'Settings'); }],
-  ['cards', async () => { await wallet(); await tapKey(page, 'Cards'); }],
+  ['cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); }],
   ['import-sms', async () => { await wallet(); await tapKey(page, 'Paste a bank message'); }],
   ['feedback', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); await tapKey(page, 'Send feedback'); }],
 ]) {
