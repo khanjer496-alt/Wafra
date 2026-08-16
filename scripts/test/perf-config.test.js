@@ -90,10 +90,13 @@ function stripComments(text) {
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
-const TAB_SCREENS = [
-  'src/app/(tabs)/index.tsx',
+const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
   'src/app/(tabs)/flow.tsx',
   'src/app/(tabs)/bills.tsx',
+];
+
+const PERSISTENT_REVEAL_TAB_SCREENS = [
+  'src/app/(tabs)/index.tsx',
 ];
 
 // ---------------------------------------------------------------------------
@@ -122,7 +125,7 @@ ok('lazy tab loading is not disabled',
 // The tab screens: no entrance may reach Android.
 // ---------------------------------------------------------------------------
 
-for (const rel of TAB_SCREENS) {
+for (const rel of GATED_LAYOUT_ENTRY_TAB_SCREENS) {
   const src = stripComments(read(rel));
 
   /**
@@ -167,6 +170,48 @@ for (const rel of TAB_SCREENS) {
     'Section animates itself and does not know it is on a tab');
 }
 
+// Home needs a visible Android entrance, but never another layout animation on
+// a detachable native screen. MotionReveal animates only opacity/transform via
+// one persistent shared value, so tab reattachment cannot register or replay
+// an entering transition.
+for (const rel of PERSISTENT_REVEAL_TAB_SCREENS) {
+  const src = stripComments(read(rel));
+
+  ok(`${rel}: uses persistent paint-only reveals`,
+    /import \{ MotionReveal \} from '@\/components\/ui\/motion-reveal'/.test(src) &&
+      (src.match(/<MotionReveal\b/g) ?? []).length >= 4,
+    'the Android-visible choreography must stay on the persistent reveal primitive');
+
+  ok(`${rel}: has no detachable-screen layout animation`,
+    !/\bentering=\{/.test(src) && !/\bexiting=\{/.test(src) && !/\blayout=\{/.test(src),
+    'entering/exiting/layout animations can replay when react-native-screens reattaches a tab');
+
+  ok(`${rel}: does not use Section, which carries its own entrance`,
+    !/\bSection\b(?![A-Za-z])[^\n]*from '@\/components\/ui\/layout'/.test(src) &&
+      !/import \{[^}]*\bSection\b[^}]*\} from '@\/components\/ui\/layout'/.test(src),
+    'Section registers a layout entrance and does not know it is on a detachable tab');
+}
+
+const motionReveal = stripComments(read('src/components/ui/motion-reveal.tsx'));
+
+ok('MotionReveal animates persistent paint properties, not layout',
+  /useSharedValue\(/.test(motionReveal) &&
+    /useAnimatedStyle\(/.test(motionReveal) &&
+    /opacity:/.test(motionReveal) &&
+    /translateY:/.test(motionReveal) &&
+    /scale:/.test(motionReveal) &&
+    !/\bentering=\{/.test(motionReveal) &&
+    !/\bexiting=\{/.test(motionReveal) &&
+    !/\blayout=\{/.test(motionReveal),
+  'the reveal must remain a shared-value paint animation so tab attach cannot replay it');
+
+ok('MotionReveal honours the app reduced-motion policy',
+  /useMotionPreference\(\)/.test(motionReveal) &&
+    /if \(!ready\) return/.test(motionReveal) &&
+    /if \(reducedMotion\)/.test(motionReveal) &&
+    /progress\.value = 1/.test(motionReveal),
+  'wait for screen-reader detection, then settle immediately when motion is reduced');
+
 // ---------------------------------------------------------------------------
 // The tab bar. Not a tab screen, and that is exactly why it was missed.
 //
@@ -176,40 +221,32 @@ for (const rel of TAB_SCREENS) {
 // Atrace: ACTION_UP 4238.219 to Record View draw 4238.343 = 124ms, against
 // 548ms in v41.
 //
-// What still sits in front of that draw is a run of consecutive Choreographer
-// `animation` callbacks beginning 4238.223 — 4ms after the tap, before
-// anything is measured or laid out. The tab bar's own `FadeIn.duration(180)`
-// was the only ungated entrance left in the tab-switch path, and 180ms is the
-// duration in the trace. React-navigation re-renders the bar on every
-// navigation state change, so that entrance is configured afresh on each
-// press rather than once at mount.
+// The bar may animate focus state because that shared value persists with each
+// keyed tab button. It may not register entering/exiting/layout transitions:
+// React-navigation re-renders the bar on every navigation state change, so a
+// layout transition would be configured afresh on every press.
 // ---------------------------------------------------------------------------
 
 const tabBar = stripComments(read('src/components/tab-bar.tsx'));
 
 {
-  const enterings = tabBar.match(/entering=\{[^\n]*/g) ?? [];
-  const unwrapped = enterings.filter((line) => !line.startsWith('entering={enter('));
-  ok('src/components/tab-bar.tsx: its entrance goes through useScreenEntering',
-    enterings.length > 0 && unwrapped.length === 0,
-    enterings.length === 0
-      ? 'expected an entering= here; if the animation was removed outright, drop this block ' +
-        'rather than leaving a check that cannot fail'
-      : `unwrapped: ${unwrapped.join(' | ')}`);
-
-  ok('src/components/tab-bar.tsx: calls useScreenEntering',
-    /import \{ useScreenEntering \} from '@\/hooks\/use-screen-entering'/.test(tabBar) &&
-      /const enter = useScreenEntering\(\)/.test(tabBar),
-    'a local `enter` would satisfy the check above while doing nothing');
+  ok('src/components/tab-bar.tsx: focus motion uses a persistent shared value',
+    /const focus = useSharedValue\(/.test(tabBar) &&
+      /focus\.value = reducedMotion \? next : withSpring\(/.test(tabBar),
+    'focus motion must update the keyed tab button instead of registering a new entrance');
 
   /**
    * The bar is rebuilt on every navigation state change, so an exiting or
    * layout animation here would fire on every tab press by construction —
    * worse than the entering one, which at least only replays on a re-register.
    */
-  ok('src/components/tab-bar.tsx: no exiting or layout animation',
-    !/\bexiting=\{/.test(tabBar) && !/\blayout=\{/.test(tabBar),
+  ok('src/components/tab-bar.tsx: no entering, exiting or layout animation',
+    !/\bentering=\{/.test(tabBar) && !/\bexiting=\{/.test(tabBar) && !/\blayout=\{/.test(tabBar),
     'react-navigation re-renders this component on every navigation state change');
+
+  ok('src/components/tab-bar.tsx: focus motion honours Reduce Motion',
+    /useReducedMotion\(\)/.test(tabBar) && /focus\.value = reducedMotion \?/.test(tabBar),
+    'tab selection must settle immediately for Reduce Motion and screen-reader users');
 }
 
 // ---------------------------------------------------------------------------

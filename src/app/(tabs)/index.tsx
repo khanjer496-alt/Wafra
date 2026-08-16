@@ -15,9 +15,9 @@
  * kinds of thing. They are all money that leaves on a date.
  */
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PeriodSheet } from '@/components/period-sheet';
@@ -29,6 +29,7 @@ import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { Icon } from '@/components/ui/icon';
 import { CountUpAmount } from '@/components/ui/count-up';
+import { MotionReveal } from '@/components/ui/motion-reveal';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useToast } from '@/components/ui/toast';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
@@ -36,7 +37,6 @@ import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
-import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
@@ -71,7 +71,6 @@ function AutomaticCapture({
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const enter = useScreenEntering();
   const active = status === 'active';
   const title =
     status === 'paused'
@@ -134,54 +133,52 @@ function AutomaticCapture({
         : t('captureEnable');
 
   return (
-    <Animated.View entering={enter(FadeInDown.duration(280))}>
-      <SpringPressable
-        accessibilityRole="button"
-        accessibilityLabel={[t('automaticCapture'), title, detail].filter(Boolean).join('. ')}
-        disabled={status === 'checking' || status === 'unsupported'}
-        onPress={() => {
-          tapped();
-          onPress();
-        }}
-        scaleTo={0.985}
+    <SpringPressable
+      accessibilityRole="button"
+      accessibilityLabel={[t('automaticCapture'), title, detail].filter(Boolean).join('. ')}
+      disabled={status === 'checking' || status === 'unsupported'}
+      onPress={() => {
+        tapped();
+        onPress();
+      }}
+      scaleTo={0.985}
+      style={[
+        styles.capture,
+        active && styles.captureHealthy,
+        {
+          backgroundColor: active ? 'transparent' : theme.backgroundElement,
+          borderColor: active ? 'transparent' : theme.cardBorder,
+        },
+      ]}>
+      <View
         style={[
-          styles.capture,
-          active && styles.captureHealthy,
-          {
-            backgroundColor: active ? 'transparent' : theme.backgroundElement,
-            borderColor: active ? 'transparent' : theme.cardBorder,
-          },
+          styles.captureIcon,
+          { backgroundColor: active ? theme.primary : theme.backgroundSelected },
         ]}>
-        <View
-          style={[
-            styles.captureIcon,
-            { backgroundColor: active ? theme.primary : theme.backgroundSelected },
-          ]}>
-          <Icon name="spark" size={18} color={active ? theme.onPrimary : theme.textSecondary} />
+        <Icon name="spark" size={18} color={active ? theme.onPrimary : theme.textSecondary} />
+      </View>
+      <View style={styles.captureText}>
+        <View style={styles.captureTitleRow}>
+          {active && <View style={[styles.liveDot, { backgroundColor: theme.primary }]} />}
+          <ThemedText type="smallBold" numberOfLines={2} style={styles.captureTitle}>
+            {title}
+          </ThemedText>
         </View>
-        <View style={styles.captureText}>
-          <View style={styles.captureTitleRow}>
-            {active && <View style={[styles.liveDot, { backgroundColor: theme.primary }]} />}
-            <ThemedText type="smallBold" numberOfLines={2} style={styles.captureTitle}>
-              {title}
-            </ThemedText>
-          </View>
-          {detail ? (
-            <ThemedText type="meta" themeColor="textTertiary">
-              {detail}
-            </ThemedText>
-          ) : null}
-        </View>
-        {badge ? (
-          <ThemedText type="nano" style={{ color: active ? theme.primary : theme.warning }}>
-            {badge}
+        {detail ? (
+          <ThemedText type="meta" themeColor="textTertiary">
+            {detail}
           </ThemedText>
         ) : null}
-        {status !== 'checking' && status !== 'unsupported' ? (
-          <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-        ) : null}
-      </SpringPressable>
-    </Animated.View>
+      </View>
+      {badge ? (
+        <ThemedText type="nano" style={{ color: active ? theme.primary : theme.warning }}>
+          {badge}
+        </ThemedText>
+      ) : null}
+      {status !== 'checking' && status !== 'unsupported' ? (
+        <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+      ) : null}
+    </SpringPressable>
   );
 }
 
@@ -194,40 +191,37 @@ function AutomaticCapture({
  */
 function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => void }) {
   const theme = useTheme();
-  const enter = useScreenEntering();
   if (count === 0) return null;
   const label = tf('reviewAlertsHomeCount', { count, s: count === 1 ? '' : 's' });
 
   return (
-    <Animated.View entering={enter(FadeInDown.delay(40).duration(280))}>
-      <SpringPressable
-        accessibilityRole="button"
-        accessibilityLabel={`${t('reviewAlertsTitle')}. ${label}`}
-        accessibilityHint={t('reviewAlertsPrivacy')}
-        onPress={() => {
-          tapped();
-          onPress();
-        }}
-        scaleTo={0.985}
-        style={[
-          styles.reviewPrompt,
-          {
-            borderColor: theme.cardBorder,
-            backgroundColor: theme.backgroundElement,
-          },
-        ]}>
-        <View style={[styles.reviewPromptIcon, { backgroundColor: theme.backgroundSelected }]}>
-          <Icon name="alert" size={17} color={theme.warning} />
-        </View>
-        <ThemedText type="small" style={styles.reviewPromptCopy}>
-          {label}
-        </ThemedText>
-        <ThemedText type="nano" style={{ color: theme.warning }}>
-          {t('review')}
-        </ThemedText>
-        <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-      </SpringPressable>
-    </Animated.View>
+    <SpringPressable
+      accessibilityRole="button"
+      accessibilityLabel={`${t('reviewAlertsTitle')}. ${label}`}
+      accessibilityHint={t('reviewAlertsPrivacy')}
+      onPress={() => {
+        tapped();
+        onPress();
+      }}
+      scaleTo={0.985}
+      style={[
+        styles.reviewPrompt,
+        {
+          borderColor: theme.cardBorder,
+          backgroundColor: theme.backgroundElement,
+        },
+      ]}>
+      <View style={[styles.reviewPromptIcon, { backgroundColor: theme.backgroundSelected }]}>
+        <Icon name="alert" size={17} color={theme.warning} />
+      </View>
+      <ThemedText type="small" style={styles.reviewPromptCopy}>
+        {label}
+      </ThemedText>
+      <ThemedText type="nano" style={{ color: theme.warning }}>
+        {t('review')}
+      </ThemedText>
+      <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+    </SpringPressable>
   );
 }
 
@@ -262,6 +256,7 @@ function Hero({
   incomeFils,
   expenseFils,
   comparison,
+  active,
 }: {
   period: Period;
   live: boolean;
@@ -269,10 +264,10 @@ function Hero({
   incomeFils: number;
   expenseFils: number;
   comparison: PeriodComparison | null;
+  active: boolean;
 }) {
   const theme = useTheme();
   const router = useRouter();
-  const enter = useScreenEntering();
 
   const caption =
     t('netAfterSpending') +
@@ -289,7 +284,7 @@ function Hero({
     // and against theme.ts's own doctrine that grouping is done with 1px
     // dividers rather than boxes. The gradient also hard-coded six hexes that
     // exist in neither theme, so it did not move with the palette.
-    <Animated.View entering={enter(FadeInDown.duration(320))}>
+    <View>
       <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
@@ -336,7 +331,13 @@ function Hero({
             {netFils < 0 ? (
               <ThemedText type="display" tabular>−</ThemedText>
             ) : null}
-            <CountUpAmount type="display" fils={Math.abs(netFils)} prefix="" />
+            <CountUpAmount
+              type="display"
+              fils={Math.abs(netFils)}
+              prefix=""
+              durationMs={900}
+              active={active}
+            />
           </View>
         </View>
       )}
@@ -377,7 +378,7 @@ function Hero({
           </SpringPressable>
         ))}
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -401,7 +402,6 @@ function LeavingSoon({
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
-  const enter = useScreenEntering();
   const [expanded, setExpanded] = useState(false);
   if (items.length === 0) return null;
 
@@ -421,9 +421,7 @@ function LeavingSoon({
   const hidden = items.length - shown.length;
 
   return (
-    <Animated.View
-      entering={enter(FadeInDown.delay(80).duration(320))}
-      style={styles.section}>
+    <View style={styles.section}>
       <SectionHeader
         title={
           late > 0
@@ -493,7 +491,7 @@ function LeavingSoon({
           </ThemedText>
         </SpringPressable>
       )}
-    </Animated.View>
+    </View>
   );
 }
 
@@ -620,7 +618,7 @@ function CategorisePrompt({
 
 export default function HomeScreen() {
   const theme = useTheme();
-  const enter = useScreenEntering();
+  const focused = useIsFocused();
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
@@ -750,17 +748,23 @@ export default function HomeScreen() {
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
           }>
-          <View style={styles.topRow}>
-            <PeriodPill onPress={() => setPeriodSheetOpen(true)} />
-            <View style={styles.topActions}>
-              <IconButton
-                name="search"
-                label={t('searchMerchants')}
-                onPress={() => router.push('/transactions')}
-              />
-              <IconButton name="sliders" label={t('settingsTitle')} onPress={() => router.push('/settings')} />
+          <MotionReveal distance={10} scaleFrom={0.985}>
+            <View style={styles.topRow}>
+              <PeriodPill onPress={() => setPeriodSheetOpen(true)} />
+              <View style={styles.topActions}>
+                <IconButton
+                  name="search"
+                  label={t('searchMerchants')}
+                  onPress={() => router.push('/transactions')}
+                />
+                <IconButton
+                  name="sliders"
+                  label={t('settingsTitle')}
+                  onPress={() => router.push('/settings')}
+                />
+              </View>
             </View>
-          </View>
+          </MotionReveal>
 
           {!state.hydrated ? (
             <View
@@ -773,115 +777,121 @@ export default function HomeScreen() {
             </View>
           ) : (
           <>
-          <Hero
-            period={period}
-            live={dashboard.live}
-            comparison={dashboard.comparison}
-            // Income, spending, and saved come from one arithmetic, so the hero equals its
-            // own In and Spent cells. It read "63,039 in, 8,815 spent, saved 54,223" —
-            // a subtraction that is off by one, in 40px type, at the top of
-            // the screen. Each cell was rounded on its own while the net was
-            // computed from the raw fils and rounded once more.
-            //
-            // Spent is the composition total, which Flow prints above the
-            // category split; in is rounded the same way; and the net is the
-            // difference between those two, not a third measurement.
-            netFils={dashboard.hero.netFils}
-            incomeFils={dashboard.hero.incomeFils}
-            expenseFils={dashboard.hero.expenseFils}
-          />
+          <MotionReveal delay={45} distance={22} scaleFrom={0.955}>
+            <Hero
+              period={period}
+              live={dashboard.live}
+              comparison={dashboard.comparison}
+              active={focused}
+              // Income, spending, and saved come from one arithmetic, so the hero equals its
+              // own In and Spent cells. It read "63,039 in, 8,815 spent, saved 54,223" —
+              // a subtraction that is off by one, in 40px type, at the top of
+              // the screen. Each cell was rounded on its own while the net was
+              // computed from the raw fils and rounded once more.
+              //
+              // Spent is the composition total, which Flow prints above the
+              // category split; in is rounded the same way; and the net is the
+              // difference between those two, not a third measurement.
+              netFils={dashboard.hero.netFils}
+              incomeFils={dashboard.hero.incomeFils}
+              expenseFils={dashboard.hero.expenseFils}
+            />
+          </MotionReveal>
 
-          <AutomaticCapture
-            status={captureStatus}
-            lastCaptureDate={dashboard.lastAutomaticCaptureDate}
-            onPress={() => {
-              if (captureStatus === 'paused') router.push('/pro');
-              else if (state.captureOptOut) {
-                // This tap is the user's explicit reversal of the durable
-                // no-capture choice. Persist it before opening setup; a stale
-                // Android READ_SMS grant must never be enough on its own.
-                void setCaptureOptOut(false).then(() => {
-                  if (Platform.OS === 'ios') router.push('/ios-setup');
-                  // Android's foreground effect observes this preference
-                  // change and starts with a fresh callback/state snapshot.
-                  // Calling the old render's callback here would see the old
-                  // opt-out and make this first tap look broken.
-                }).catch(() => Alert.alert(t('capturePreferenceFailed')));
-              }
-              // Only iOS states that still owe the user setup go to the
-              // wizard: 'off' (no relay config), 'needs-test' (paired but
-              // unverified), 'pipe-ready' (verified pipe, automation not yet
-              // proven) and 'revoked' (the relay cut this device off, so the
-              // way back is a new pairing) each have something left to finish
-              // there — and 'revoked' is why this stayed a !== test. 'active'
-              // does not — its own detail line is "tap to sync now" — so it
-              // gets the sync, exactly as Android does.
-              else if (Platform.OS === 'ios' && captureStatus !== 'active') {
-                router.push('/ios-setup');
-              } else void runAutoImport(true);
-            }}
-          />
+          <MotionReveal delay={115} distance={18} scaleFrom={0.97}>
+            <AutomaticCapture
+              status={captureStatus}
+              lastCaptureDate={dashboard.lastAutomaticCaptureDate}
+              onPress={() => {
+                if (captureStatus === 'paused') router.push('/pro');
+                else if (state.captureOptOut) {
+                  // This tap is the user's explicit reversal of the durable
+                  // no-capture choice. Persist it before opening setup; a stale
+                  // Android READ_SMS grant must never be enough on its own.
+                  void setCaptureOptOut(false).then(() => {
+                    if (Platform.OS === 'ios') router.push('/ios-setup');
+                    // Android's foreground effect observes this preference
+                    // change and starts with a fresh callback/state snapshot.
+                    // Calling the old render's callback here would see the old
+                    // opt-out and make this first tap look broken.
+                  }).catch(() => Alert.alert(t('capturePreferenceFailed')));
+                }
+                // Only iOS states that still owe the user setup go to the
+                // wizard: 'off' (no relay config), 'needs-test' (paired but
+                // unverified), 'pipe-ready' (verified pipe, automation not yet
+                // proven) and 'revoked' (the relay cut this device off, so the
+                // way back is a new pairing) each have something left to finish
+                // there — and 'revoked' is why this stayed a !== test. 'active'
+                // does not — its own detail line is "tap to sync now" — so it
+                // gets the sync, exactly as Android does.
+                else if (Platform.OS === 'ios' && captureStatus !== 'active') {
+                  router.push('/ios-setup');
+                } else void runAutoImport(true);
+              }}
+            />
+          </MotionReveal>
 
           {/* One next action, not four competing notices. */}
-          {reviewAlertCount > 0 ? (
-            <ReviewAlertsPrompt
-              count={reviewAlertCount}
-              onPress={() => router.push('/review-alerts')}
-            />
-          ) : dashboard.uncategorised.shouldPrompt ? (
-            <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
-          ) : dashboard.unreadFormats.shouldPrompt ? (
-            <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
-          ) : insight ? (
-            <Animated.View
-              entering={enter(FadeInDown.delay(40).duration(320))}
-              style={[
-                styles.insight,
-                { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-              ]}>
-              <Icon name={insight.icon} size={17} color={theme.warning} />
-              <ThemedText type="small" style={styles.insightTitle}>
-                {insight.title}
-              </ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary">
-                {insight.body}
-              </ThemedText>
-              <View style={styles.insightActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => {
-                    tapped();
-                    router.push(insight.href ?? '/flow');
-                  }}
-                  style={[styles.btn, { backgroundColor: theme.primary }]}>
-                  <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                    {t('seeBreakdown')}
-                  </ThemedText>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => {
-                    tapped();
-                    setDismissedInsight(insight.id);
-                  }}
-                  style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
-                  <ThemedText type="nano" themeColor="textSecondary">
-                    {t('dismiss')}
-                  </ThemedText>
-                </Pressable>
+          <MotionReveal delay={165} distance={16} scaleFrom={0.975}>
+            {reviewAlertCount > 0 ? (
+              <ReviewAlertsPrompt
+                count={reviewAlertCount}
+                onPress={() => router.push('/review-alerts')}
+              />
+            ) : dashboard.uncategorised.shouldPrompt ? (
+              <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
+            ) : dashboard.unreadFormats.shouldPrompt ? (
+              <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
+            ) : insight ? (
+              <View
+                style={[
+                  styles.insight,
+                  { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+                ]}>
+                <Icon name={insight.icon} size={17} color={theme.warning} />
+                <ThemedText type="small" style={styles.insightTitle}>
+                  {insight.title}
+                </ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {insight.body}
+                </ThemedText>
+                <View style={styles.insightActions}>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      tapped();
+                      router.push(insight.href ?? '/flow');
+                    }}
+                    style={[styles.btn, { backgroundColor: theme.primary }]}>
+                    <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                      {t('seeBreakdown')}
+                    </ThemedText>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => {
+                      tapped();
+                      setDismissedInsight(insight.id);
+                    }}
+                    style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
+                    <ThemedText type="nano" themeColor="textSecondary">
+                      {t('dismiss')}
+                    </ThemedText>
+                  </Pressable>
+                </View>
               </View>
-            </Animated.View>
-          ) : null}
+            ) : null}
+          </MotionReveal>
 
-          <LeavingSoon
-            items={dashboard.upcoming.items}
-            withinDays={dashboard.upcoming.withinDays}
-            onOpen={openOutgoing}
-          />
+          <MotionReveal delay={215} distance={18} scaleFrom={0.97}>
+            <LeavingSoon
+              items={dashboard.upcoming.items}
+              withinDays={dashboard.upcoming.withinDays}
+              onOpen={openOutgoing}
+            />
+          </MotionReveal>
 
-          <Animated.View
-            entering={enter(FadeInDown.delay(120).duration(320))}
-            style={styles.section}>
+          <MotionReveal delay={265} distance={20} scaleFrom={0.97} style={styles.section}>
             <SectionHeader
               title={dashboard.live ? t('recentActivity') : periodLabel(period)}
               right={t('allActivity')}
@@ -912,7 +922,7 @@ export default function HomeScreen() {
                 onAddManually={() => router.push('/add-transaction')}
               />
             )}
-          </Animated.View>
+          </MotionReveal>
           </>
           )}
         </ScrollView>
