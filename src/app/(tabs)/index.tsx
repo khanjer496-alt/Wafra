@@ -15,7 +15,6 @@
  * kinds of thing. They are all money that leaves on a date.
  */
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
@@ -31,7 +30,6 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { Icon } from '@/components/ui/icon';
 import { CountUpAmount } from '@/components/ui/count-up';
 import { MotionReveal } from '@/components/ui/motion-reveal';
-import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useToast } from '@/components/ui/toast';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
@@ -146,9 +144,10 @@ function AutomaticCapture({
       scaleTo={0.985}
       style={[
         styles.capture,
+        active && styles.captureHealthy,
         {
-          backgroundColor: active ? theme.primarySoft : theme.backgroundElement,
-          borderColor: active ? theme.primaryBorder : theme.cardBorder,
+          backgroundColor: active ? 'transparent' : theme.backgroundElement,
+          borderColor: active ? 'transparent' : theme.cardBorder,
         },
       ]}>
       <View
@@ -258,7 +257,6 @@ function Hero({
   expenseFils,
   comparison,
   active,
-  activityRows,
 }: {
   period: Period;
   live: boolean;
@@ -267,8 +265,8 @@ function Hero({
   expenseFils: number;
   comparison: PeriodComparison | null;
   active: boolean;
-  activityRows: Transaction[];
 }) {
+  const theme = useTheme();
   const router = useRouter();
 
   const caption =
@@ -280,38 +278,45 @@ function Hero({
         ? t('allTime')
         : `${t('inWord')} ${periodLabel(period)}`);
 
-  const activityTiles = Array<Transaction | undefined>(14).fill(undefined);
-  activityRows.slice(0, 8).forEach((transaction, index) => {
-    const day = Number(transaction.date.slice(-2));
-    let slot = Number.isFinite(day) ? (day - 1) % activityTiles.length : index;
-    while (activityTiles[slot]) slot = (slot + 1) % activityTiles.length;
-    activityTiles[slot] = transaction;
-  });
-
-  const heroColors = netFils < 0
-    ? (['#351E1A', '#5E2922', '#763127'] as const)
-    : (['#102B25', '#164C3D', '#1F5C49'] as const);
-
   return (
-    <LinearGradient
-      colors={heroColors}
-      start={{ x: 0.05, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.heroSurface}>
-      <View pointerEvents="none" style={styles.heroGlow} />
-      <ThemedText type="meta" style={styles.heroLabel}>
+    // No shell. This carried a bordered card filled with a three-stop
+    // LinearGradient, directly above a comment saying "no card, no background"
+    // and against theme.ts's own doctrine that grouping is done with 1px
+    // dividers rather than boxes. The gradient also hard-coded six hexes that
+    // exist in neither theme, so it did not move with the palette.
+    <View>
+      <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
         {caption}
       </ThemedText>
 
-      {Math.abs(netFils) >= 1_000_000_000 ? (
+      {/* The same period before this one, over the same number of days.
+          Rendered only when there is something honest to compare against —
+          `periodComparison` returns null for a ledger with no prior history,
+          and "+100% vs nothing" would be the loudest claim this screen makes
+          resting on the least evidence it has. Nothing is not a dash and not
+          a 0%; it is nothing. */}
+      {comparison && (
         <ThemedText
-          type="display"
-          tabular
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.55}
-          style={styles.heroFigure}>
-          <ThemedText type="smallBold" tabular style={styles.heroCurrency}>
+          type="meta"
+          style={[
+            styles.heroCompare,
+            {
+              color:
+                comparison.deltaFils === 0
+                  ? theme.textSecondary
+                  : comparison.deltaFils > 0
+                    ? theme.expense
+                    : theme.income,
+            },
+          ]}>
+          {comparisonSentence(comparison)}
+        </ThemedText>
+      )}
+
+      {/* No card, no background. The figure IS the top of the screen. */}
+      {Math.abs(netFils) >= 1_000_000_000 ? (
+        <ThemedText type="display" tabular>
+          <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
             {ledgerCurrencyDisplay()}{' '}
           </ThemedText>
           {netFils < 0 ? '−' : ''}
@@ -319,97 +324,61 @@ function Hero({
         </ThemedText>
       ) : (
         <View style={styles.heroRow}>
-          <ThemedText type="smallBold" tabular style={styles.heroCurrency}>
+          <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
             {ledgerCurrencyDisplay()}
           </ThemedText>
           <View style={styles.heroAmount}>
+            {netFils < 0 ? (
+              <ThemedText type="display" tabular>−</ThemedText>
+            ) : null}
             <CountUpAmount
               type="display"
               fils={Math.abs(netFils)}
-              prefix={netFils < 0 ? '−' : ''}
+              prefix=""
               durationMs={900}
               active={active}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.55}
-              style={styles.heroFigure}
             />
           </View>
         </View>
       )}
 
-      {comparison ? (
-        <View style={styles.heroComparePill}>
-          <Icon
-            name={comparison.deltaFils > 0 ? 'arrow-up' : comparison.deltaFils < 0 ? 'arrow-down' : 'trend'}
-            size={13}
-            color="#E3F3EC"
-          />
-          <ThemedText type="meta" style={styles.heroCompare}>
-            {comparisonSentence(comparison)}
-          </ThemedText>
-        </View>
-      ) : null}
-
+      {/* Two cells divided by rules rather than boxed — the split is a
+          continuation of the hero, not a separate component. */}
       <View style={styles.split}>
         {(
           [
-            [t('inLabel'), incomeFils, '#AEE8CE', '/transactions?type=income'],
-            [t('spentLabel'), expenseFils, '#FFC1B2', '/transactions?type=expense'],
+            [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
+            [t('spentLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
           ] as const
-        ).map(([label, fils, color, href]) => (
+        ).map(([label, fils, color, href], i) => (
           <SpringPressable
             key={label}
-            accessibilityRole="button"
+            accessibilityRole={href ? 'button' : 'text'}
             accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
-            onPress={() => {
+            onPress={href ? () => {
               tapped();
               router.push(href);
-            }}
-            scaleTo={0.97}
-            opacityTo={0.9}
-            style={styles.splitCell}>
+            } : undefined}
+            scaleTo={0.985}
+            opacityTo={0.94}
+            style={[
+              styles.splitCell,
+              { borderTopColor: theme.cardBorder },
+              i > 0 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
+            ]}>
             <View style={styles.splitTop}>
               <View style={[styles.dot, { backgroundColor: color }]} />
-              <ThemedText type="nano" style={styles.splitLabel}>
+              <ThemedText type="nano" themeColor="textTertiary">
                 {label}
               </ThemedText>
             </View>
-            <ThemedText
-              type="smallBold"
-              tabular
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.7}
-              style={styles.splitFigure}>
+            <ThemedText type="small" tabular style={styles.splitFigure}>
               {formatAmount(fils, { decimals: false })}
             </ThemedText>
           </SpringPressable>
         ))}
       </View>
-
-      <View
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={styles.activityMosaic}>
-        {activityTiles.map((transaction, index) => (
-          <View
-            key={transaction?.id ?? `empty-${index}`}
-            style={[styles.activityTile, transaction && styles.activityTileFilled]}>
-            {transaction ? (
-              <>
-                <MerchantAvatar title={transaction.title} category={transaction.category} size={24} />
-                <ThemedText type="micro" tabular style={styles.activityDay}>
-                  {transaction.date.slice(-2)}
-                </ThemedText>
-              </>
-            ) : index === activityTiles.length - 1 ? (
-              <View style={styles.activityToday} />
-            ) : null}
-          </View>
-        ))}
-      </View>
-    </LinearGradient>
+    </View>
   );
 }
 
@@ -461,77 +430,67 @@ function LeavingSoon({
         }
         right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
       />
-      <View
-        style={[
-          styles.leaveCard,
-          { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-        ]}>
-        {shown.map((x, i) => {
-          const alarming = x.overdue || x.urgent;
-          return (
-            <SpringPressable
-              key={x.id}
-              accessibilityRole="button"
-              accessibilityLabel={`${x.title}, ${formatAED(x.amountFils, { decimals: false })}, ${daysPhrase(x.daysLeft)}`}
-              onPress={() => onOpen(x)}
-              scaleTo={0.975}
-              style={[
-                styles.leaveRow,
-                i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-              ]}>
-              <View
-                style={[
-                  styles.leaveIcon,
-                  { backgroundColor: alarming ? theme.expenseSoftBg : theme.backgroundSelected },
-                ]}>
-                <Icon name={x.icon} size={19} color={alarming ? theme.expense : theme.primary} />
-              </View>
-              <View style={styles.leaveText}>
-                <ThemedText type="smallBold" numberOfLines={1}>
-                  {x.title}
-                </ThemedText>
-                <ThemedText
-                  type="meta"
-                  themeColor={x.overdue ? undefined : 'textTertiary'}
-                  style={x.overdue ? { color: theme.expense } : undefined}>
-                  {shortDate(x.dateISO)} · {daysPhrase(x.daysLeft)}
-                </ThemedText>
-              </View>
-              <ThemedText type="smallBold" tabular style={x.overdue ? { color: theme.expense } : undefined}>
-                {formatAmount(x.amountFils, { decimals: false })}
-              </ThemedText>
-            </SpringPressable>
-          );
-        })}
-        {hidden > 0 && (
+      {shown.map((x, i) => {
+        const alarming = x.overdue || x.urgent;
+        return (
           <SpringPressable
+            key={x.id}
             accessibilityRole="button"
-            accessibilityLabel={tf('seeUpcomingPaymentsA11y', { count: items.length })}
-            onPress={() => {
-              tapped();
-              setExpanded(true);
-            }}
-            scaleTo={0.975}
+            accessibilityLabel={x.title}
+            onPress={() => onOpen(x)}
+            scaleTo={0.99}
             style={[
               styles.leaveRow,
-              { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+              i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
             ]}>
-            <View style={[styles.leaveIcon, { backgroundColor: theme.backgroundSelected }]}>
-              <Icon name="chevron-right" size={18} color={theme.textTertiary} />
-            </View>
+            <Icon name={x.icon} size={17} color={alarming ? theme.expense : theme.text} />
             <View style={styles.leaveText}>
-              <ThemedText type="smallBold" themeColor="textSecondary">
-                {tf('moreItems', { count: hidden })}
+              <ThemedText type="small" numberOfLines={1}>
+                {x.title}
+              </ThemedText>
+              <ThemedText
+                type="meta"
+                themeColor={x.overdue ? undefined : 'textTertiary'}
+                style={x.overdue ? { color: theme.expense } : undefined}>
+                {shortDate(x.dateISO)} · {daysPhrase(x.daysLeft)}
               </ThemedText>
             </View>
-            <ThemedText type="smallBold" tabular themeColor="textSecondary">
-              {formatAmount(totalAsShown(items.slice(3).map((x) => x.amountFils)), {
-                decimals: false,
-              })}
+            <ThemedText type="small" tabular style={x.overdue ? { color: theme.expense } : undefined}>
+              {formatAmount(x.amountFils, { decimals: false })}
             </ThemedText>
           </SpringPressable>
-        )}
-      </View>
+        );
+      })}
+      {hidden > 0 && (
+        <SpringPressable
+          accessibilityRole="button"
+          accessibilityLabel={tf('seeUpcomingPaymentsA11y', { count: items.length })}
+          // Expand in place. This used to push to Bills, which opens on its
+          // Cards segment — so tapping "3 more" under three card rows showed
+          // the SAME three cards, and the three items actually being counted
+          // (bills, not cards) were never reachable at all.
+          onPress={() => {
+            tapped();
+            setExpanded(true);
+          }}
+          scaleTo={0.99}
+          style={[
+            styles.leaveRow,
+            { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          ]}>
+          <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+          <View style={styles.leaveText}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {tf('moreItems', { count: hidden })}
+            </ThemedText>
+          </View>
+          <ThemedText type="small" tabular themeColor="textSecondary">
+            {formatAmount(totalAsShown(items.slice(3).map((x) => x.amountFils)), {
+              decimals: false,
+            })}
+          </ThemedText>
+        </SpringPressable>
+      )}
     </View>
   );
 }
@@ -836,7 +795,6 @@ export default function HomeScreen() {
               netFils={dashboard.hero.netFils}
               incomeFils={dashboard.hero.incomeFils}
               expenseFils={dashboard.hero.expenseFils}
-              activityRows={dashboard.activityRows}
             />
           </MotionReveal>
 
@@ -939,30 +897,22 @@ export default function HomeScreen() {
               right={t('allActivity')}
               onPressRight={() => router.push('/transactions')}
             />
-            {dashboard.activityRows.length > 0 ? (
+            {dashboard.activityRows.map((tx, i) => (
               <View
-                style={[
-                  styles.activityCard,
-                  { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-                ]}>
-                {dashboard.activityRows.map((tx, i) => (
-                  <View
-                    key={tx.id}
-                    style={
-                      i > 0
-                        ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }
-                        : undefined
-                    }>
-                    <TransactionRow
-                      transaction={tx}
-                      account={dashboard.accountById.get(tx.accountId)}
-                      onPress={setEntry}
-                      internal={dashboard.internalTransactionIds.has(tx.id)}
-                    />
-                  </View>
-                ))}
+                key={tx.id}
+                style={
+                  i > 0
+                    ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }
+                    : undefined
+                }>
+                <TransactionRow
+                  transaction={tx}
+                  account={dashboard.accountById.get(tx.accountId)}
+                  onPress={setEntry}
+                  internal={dashboard.internalTransactionIds.has(tx.id)}
+                />
               </View>
-            ) : null}
+            ))}
             {dashboard.activityRows.length === 0 && (
               <EmptyMonth
                 monthName={periodLabel(period)}
@@ -1004,9 +954,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two + 3,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
+    borderRadius: Radius.sheet,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 11,
+    marginTop: Spacing.four,
+  },
+  captureHealthy: {
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: Spacing.two,
     marginTop: Spacing.three,
   },
   captureIcon: {
@@ -1040,92 +996,24 @@ const styles = StyleSheet.create({
   },
   reviewPromptCopy: { flex: 1 },
 
-  heroSurface: {
-    position: 'relative',
-    overflow: 'hidden',
-    borderRadius: 28,
-    padding: 20,
-    minHeight: 360,
-  },
-  heroGlow: {
-    position: 'absolute',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    right: -80,
-    top: -105,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-  },
-  heroLabel: { color: 'rgba(247,251,248,0.72)', marginBottom: 10 },
-  heroComparePill: {
-    alignSelf: 'flex-start',
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
-  },
-  heroCompare: { color: '#E3F3EC', flexShrink: 1 },
-  heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
-  heroAmount: { flex: 1, flexDirection: 'row', alignItems: 'baseline', minWidth: 0 },
-  heroCurrency: { color: 'rgba(247,251,248,0.68)', fontSize: 15, lineHeight: 20 },
-  heroFigure: { color: '#F7FBF8', fontSize: 50, lineHeight: 52, letterSpacing: -1.8 },
-  split: { flexDirection: 'row', gap: 8, marginTop: 20 },
+  heroLabel: { marginBottom: Spacing.two },
+  heroCompare: { marginTop: Spacing.two, marginBottom: Spacing.two },
+  heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  heroAmount: { flexDirection: 'row', alignItems: 'baseline' },
+  aed: { fontSize: 15, lineHeight: 20 },
+  split: { flexDirection: 'row', marginTop: Spacing.four },
   splitCell: {
     flex: 1,
-    minHeight: 70,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    borderRadius: 17,
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: 11,
+    paddingBottom: Spacing.two,
+    paddingEnd: Spacing.three,
+    paddingStart: 0,
+    gap: 5,
   },
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  splitLabel: { color: 'rgba(247,251,248,0.90)' },
-  splitFigure: { color: '#F7FBF8', fontSize: 17, lineHeight: 22 },
+  splitFigure: { fontSize: 17, lineHeight: 22 },
   dot: { width: 5, height: 5, borderRadius: 3 },
-  activityMosaic: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 6,
-    marginTop: 14,
-  },
-  activityTile: {
-    width: '12.2%',
-    aspectRatio: 0.9,
-    minHeight: 37,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 1,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  activityTileFilled: {
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    borderColor: 'rgba(255,255,255,0.20)',
-  },
-  activityDay: { color: 'rgba(247,251,248,0.65)', fontSize: 8, lineHeight: 9 },
-  activityToday: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#B6E9D3',
-    shadowColor: '#B6E9D3',
-    shadowOpacity: 0.7,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 0 },
-  },
   currencyPreview: {
     marginTop: Spacing.four,
     borderWidth: StyleSheet.hairlineWidth,
@@ -1187,29 +1075,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 4,
-    minHeight: 68,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 13,
   },
   leaveText: { flex: 1, gap: 1 },
-  leaveCard: {
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
-  },
-  leaveIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activityCard: {
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
-    paddingHorizontal: 14,
-  },
 
   empty: {
     borderWidth: 1,

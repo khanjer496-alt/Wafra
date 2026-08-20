@@ -3,7 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spacing } from '@/constants/theme';
 
 /** Visual height of the four-destination bar above the safe-area inset. */
-export const TAB_BAR_HEIGHT = 66;
+export const TAB_BAR_HEIGHT = 58;
 
 /**
  * Bottom padding a tab screen's scroll content needs so the floating tab bar

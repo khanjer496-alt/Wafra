@@ -13,7 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { SpringPressable } from '@/components/ui/spring-pressable';
-import { Elevation, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
 import { t, type Lang, type StringKey } from '@/lib/i18n';
@@ -89,14 +89,14 @@ const AnimatedTabButton = ({
       scaleTo={0.92}
       style={styles.tab}
       onPress={onPress}>
-      <Animated.View
-        style={[
-          styles.activePill,
-          { backgroundColor: theme.backgroundSelected },
-          pillStyle,
-        ]}
-      />
       <View style={styles.iconStage}>
+        <Animated.View
+          style={[
+            styles.activePill,
+            { backgroundColor: theme.backgroundSelected },
+            pillStyle,
+          ]}
+        />
         <Animated.View style={iconStyle}>
           <Icon
             name={icon}
@@ -109,10 +109,6 @@ const AnimatedTabButton = ({
       <Animated.View style={labelStyle}>
         <ThemedText
           type="meta"
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.78}
-          maxFontSizeMultiplier={1.25}
           style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
           {label}
         </ThemedText>
@@ -174,16 +170,9 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
     <View
       style={[
         styles.wrap,
-        { paddingBottom: Math.max(insets.bottom, Spacing.two) },
+        { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
       ]}>
-      <View
-        style={[
-          styles.bar,
-          {
-            backgroundColor: theme.backgroundElement,
-            borderColor: theme.cardBorder,
-          },
-        ]}>
+      <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
         {routes.map(renderTab)}
       </View>
     </View>
@@ -193,31 +182,27 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 0,
+    right: 0,
     bottom: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
   },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 66,
-    padding: 6,
+    paddingTop: 5,
+    paddingHorizontal: Spacing.two,
     width: '100%',
-    maxWidth: 776,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 28,
-    ...Elevation,
+    maxWidth: 800,
   },
   tab: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
     paddingVertical: 5,
-    borderRadius: 22,
-    overflow: 'hidden',
   },
   iconStage: {
     width: 46,
@@ -227,11 +212,10 @@ const styles = StyleSheet.create({
   },
   activePill: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 22,
+    borderRadius: 14,
   },
   tabLabel: {
     fontSize: 11,
     lineHeight: 14,
-    textAlign: 'center',
   },
 });
