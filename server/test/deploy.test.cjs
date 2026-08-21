@@ -85,6 +85,16 @@ ok('a logged-out wrangler is named as such', /wrangler login/.test(d1));
 // is how the placeholder survived a "successful" setup in the first place.
 ok('the written database_id is verified by reading it back', /currentId\(\) !== id/.test(d1));
 
+// csv-parse touches Buffer at module load. Cloudflare enables Node
+// compatibility automatically only from 2026-08-04; an older date must opt in
+// explicitly or the API rejects the Worker before deployment.
+const compatibilityDate = toml.match(/^\s*compatibility_date\s*=\s*"([^"]*)"/m)?.[1] ?? '';
+ok(
+  'the Worker runtime provides Buffer for statement parser dependencies',
+  compatibilityDate >= '2026-08-04' ||
+    /^\s*compatibility_flags\s*=\s*\[[^\]]*"nodejs_compat"[^\]]*\]/m.test(toml),
+);
+
 ok('the deploy runbook exists', fs.existsSync(path.join(root, 'DEPLOY.md')));
 
 console.log(`\n${passed} passed, ${failed} failed`);
