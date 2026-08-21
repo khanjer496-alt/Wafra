@@ -1,6 +1,11 @@
 name = "wafra-relay"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
+# csv-parse and the statement/PDF import stack use Node's Buffer API. This
+# compatibility date predates Cloudflare's 2026-08-04 Node-default cutoff, so
+# opt in explicitly rather than changing every runtime behavior during a
+# release deploy.
+compatibility_flags = ["nodejs_compat"]
 
 # The parser is imported from the app's own src/lib, so esbuild must be able to
 # see outside this directory.

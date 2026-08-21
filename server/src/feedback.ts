@@ -16,11 +16,11 @@
  *     because a maintainer has to read it — so it is not pretending to be
  *     private, and the retention ceiling is short (see FEEDBACK_RETENTION_
  *     SECONDS in ../src/index.ts's sweep) rather than the queue's thirty days.
- *  2. The DIAGNOSTIC is redacted by the client before it leaves the phone. This
- *     module cannot verify that, and does not pretend to — what it can do is
- *     refuse anything that is not a small JSON object, so a client that "just
- *     attaches the ledger" fails loudly at the wire rather than silently
- *     shipping fourteen thousand rows of someone's spending.
+ *  2. Ordinary diagnostics are redacted by the client and bounded here. The
+ *     parser-research path has a stronger contract: this module validates one
+ *     exact allow-listed shape before it can authorize an AI workflow. Extra
+ *     fields, free text and unmasked numbers are rejected rather than passed to
+ *     a model.
  *  3. Nothing here logs, persists, or echoes. Same rule as ingest-row.ts, and
  *     server/test/schema.test.cjs asserts the absence of the surface.
  *  4. Over-long input is REFUSED, never truncated. Truncating a bug report is
@@ -30,8 +30,15 @@
 import {
   FEEDBACK_DIAGNOSTIC_MAX_BYTES,
   FEEDBACK_WIRE_SCHEMA,
+  PARSER_RESEARCH_FEEDBACK_TEXT,
   type FeedbackWirePayload,
 } from '@/lib/feedback-wire';
+import {
+  isSafeParserResearchSender,
+  isSafeParserResearchTemplate,
+  PARSER_RESEARCH_SCHEMA,
+  PARSER_RESEARCH_SHAPES_MAX,
+} from '@/lib/parser-research-contract';
 
 /**
  * Whole-body ceiling. A feedback POST is a sentence and a small diagnostic; a
@@ -78,8 +85,92 @@ export interface FeedbackRecord {
   locale: string | null;
   /** Serialized JSON, or null. Stored as the client sent it, bounded. */
   diagnostic: string | null;
-  /** Always false in this release; true is rejected at the wire. */
-  aiReviewConsent: false;
+  /** True only for the strictly shaped, client-redacted parser research path. */
+  aiReviewConsent: boolean;
+}
+
+const objectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const exactKeys = (
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean => {
+  const actual = Object.keys(value);
+  return actual.length === keys.length &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+};
+
+const boundedCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000;
+
+/**
+ * The only diagnostic allowed to authorize an agent run. This validates the
+ * privacy contract rather than trusting a boolean beside an arbitrary report.
+ */
+export function isConsentedParserResearchDiagnostic(value: unknown): boolean {
+  if (!objectRecord(value) || !exactKeys(value, [
+    'reportSchema', 'kind', 'detailRequested', 'detail', 'withheld', 'delivery',
+    'build', 'counts', 'shapes', 'cardDiagnostic', 'redaction',
+  ]) || value.kind !== 'parser-research' || value.reportSchema !== PARSER_RESEARCH_SCHEMA ||
+    value.detailRequested !== 'parser-research' || value.detail !== 'parser-research' ||
+    value.withheld !== null || value.cardDiagnostic !== null) {
+    return false;
+  }
+  const delivery = value.delivery;
+  const redaction = value.redaction;
+  const build = value.build;
+  const counts = value.counts;
+  const shapes = value.shapes;
+  if (!objectRecord(delivery) || !exactKeys(delivery, [
+    'retentionDays', 'reviewedBy', 'thirdPartyAi',
+  ]) || delivery.retentionDays !== 14 ||
+    delivery.reviewedBy !== 'wafra-maintainers' || delivery.thirdPartyAi !== true ||
+    !objectRecord(redaction) || !exactKeys(redaction, [
+      'rawMessages', 'digits', 'freeText', 'senders', 'timestamps',
+    ]) || redaction.rawMessages !== false ||
+    redaction.digits !== 'masked' || redaction.freeText !== 'allowlist' ||
+    redaction.senders !== 'known-bank-or-alias' || redaction.timestamps !== false ||
+    !objectRecord(build) || !exactKeys(build, ['marketId', 'currency', 'privateMode']) ||
+    typeof build.marketId !== 'string' || !/^(?:AE|SA)$/.test(build.marketId) ||
+    typeof build.currency !== 'string' || !/^[A-Z]{3}$/.test(build.currency) ||
+    build.privateMode !== false ||
+    !objectRecord(counts) || !exactKeys(counts, [
+      'checked', 'financial', 'sensitiveExcluded', 'nonFinancialExcluded',
+      'alreadyParsedExcluded', 'uniqueTemplates', 'attachedTemplates', 'omittedTemplates',
+    ]) || !Object.values(counts).every(boundedCount) ||
+    !Array.isArray(shapes) || shapes.length < 1 ||
+    shapes.length > PARSER_RESEARCH_SHAPES_MAX) {
+    return false;
+  }
+  const safeShapes = shapes.every((shape) => {
+    if (!objectRecord(shape) || typeof shape.sender !== 'string' ||
+      !exactKeys(shape, ['sender', 'template', 'outcome', 'count']) ||
+      typeof shape.template !== 'string' || typeof shape.count !== 'number' ||
+      !Number.isSafeInteger(shape.count) || shape.count < 1 || shape.count > 1_000_000 ||
+      shape.outcome !== 'needs-parser-work') return false;
+    return isSafeParserResearchSender(shape.sender) &&
+      isSafeParserResearchTemplate(shape.template);
+  });
+  if (!safeShapes) return false;
+
+  const checked = counts.checked as number;
+  const financial = counts.financial as number;
+  const sensitiveExcluded = counts.sensitiveExcluded as number;
+  const nonFinancialExcluded = counts.nonFinancialExcluded as number;
+  const alreadyParsedExcluded = counts.alreadyParsedExcluded as number;
+  const uniqueTemplates = counts.uniqueTemplates as number;
+  const attachedTemplates = counts.attachedTemplates as number;
+  const omittedTemplates = counts.omittedTemplates as number;
+  const attachedOccurrences = shapes.reduce(
+    (total, shape) => total + ((shape as Record<string, unknown>).count as number),
+    0,
+  );
+  return checked === financial + sensitiveExcluded + nonFinancialExcluded &&
+    alreadyParsedExcluded <= financial &&
+    attachedOccurrences <= financial - alreadyParsedExcluded &&
+    attachedTemplates === shapes.length &&
+    uniqueTemplates === attachedTemplates + omittedTemplates;
 }
 
 export interface FeedbackReject {
@@ -136,7 +227,6 @@ export function validateFeedback(value: unknown): FeedbackRecord | FeedbackRejec
   const body = value as Partial<Record<keyof FeedbackWirePayload, unknown>>;
 
   if (body.schema !== FEEDBACK_WIRE_SCHEMA) return { error: 'bad_schema', status: 400 };
-  if (body.aiReviewConsent !== false) return { error: 'ai_consent_unsupported', status: 400 };
 
   if (typeof body.text !== 'string') return { error: 'empty', status: 400 };
   const text = scrubProse(body.text);
@@ -170,6 +260,7 @@ export function validateFeedback(value: unknown): FeedbackRecord | FeedbackRejec
   }
 
   let diagnostic: string | null = null;
+  let diagnosticValue: Record<string, unknown> | null = null;
   if (body.diagnostic !== undefined && body.diagnostic !== null) {
     if (typeof body.diagnostic !== 'object' || Array.isArray(body.diagnostic)) {
       return { error: 'bad_diagnostic', status: 400 };
@@ -186,9 +277,20 @@ export function validateFeedback(value: unknown): FeedbackRecord | FeedbackRejec
       return { error: 'diagnostic_too_large', status: 413 };
     }
     diagnostic = serialized;
+    diagnosticValue = body.diagnostic as Record<string, unknown>;
   }
 
-  return { text, appVersion, platform, locale, diagnostic, aiReviewConsent: false };
+  const aiReviewConsent = body.aiReviewConsent === true;
+  if (body.aiReviewConsent !== false && body.aiReviewConsent !== true) {
+    return { error: 'ai_consent_unsupported', status: 400 };
+  }
+  if (aiReviewConsent &&
+    (text !== PARSER_RESEARCH_FEEDBACK_TEXT ||
+      !isConsentedParserResearchDiagnostic(diagnosticValue))) {
+    return { error: 'ai_consent_unsupported', status: 400 };
+  }
+
+  return { text, appVersion, platform, locale, diagnostic, aiReviewConsent };
 }
 
 /**

@@ -317,7 +317,8 @@ function ktSources(dir) {
  * The screen that sells the product, so its mistakes are the expensive kind.
  * All three of these were live: a sentence assembled from English fragments
  * that stayed English in Arabic, a discount claim that disagreed with the
- * prices beside it, and hidden gestures that granted Pro for free. */
+ * prices beside it. Founder access is isolated to explicitly enabled native
+ * test builds and never changes the store receipt. */
 {
   const pro = fs.readFileSync(path.join(ROOT, 'src/app/pro.tsx'), 'utf8');
 
@@ -325,10 +326,10 @@ function ktSources(dir) {
     !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
 
   const settings = fs.readFileSync(path.join(ROOT, 'src/app/settings.tsx'), 'utf8');
-  ok('Settings contains no hidden entitlement bypass',
+  ok('Settings founder access cannot forge a store entitlement or reach production',
     !/\bsetPro\b/.test(settings) &&
-      !/tapCount\.current >= 7/.test(settings) &&
-      !/onVersionTap/.test(settings));
+      /isFounderUnlockBuild\(\)/.test(settings) &&
+      /await unlockFounderPro\(\)/.test(settings));
 
   const storeMetadata = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'docs/store-metadata.json'), 'utf8'),
@@ -1821,11 +1822,14 @@ ok('the spoken label agrees with the sign on screen',
       fs.readFileSync(file, 'utf8'),
     ));
   const launchFallback = read('src/lib/unparsed-launch-alert.ts');
+  const parserResearch = read('src/lib/parser-research.ts');
+  const parserResearchContract = read('src/lib/parser-research-contract.ts');
   const aiSuggestion = read('src/lib/alert-ai-suggestion.ts');
   const capture = read('src/lib/auto-import.ts');
-  ok('only the sanitized Gulf fallback consumes alert drafts in shipping capture',
-    alertConsumers.length === 1 &&
-      alertConsumers[0].endsWith(`${path.sep}unparsed-launch-alert.ts`),
+  ok('alert drafts reach only review capture and the isolated research redactor',
+    alertConsumers.length === 2 &&
+      alertConsumers.some((file) => file.endsWith(`${path.sep}unparsed-launch-alert.ts`)) &&
+      alertConsumers.some((file) => file.endsWith(`${path.sep}parser-research.ts`)),
     alertConsumers.join(' | '));
   ok('the Gulf fallback can reach only the explicit encrypted review path',
     !/(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import)['"]/.test(
@@ -1834,6 +1838,11 @@ ok('the spoken label agrees with the sign on screen',
       /prepareLaunchReviewAlert/.test(capture) &&
       /reviewCandidates\.push\(\{ \.\.\.reviewPrepared, \.\.\.identity \}\)/.test(capture),
     'an uncertain alert must never become parsed or mutate the ledger directly');
+  ok('parser research cannot mutate the ledger or perform its own network request',
+    !/(?:fetch\s*\(|https?:|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(
+      parserResearch,
+    ) && /rawMessages: false/.test(parserResearchContract) &&
+      /timestamps: false/.test(parserResearchContract));
   ok('ISO draft metadata reaches shipping code only through the isolated inspector',
     metadataConsumers.length === 0, metadataConsumers.join(' | '));
   ok('first-wave market review logic has no shipping importer',

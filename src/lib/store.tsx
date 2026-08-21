@@ -155,6 +155,7 @@ const EMPTY_STATE: AppState = {
   monthStartDay: 1,
   themePreference: 'system',
   pro: false,
+  founderPro: false,
   privateMode: false,
   captureOptOut: false,
   dailySummary: false,
@@ -614,6 +615,7 @@ type Action =
   | { type: 'setMonthStartDay'; day: number }
   | { type: 'setThemePreference'; preference: string }
   | { type: 'setPro'; pro: boolean }
+  | { type: 'unlockFounderPro' }
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
   | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
@@ -711,6 +713,8 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'setPro':
       return { ...state, pro: action.pro };
+    case 'unlockFounderPro':
+      return state.founderPro ? state : { ...state, founderPro: true };
     case 'setMarket':
       // Refused outright once the ledger holds money: the pack change would
       // relabel every stored figure in a currency it was never recorded in,
@@ -986,6 +990,8 @@ function reduceState(state: AppState, action: Action): AppState {
         // opt-out or the forced post-erase scan would immediately rebuild the
         // entries the user just deleted.
         captureOptOut: state.captureOptOut,
+        // Founder access belongs to this installation, not to ledger data.
+        founderPro: state.founderPro,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1085,6 +1091,7 @@ interface StoreValue {
   setMonthStartDay: (day: number) => void;
   setThemePreference: (preference: string) => void;
   setPro: (pro: boolean) => void;
+  unlockFounderPro: () => Promise<void>;
   setMarket: (id: string) => boolean;
   setUiLanguage: (language: string) => void;
   setOnboarded: () => void;
@@ -1714,6 +1721,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setPro', pro });
   }, [dispatch]);
 
+  const unlockFounderPro = useCallback(async () => {
+    const next = dispatch({ type: 'unlockFounderPro' });
+    if (!await persist(next)) throw new Error('Founder Pro grant could not be saved');
+  }, [dispatch, persist]);
+
   const setMarket = useCallback((id: string) => {
     if (!canSelectMarket(id)) return false;
     dispatch({ type: 'setMarket', id });
@@ -1738,6 +1750,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const {
       hydrated: _h,
       pro: _pro,
+      founderPro: _founderPro,
       trialStartTs: _trial,
       reviewTray: _reviewTray,
       ...data
@@ -1753,15 +1766,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const safeState = {
       ...restored,
       pro: state.pro,
+      founderPro: state.founderPro,
       trialStartTs: state.trialStartTs,
       reviewTray: state.reviewTray,
     };
     dispatch({ type: 'restore', state: safeState });
     return true;
-  }, [dispatch, state.pro, state.reviewTray, state.trialStartTs]);
+  }, [dispatch, state.founderPro, state.pro, state.reviewTray, state.trialStartTs]);
 
   const loadDemoData = useCallback(() => {
-    dispatch({ type: 'loadDemo', state: demoState() });
+    dispatch({
+      type: 'loadDemo',
+      state: {
+        ...demoState(),
+        founderPro: authoritativeState.current.founderPro,
+      },
+    });
   }, [dispatch]);
 
   const clearAll = useCallback(async (afterErase?: () => Promise<void>) => {
@@ -1889,6 +1909,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setMonthStartDay,
       setThemePreference,
       setPro,
+      unlockFounderPro,
       setMarket,
       setUiLanguage,
       setOnboarded,
@@ -1940,6 +1961,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setMonthStartDay,
       setThemePreference,
       setPro,
+      unlockFounderPro,
       setMarket,
       setUiLanguage,
       setOnboarded,

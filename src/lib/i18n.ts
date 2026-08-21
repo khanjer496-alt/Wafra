@@ -1179,6 +1179,18 @@ const S = {
     ar: 'إذا كان ذلك الجهاز آيفون، فسيظل اختصار «Wafra Capture» فيه يرسل التنبيهات البنكية إلى المرحّل — مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. مالك الجهاز وحده يستطيع حذفه من تطبيق الاختصارات.',
   },
   activeOnThisDevice: { en: 'Active on this device', ar: 'مفعّل على هذا الجهاز' },
+  founderProActive: { en: 'Founder access · active on this device', ar: 'وصول المؤسس · مفعّل على هذا الجهاز' },
+  founderProUnlockedTitle: { en: 'Founder Pro unlocked', ar: 'تم فتح وفرة برو للمؤسس' },
+  founderProUnlockedBody: {
+    en: 'Pro stays active on this test device, including after you erase the ledger.',
+    ar: 'يبقى برو مفعّلاً على جهاز الاختبار هذا، حتى بعد مسح السجل.',
+  },
+  founderProFailedTitle: { en: 'Could not unlock Founder Pro', ar: 'تعذّر فتح وفرة برو للمؤسس' },
+  founderProFailedBody: {
+    en: 'The encrypted local grant could not be saved. Keep Wafra open and try five taps again.',
+    ar: 'تعذّر حفظ المنحة المحلية المشفّرة. أبقِ وفرة مفتوحاً وحاول خمس ضغطات مجدداً.',
+  },
+  wafraLogo: { en: 'Wafra logo', ar: 'شعار وفرة' },
   followingPhone: { en: 'Following your phone. Wafra turns over when it does.', ar: 'يتبع هاتفك. يتغيّر وفرة بتغيّره.' },
   alertEveryCharge: { en: 'Alert me on every charge', ar: 'نبّهني عند كل عملية' },
   turnOnSmsFirst: { en: 'Turn on bank SMS first', ar: 'فعّل قراءة رسائل البنك أولاً' },
@@ -2464,8 +2476,83 @@ const S = {
   // terms of what it DOES.
   sendFeedback: { en: 'Send feedback', ar: 'إرسال ملاحظة' },
   sendFeedbackDetail: {
-    en: 'Report a bug, and choose what to attach',
-    ar: 'أبلغ عن خلل، واختر ما تُرفقه',
+    en: 'Send a note or improve the bank parser',
+    ar: 'أرسل ملاحظة أو ساعد في تحسين محلّل البنك',
+  },
+  parserResearchSettingsTitle: {
+    en: 'Send parser samples',
+    ar: 'إرسال عينات للمحلّل',
+  },
+  parserResearchSettingsDetail: {
+    en: 'Tester tool · redacted templates only',
+    ar: 'أداة اختبار · قوالب منقّحة فقط',
+  },
+  parserResearchTitle: { en: 'Parser samples', ar: 'عينات المحلّل' },
+  parserResearchUnavailable: {
+    en: 'This tester tool is not included in this build.',
+    ar: 'أداة الاختبار هذه غير مضمّنة في هذه النسخة.',
+  },
+  parserResearchAndroidIntro: {
+    en: 'Wafra checks this Android inbox in memory, keeps only likely financial alerts, removes sensitive details, and prepares a small set of repeated message templates.',
+    ar: 'يفحص وفرة صندوق رسائل أندرويد في الذاكرة، ويحتفظ بتنبيهات مالية محتملة فقط، ويحذف التفاصيل الحساسة، ثم يجهّز مجموعة صغيرة من قوالب الرسائل المتكررة.',
+  },
+  parserResearchIosIntro: {
+    en: 'iPhone does not let Wafra read Messages. Copy bank alerts with Apple Shortcuts, paste them here, then Wafra will filter and redact them on this phone.',
+    ar: 'لا يسمح الآيفون لوفرة بقراءة الرسائل. انسخ تنبيهات البنك عبر اختصارات Apple والصقها هنا، ثم يرشّحها وفرة وينقّحها على هذا الهاتف.',
+  },
+  parserResearchPasteIntro: {
+    en: 'This tester build cannot scan the inbox automatically. Paste bank alerts here, then Wafra will filter and redact them on this device.',
+    ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق تنبيهات البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
+  },
+  parserResearchPrivacy: {
+    en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. The exact result is shown before sending.',
+    ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. وسترى النتيجة كاملة قبل الإرسال.',
+  },
+  parserResearchPasteHeader: { en: 'PASTE BANK ALERTS', ar: 'ألصق تنبيهات البنك' },
+  parserResearchPasteHelp: {
+    en: 'Put a blank line between messages. You may add “From: ADIB” as the first line of a message; unknown senders become aliases.',
+    ar: 'ضع سطراً فارغاً بين الرسائل. يمكنك إضافة «From: ADIB» في أول سطر؛ ويستبدل وفرة المرسلين غير المعروفين بأسماء مستعارة.',
+  },
+  parserResearchPasteA11y: { en: 'Paste bank alert messages', ar: 'ألصق رسائل تنبيهات البنك' },
+  parserResearchPastePlaceholder: {
+    en: 'From: YOUR BANK\nYour card purchase alert…\n\nFrom: YOUR BANK\nYour transfer alert…',
+    ar: 'From: YOUR BANK\nرسالة شراء بالبطاقة…\n\nFrom: YOUR BANK\nرسالة تحويل…',
+  },
+  parserResearchPrivateBlocked: {
+    en: 'Private Mode is local-only. Turn it off before preparing or sending parser samples.',
+    ar: 'الوضع الخاص محلي فقط. أوقفه قبل تجهيز عينات المحلّل أو إرسالها.',
+  },
+  parserResearchPrepareInbox: { en: 'Prepare safe inbox report', ar: 'تجهيز تقرير آمن من الرسائل' },
+  parserResearchPreparePaste: { en: 'Prepare safe report', ar: 'تجهيز تقرير آمن' },
+  parserResearchPreparing: { en: 'Checking {count} messages…', ar: 'جارٍ فحص {count} رسالة…' },
+  parserResearchPreviewNote: {
+    en: 'This complete report goes to Wafra, GitHub Actions and Anthropic Claude. Wafra deletes its relay copy within 14 days; GitHub and Anthropic apply their own retention policies. Code and synthetic tests may appear in a public draft PR, but this report is not published or merged automatically.',
+    ar: 'يُرسل هذا التقرير الكامل إلى وفرة وGitHub Actions وAnthropic Claude. تحذف وفرة نسخة المرحّل خلال 14 يوماً، بينما تطبق GitHub وAnthropic سياسات الاحتفاظ الخاصة بهما. قد يظهر كود واختبارات مصطنعة في مسودة طلب دمج عامة، لكن التقرير نفسه لا يُنشر ولا يُدمج شيء تلقائياً.',
+  },
+  parserResearchSend: { en: 'Send safe samples', ar: 'إرسال العينات الآمنة' },
+  parserResearchSendQ: { en: 'Send these safe samples?', ar: 'إرسال هذه العينات الآمنة؟' },
+  parserResearchSendBody: {
+    en: 'Only the redacted templates shown above leave this phone. You allow Wafra maintainers, GitHub Actions and Anthropic Claude to process them. Wafra keeps its relay copy for at most 14 days; GitHub and Anthropic use their own retention policies. Code and synthetic tests may be published in a public draft PR, but the report itself must not be copied there.',
+    ar: 'لن يغادر الهاتف سوى القوالب المنقّحة المعروضة أعلاه. أنت تسمح لمشرفي وفرة وGitHub Actions وAnthropic Claude بمعالجتها. تحتفظ وفرة بنسخة المرحّل لمدة أقصاها 14 يوماً، وتطبق GitHub وAnthropic سياساتهما الخاصة. قد يُنشر الكود والاختبارات المصطنعة في مسودة طلب دمج عامة، لكن يجب ألا يُنسخ التقرير نفسه إليها.',
+  },
+  parserResearchNoneTitle: { en: 'No safe samples found', ar: 'لم تُوجد عينات آمنة' },
+  parserResearchNoneBody: {
+    en: 'Wafra excluded OTPs, security messages and anything that did not look like posted financial activity. Nothing was prepared or uploaded.',
+    ar: 'استبعد وفرة رموز التحقق ورسائل الأمان وكل ما لم يبدُ نشاطاً مالياً منفذاً. لم يُجهّز أو يُرفع شيء.',
+  },
+  parserResearchFailedTitle: { en: 'Could not prepare samples', ar: 'تعذّر تجهيز العينات' },
+  parserResearchFailedBody: {
+    en: 'Nothing was uploaded. Keep Wafra open and try again.',
+    ar: 'لم يُرفع شيء. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
+  },
+  parserResearchSentTitle: { en: 'Safe samples received', ar: 'تم استلام العينات الآمنة' },
+  parserResearchSentDispatched: {
+    en: 'Reference {id}. The GitHub/Claude workflow was requested; any code result will be a public draft PR for review.',
+    ar: 'المرجع {id}. طُلب تشغيل آلية GitHub/Claude؛ وأي نتيجة برمجية ستكون مسودة طلب دمج عامة للمراجعة.',
+  },
+  parserResearchSentStored: {
+    en: 'Reference {id}. The safe report is stored for maintainers, but the GitHub workflow was not started.',
+    ar: 'المرجع {id}. حُفظ التقرير الآمن للمشرفين، لكن آلية GitHub لم تبدأ.',
   },
   supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
   settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
@@ -2474,8 +2561,14 @@ const S = {
   settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
   settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
   feedbackIntro: {
-    en: 'Say what went wrong. Nothing leaves this phone until you tap Send. The report is kept for at most 14 days for Wafra maintainers and is not sent to third-party AI.',
-    ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال. يُحتفظ بالتقرير لمدة أقصاها 14 يوماً لمشرفي وفرة ولا يُرسل إلى ذكاء اصطناعي خارجي.',
+    en: 'Send a note directly to Wafra maintainers. Nothing from your ledger is attached, and nothing leaves this phone until you confirm.',
+    ar: 'أرسل ملاحظة مباشرة إلى مشرفي وفرة. لا يُرفق شيء من سجلك، ولا يغادر شيء الهاتف حتى تؤكد.',
+  },
+  feedbackParserHeader: { en: 'BANK MESSAGE PROBLEM', ar: 'مشكلة في رسالة بنكية' },
+  feedbackParserTitle: { en: 'Improve the bank parser', ar: 'تحسين محلّل البنك' },
+  feedbackParserDetail: {
+    en: 'Review redacted message templates, then send them directly to the GitHub parser workflow.',
+    ar: 'راجع قوالب الرسائل المنقّحة، ثم أرسلها مباشرة إلى آلية GitHub للمحلّل.',
   },
   feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
   feedbackPlaceholder: {
@@ -2512,8 +2605,8 @@ const S = {
   },
   feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
   feedbackPreviewNote: {
-    en: 'This is the whole report, not a summary. It is written in English for Wafra maintainers. Third-party AI review is off.',
-    ar: 'هذا هو التقرير كاملاً، لا ملخص له. وهو مكتوب بالإنجليزية لمشرفي وفرة. مراجعة الذكاء الاصطناعي الخارجي متوقفة.',
+    en: 'This is the complete note sent to Wafra maintainers. No ledger, bank message, amount, account, or merchant is attached.',
+    ar: 'هذه هي الملاحظة الكاملة التي تُرسل إلى مشرفي وفرة. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
   },
   feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
   feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
@@ -2531,8 +2624,8 @@ const S = {
   },
   feedbackNoTransportTitle: { en: 'Sending is not connected yet', ar: 'الإرسال غير موصول بعد' },
   feedbackNoTransportBody: {
-    en: 'This build has no way to deliver a report, so nothing was uploaded. Save a copy and send it yourself.',
-    ar: 'لا توجد في هذه النسخة طريقة لتسليم التقرير، لذا لم يُرفع شيء. احفظ نسخة وأرسلها بنفسك.',
+    en: 'This build has no direct feedback connection, so nothing was uploaded. Install a newer Wafra test build.',
+    ar: 'لا تتضمن هذه النسخة اتصالاً مباشراً للملاحظات، لذا لم يُرفع شيء. ثبّت نسخة اختبار أحدث من وفرة.',
   },
   feedbackPreparing: {
     en: 'Preparing the attachment…',
@@ -2552,8 +2645,8 @@ const S = {
    * transport in it at all" — and it was made anyway, one level down.
    */
   feedbackFailedBody: {
-    en: 'The report did not leave the phone. Save a copy so it is not lost, and try again later.',
-    ar: 'لم يغادر التقرير الهاتف. احفظ نسخة كي لا تضيع، وحاول لاحقاً.',
+    en: 'The report did not leave the phone. Your text is still here; try again later.',
+    ar: 'لم يغادر التقرير الهاتف. ما كتبته ما زال هنا؛ حاول مجدداً لاحقاً.',
   },
   /**
    * Not "try again later": this build shipped without a relay address
@@ -2561,8 +2654,8 @@ const S = {
    * an hour. The only thing that fixes it is a newer build.
    */
   feedbackNoRelayBody: {
-    en: 'This build has no server address in it, so it can never send a report — waiting will not help. Save a copy, and install a newer build of Wafra.',
-    ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لا يمكنه إرسال أي تقرير مهما انتظرت. احفظ نسخة، وثبّت إصداراً أحدث من وفرة.',
+    en: 'This build has no server address, so waiting will not help. Install a newer Wafra test build to send directly.',
+    ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لن يفيد الانتظار. ثبّت نسخة اختبار أحدث من وفرة للإرسال المباشر.',
   },
   feedbackOfflineTitle: { en: 'No connection', ar: 'لا يوجد اتصال' },
   feedbackOfflineBody: {

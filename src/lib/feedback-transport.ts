@@ -5,6 +5,7 @@ import {
 } from '@/lib/feedback';
 import {
   FEEDBACK_DIAGNOSTIC_MAX_BYTES,
+  type ParserResearchWirePayload,
   serializeFeedbackWire,
 } from '@/lib/feedback-wire';
 import { DEFAULT_RELAY_URL } from '@/lib/relay';
@@ -34,6 +35,8 @@ interface FeedbackResponse {
   id?: unknown;
   dispatched?: unknown;
 }
+
+const wireEncoder = new TextEncoder();
 
 export class FeedbackSendError extends Error {
   /** The Worker's machine-readable reason, when it gave one. */
@@ -121,7 +124,65 @@ async function postFeedback(payload: FeedbackPayload): Promise<FeedbackReceipt> 
   if (typeof parsed.id !== 'string' || parsed.id === '') {
     throw new FeedbackSendError('The server did not say where the report went.', 'no_id');
   }
-  return { id: parsed.id };
+  return { id: parsed.id, dispatched: parsed.dispatched === true };
+}
+
+/**
+ * Post a parser-research report that the tester has previewed and explicitly
+ * authorized for the disclosed coding-AI workflow. Unlike ordinary feedback,
+ * the body is already the final wire object and contains no user prose.
+ */
+export async function submitParserResearchFeedback(
+  wire: ParserResearchWirePayload,
+): Promise<FeedbackReceipt> {
+  if (!DEFAULT_RELAY_URL) {
+    throw new FeedbackSendError('This build has no relay URL configured.', 'no_relay_url');
+  }
+  const body = JSON.stringify(wire);
+  const diagnosticBytes = wireEncoder.encode(JSON.stringify(wire.diagnostic)).byteLength;
+  if (diagnosticBytes > FEEDBACK_DIAGNOSTIC_MAX_BYTES) {
+    throw new FeedbackSendError('This report attachment is too large to send.', 'diagnostic_too_large');
+  }
+  if (wireEncoder.encode(body).byteLength > MAX_BODY_BYTES) {
+    throw new FeedbackSendError('This report is too large to send.', 'too_large');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${DEFAULT_RELAY_URL}/v1/feedback`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+  } catch {
+    throw new FeedbackSendError('Could not reach the server.', 'network');
+  }
+  if (!response.ok) {
+    let code: string | null = null;
+    try {
+      const parsed: unknown = await response.json();
+      if (parsed && typeof parsed === 'object' && typeof (parsed as { error?: unknown }).error === 'string') {
+        code = (parsed as { error: string }).error;
+      }
+    } catch {
+      code = null;
+    }
+    throw new FeedbackSendError(
+      `The server refused the report (${response.status}).`,
+      code,
+      response.status,
+    );
+  }
+  let parsed: FeedbackResponse;
+  try {
+    parsed = (await response.json()) as FeedbackResponse;
+  } catch {
+    throw new FeedbackSendError('The server answered with something unreadable.', 'bad_response');
+  }
+  if (typeof parsed.id !== 'string' || parsed.id === '') {
+    throw new FeedbackSendError('The server did not say where the report went.', 'no_id');
+  }
+  return { id: parsed.id, dispatched: parsed.dispatched === true };
 }
 
 /**

@@ -1,6 +1,8 @@
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { writeAppStoreConnectMetadata } from './app-store-connect-package.mjs';
+
 const APPLE_LAUNCH_LOCALES = ['ar-SA', 'en-US'];
 const GOOGLE_LAUNCH_LOCALES = ['ar', 'en-US'];
 
@@ -111,9 +113,10 @@ export const prepareStorePackage = async ({
   includeAssets = false,
   allowOutsideRoot = false,
 }) => {
-  const [metadata, pricing] = await Promise.all([
+  const [metadata, pricing, appConfig] = await Promise.all([
     readFile(path.join(root, 'docs', 'store-metadata.json'), 'utf8').then(JSON.parse),
     readFile(path.join(root, 'docs', 'store-pricing.json'), 'utf8').then(JSON.parse),
+    readFile(path.join(root, 'app.json'), 'utf8').then(JSON.parse),
   ]);
   assertExactValues(Object.keys(metadata.apple.locales), APPLE_LAUNCH_LOCALES, 'Apple locales');
   assertExactValues(
@@ -126,6 +129,11 @@ export const prepareStorePackage = async ({
   await resetOutput(root, output, allowOutsideRoot);
   await Promise.all([
     writeAppleMetadata(output, metadata),
+    writeAppStoreConnectMetadata({
+      output,
+      metadata,
+      version: appConfig.expo.version,
+    }),
     writeGoogleMetadata(output, metadata),
   ]);
   if (includeAssets) {
@@ -136,6 +144,7 @@ export const prepareStorePackage = async ({
     generatedAt: new Date().toISOString(),
     launchStorefronts: metadata.launchScope.storefronts,
     appleLocales: Object.keys(metadata.apple.locales),
+    appStoreVersion: appConfig.expo.version,
     googleLocales: metadata.googlePlay.launchListings.map(
       (listing) => metadata.googlePlay.listings[listing].languageCode,
     ),

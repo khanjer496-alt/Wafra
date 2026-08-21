@@ -214,10 +214,11 @@ ok('the feedback retention ceiling is shorter than the queue\'s, and written at 
 ok('the repository_dispatch carries the feedback id and nothing else',
   /client_payload: \{ feedbackId \},/.test(worker) &&
     !/client_payload:[\s\S]{0,200}\b(?:text|diagnostic|appVersion|locale)\b/.test(worker));
-ok('a no-consent report is stored for humans without starting an agent',
-  /const dispatchStatus = 'skipped_no_consent';/.test(worker) &&
-    /return json\(\{ id, dispatched: false \}, 202\)/.test(worker) &&
-    /body\.aiReviewConsent !== false/.test(feedback));
+ok('ordinary feedback stays human-only and AI consent requires the strict research diagnostic',
+  /let dispatchStatus = 'skipped_no_consent';/.test(worker) &&
+    /if \(validated\.aiReviewConsent\)/.test(worker) &&
+    /isConsentedParserResearchDiagnostic/.test(feedback) &&
+    /text !== PARSER_RESEARCH_FEEDBACK_TEXT/.test(feedback));
 ok('the repository name is validated before it is interpolated into an API path',
   /githubRepository\(env\.GITHUB_REPOSITORY\)/.test(worker) &&
     /export function githubRepository/.test(feedback) &&

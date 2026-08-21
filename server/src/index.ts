@@ -34,6 +34,7 @@ import { interpretBankAlert } from '@/lib/bank-alert-interpreter';
 import { parseSms } from '@/lib/sms-parser';
 import { RELAY_TEST_MESSAGE } from '@/lib/relay-protocol';
 import { normalizeUnparsedLaunchTemplate } from '@/lib/unparsed-launch-alert';
+import { PARSER_RESEARCH_FEEDBACK_TEXT } from '@/lib/feedback-wire';
 
 import {
   b64encode,
@@ -48,6 +49,7 @@ import {
   FEEDBACK_DISPATCH_EVENT,
   FEEDBACK_RETENTION_SECONDS,
   githubRepository,
+  isConsentedParserResearchDiagnostic,
   isFeedbackReject,
   MAX_FEEDBACK_BYTES,
   validateFeedback,
@@ -131,6 +133,8 @@ const MAX_QUEUED_ROWS = 10_000;
  * limiting rule at the edge, which does see the IP and does not persist it.
  */
 const FEEDBACK_PER_HOUR = 60;
+/** Separate ceiling for the expensive feedback → coding-agent path. */
+const FEEDBACK_AGENT_RUNS_PER_HOUR = 5;
 /** Fallback pack for a device paired before market selection existed. */
 const DEFAULT_MARKET = 'AE';
 /**
@@ -1686,14 +1690,21 @@ export default {
         return json({ error: validated.error }, validated.status);
       }
 
-      // Decided BEFORE the insert so the stored row explains itself: an
-      // operator looking at a feedback item with no PR behind it can tell
-      // "GitHub was never wired up" from "the hourly agent budget was spent"
-      // without a log line, and without anything quoting the payload.
-      // This app version does not offer third-party-AI consent, so a report is
-      // retained for human maintainers only and can never trigger the workflow.
-      // `validateFeedback` rejects true rather than treating consent as implied.
-      const dispatchStatus = 'skipped_no_consent';
+      // Decided BEFORE the insert so the stored row explains itself. Ordinary
+      // feedback remains human-only. Only the separate parser-research screen
+      // can produce the strictly validated consented shape.
+      let dispatchStatus = 'skipped_no_consent';
+      let dispatched = false;
+      if (validated.aiReviewConsent) {
+        if (!githubRepository(env.GITHUB_REPOSITORY) || !env.GITHUB_DISPATCH_TOKEN) {
+          dispatchStatus = 'skipped_unconfigured';
+        } else if (await overFeedbackWindow(env, 'dispatch', FEEDBACK_AGENT_RUNS_PER_HOUR)) {
+          dispatchStatus = 'skipped_budget';
+        } else {
+          dispatchStatus = 'pending';
+          dispatched = true;
+        }
+      }
 
       const id = crypto.randomUUID();
       await env.DB.prepare(
@@ -1714,9 +1725,10 @@ export default {
         )
         .run();
 
-      // No detached workflow is scheduled without explicit consent. The id is
-      // returned so the user can quote it to a human maintainer.
-      return json({ id, dispatched: false }, 202);
+      // The report is already durable. A GitHub/network failure updates the row
+      // to `failed` without turning a successful submission into a client error.
+      if (dispatched) ctx.waitUntil(sendRepositoryDispatch(env, id));
+      return json({ id, dispatched }, 202);
     }
 
     // ── Feedback read: one item, by id, for the agent ──
@@ -1765,6 +1777,14 @@ export default {
           diagnostic: string | null;
         }>();
       if (!row) return json({ error: 'feedback_not_found' }, 404);
+      const diagnostic = ((): unknown => {
+        if (!row.diagnostic) return null;
+        try {
+          return JSON.parse(row.diagnostic) as unknown;
+        } catch {
+          return null;
+        }
+      })();
       return json({
         id: row.id,
         createdAt: row.created_at,
@@ -1772,22 +1792,17 @@ export default {
         platform: row.platform,
         locale: row.locale,
         text: row.text,
-        // The current wire contract only accepts false. Returning it makes the
-        // downstream workflow independently enforce the same boundary even if
-        // somebody starts that workflow by hand.
-        aiReviewConsent: false,
+        // Derived from the stored, strictly validated diagnostic instead of a
+        // separate mutable column. Manual workflow runs cannot promote an
+        // ordinary report into model input by changing one flag.
+        aiReviewConsent:
+          row.text === PARSER_RESEARCH_FEEDBACK_TEXT &&
+          isConsentedParserResearchDiagnostic(diagnostic),
         // Handed back as JSON rather than as the stored string, so the agent
         // does not have to double-parse. A row whose diagnostic somehow will
         // not parse yields null rather than failing the whole fetch — the
         // user's words are the part that matters.
-        diagnostic: ((): unknown => {
-          if (!row.diagnostic) return null;
-          try {
-            return JSON.parse(row.diagnostic) as unknown;
-          } catch {
-            return null;
-          }
-        })(),
+        diagnostic,
       });
     }
 
@@ -1993,6 +2008,21 @@ export default {
     // being a fourteen-day buffer and starts being an archive of things users
     // typed about their bank accounts.
     await env.DB.prepare('DELETE FROM feedback WHERE expires_at <= unixepoch()').run();
+    // A transient GitHub/DNS failure must not make a one-tap tester report
+    // disappear. Retry the same id for two hours, at most once per cron tick.
+    // The workflow concurrency key is the id, so an accepted dispatch whose
+    // response was lost cannot create two simultaneous agent runs.
+    const { results: failedFeedback } = await env.DB.prepare(
+      `SELECT id FROM feedback
+        WHERE dispatch_status = 'failed'
+          AND created_at > unixepoch() - 7200
+          AND dispatched_at <= unixepoch() - 900
+        ORDER BY created_at ASC
+        LIMIT 5`,
+    ).all<{ id: string }>();
+    for (const row of failedFeedback ?? []) {
+      await sendRepositoryDispatch(env, row.id);
+    }
     await env.DB.prepare('DELETE FROM push_registrations WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare('DELETE FROM device_invites WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare(

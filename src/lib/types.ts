@@ -358,6 +358,8 @@ export interface AppState {
   monthStartDay: number;
   /** Cached Wafra Pro entitlement supplied by the platform stores via RevenueCat. */
   pro: boolean;
+  /** Durable local founder grant, available only from explicitly enabled test builds. */
+  founderPro: boolean;
   /**
    * Strict local-only posture. Enabling it removes every retained diagnostic
    * message body and prevents future imports from keeping raw text.

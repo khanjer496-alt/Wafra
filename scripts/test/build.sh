@@ -67,7 +67,7 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray unparsed-launch-alert \
          ledger-money review-promotion alert-ai-suggestion launch-review-rollout trusted-bank-notification-packages \
-         sms-corpus \
+         sms-corpus parser-research-contract parser-research founder-pro \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import; do
   [ -f "../../src/lib/$f.ts" ] || continue

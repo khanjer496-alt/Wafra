@@ -167,8 +167,9 @@ CREATE TABLE IF NOT EXISTS feedback (
 -- stores no IP address, no hash of one, and nothing else user-derived.
 --
 -- The `feedback` counter bounds writes (how much a flood can put in the
--- database). Third-party agent dispatch is disabled unless a future app and
--- Worker contract add explicit consent, so no dispatch budget is spent today.
+-- database). The separate `dispatch` bucket bounds explicitly consented,
+-- client-redacted parser-research agent runs to five per hour. Ordinary
+-- feedback never consumes that budget.
 CREATE TABLE IF NOT EXISTS feedback_limits (
   id            TEXT PRIMARY KEY,
   window_start  INTEGER NOT NULL,

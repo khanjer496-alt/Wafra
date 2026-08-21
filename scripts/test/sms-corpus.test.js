@@ -113,8 +113,8 @@ const rejects = async (name, run, code) => {
       !/\bfetch\s*\(|XMLHttpRequest|uploadAsync|feedback-transport|relay/i.test(adapter));
   ok('the full corpus never falls back to an Android intent text payload',
     !/Share\.share\s*\(/.test(adapter));
-  ok('the temporary Settings row cannot render in an ordinary build',
-    /isSmsCorpusExportAvailable\(\) &&[\s\S]{0,500}smsCorpusExportTitle/.test(settings));
+  ok('the raw full-inbox share control is no longer exposed in Settings',
+    !/isSmsCorpusExportAvailable|shareSmsCorpus|smsCorpusExportTitle/.test(settings));
   const ordinaryProfiles = Object.entries(eas.build)
     .filter(([name]) => name !== 'corpus-preview');
   ok('only the dedicated internal APK profile enables both corpus gates',

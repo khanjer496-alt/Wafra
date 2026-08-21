@@ -100,6 +100,7 @@ export default function ProScreen() {
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const [completion, setCompletion] = useState<Completion>(null);
   const trial = trialDaysLeft(state);
+  const entitled = state.pro || state.founderPro;
   const rows = features();
   const privacyPolicyUrl = configuredUrl('privacyPolicyUrl');
   const termsOfUseUrl = configuredUrl('termsOfUseUrl');
@@ -265,7 +266,7 @@ export default function ProScreen() {
             </ThemedText>
             <ThemedText type="title">{t('proOutcomeTitle')}</ThemedText>
             <ThemedText type="default" themeColor="textSecondary">
-              {state.pro
+              {entitled
                 ? t('proActiveThanks')
                 : trial > 0
                   ? tf('proTrialActiveBody', {
@@ -274,7 +275,7 @@ export default function ProScreen() {
                     })
                   : t('proTrialEndedBody')}
             </ThemedText>
-            {!state.pro && trial > 0 && (
+            {!entitled && trial > 0 && (
               <View
                 style={[
                   styles.statusPill,
@@ -340,7 +341,7 @@ export default function ProScreen() {
             </View>
           </Section>
 
-          {!state.pro && (
+          {!entitled && (
             <Section index={3} style={styles.planSection}>
               <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
                 {t('proChoosePlan')}
@@ -505,6 +506,8 @@ export default function ProScreen() {
 
           {completion ? (
             <Button label={t('proContinue')} icon="check" onPress={() => router.back()} />
+          ) : state.founderPro ? (
+            <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
           ) : state.pro ? (
             <>
               {Platform.OS !== 'web' && (

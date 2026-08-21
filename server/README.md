@@ -324,11 +324,23 @@ maintainer re-fires any id by hand through the workflow's `workflow_dispatch`
 input. Worst case is 120 agent runs a day, which is a number a human notices on
 a dashboard rather than on an invoice.
 
-When feedback arrives the Worker fires a GitHub `repository_dispatch`
-(`wafra-feedback`) carrying **the id and nothing else**, and
-`.github/workflows/feedback-agent.yml` fetches the item back through the read
-route. A `client_payload` is readable by anyone with access to the repository's
-Actions data and is kept in the run record; the report is not. With
+An attempted dispatch that fails at the network or GitHub boundary is retried
+by the half-hour cron for up to two hours. The same feedback id is reused, and
+the workflow's concurrency key prevents simultaneous duplicate runs.
+
+When a tester explicitly sends a redacted parser-research report, the Worker
+fires a GitHub `repository_dispatch` (`wafra-feedback`) carrying **the id and
+nothing else**. Ordinary feedback stays human-only. The research screen masks
+every digit, aliases unknown senders, masks recipient/merchant spans, replaces
+words outside a strict financial grammar, removes timestamps, and shows the
+complete result before confirmation. It explicitly names GitHub Actions and
+Anthropic Claude. `.github/workflows/feedback-agent.yml` then fetches the item
+back through the read route. Wafra's D1 copy expires within 14 days; GitHub and
+Anthropic apply their own retention policies. The workflow can publish code and
+synthetic tests only in a **public draft** pull request; it never merges and its
+verbatim gate forbids copying the report into the diff or PR body. A
+`client_payload` is readable by anyone with access to the repository's Actions
+data and is kept in the run record, but it contains only the report id. With
 `GITHUB_DISPATCH_TOKEN` or `GITHUB_REPOSITORY` unset the feedback is still
 stored and the row says `skipped_unconfigured` — nothing 500s. See the secrets
 block at the end of `wrangler.toml` for exactly which token, which scopes, and

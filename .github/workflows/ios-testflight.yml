@@ -330,6 +330,33 @@ jobs:
           echo "state=present" >> "$GITHUB_OUTPUT"
           echo "ASC API key written to \$RUNNER_TEMP as $form; key id and issuer id exported."
 
+      # Pin asc because its command and safety contracts are part of Wafra's
+      # release tooling. The checksum is from the 4.4.2 release manifest; a
+      # changed binary fails before any credential is used or build is paid for.
+      - name: Install the pinned App Store Connect CLI
+        if: steps.asc.outputs.state == 'present'
+        run: |
+          asset=asc_4.4.2_linux_amd64
+          download="https://github.com/rorkai/App-Store-Connect-CLI/releases/download/4.4.2/$asset"
+          curl -fsSL "$download" -o "$RUNNER_TEMP/$asset"
+          printf '%s  %s\n' \
+            'f855f44f3238675c5ac05628d46ddff73f6a39706378b969cb284f7a88e1f850' \
+            "$RUNNER_TEMP/$asset" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/asc-bin"
+          install -m 0755 "$RUNNER_TEMP/$asset" "$RUNNER_TEMP/asc-bin/asc"
+          echo "$RUNNER_TEMP/asc-bin" >> "$GITHUB_PATH"
+
+      # EAS can otherwise discover an expired/revoked key only after a paid
+      # build finishes. Validate it against Apple while the run is still cheap.
+      - name: Validate the App Store Connect API key
+        if: steps.asc.outputs.state == 'present'
+        run: |
+          export ASC_KEY_ID="$EXPO_ASC_KEY_ID"
+          export ASC_ISSUER_ID="$EXPO_ASC_ISSUER_ID"
+          export ASC_PRIVATE_KEY_PATH="$EXPO_ASC_API_KEY_PATH"
+          npm run check:asc
+          npm run asc:auth
+
       - name: Install dependencies
         run: npm ci
 
