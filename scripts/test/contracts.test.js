@@ -317,7 +317,8 @@ function ktSources(dir) {
  * The screen that sells the product, so its mistakes are the expensive kind.
  * All three of these were live: a sentence assembled from English fragments
  * that stayed English in Arabic, a discount claim that disagreed with the
- * prices beside it, and hidden gestures that granted Pro for free. */
+ * prices beside it. Founder access is isolated to explicitly enabled native
+ * test builds and never changes the store receipt. */
 {
   const pro = fs.readFileSync(path.join(ROOT, 'src/app/pro.tsx'), 'utf8');
 
@@ -325,10 +326,10 @@ function ktSources(dir) {
     !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
 
   const settings = fs.readFileSync(path.join(ROOT, 'src/app/settings.tsx'), 'utf8');
-  ok('Settings contains no hidden entitlement bypass',
+  ok('Settings founder access cannot forge a store entitlement or reach production',
     !/\bsetPro\b/.test(settings) &&
-      !/tapCount\.current >= 7/.test(settings) &&
-      !/onVersionTap/.test(settings));
+      /isFounderUnlockBuild\(\)/.test(settings) &&
+      /await unlockFounderPro\(\)/.test(settings));
 
   const storeMetadata = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'docs/store-metadata.json'), 'utf8'),

@@ -110,10 +110,10 @@ export function trialDaysLeft(
 
 /** Pro features unlocked: purchased Pro, or still inside the trial. */
 export function isProActive(
-  state: { pro: boolean; trialStartTs: number },
+  state: { pro: boolean; founderPro?: boolean; trialStartTs: number },
   nowMs: number = Date.now(),
 ): boolean {
-  return state.pro || trialDaysLeft(state, nowMs) > 0;
+  return state.pro || state.founderPro === true || trialDaysLeft(state, nowMs) > 0;
 }
 
 /* ─────────────────── What is free and what is paid ─────────────────── */

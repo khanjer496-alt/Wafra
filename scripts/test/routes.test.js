@@ -264,11 +264,13 @@ function sources(dir = SRC) {
     !/chargeAlertsSetting/.test(settings) &&
       (settings.match(/t\('alertEveryCharge'\)/g) ?? []).length === 2);
 
-  ok('the version label and logo contain no hidden Pro unlock gesture',
+  ok('the founder logo gesture is test-build gated and never forges store Pro',
     !/\bsetPro\b/.test(settings) &&
-      !/tapCount\.current >= 7/.test(settings) &&
-      !/onVersionTap/.test(settings) &&
-      !/<Pressable[^>]*>\s*<WafraMark/.test(settings));
+      /Platform\.OS !== 'web' && isFounderUnlockBuild\(\)/.test(settings) &&
+      /await unlockFounderPro\(\)/.test(settings));
+
+  ok('Trusted devices and family are hidden from Settings for now',
+    !/linkRow\(\s*t\('trustedSettingsRow'\)/.test(settings));
 
   // A toggle row whose label and sub-line are dead text, beside link rows that
   // are tappable edge to edge, is a target the user has to find twice. The

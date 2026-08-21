@@ -564,15 +564,10 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   const lib = code(read('src/lib/feedback.ts'));
 
   // The whole guarantee: the screen shows the payload by RENDERING it, not by
-  // describing it. One function produces the text, and both the preview and
-  // the copy come from that one call.
+  // describing it. Ordinary feedback is now message-only and direct; parser
+  // evidence has its own bounded screen instead of a file export here.
   ok('the screen previews the payload through the same formatter it sends',
-    /const preview = useMemo\(\(\) => formatFeedbackPayload\(payload\)/.test(screen) &&
-      /shareText\('wafra-feedback\.txt', preview\)/.test(screen));
-  // Rendered, in braces, whatever else shares the expression with it — the
-  // screen now shows a "preparing" line in its place while a level is being
-  // built, because a STALE preview under a new heading is this screen's one
-  // guarantee being false rather than a cosmetic lag.
+    /const preview = useMemo\(\(\) => formatFeedbackPayload\(payload\)/.test(screen));
   ok('the preview is drawn on the screen, not hidden behind a share sheet',
     /\{[^{}]*\bpreview\b[^{}]*\}/.test(screen));
 
@@ -582,52 +577,13 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   ok('submitFeedback is reached only from the confirmed send path',
     (screen.match(/submitFeedback\(/g) ?? []).length === 1 &&
       /<ConfirmSheet[\s\S]{0,400}onConfirm=\{\(\) => void send\(\)\}/.test(screen));
-  /**
-   * The property, not the proxy.
-   *
-   * This used to be `!/useEffect/.test(screen)` — no effects at all, as a
-   * stand-in for "nothing submits from one". That held while the screen had no
-   * effects and stopped being usable the moment it needed one: building the
-   * `figures` attachment had to come off the render path, because doing it
-   * during render froze the app for seconds on a real ledger.
-   *
-   * So the body of every effect is read and checked for the call itself. That
-   * is strictly narrower than the old line — it still fails on the thing the
-   * old line existed to catch, and no longer fails on an effect that does
-   * something else.
-   */
-  const effectBodies = [];
-  for (let at = screen.indexOf('useEffect('); at >= 0; at = screen.indexOf('useEffect(', at + 1)) {
-    let depth = 0;
-    let end = at;
-    for (let i = screen.indexOf('(', at); i < screen.length; i += 1) {
-      if (screen[i] === '(') depth += 1;
-      else if (screen[i] === ')') {
-        depth -= 1;
-        if (depth === 0) { end = i; break; }
-      }
-    }
-    effectBodies.push(screen.slice(at, end + 1));
-  }
-  ok('nothing is submitted from an effect',
-    effectBodies.length > 0 && effectBodies.every((body) => !/submitFeedback\(/.test(body)),
-    `${effectBodies.length} effect(s) read`);
-
-  /**
-   * And the expensive build IS in one.
-   *
-   * Measured at ~270ms in Node on a 14,314-row ledger with twelve cards, which
-   * is seconds under Hermes. Run during render — which is where a `useMemo`
-   * keyed on `detail` runs it — the app stops answering the moment the third
-   * option is chosen, with no spinner and nothing to cancel. That was reported
-   * from a real phone as "lags and stops working".
-   */
-  ok('the attachment is built off the render path',
-    effectBodies.some((body) => /requestIdleCallback/.test(body) && /buildFeedbackPayload\(/.test(body)),
-    'the figures build must not run during render');
-  ok('Send is blocked while the attachment is still being built',
-    /const ready = [^;]*!preparing/.test(screen),
-    'sending mid-build would post the previous level under the new label');
+  ok('ordinary feedback never scans the ledger or opens a file export',
+    /detail: 'none'/.test(screen) && /ledger: EMPTY_LEDGER/.test(screen) &&
+      !/requestIdleCallback|cardDiagnostics|shareText|feedbackSaveCopy/.test(screen));
+  ok('parser problems route to the dedicated redacted GitHub flow',
+    /isParserResearchBuild\(\)/.test(screen) &&
+      /router\.push\('\/parser-research' as Href\)/.test(screen) &&
+      /feedbackParserTitle/.test(screen));
 
   // The repo-wide rule, restated here because this screen is new: an alert on
   // react-native-web is an empty method, so a confirmation built from one is a
@@ -672,11 +628,8 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 
   ok('the screen uses no alert at all', !/\bAlert\b/.test(screen));
 
-  ok('the attachment choice is drawn as a sheet', /<ChoiceSheet/.test(screen));
-  ok('Private Mode disables the other levels visibly, with the reason on the row',
-    /state\.privateMode && value !== 'none'/.test(screen) &&
-      /disabled: blocked/.test(screen) &&
-      /t\('feedbackPrivateBlocked'\)/.test(screen));
+  ok('the confusing attachment chooser is gone',
+    !/<ChoiceSheet/.test(screen) && !/feedbackAttachRow|feedbackDetailFigures/.test(screen));
 
   // The refusal is in the pure function too. A guard that lives only in the UI
   // is one refactor away from not existing.

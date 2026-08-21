@@ -7,6 +7,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
@@ -18,6 +19,7 @@
         "simulator": true
       },
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
@@ -27,6 +29,7 @@
       "distribution": "internal",
       "autoIncrement": true,
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
@@ -40,6 +43,7 @@
         "simulator": true
       },
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
@@ -53,6 +57,7 @@
         "buildType": "apk"
       },
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "1",
@@ -64,6 +69,7 @@
       "environment": "preview",
       "autoIncrement": true,
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
         "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://raw.githubusercontent.com/khanjer496-alt/Wafra/3f43134e280bfe7b0cd82aabe55a664139debf1a/assets/shortcuts/Wafra%20Capture.shortcut",
@@ -75,6 +81,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "0",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
         "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1",

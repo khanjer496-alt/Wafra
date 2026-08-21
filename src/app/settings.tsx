@@ -24,8 +24,8 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import { shareText } from '@/lib/share-text';
-import { useRouter, type Href } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   I18nManager,
@@ -67,6 +67,11 @@ import {
   requestSmsPermission,
 } from '@/lib/auto-import';
 import { tapped } from '@/lib/haptics';
+import {
+  EMPTY_FOUNDER_TAP_SEQUENCE,
+  isFounderUnlockBuild,
+  recordFounderTap,
+} from '@/lib/founder-pro';
 import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { canSelectMarket, ledgerCurrencyDisplay, MARKETS } from '@/lib/markets';
@@ -84,7 +89,6 @@ import {
   type RelayConfig,
 } from '@/lib/relay';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
-import { isParserResearchBuild } from '@/lib/parser-research-source';
 import {
   buildExpenseReportHtml,
   reportExpenses,
@@ -119,6 +123,7 @@ export default function SettingsScreen() {
     restoreBackup,
     clearAll,
     setThemePreference,
+    unlockFounderPro,
   } = useStore();
 
   const themeChoice: ThemePreference =
@@ -152,6 +157,9 @@ export default function SettingsScreen() {
     privateMode: state.privateMode,
   });
   const version = Constants.expoConfig?.version ?? '1.0.0';
+  const founderUnlockEnabled =
+    Platform.OS !== 'web' && isFounderUnlockBuild();
+  const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
 
   const [instantAlerts, setInstantAlerts] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
@@ -191,6 +199,20 @@ export default function SettingsScreen() {
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
   const proActive = isProActive(state);
+
+  const onFounderLogoTap = async () => {
+    if (!founderUnlockEnabled || state.founderPro) return;
+    tapped();
+    const result = recordFounderTap(founderTapSequence.current, Date.now());
+    founderTapSequence.current = result.next;
+    if (!result.unlocked) return;
+    try {
+      await unlockFounderPro();
+      Alert.alert(t('founderProUnlockedTitle'), t('founderProUnlockedBody'));
+    } catch {
+      Alert.alert(t('founderProFailedTitle'), t('founderProFailedBody'));
+    }
+  };
 
   const gated = (fn: () => void) => () => {
     if (proActive) fn();
@@ -902,8 +924,10 @@ export default function SettingsScreen() {
                   <ThemedText type="small">{t('wafraPro')}</ThemedText>
                   <ThemedText
                     type="meta"
-                    style={{ color: state.pro ? theme.textTertiary : theme.warning }}>
-                    {state.pro
+                    style={{ color: proActive ? theme.textTertiary : theme.warning }}>
+                    {state.founderPro
+                      ? t('founderProActive')
+                      : state.pro
                       ? t('activeOnThisDevice')
                       : trial > 0
                         ? tf('settingsTrialDays', {
@@ -1014,15 +1038,8 @@ export default function SettingsScreen() {
               t('sendFeedback'),
               t('sendFeedbackDetail'),
               () => router.push('/feedback'),
-              { last: !isParserResearchBuild() },
+              { last: true },
             )}
-            {isParserResearchBuild() &&
-              linkRow(
-                t('parserResearchSettingsTitle'),
-                t('parserResearchSettingsDetail'),
-                () => router.push('/parser-research' as Href),
-                { last: true },
-              )}
           </Section>
 
           <Section index={4}>
@@ -1075,12 +1092,6 @@ export default function SettingsScreen() {
                 gated(onNotificationAccess),
                 { pro: true },
               )}
-            {linkRow(
-              t('trustedSettingsRow'),
-              t('trustedSettingsDetail'),
-              () => router.push('/trusted-devices'),
-              { last: true },
-            )}
             {/* The retention disclosure, as a footnote under the rows it is
                 about rather than a ~50-word wall standing between the header
                 and the first setting. It still describes both platforms on a
@@ -1204,7 +1215,19 @@ export default function SettingsScreen() {
           </Section>
 
           <Section index={8} style={styles.about}>
-            <WafraMark size={34} />
+            {founderUnlockEnabled ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('wafraLogo')}
+                disabled={state.founderPro}
+                hitSlop={4}
+                onPress={() => void onFounderLogoTap()}
+                style={styles.founderLogoTap}>
+                <WafraMark size={34} />
+              </Pressable>
+            ) : (
+              <WafraMark size={34} />
+            )}
             <ThemedText type="default" themeColor="textSecondary">
               {t('settingsTagline')}
             </ThemedText>
@@ -1344,6 +1367,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: Spacing.two + 2,
     paddingTop: Spacing.two,
+  },
+  founderLogoTap: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   privacyCopy: {
     flexDirection: 'row',

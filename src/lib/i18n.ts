@@ -1179,6 +1179,18 @@ const S = {
     ar: 'إذا كان ذلك الجهاز آيفون، فسيظل اختصار «Wafra Capture» فيه يرسل التنبيهات البنكية إلى المرحّل — مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. مالك الجهاز وحده يستطيع حذفه من تطبيق الاختصارات.',
   },
   activeOnThisDevice: { en: 'Active on this device', ar: 'مفعّل على هذا الجهاز' },
+  founderProActive: { en: 'Founder access · active on this device', ar: 'وصول المؤسس · مفعّل على هذا الجهاز' },
+  founderProUnlockedTitle: { en: 'Founder Pro unlocked', ar: 'تم فتح وفرة برو للمؤسس' },
+  founderProUnlockedBody: {
+    en: 'Pro stays active on this test device, including after you erase the ledger.',
+    ar: 'يبقى برو مفعّلاً على جهاز الاختبار هذا، حتى بعد مسح السجل.',
+  },
+  founderProFailedTitle: { en: 'Could not unlock Founder Pro', ar: 'تعذّر فتح وفرة برو للمؤسس' },
+  founderProFailedBody: {
+    en: 'The encrypted local grant could not be saved. Keep Wafra open and try five taps again.',
+    ar: 'تعذّر حفظ المنحة المحلية المشفّرة. أبقِ وفرة مفتوحاً وحاول خمس ضغطات مجدداً.',
+  },
+  wafraLogo: { en: 'Wafra logo', ar: 'شعار وفرة' },
   followingPhone: { en: 'Following your phone. Wafra turns over when it does.', ar: 'يتبع هاتفك. يتغيّر وفرة بتغيّره.' },
   alertEveryCharge: { en: 'Alert me on every charge', ar: 'نبّهني عند كل عملية' },
   turnOnSmsFirst: { en: 'Turn on bank SMS first', ar: 'فعّل قراءة رسائل البنك أولاً' },
@@ -2464,8 +2476,8 @@ const S = {
   // terms of what it DOES.
   sendFeedback: { en: 'Send feedback', ar: 'إرسال ملاحظة' },
   sendFeedbackDetail: {
-    en: 'Report a bug, and choose what to attach',
-    ar: 'أبلغ عن خلل، واختر ما تُرفقه',
+    en: 'Send a note or improve the bank parser',
+    ar: 'أرسل ملاحظة أو ساعد في تحسين محلّل البنك',
   },
   parserResearchSettingsTitle: {
     en: 'Send parser samples',
@@ -2549,8 +2561,14 @@ const S = {
   settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
   settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
   feedbackIntro: {
-    en: 'Say what went wrong. Nothing leaves this phone until you tap Send. The report is kept for at most 14 days for Wafra maintainers and is not sent to third-party AI.',
-    ar: 'اكتب ما الذي حدث. لا يغادر شيء هذا الهاتف حتى تضغط إرسال. يُحتفظ بالتقرير لمدة أقصاها 14 يوماً لمشرفي وفرة ولا يُرسل إلى ذكاء اصطناعي خارجي.',
+    en: 'Send a note directly to Wafra maintainers. Nothing from your ledger is attached, and nothing leaves this phone until you confirm.',
+    ar: 'أرسل ملاحظة مباشرة إلى مشرفي وفرة. لا يُرفق شيء من سجلك، ولا يغادر شيء الهاتف حتى تؤكد.',
+  },
+  feedbackParserHeader: { en: 'BANK MESSAGE PROBLEM', ar: 'مشكلة في رسالة بنكية' },
+  feedbackParserTitle: { en: 'Improve the bank parser', ar: 'تحسين محلّل البنك' },
+  feedbackParserDetail: {
+    en: 'Review redacted message templates, then send them directly to the GitHub parser workflow.',
+    ar: 'راجع قوالب الرسائل المنقّحة، ثم أرسلها مباشرة إلى آلية GitHub للمحلّل.',
   },
   feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
   feedbackPlaceholder: {
@@ -2587,8 +2605,8 @@ const S = {
   },
   feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
   feedbackPreviewNote: {
-    en: 'This is the whole report, not a summary. It is written in English for Wafra maintainers. Third-party AI review is off.',
-    ar: 'هذا هو التقرير كاملاً، لا ملخص له. وهو مكتوب بالإنجليزية لمشرفي وفرة. مراجعة الذكاء الاصطناعي الخارجي متوقفة.',
+    en: 'This is the complete note sent to Wafra maintainers. No ledger, bank message, amount, account, or merchant is attached.',
+    ar: 'هذه هي الملاحظة الكاملة التي تُرسل إلى مشرفي وفرة. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
   },
   feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
   feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
@@ -2606,8 +2624,8 @@ const S = {
   },
   feedbackNoTransportTitle: { en: 'Sending is not connected yet', ar: 'الإرسال غير موصول بعد' },
   feedbackNoTransportBody: {
-    en: 'This build has no way to deliver a report, so nothing was uploaded. Save a copy and send it yourself.',
-    ar: 'لا توجد في هذه النسخة طريقة لتسليم التقرير، لذا لم يُرفع شيء. احفظ نسخة وأرسلها بنفسك.',
+    en: 'This build has no direct feedback connection, so nothing was uploaded. Install a newer Wafra test build.',
+    ar: 'لا تتضمن هذه النسخة اتصالاً مباشراً للملاحظات، لذا لم يُرفع شيء. ثبّت نسخة اختبار أحدث من وفرة.',
   },
   feedbackPreparing: {
     en: 'Preparing the attachment…',
@@ -2627,8 +2645,8 @@ const S = {
    * transport in it at all" — and it was made anyway, one level down.
    */
   feedbackFailedBody: {
-    en: 'The report did not leave the phone. Save a copy so it is not lost, and try again later.',
-    ar: 'لم يغادر التقرير الهاتف. احفظ نسخة كي لا تضيع، وحاول لاحقاً.',
+    en: 'The report did not leave the phone. Your text is still here; try again later.',
+    ar: 'لم يغادر التقرير الهاتف. ما كتبته ما زال هنا؛ حاول مجدداً لاحقاً.',
   },
   /**
    * Not "try again later": this build shipped without a relay address
@@ -2636,8 +2654,8 @@ const S = {
    * an hour. The only thing that fixes it is a newer build.
    */
   feedbackNoRelayBody: {
-    en: 'This build has no server address in it, so it can never send a report — waiting will not help. Save a copy, and install a newer build of Wafra.',
-    ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لا يمكنه إرسال أي تقرير مهما انتظرت. احفظ نسخة، وثبّت إصداراً أحدث من وفرة.',
+    en: 'This build has no server address, so waiting will not help. Install a newer Wafra test build to send directly.',
+    ar: 'لا يحتوي هذا الإصدار على عنوان الخادم، لذا لن يفيد الانتظار. ثبّت نسخة اختبار أحدث من وفرة للإرسال المباشر.',
   },
   feedbackOfflineTitle: { en: 'No connection', ar: 'لا يوجد اتصال' },
   feedbackOfflineBody: {
