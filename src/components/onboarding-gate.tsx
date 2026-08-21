@@ -54,6 +54,10 @@ const QUESTION_STEPS: readonly Step[] = ['goals', 'budget', 'capture'];
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
 
+const isWebPlatform = () => Platform.OS === 'web';
+const isPublicWebSurface = () =>
+  isWebPlatform() && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1';
+
 /** Onboarding is night mode regardless of the OS theme: the first screen sets
  * the tone, and the mark is at its strongest on charcoal. */
 const night = Colors.dark;
@@ -495,6 +499,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * this would be rendering an empty ledger as though it were the user's, and
    * `storageFailure` tells us it is not. Nothing reads better than nothing.
    */
+  if (isPublicWebSurface()) return <>{children}</>;
+
   if (showRecovery) {
     return <StorageRecovery failure={storageFailure} recoveryState={storageRecoveryState} />;
   }

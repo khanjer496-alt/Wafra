@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Wafra — private money clarity</title>
+  <desc id="desc">A dark green social card for Wafra, a private budget and expense tracker.</desc>
+  <rect width="1200" height="630" fill="#07100c"/>
+  <circle cx="982" cy="120" r="340" fill="#123426" opacity=".72"/>
+  <circle cx="112" cy="642" r="300" fill="#0d271d"/>
+  <g opacity=".16" stroke="#61d5a6" fill="none">
+    <circle cx="980" cy="140" r="212"/>
+    <circle cx="980" cy="140" r="252"/>
+    <path d="M0 520H1200M0 480H1200M760 0V630M800 0V630M840 0V630M880 0V630M920 0V630M960 0V630M1000 0V630M1040 0V630M1080 0V630M1120 0V630"/>
+  </g>
+  <g transform="translate(74 68)" fill="none" stroke="#61d5a6" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M0 18l18 43 18-34 18 34L78 10"/>
+    <path d="M64 10h14v14"/>
+  </g>
+  <text x="176" y="126" fill="#eef6f1" font-family="Arial, sans-serif" font-size="48" font-weight="700" letter-spacing="-2">Wafra</text>
+  <text x="324" y="121" fill="#a8b8b0" font-family="Arial, sans-serif" font-size="23">وفرة</text>
+  <text x="74" y="282" fill="#eef6f1" font-family="Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="-3">Know where your money went.</text>
+  <text x="74" y="367" fill="#61d5a6" font-family="Arial, sans-serif" font-size="72" font-weight="700" letter-spacing="-3">See what comes next.</text>
+  <text x="76" y="446" fill="#a8b8b0" font-family="Arial, sans-serif" font-size="29">Private budgets, bills and spending — without a bank login.</text>
+  <g transform="translate(76 520)">
+    <rect width="183" height="46" rx="23" fill="#61d5a6"/>
+    <text x="92" y="30" text-anchor="middle" fill="#07100c" font-family="Arial, sans-serif" font-size="17" font-weight="700">iPhone + Android</text>
+  </g>
+  <g transform="translate(938 469)">
+    <rect width="188" height="98" rx="6" fill="#0b1913" stroke="#61d5a6" stroke-opacity=".4"/>
+    <text x="20" y="34" fill="#61d5a6" font-family="monospace" font-size="13" letter-spacing="1.5">PRIVATE LEDGER</text>
+    <text x="20" y="67" fill="#eef6f1" font-family="Arial, sans-serif" font-size="19" font-weight="700">No bank login</text>
+  </g>
+</svg>

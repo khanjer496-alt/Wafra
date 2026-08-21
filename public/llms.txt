@@ -1,0 +1,35 @@
+# Wafra
+
+> Wafra is a private personal money manager for iPhone and Android. It helps people track spending, income, budgets, bills, card due dates, recurring charges and savings goals without connecting a bank account.
+
+## Product facts
+
+- Wafra has no bank login, no advertising and no third-party analytics.
+- Manual tracking works anywhere; users can choose their own currency and enter transactions without automatic bank-alert support.
+- The main ledger is encrypted in app storage on the user's device.
+- Android can process supported bank SMS and optional bank-app notifications on-device after the user enables access.
+- iPhone does not give Wafra direct SMS-inbox access. Optional automatic capture uses an Apple Shortcut configured by the user for selected bank senders.
+- Bank-alert automation varies by bank, country and message format and is not required to use Wafra.
+- Wafra supports English and Arabic, including right-to-left layouts.
+- Wafra is a personal organizer, not a bank, payment service or source of financial advice.
+
+## Main capabilities
+
+- Monthly income, spending and money-left overview
+- Salary-day or calendar-month reporting periods
+- Category budgets and spending pace
+- Bills, card statements and due-date reminders
+- Recurring charge and subscription review
+- Cards, accounts and savings goals
+- Manual entry, pasted-alert import and optional supported platform-specific imports
+- User-controlled backup and restore
+
+## Important limitations
+
+- Wafra does not support every bank or message format.
+- Automatic parsing can be wrong or miss an alert; the user's bank remains authoritative.
+- Worldwide storefront billing and worldwide bank-alert parsing are separate capabilities. Wafra does not claim worldwide bank parsing.
+
+## Canonical public page
+
+- `/` — product overview, privacy summary and common questions

@@ -23,7 +23,7 @@ function ok(name, condition, detail = '') {
 const ROOT = path.join(__dirname, '../..');
 const read = (file) => fs.readFileSync(path.join(ROOT, file), 'utf8');
 const route = read('src/app/review-alerts.tsx');
-const home = read('src/app/(tabs)/index.tsx');
+const home = read('src/screens/ledger-home-screen.tsx');
 const settings = read('src/app/settings.tsx');
 const add = read('src/app/add-transaction.tsx');
 const store = read('src/lib/store.tsx');

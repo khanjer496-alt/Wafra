@@ -96,14 +96,14 @@ const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
 ];
 
 const PERSISTENT_REVEAL_TAB_SCREENS = [
-  'src/app/(tabs)/index.tsx',
+  'src/screens/ledger-home-screen.tsx',
 ];
 
 // ---------------------------------------------------------------------------
 // The navigator: the failed fix must stay gone.
 // ---------------------------------------------------------------------------
 
-const layout = stripComments(read('src/app/(tabs)/_layout.tsx'));
+const layout = stripComments(read('src/components/app-tabs-layout.tsx'));
 
 ok('the tabs navigator leaves detachInactiveScreens at its default',
   !/detachInactiveScreens/.test(layout),

@@ -1,6 +1,20 @@
-# Wafra — UAE Money Manager 🇦🇪
+# Wafra — Private Money Manager
 
-**Wafra** (وفرة — “abundance”) is an automatic personal-finance tracker for the UAE, built with Expo SDK 55 and React Native. Android reads supported bank SMS and bank-app money notifications on-device. iOS uses a user-created Shortcuts automation to send selected bank alerts to a privacy-minimizing relay that parses in memory, discards the source body, and seals only structured rows to the user's devices.
+**Wafra** (وفرة — “abundance”) is a private personal-finance tracker for users anywhere, built with Expo SDK 55 and React Native. Manual budgeting and expense tracking work independently of country or bank support. Where supported, Android can read bank SMS and bank-app money notifications on-device. On iOS, optional automatic capture uses a user-created Shortcuts automation to send selected bank alerts to a privacy-minimizing relay that parses in memory, discards the source body, and seals only structured rows to the user's devices.
+
+The normal web export is Wafra's public SEO/GEO landing page. Production builds
+require the owned HTTPS origin so canonical, social and sitemap URLs cannot be
+published with a placeholder. The finalized public root is static HTML/CSS and
+ships no JavaScript; non-root QA routes retain asynchronously split app bundles
+and are marked `noindex` but are not access-controlled:
+
+```sh
+EXPO_PUBLIC_WAFRA_SITE_URL="$WAFRA_SITE_ORIGIN" npm run web:export
+EXPO_PUBLIC_WAFRA_SITE_URL="$WAFRA_SITE_ORIGIN" npm run check:web-seo
+```
+
+See [the SEO/GEO audit](docs/seo-geo-audit.md) for verified coverage and the
+remaining deployment and legal blockers.
 
 ## Features
 

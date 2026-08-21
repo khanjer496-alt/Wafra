@@ -12,7 +12,10 @@ PORT="${E2E_PORT:-8126}"
 OUT="${E2E_DIST:-dist}"
 
 echo "→ exporting web build to $OUT"
-EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx expo export --platform web --output-dir "$OUT" >/dev/null
+# The normal web build is now the public marketing surface. Metro's transform
+# cache is not keyed by EXPO_PUBLIC values, so switching from that build to the
+# seeded ledger harness without clearing can mix the two modes in one bundle.
+EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx expo export --clear --platform web --output-dir "$OUT" >/dev/null
 
 echo "→ serving $OUT on :$PORT"
 # serve.mjs, not `npx serve`: serve is in nobody's dependencies, so this line

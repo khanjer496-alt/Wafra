@@ -477,7 +477,7 @@ function ktSources(dir) {
 {
   const src = read('src/lib/purchases.ts');
   const sdk = read('src/lib/billing.ts');
-  const layout = read('src/app/_layout.tsx');
+  const layout = read('src/components/app-root-layout.tsx');
 
   // The entitlement id is a string shared with a dashboard nobody can grep.
   ok('the entitlement id is named once and exported',
@@ -654,7 +654,7 @@ function ktSources(dir) {
   const relay = read('src/lib/relay.ts');
   const home = read('src/hooks/use-auto-import.ts');
   const onboarding = read('src/components/onboarding-gate.tsx');
-  const layout = read('src/app/_layout.tsx');
+  const layout = read('src/components/app-root-layout.tsx');
   const worker = read('server/src/push.ts');
   const wake = worker.match(/function wakePayload[\s\S]*?return \{([\s\S]*?)\n  \};/)?.[1] || '';
 
@@ -719,7 +719,7 @@ function ktSources(dir) {
   const relay = read('src/lib/relay.ts');
   const hook = read('src/hooks/use-auto-import.ts');
   const capture = read('src/lib/capture.ts');
-  const home = read('src/app/(tabs)/index.tsx');
+  const home = read('src/screens/ledger-home-screen.tsx');
 
   ok('a 401 from sync records the refusal rather than only throwing',
     /res\.status === 401/.test(relay) && /markRelayRevoked\(cfg\.syncToken\)/.test(relay));
@@ -946,8 +946,8 @@ function ktSources(dir) {
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status
   // query, so a tab switch does not start another parser migration.
-  const home = read('src/app/(tabs)/index.tsx');
-  const tabsLayout = read('src/app/(tabs)/_layout.tsx');
+  const home = read('src/screens/ledger-home-screen.tsx');
+  const tabsLayout = read('src/components/app-tabs-layout.tsx');
   ok('the tabs shell owns parser migrations independent of the active tab',
     /function CaptureOwner/.test(tabsLayout) &&
       /useAutoImport\(true, false\)/.test(tabsLayout) &&

@@ -86,7 +86,15 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router",
+      [
+        "expo-router",
+        {
+          "sitemap": false,
+          "asyncRoutes": {
+            "web": true
+          }
+        }
+      ],
       [
         "expo-splash-screen",
         {
