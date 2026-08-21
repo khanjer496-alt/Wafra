@@ -1,28 +1,33 @@
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Keyboard, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Keyboard,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { Fonts, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { requestSmsPermission } from '@/lib/auto-import';
-import {
-  FeedbackSendError,
-  submitParserResearchFeedback,
-} from '@/lib/feedback-transport';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import {
+  buildManualParserResearchExport,
   buildParserResearchSubmission,
   PARSER_RESEARCH_PASTE_MAX,
   parsePastedParserMessages,
+  serializeManualParserResearchExport,
   type ParserResearchSubmission,
 } from '@/lib/parser-research';
 import {
@@ -30,28 +35,8 @@ import {
   collectParserResearchInbox,
   isParserResearchBuild,
 } from '@/lib/parser-research-source';
+import { shareTextFile } from '@/lib/share-text';
 import { useStore } from '@/lib/store';
-
-const researchSendFailure = (error: unknown): { title: string; body: string } => {
-  if (error instanceof FeedbackSendError) {
-    if (error.code === 'network') {
-      return { title: t('feedbackOfflineTitle'), body: t('feedbackOfflineBody') };
-    }
-    if (error.code === 'too_large' || error.code === 'diagnostic_too_large') {
-      return { title: t('feedbackTooLargeTitle'), body: t('feedbackTooLargeBody') };
-    }
-    if (error.code === 'rate_limited' || error.status === 429) {
-      return { title: t('feedbackBusyTitle'), body: t('feedbackBusyBody') };
-    }
-    if (error.status !== null) {
-      return {
-        title: t('feedbackRefusedTitle'),
-        body: tf('feedbackRefusedBody', { code: error.code ?? String(error.status) }),
-      };
-    }
-  }
-  return { title: t('feedbackFailedTitle'), body: t('feedbackFailedBody') };
-};
 
 export default function ParserResearchScreen() {
   const router = useRouter();
@@ -64,15 +49,14 @@ export default function ParserResearchScreen() {
   const [submission, setSubmission] = useState<ParserResearchSubmission | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [checked, setChecked] = useState(0);
-  const [confirming, setConfirming] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  const pasteInputRef = useRef<TextInput>(null);
   const blocked = state.privateMode || !enabled;
 
   useEffect(() => {
     if (!blocked) return;
     setSubmission(null);
-    setConfirming(false);
   }, [blocked]);
 
   const build = useMemo(() => ({
@@ -83,7 +67,24 @@ export default function ParserResearchScreen() {
     currency: ledgerCurrencyDisplay(),
   }), [language, state.marketId]);
 
+  const manualJson = useMemo(() => {
+    if (!submission) return '';
+    return serializeManualParserResearchExport(
+      buildManualParserResearchExport(submission),
+    );
+  }, [submission]);
+
   const prepare = async () => {
+    if (!automaticInbox && !pasted.trim()) {
+      const body = t('parserResearchPasteRequired');
+      setNotice({
+        title: t('parserResearchPasteRequiredTitle'),
+        body,
+      });
+      pasteInputRef.current?.focus();
+      AccessibilityInfo.announceForAccessibility(body);
+      return;
+    }
     Keyboard.dismiss();
     setPreparing(true);
     setChecked(0);
@@ -117,10 +118,9 @@ export default function ParserResearchScreen() {
     }
   };
 
-  const send = async () => {
+  const exportReport = async () => {
     if (!submission || state.privateMode || !enabled) {
       setSubmission(null);
-      setConfirming(false);
       setNotice({
         title: t('parserResearchFailedTitle'),
         body: state.privateMode
@@ -129,25 +129,24 @@ export default function ParserResearchScreen() {
       });
       return;
     }
-    setSending(true);
+    setExporting(true);
     setNotice(null);
     try {
-      const receipt = await submitParserResearchFeedback(submission.wire);
-      setSubmission(null);
-      setNotice({
-        title: t('parserResearchSentTitle'),
-        body: receipt.dispatched
-          ? tf('parserResearchSentDispatched', { id: receipt.id })
-          : tf('parserResearchSentStored', { id: receipt.id }),
+      await shareTextFile('wafra-parser-report.json', manualJson, {
+        mimeType: 'application/json',
+        dialogTitle: t('parserResearchExport'),
       });
-    } catch (error) {
-      setNotice(researchSendFailure(error));
+    } catch {
+      setNotice({
+        title: t('parserResearchExportFailedTitle'),
+        body: t('parserResearchExportFailedBody'),
+      });
     } finally {
-      setSending(false);
+      setExporting(false);
     }
   };
 
-  const canPrepare = !blocked && !preparing && (automaticInbox || pasted.trim().length > 0);
+  const canPrepare = !blocked && !preparing;
 
   return (
     <ThemedView style={styles.root}>
@@ -184,6 +183,7 @@ export default function ParserResearchScreen() {
                 {t('parserResearchPasteHelp')}
               </ThemedText>
               <TextInput
+                ref={pasteInputRef}
                 accessibilityLabel={t('parserResearchPasteA11y')}
                 value={pasted}
                 onChangeText={(value) => {
@@ -236,21 +236,24 @@ export default function ParserResearchScreen() {
                   showsVerticalScrollIndicator
                   style={styles.previewScroll}>
                   <ThemedText type="nano" themeColor="textSecondary" style={styles.preview}>
-                    {submission.preview}
+                    {manualJson}
                   </ThemedText>
                 </ScrollView>
               </Block>
               <Button
-                label={sending ? t('feedbackSending') : t('parserResearchSend')}
-                icon="upload"
-                disabled={sending || blocked}
-                onPress={() => setConfirming(true)}
+                label={exporting ? t('parserResearchExporting') : t('parserResearchExport')}
+                icon="download"
+                disabled={exporting || blocked}
+                onPress={() => void exportReport()}
               />
+              <ThemedText type="meta" themeColor="textTertiary">
+                {t('parserResearchExportHelp')}
+              </ThemedText>
             </Section>
           )}
 
           {notice && (
-            <Section index={4}>
+            <Section index={4} accessibilityLiveRegion="polite">
               <Block>
                 <ThemedText type="small">{notice.title}</ThemedText>
                 <ThemedText type="meta" themeColor="textSecondary">{notice.body}</ThemedText>
@@ -259,14 +262,6 @@ export default function ParserResearchScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
-      <ConfirmSheet
-        visible={confirming && !blocked}
-        onClose={() => setConfirming(false)}
-        question={t('parserResearchSendQ')}
-        body={t('parserResearchSendBody')}
-        confirmLabel={t('parserResearchSend')}
-        onConfirm={() => void send()}
-      />
     </ThemedView>
   );
 }
@@ -278,7 +273,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: ScreenPadding,
     // A 280-character template plus the full provider disclosure is tall. Keep
-    // enough trailing scroll range for the final consent button to clear the
+    // enough trailing scroll range for the final export button to clear the
     // home indicator on smaller iPhones and large Dynamic Type.
     paddingBottom: Spacing.six + 96,
     gap: Spacing.four + 2,

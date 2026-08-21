@@ -2,6 +2,93 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Platform, Share } from 'react-native';
 
+export type TextFileShareErrorCode =
+  | 'download_unavailable'
+  | 'cache_unavailable'
+  | 'share_unavailable'
+  | 'write_failed'
+  | 'share_failed';
+
+/** Named so the screen can answer a failed file export without platform detail. */
+export class TextFileShareError extends Error {
+  readonly code: TextFileShareErrorCode;
+
+  constructor(code: TextFileShareErrorCode) {
+    super(`Could not export a text file (${code}).`);
+    this.name = 'TextFileShareError';
+    this.code = code;
+  }
+}
+
+/**
+ * Export text as an actual file, or reject. Never degrades to a message share.
+ *
+ * Parser reports depend on the user receiving one attachable JSON file. The
+ * permissive `shareText` fallback below is right for convenience exports and
+ * wrong here: a swallowed Web Share failure or a plain-text intent looks like
+ * success while leaving the tester with no file to hand to Codex.
+ */
+export async function shareTextFile(
+  filename: string,
+  text: string,
+  options: { mimeType?: string; dialogTitle?: string } = {},
+): Promise<void> {
+  const mimeType = options.mimeType ?? 'text/plain';
+  if (Platform.OS === 'web') {
+    if (typeof document === 'undefined' || typeof Blob === 'undefined' ||
+      !document.body || typeof URL === 'undefined' ||
+      typeof URL.createObjectURL !== 'function') {
+      throw new TextFileShareError('download_unavailable');
+    }
+    try {
+      const uri = URL.createObjectURL(new Blob([text], { type: mimeType }));
+      const anchor = document.createElement('a');
+      anchor.href = uri;
+      anchor.download = filename;
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      // Some browsers consume Blob downloads asynchronously after click().
+      // Revoking on the next tick can cancel the file before it is claimed.
+      setTimeout(() => URL.revokeObjectURL(uri), 1_000);
+      return;
+    } catch {
+      throw new TextFileShareError('download_unavailable');
+    }
+  }
+
+  const dir = FileSystem.cacheDirectory;
+  if (!dir) throw new TextFileShareError('cache_unavailable');
+  let sharingAvailable = false;
+  try {
+    sharingAvailable = await Sharing.isAvailableAsync();
+  } catch {
+    throw new TextFileShareError('share_unavailable');
+  }
+  if (!sharingAvailable) {
+    throw new TextFileShareError('share_unavailable');
+  }
+
+  const uri = `${dir}${filename}`;
+  try {
+    await FileSystem.writeAsStringAsync(uri, text, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+  } catch {
+    throw new TextFileShareError('write_failed');
+  }
+  try {
+    await Sharing.shareAsync(uri, {
+      mimeType,
+      dialogTitle: options.dialogTitle ?? filename,
+      UTI: mimeType === 'application/json' ? 'public.json' : 'public.plain-text',
+    });
+  } catch {
+    throw new TextFileShareError('share_failed');
+  }
+}
+
 /**
  * Share a block of text as a FILE rather than as an intent payload.
  *

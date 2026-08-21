@@ -2505,8 +2505,8 @@ const S = {
     ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق تنبيهات البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
   },
   parserResearchPrivacy: {
-    en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. The exact result is shown before sending.',
-    ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. وسترى النتيجة كاملة قبل الإرسال.',
+    en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. The exact result is shown before export.',
+    ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. وسترى النتيجة كاملة قبل التصدير.',
   },
   parserResearchPasteHeader: { en: 'PASTE BANK ALERTS', ar: 'ألصق تنبيهات البنك' },
   parserResearchPasteHelp: {
@@ -2519,21 +2519,31 @@ const S = {
     ar: 'From: YOUR BANK\nرسالة شراء بالبطاقة…\n\nFrom: YOUR BANK\nرسالة تحويل…',
   },
   parserResearchPrivateBlocked: {
-    en: 'Private Mode is local-only. Turn it off before preparing or sending parser samples.',
-    ar: 'الوضع الخاص محلي فقط. أوقفه قبل تجهيز عينات المحلّل أو إرسالها.',
+    en: 'Private Mode is local-only. Turn it off before preparing or exporting parser samples.',
+    ar: 'الوضع الخاص محلي فقط. أوقفه قبل تجهيز عينات المحلّل أو تصديرها.',
+  },
+  parserResearchPasteRequiredTitle: { en: 'Paste an alert first', ar: 'ألصق تنبيهاً أولاً' },
+  parserResearchPasteRequired: {
+    en: 'Paste at least one bank alert above, then prepare the safe report.',
+    ar: 'ألصق تنبيهاً بنكياً واحداً على الأقل أعلاه، ثم جهّز التقرير الآمن.',
   },
   parserResearchPrepareInbox: { en: 'Prepare safe inbox report', ar: 'تجهيز تقرير آمن من الرسائل' },
   parserResearchPreparePaste: { en: 'Prepare safe report', ar: 'تجهيز تقرير آمن' },
   parserResearchPreparing: { en: 'Checking {count} messages…', ar: 'جارٍ فحص {count} رسالة…' },
   parserResearchPreviewNote: {
-    en: 'This complete report goes to Wafra, GitHub Actions and Anthropic Claude. Wafra deletes its relay copy within 14 days; GitHub and Anthropic apply their own retention policies. Code and synthetic tests may appear in a public draft PR, but this report is not published or merged automatically.',
-    ar: 'يُرسل هذا التقرير الكامل إلى وفرة وGitHub Actions وAnthropic Claude. تحذف وفرة نسخة المرحّل خلال 14 يوماً، بينما تطبق GitHub وAnthropic سياسات الاحتفاظ الخاصة بهما. قد يظهر كود واختبارات مصطنعة في مسودة طلب دمج عامة، لكن التقرير نفسه لا يُنشر ولا يُدمج شيء تلقائياً.',
+    en: 'This is the exact local JSON file. Wafra uploads nothing. You choose where to save or share it, then attach it to a Codex task yourself.',
+    ar: 'هذا هو ملف JSON المحلي نفسه. لا يرفع وفرة شيئاً. أنت تختار مكان حفظه أو مشاركته، ثم ترفقه بنفسك بمهمة في Codex.',
   },
-  parserResearchSend: { en: 'Send safe samples', ar: 'إرسال العينات الآمنة' },
-  parserResearchSendQ: { en: 'Send these safe samples?', ar: 'إرسال هذه العينات الآمنة؟' },
-  parserResearchSendBody: {
-    en: 'Only the redacted templates shown above leave this phone. You allow Wafra maintainers, GitHub Actions and Anthropic Claude to process them. Wafra keeps its relay copy for at most 14 days; GitHub and Anthropic use their own retention policies. Code and synthetic tests may be published in a public draft PR, but the report itself must not be copied there.',
-    ar: 'لن يغادر الهاتف سوى القوالب المنقّحة المعروضة أعلاه. أنت تسمح لمشرفي وفرة وGitHub Actions وAnthropic Claude بمعالجتها. تحتفظ وفرة بنسخة المرحّل لمدة أقصاها 14 يوماً، وتطبق GitHub وAnthropic سياساتهما الخاصة. قد يُنشر الكود والاختبارات المصطنعة في مسودة طلب دمج عامة، لكن يجب ألا يُنسخ التقرير نفسه إليها.',
+  parserResearchExport: { en: 'Export safe report', ar: 'تصدير التقرير الآمن' },
+  parserResearchExporting: { en: 'Opening share sheet…', ar: 'جارٍ فتح قائمة المشاركة…' },
+  parserResearchExportHelp: {
+    en: 'Save the JSON file, then attach it to Codex manually. Wafra does not choose or contact a recipient.',
+    ar: 'احفظ ملف JSON ثم أرفقه يدوياً في Codex. لا يختار وفرة مستلماً ولا يتواصل مع أي جهة.',
+  },
+  parserResearchExportFailedTitle: { en: 'Could not export the file', ar: 'تعذّر تصدير الملف' },
+  parserResearchExportFailedBody: {
+    en: 'Nothing was uploaded. Try again, or check that this device can save and share files.',
+    ar: 'لم يُرفع شيء. حاول مرة أخرى، أو تحقق من أن هذا الجهاز يستطيع حفظ الملفات ومشاركتها.',
   },
   parserResearchNoneTitle: { en: 'No safe samples found', ar: 'لم تُوجد عينات آمنة' },
   parserResearchNoneBody: {
@@ -2544,15 +2554,6 @@ const S = {
   parserResearchFailedBody: {
     en: 'Nothing was uploaded. Keep Wafra open and try again.',
     ar: 'لم يُرفع شيء. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
-  },
-  parserResearchSentTitle: { en: 'Safe samples received', ar: 'تم استلام العينات الآمنة' },
-  parserResearchSentDispatched: {
-    en: 'Reference {id}. The GitHub/Claude workflow was requested; any code result will be a public draft PR for review.',
-    ar: 'المرجع {id}. طُلب تشغيل آلية GitHub/Claude؛ وأي نتيجة برمجية ستكون مسودة طلب دمج عامة للمراجعة.',
-  },
-  parserResearchSentStored: {
-    en: 'Reference {id}. The safe report is stored for maintainers, but the GitHub workflow was not started.',
-    ar: 'المرجع {id}. حُفظ التقرير الآمن للمشرفين، لكن آلية GitHub لم تبدأ.',
   },
   supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
   settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
@@ -2567,8 +2568,8 @@ const S = {
   feedbackParserHeader: { en: 'BANK MESSAGE PROBLEM', ar: 'مشكلة في رسالة بنكية' },
   feedbackParserTitle: { en: 'Improve the bank parser', ar: 'تحسين محلّل البنك' },
   feedbackParserDetail: {
-    en: 'Review redacted message templates, then send them directly to the GitHub parser workflow.',
-    ar: 'راجع قوالب الرسائل المنقّحة، ثم أرسلها مباشرة إلى آلية GitHub للمحلّل.',
+    en: 'Prepare a redacted JSON file, then attach it to Codex yourself.',
+    ar: 'جهّز ملف JSON منقّحاً، ثم أرفقه بنفسك في Codex.',
   },
   feedbackWriteHeader: { en: 'WHAT WENT WRONG', ar: 'ما الذي حدث' },
   feedbackPlaceholder: {

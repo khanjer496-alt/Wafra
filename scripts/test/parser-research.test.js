@@ -2,9 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
+  buildManualParserResearchExport,
   buildParserResearchSubmission,
   parsePastedParserMessages,
   sanitizeParserTemplate,
+  serializeManualParserResearchExport,
 } = require('./build/parser-research.js');
 
 let pass = 0;
@@ -99,6 +101,31 @@ ok('only the dedicated report explicitly consents to named AI review',
     submission.wire.diagnostic.delivery.thirdPartyAi === true &&
     submission.wire.text === 'Sanitized parser research report.');
 
+const manualExport = typeof buildManualParserResearchExport === 'function'
+  ? buildManualParserResearchExport(submission)
+  : null;
+const manualJson = typeof serializeManualParserResearchExport === 'function' && manualExport
+  ? serializeManualParserResearchExport(manualExport)
+  : '';
+ok('the manual export says Wafra uploaded nothing and the user chooses the destination',
+  manualExport?.schema === 1 && manualExport?.kind === 'wafra-parser-report' &&
+    manualExport?.delivery?.mode === 'manual' &&
+    manualExport?.delivery?.uploadedByWafra === false &&
+    manualExport?.delivery?.destinationChosenByUser === true,
+  manualJson);
+ok('the manual export keeps the useful redacted templates and aggregate counts',
+  manualExport?.counts === submission.counts &&
+    manualExport?.templates === submission.wire.diagnostic.shapes &&
+    manualExport?.redaction === submission.wire.diagnostic.redaction &&
+    manualExport?.build?.version === '1.0.0' && manualExport?.build?.marketId === 'AE',
+  manualJson);
+ok('the manual export carries no automatic-delivery or raw-message residue',
+  manualJson.length > 0 && !manualJson.includes(secret) && !manualJson.includes('45.75') &&
+    !manualJson.includes('3644') && !manualJson.includes('04/07/2026') &&
+    !manualJson.includes('90881723004') && !manualJson.includes('1800000000000') &&
+    !/aiReviewConsent|thirdPartyAi|Anthropic|GitHub|relay|retention/i.test(manualJson),
+  manualJson);
+
 const root = path.join(__dirname, '../..');
 const source = fs.readFileSync(path.join(root, 'src/lib/parser-research-source.ts'), 'utf8');
 const transport = fs.readFileSync(path.join(root, 'src/lib/feedback-transport.ts'), 'utf8');
@@ -117,22 +144,32 @@ ok('the parser-research transport posts only the already-built wire object',
     !/submitParserResearchFeedback[\s\S]{0,4000}(deviceId|pushToken|installationId)/.test(transport));
 ok('the old full-inbox raw share control is no longer exposed in Settings',
   !/isSmsCorpusExportAvailable|shareSmsCorpus|smsCorpusExportTitle/.test(settings));
-ok('the tester sees the exact safe preview before a separate send confirmation',
-    /submission\.preview/.test(screen) && /setConfirming\(true\)/.test(screen) &&
-    /parserResearchSendBody/.test(screen) && /previewScroll/.test(screen) &&
-    /maxHeight: 180/.test(screen));
+ok('the tester previews and exports the exact local JSON file instead of sending it',
+    /serializeManualParserResearchExport/.test(screen) &&
+    /shareTextFile\('wafra-parser-report\.json',\s*manualJson/.test(screen) &&
+    /mimeType:\s*'application\/json'/.test(screen) &&
+    /parserResearchExport/.test(screen) && /previewScroll/.test(screen) &&
+    /maxHeight: 180/.test(screen) &&
+    !/submitParserResearchFeedback|setConfirming\(true\)|<ConfirmSheet/.test(screen));
 ok('raw pasted text is cleared as soon as the redacted report exists',
   /setPasted\(''\)/.test(screen) && !/setState\([^)]*messages/.test(screen));
-ok('preparing dismisses the keyboard so the complete preview and consent stay reachable',
-  /const prepare = async \(\) => \{\s*Keyboard\.dismiss\(\)/.test(screen) &&
+ok('an empty paste gives a visible answer and focuses the input instead of a dead button',
+  /parserResearchPasteRequired/.test(screen) && /pasteInputRef\.current\?\.focus\(\)/.test(screen) &&
+    /AccessibilityInfo\.announceForAccessibility/.test(screen) &&
+    /accessibilityLiveRegion="polite"/.test(screen) &&
+    /const canPrepare = !blocked && !preparing/.test(screen));
+const prepareSource = screen.slice(screen.indexOf('const prepare = async'));
+ok('preparing a real report dismisses the keyboard before work starts',
+  prepareSource.indexOf('Keyboard.dismiss()') >= 0 &&
+    prepareSource.indexOf('Keyboard.dismiss()') < prepareSource.indexOf('setPreparing(true)') &&
     /paddingBottom: Spacing\.six \+ 96/.test(screen));
 ok('Private Mode blocks both collection and preparation',
   /const blocked = state\.privateMode/.test(screen) &&
     /const canPrepare = !blocked/.test(screen));
-ok('Private Mode is rechecked before final send and clears a stale report',
+ok('Private Mode is rechecked before export and clears a stale report',
   /if \(!submission \|\| state\.privateMode \|\| !enabled\)/.test(screen) &&
     /if \(!blocked\) return;[\s\S]{0,160}setSubmission\(null\)/.test(screen) &&
-    /disabled=\{sending \|\| blocked\}/.test(screen));
+    /disabled=\{exporting \|\| blocked\}/.test(screen));
 ok('a production deep link cannot bypass the internal-build gate',
   /const enabled = isParserResearchBuild\(\)/.test(screen) &&
     /const blocked = state\.privateMode \|\| !enabled/.test(screen) &&

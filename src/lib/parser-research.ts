@@ -56,6 +56,61 @@ export interface ParserResearchSubmission {
   counts: ParserResearchCounts;
 }
 
+export interface ManualParserResearchExport {
+  schema: 1;
+  kind: 'wafra-parser-report';
+  notice: string;
+  delivery: {
+    mode: 'manual';
+    uploadedByWafra: false;
+    destinationChosenByUser: true;
+  };
+  build: ParserResearchBuild;
+  counts: ParserResearchCounts;
+  templates: ParserResearchShape[];
+  redaction: typeof PARSER_RESEARCH_REDACTION;
+}
+
+/**
+ * Build the local file the tester can hand to Codex themselves.
+ *
+ * This intentionally does not reuse the relay wire envelope: that object says
+ * the tester authorized Wafra, GitHub Actions and Anthropic Claude. A manual
+ * export makes none of those claims. It carries only the already-redacted
+ * diagnostic value and says plainly that Wafra uploaded nothing.
+ */
+export function buildManualParserResearchExport(
+  submission: ParserResearchSubmission,
+): ManualParserResearchExport {
+  return {
+    schema: 1,
+    kind: 'wafra-parser-report',
+    notice: 'Wafra did not upload this file. The user chooses where to share it.',
+    delivery: {
+      mode: 'manual',
+      uploadedByWafra: false,
+      destinationChosenByUser: true,
+    },
+    build: {
+      version: submission.wire.appVersion,
+      platform: submission.wire.platform,
+      language: submission.wire.locale,
+      marketId: submission.wire.diagnostic.build.marketId,
+      currency: submission.wire.diagnostic.build.currency,
+    },
+    counts: submission.counts,
+    templates: submission.wire.diagnostic.shapes as ParserResearchShape[],
+    redaction: PARSER_RESEARCH_REDACTION,
+  };
+}
+
+/** The exact bytes shown on screen and written into the shared JSON file. */
+export function serializeManualParserResearchExport(
+  report: ManualParserResearchExport,
+): string {
+  return JSON.stringify(report, null, 2);
+}
+
 /**
  * Words a parser test needs to preserve. Every other letter-run becomes
  * `[text]`, so an unknown merchant, beneficiary or account nickname cannot
