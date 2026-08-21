@@ -64,3 +64,4 @@ server/.test-build/
 # scratch space for a single run and are removed when it ends; the work itself
 # arrives as branches, never as files here.
 .claude/worktrees/
+.variate/
