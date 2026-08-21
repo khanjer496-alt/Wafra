@@ -1821,11 +1821,14 @@ ok('the spoken label agrees with the sign on screen',
       fs.readFileSync(file, 'utf8'),
     ));
   const launchFallback = read('src/lib/unparsed-launch-alert.ts');
+  const parserResearch = read('src/lib/parser-research.ts');
+  const parserResearchContract = read('src/lib/parser-research-contract.ts');
   const aiSuggestion = read('src/lib/alert-ai-suggestion.ts');
   const capture = read('src/lib/auto-import.ts');
-  ok('only the sanitized Gulf fallback consumes alert drafts in shipping capture',
-    alertConsumers.length === 1 &&
-      alertConsumers[0].endsWith(`${path.sep}unparsed-launch-alert.ts`),
+  ok('alert drafts reach only review capture and the isolated research redactor',
+    alertConsumers.length === 2 &&
+      alertConsumers.some((file) => file.endsWith(`${path.sep}unparsed-launch-alert.ts`)) &&
+      alertConsumers.some((file) => file.endsWith(`${path.sep}parser-research.ts`)),
     alertConsumers.join(' | '));
   ok('the Gulf fallback can reach only the explicit encrypted review path',
     !/(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import)['"]/.test(
@@ -1834,6 +1837,11 @@ ok('the spoken label agrees with the sign on screen',
       /prepareLaunchReviewAlert/.test(capture) &&
       /reviewCandidates\.push\(\{ \.\.\.reviewPrepared, \.\.\.identity \}\)/.test(capture),
     'an uncertain alert must never become parsed or mutate the ledger directly');
+  ok('parser research cannot mutate the ledger or perform its own network request',
+    !/(?:fetch\s*\(|https?:|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(
+      parserResearch,
+    ) && /rawMessages: false/.test(parserResearchContract) &&
+      /timestamps: false/.test(parserResearchContract));
   ok('ISO draft metadata reaches shipping code only through the isolated inspector',
     metadataConsumers.length === 0, metadataConsumers.join(' | '));
   ok('first-wave market review logic has no shipping importer',

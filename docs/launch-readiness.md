@@ -494,8 +494,11 @@ Simulator results and source inspection do not satisfy this gate.
   RevenueCat, Expo Push Service/APNs, email/PDF import, trusted devices,
   Keychain survival after uninstall, backups/exports, and deletion failure
   recovery.
-- [x] Current feedback reports disclose 14-day retention and human maintainer
-  access, and are blocked from GitHub/third-party AI without explicit consent.
+- [x] Ordinary feedback discloses 14-day retention and human maintainer access
+  and is blocked from GitHub/third-party AI. Internal parser research separately
+  shows the complete redacted templates, names GitHub Actions and Anthropic
+  Claude, distinguishes provider retention from Wafra's 14-day relay copy, and
+  requires explicit coding-AI consent before a public draft PR can be opened.
 - [ ] Before enabling worldwide automatic import, migrate all money-bearing
   storage and formatting away from the two-decimal `*Fils` assumption; keep
   the universal alert inspector review-only until that migration and its

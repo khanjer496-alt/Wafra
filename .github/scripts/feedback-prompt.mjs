@@ -31,7 +31,8 @@ if (typeof item.text !== 'string' || !item.text.trim()) {
 // Defence in depth: repository_dispatch is not the only trigger. A maintainer
 // can start the workflow manually, so the final component that constructs
 // model input must independently require the user's explicit disclosure and
-// consent. Current app builds send false and therefore can never reach Claude.
+// consent. Ordinary feedback sends false; only the dedicated, previewed parser
+// research report can reach the coding agent.
 if (item.aiReviewConsent !== true || item.diagnostic?.delivery?.thirdPartyAi !== true) {
   console.error('::error::this feedback item did not authorize third-party AI review');
   process.exit(1);
@@ -43,6 +44,16 @@ if (item.aiReviewConsent !== true || item.diagnostic?.delivery?.thirdPartyAi !==
 const diagnostic = item.diagnostic
   ? JSON.stringify(item.diagnostic, null, 2).slice(0, 8_000)
   : '(none sent)';
+const parserResearch = item.diagnostic?.kind === 'parser-research';
+const researchInstructions = parserResearch
+  ? `\nThis is a parser-research batch, not user prose. Each template is already\n` +
+    `redacted: # marks a digit position, while [text] marks a masked\n` +
+    `recipient/merchant span or a word outside the financial grammar,\n` +
+    `and an aliased sender is intentionally not recoverable. Start with the most\n` +
+    `frequent \`needs-parser-work\` template. Replace placeholders with invented\n` +
+    `values when writing the synthetic reproduction; never try to infer the\n` +
+    `original merchant, person, sender or number.\n`
+  : '';
 
 writeFileSync(
   outPath,
@@ -64,6 +75,7 @@ Redacted diagnostic the client attached:
 \`\`\`json
 ${diagnostic}
 \`\`\`
+${researchInstructions}
 
 ## What you must do, in this order
 

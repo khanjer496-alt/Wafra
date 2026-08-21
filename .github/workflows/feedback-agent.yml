@@ -26,10 +26,10 @@ name: Feedback agent
 #    applied and it must PASS. An agent that "fixed" a bug it never reproduced
 #    cannot get past it.
 #
-# 3. EXPLICIT AI CONSENT. Current app/Worker contracts return false, so the
-#    consent gate below stops both repository and manual dispatch before a
-#    prompt is composed. If a future consented path is introduced, the
-#    concurrency group still prevents two runs for the same item.
+# 3. EXPLICIT AI CONSENT. Ordinary feedback still returns false. Only the
+#    internal parser-research screen can return true, after showing its fully
+#    redacted templates and naming this workflow. The gate below also stops a
+#    manual dispatch from bypassing that choice.
 
 on:
   repository_dispatch:
@@ -69,16 +69,6 @@ jobs:
       # Repository VARIABLE (Settings → Secrets and variables → Actions →
       # Variables), e.g. https://wafra-relay.<account>.workers.dev
       RELAY_URL: ${{ vars.WAFRA_RELAY_URL }}
-      # Repository SECRET holding the SAME value as the Worker secret
-      # FEEDBACK_READ_TOKEN — see the block at the end of server/wrangler.toml.
-      FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
-      # A SUBSCRIPTION, not an API key. `claude setup-token` (run once, locally,
-      # on a Pro/Max/Team/Enterprise plan) mints a long-lived OAuth token that
-      # the CLI reads from this exact variable name; it lasts a year and is
-      # renewed by running the same command again. Documented for CI at
-      # https://code.claude.com/docs/en/authentication#generate-a-long-lived-token
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      GH_TOKEN: ${{ github.token }}
       # WORK is deliberately NOT here. It is set in the first step instead,
       # because neither way of writing it in this block works:
       #
@@ -116,6 +106,9 @@ jobs:
       # file. Same convention as deploy-relay.yml: the run ends in a sentence in
       # the job summary, not a stack trace.
       - name: Preflight
+        env:
+          FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
           missing=()
@@ -152,6 +145,9 @@ jobs:
         with:
           # The branch is pushed from here; a shallow clone makes that awkward.
           fetch-depth: 0
+          # The coding agent must not inherit a credential that can push. The
+          # final PR step authenticates Git after every gate passes.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -173,6 +169,9 @@ jobs:
       # Into $RUNNER_TEMP, outside the git workspace, so no later `git add -A`
       # can sweep it into a commit. Nothing here prints the body.
       - name: Fetch the feedback item
+        env:
+          # Same value as the Worker's FEEDBACK_READ_TOKEN; scoped to this curl.
+          FEEDBACK_READ_TOKEN: ${{ secrets.WAFRA_FEEDBACK_READ_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p "$WORK"
@@ -285,6 +284,10 @@ jobs:
       # it is wrong the step fails loudly, no branch is pushed, and the item is
       # still in D1 to re-fire — a wasted run, not a bad pull request.
       - name: Run the agent
+        env:
+          # Generated with `claude setup-token`. The coding agent receives
+          # neither the relay read secret nor GitHub write credentials.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
           npm install -g @anthropic-ai/claude-code
@@ -395,8 +398,11 @@ jobs:
             "$WORK/feedback.json" "$WORK/SUMMARY.md"
 
       - name: Open a draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          gh auth setup-git
           branch="feedback/$FEEDBACK_ID"
           git config user.name  'wafra-feedback-agent'
           git config user.email 'github-actions[bot]@users.noreply.github.com'

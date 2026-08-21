@@ -24,11 +24,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import { shareText } from '@/lib/share-text';
-import {
-  isSmsCorpusExportAvailable,
-  shareSmsCorpus,
-} from '@/lib/sms-corpus-export';
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -88,6 +84,7 @@ import {
   type RelayConfig,
 } from '@/lib/relay';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
+import { isParserResearchBuild } from '@/lib/parser-research-source';
 import {
   buildExpenseReportHtml,
   reportExpenses,
@@ -143,8 +140,6 @@ export default function SettingsScreen() {
     isRelayPlatform() ? undefined : null,
   );
   const [smsGranted, setSmsGranted] = useState(false);
-  const [corpusExportCount, setCorpusExportCount] = useState<number | null>(null);
-  const [corpusExporting, setCorpusExporting] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
   // their way down to two merchants loses the only route to the screen with
@@ -536,25 +531,6 @@ export default function SettingsScreen() {
     shareText('wafra-backup.json', exportBackup(), {
       mimeType: 'application/json',
     }).catch(() => {});
-  };
-
-  const exportSmsCorpus = async () => {
-    if (corpusExporting) return;
-    setCorpusExporting(true);
-    try {
-      const granted = await requestSmsPermission();
-      setSmsGranted(granted);
-      if (!granted) {
-        Alert.alert(t('smsCorpusPermissionTitle'), t('smsCorpusPermissionBody'));
-        return;
-      }
-      setCorpusExportCount(0);
-      await shareSmsCorpus(setCorpusExportCount);
-    } catch {
-      Alert.alert(t('smsCorpusFailedTitle'), t('smsCorpusFailedBody'));
-    } finally {
-      setCorpusExporting(false);
-    }
   };
 
   const createExpenseReport = async (scope: 'month' | 'all') => {
@@ -1038,8 +1014,15 @@ export default function SettingsScreen() {
               t('sendFeedback'),
               t('sendFeedbackDetail'),
               () => router.push('/feedback'),
-              { last: true },
+              { last: !isParserResearchBuild() },
             )}
+            {isParserResearchBuild() &&
+              linkRow(
+                t('parserResearchSettingsTitle'),
+                t('parserResearchSettingsDetail'),
+                () => router.push('/parser-research' as Href),
+                { last: true },
+              )}
           </Section>
 
           <Section index={4}>
@@ -1158,22 +1141,6 @@ export default function SettingsScreen() {
                   : t('formatsNotKeptRow'),
               () => router.push('/accuracy'),
             )}
-            {isSmsCorpusExportAvailable() &&
-              linkRow(
-                t('smsCorpusExportTitle'),
-                corpusExporting
-                  ? tf('smsCorpusExportProgress', { count: corpusExportCount ?? 0 })
-                  : t('smsCorpusExportDetail'),
-                () => {
-                  if (corpusExporting) return;
-                  setConfirmation({
-                    question: t('smsCorpusConfirmTitle'),
-                    body: t('smsCorpusConfirmBody'),
-                    confirmLabel: t('smsCorpusConfirmAction'),
-                    onConfirm: () => void exportSmsCorpus(),
-                  });
-                },
-              )}
             {linkRow(t('backupJson'), null, backupJson)}
             {linkRow(t('restoreBackup'), null, restoreFromFile)}
             {linkRow(t('exportCsv'), null, exportCsv)}

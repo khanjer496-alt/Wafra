@@ -2467,6 +2467,81 @@ const S = {
     en: 'Report a bug, and choose what to attach',
     ar: 'أبلغ عن خلل، واختر ما تُرفقه',
   },
+  parserResearchSettingsTitle: {
+    en: 'Send parser samples',
+    ar: 'إرسال عينات للمحلّل',
+  },
+  parserResearchSettingsDetail: {
+    en: 'Tester tool · redacted templates only',
+    ar: 'أداة اختبار · قوالب منقّحة فقط',
+  },
+  parserResearchTitle: { en: 'Parser samples', ar: 'عينات المحلّل' },
+  parserResearchUnavailable: {
+    en: 'This tester tool is not included in this build.',
+    ar: 'أداة الاختبار هذه غير مضمّنة في هذه النسخة.',
+  },
+  parserResearchAndroidIntro: {
+    en: 'Wafra checks this Android inbox in memory, keeps only likely financial alerts, removes sensitive details, and prepares a small set of repeated message templates.',
+    ar: 'يفحص وفرة صندوق رسائل أندرويد في الذاكرة، ويحتفظ بتنبيهات مالية محتملة فقط، ويحذف التفاصيل الحساسة، ثم يجهّز مجموعة صغيرة من قوالب الرسائل المتكررة.',
+  },
+  parserResearchIosIntro: {
+    en: 'iPhone does not let Wafra read Messages. Copy bank alerts with Apple Shortcuts, paste them here, then Wafra will filter and redact them on this phone.',
+    ar: 'لا يسمح الآيفون لوفرة بقراءة الرسائل. انسخ تنبيهات البنك عبر اختصارات Apple والصقها هنا، ثم يرشّحها وفرة وينقّحها على هذا الهاتف.',
+  },
+  parserResearchPasteIntro: {
+    en: 'This tester build cannot scan the inbox automatically. Paste bank alerts here, then Wafra will filter and redact them on this device.',
+    ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق تنبيهات البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
+  },
+  parserResearchPrivacy: {
+    en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. The exact result is shown before sending.',
+    ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. وسترى النتيجة كاملة قبل الإرسال.',
+  },
+  parserResearchPasteHeader: { en: 'PASTE BANK ALERTS', ar: 'ألصق تنبيهات البنك' },
+  parserResearchPasteHelp: {
+    en: 'Put a blank line between messages. You may add “From: ADIB” as the first line of a message; unknown senders become aliases.',
+    ar: 'ضع سطراً فارغاً بين الرسائل. يمكنك إضافة «From: ADIB» في أول سطر؛ ويستبدل وفرة المرسلين غير المعروفين بأسماء مستعارة.',
+  },
+  parserResearchPasteA11y: { en: 'Paste bank alert messages', ar: 'ألصق رسائل تنبيهات البنك' },
+  parserResearchPastePlaceholder: {
+    en: 'From: YOUR BANK\nYour card purchase alert…\n\nFrom: YOUR BANK\nYour transfer alert…',
+    ar: 'From: YOUR BANK\nرسالة شراء بالبطاقة…\n\nFrom: YOUR BANK\nرسالة تحويل…',
+  },
+  parserResearchPrivateBlocked: {
+    en: 'Private Mode is local-only. Turn it off before preparing or sending parser samples.',
+    ar: 'الوضع الخاص محلي فقط. أوقفه قبل تجهيز عينات المحلّل أو إرسالها.',
+  },
+  parserResearchPrepareInbox: { en: 'Prepare safe inbox report', ar: 'تجهيز تقرير آمن من الرسائل' },
+  parserResearchPreparePaste: { en: 'Prepare safe report', ar: 'تجهيز تقرير آمن' },
+  parserResearchPreparing: { en: 'Checking {count} messages…', ar: 'جارٍ فحص {count} رسالة…' },
+  parserResearchPreviewNote: {
+    en: 'This complete report goes to Wafra, GitHub Actions and Anthropic Claude. Wafra deletes its relay copy within 14 days; GitHub and Anthropic apply their own retention policies. Code and synthetic tests may appear in a public draft PR, but this report is not published or merged automatically.',
+    ar: 'يُرسل هذا التقرير الكامل إلى وفرة وGitHub Actions وAnthropic Claude. تحذف وفرة نسخة المرحّل خلال 14 يوماً، بينما تطبق GitHub وAnthropic سياسات الاحتفاظ الخاصة بهما. قد يظهر كود واختبارات مصطنعة في مسودة طلب دمج عامة، لكن التقرير نفسه لا يُنشر ولا يُدمج شيء تلقائياً.',
+  },
+  parserResearchSend: { en: 'Send safe samples', ar: 'إرسال العينات الآمنة' },
+  parserResearchSendQ: { en: 'Send these safe samples?', ar: 'إرسال هذه العينات الآمنة؟' },
+  parserResearchSendBody: {
+    en: 'Only the redacted templates shown above leave this phone. You allow Wafra maintainers, GitHub Actions and Anthropic Claude to process them. Wafra keeps its relay copy for at most 14 days; GitHub and Anthropic use their own retention policies. Code and synthetic tests may be published in a public draft PR, but the report itself must not be copied there.',
+    ar: 'لن يغادر الهاتف سوى القوالب المنقّحة المعروضة أعلاه. أنت تسمح لمشرفي وفرة وGitHub Actions وAnthropic Claude بمعالجتها. تحتفظ وفرة بنسخة المرحّل لمدة أقصاها 14 يوماً، وتطبق GitHub وAnthropic سياساتهما الخاصة. قد يُنشر الكود والاختبارات المصطنعة في مسودة طلب دمج عامة، لكن يجب ألا يُنسخ التقرير نفسه إليها.',
+  },
+  parserResearchNoneTitle: { en: 'No safe samples found', ar: 'لم تُوجد عينات آمنة' },
+  parserResearchNoneBody: {
+    en: 'Wafra excluded OTPs, security messages and anything that did not look like posted financial activity. Nothing was prepared or uploaded.',
+    ar: 'استبعد وفرة رموز التحقق ورسائل الأمان وكل ما لم يبدُ نشاطاً مالياً منفذاً. لم يُجهّز أو يُرفع شيء.',
+  },
+  parserResearchFailedTitle: { en: 'Could not prepare samples', ar: 'تعذّر تجهيز العينات' },
+  parserResearchFailedBody: {
+    en: 'Nothing was uploaded. Keep Wafra open and try again.',
+    ar: 'لم يُرفع شيء. أبقِ وفرة مفتوحاً وحاول مرة أخرى.',
+  },
+  parserResearchSentTitle: { en: 'Safe samples received', ar: 'تم استلام العينات الآمنة' },
+  parserResearchSentDispatched: {
+    en: 'Reference {id}. The GitHub/Claude workflow was requested; any code result will be a public draft PR for review.',
+    ar: 'المرجع {id}. طُلب تشغيل آلية GitHub/Claude؛ وأي نتيجة برمجية ستكون مسودة طلب دمج عامة للمراجعة.',
+  },
+  parserResearchSentStored: {
+    en: 'Reference {id}. The safe report is stored for maintainers, but the GitHub workflow was not started.',
+    ar: 'المرجع {id}. حُفظ التقرير الآمن للمشرفين، لكن آلية GitHub لم تبدأ.',
+  },
   supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
   settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
   settingStatusOn: { en: 'On', ar: 'مفعّل' },

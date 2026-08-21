@@ -2,6 +2,7 @@
 export const FEEDBACK_WIRE_SCHEMA = 1;
 export const FEEDBACK_RETENTION_DAYS = 14;
 export const FEEDBACK_DIAGNOSTIC_MAX_BYTES = 16 * 1024;
+export const PARSER_RESEARCH_FEEDBACK_TEXT = 'Sanitized parser research report.';
 
 export interface FeedbackDeliveryDisclosure {
   retentionDays: 14;
@@ -14,6 +15,40 @@ export const FEEDBACK_DELIVERY: FeedbackDeliveryDisclosure = {
   reviewedBy: 'wafra-maintainers',
   thirdPartyAi: false,
 };
+
+export interface ParserResearchDeliveryDisclosure {
+  retentionDays: 14;
+  reviewedBy: 'wafra-maintainers';
+  thirdPartyAi: true;
+}
+
+export const PARSER_RESEARCH_DELIVERY: ParserResearchDeliveryDisclosure = {
+  retentionDays: FEEDBACK_RETENTION_DAYS,
+  reviewedBy: 'wafra-maintainers',
+  thirdPartyAi: true,
+};
+
+export interface ParserResearchWirePayload {
+  schema: 1;
+  text: typeof PARSER_RESEARCH_FEEDBACK_TEXT;
+  appVersion: string;
+  platform: string;
+  locale: string;
+  aiReviewConsent: true;
+  diagnostic: {
+    reportSchema: number;
+    kind: 'parser-research';
+    detailRequested: 'parser-research';
+    detail: 'parser-research';
+    withheld: null;
+    delivery: ParserResearchDeliveryDisclosure;
+    build: { marketId: string; currency: string; privateMode: false };
+    counts: unknown;
+    shapes: unknown;
+    cardDiagnostic: null;
+    redaction: unknown;
+  };
+}
 
 interface FeedbackWireSource {
   schema: number;
@@ -41,7 +76,7 @@ export interface FeedbackWirePayload {
   appVersion: string;
   platform: string;
   locale: string;
-  /** Literal false in this release. The Worker rejects true. */
+  /** Ordinary feedback is always human-only; parser research has a separate type. */
   aiReviewConsent: false;
   diagnostic: {
     reportSchema: number;

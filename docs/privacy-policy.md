@@ -168,12 +168,21 @@ store biometric templates.
   vault removes every device and queue.
 - **Backup and export:** the user can create a backup or export and choose where
   to send it. The resulting file is controlled by the user.
-- **Feedback and unrecognised formats:** if the user deliberately sends a
+- **Feedback and parser research:** if the user deliberately sends an ordinary
   report in Wafra, the exact redacted report is shown before confirmation. It
   is stored in Cloudflare D1 for at most 14 days and can be read by Wafra
-  maintainers. In the current release it is not dispatched to GitHub Actions
-  or any third-party AI service. Reports contain no device, advertising,
-  installation or push identifier.
+  maintainers; ordinary feedback is not sent to third-party AI. Internal test
+  builds also offer a separate parser-research tool. It keeps only likely
+  financial-alert templates, masks every digit, removes timestamps, masks
+  recipient and merchant spans, replaces words outside a strict financial
+  grammar, and aliases unknown senders. It shows the complete result before a
+  second confirmation that explicitly permits GitHub Actions and Anthropic
+  Claude to process it. Wafra deletes its Cloudflare D1 copy within 14 days;
+  GitHub and Anthropic apply their own retention policies. Code and synthetic
+  tests may be published in a public draft pull request, but the workflow is
+  required not to copy the report itself into that pull request and never
+  merges a change automatically. Raw message bodies are not uploaded. Reports
+  contain no device, advertising, installation or push identifier.
 
 Wafra does not include advertising, third-party analytics or crash reporting.
 
@@ -182,8 +191,9 @@ Wafra does not include advertising, third-party analytics or crash reporting.
 Wafra extracts transaction fields and suggests a merchant and category. These
 labels are visible only to the user, have no legal or financial effect and can
 be corrected. Wafra does not use bank alerts for advertising, credit decisions
-or training a server-side model. User feedback is not sent to a third-party AI
-in the current release.
+or training a server-side model. Ordinary user feedback is not sent to a
+third-party AI. A tester may separately and explicitly authorize GitHub Actions
+and Anthropic Claude to process the redacted parser templates described above.
 
 ## Security and retention
 

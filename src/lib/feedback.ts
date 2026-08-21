@@ -729,6 +729,8 @@ export function formatFeedbackPayload(p: FeedbackPayload): string {
 export interface FeedbackReceipt {
   /** The transport's own id for this report — an issue number, a ticket id. */
   id: string;
+  /** Whether the explicitly consented repository workflow was requested. */
+  dispatched?: boolean;
 }
 
 /** Implement this. It is the entire surface between capture and transport. */
