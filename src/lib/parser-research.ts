@@ -8,6 +8,7 @@ import {
 import { inspectAlertDraft } from '@/lib/alert-draft';
 import { bankProfileForSender, nonPostingReason, parseSms } from '@/lib/sms-parser';
 import type { SmsCorpusMessage } from '@/lib/sms-corpus';
+import type { CategoryId, TransactionType } from '@/lib/types';
 import {
   isParserResearchTemplateWord,
   PARSER_RESEARCH_REDACTION,
@@ -39,6 +40,36 @@ export interface ParserResearchShape {
   count: number;
 }
 
+export interface ParsedParserResearchShape {
+  sender: string;
+  template: string;
+  outcome: 'parsed';
+  count: number;
+  result: {
+    kind: 'transaction' | 'billDue' | 'cardStatement' | 'cardPayment';
+    type: TransactionType;
+    category: CategoryId;
+    categorySource: 'rule' | 'fallback';
+  };
+}
+
+export interface ManualParserResearchSamples {
+  unparsed: ParserResearchShape[];
+  parsed: ParsedParserResearchShape[];
+}
+
+export interface ManualParserResearchCounts {
+  checked: number;
+  financial: number;
+  parsedMessages: number;
+  unparsedMessages: number;
+  sensitiveExcluded: number;
+  nonFinancialExcluded: number;
+  uniqueParsedTemplates: number;
+  uniqueUnparsedTemplates: number;
+  includedTemplates: number;
+}
+
 export interface ParserResearchCounts {
   checked: number;
   financial: number;
@@ -54,6 +85,7 @@ export interface ParserResearchSubmission {
   preview: string;
   wire: ParserResearchWirePayload;
   counts: ParserResearchCounts;
+  manualSamples: ManualParserResearchSamples;
 }
 
 export interface ParserResearchProgress {
@@ -67,7 +99,7 @@ export interface ParserResearchCooperativeOptions {
 }
 
 export interface ManualParserResearchExport {
-  schema: 1;
+  schema: 2;
   kind: 'wafra-parser-report';
   notice: string;
   delivery: {
@@ -76,8 +108,8 @@ export interface ManualParserResearchExport {
     destinationChosenByUser: true;
   };
   build: ParserResearchBuild;
-  counts: ParserResearchCounts;
-  templates: ParserResearchShape[];
+  counts: ManualParserResearchCounts;
+  samples: ManualParserResearchSamples;
   redaction: typeof PARSER_RESEARCH_REDACTION;
 }
 
@@ -93,7 +125,7 @@ export function buildManualParserResearchExport(
   submission: ParserResearchSubmission,
 ): ManualParserResearchExport {
   return {
-    schema: 1,
+    schema: 2,
     kind: 'wafra-parser-report',
     notice: 'Wafra did not upload this file. The user chooses where to share it.',
     delivery: {
@@ -108,10 +140,29 @@ export function buildManualParserResearchExport(
       marketId: submission.wire.diagnostic.build.marketId,
       currency: submission.wire.diagnostic.build.currency,
     },
-    counts: submission.counts,
-    templates: submission.wire.diagnostic.shapes as ParserResearchShape[],
+    counts: {
+      checked: submission.counts.checked,
+      financial: submission.counts.financial,
+      parsedMessages: submission.counts.alreadyParsedExcluded,
+      unparsedMessages:
+        submission.counts.financial - submission.counts.alreadyParsedExcluded,
+      sensitiveExcluded: submission.counts.sensitiveExcluded,
+      nonFinancialExcluded: submission.counts.nonFinancialExcluded,
+      uniqueParsedTemplates: submission.manualSamples.parsed.length,
+      uniqueUnparsedTemplates: submission.manualSamples.unparsed.length,
+      includedTemplates:
+        submission.manualSamples.parsed.length + submission.manualSamples.unparsed.length,
+    },
+    samples: submission.manualSamples,
     redaction: PARSER_RESEARCH_REDACTION,
   };
+}
+
+export function hasManualParserResearchSamples(
+  submission: ParserResearchSubmission,
+): boolean {
+  return submission.manualSamples.unparsed.length > 0 ||
+    submission.manualSamples.parsed.length > 0;
 }
 
 /** The exact bytes shown on screen and written into the shared JSON file. */
@@ -119,6 +170,76 @@ export function serializeManualParserResearchExport(
   report: ManualParserResearchExport,
 ): string {
   return JSON.stringify(report, null, 2);
+}
+
+export interface ManualParserResearchSerializationProgress {
+  completed: number;
+  total: number;
+}
+
+/**
+ * Serialize an unbounded manual report in small turns. Each sample is handled
+ * in a bounded turn before the final JSON string is assembled; the resulting
+ * bytes remain exactly equivalent to JSON.stringify(report, null, 2).
+ */
+export async function serializeManualParserResearchExportCooperatively(
+  report: ManualParserResearchExport,
+  onProgress?: (progress: ManualParserResearchSerializationProgress) => void,
+  options: ParserResearchCooperativeOptions = {},
+): Promise<string> {
+  const shouldContinue = options.shouldContinue ?? (() => true);
+  const total = report.samples.unparsed.length + report.samples.parsed.length;
+  const unparsed: string[] = [];
+  const parsed: string[] = [];
+  let completed = 0;
+  let sliceStartedAt = Date.now();
+  let sliceSize = 0;
+  const append = async (
+    sample: ParserResearchShape | ParsedParserResearchShape,
+    destination: string[],
+  ): Promise<void> => {
+    assertParserResearchContinues(shouldContinue);
+    destination.push(JSON.stringify(sample, null, 2)
+      .split('\n')
+      .map((line) => `      ${line}`)
+      .join('\n'));
+    completed += 1;
+    sliceSize += 1;
+    if (completed < total && (
+      sliceSize >= RESEARCH_PARSE_SLICE_MAX ||
+      Date.now() - sliceStartedAt >= RESEARCH_PARSE_TIME_BUDGET_MS
+    )) {
+      onProgress?.({ completed, total });
+      await yieldToUi();
+      assertParserResearchContinues(shouldContinue);
+      sliceStartedAt = Date.now();
+      sliceSize = 0;
+    }
+  };
+
+  onProgress?.({ completed: 0, total });
+  await yieldToUi();
+  for (const sample of report.samples.unparsed) await append(sample, unparsed);
+  for (const sample of report.samples.parsed) await append(sample, parsed);
+  assertParserResearchContinues(shouldContinue);
+  onProgress?.({ completed, total });
+
+  const arrayJson = (items: string[]): string => items.length === 0
+    ? '[]'
+    : `[\n${items.join(',\n')}\n    ]`;
+  const emptySamples = '  "samples": {\n    "unparsed": [],\n    "parsed": []\n  },';
+  const samples = '  "samples": {\n' +
+    `    "unparsed": ${arrayJson(unparsed)},\n` +
+    `    "parsed": ${arrayJson(parsed)}\n` +
+    '  },';
+  const skeleton = JSON.stringify({
+    ...report,
+    samples: { unparsed: [], parsed: [] },
+  }, null, 2);
+  if (!skeleton.includes(emptySamples)) {
+    throw new Error('parser_research_serialization_failed');
+  }
+  return skeleton.replace(emptySamples, samples);
 }
 
 /**
@@ -245,6 +366,7 @@ interface ParserResearchAccumulator {
   financial: number;
   unknownSenders: Map<string, string>;
   templates: Map<string, ParserResearchShape>;
+  parsedTemplates: Map<string, ParsedParserResearchShape>;
 }
 
 const createParserResearchAccumulator = (): ParserResearchAccumulator => ({
@@ -254,7 +376,21 @@ const createParserResearchAccumulator = (): ParserResearchAccumulator => ({
   financial: 0,
   unknownSenders: new Map(),
   templates: new Map(),
+  parsedTemplates: new Map(),
 });
+
+const researchSender = (
+  accumulator: ParserResearchAccumulator,
+  source: string,
+): string => {
+  const bank = bankProfileForSender(source || undefined)?.name ?? null;
+  if (bank) return bank;
+  const senderKey = source.trim().toLocaleLowerCase('en');
+  const existing = accumulator.unknownSenders.get(senderKey);
+  const sender = existing ?? alphaAlias(accumulator.unknownSenders.size);
+  if (!existing) accumulator.unknownSenders.set(senderKey, sender);
+  return sender;
+};
 
 const addParserResearchMessage = (
   accumulator: ParserResearchAccumulator,
@@ -276,26 +412,33 @@ const addParserResearchMessage = (
       return;
     }
     accumulator.financial += 1;
-    // The workflow proves a new test fails before it accepts a fix. Already
-    // supported alerts cannot satisfy that gate, so do not spend privacy or
-    // agent budget sending them.
-    if (parsed) {
-      accumulator.alreadyParsedExcluded += 1;
-      return;
-    }
-
-    const bank = bankProfileForSender(message.sender || undefined)?.name ?? null;
-    const senderKey = message.sender.trim().toLocaleLowerCase('en');
-    let sender = bank;
-    if (!sender) {
-      const existing = accumulator.unknownSenders.get(senderKey);
-      sender = existing ?? alphaAlias(accumulator.unknownSenders.size);
-      if (!existing) accumulator.unknownSenders.set(senderKey, sender);
-    }
-    const template = sanitizeParserTemplate(body);
+    const sender = researchSender(accumulator, message.sender);
+    const template = sanitizeParserTemplate(
+      body,
+      parsed ? [parsed.merchant, parsed.reference ?? ''] : [],
+    );
     if (!template) {
       accumulator.nonFinancialExcluded += 1;
       accumulator.financial -= 1;
+      return;
+    }
+    // The relay's bounded coding-agent payload still carries only unsupported
+    // templates. The manual report is broader: it also lets maintainers review
+    // what Wafra parsed and which category it assigned.
+    if (parsed) {
+      accumulator.alreadyParsedExcluded += 1;
+      const outcome = 'parsed' as const;
+      const result: ParsedParserResearchShape['result'] = {
+        kind: parsed.kind,
+        type: parsed.type,
+        category: parsed.categoryGuess,
+        categorySource: parsed.categoryDeliberate ? 'rule' : 'fallback',
+      };
+      const key = `${sender}\u0000${outcome}\u0000${template}\u0000${result.kind}` +
+        `\u0000${result.type}\u0000${result.category}\u0000${result.categorySource}`;
+      const prior = accumulator.parsedTemplates.get(key);
+      if (prior) prior.count += 1;
+      else accumulator.parsedTemplates.set(key, { sender, template, outcome, count: 1, result });
       return;
     }
     const outcome = 'needs-parser-work' as const;
@@ -311,6 +454,7 @@ const finishParserResearchSubmission = (
   build: ParserResearchBuild,
   shapes: ParserResearchShape[],
   uniqueTemplateCount: number,
+  manualSamples: ManualParserResearchSamples,
 ): ParserResearchSubmission => {
   const counts: ParserResearchCounts = {
     checked,
@@ -353,7 +497,7 @@ const finishParserResearchSubmission = (
   if (diagnosticBytes > FEEDBACK_DIAGNOSTIC_MAX_BYTES) {
     throw new Error('parser_research_report_too_large');
   }
-  return { preview, wire, counts };
+  return { preview, wire, counts, manualSamples };
 };
 
 /** Build the exact bounded object shown to the tester and posted to the relay. */
@@ -370,6 +514,10 @@ export function buildParserResearchSubmission(
     build,
     allShapes.slice(0, PARSER_RESEARCH_SHAPES_MAX),
     allShapes.length,
+    {
+      unparsed: [...accumulator.templates.values()],
+      parsed: [...accumulator.parsedTemplates.values()],
+    },
   );
 }
 
@@ -440,25 +588,45 @@ export async function buildParserResearchSubmissionCooperatively(
   assertParserResearchContinues(shouldContinue);
 
   const uniqueTemplateCount = accumulator.templates.size;
-  onProgress?.({ stage: 'finalizing', completed: 0, total: uniqueTemplateCount });
+  const manualTemplateCount = uniqueTemplateCount + accumulator.parsedTemplates.size;
+  onProgress?.({ stage: 'finalizing', completed: 0, total: manualTemplateCount });
   await yieldToUi();
   assertParserResearchContinues(shouldContinue);
 
   const topShapes: ParserResearchShape[] = [];
+  const manualSamples: ManualParserResearchSamples = { unparsed: [], parsed: [] };
   let finalized = 0;
   sliceStartedAt = Date.now();
   sliceSize = 0;
   for (const shape of accumulator.templates.values()) {
     assertParserResearchContinues(shouldContinue);
     keepTopParserResearchShape(topShapes, shape);
+    manualSamples.unparsed.push(shape);
     finalized += 1;
     sliceSize += 1;
-    const hasMore = finalized < uniqueTemplateCount;
+    const hasMore = finalized < manualTemplateCount;
     if (hasMore && (
       sliceSize >= RESEARCH_PARSE_SLICE_MAX ||
       Date.now() - sliceStartedAt >= RESEARCH_PARSE_TIME_BUDGET_MS
     )) {
-      onProgress?.({ stage: 'finalizing', completed: finalized, total: uniqueTemplateCount });
+      onProgress?.({ stage: 'finalizing', completed: finalized, total: manualTemplateCount });
+      await yieldToUi();
+      assertParserResearchContinues(shouldContinue);
+      sliceStartedAt = Date.now();
+      sliceSize = 0;
+    }
+  }
+  for (const shape of accumulator.parsedTemplates.values()) {
+    assertParserResearchContinues(shouldContinue);
+    manualSamples.parsed.push(shape);
+    finalized += 1;
+    sliceSize += 1;
+    const hasMore = finalized < manualTemplateCount;
+    if (hasMore && (
+      sliceSize >= RESEARCH_PARSE_SLICE_MAX ||
+      Date.now() - sliceStartedAt >= RESEARCH_PARSE_TIME_BUDGET_MS
+    )) {
+      onProgress?.({ stage: 'finalizing', completed: finalized, total: manualTemplateCount });
       await yieldToUi();
       assertParserResearchContinues(shouldContinue);
       sliceStartedAt = Date.now();
@@ -468,7 +636,7 @@ export async function buildParserResearchSubmissionCooperatively(
   onProgress?.({
     stage: 'finalizing',
     completed: finalized,
-    total: uniqueTemplateCount,
+    total: manualTemplateCount,
   });
   assertParserResearchContinues(shouldContinue);
   return finishParserResearchSubmission(
@@ -477,5 +645,6 @@ export async function buildParserResearchSubmissionCooperatively(
     build,
     topShapes,
     uniqueTemplateCount,
+    manualSamples,
   );
 }

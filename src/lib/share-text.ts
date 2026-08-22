@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Platform, Share } from 'react-native';
@@ -18,6 +19,27 @@ export class TextFileShareError extends Error {
     this.name = 'TextFileShareError';
     this.code = code;
   }
+}
+
+export class TextClipboardError extends Error {
+  readonly code: 'too_large';
+
+  constructor(code: 'too_large') {
+    super(`Could not copy text (${code}).`);
+    this.name = 'TextClipboardError';
+    this.code = code;
+  }
+}
+
+const CLIPBOARD_TEXT_MAX_BYTES = 128 * 1024;
+
+/** Copy only text a caller has already made safe for the system clipboard. */
+export async function copyTextToClipboard(text: string): Promise<void> {
+  if (text.length > CLIPBOARD_TEXT_MAX_BYTES ||
+    new TextEncoder().encode(text).byteLength > CLIPBOARD_TEXT_MAX_BYTES) {
+    throw new TextClipboardError('too_large');
+  }
+  await Clipboard.setStringAsync(text);
 }
 
 /**

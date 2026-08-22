@@ -25,9 +25,10 @@ import { ledgerCurrencyDisplay } from '@/lib/markets';
 import {
   buildManualParserResearchExport,
   buildParserResearchSubmissionCooperatively,
+  hasManualParserResearchSamples,
   PARSER_RESEARCH_PASTE_MAX,
   parsePastedParserMessages,
-  serializeManualParserResearchExport,
+  serializeManualParserResearchExportCooperatively,
   type ParserResearchProgress,
   type ParserResearchSubmission,
 } from '@/lib/parser-research';
@@ -36,8 +37,10 @@ import {
   collectParserResearchInbox,
   isParserResearchBuild,
 } from '@/lib/parser-research-source';
-import { shareTextFile } from '@/lib/share-text';
+import { copyTextToClipboard, shareTextFile, TextClipboardError } from '@/lib/share-text';
 import { useStore } from '@/lib/store';
+
+const REPORT_PREVIEW_PAGE_CHARS = 2_000;
 
 export default function ParserResearchScreen() {
   const router = useRouter();
@@ -53,6 +56,9 @@ export default function ParserResearchScreen() {
   const [checked, setChecked] = useState(0);
   const [checkingTotal, setCheckingTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [manualJson, setManualJson] = useState('');
+  const [previewPage, setPreviewPage] = useState(0);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const pasteInputRef = useRef<TextInput>(null);
   const blocked = state.privateMode || !enabled;
@@ -69,6 +75,8 @@ export default function ParserResearchScreen() {
     prepareGeneration.current += 1;
     setPreparing(false);
     setSubmission(null);
+    setManualJson('');
+    setPreviewPage(0);
   }, [blocked]);
 
   const build = useMemo(() => ({
@@ -79,12 +87,16 @@ export default function ParserResearchScreen() {
     currency: ledgerCurrencyDisplay(),
   }), [language, state.marketId]);
 
-  const manualJson = useMemo(() => {
-    if (!submission) return '';
-    return serializeManualParserResearchExport(
-      buildManualParserResearchExport(submission),
-    );
+  const manualReport = useMemo(() => {
+    if (!submission) return null;
+    return buildManualParserResearchExport(submission);
   }, [submission]);
+  const previewPageCount = Math.max(
+    1,
+    Math.ceil(manualJson.length / REPORT_PREVIEW_PAGE_CHARS),
+  );
+  const previewStart = previewPage * REPORT_PREVIEW_PAGE_CHARS;
+  const previewEnd = Math.min(manualJson.length, previewStart + REPORT_PREVIEW_PAGE_CHARS);
 
   const prepare = async () => {
     if (blocked) return;
@@ -105,6 +117,8 @@ export default function ParserResearchScreen() {
     setCheckingTotal(0);
     setNotice(null);
     setSubmission(null);
+    setManualJson('');
+    setPreviewPage(0);
     const generation = ++prepareGeneration.current;
     const isCurrent = () =>
       prepareGeneration.current === generation && !blockedRef.current;
@@ -137,12 +151,25 @@ export default function ParserResearchScreen() {
       if (!isCurrent()) throw new Error('parser_research_cancelled');
       // Do not retain the tester's pasted plaintext once the safe report exists.
       setPasted('');
-      if (next.counts.attachedTemplates === 0) {
+      if (!hasManualParserResearchSamples(next)) {
         setNotice({
           title: t('parserResearchNoneTitle'),
           body: t('parserResearchNoneBody'),
         });
       } else {
+        const report = buildManualParserResearchExport(next);
+        const json = await serializeManualParserResearchExportCooperatively(
+          report,
+          (progress) => {
+            if (!isCurrent()) return;
+            setPreparingStage('finalizing');
+            setChecked(progress.completed);
+            setCheckingTotal(progress.total);
+          },
+          { shouldContinue: isCurrent },
+        );
+        if (!isCurrent()) throw new Error('parser_research_cancelled');
+        setManualJson(json);
         setSubmission(next);
       }
     } catch (error) {
@@ -158,6 +185,39 @@ export default function ParserResearchScreen() {
         : { title: t('parserResearchFailedTitle'), body: t('parserResearchFailedBody') });
     } finally {
       if (isCurrent()) setPreparing(false);
+    }
+  };
+
+  const copyReport = async () => {
+    if (!submission || state.privateMode || !enabled) {
+      setSubmission(null);
+      setNotice({
+        title: t('parserResearchFailedTitle'),
+        body: state.privateMode
+          ? t('parserResearchPrivateBlocked')
+          : t('parserResearchUnavailable'),
+      });
+      return;
+    }
+    setCopying(true);
+    setNotice(null);
+    try {
+      await copyTextToClipboard(manualJson);
+      const body = t('parserResearchCopiedBody');
+      setNotice({ title: t('parserResearchCopiedTitle'), body });
+      AccessibilityInfo.announceForAccessibility(body);
+    } catch (error) {
+      setNotice(error instanceof TextClipboardError && error.code === 'too_large'
+        ? {
+            title: t('parserResearchCopyTooLargeTitle'),
+            body: t('parserResearchCopyTooLargeBody'),
+          }
+        : {
+            title: t('parserResearchCopyFailedTitle'),
+            body: t('parserResearchCopyFailedBody'),
+          });
+    } finally {
+      setCopying(false);
     }
   };
 
@@ -278,18 +338,54 @@ export default function ParserResearchScreen() {
                 {t('parserResearchPreviewNote')}
               </ThemedText>
               <Block>
-                <ScrollView
-                  nestedScrollEnabled
-                  showsVerticalScrollIndicator
-                  style={styles.previewScroll}>
-                  <ThemedText type="nano" themeColor="textSecondary" style={styles.preview}>
-                    {manualJson}
+                <ThemedText type="small">
+                  {tf('parserResearchReadySummary', {
+                    checked: manualReport?.counts.checked ?? 0,
+                    parsed: manualReport?.counts.uniqueParsedTemplates ?? 0,
+                    unparsed: manualReport?.counts.uniqueUnparsedTemplates ?? 0,
+                  })}
+                </ThemedText>
+                <ThemedText
+                  selectable
+                  type="nano"
+                  themeColor="textSecondary"
+                  style={styles.preview}>
+                  {manualJson.slice(previewStart, previewEnd)}
+                </ThemedText>
+                <View style={styles.previewActions}>
+                  <Button
+                    inline
+                    variant="outline"
+                    label={t('parserResearchPreviewPrevious')}
+                    disabled={previewPage === 0}
+                    onPress={() => setPreviewPage((page) => Math.max(0, page - 1))}
+                  />
+                  <ThemedText type="nano" themeColor="textTertiary">
+                    {tf('parserResearchPreviewPage', {
+                      current: previewPage + 1,
+                      total: previewPageCount,
+                    })}
                   </ThemedText>
-                </ScrollView>
+                  <Button
+                    inline
+                    variant="outline"
+                    label={t('parserResearchPreviewNext')}
+                    disabled={previewPage >= previewPageCount - 1}
+                    onPress={() => setPreviewPage((page) =>
+                      Math.min(previewPageCount - 1, page + 1))}
+                  />
+                </View>
               </Block>
+              <Button
+                label={copying ? t('parserResearchCopying') : t('parserResearchCopy')}
+                icon="code"
+                disabled={copying || blocked}
+                onPress={() => void copyReport()}
+              />
               <Button
                 label={exporting ? t('parserResearchExporting') : t('parserResearchExport')}
                 icon="download"
+                variant="outline"
                 disabled={exporting || blocked}
                 onPress={() => void exportReport()}
               />
@@ -343,7 +439,10 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     writingDirection: 'ltr',
   },
-  previewScroll: {
-    maxHeight: 180,
+  previewActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
   },
 });

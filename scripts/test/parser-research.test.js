@@ -5,9 +5,11 @@ const {
   buildManualParserResearchExport,
   buildParserResearchSubmission,
   buildParserResearchSubmissionCooperatively,
+  hasManualParserResearchSamples,
   parsePastedParserMessages,
   sanitizeParserTemplate,
   serializeManualParserResearchExport,
+  serializeManualParserResearchExportCooperatively,
 } = require('./build/parser-research.js');
 
 let pass = 0;
@@ -109,14 +111,29 @@ const manualJson = typeof serializeManualParserResearchExport === 'function' && 
   ? serializeManualParserResearchExport(manualExport)
   : '';
 ok('the manual export says Wafra uploaded nothing and the user chooses the destination',
-  manualExport?.schema === 1 && manualExport?.kind === 'wafra-parser-report' &&
+  manualExport?.schema === 2 && manualExport?.kind === 'wafra-parser-report' &&
     manualExport?.delivery?.mode === 'manual' &&
     manualExport?.delivery?.uploadedByWafra === false &&
     manualExport?.delivery?.destinationChosenByUser === true,
   manualJson);
-ok('the manual export keeps the useful redacted templates and aggregate counts',
-  manualExport?.counts === submission.counts &&
-    manualExport?.templates === submission.wire.diagnostic.shapes &&
+ok('the manual AI report includes both unparsed and parsed financial templates',
+  manualExport?.counts?.checked === 6 &&
+    manualExport?.counts?.financial === 4 &&
+    manualExport?.counts?.parsedMessages === 2 &&
+    manualExport?.counts?.unparsedMessages === 2 &&
+    manualExport?.counts?.uniqueParsedTemplates === 1 &&
+    manualExport?.counts?.uniqueUnparsedTemplates === 1 &&
+    manualExport?.counts?.includedTemplates === 2 &&
+    manualExport?.samples?.unparsed?.length === 1 &&
+    manualExport?.samples?.unparsed?.[0]?.outcome === 'needs-parser-work' &&
+    manualExport?.samples?.unparsed?.[0]?.count === 2 &&
+    manualExport?.samples?.parsed?.length === 1 &&
+    manualExport?.samples?.parsed?.[0]?.outcome === 'parsed' &&
+    manualExport?.samples?.parsed?.[0]?.count === 2 &&
+    manualExport?.samples?.parsed?.[0]?.result?.kind === 'transaction' &&
+    manualExport?.samples?.parsed?.[0]?.result?.type === 'expense' &&
+    manualExport?.samples?.parsed?.[0]?.result?.category === 'groceries' &&
+    manualExport?.samples?.parsed?.[0]?.result?.categorySource === 'rule' &&
     manualExport?.redaction === submission.wire.diagnostic.redaction &&
     manualExport?.build?.version === '1.0.0' && manualExport?.build?.marketId === 'AE',
   manualJson);
@@ -126,6 +143,17 @@ ok('the manual export carries no automatic-delivery or raw-message residue',
     !manualJson.includes('90881723004') && !manualJson.includes('1800000000000') &&
     !/aiReviewConsent|thirdPartyAi|Anthropic|GitHub|relay|retention/i.test(manualJson),
   manualJson);
+
+const parsedOnlySubmission = buildParserResearchSubmission([
+  { sender: 'ENBD', body, receivedAtMs: 1_800_000_000_000 },
+], {
+  version: '1.0.0', platform: 'android', language: 'en-AE', marketId: 'AE', currency: 'AED',
+});
+ok('a parsed-only inbox still produces an AI review report',
+  typeof hasManualParserResearchSamples === 'function' &&
+    hasManualParserResearchSamples(parsedOnlySubmission) === true &&
+    parsedOnlySubmission.counts.attachedTemplates === 0,
+  JSON.stringify(parsedOnlySubmission.counts));
 
 const root = path.join(__dirname, '../..');
 const source = fs.readFileSync(path.join(root, 'src/lib/parser-research-source.ts'), 'utf8');
@@ -147,11 +175,22 @@ ok('the old full-inbox raw share control is no longer exposed in Settings',
   !/isSmsCorpusExportAvailable|shareSmsCorpus|smsCorpusExportTitle/.test(settings));
 ok('the tester previews and exports the exact local JSON file instead of sending it',
     /serializeManualParserResearchExport/.test(screen) &&
+    /serializeManualParserResearchExportCooperatively/.test(screen) &&
+    /hasManualParserResearchSamples\(next\)/.test(screen) &&
+    !/next\.counts\.attachedTemplates === 0/.test(screen) &&
     /shareTextFile\('wafra-parser-report\.json',\s*manualJson/.test(screen) &&
     /mimeType:\s*'application\/json'/.test(screen) &&
-    /parserResearchExport/.test(screen) && /previewScroll/.test(screen) &&
-    /maxHeight: 180/.test(screen) &&
+    /parserResearchExport/.test(screen) && /parserResearchReadySummary/.test(screen) &&
+    /manualJson\.slice\(previewStart, previewEnd\)/.test(screen) &&
+    /REPORT_PREVIEW_PAGE_CHARS = 2_000/.test(screen) &&
+    /parserResearchPreviewPrevious/.test(screen) && /parserResearchPreviewNext/.test(screen) &&
+    !/\{manualJson\}/.test(screen) &&
     !/submitParserResearchFeedback|setConfirming\(true\)|<ConfirmSheet/.test(screen));
+ok('the tester can copy the exact redacted AI report without opening a share sheet',
+  /copyTextToClipboard\(manualJson\)/.test(screen) &&
+    /parserResearchCopy/.test(screen) &&
+    /parserResearchCopiedTitle/.test(screen) &&
+    /disabled=\{copying \|\| blocked\}/.test(screen));
 ok('raw pasted text is cleared as soon as the redacted report exists',
   /setPasted\(''\)/.test(screen) && !/setState\([^)]*messages/.test(screen));
 ok('an empty paste gives a visible answer and focuses the input instead of a dead button',
@@ -257,6 +296,11 @@ ok('research is internal/test only and production is compiled closed',
     body: `Movement of AED 23.45 sent successfully to Sample merchant. Ref 55566677788.${'!'.repeat(index + 1)}`,
     receivedAtMs: 0,
   }));
+  diverseInbox.push({
+    sender: 'ENBD',
+    body: 'AED 45.75 spent on card ending 3644 at CARREFOUR on 04/07/2026.',
+    receivedAtMs: 0,
+  });
   const diverseProgress = [];
   const diverse = await buildParserResearchSubmissionCooperatively(
     diverseInbox,
@@ -267,8 +311,34 @@ ok('research is internal/test only and production is compiled closed',
   ok('diverse-template finalization also yields and reports progress before completion',
     diverse.counts.uniqueTemplates === 180 && diverse.counts.attachedTemplates === 40 &&
       finalizingProgress.some((value) => value.completed > 0 && value.completed < value.total) &&
-      finalizingProgress.at(-1)?.completed === 180,
+      finalizingProgress.every((value) => value.total === 181) &&
+      finalizingProgress.at(-1)?.completed === 181,
     JSON.stringify({ counts: diverse.counts, finalizingProgress }));
+  const diverseManual = buildManualParserResearchExport(diverse);
+  ok('the manual report keeps every unique financial template after scanning the full inbox',
+    diverseManual.samples.unparsed.length === 180 &&
+      diverseManual.samples.unparsed.every((sample) => sample.outcome === 'needs-parser-work') &&
+      diverseManual.samples.parsed.length === 1,
+    JSON.stringify({
+      unparsed: diverseManual.samples?.unparsed?.length,
+      parsed: diverseManual.samples?.parsed?.length,
+    }));
+  const serializationProgress = [];
+  let serializationTimerFired = false;
+  setTimeout(() => { serializationTimerFired = true; }, 0);
+  const cooperativeJson = typeof serializeManualParserResearchExportCooperatively === 'function'
+    ? await serializeManualParserResearchExportCooperatively(
+        diverseManual,
+        (value) => serializationProgress.push(value),
+      )
+    : '';
+  ok('the full manual report serializes cooperatively without changing a byte',
+    serializationTimerFired &&
+      cooperativeJson === serializeManualParserResearchExport(diverseManual) &&
+      serializationProgress.some((value) => value.completed > 0 && value.completed < 181) &&
+      serializationProgress.at(-1)?.completed === 181 &&
+      serializationProgress.at(-1)?.total === 181,
+    JSON.stringify({ serializationTimerFired, serializationProgress }));
 
   let keepRunning = true;
   let cancellation = '';

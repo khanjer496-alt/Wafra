@@ -24,11 +24,12 @@ const output = ts.transpileModule(source, {
   },
 }).outputText;
 
-const load = ({ os, fileSystem = {}, sharing = {}, share = {} }) => {
+const load = ({ os, fileSystem = {}, sharing = {}, clipboard = {}, share = {} }) => {
   const loaded = { exports: {} };
   const requireModule = (id) => {
     if (id === 'expo-file-system/legacy') return fileSystem;
     if (id === 'expo-sharing') return sharing;
+    if (id === 'expo-clipboard') return clipboard;
     if (id === 'react-native') return { Platform: { OS: os }, Share: share };
     throw new Error(`unexpected dependency ${id}`);
   };
@@ -112,9 +113,13 @@ async function main() {
 
   const writes = [];
   const shares = [];
+  const clipboardWrites = [];
   let plainTextShares = 0;
   const nativeModule = load({
     os: 'android',
+    clipboard: {
+      setStringAsync: async (value) => { clipboardWrites.push(value); },
+    },
     fileSystem: {
       cacheDirectory: 'file:///cache/',
       EncodingType: { UTF8: 'utf8' },
@@ -136,6 +141,19 @@ async function main() {
       shares.length === 1 && shares[0][0] === 'file:///cache/wafra-parser-report.json' &&
       shares[0][1]?.mimeType === 'application/json' && shares[0][1]?.UTI === 'public.json' &&
       plainTextShares === 0);
+  if (typeof nativeModule.copyTextToClipboard === 'function') {
+    await nativeModule.copyTextToClipboard('{"safe":true}');
+  }
+  ok('clipboard export copies the exact already-redacted report text',
+    clipboardWrites.length === 1 && clipboardWrites[0] === '{"safe":true}');
+  let oversizedClipboard = null;
+  await nativeModule.copyTextToClipboard?.('x'.repeat(128 * 1024 + 1)).catch((error) => {
+    oversizedClipboard = error;
+  });
+  ok('an oversized report is refused before Android receives a clipboard payload',
+    oversizedClipboard?.name === 'TextClipboardError' &&
+      oversizedClipboard?.code === 'too_large' && clipboardWrites.length === 1,
+    String(oversizedClipboard));
 
   const noCacheModule = load({
     os: 'android',

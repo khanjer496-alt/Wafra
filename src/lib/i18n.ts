@@ -2530,8 +2530,8 @@ const S = {
     ar: 'أداة الاختبار هذه غير مضمّنة في هذه النسخة.',
   },
   parserResearchAndroidIntro: {
-    en: 'Wafra checks this Android inbox in memory, keeps only likely financial alerts, removes sensitive details, and prepares a small set of repeated message templates.',
-    ar: 'يفحص وفرة صندوق رسائل أندرويد في الذاكرة، ويحتفظ بتنبيهات مالية محتملة فقط، ويحذف التفاصيل الحساسة، ثم يجهّز مجموعة صغيرة من قوالب الرسائل المتكررة.',
+    en: 'Wafra checks the full Android inbox in memory, keeps likely financial alerts, and prepares redacted templates for messages it parsed and messages it could not parse.',
+    ar: 'يفحص وفرة صندوق رسائل أندرويد كاملاً في الذاكرة، ويحتفظ بالتنبيهات المالية المحتملة، ثم يجهّز قوالب منقّحة للرسائل التي حلّلها والتي تعذّر عليه تحليلها.',
   },
   parserResearchIosIntro: {
     en: 'iPhone does not let Wafra read Messages. Copy bank alerts with Apple Shortcuts, paste them here, then Wafra will filter and redact them on this phone.',
@@ -2542,8 +2542,8 @@ const S = {
     ar: 'لا تستطيع نسخة الاختبار هذه فحص صندوق الرسائل تلقائياً. ألصق تنبيهات البنك هنا، ثم يرشّحها وفرة وينقّحها على هذا الجهاز.',
   },
   parserResearchPrivacy: {
-    en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. The exact result is shown before export.',
-    ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. وسترى النتيجة كاملة قبل التصدير.',
+    en: 'Raw messages never upload. Every digit and timestamp is removed. Recipient and merchant spans, plus every word outside a strict financial grammar, become [text]. Only the redacted report can be copied or exported.',
+    ar: 'لا تُرفع الرسائل الخام. تُحذف كل الأرقام والتوقيتات، وتُستبدل مواضع المستفيدين والمتاجر وكل كلمة خارج قواعد مالية محدودة بـ [text]. ولا يمكن نسخ أو تصدير سوى التقرير المنقّح.',
   },
   parserResearchPasteHeader: { en: 'PASTE BANK ALERTS', ar: 'ألصق تنبيهات البنك' },
   parserResearchPasteHelp: {
@@ -2576,8 +2576,35 @@ const S = {
     ar: 'جارٍ إنهاء التقرير الآمن…',
   },
   parserResearchPreviewNote: {
-    en: 'This is the exact local JSON file. Wafra uploads nothing. You choose where to save or share it, then attach it to a Codex task yourself.',
-    ar: 'هذا هو ملف JSON المحلي نفسه. لا يرفع وفرة شيئاً. أنت تختار مكان حفظه أو مشاركته، ثم ترفقه بنفسك بمهمة في Codex.',
+    en: 'The exact local JSON report is shown below in pages. Wafra uploads nothing. Copy it into Codex, or save the file and attach it yourself.',
+    ar: 'يظهر تقرير JSON المحلي نفسه أدناه على صفحات. لا يرفع وفرة شيئاً. انسخه إلى Codex، أو احفظ الملف وأرفقه بنفسك.',
+  },
+  parserResearchReadySummary: {
+    en: 'Checked {checked} inbox messages · {unparsed} unparsed formats · {parsed} parsed formats with assigned categories.',
+    ar: 'تم فحص {checked} رسالة · {unparsed} قوالب غير محلّلة · {parsed} قوالب محلّلة مع التصنيفات المعيّنة.',
+  },
+  parserResearchPreviewPrevious: { en: 'Previous', ar: 'السابق' },
+  parserResearchPreviewNext: { en: 'Next', ar: 'التالي' },
+  parserResearchPreviewPage: {
+    en: 'Page {current} of {total}',
+    ar: 'الصفحة {current} من {total}',
+  },
+  parserResearchCopy: { en: 'Copy AI report', ar: 'نسخ تقرير الذكاء الاصطناعي' },
+  parserResearchCopying: { en: 'Copying safe report…', ar: 'جارٍ نسخ التقرير الآمن…' },
+  parserResearchCopiedTitle: { en: 'Safe report copied', ar: 'تم نسخ التقرير الآمن' },
+  parserResearchCopiedBody: {
+    en: 'Paste it into a Codex task for parser review. No raw messages were copied or uploaded.',
+    ar: 'ألصقه في مهمة Codex لمراجعة المحلّل. لم تُنسخ أو تُرفع أي رسائل خام.',
+  },
+  parserResearchCopyFailedTitle: { en: 'Could not copy the report', ar: 'تعذّر نسخ التقرير' },
+  parserResearchCopyFailedBody: {
+    en: 'Nothing was uploaded. Save the JSON file instead, then attach it to Codex.',
+    ar: 'لم يُرفع شيء. احفظ ملف JSON بدلاً من ذلك، ثم أرفقه في Codex.',
+  },
+  parserResearchCopyTooLargeTitle: { en: 'Report is too large to copy', ar: 'التقرير كبير جداً للنسخ' },
+  parserResearchCopyTooLargeBody: {
+    en: 'Use Export safe report instead. It saves the complete JSON without sending a large clipboard payload to Android.',
+    ar: 'استخدم «تصدير التقرير الآمن» بدلاً من ذلك. فهو يحفظ ملف JSON كاملاً دون إرسال نص كبير إلى حافظة أندرويد.',
   },
   parserResearchExport: { en: 'Export safe report', ar: 'تصدير التقرير الآمن' },
   parserResearchExporting: { en: 'Opening share sheet…', ar: 'جارٍ فتح قائمة المشاركة…' },
