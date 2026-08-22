@@ -56,6 +56,16 @@ export interface ParserResearchSubmission {
   counts: ParserResearchCounts;
 }
 
+export interface ParserResearchProgress {
+  stage: 'checking' | 'finalizing';
+  completed: number;
+  total: number;
+}
+
+export interface ParserResearchCooperativeOptions {
+  shouldContinue?: () => boolean;
+}
+
 export interface ManualParserResearchExport {
   schema: 1;
   kind: 'wafra-parser-report';
@@ -228,76 +238,89 @@ function formatPreview(
   return lines.join('\n');
 }
 
-/** Build the exact bounded object shown to the tester and posted to the relay. */
-export function buildParserResearchSubmission(
-  messages: readonly SmsCorpusMessage[],
-  build: ParserResearchBuild,
-): ParserResearchSubmission {
-  let sensitiveExcluded = 0;
-  let nonFinancialExcluded = 0;
-  let alreadyParsedExcluded = 0;
-  let financial = 0;
-  const unknownSenders = new Map<string, string>();
-  const templates = new Map<string, ParserResearchShape>();
+interface ParserResearchAccumulator {
+  sensitiveExcluded: number;
+  nonFinancialExcluded: number;
+  alreadyParsedExcluded: number;
+  financial: number;
+  unknownSenders: Map<string, string>;
+  templates: Map<string, ParserResearchShape>;
+}
 
-  for (const message of messages) {
+const createParserResearchAccumulator = (): ParserResearchAccumulator => ({
+  sensitiveExcluded: 0,
+  nonFinancialExcluded: 0,
+  alreadyParsedExcluded: 0,
+  financial: 0,
+  unknownSenders: new Map(),
+  templates: new Map(),
+});
+
+const addParserResearchMessage = (
+  accumulator: ParserResearchAccumulator,
+  message: SmsCorpusMessage,
+): void => {
     const body = message.body.trim();
     if (!body) {
-      nonFinancialExcluded += 1;
-      continue;
+      accumulator.nonFinancialExcluded += 1;
+      return;
     }
     if (nonPostingReason(body) !== null) {
-      sensitiveExcluded += 1;
-      continue;
+      accumulator.sensitiveExcluded += 1;
+      return;
     }
     const parsed = parseSms(body, undefined, { sender: message.sender || undefined });
     const draft = parsed ? null : inspectAlertDraft(body);
     if (!parsed && draft?.decision !== 'review') {
-      nonFinancialExcluded += 1;
-      continue;
+      accumulator.nonFinancialExcluded += 1;
+      return;
     }
-    financial += 1;
+    accumulator.financial += 1;
     // The workflow proves a new test fails before it accepts a fix. Already
     // supported alerts cannot satisfy that gate, so do not spend privacy or
     // agent budget sending them.
     if (parsed) {
-      alreadyParsedExcluded += 1;
-      continue;
+      accumulator.alreadyParsedExcluded += 1;
+      return;
     }
 
     const bank = bankProfileForSender(message.sender || undefined)?.name ?? null;
     const senderKey = message.sender.trim().toLocaleLowerCase('en');
     let sender = bank;
     if (!sender) {
-      const existing = unknownSenders.get(senderKey);
-      sender = existing ?? alphaAlias(unknownSenders.size);
-      if (!existing) unknownSenders.set(senderKey, sender);
+      const existing = accumulator.unknownSenders.get(senderKey);
+      sender = existing ?? alphaAlias(accumulator.unknownSenders.size);
+      if (!existing) accumulator.unknownSenders.set(senderKey, sender);
     }
     const template = sanitizeParserTemplate(body);
     if (!template) {
-      nonFinancialExcluded += 1;
-      financial -= 1;
-      continue;
+      accumulator.nonFinancialExcluded += 1;
+      accumulator.financial -= 1;
+      return;
     }
     const outcome = 'needs-parser-work' as const;
     const key = `${sender}\u0000${outcome}\u0000${template}`;
-    const prior = templates.get(key);
+    const prior = accumulator.templates.get(key);
     if (prior) prior.count += 1;
-    else templates.set(key, { sender, template, outcome, count: 1 });
-  }
+    else accumulator.templates.set(key, { sender, template, outcome, count: 1 });
+};
 
-  const allShapes = [...templates.values()].sort((a, b) =>
-    b.count - a.count || a.template.localeCompare(b.template));
-  const shapes = allShapes.slice(0, PARSER_RESEARCH_SHAPES_MAX);
+const finishParserResearchSubmission = (
+  accumulator: ParserResearchAccumulator,
+  checked: number,
+  build: ParserResearchBuild,
+  shapes: ParserResearchShape[],
+  uniqueTemplateCount: number,
+): ParserResearchSubmission => {
   const counts: ParserResearchCounts = {
-    checked: messages.length,
-    financial,
-    sensitiveExcluded,
-    nonFinancialExcluded,
-    alreadyParsedExcluded,
-    uniqueTemplates: allShapes.length,
+    checked,
+    financial: accumulator.financial,
+    sensitiveExcluded: accumulator.sensitiveExcluded,
+    nonFinancialExcluded: accumulator.nonFinancialExcluded,
+    alreadyParsedExcluded: accumulator.alreadyParsedExcluded,
+    uniqueTemplates: uniqueTemplateCount,
     attachedTemplates: shapes.length,
-    omittedTemplates: Math.max(0, allShapes.length - shapes.length),
+    omittedTemplates: Math.max(0, uniqueTemplateCount - shapes.length),
   };
   const preview = formatPreview(build, counts, shapes);
   const diagnostic = {
@@ -331,4 +354,128 @@ export function buildParserResearchSubmission(
     throw new Error('parser_research_report_too_large');
   }
   return { preview, wire, counts };
+};
+
+/** Build the exact bounded object shown to the tester and posted to the relay. */
+export function buildParserResearchSubmission(
+  messages: readonly SmsCorpusMessage[],
+  build: ParserResearchBuild,
+): ParserResearchSubmission {
+  const accumulator = createParserResearchAccumulator();
+  for (const message of messages) addParserResearchMessage(accumulator, message);
+  const allShapes = [...accumulator.templates.values()].sort(compareParserResearchShapes);
+  return finishParserResearchSubmission(
+    accumulator,
+    messages.length,
+    build,
+    allShapes.slice(0, PARSER_RESEARCH_SHAPES_MAX),
+    allShapes.length,
+  );
+}
+
+const RESEARCH_PARSE_TIME_BUDGET_MS = 8;
+const RESEARCH_PARSE_SLICE_MAX = 64;
+const compareParserResearchShapes = (a: ParserResearchShape, b: ParserResearchShape): number =>
+  b.count - a.count || a.template.localeCompare(b.template);
+
+const yieldToUi = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 0));
+
+const assertParserResearchContinues = (shouldContinue: () => boolean): void => {
+  if (!shouldContinue()) throw new Error('parser_research_cancelled');
+};
+
+/** Insert after equal-ranked entries so this stays equivalent to stable Array.sort. */
+const keepTopParserResearchShape = (
+  topShapes: ParserResearchShape[],
+  shape: ParserResearchShape,
+): void => {
+  let index = 0;
+  while (
+    index < topShapes.length &&
+    compareParserResearchShapes(shape, topShapes[index]) >= 0
+  ) index += 1;
+  topShapes.splice(index, 0, shape);
+  if (topShapes.length > PARSER_RESEARCH_SHAPES_MAX) topShapes.pop();
+};
+
+/**
+ * Analyze a large inbox without monopolizing React Native's JavaScript thread.
+ * The accumulator is identical to the synchronous builder; only scheduling is
+ * different, so privacy filtering and the exported report remain byte-stable.
+ */
+export async function buildParserResearchSubmissionCooperatively(
+  messages: readonly SmsCorpusMessage[],
+  build: ParserResearchBuild,
+  onProgress?: (progress: ParserResearchProgress) => void,
+  options: ParserResearchCooperativeOptions = {},
+): Promise<ParserResearchSubmission> {
+  const shouldContinue = options.shouldContinue ?? (() => true);
+  assertParserResearchContinues(shouldContinue);
+  const accumulator = createParserResearchAccumulator();
+  let sliceStartedAt = Date.now();
+  let sliceSize = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    assertParserResearchContinues(shouldContinue);
+    addParserResearchMessage(accumulator, messages[index]);
+    sliceSize += 1;
+    const checked = index + 1;
+    const hasMore = checked < messages.length;
+    if (hasMore && (
+      sliceSize >= RESEARCH_PARSE_SLICE_MAX ||
+      Date.now() - sliceStartedAt >= RESEARCH_PARSE_TIME_BUDGET_MS
+    )) {
+      onProgress?.({ stage: 'checking', completed: checked, total: messages.length });
+      await yieldToUi();
+      assertParserResearchContinues(shouldContinue);
+      sliceStartedAt = Date.now();
+      sliceSize = 0;
+    }
+  }
+  onProgress?.({
+    stage: 'checking',
+    completed: messages.length,
+    total: messages.length,
+  });
+  assertParserResearchContinues(shouldContinue);
+
+  const uniqueTemplateCount = accumulator.templates.size;
+  onProgress?.({ stage: 'finalizing', completed: 0, total: uniqueTemplateCount });
+  await yieldToUi();
+  assertParserResearchContinues(shouldContinue);
+
+  const topShapes: ParserResearchShape[] = [];
+  let finalized = 0;
+  sliceStartedAt = Date.now();
+  sliceSize = 0;
+  for (const shape of accumulator.templates.values()) {
+    assertParserResearchContinues(shouldContinue);
+    keepTopParserResearchShape(topShapes, shape);
+    finalized += 1;
+    sliceSize += 1;
+    const hasMore = finalized < uniqueTemplateCount;
+    if (hasMore && (
+      sliceSize >= RESEARCH_PARSE_SLICE_MAX ||
+      Date.now() - sliceStartedAt >= RESEARCH_PARSE_TIME_BUDGET_MS
+    )) {
+      onProgress?.({ stage: 'finalizing', completed: finalized, total: uniqueTemplateCount });
+      await yieldToUi();
+      assertParserResearchContinues(shouldContinue);
+      sliceStartedAt = Date.now();
+      sliceSize = 0;
+    }
+  }
+  onProgress?.({
+    stage: 'finalizing',
+    completed: finalized,
+    total: uniqueTemplateCount,
+  });
+  assertParserResearchContinues(shouldContinue);
+  return finishParserResearchSubmission(
+    accumulator,
+    messages.length,
+    build,
+    topShapes,
+    uniqueTemplateCount,
+  );
 }

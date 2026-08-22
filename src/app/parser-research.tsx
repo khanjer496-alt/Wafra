@@ -24,10 +24,11 @@ import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import {
   buildManualParserResearchExport,
-  buildParserResearchSubmission,
+  buildParserResearchSubmissionCooperatively,
   PARSER_RESEARCH_PASTE_MAX,
   parsePastedParserMessages,
   serializeManualParserResearchExport,
+  type ParserResearchProgress,
   type ParserResearchSubmission,
 } from '@/lib/parser-research';
 import {
@@ -48,14 +49,25 @@ export default function ParserResearchScreen() {
   const [pasted, setPasted] = useState('');
   const [submission, setSubmission] = useState<ParserResearchSubmission | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [preparingStage, setPreparingStage] = useState<'reading' | 'checking' | 'finalizing'>('reading');
   const [checked, setChecked] = useState(0);
+  const [checkingTotal, setCheckingTotal] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const pasteInputRef = useRef<TextInput>(null);
   const blocked = state.privateMode || !enabled;
+  const prepareGeneration = useRef(0);
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
+
+  useEffect(() => () => {
+    prepareGeneration.current += 1;
+  }, []);
 
   useEffect(() => {
     if (!blocked) return;
+    prepareGeneration.current += 1;
+    setPreparing(false);
     setSubmission(null);
   }, [blocked]);
 
@@ -75,6 +87,7 @@ export default function ParserResearchScreen() {
   }, [submission]);
 
   const prepare = async () => {
+    if (blocked) return;
     if (!automaticInbox && !pasted.trim()) {
       const body = t('parserResearchPasteRequired');
       setNotice({
@@ -87,18 +100,41 @@ export default function ParserResearchScreen() {
     }
     Keyboard.dismiss();
     setPreparing(true);
+    setPreparingStage('reading');
     setChecked(0);
+    setCheckingTotal(0);
     setNotice(null);
     setSubmission(null);
+    const generation = ++prepareGeneration.current;
+    const isCurrent = () =>
+      prepareGeneration.current === generation && !blockedRef.current;
     try {
       const messages = automaticInbox
         ? await (async () => {
             const granted = await requestSmsPermission();
             if (!granted) throw new Error('parser_research_permission');
-            return collectParserResearchInbox(setChecked);
+            if (!isCurrent()) throw new Error('parser_research_cancelled');
+            return collectParserResearchInbox((count) => {
+              if (isCurrent()) setChecked(count);
+            }, { shouldContinue: isCurrent });
           })()
         : parsePastedParserMessages(pasted);
-      const next = buildParserResearchSubmission(messages, build);
+      if (!isCurrent()) throw new Error('parser_research_cancelled');
+      setPreparingStage('checking');
+      setChecked(0);
+      setCheckingTotal(messages.length);
+      const next = await buildParserResearchSubmissionCooperatively(
+        messages,
+        build,
+        (progress: ParserResearchProgress) => {
+          if (!isCurrent()) return;
+          setPreparingStage(progress.stage);
+          setChecked(progress.completed);
+          setCheckingTotal(progress.total);
+        },
+        { shouldContinue: isCurrent },
+      );
+      if (!isCurrent()) throw new Error('parser_research_cancelled');
       // Do not retain the tester's pasted plaintext once the safe report exists.
       setPasted('');
       if (next.counts.attachedTemplates === 0) {
@@ -110,11 +146,18 @@ export default function ParserResearchScreen() {
         setSubmission(next);
       }
     } catch (error) {
+      if (
+        !isCurrent() ||
+        (error instanceof Error && (
+          error.message === 'parser_research_cancelled' ||
+          error.message === 'sms_corpus_cancelled'
+        ))
+      ) return;
       setNotice(error instanceof Error && error.message === 'parser_research_permission'
         ? { title: t('smsCorpusPermissionTitle'), body: t('smsCorpusPermissionBody') }
         : { title: t('parserResearchFailedTitle'), body: t('parserResearchFailedBody') });
     } finally {
-      setPreparing(false);
+      if (isCurrent()) setPreparing(false);
     }
   };
 
@@ -216,7 +259,11 @@ export default function ParserResearchScreen() {
             )}
             <Button
               label={preparing
-                ? tf('parserResearchPreparing', { count: checked })
+                ? preparingStage === 'reading'
+                  ? tf('parserResearchReading', { count: checked })
+                  : preparingStage === 'checking'
+                    ? tf('parserResearchPreparing', { count: checked, total: checkingTotal })
+                    : t('parserResearchFinalizing')
                 : t(automaticInbox ? 'parserResearchPrepareInbox' : 'parserResearchPreparePaste')}
               icon="code"
               disabled={!canPrepare}

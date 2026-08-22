@@ -24,6 +24,10 @@ export type SmsCorpusPageReader = (
   max: number,
 ) => Promise<SmsCorpusRow[]>;
 
+export interface SmsCorpusCollectionOptions {
+  shouldContinue?: () => boolean;
+}
+
 const PAGE_SIZE = 500;
 const FIRST_CURSOR = Number.MAX_SAFE_INTEGER;
 
@@ -52,13 +56,20 @@ const precedesCursor = (
 export const collectSmsCorpus = async (
   readPage: SmsCorpusPageReader,
   onProgress?: (count: number) => void,
+  options: SmsCorpusCollectionOptions = {},
 ): Promise<SmsCorpusMessage[]> => {
+  const shouldContinue = options.shouldContinue ?? (() => true);
+  const assertContinues = (): void => {
+    if (!shouldContinue()) throw new Error('sms_corpus_cancelled');
+  };
   const messages: SmsCorpusMessage[] = [];
   let beforeDateMs = FIRST_CURSOR;
   let beforeId = FIRST_CURSOR;
 
   while (true) {
+    assertContinues();
     const page = await readPage(beforeDateMs, beforeId, PAGE_SIZE);
+    assertContinues();
     if (page.length === 0) return messages;
     if (page.length > PAGE_SIZE || page.some((row) => !validRow(row))) {
       throw new Error('invalid_sms_corpus_page');

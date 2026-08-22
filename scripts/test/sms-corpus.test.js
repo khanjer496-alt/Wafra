@@ -49,6 +49,24 @@ const rejects = async (name, run, code) => {
       cursors[1][1] === sameTimestamp[499].id && cursors[0][2] === 500,
     JSON.stringify(cursors));
 
+  let keepCollecting = true;
+  let cancelledPageReads = 0;
+  await rejects(
+    'leaving parser research cancels inbox collection between native pages',
+    () => collectSmsCorpus(
+      async () => {
+        cancelledPageReads += 1;
+        return sameTimestamp.slice(0, 500);
+      },
+      () => { keepCollecting = false; },
+      { shouldContinue: () => keepCollecting },
+    ),
+    'sms_corpus_cancelled',
+  );
+  ok('cancellation prevents a second native inbox page read',
+    cancelledPageReads === 1,
+    `page reads=${cancelledPageReads}`);
+
   await rejects(
     'a native page that does not advance the cursor fails closed',
     () => collectSmsCorpus(async () => [{ id: Number.MAX_SAFE_INTEGER, address: 'B', body: 'x', date: Number.MAX_SAFE_INTEGER }]),

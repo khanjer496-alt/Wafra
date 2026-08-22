@@ -1,7 +1,11 @@
 import { Platform } from 'react-native';
 
 import SmsReader from '../../modules/sms-reader';
-import { collectSmsCorpus, type SmsCorpusMessage } from '@/lib/sms-corpus';
+import {
+  collectSmsCorpus,
+  type SmsCorpusCollectionOptions,
+  type SmsCorpusMessage,
+} from '@/lib/sms-corpus';
 
 const RESEARCH_BUILD_ENABLED =
   process.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1';
@@ -25,6 +29,7 @@ export const canCollectParserResearchInbox = (): boolean => {
  */
 export const collectParserResearchInbox = async (
   onProgress?: (count: number) => void,
+  options: SmsCorpusCollectionOptions = {},
 ): Promise<SmsCorpusMessage[]> => {
   const reader = SmsReader;
   if (!canCollectParserResearchInbox() || !reader?.getInboxCorpusPage) {
@@ -34,5 +39,6 @@ export const collectParserResearchInbox = async (
     (beforeDateMs, beforeId, max) =>
       reader.getInboxCorpusPage!(beforeDateMs, beforeId, max),
     onProgress,
+    options,
   );
 };

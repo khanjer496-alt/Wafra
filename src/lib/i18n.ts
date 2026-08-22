@@ -2566,7 +2566,15 @@ const S = {
   },
   parserResearchPrepareInbox: { en: 'Prepare safe inbox report', ar: 'تجهيز تقرير آمن من الرسائل' },
   parserResearchPreparePaste: { en: 'Prepare safe report', ar: 'تجهيز تقرير آمن' },
-  parserResearchPreparing: { en: 'Checking {count} messages…', ar: 'جارٍ فحص {count} رسالة…' },
+  parserResearchReading: { en: 'Reading {count} messages…', ar: 'جارٍ قراءة {count} رسالة…' },
+  parserResearchPreparing: {
+    en: 'Checking {count} of {total} messages…',
+    ar: 'جارٍ فحص {count} من {total} رسالة…',
+  },
+  parserResearchFinalizing: {
+    en: 'Finalizing safe report…',
+    ar: 'جارٍ إنهاء التقرير الآمن…',
+  },
   parserResearchPreviewNote: {
     en: 'This is the exact local JSON file. Wafra uploads nothing. You choose where to save or share it, then attach it to a Codex task yourself.',
     ar: 'هذا هو ملف JSON المحلي نفسه. لا يرفع وفرة شيئاً. أنت تختار مكان حفظه أو مشاركته، ثم ترفقه بنفسك بمهمة في Codex.',

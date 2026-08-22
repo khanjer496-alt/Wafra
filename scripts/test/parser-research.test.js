@@ -4,6 +4,7 @@ const path = require('node:path');
 const {
   buildManualParserResearchExport,
   buildParserResearchSubmission,
+  buildParserResearchSubmissionCooperatively,
   parsePastedParserMessages,
   sanitizeParserTemplate,
   serializeManualParserResearchExport,
@@ -186,5 +187,109 @@ ok('research is internal/test only and production is compiled closed',
     eas.build['capture-beta'].env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1' &&
     eas.build.production.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '0');
 
-console.log(`\nparser-research: ${pass} passed, ${fail} failed`);
-if (fail) process.exit(1);
+(async () => {
+  const largeInbox = Array.from({ length: 130 }, (_, index) => ({
+    sender: 'ENBD',
+    body: index % 2 === 0
+      ? 'Your OTP is 458213. Do not share this verification code.'
+      : 'AED 45.75 spent on card ending 3644 at CARREFOUR on 04/07/2026.',
+    receivedAtMs: 0,
+  }));
+  const progress = [];
+  let timerFired = false;
+  setTimeout(() => { timerFired = true; }, 0);
+  const cooperative = await buildParserResearchSubmissionCooperatively(
+    largeInbox,
+    { version: '1.0.0', platform: 'android', language: 'en', marketId: 'AE', currency: 'AED' },
+    (value) => progress.push(value),
+  );
+  const checkingProgress = progress.filter((value) => value?.stage === 'checking');
+  ok('large parser-sample analysis yields to the UI before it completes',
+    timerFired && checkingProgress.length >= 2 &&
+      checkingProgress[0].completed > 0 &&
+      checkingProgress[0].completed < largeInbox.length &&
+      checkingProgress.at(-1).completed === largeInbox.length,
+    JSON.stringify({ timerFired, progress }));
+  ok('cooperative analysis preserves the hand-checked parser research result',
+    cooperative.counts.checked === 130 &&
+      cooperative.counts.financial === 65 &&
+      cooperative.counts.sensitiveExcluded === 65 &&
+      cooperative.counts.nonFinancialExcluded === 0 &&
+      cooperative.counts.alreadyParsedExcluded === 65 &&
+      cooperative.counts.attachedTemplates === 0,
+    JSON.stringify(cooperative.counts));
+
+  const mixedInbox = Array.from({ length: 30 }, (_, batch) => [
+    {
+      sender: 'ENBD',
+      body: `Movement of AED 23.45 sent successfully to CARREFOUR. Ref 55566677788.${'!'.repeat(batch + 1)}`,
+      receivedAtMs: 0,
+    },
+    {
+      sender: '+971501234567',
+      body: `Movement of AED 67.89 sent successfully to SOME SHOP. Ref 99900011122.${'?'.repeat(batch + 1)}`,
+      receivedAtMs: 0,
+    },
+    {
+      sender: 'ENBD',
+      body: 'AED 45.75 spent on card ending 3644 at CARREFOUR on 04/07/2026.',
+      receivedAtMs: 0,
+    },
+    {
+      sender: '+971501234567',
+      body: 'Your OTP is 458213. Do not share this verification code.',
+      receivedAtMs: 0,
+    },
+  ]).flat();
+  const mixedBuild = {
+    version: '1.0.0', platform: 'android', language: 'en', marketId: 'AE', currency: 'AED',
+  };
+  const synchronousMixed = buildParserResearchSubmission(mixedInbox, mixedBuild);
+  const cooperativeMixed = await buildParserResearchSubmissionCooperatively(mixedInbox, mixedBuild);
+  ok('cooperative scheduling does not change any preview, wire or manual-export byte',
+    cooperativeMixed.preview === synchronousMixed.preview &&
+      JSON.stringify(cooperativeMixed.wire) === JSON.stringify(synchronousMixed.wire) &&
+      serializeManualParserResearchExport(buildManualParserResearchExport(cooperativeMixed)) ===
+        serializeManualParserResearchExport(buildManualParserResearchExport(synchronousMixed)));
+
+  const diverseInbox = Array.from({ length: 180 }, (_, index) => ({
+    sender: `+97150${index}`,
+    body: `Movement of AED 23.45 sent successfully to Sample merchant. Ref 55566677788.${'!'.repeat(index + 1)}`,
+    receivedAtMs: 0,
+  }));
+  const diverseProgress = [];
+  const diverse = await buildParserResearchSubmissionCooperatively(
+    diverseInbox,
+    mixedBuild,
+    (value) => diverseProgress.push(value),
+  );
+  const finalizingProgress = diverseProgress.filter((value) => value?.stage === 'finalizing');
+  ok('diverse-template finalization also yields and reports progress before completion',
+    diverse.counts.uniqueTemplates === 180 && diverse.counts.attachedTemplates === 40 &&
+      finalizingProgress.some((value) => value.completed > 0 && value.completed < value.total) &&
+      finalizingProgress.at(-1)?.completed === 180,
+    JSON.stringify({ counts: diverse.counts, finalizingProgress }));
+
+  let keepRunning = true;
+  let cancellation = '';
+  try {
+    await buildParserResearchSubmissionCooperatively(
+      largeInbox,
+      mixedBuild,
+      (value) => {
+        if (value?.stage === 'checking' && value.completed > 0) keepRunning = false;
+      },
+      { shouldContinue: () => keepRunning },
+    );
+  } catch (error) {
+    cancellation = error instanceof Error ? error.message : String(error);
+  }
+  ok('leaving or blocking the screen cancels raw-message analysis between slices',
+    cancellation === 'parser_research_cancelled');
+
+  console.log(`\nparser-research: ${pass} passed, ${fail} failed`);
+  if (fail) process.exit(1);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
