@@ -39,6 +39,7 @@ export interface MaterializedImportBatch {
   cardTypes: NonNullable<ImportBatchInput['cardTypes']>;
   confirmedLedgerCurrency?: 'AED' | 'SAR';
   parserRereadComplete: boolean;
+  historyImport: ImportBatchInput['historyImport'];
   lastScanTs: number;
   updates: TxHealUpdate[];
 }
@@ -85,6 +86,7 @@ export const materializeImportBatch = (
     cardTypes: mapRefs(input.cardTypes),
     confirmedLedgerCurrency: input.confirmedLedgerCurrency,
     parserRereadComplete: input.parserRereadComplete === true,
+    historyImport: input.historyImport,
     lastScanTs: input.lastScanTs,
     updates: (input.updates ?? []).map((update) => ({
       ...update,
@@ -139,6 +141,7 @@ export const applyMaterializedImportBatch = (
     cardDues: dues,
     bills,
     lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
+    historyImport: batch.historyImport ?? state.historyImport,
     // Parser version is proof of a completed full-history reread, not merely
     // proof that one new alert was imported. This distinction matters when a
     // backup is restored while an incremental capture is already in flight.

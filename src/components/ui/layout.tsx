@@ -77,7 +77,7 @@ export function SectionHeader({
   const theme = useTheme();
   return (
     <View style={styles.sectionHeader}>
-      <ThemedText type="micro" themeColor="textTertiary">
+      <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
         {title}
       </ThemedText>
       {trailing}
@@ -154,7 +154,10 @@ export function Block({
   const surface =
     tone === 'expense'
       ? { backgroundColor: theme.expenseSoftBg, borderColor: theme.expenseSoftBorder }
-      : { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder };
+      : {
+          backgroundColor: theme.backgroundElement,
+          borderColor: onPress ? theme.controlBorder : theme.cardBorder,
+        };
 
   if (!onPress) return <View style={[styles.block, surface, style]}>{children}</View>;
   return (
@@ -216,7 +219,7 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
           color={theme.text}
         />
       </Pressable>
-      <ThemedText type="micro" themeColor="textTertiary">
+      <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
         {title}
       </ThemedText>
     </View>

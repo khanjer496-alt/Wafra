@@ -36,7 +36,7 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
         styles.pill,
         {
           backgroundColor: theme.backgroundElement,
-          borderColor: theme.cardBorder,
+          borderColor: theme.controlBorder,
         },
       ]}>
       <ThemedText type="micro" themeColor="textSecondary">
@@ -111,7 +111,7 @@ export function IconButton({
         styles.iconBtn,
         {
           backgroundColor: theme.backgroundElement,
-          borderColor: theme.cardBorder,
+          borderColor: theme.controlBorder,
         },
       ]}>
       <Icon name={name} size={17} color={theme.textSecondary} />
@@ -131,7 +131,11 @@ export function SectionHeader({
 }) {
   return (
     <View style={styles.sectionHeader}>
-      <ThemedText type="micro" themeColor="textTertiary" style={styles.sectionTitle}>
+      <ThemedText
+        type="micro"
+        themeColor="textTertiary"
+        accessibilityRole="header"
+        style={styles.sectionTitle}>
         {title}
       </ThemedText>
       {right !== undefined &&

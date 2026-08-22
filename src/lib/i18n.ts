@@ -941,6 +941,16 @@ const S = {
   backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
   restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
   exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
+  launchMetricsInternal: { en: 'Launch metrics (internal)', ar: 'مقاييس التشغيل (داخلية)' },
+  launchMetricsDetail: {
+    en: 'Fixed timings only · no ledger data',
+    ar: 'أزمنة ثابتة فقط · بلا بيانات مالية',
+  },
+  launchMetricsDialog: { en: 'Export launch metrics', ar: 'تصدير مقاييس التشغيل' },
+  launchMetricsExportFailed: {
+    en: 'Launch metrics export failed',
+    ar: 'تعذّر تصدير مقاييس التشغيل',
+  },
   smsCorpusExportTitle: {
     en: 'Export parser corpus (temporary)',
     ar: 'تصدير مجموعة رسائل للمحلّل (مؤقت)',
@@ -1350,8 +1360,8 @@ const S = {
   onboardMarketSaudiDetail: { en: 'SAR · Saudi money format', ar: 'ريال · تنسيق الأموال السعودي' },
   onboardGoalsTitle: { en: 'What are you building towards?', ar: 'نحو ماذا تدّخر؟' },
   onboardGoalsBody: {
-    en: 'Choose up to two. Wafra will create starter targets after a supported ledger currency is confirmed.',
-    ar: 'اختر هدفين كحد أقصى. سينشئ وفرة أهدافاً مبدئية بعد تأكيد عملة مدعومة لسجلك.',
+    en: 'Choose up to two. Wafra will size starter targets from real income recorded in your ledger.',
+    ar: 'اختر هدفين كحد أقصى. سيحدد وفرة مبالغ الأهداف المبدئية من دخل حقيقي مسجّل في سجلك.',
   },
   onboardGoalSelectionHint: {
     en: 'Choose up to two goals.',
@@ -1366,8 +1376,8 @@ const S = {
   onboardGoalHomeDetail: { en: 'Make the first big milestone visible', ar: 'اجعل أول محطة كبيرة واضحة' },
   onboardBudgetTitle: { en: 'How should your month feel?', ar: 'كيف تريد أن يبدو شهرك؟' },
   onboardBudgetBody: {
-    en: 'Choose a starting style. Wafra will create five editable category limits after a supported currency is confirmed.',
-    ar: 'اختر أسلوباً مبدئياً. سينشئ وفرة خمسة حدود قابلة للتعديل بعد تأكيد عملة مدعومة.',
+    en: 'Choose a starting style. Wafra will create five editable category limits after it finds real income in your ledger.',
+    ar: 'اختر أسلوباً مبدئياً. سينشئ وفرة خمسة حدود قابلة للتعديل بعد العثور على دخل حقيقي في سجلك.',
   },
   onboardBudgetEssentials: { en: 'Essentials first', ar: 'الأساسيات أولاً' },
   onboardBudgetEssentialsDetail: { en: 'A tighter plan for focused months', ar: 'خطة أدق للأشهر المنضبطة' },
@@ -1376,12 +1386,12 @@ const S = {
   onboardBudgetFlexible: { en: 'More flexible', ar: 'أكثر مرونة' },
   onboardBudgetFlexibleDetail: { en: 'More room for dining and shopping', ar: 'مساحة أكبر للمطاعم والتسوق' },
   onboardPlanActivatesLater: {
-    en: 'No currency is guessed. Your plan activates when real money confirms a supported ledger currency.',
-    ar: 'لن نخمن العملة. تتفعّل خطتك عندما تؤكد عملية مالية حقيقية عملة مدعومة للسجل.',
+    en: 'No country, currency, or amount is guessed. Your plan activates when real income establishes useful amounts in your ledger.',
+    ar: 'لن نخمن البلد أو العملة أو المبلغ. تتفعّل خطتك عندما يحدد دخل حقيقي مبالغ مفيدة في سجلك.',
   },
   onboardPlanPending: {
-    en: 'Your starting plan is saved. It will activate when Wafra confirms a supported ledger currency.',
-    ar: 'حُفظت خطتك المبدئية. ستتفعّل عندما يؤكد وفرة عملة مدعومة للسجل.',
+    en: 'Your starting plan is saved. It will activate when Wafra finds real income to size it from.',
+    ar: 'حُفظت خطتك المبدئية. ستتفعّل عندما يجد وفرة دخلاً حقيقياً ليحدد مبالغها.',
   },
   onboardBudgetContinue: { en: 'Save my starting plan', ar: 'احفظ خطتي المبدئية' },
   onboardBudgetPreview: {
@@ -1856,6 +1866,33 @@ const S = {
   // Import screen
   importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
   scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
+  historyImportRunningTitle: {
+    en: 'Reading your bank-alert history',
+    ar: 'جارٍ قراءة سجل تنبيهات البنك',
+  },
+  historyImportSavedTitle: {
+    en: 'Inbox progress saved',
+    ar: 'تم حفظ تقدّم قراءة الرسائل',
+  },
+  historyImportSavedBody: {
+    en: 'Nothing was lost. Open Wafra and retry to continue from the last saved page.',
+    ar: 'لم يُفقد شيء. افتح وفرة وأعد المحاولة للمتابعة من آخر صفحة محفوظة.',
+  },
+  historyImportAccessBody: {
+    en: 'Android blocked inbox history access. Open phone settings, allow access, then return to continue safely.',
+    ar: 'منع أندرويد الوصول إلى سجل الرسائل. افتح إعدادات الهاتف واسمح بالوصول ثم ارجع للمتابعة بأمان.',
+  },
+  historyImportLiveProgress: {
+    en: '{scanned} messages checked · {found} money entries found. You can keep using Wafra.',
+    ar: 'تم فحص {scanned} رسالة · عُثر على {found} قيد مالي. يمكنك متابعة استخدام وفرة.',
+  },
+  historyImportSettingsTitle: {
+    en: 'First inbox import',
+    ar: 'الاستيراد الأول من الرسائل',
+  },
+  retryHistoryImport: { en: 'Retry inbox import', ar: 'إعادة محاولة استيراد الرسائل' },
+  choiceColor: { en: 'Color {count}', ar: 'اللون {count}' },
+  choiceIcon: { en: 'Icon {count}', ar: 'الأيقونة {count}' },
   findBankAlerts: { en: 'Find bank alerts', ar: 'ابحث عن التنبيهات البنكية' },
   scanBankAlertsPrivacy: {
     en: 'Finds supported bank alerts on this phone. They are parsed here; raw messages never leave.',

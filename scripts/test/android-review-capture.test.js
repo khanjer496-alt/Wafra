@@ -459,6 +459,48 @@ const { scanInbox } = require('./build/auto-import.js');
       pages: inboxReadCursors.length,
     }));
 
+  inboxReadCursors.length = 0;
+  const firstResumablePage = await scanInbox(
+    0,
+    {},
+    undefined,
+    'en-AE',
+    { maxInboxPages: 1 },
+  );
+  ok('a resumable scan returns after one bounded provider page',
+    firstResumablePage.inboxScannedCount === 1000 &&
+      firstResumablePage.inboxHistoryComplete === false &&
+      firstResumablePage.nextCursor?.beforeId === 2_002 &&
+      inboxReadCursors.length === 1,
+    JSON.stringify({
+      count: firstResumablePage.inboxScannedCount,
+      complete: firstResumablePage.inboxHistoryComplete,
+      cursor: firstResumablePage.nextCursor,
+      reads: inboxReadCursors,
+    }));
+  const secondResumablePage = await scanInbox(
+    0,
+    {},
+    undefined,
+    'en-AE',
+    { maxInboxPages: 1, cursor: firstResumablePage.nextCursor },
+  );
+  const resumableIds = new Set([
+    ...firstResumablePage.parsed,
+    ...secondResumablePage.parsed,
+  ].map((item) => item.sourceEventId));
+  ok('the next resumable page overlaps one row and still reaches history end losslessly',
+    secondResumablePage.inboxScannedCount === 2 &&
+      secondResumablePage.inboxHistoryComplete === true &&
+      secondResumablePage.nextCursor === null &&
+      resumableIds.size === 1001,
+    JSON.stringify({
+      count: secondResumablePage.inboxScannedCount,
+      complete: secondResumablePage.inboxHistoryComplete,
+      cursor: secondResumablePage.nextCursor,
+      unique: resumableIds.size,
+    }));
+
   reactNative.Platform.OS = 'ios';
   const ios = await scanInbox(123, {}, undefined, 'fr-FR');
   ok('the review-candidate scanner remains Android-only',

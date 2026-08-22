@@ -3,12 +3,18 @@
 # parser, corpus, invariants, Kotlin, contracts, worker and relay-client, plus
 # the Worker's own PDF/email/push suites out of server/test.
 set -e
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")"
 # The suite compiles into a single shared build/ directory, so two runs at
 # once would delete each other's output half-way through and fail for reasons
 # that have nothing to do with the code. Queue them instead.
-exec 9>/tmp/wafra-test.lock
-flock 9 2>/dev/null || true
+if [ "${WAFRA_TEST_LOCKED:-}" != "1" ]; then
+  if command -v flock >/dev/null 2>&1; then
+    exec env WAFRA_TEST_LOCKED=1 flock /tmp/wafra-test.lock "$SELF" "$@"
+  elif command -v lockf >/dev/null 2>&1; then
+    exec env WAFRA_TEST_LOCKED=1 lockf -k /tmp/wafra-test.lock "$SELF" "$@"
+  fi
+fi
 # kotlin-regex.test.js needs a working javac, and skips itself (printing
 # "0 passed") when it cannot find one — which reads exactly like the suite
 # passing. Two traps here, both of which hid those 15 assertions on macOS:
@@ -90,11 +96,16 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=53
+EXPECTED_SUITES=58
 SUITES=(parser bank-corpus unit worker relay invariants import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
         trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
 SUITES+=(historical-import)
+SUITES+=(history-import)
+SUITES+=(launch-performance)
+SUITES+=(screen-section-contract)
+SUITES+=(parser-capabilities)
+SUITES+=(accessibility-layout)
 SUITES+=(alert-market-packs)
 SUITES+=(alert-institution-grammars)
 SUITES+=(alert-market-detection)

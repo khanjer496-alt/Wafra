@@ -442,7 +442,7 @@ export default function TransactionsScreen() {
           <View
             style={[
               styles.searchBox,
-              { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+              { backgroundColor: theme.backgroundElement, borderColor: theme.controlBorder },
             ]}>
             <Icon name="search" size={17} color={theme.textSecondary} />
             <TextInput

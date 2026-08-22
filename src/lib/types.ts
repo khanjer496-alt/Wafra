@@ -1,5 +1,6 @@
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 import type { AlertReviewTrayState } from '@/lib/alert-review-tray';
+import type { HistoryImportProgress } from '@/lib/history-import';
 
 export type TransactionType = 'expense' | 'income';
 
@@ -343,6 +344,8 @@ export interface AppState {
   notSubscriptions: string[];
   /** Epoch ms of the newest SMS already scanned. */
   lastScanTs: number;
+  /** Body-free, resumable progress for Android's first full history import. */
+  historyImport: HistoryImportProgress | null;
   /**
    * The parser version the stored rows were read with. When it falls behind
    * `PARSER_VERSION` the next scan re-reads the whole inbox so the improvements
@@ -470,6 +473,8 @@ export interface ImportBatchInput {
    * partial scan as migration proof permanently strands older messages.
    */
   parserRereadComplete?: boolean;
+  /** Applied atomically with this page so its cursor can never outrun its rows. */
+  historyImport?: HistoryImportProgress;
   lastScanTs: number;
   updates?: TxHealUpdate[];
 }

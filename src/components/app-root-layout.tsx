@@ -18,6 +18,7 @@ import { StoreProvider, useStore } from '@/lib/store';
 // handler when iOS launches the JS bundle in the background.
 import '@/lib/background-relay';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
+import { markLaunchPhase } from '@/lib/launch-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
 // capture module keeps its promise of holding no network by taking delivery
@@ -136,7 +137,10 @@ export default function RootLayout() {
   const ready = Platform.OS === 'web' || fontsLoaded || !!fontError;
 
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync().catch(() => {});
+    if (ready) {
+      markLaunchPhase('fonts-ready');
+      SplashScreen.hideAsync().catch(() => {});
+    }
   }, [ready]);
 
   if (!ready) return null;

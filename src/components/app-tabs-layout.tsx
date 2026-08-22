@@ -3,6 +3,7 @@ import React from 'react';
 
 import { WafraTabBar } from '@/components/tab-bar';
 import { useAutoImport } from '@/hooks/use-auto-import';
+import { useHistoryImport } from '@/hooks/use-history-import';
 
 /**
  * Capture belongs to the signed-in tab shell, not to whichever tab happened
@@ -14,6 +15,7 @@ import { useAutoImport } from '@/hooks/use-auto-import';
  * owns the once-per-session notification work without creating a second UI.
  */
 function CaptureOwner() {
+  useHistoryImport();
   useAutoImport(true, false);
   return null;
 }

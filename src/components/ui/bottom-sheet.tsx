@@ -234,7 +234,7 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
                       accessibilityLabel={t('close', language)}
                       hitSlop={8}
                       onPress={requestDismiss}
-                      style={[styles.close, { borderColor: theme.cardBorder }]}>
+                      style={[styles.close, { borderColor: theme.controlBorder }]}>
                       <Icon name="close" size={15} color={theme.textSecondary} />
                     </Pressable>
                   </View>

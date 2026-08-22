@@ -678,7 +678,7 @@ export default function TrustedDevicesScreen() {
             accessibilityLabel={t('trustedDeviceName', language)}
             placeholder={suggestedName}
             placeholderTextColor={theme.textTertiary}
-            style={[styles.input, { color: theme.text, borderColor: theme.cardBorderStrong, backgroundColor: theme.backgroundElement }]}
+            style={[styles.input, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
           />
         </View>
         <View style={styles.field}>
@@ -692,7 +692,7 @@ export default function TrustedDevicesScreen() {
             accessibilityLabel={t('trustedInviteCode', language)}
             placeholder={t('trustedInvitePlaceholder', language)}
             placeholderTextColor={theme.textTertiary}
-            style={[styles.input, styles.codeInput, { color: theme.text, borderColor: theme.cardBorderStrong, backgroundColor: theme.backgroundElement }]}
+            style={[styles.input, styles.codeInput, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
           />
         </View>
         {noticeBlock}
@@ -729,7 +729,7 @@ export default function TrustedDevicesScreen() {
                   maxLength={60}
                   autoCapitalize="words"
                   accessibilityLabel={t('trustedDeviceName', language)}
-                  style={[styles.input, { color: theme.text, borderColor: theme.cardBorderStrong, backgroundColor: theme.backgroundElement }]}
+                  style={[styles.input, { color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]}
                 />
                 <Button
                   label={t('save', language)}

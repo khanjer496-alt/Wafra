@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -12,17 +11,20 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
+import { BillsSegmentControl } from '@/components/bills/bills-segment-control';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { billsForMonth, type BillStatus } from '@/lib/bills';
 import { openDues, recentlySettledDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
@@ -76,6 +78,7 @@ type Confirmation = {
 
 export default function BillsScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
   const clearance = useTabBarClearance();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue } = useStore();
@@ -536,53 +539,31 @@ export default function BillsScreen() {
   return (
     <ThemedView style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.header}>
+        <View style={[styles.header, largeText && styles.headerLarge]}>
           <View>
-            <ThemedText type="title">{t('billsTitle')}</ThemedText>
+            <ThemedText type="title" accessibilityRole="header">{t('billsTitle')}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">
               {t('billsSubtitle')}
             </ThemedText>
           </View>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('newReminder')}
             onPress={() => setAdderVisible(true)}
             style={[styles.backBtn, { backgroundColor: theme.primary }]}>
             <Icon name="plus" size={18} color={theme.onPrimary} strokeWidth={2.4} />
           </Pressable>
         </View>
 
-        <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
-          {(['subscriptions', 'cards', 'utilities'] as Segment[]).map((s) => {
-            const label =
-              s === 'subscriptions'
-                ? `${t('subscriptionsSeg')} ${subs.length}`
-                : s === 'cards'
-                  ? `${t('cardsSeg')} ${dues.length}`
-                  : `${t('utilitiesSeg')} ${
-                      loans.length + commitments.length + otherRepeats.length + rows.length
-                    }`;
-            return (
-              <Pressable
-                key={s}
-                onPress={() => setSegment(s)}
-                style={[
-                  styles.segmentItem,
-                  segment === s && {
-                    backgroundColor: theme.backgroundElement,
-                    borderColor: theme.cardBorder,
-                    borderWidth: StyleSheet.hairlineWidth,
-                  },
-                ]}>
-                <ThemedText
-                  type="nano"
-                  numberOfLines={1}
-                  tabular
-                  themeColor={segment === s ? 'text' : 'textTertiary'}>
-                  {label}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
-        </View>
+        <BillsSegmentControl
+          segment={segment}
+          onChange={setSegment}
+          subscriptionCount={subs.length}
+          cardCount={dues.length}
+          utilityCount={loans.length + commitments.length + otherRepeats.length + rows.length}
+          largeText={largeText}
+          theme={theme}
+        />
 
         <ScrollView
           contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
@@ -599,7 +580,7 @@ export default function BillsScreen() {
                   <View
                     style={[
                       styles.dueFocal,
-                      { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+                      { backgroundColor: theme.backgroundElement, borderColor: theme.controlBorder },
                     ]}>
                     {/* One target, not a decorated header sitting above one.
                         The card name, the due date and the chevron used to be
@@ -704,7 +685,7 @@ export default function BillsScreen() {
                       </Pressable>
                       <Pressable
                         onPress={() => setCardDetail(account)}
-                        style={[styles.dueDetailsButton, { borderColor: theme.cardBorderStrong }]}>
+                        style={[styles.dueDetailsButton, { borderColor: theme.controlBorder }]}>
                         <ThemedText type="smallBold">{t('seeAll')}</ThemedText>
                       </Pressable>
                     </View>
@@ -846,7 +827,7 @@ export default function BillsScreen() {
               )}
               <View>{subs.map((sub, i) => renderRecurringRow(sub, i))}</View>
 
-              <View style={[styles.trackingRail, { borderColor: theme.cardBorder }]}>
+              <View style={[styles.trackingRail, { borderColor: theme.controlBorder }]}>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={t('cardPaymentsDue')}
@@ -867,7 +848,7 @@ export default function BillsScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={t('fixedPayments')}
                   onPress={() => setSegment('utilities')}
-                  style={[styles.trackingLink, { borderTopColor: theme.cardBorder, borderTopWidth: StyleSheet.hairlineWidth }]}>
+                  style={[styles.trackingLink, { borderTopColor: theme.controlBorder, borderTopWidth: 1 }]}>
                   <View style={[styles.trackingIcon, { backgroundColor: theme.backgroundSelected }]}>
                     <Icon name="receipt" size={15} color={theme.textSecondary} />
                   </View>
@@ -1035,16 +1016,10 @@ export default function BillsScreen() {
       </SafeAreaView>
 
       {/* Subscription detail sheet */}
-      <Modal
+      <BottomSheet
         visible={detail !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDetail(null)}>
-        <Pressable style={styles.backdrop} onPress={() => setDetail(null)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}
-            onPress={() => {}}>
-            <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
+        onClose={() => setDetail(null)}
+        title={detail?.title ?? t('subscriptionsSeg')}>
             {detail && detailData && (
               <>
                 <View style={styles.sheetHeader}>
@@ -1064,13 +1039,6 @@ export default function BillsScreen() {
                       </ThemedText>
                     </View>
                   </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('close')}
-                    hitSlop={8}
-                    onPress={() => setDetail(null)}>
-                    <Icon name="close" size={20} color={theme.textSecondary} />
-                  </Pressable>
                 </View>
 
                 {/* Lifetime facts */}
@@ -1129,7 +1097,10 @@ export default function BillsScreen() {
                   <ThemedText type="micro" themeColor="textSecondary">
                     {detail.group === 'subscription' ? t('history') : t('paymentHistory')}
                   </ThemedText>
-                  <ScrollView style={styles.historyScroll} showsVerticalScrollIndicator={false}>
+                  <ScrollView
+                    nestedScrollEnabled
+                    style={styles.historyScroll}
+                    showsVerticalScrollIndicator={false}>
                     {detailData.txs.slice(0, 36).map((transaction, i) => {
                       const acc = recurringPaymentAccount(transaction, state.accounts);
                       const offMedian =
@@ -1198,54 +1169,51 @@ export default function BillsScreen() {
                 </View>
               </>
             )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BottomSheet>
 
       {/* Add reminder sheet */}
-      <Modal visible={adderVisible} transparent animationType="fade" onRequestClose={() => setAdderVisible(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setAdderVisible(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}
-            onPress={() => {}}>
-            <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
-            <View style={styles.sheetHeader}>
-              <ThemedText type="heading">{t('newReminder')}</ThemedText>
-              <Pressable onPress={() => setAdderVisible(false)}>
-                <Icon name="close" size={20} color={theme.textSecondary} />
-              </Pressable>
-            </View>
-
+      <BottomSheet visible={adderVisible} onClose={() => setAdderVisible(false)} title={t('newReminder')}>
+            <ThemedText type="small" accessibilityRole="header">
+              {t('reminderNamePlaceholder')}
+            </ThemedText>
             <TextInput
+              accessibilityLabel={t('reminderNamePlaceholder')}
               value={title}
               onChangeText={setTitle}
               placeholder={t('reminderNamePlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder, color: theme.text }]}
             />
 
-            <View style={styles.inputRow}>
-              <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
-                <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
-                <TextInput
-                  value={amountText}
-                  onChangeText={setAmountText}
-                  keyboardType="numeric"
-                  placeholder={t('amount')}
-                  placeholderTextColor={theme.textSecondary}
-                  style={[styles.amountInput, { color: theme.text }]}
-                />
+            <View style={[styles.inputRow, largeText && styles.inputRowLarge]}>
+              <View style={styles.labeledInput}>
+                <ThemedText type="micro" themeColor="textSecondary">{t('amount')}</ThemedText>
+                <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder }]}>
+                  <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
+                  <TextInput
+                    accessibilityLabel={t('amount')}
+                    value={amountText}
+                    onChangeText={setAmountText}
+                    keyboardType="numeric"
+                    placeholder={t('amount')}
+                    placeholderTextColor={theme.textSecondary}
+                    style={[styles.amountInput, { color: theme.text }]}
+                  />
+                </View>
               </View>
-              <View style={[styles.amountBox, styles.dayBox, { backgroundColor: theme.backgroundSelected }]}>
-                <ThemedText type="smallBold" themeColor="textSecondary">{t('day')}</ThemedText>
-                <TextInput
-                  value={dueDayText}
-                  onChangeText={setDueDayText}
-                  keyboardType="numeric"
-                  placeholder="1-31"
-                  placeholderTextColor={theme.textSecondary}
-                  style={[styles.amountInput, { color: theme.text }]}
-                />
+              <View style={[styles.labeledInput, styles.dayBox]}>
+                <ThemedText type="micro" themeColor="textSecondary">{t('day')}</ThemedText>
+                <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder }]}>
+                  <TextInput
+                    accessibilityLabel={t('day')}
+                    value={dueDayText}
+                    onChangeText={setDueDayText}
+                    keyboardType="numeric"
+                    placeholder="1-31"
+                    placeholderTextColor={theme.textSecondary}
+                    style={[styles.amountInput, { color: theme.text }]}
+                  />
+                </View>
               </View>
             </View>
 
@@ -1256,6 +1224,7 @@ export default function BillsScreen() {
             />
 
             <Pressable
+              accessibilityRole="button"
               onPress={saveBill}
               disabled={!draftValid}
               style={[
@@ -1264,9 +1233,7 @@ export default function BillsScreen() {
               ]}>
               <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('saveReminder')}</ThemedText>
             </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BottomSheet>
       <CardDetailSheet account={cardDetail} onClose={() => setCardDetail(null)} />
       {/* Mounted only while there is something to confirm, so the entry
           animation runs on every open rather than once per screen. */}
@@ -1310,26 +1277,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding,
     paddingVertical: Spacing.two,
   },
+  headerLarge: { alignItems: 'flex-start' },
   backBtn: {
     width: 34,
     height: 34,
     borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  segment: {
-    flexDirection: 'row',
-    marginHorizontal: ScreenPadding,
-    borderRadius: 11,
-    padding: 3,
-    gap: 3,
-  },
-  segmentItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 9,
-    borderRadius: 8,
   },
   content: {
     paddingHorizontal: ScreenPadding,
@@ -1537,6 +1491,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   input: {
+    borderWidth: 1,
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
@@ -1547,12 +1502,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two,
   },
+  inputRowLarge: { flexDirection: 'column' },
+  labeledInput: { flex: 1, gap: Spacing.one },
   amountBox: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
     borderRadius: Radius.md,
+    borderWidth: 1,
     paddingHorizontal: Spacing.three,
   },
   dayBox: {

@@ -112,6 +112,18 @@ export type { CaptureChannel } from '@/lib/dedupe';
 export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
+export interface InboxScanCursor {
+  beforeDateMs: number;
+  beforeId: number;
+}
+
+export interface ScanInboxOptions {
+  /** Resume strictly before this lossless Android provider date/id pair. */
+  cursor?: InboxScanCursor | null;
+  /** Omit for the existing complete scan; history import uses one page. */
+  maxInboxPages?: number;
+}
+
 export interface ScanResult {
   parsed: ScannedSms[];
   /**
@@ -138,6 +150,8 @@ export interface ScanResult {
   inboxScannedCount: number;
   /** The inbox provider reached a real end-of-history page. */
   inboxHistoryComplete: boolean;
+  /** Cursor for the next bounded page, null only at the real history end. */
+  nextCursor: InboxScanCursor | null;
   scannedCount: number;
   /** Strong launch-pack evidence observed while parsing this scan. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
@@ -228,11 +242,13 @@ export async function scanInbox(
   overrides: Record<string, import('@/lib/types').CategoryId>,
   onProgress?: (scanned: number, found: number) => void,
   regionHint: string | null = deviceRegionHint(),
+  options: ScanInboxOptions = {},
 ): Promise<ScanResult> {
   if (!isSmsScanningAvailable() || !SmsReader) {
     return {
       parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs,
       inboxScannedCount: 0, inboxHistoryComplete: false, scannedCount: 0,
+      nextCursor: null,
       detectedLaunchMarket: null,
       commit: NOOP_SCAN_COMMIT,
     };
@@ -329,12 +345,17 @@ export async function scanInbox(
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
   let newestTs = sinceMs;
-  let beforeDateMs = Date.now() + 60_000;
-  let beforeId = Number.MAX_SAFE_INTEGER;
+  let beforeDateMs = options.cursor?.beforeDateMs ?? Date.now() + 60_000;
+  let beforeId = options.cursor?.beforeId ?? Number.MAX_SAFE_INTEGER;
   let inboxScannedCount = 0;
   let inboxHistoryComplete = false;
+  let nextCursor: InboxScanCursor | null = null;
   let scannedCount = 0;
   let previousInboxSms: InboxSms | null = null;
+  let pagesRead = 0;
+  const maxInboxPages = options.maxInboxPages === undefined
+    ? Number.POSITIVE_INFINITY
+    : Math.max(1, Math.floor(options.maxInboxPages));
 
   for (;;) {
     const batch: InboxSms[] = await SmsReader.getInboxSms(
@@ -345,8 +366,10 @@ export async function scanInbox(
     );
     if (batch.length === 0) {
       inboxHistoryComplete = true;
+      nextCursor = null;
       break;
     }
+    pagesRead += 1;
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
@@ -428,19 +451,32 @@ export async function scanInbox(
     if (nextBeforeDateMs === beforeDateMs && nextBeforeId === beforeId) {
       throw new Error('SMS inbox pagination did not advance');
     }
-    beforeDateMs = nextBeforeDateMs;
-    beforeId = nextBeforeId;
     if (batch.length < PAGE_SIZE) {
       inboxHistoryComplete = true;
+      nextCursor = null;
       break;
     }
+    if (pagesRead >= maxInboxPages) {
+      // Repeat the last row on the next page by placing its cursor at the row
+      // immediately before it. That one-row overlap preserves the adjacency
+      // needed to detect a byte-identical OEM provider duplicate split across
+      // a process boundary, without persisting raw SMS or a message hash.
+      const overlapBoundary = batch[batch.length - 2];
+      nextCursor = {
+        beforeDateMs: overlapBoundary.date,
+        beforeId: overlapBoundary.id,
+      };
+      break;
+    }
+    beforeDateMs = nextBeforeDateMs;
+    beforeId = nextBeforeId;
   }
 
   // Alerts the delivery receiver caught as they arrived. Usually the inbox
   // query above already found them; this covers the case where a message
   // never reached the SMS provider, and is the hook a live alert hangs off.
   // Duplicates collapse on the date/amount/title fingerprint in the plan.
-  if (SmsReader.getReceived) {
+  if (inboxHistoryComplete && SmsReader.getReceived) {
     try {
       const received = await SmsReader.getReceived(sinceMs);
       const deliveryYield = createParseYieldState();
@@ -486,7 +522,7 @@ export async function scanInbox(
   // Bank-app push notifications captured by the notification listener (banks
   // are shifting from SMS to push). Same parser, same dedupe fingerprints.
   const notificationReader = NotificationReader;
-  if (notificationReader?.isEnabled?.()) {
+  if (inboxHistoryComplete && notificationReader?.isEnabled?.()) {
     try {
       // This queue has its own explicit acknowledgement. Always read every
       // retained row: using the ledger watermark here could strand an older
@@ -559,6 +595,7 @@ export async function scanInbox(
     newestTs,
     inboxScannedCount,
     inboxHistoryComplete,
+    nextCursor,
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
     commit: notificationIds.size > 0 && notificationReader

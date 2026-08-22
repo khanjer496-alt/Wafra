@@ -14,6 +14,7 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { StorageRecovery } from '@/components/storage-recovery';
+import { MoneyPreview } from '@/components/onboarding/money-preview';
 import { ThemedText } from '@/components/themed-text';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
@@ -22,11 +23,8 @@ import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import {
-  buildImportPlan,
-  isSmsInboxAccessError,
   isSmsScanningAvailable,
   requestSmsPermission,
-  scanInbox,
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
@@ -70,48 +68,6 @@ function captureCopy(): { title: StringKey; body: StringKey } {
     return { title: 'onboardCaptureTitleAndroid', body: 'onboardCaptureBodyAndroid' };
   }
   return { title: 'onboardCaptureTitleWeb', body: 'onboardCaptureBodyWeb' };
-}
-
-function MoneyPreview({ reducedMotion }: { reducedMotion: boolean }) {
-  const items = [
-    { icon: 'briefcase' as const, label: t('onboardPreviewIncome'), detail: t('onboardPreviewIncomeDetail'), tone: night.income },
-    { icon: 'bolt' as const, label: t('onboardPreviewBill'), detail: t('onboardPreviewBillDetail'), tone: night.warning },
-    { icon: 'check' as const, label: t('onboardPreviewCard'), detail: t('onboardPreviewCardDetail'), tone: night.primary },
-  ];
-  return (
-    <View
-      style={styles.moneyPreview}
-      accessible
-      accessibilityLabel={t('onboardPreviewAccessibility')}>
-      <View style={styles.previewHeader}>
-        <ThemedText style={styles.previewOverline}>{t('onboardPreviewOverline')}</ThemedText>
-        <View style={styles.livePill}>
-          <ThemedText style={styles.liveLabel}>{t('onboardPreviewLive')}</ThemedText>
-        </View>
-      </View>
-      <View style={styles.previewRows}>
-        {items.map((item, index) => (
-          <Animated.View
-            key={item.label}
-            entering={reducedMotion ? undefined : FadeInDown.delay(160 + index * 70).duration(360)}
-            style={[styles.previewRow, index > 0 && styles.previewRowBorder]}>
-            <View style={[styles.previewIcon, { backgroundColor: `${item.tone}1A` }]}>
-              <Icon name={item.icon} size={17} color={item.tone} />
-            </View>
-            <View style={styles.previewCopy}>
-              <ThemedText style={styles.previewLabel}>{item.label}</ThemedText>
-              <ThemedText style={styles.previewDetail}>{item.detail}</ThemedText>
-            </View>
-            <Icon name="chevron-right" size={16} color={night.textTertiary} />
-          </Animated.View>
-        ))}
-      </View>
-      <View style={styles.previewFooter}>
-        <Icon name="spark" size={15} color={night.primary} />
-        <ThemedText style={styles.previewFooterText}>{t('onboardPreviewFooter')}</ThemedText>
-      </View>
-    </View>
-  );
 }
 
 function StartOption({
@@ -278,9 +234,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     storageFailure,
     storageRecoveryState,
     hydrationFailed,
-    importBatch,
-    stageReviewAlerts,
-    setMarket,
+    beginHistoryImport,
+    ensureDurable,
     setOnboarded,
     setOnboardingPlan,
     setCaptureOptOut,
@@ -291,7 +246,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds],
   }));
   const [goalLimitAnnounced, setGoalLimitAnnounced] = useState(false);
-  const [progress, setProgress] = useState({ scanned: 0, found: 0 });
+  const [progress] = useState({ scanned: 0, found: 0 });
   const [result, setResult] = useState<{ tx: number; accounts: number } | null>(null);
   const [smsDenied, setSmsDenied] = useState(false);
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
@@ -361,42 +316,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       // automatic capture instead. Clear the durable opt-out before the first
       // read so setup cannot report success over a permanently blocked pipe.
       await setCaptureOptOut(false);
-      setStep('scanning');
-      const {
-        parsed,
-        reviewCandidates,
-        newestTs,
-        inboxHistoryComplete,
-        detectedLaunchMarket,
-        commit,
-      } = await scanInbox(0, {}, (scanned, found) => setProgress({ scanned, found }));
-      if (detectedLaunchMarket && detectedLaunchMarket !== state.marketId) {
-        if (!setMarket(detectedLaunchMarket)) {
-          throw new Error('market_mismatch');
-        }
-      }
-      const reviewReceipt = stageReviewAlerts(reviewCandidates);
-      await reviewReceipt.durable;
-      const importPlan = buildImportPlan(
-        parsed,
-        detectedLaunchMarket ? { ...state, marketId: detectedLaunchMarket } : state,
-        newestTs,
-      );
-      if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
-      await importBatch({ ...importPlan.batch, parserRereadComplete: true }).durable;
-      await commit();
-      setResult({ tx: importPlan.txCount, accounts: importPlan.newAccountCount });
+      await beginHistoryImport();
       setCompletionOutcome('automatic');
-      setStep('complete');
+      setOnboarded();
+      await ensureDurable();
       committed();
-    } catch (error) {
+    } catch {
       setResult({ tx: 0, accounts: 0 });
-      if (Platform.OS === 'android' && isSmsInboxAccessError(error)) {
-        setSmsDenied(true);
-        setCompletionOutcome('denied');
-      } else {
-        setCompletionOutcome('failed');
-      }
+      setCompletionOutcome('failed');
       setStep('complete');
     }
   };
@@ -937,52 +864,6 @@ const styles = StyleSheet.create({
     maxWidth: 430,
   },
   sub: { fontFamily: Fonts.sans, fontSize: 15, lineHeight: 23, color: night.textSecondary },
-  moneyPreview: {
-    overflow: 'hidden',
-    borderRadius: Radius.bottomSheet,
-    borderCurve: 'continuous',
-    borderWidth: 1,
-    borderColor: night.cardBorder,
-    backgroundColor: night.backgroundElement,
-  },
-  previewHeader: {
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.two,
-  },
-  previewOverline: { color: night.textTertiary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.7 },
-  livePill: {
-    alignSelf: 'stretch',
-    minHeight: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    justifyContent: 'center',
-    paddingHorizontal: 9,
-    borderRadius: Radius.full,
-    backgroundColor: night.primarySoft,
-  },
-  liveLabel: { flexShrink: 1, color: night.primary, fontFamily: Fonts.sansSemi, fontSize: 11, lineHeight: 15, letterSpacing: 0.5 },
-  previewRows: { paddingHorizontal: Spacing.three },
-  previewRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  previewRowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: night.cardBorder },
-  previewIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  previewCopy: { flex: 1, gap: 2 },
-  previewLabel: { color: night.text, fontFamily: Fonts.sansMedium, fontSize: 14, lineHeight: 19 },
-  previewDetail: { color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 11.5, lineHeight: 16 },
-  previewFooter: {
-    minHeight: 43,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: night.primaryBorder,
-    backgroundColor: night.primarySoft,
-  },
-  previewFooterText: { flex: 1, color: night.primary, fontFamily: Fonts.sansMedium, fontSize: 11.5 },
   welcomeActions: { marginTop: 'auto', gap: Spacing.two },
   setupTime: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   setupTimeText: { flexShrink: 1, color: night.textTertiary, fontFamily: Fonts.sans, fontSize: 11.5, textAlign: 'center' },

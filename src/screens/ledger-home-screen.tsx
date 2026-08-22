@@ -32,10 +32,12 @@ import { CountUpAmount } from '@/components/ui/count-up';
 import { MotionReveal } from '@/components/ui/motion-reveal';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useToast } from '@/components/ui/toast';
+import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
@@ -51,8 +53,11 @@ import { ledgerCurrencyCode, ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { CardDue, Transaction } from '@/lib/types';
+import type { HistoryImportProgress } from '@/lib/history-import';
 import { t, tf } from '@/lib/i18n';
 import { projectDashboard } from '@/lib/dashboard-projection';
+import { openSmsPermissionSettings } from '@/lib/auto-import';
+import { markLaunchPhase } from '@/lib/launch-performance';
 import type { UncategorisedSummary } from '@/lib/uncategorised';
 
 /**
@@ -182,6 +187,59 @@ function AutomaticCapture({
   );
 }
 
+function HistoryImportNotice({
+  progress,
+  onRetry,
+  onOpenSettings,
+}: {
+  progress: HistoryImportProgress | null;
+  onRetry: () => void;
+  onOpenSettings: () => void;
+}) {
+  const theme = useTheme();
+  if (!progress || progress.status === 'complete') return null;
+  const failed = progress.status === 'failed';
+  const accessFailed = progress.error === 'inbox-access';
+  const title = failed ? t('historyImportSavedTitle') : t('historyImportRunningTitle');
+  const detail = failed
+    ? t(accessFailed ? 'historyImportAccessBody' : 'historyImportSavedBody')
+    : tf('historyImportLiveProgress', { scanned: progress.scanned, found: progress.found });
+  return (
+    <View style={[styles.historyImport, {
+        backgroundColor: failed ? theme.goldSoft : theme.primarySoft,
+        borderColor: failed ? theme.cardBorderStrong : theme.primaryBorder,
+      }]}>
+      <Icon
+        name={failed ? 'alert' : 'spark'}
+        size={17}
+        color={failed ? theme.warning : theme.primary}
+      />
+      <View
+        accessible
+        accessibilityLiveRegion="polite"
+        accessibilityRole={failed ? 'text' : 'progressbar'}
+        accessibilityValue={failed ? undefined : { min: 0, now: progress.scanned }}
+        accessibilityLabel={`${title}. ${detail}`}
+        style={styles.historyImportCopy}>
+        <ThemedText type="smallBold">{title}</ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">{detail}</ThemedText>
+      </View>
+      {failed ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t(accessFailed ? 'openPhoneSettings' : 'retryHistoryImport')}
+          hitSlop={8}
+          onPress={accessFailed ? onOpenSettings : onRetry}
+          style={styles.historyImportRetry}>
+          <ThemedText type="nano" style={{ color: theme.warning }}>
+            {t(accessFailed ? 'openPhoneSettings' : 'retryHistoryImport')}
+          </ThemedText>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * One aggregate doorway, never one warning per unrecognized message.
  *
@@ -268,6 +326,7 @@ function Hero({
 }) {
   const theme = useTheme();
   const router = useRouter();
+  const largeText = useLargeTextLayout();
 
   const caption =
     t('netAfterSpending') +
@@ -323,7 +382,7 @@ function Hero({
           {formatCompactAED(netFils)}
         </ThemedText>
       ) : (
-        <View style={styles.heroRow}>
+        <View style={[styles.heroRow, largeText && styles.heroRowLarge]}>
           <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
             {ledgerCurrencyDisplay()}
           </ThemedText>
@@ -344,7 +403,7 @@ function Hero({
 
       {/* Two cells divided by rules rather than boxed — the split is a
           continuation of the hero, not a separate component. */}
-      <View style={styles.split}>
+      <View style={[styles.split, largeText && styles.splitLarge]}>
         {(
           [
             [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
@@ -364,7 +423,7 @@ function Hero({
             style={[
               styles.splitCell,
               { borderTopColor: theme.cardBorder },
-              i > 0 && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
+              i > 0 && !largeText && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
             ]}>
             <View style={styles.splitTop}>
               <View style={[styles.dot, { backgroundColor: color }]} />
@@ -619,15 +678,21 @@ function CategorisePrompt({
 export default function LedgerHomeScreen() {
   const theme = useTheme();
   const focused = useIsFocused();
+  const privacyGateCleared = usePrivacyGateCleared();
   const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
-  const { state, applyFxUpdates, setCaptureOptOut } = useStore();
+  const { state, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
   const { period } = usePeriod();
   // The tabs shell owns launch/foreground scanning so a restored Bills, Flow
   // or Wallet tab still runs parser migrations. Home owns only this visible
   // status surface and joins the shell's module-level in-flight scan on tap.
   const { runAutoImport, needsPermission, captureState } = useAutoImport(false, true);
+  useEffect(() => {
+    if (focused && privacyGateCleared && state.hydrated && state.onboarded) {
+      markLaunchPhase('first-usable-home');
+    }
+  }, [focused, privacyGateCleared, state.hydrated, state.onboarded]);
   // One value for what the card SAYS and what tapping it DOES. They used to be
   // written out separately and drifted: the tap handler branched on the
   // platform alone, so a fully verified iOS user — card reading "Shortcut
@@ -830,6 +895,12 @@ export default function LedgerHomeScreen() {
               }}
             />
           </MotionReveal>
+          <HistoryImportNotice
+            progress={state.historyImport}
+            onRetry={() => void beginHistoryImport()}
+            onOpenSettings={() => void openSmsPermissionSettings()
+              .then(() => beginHistoryImport())}
+          />
 
           {/* One next action, not four competing notices. */}
           <MotionReveal delay={165} distance={16} scaleFrom={0.975}>
@@ -976,6 +1047,17 @@ const styles = StyleSheet.create({
   captureTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   captureTitle: { flexShrink: 1 },
   liveDot: { width: 6, height: 6, borderRadius: 3 },
+  historyImport: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.two,
+    padding: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.control,
+  },
+  historyImportCopy: { flex: 1, gap: 2 },
+  historyImportRetry: { minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
   reviewPrompt: {
     minHeight: 52,
     flexDirection: 'row',
@@ -999,9 +1081,11 @@ const styles = StyleSheet.create({
   heroLabel: { marginBottom: Spacing.two },
   heroCompare: { marginTop: Spacing.two, marginBottom: Spacing.two },
   heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  heroRowLarge: { flexWrap: 'wrap', alignItems: 'flex-end' },
   heroAmount: { flexDirection: 'row', alignItems: 'baseline' },
   aed: { fontSize: 15, lineHeight: 20 },
   split: { flexDirection: 'row', marginTop: Spacing.four },
+  splitLarge: { flexDirection: 'column' },
   splitCell: {
     flex: 1,
     borderTopWidth: StyleSheet.hairlineWidth,

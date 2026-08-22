@@ -386,6 +386,8 @@ function loadHydrationExports(realModules = {}) {
       LedgerResetError: class LedgerResetError extends Error {},
     },
     '@/lib/ledger-money': require('./build/ledger-money'),
+    '@/lib/history-import': require('./build/history-import'),
+    '@/lib/launch-performance': { markLaunchPhase() {} },
     '@/lib/onboarding': {
       allOnboardingGoalTitles: () => [],
       buildDeferredOnboardingPlan: () => null,
@@ -410,6 +412,7 @@ function loadHydrationExports(realModules = {}) {
 }
 
 const hydration = loadHydrationExports();
+const { buildLaunchBenchmarkBackup } = require('./build/launch-benchmark.js');
 const ledgerPersistenceSource = stripComments(read('src/lib/ledger-persistence.ts'));
 
 ok('a failed hydration latches writes off',
@@ -676,6 +679,11 @@ const tx = (id, extra = {}) => ({
     hydration.parseBackupForRestore(JSON.stringify({
       app: 'wafra', version: 2, data: { transactions: [] },
     })) === null);
+  const benchmark = buildLaunchBenchmarkBackup(1_000, Date.UTC(2026, 0, 15));
+  const restoredBenchmark = hydration.parseBackupForRestore(JSON.stringify(benchmark));
+  ok('launch benchmark fixtures pass through the real backup restore parser',
+    restoredBenchmark?.transactions?.length === 1_000 &&
+      restoredBenchmark.transactions[0]?.title === 'Sample expense');
   const globalLedger = hydration.parseBackupForRestore(JSON.stringify({
       app: 'wafra',
       version: 1,

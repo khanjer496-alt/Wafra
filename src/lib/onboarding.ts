@@ -4,6 +4,7 @@ import type {
   CategoryId,
   Goal,
   OnboardingPlanPreferences,
+  Transaction,
 } from '@/lib/types';
 
 export type OnboardingMarketId = 'AE' | 'SA';
@@ -121,6 +122,38 @@ export const BUDGET_PRESETS: readonly BudgetPreset[] = [
   },
 ] as const;
 
+const INCOME_RELATIVE_LIMITS: Readonly<
+  Record<OnboardingBudgetId, Readonly<Partial<Record<CategoryId, number>>>>
+> = {
+  essentials: {
+    groceries: 0.18,
+    dining: 0.05,
+    transport: 0.08,
+    shopping: 0.04,
+    entertainment: 0.02,
+  },
+  balanced: {
+    groceries: 0.18,
+    dining: 0.1,
+    transport: 0.08,
+    shopping: 0.08,
+    entertainment: 0.05,
+  },
+  flexible: {
+    groceries: 0.2,
+    dining: 0.15,
+    transport: 0.1,
+    shopping: 0.12,
+    entertainment: 0.08,
+  },
+};
+
+const GOAL_INCOME_MULTIPLIERS: Readonly<Record<OnboardingGoalId, number>> = {
+  emergency: 3,
+  travel: 1,
+  home: 8,
+};
+
 export const MONEY_MONTH_DAYS = [1, 25, 27, 28] as const;
 
 export const DEFAULT_ONBOARDING_ANSWERS: OnboardingAnswers = {
@@ -134,6 +167,50 @@ export const DEFAULT_ONBOARDING_PLAN: OnboardingPlanPreferences = {
   goalIds: ['emergency'],
   budgetId: 'balanced',
 };
+
+/**
+ * A currency-relative starter plan needs credible monthly income, not merely
+ * the largest credit in a lifetime ledger. Salary rows are explicit parser or
+ * user classifications, so their median is robust to a bonus. Business income
+ * is included only after it appears in two distinct months, using the median
+ * monthly total. Refunds, gifts, windfalls and own-account movements never set
+ * a recurring budget by accident.
+ */
+export function onboardingIncomeBasis(
+  transactions: readonly Pick<
+    Transaction,
+    'type' | 'amountFils' | 'isTransfer' | 'category' | 'date'
+  >[],
+): number {
+  const salaries: number[] = [];
+  const businessByMonth = new Map<string, number>();
+  for (const transaction of transactions) {
+    if (transaction.type !== 'income' || transaction.isTransfer) continue;
+    if (!Number.isSafeInteger(transaction.amountFils) || transaction.amountFils <= 0) continue;
+    if (transaction.category === 'salary') {
+      salaries.push(transaction.amountFils);
+      continue;
+    }
+    const month = /^\d{4}-\d{2}/.exec(transaction.date)?.[0];
+    if (transaction.category !== 'business' || !month) continue;
+    const next = (businessByMonth.get(month) ?? 0) + transaction.amountFils;
+    if (Number.isSafeInteger(next)) businessByMonth.set(month, next);
+  }
+  const median = (values: number[]): number => {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    const middle = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 1
+      ? sorted[middle]
+      : sorted[middle - 1] + Math.round((sorted[middle] - sorted[middle - 1]) / 2);
+  };
+  const salaryBasis = median(salaries);
+  const businessBasis = businessByMonth.size >= 2
+    ? median([...businessByMonth.values()])
+    : 0;
+  const basis = salaryBasis + businessBasis;
+  return Number.isSafeInteger(basis) ? basis : 0;
+}
 
 export function normalizeOnboardingAnswers(
   answers: Partial<OnboardingAnswers>,
@@ -188,32 +265,66 @@ export function buildOnboardingPlan(
 }
 
 /**
- * Resolve currency-free first-run choices only after the ledger has a proven
- * launch currency. Other currencies stay pending until Wafra ships matching
- * budget presets; they are never relabelled as AED by fallback.
+ * Resolve currency-free first-run choices only after real ledger activity has
+ * established both the currency and a usable income basis.
+ *
+ * Percentages, rather than AED/SAR literals, are what make the same promise
+ * honest in every supported ISO ledger currency. A currency alone is not
+ * enough: inventing a salary would be just as misleading as relabelling an AED
+ * preset as USD, so the plan remains pending until income exists.
  */
 export function buildDeferredOnboardingPlan(
   preferences: OnboardingPlanPreferences,
   ledgerCurrency: string | null | undefined,
-  confirmedCurrency: 'AED' | 'SAR' | null | undefined,
+  monthlyIncomeFils: number | null | undefined,
   monthStartDay: number,
   language: Lang,
-): ReturnType<typeof buildOnboardingPlan> | null {
-  if (!confirmedCurrency || confirmedCurrency !== ledgerCurrency) {
+): {
+  answers: OnboardingPlanPreferences & { currency: string; monthStartDay: number };
+  budgets: Budget[];
+  goals: Omit<Goal, 'id'>[];
+} | null {
+  const currency = ledgerCurrency?.trim().toUpperCase() ?? '';
+  const largestMultiplier = Math.max(...Object.values(GOAL_INCOME_MULTIPLIERS));
+  if (
+    !currency ||
+    !Number.isSafeInteger(monthlyIncomeFils) ||
+    monthlyIncomeFils! <= 0 ||
+    monthlyIncomeFils! > Math.floor(Number.MAX_SAFE_INTEGER / largestMultiplier)
+  ) {
     return null;
   }
-  const marketId: OnboardingMarketId | null = ledgerCurrency === 'AED'
-    ? 'AE'
-    : ledgerCurrency === 'SAR'
-      ? 'SA'
-      : null;
-  if (!marketId) return null;
-  return buildOnboardingPlan({
+  const normalized = normalizeOnboardingAnswers({
     goalIds: preferences.goalIds,
     budgetId: preferences.budgetId,
-    marketId,
     monthStartDay,
-  }, language);
+  });
+  const ratios = INCOME_RELATIVE_LIMITS[normalized.budgetId];
+  const budgets = Object.entries(ratios)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0)
+    .map(([category, ratio]) => ({
+      category: category as CategoryId,
+      limitFils: Math.max(1, Math.round(monthlyIncomeFils! * ratio)),
+    }));
+  const goals = normalized.goalIds.map((id) => {
+    const preset = GOAL_PRESETS.find((candidate) => candidate.id === id)!;
+    return {
+      title: t(preset.titleKey, language),
+      emoji: preset.icon,
+      targetFils: monthlyIncomeFils! * GOAL_INCOME_MULTIPLIERS[id],
+      savedFils: 0,
+    };
+  });
+  return {
+    answers: {
+      currency,
+      goalIds: normalized.goalIds,
+      budgetId: normalized.budgetId,
+      monthStartDay: normalized.monthStartDay,
+    },
+    budgets,
+    goals,
+  };
 }
 
 /**

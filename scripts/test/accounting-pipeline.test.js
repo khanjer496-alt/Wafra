@@ -161,6 +161,25 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
   ok('only a completed full-history batch advances the durable parser version',
     afterReread.parserVersion === PARSER_VERSION,
     afterReread.parserVersion);
+
+  const pageProgress = {
+    status: 'running',
+    cursor: { beforeDateMs: 1_700_000_000_000, beforeId: 900 },
+    scanned: 1000,
+    found: 9,
+    startedAt: 10,
+    updatedAt: 20,
+    error: null,
+  };
+  const pageBatch = materializeImportBatch(
+    { ...plan.batch, historyImport: pageProgress },
+    restoredState,
+    (prefix) => `history-page-${prefix}-${++rereadId}`,
+  );
+  const afterPage = applyMaterializedImportBatch(restoredState, pageBatch);
+  ok('one ledger batch applies page rows and the next history cursor atomically',
+    isDeepStrictEqual(afterPage.historyImport, pageProgress),
+    JSON.stringify(afterPage.historyImport));
 }
 {
   let proofId = 0;

@@ -26,6 +26,10 @@ export const Colors = {
     card: '#FBF9F4',
     cardBorder: '#E3DED2',
     cardBorderStrong: '#D3CCBD',
+    // Interactive boundaries must remain visible without relying on colour.
+    // 3.65:1 against backgroundElement, clearing WCAG's 3:1 non-text floor.
+    controlBorder: '#8A8173',
+    controlBorderHigh: '#6B6559',
     primary: '#1F6B52', // the only accent
     primarySoft: '#E4EDE8',
     primaryBorder: '#C3D8CD',
@@ -62,6 +66,9 @@ export const Colors = {
     card: '#1C1A16',
     cardBorder: '#3B362E',
     cardBorderStrong: '#4A443A',
+    // 3.55:1 against backgroundElement; the high-contrast value reaches 6.88:1.
+    controlBorder: '#777064',
+    controlBorderHigh: '#A9A29A',
     primary: '#57B894',
     primarySoft: '#1E3A31',
     primaryBorder: '#3B362E',
@@ -82,7 +89,7 @@ export const Colors = {
     /** @deprecated */
     goldSoft: '#332A18',
   },
-} as const;
+};
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 

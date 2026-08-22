@@ -210,7 +210,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
               onChangeText={setTitle}
               placeholderTextColor={theme.textTertiary}
               selectionColor={theme.primary}
-              style={[styles.input, { borderColor: theme.cardBorder, color: theme.text, textAlign: state.language === 'ar' ? 'right' : 'left' }]}
+              style={[styles.input, { borderColor: theme.controlBorder, color: theme.text, textAlign: state.language === 'ar' ? 'right' : 'left' }]}
             />
           </View>
 
@@ -228,7 +228,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
                 style={[
                   styles.input,
                   styles.mono,
-                  { borderColor: theme.cardBorder, color: amountFils ? theme.text : theme.expense },
+                  { borderColor: theme.controlBorder, color: amountFils ? theme.text : theme.expense },
                 ]}
               />
             </View>
@@ -250,7 +250,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
                 style={[
                   styles.input,
                   styles.mono,
-                  { borderColor: theme.cardBorder, color: dateValid ? theme.text : theme.expense },
+                  { borderColor: theme.controlBorder, color: dateValid ? theme.text : theme.expense },
                 ]}
               />
             </View>

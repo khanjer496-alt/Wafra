@@ -36,6 +36,7 @@ import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { categoryLabel, getCategory, rampColor } from '@/lib/categories';
 import {
   formatAED,
@@ -58,6 +59,7 @@ const MAX_SLICES = 5;
 
 export default function FlowScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
   const language = useLanguage();
   const router = useRouter();
@@ -239,8 +241,8 @@ export default function FlowScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
           }
           showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <ThemedText type="title">{t('tabFlow')}</ThemedText>
+          <View style={[styles.header, largeText && styles.headerLarge]}>
+            <ThemedText type="title" accessibilityRole="header">{t('tabFlow')}</ThemedText>
             {/* The one way into /stats, and it has to exist here. The old
                 "ALL STATS" link hung off the six-month chart below and landed
                 on a pixel-identical copy of that chart — the least rewarding
@@ -257,13 +259,14 @@ export default function FlowScreen() {
           <View
             style={[
               styles.summaryRail,
+              largeText && styles.summaryRailLarge,
               { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
             ]}>
             <View style={[styles.summaryCell, styles.summaryPrimary]}>
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('totalOut')}
               </ThemedText>
-              <ThemedText type="smallBold" tabular numberOfLines={1}>
+              <ThemedText type="smallBold" tabular numberOfLines={largeText ? undefined : 1}>
                 {formatAED(comp.totalFils, { decimals: false })}
               </ThemedText>
             </View>
@@ -276,11 +279,11 @@ export default function FlowScreen() {
                 cannot. Out of the rail in those views; the section below still
                 shows the limits, under the month it is actually measuring. */}
             {totalLimit > 0 && monthScoped && (
-              <View style={[styles.summaryCell, styles.summaryPaired, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+              <View style={[styles.summaryCell, styles.summaryPaired, styles.summaryDivided, largeText && styles.summaryDividedLarge, { borderColor: theme.cardBorder }]}>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('limitedSpend')}
                 </ThemedText>
-                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                <ThemedText type="smallBold" tabular numberOfLines={largeText ? undefined : 1}>
                   {formatAmount(limitedSpend, { decimals: false })}
                   <ThemedText type="meta" tabular themeColor="textTertiary">
                     {' / '}{formatAmount(totalLimit, { decimals: false })}
@@ -289,11 +292,11 @@ export default function FlowScreen() {
               </View>
             )}
             {live && (
-              <View style={[styles.summaryCell, styles.summaryTerse, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+              <View style={[styles.summaryCell, styles.summaryTerse, styles.summaryDivided, largeText && styles.summaryDividedLarge, { borderColor: theme.cardBorder }]}>
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('periodProgress')}
                 </ThemedText>
-                <ThemedText type="smallBold" tabular numberOfLines={1}>
+                <ThemedText type="smallBold" tabular numberOfLines={largeText ? undefined : 1}>
                   {Math.round(monthShare * 100)}%
                 </ThemedText>
               </View>
@@ -694,6 +697,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
+  headerLarge: { flexDirection: 'column', alignItems: 'stretch' },
   summaryRail: {
     flexDirection: 'row',
     marginTop: Spacing.three,
@@ -701,6 +705,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.sheet,
     paddingHorizontal: Spacing.three,
   },
+  summaryRailLarge: { flexDirection: 'column' },
   /**
     * Three equal thirds cut the only figure the rail exists for.
     *
@@ -724,6 +729,11 @@ const styles = StyleSheet.create({
   summaryPaired: { flex: 1.35 },
   summaryTerse: { flex: 0.65 },
   summaryDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
+  summaryDividedLarge: {
+    borderStartWidth: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingStart: 0,
+  },
   section: { marginTop: Spacing.five },
 
   compBar: {

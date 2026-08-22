@@ -104,7 +104,7 @@ export default function CurrencyScreen() {
             <PeriodPill onPress={() => setPeriodOpen(true)} />
           </View>
 
-          <View style={[styles.search, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
+          <View style={[styles.search, { backgroundColor: theme.backgroundElement, borderColor: theme.controlBorder }]}>
             <Icon name="search" size={16} color={theme.textTertiary} />
             <TextInput
               value={query}

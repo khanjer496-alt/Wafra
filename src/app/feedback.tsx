@@ -227,7 +227,7 @@ export default function FeedbackScreen() {
                 styles.textarea,
                 {
                   backgroundColor: theme.backgroundElement,
-                  borderColor: theme.cardBorder,
+                  borderColor: theme.controlBorder,
                   color: theme.text,
                   textAlign: language === 'ar' ? 'right' : 'left',
                 },

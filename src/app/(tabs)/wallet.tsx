@@ -1,7 +1,6 @@
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
@@ -16,7 +15,9 @@ import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { BalanceOverview } from '@/components/wallet/balance-overview';
 import { AmountSheet } from '@/components/ui/amount-sheet';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { AccountTile } from '@/components/ui/tile';
@@ -25,6 +26,7 @@ import { IconButton, SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
@@ -94,6 +96,7 @@ type AccountAction = 'visibility' | 'delete';
 
 export default function WalletScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const language = useLanguage();
   const tabBarClearance = useTabBarClearance();
   const router = useRouter();
@@ -337,8 +340,8 @@ export default function WalletScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
           }
           showsVerticalScrollIndicator={false}>
-          <View style={styles.headerRow}>
-            <ThemedText type="title">{t('walletTitle')}</ThemedText>
+          <View style={[styles.headerRow, largeText && styles.headerRowLarge]}>
+            <ThemedText type="title" accessibilityRole="header">{t('walletTitle')}</ThemedText>
             <View style={styles.headerActions}>
               <IconButton
                 name="sliders"
@@ -357,151 +360,27 @@ export default function WalletScreen() {
 
           {/* Wallet answers concrete account questions. Inbox history is not
               complete enough to make a defensible net-worth claim. */}
-          <View
-            style={[
-              styles.overviewCard,
-              { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-            ]}>
-            <View style={styles.overviewHeader}>
-              <View style={styles.overviewHeaderCopy}>
-                <ThemedText type="smallBold">{t('availableBalances')}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {balanceCoverageText}
-                </ThemedText>
-              </View>
-              <View style={[styles.overviewMark, { backgroundColor: theme.primarySoft }]}>
-                <Icon name="bank" size={18} color={theme.primary} />
-              </View>
-            </View>
-
-            <View style={styles.overviewAmount}>
-              <ThemedText
-                accessible={false}
-                type="smallBold"
-                themeColor="textSecondary"
-                tabular
-                style={styles.aed}>
-                {ledgerCurrencyDisplay()}
-              </ThemedText>
-              <ThemedText
-                type="amount"
-                tabular
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.58}
-                accessibilityLabel={
-                  balanceAccountCoverage.known > 0
-                    ? `${ledgerCurrencyDisplay()} ${formatAmount(balances.balanceFils)}`
-                    : undefined
-                }>
-                {balanceAccountCoverage.known > 0
-                  ? formatAmount(balances.balanceFils, { decimals: false })
-                  : '—'}
-              </ThemedText>
-            </View>
-
-            <View style={styles.snapshotGrid}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${t('cardPaymentsDue')}, ${formatAED(duesTotalFils, { decimals: false })}`}
-                onPress={() => {
-                  tapped();
-                  router.push('/bills');
-                }}
-                style={({ pressed }) => [
-                  styles.snapshotFact,
-                  {
-                    borderColor: theme.cardBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : theme.background,
-                  },
-                ]}>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {t('cardPaymentsDue')}
-                </ThemedText>
-                <ThemedText type="smallBold" tabular style={{ color: theme.expense }}>
-                  {formatAED(duesTotalFils, { decimals: false })}
-                </ThemedText>
-              </Pressable>
-
-              <View
-                accessible
-                accessibilityLabel={`${t('paidFromAccounts')}, ${formatAED(cashOut.totalFils, { decimals: false })}. ${tf('cashOutBreakdown', {
-                  cards: formatAED(cashOut.cardPaymentsFils, { decimals: false }),
-                  accounts: formatAED(cashOut.accountOutflowFils, { decimals: false }),
-                })}`}
-                style={[
-                  styles.snapshotFact,
-                  { borderColor: theme.cardBorder, backgroundColor: theme.background },
-                ]}>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {t('paidFromAccounts')}
-                </ThemedText>
-                <ThemedText type="smallBold" tabular>
-                  {formatAED(cashOut.totalFils, { decimals: false })}
-                </ThemedText>
-              </View>
-
-              {currencies.length > 0 && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t('currencyActivityTitle')}, ${formatAED(currenciesTotalFils, { decimals: false })}`}
-                  onPress={() => router.push('/currency')}
-                  style={({ pressed }) => [
-                    styles.snapshotFact,
-                    {
-                      borderColor: theme.cardBorder,
-                      backgroundColor: pressed ? theme.backgroundSelected : theme.background,
-                    },
-                  ]}>
-                  <ThemedText type="meta" themeColor="textSecondary">
-                    {t('currencyActivityTitle')}
-                  </ThemedText>
-                  <ThemedText type="smallBold" tabular>
-                    {formatAED(currenciesTotalFils, { decimals: false })}
-                  </ThemedText>
-                  <ThemedText type="nano" themeColor="textTertiary" numberOfLines={1}>
-                    {currencies.slice(0, 3).map((group) => group.currency).join(' · ')}
-                  </ThemedText>
-                </Pressable>
-              )}
-
-              {currencies.length === 0 && (
-                <View
-                  accessible
-                  accessibilityLabel={`${t('moneySourcesHeader')}, ${activeSources.length}`}
-                  style={[
-                    styles.snapshotFact,
-                    { borderColor: theme.cardBorder, backgroundColor: theme.background },
-                  ]}>
-                  <ThemedText type="meta" themeColor="textSecondary">
-                    {t('moneySourcesHeader')}
-                  </ThemedText>
-                  <ThemedText type="smallBold" tabular>
-                    {activeSources.length}
-                  </ThemedText>
-                </View>
-              )}
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${t('cardsHeader')}, ${cards.length}`}
-                onPress={() => router.push('/cards')}
-                style={({ pressed }) => [
-                  styles.snapshotFact,
-                  {
-                    borderColor: theme.cardBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : theme.background,
-                  },
-                ]}>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {t('cardsHeader')}
-                </ThemedText>
-                <ThemedText type="smallBold" tabular>
-                  {cards.length}
-                </ThemedText>
-              </Pressable>
-            </View>
-          </View>
+          <BalanceOverview
+            balanceCoverageText={balanceCoverageText}
+            balanceFils={balances.balanceFils}
+            knownBalanceCount={balanceAccountCoverage.known}
+            duesTotalFils={duesTotalFils}
+            cashOutTotalFils={cashOut.totalFils}
+            cashOutCardPaymentsFils={cashOut.cardPaymentsFils}
+            cashOutAccountOutflowFils={cashOut.accountOutflowFils}
+            currencies={currencies}
+            currenciesTotalFils={currenciesTotalFils}
+            activeSourceCount={activeSources.length}
+            cardCount={cards.length}
+            largeText={largeText}
+            theme={theme}
+            onOpenBills={() => {
+              tapped();
+              router.push('/bills');
+            }}
+            onOpenCurrency={() => router.push('/currency')}
+            onOpenCards={() => router.push('/cards')}
+          />
 
           {/* Option F's compact snapshot flows into Option D's bank grouping.
               A bank heading is a display group learned from message senders,
@@ -561,7 +440,7 @@ export default function WalletScreen() {
                       }}
                       style={[
                         styles.reissueBtn,
-                        { borderWidth: 1, borderColor: theme.cardBorder },
+                        { borderWidth: 1, borderColor: theme.controlBorder },
                       ]}>
                       <ThemedText type="nano" themeColor="textSecondary">
                         {t('differentCard')}
@@ -579,7 +458,7 @@ export default function WalletScreen() {
                   styles.institutionGroup,
                   {
                     backgroundColor: theme.backgroundElement,
-                    borderColor: theme.cardBorder,
+                    borderColor: theme.controlBorder,
                   },
                 ]}>
                 <View style={styles.institutionHeader}>
@@ -808,7 +687,7 @@ export default function WalletScreen() {
                 style={({ pressed }) => [
                   styles.goalEmpty,
                   {
-                    borderColor: theme.cardBorder,
+                    borderColor: theme.controlBorder,
                     backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
                   },
                 ]}>
@@ -841,7 +720,7 @@ export default function WalletScreen() {
               style={({ pressed }) => [
                 styles.scan,
                 {
-                  borderColor: theme.cardBorder,
+                  borderColor: theme.controlBorder,
                   backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
                 },
               ]}>
@@ -874,37 +753,32 @@ export default function WalletScreen() {
       </SafeAreaView>
 
       {/* Add account sheet */}
-      <Modal visible={adderVisible} transparent animationType="fade" onRequestClose={() => setAdderVisible(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setAdderVisible(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}
-            onPress={() => {}}>
-            <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
-            <View style={styles.sheetHeader}>
-              <ThemedText type="heading">{t('newAccount')}</ThemedText>
-              <Pressable accessibilityRole="button" accessibilityLabel={t('close')} onPress={() => setAdderVisible(false)}>
-                <Icon name="close" size={20} color={theme.textSecondary} />
-              </Pressable>
-            </View>
-
+      <BottomSheet visible={adderVisible} onClose={() => setAdderVisible(false)} title={t('newAccount')}>
+            <ThemedText type="small" accessibilityRole="header">
+              {t('accountNamePlaceholder')}
+            </ThemedText>
             <TextInput
+              accessibilityLabel={t('accountNamePlaceholder')}
               value={name}
               onChangeText={setName}
               placeholder={t('accountNamePlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
             />
 
             <View style={styles.kindRow}>
               {(Object.keys(KIND_META) as AccountKind[]).map((k) => (
                 <Pressable
                   key={k}
+                  accessibilityRole="radio"
+                  accessibilityLabel={t(KIND_META[k].labelKey)}
+                  accessibilityState={{ selected: kind === k }}
                   onPress={() => setKind(k)}
                   style={[
                     styles.kindChip,
                     {
                       backgroundColor: kind === k ? `${theme.primary}22` : theme.backgroundSelected,
-                      borderColor: kind === k ? theme.primary : 'transparent',
+                      borderColor: kind === k ? theme.primary : theme.controlBorder,
                     },
                   ]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -915,9 +789,13 @@ export default function WalletScreen() {
               ))}
             </View>
 
-            <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
+            <ThemedText type="micro" themeColor="textSecondary">
+              {t('openingBalanceOptional')}
+            </ThemedText>
+            <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder }]}>
               <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
               <TextInput
+                accessibilityLabel={t('openingBalanceOptional')}
                 value={openingText}
                 onChangeText={setOpeningText}
                 keyboardType="numeric"
@@ -931,6 +809,9 @@ export default function WalletScreen() {
               {ACCOUNT_COLORS.map((c, i) => (
                 <Pressable
                   key={c}
+                  accessibilityRole="radio"
+                  accessibilityLabel={tf('choiceColor', { count: i + 1 })}
+                  accessibilityState={{ selected: colorIdx === i }}
                   onPress={() => setColorIdx(i)}
                   style={[
                     styles.colorDot,
@@ -941,40 +822,31 @@ export default function WalletScreen() {
             </View>
 
             <Pressable
+              accessibilityRole="button"
               onPress={saveAccount}
               disabled={!name.trim()}
               style={[styles.saveBtn, { backgroundColor: theme.primary, opacity: name.trim() ? 1 : 0.45 }]}>
               <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('addAccount')}</ThemedText>
             </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BottomSheet>
 
       {/* New goal sheet */}
-      <Modal visible={goalVisible} transparent animationType="fade" onRequestClose={() => setGoalVisible(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setGoalVisible(false)}>
-          <Pressable
-            style={[styles.sheet, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}
-            onPress={() => {}}>
-            <View style={[styles.grabber, { backgroundColor: theme.cardBorder }]} />
-            <View style={styles.sheetHeader}>
-              <ThemedText type="heading">{t('newGoalTitle')}</ThemedText>
-              <Pressable accessibilityRole="button" accessibilityLabel={t('close')} onPress={() => setGoalVisible(false)}>
-                <Icon name="close" size={20} color={theme.textSecondary} />
-              </Pressable>
-            </View>
-
+      <BottomSheet visible={goalVisible} onClose={() => setGoalVisible(false)} title={t('newGoalTitle')}>
+            <ThemedText type="small" accessibilityRole="header">{t('goalPlaceholder')}</ThemedText>
             <TextInput
+              accessibilityLabel={t('goalPlaceholder')}
               value={goalTitle}
               onChangeText={setGoalTitle}
               placeholder={t('goalPlaceholder')}
               placeholderTextColor={theme.textSecondary}
-              style={[styles.input, { backgroundColor: theme.backgroundSelected, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
+              style={[styles.input, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder, color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' }]}
             />
 
-            <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected }]}>
+            <ThemedText type="micro" themeColor="textSecondary">{t('targetAmount')}</ThemedText>
+            <View style={[styles.amountBox, { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder }]}>
               <ThemedText type="smallBold" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
               <TextInput
+                accessibilityLabel={t('targetAmount')}
                 value={goalTarget}
                 onChangeText={setGoalTarget}
                 keyboardType="numeric"
@@ -988,6 +860,9 @@ export default function WalletScreen() {
               {GOAL_ICONS.map((ic) => (
                 <Pressable
                   key={ic}
+                  accessibilityRole="radio"
+                  accessibilityLabel={tf('choiceIcon', { count: GOAL_ICONS.indexOf(ic) + 1 })}
+                  accessibilityState={{ selected: goalIcon === ic }}
                   onPress={() => setGoalIcon(ic)}
                   style={[
                     styles.emojiPick,
@@ -1002,6 +877,7 @@ export default function WalletScreen() {
             </View>
 
             <Pressable
+              accessibilityRole="button"
               onPress={saveGoal}
               disabled={!goalTitle.trim() || !parseAmountToFils(goalTarget)}
               style={[
@@ -1013,9 +889,7 @@ export default function WalletScreen() {
               ]}>
               <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{t('createGoal')}</ThemedText>
             </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      </BottomSheet>
 
       {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
           inherits its clipping and its scroll offset on web. */}
@@ -1094,44 +968,6 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     gap: Spacing.five,
   },
-  overviewCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.bottomSheet,
-    padding: Spacing.four,
-    gap: Spacing.three,
-    marginTop: -Spacing.two,
-  },
-  overviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  overviewHeaderCopy: { flex: 1, minWidth: 0, gap: 2 },
-  overviewMark: {
-    width: 38,
-    height: 38,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  overviewAmount: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
-  aed: { fontSize: 15, lineHeight: 20 },
-  snapshotGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  snapshotFact: {
-    flexBasis: '47%',
-    flexGrow: 1,
-    minHeight: 76,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.md,
-    padding: Spacing.three,
-    justifyContent: 'space-between',
-    gap: Spacing.half,
-  },
   scan: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1146,6 +982,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerRowLarge: { alignItems: 'flex-start', flexWrap: 'wrap' },
   headerActions: {
     flexDirection: 'row',
     gap: Spacing.two,
@@ -1333,6 +1170,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   input: {
+    borderWidth: 1,
     borderRadius: Radius.md,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
@@ -1355,6 +1193,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     borderRadius: Radius.md,
+    borderWidth: 1,
     paddingHorizontal: Spacing.three,
   },
   amountInput: {

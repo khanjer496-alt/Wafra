@@ -23,7 +23,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-import { shareText } from '@/lib/share-text';
+import { shareText, shareTextFile } from '@/lib/share-text';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -40,6 +40,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { StatusFacts, type StatusFact } from '@/components/settings/status-facts';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Segmented, Toggle } from '@/components/ui/controls';
@@ -48,6 +49,7 @@ import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/u
 import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { uncategorisedMerchants } from '@/lib/uncategorised';
 import {
@@ -63,6 +65,7 @@ import {
 import {
   hasSmsPermission,
   isSmsScanningAvailable,
+  openSmsPermissionSettings,
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
@@ -98,6 +101,10 @@ import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
 import { t, tf } from '@/lib/i18n';
+import {
+  isInternalLaunchDiagnosticsEnabled,
+  serializeLaunchMetrics,
+} from '@/lib/launch-performance';
 
 /**
  * A language is named in its own language, in both languages: an Arabic
@@ -110,6 +117,7 @@ const LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const router = useRouter();
   const {
     state,
@@ -117,6 +125,7 @@ export default function SettingsScreen() {
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
+    beginHistoryImport,
     setMarket,
     setUiLanguage,
     exportBackup,
@@ -555,6 +564,13 @@ export default function SettingsScreen() {
     }).catch(() => {});
   };
 
+  const exportLaunchMetrics = () => {
+    shareTextFile('wafra-launch-metrics.json', serializeLaunchMetrics(), {
+      mimeType: 'application/json',
+      dialogTitle: t('launchMetricsDialog'),
+    }).catch(() => Alert.alert(t('launchMetricsExportFailed')));
+  };
+
   const createExpenseReport = async (scope: 'month' | 'all') => {
     // Same rule every other total in the app applies: real spending, on an
     // account still in play, neither leg of a move between the user's own
@@ -885,7 +901,7 @@ export default function SettingsScreen() {
         : relay?.setupState === 'verified'
           ? t('settingStatusOn')
           : t('settingStatusSetup');
-  const statusFacts = [
+  const statusFacts: StatusFact[] = [
     {
       key: 'summary',
       label: t('dailySummarySetting'),
@@ -944,36 +960,7 @@ export default function SettingsScreen() {
 
           <Section index={1}>
             <SectionHeader title={t('settingsStatusHeader')} />
-            <Block style={styles.statusGrid}>
-              {statusFacts.map((fact) => (
-                <View
-                  key={fact.key}
-                  accessible
-                  accessibilityLabel={`${fact.label}: ${fact.value}`}
-                  style={[styles.statusFact, { backgroundColor: theme.backgroundSelected }]}>
-                  <ThemedText type="meta" themeColor="textSecondary" numberOfLines={2}>
-                    {fact.label}
-                  </ThemedText>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      { backgroundColor: fact.active ? theme.primarySoft : theme.backgroundElement },
-                    ]}>
-                    <View
-                      style={[
-                        styles.statusDot,
-                        { backgroundColor: fact.active ? theme.primary : theme.textTertiary },
-                      ]}
-                    />
-                    <ThemedText
-                      type="micro"
-                      style={{ color: fact.active ? theme.primary : theme.textSecondary }}>
-                      {fact.value}
-                    </ThemedText>
-                  </View>
-                </View>
-              ))}
-            </Block>
+            <StatusFacts facts={statusFacts} largeText={largeText} theme={theme} />
           </Section>
 
           {/* Notifications, out of "Privacy" and up here.
@@ -1058,6 +1045,35 @@ export default function SettingsScreen() {
                 smsGranted && !state.captureOptOut,
                 toggleSms,
               )}
+            {state.historyImport && state.historyImport.status !== 'complete' ? (
+              <Block style={styles.historyImportSettings}>
+                <View style={styles.historyImportSettingsCopy}>
+                  <ThemedText type="smallBold">{t('historyImportSettingsTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {state.historyImport.status === 'failed'
+                      ? t(state.historyImport.error === 'inbox-access'
+                          ? 'historyImportAccessBody'
+                          : 'historyImportSavedBody')
+                      : tf('historyImportLiveProgress', {
+                          scanned: state.historyImport.scanned,
+                          found: state.historyImport.found,
+                        })}
+                  </ThemedText>
+                </View>
+                {state.historyImport.status === 'failed' ? (
+                  <Button
+                    inline
+                    variant="outline"
+                    label={t(state.historyImport.error === 'inbox-access'
+                      ? 'openPhoneSettings'
+                      : 'retryHistoryImport')}
+                    onPress={() => void (state.historyImport?.error === 'inbox-access'
+                      ? openSmsPermissionSettings().then(() => beginHistoryImport())
+                      : beginHistoryImport())}
+                  />
+                ) : null}
+              </Block>
+            ) : null}
             {/* iPhone capture is a privacy setting as much as a feature: the
                 relay is the ONE path in the whole app where anything derived
                 from a message leaves the phone. It belongs in this section,
@@ -1155,7 +1171,14 @@ export default function SettingsScreen() {
             {linkRow(t('backupJson'), null, backupJson)}
             {linkRow(t('restoreBackup'), null, restoreFromFile)}
             {linkRow(t('exportCsv'), null, exportCsv)}
-            {linkRow(t('exportExpensePdf'), null, () => setReportScopeSheet(true), { last: true })}
+            {linkRow(
+              t('exportExpensePdf'),
+              null,
+              () => setReportScopeSheet(true),
+              { last: !isInternalLaunchDiagnosticsEnabled() },
+            )}
+            {isInternalLaunchDiagnosticsEnabled() &&
+              linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
           </Section>
 
           <Section index={6}>
@@ -1318,35 +1341,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two + 2,
   },
-  statusGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  statusFact: {
-    flexBasis: 92,
-    flexGrow: 1,
-    minHeight: 82,
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    borderRadius: 12,
-    padding: Spacing.two,
-  },
-  statusPill: {
-    minHeight: 26,
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.one,
-    borderRadius: 999,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
   rowText: {
     flex: 1,
     gap: Spacing.half,
@@ -1383,6 +1377,12 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
+  historyImportSettings: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  historyImportSettingsCopy: { flex: 1, gap: Spacing.half },
   // Twice the gap every other section gets. Erase is the only control on this
   // screen that cannot be undone, and the distance is the point.
   danger: {

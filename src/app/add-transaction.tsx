@@ -232,7 +232,7 @@ export default function AddTransactionScreen() {
                 accessibilityState={{ checked: betweenOwnAccounts }}
                 accessibilityLabel={tUi('reviewAlertOwnAccounts')}
                 onPress={() => setBetweenOwnAccounts((value) => !value)}
-                style={[styles.transferChoice, { borderColor: theme.cardBorder }]}>
+                style={[styles.transferChoice, { borderColor: theme.controlBorder }]}>
                 <Icon
                   name={betweenOwnAccounts ? 'check' : 'repeat'}
                   size={18}
@@ -322,7 +322,7 @@ export default function AddTransactionScreen() {
                     styles.titleInput,
                     {
                       backgroundColor: theme.backgroundElement,
-                      borderColor: theme.cardBorder,
+                      borderColor: theme.controlBorder,
                       color: theme.text,
                     },
                   ]}
@@ -371,7 +371,7 @@ export default function AddTransactionScreen() {
                   styles.titleInput,
                   {
                     backgroundColor: theme.backgroundElement,
-                    borderColor: theme.cardBorder,
+                    borderColor: theme.controlBorder,
                     color: theme.text,
                     textAlign: state.language === 'ar' ? 'right' : 'left',
                   },

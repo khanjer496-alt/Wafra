@@ -824,7 +824,7 @@ export default function ImportSmsScreen() {
                       styles.textarea,
                       {
                         backgroundColor: theme.backgroundElement,
-                        borderColor: theme.cardBorder,
+                        borderColor: theme.controlBorder,
                         color: theme.text,
                         textAlign: state.language === 'ar' ? 'right' : 'left',
                       },

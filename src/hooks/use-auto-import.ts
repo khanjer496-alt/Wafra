@@ -90,6 +90,7 @@ const smsAccessSnapshot = (): boolean => sharedSmsAccessUnavailable;
  */
 export type AutoImportOutcome =
   | 'not-hydrated'
+  | 'history-import-running'
   | 'not-pro'
   | 'unavailable'
   | 'no-permission'
@@ -252,6 +253,13 @@ export function useAutoImport(
       if (!state.hydrated) {
         if (interactive) toast.show(t('stillLoading'));
         return 'not-hydrated';
+      }
+      // The first-history owner reads bounded pages from a durable cursor.
+      // Running the incremental scanner beside it would parse the same inbox
+      // against a competing ledger snapshot and could advance lastScanTs past
+      // history the page coordinator has not committed yet.
+      if (state.historyImport && state.historyImport.status !== 'complete') {
+        return 'history-import-running';
       }
       // Hard paywall: tracking pauses when the trial ends without Pro.
       if (!isProActive(state)) {
@@ -526,7 +534,14 @@ export function useAutoImport(
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.captureOptOut, state.hydrated, state.onboarded, state.lastScanTs, watchForeground]);
+  }, [
+    state.captureOptOut,
+    state.historyImport?.status,
+    state.hydrated,
+    state.onboarded,
+    state.lastScanTs,
+    watchForeground,
+  ]);
 
   /**
    * Tonight's summary follows the ledger, not the launch.

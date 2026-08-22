@@ -53,6 +53,7 @@ import {
   LedgerResetError,
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
+import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import {
   planReviewPromotion,
@@ -78,10 +79,16 @@ import {
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
+import {
+  createHistoryImportProgress,
+  normalizeHistoryImportProgress,
+  type HistoryImportProgress,
+} from '@/lib/history-import';
 import type { FxUpdate } from '@/lib/fx';
 import {
   buildDeferredOnboardingPlan,
   mergeDeferredOnboardingPlan,
+  onboardingIncomeBasis,
 } from '@/lib/onboarding';
 
 import type {
@@ -149,6 +156,7 @@ const EMPTY_STATE: AppState = {
   accountHints: {},
   notSubscriptions: [],
   lastScanTs: 0,
+  historyImport: null,
   onboarded: false,
   userName: 'there',
   appLock: false,
@@ -610,6 +618,7 @@ type Action =
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
+  | { type: 'setHistoryImport'; progress: HistoryImportProgress }
   | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
@@ -672,6 +681,7 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      next.historyImport = normalizeHistoryImportProgress(next.historyImport);
       // Month grouping is computed all over the app; sync the global before
       // anything renders against the hydrated state.
       applyMonthStartDay(next.monthStartDay || 1);
@@ -964,6 +974,8 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'setCaptureOptOut':
       return { ...state, captureOptOut: action.enabled };
+    case 'setHistoryImport':
+      return { ...state, historyImport: action.progress };
     case 'applyFxUpdates': {
       const updates = new Map(action.updates.map((update) => [update.id, update]));
       if (updates.size === 0) return state;
@@ -1011,6 +1023,10 @@ export type { TxHealUpdate } from '@/lib/types';
 
 interface StoreValue {
   state: AppState;
+  /** Latest reducer snapshot, including dispatches React has not rendered yet. */
+  getStateSnapshot: () => AppState;
+  /** Invalidates in-flight work when restore/erase replaces the whole ledger. */
+  getStateGeneration: () => number;
   /**
    * Non-null when persistence has failed in this process.
    *
@@ -1086,6 +1102,8 @@ interface StoreValue {
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
+  setHistoryImportProgress: (progress: HistoryImportProgress) => Promise<void>;
+  beginHistoryImport: () => Promise<void>;
   setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
@@ -1227,13 +1245,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const authoritativeState = useRef(EMPTY_STATE);
   const authoritativeRevision = useRef(0);
+  const stateGeneration = useRef(0);
   const dispatch = useCallback((action: Action): AppState => {
+    if (
+      action.type === 'hydrate' ||
+      action.type === 'restore' ||
+      action.type === 'loadDemo' ||
+      action.type === 'clearAll'
+    ) {
+      stateGeneration.current += 1;
+    }
     const next = reducer(authoritativeState.current, action);
     authoritativeState.current = next;
     authoritativeRevision.current += 1;
     setState(next);
     return next;
   }, []);
+  const getStateSnapshot = useCallback(() => authoritativeState.current, []);
+  const getStateGeneration = useCallback(() => stateGeneration.current, []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storageFailure, setStorageFailure] = useState<StorageFailure | null>(null);
   const [storageRecoveryState, setStorageRecoveryState] = useState<StorageRecoveryState>(null);
@@ -1294,6 +1323,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const hydrate = useCallback(async (): Promise<boolean> => {
     const run = ++hydrationRun.current;
+    markLaunchPhase('ledger-load-start');
     try {
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
@@ -1314,6 +1344,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setStorageFailure(null);
       setStorageRecoveryState(null);
       dispatch({ type: 'hydrate', state: next });
+      markLaunchPhase('ledger-load-complete');
       return true;
     } catch (error) {
       if (hydrationRun.current !== run) return false;
@@ -1340,6 +1371,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? current
         : 'preserved');
       dispatch({ type: 'hydrate', state: { onboarded: false } });
+      markLaunchPhase('ledger-load-complete');
       return false;
     }
   }, [dispatch, persistence]);
@@ -1421,7 +1453,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const plan = buildDeferredOnboardingPlan(
       pending,
       state.ledgerMoney?.currency,
-      state.onboardingCurrencyEvidence,
+      onboardingIncomeBasis(state.transactions),
       state.monthStartDay,
       state.language === 'ar' ? 'ar' : 'en',
     );
@@ -1436,8 +1468,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     state.language,
     state.ledgerMoney?.currency,
     state.monthStartDay,
-    state.onboardingCurrencyEvidence,
     state.onboardingPlan,
+    state.transactions,
   ]);
 
   // A debounce that loses the last write when the app is swiped away is a data
@@ -1701,6 +1733,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Capture preference could not be saved');
   }, [dispatch, persist]);
 
+  const setHistoryImportProgress = useCallback(async (progress: HistoryImportProgress) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setHistoryImport', progress });
+    const written = await persist(next);
+    if (!written) throw new Error('History import progress could not be saved');
+  }, [dispatch, persist]);
+
+  const beginHistoryImport = useCallback(async () => {
+    const existing = normalizeHistoryImportProgress(
+      authoritativeState.current.historyImport,
+    );
+    const progress = existing && existing.status !== 'complete'
+      ? { ...existing, status: 'paused' as const, updatedAt: Date.now(), error: null }
+      : createHistoryImportProgress(Date.now());
+    await setHistoryImportProgress(progress);
+  }, [setHistoryImportProgress]);
+
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
     dispatch({ type: 'applyFxUpdates', updates });
   }, [dispatch]);
@@ -1868,6 +1920,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       state,
+      getStateSnapshot,
+      getStateGeneration,
       storageFailure,
       storageRecoveryState,
       hydrationFailed,
@@ -1905,6 +1959,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      setHistoryImportProgress,
+      beginHistoryImport,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -1920,6 +1976,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      getStateSnapshot,
+      getStateGeneration,
       storageFailure,
       storageRecoveryState,
       hydrationFailed,
@@ -1957,6 +2015,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      setHistoryImportProgress,
+      beginHistoryImport,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,

@@ -80,8 +80,28 @@ async function tapKey(page, key, timeout = 4000) {
 }
 
 const tapTab = async (page, name) => {
-  await page.getByRole('tab', { name }).click({ timeout: 8000 });
-  await page.waitForTimeout(1200);
+  const tapped = await tapKey(page, name, 8000);
+  if (tapped !== true) throw new Error(`Could not hit-test tab: ${name}`);
+  await page.waitForFunction((want) => {
+    for (const tab of document.querySelectorAll('[role="tab"]')) {
+      const label = tab.getAttribute('aria-label') ?? (tab.textContent || '').trim();
+      if (label === want && tab.getAttribute('aria-selected') === 'true') return true;
+    }
+    return false;
+  }, name, { timeout: 8000 });
+  await page.waitForFunction((want) => {
+    const headings = document.querySelectorAll('[role="heading"],h1,h2,h3,h4,h5,h6');
+    for (const heading of headings) {
+      if ((heading.textContent || '').trim() !== want) continue;
+      const rect = heading.getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4) continue;
+      const x = Math.min(Math.max(rect.x + rect.width / 2, 1), window.innerWidth - 2);
+      const y = Math.min(Math.max(rect.y + rect.height / 2, 1), window.innerHeight - 2);
+      const top = document.elementFromPoint(x, y);
+      if (top && (heading.contains(top) || top.contains(heading))) return true;
+    }
+    return false;
+  }, name, { timeout: 8000 });
 };
 
 /**
@@ -148,7 +168,7 @@ const money = (s) => {
 const paintedText = (page) => page.evaluate(() => {
   const out = [];
   const seen = new Set();
-  for (const el of document.querySelectorAll('div,span')) {
+  for (const el of document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')) {
     if (el.children.length) continue;
     const s = (el.textContent || '').trim();
     if (!s) continue;
@@ -397,7 +417,7 @@ await resetPreferences();
 {
   await flow();
   const cards = await page.evaluate(() => {
-    let head = [...document.querySelectorAll('div,span')].find(
+    let head = [...document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
       (e) => !e.children.length && /^worth knowing$/i.test((e.textContent || '').trim()),
     );
     // Up to the section that holds the header AND the list under it.
@@ -539,7 +559,7 @@ for (const [name, enter] of [
    * it was the largest thing on the sheet.
    */
   const spent = await page.evaluate(() => {
-    const label = [...document.querySelectorAll('div,span')].find(
+    const label = [...document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
       (e) => !e.children.length && /^spent this month$/i.test((e.textContent || '').trim()),
     );
     const row = label?.parentElement;

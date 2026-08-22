@@ -82,6 +82,8 @@ const AnimatedTabButton = ({
 
   return (
     <SpringPressable
+      role="tab"
+      aria-selected={focused}
       accessibilityRole="tab"
       accessibilityLabel={label}
       accessibilityState={{ selected: focused }}
@@ -109,6 +111,8 @@ const AnimatedTabButton = ({
       <Animated.View style={labelStyle}>
         <ThemedText
           type="meta"
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.3}
           style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
           {label}
         </ThemedText>
@@ -172,7 +176,7 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
         styles.wrap,
         { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
       ]}>
-      <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
+      <View role="tablist" style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
         {routes.map(renderTab)}
       </View>
     </View>

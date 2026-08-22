@@ -50,7 +50,7 @@ export function Button({
     variant === 'filled'
       ? { backgroundColor: theme.primary }
       : variant === 'outline'
-        ? { borderWidth: 1, borderColor: theme.cardBorderStrong }
+        ? { borderWidth: 1, borderColor: theme.controlBorder }
         : variant === 'danger'
           ? { borderWidth: 1, borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg }
           : {};
@@ -127,7 +127,7 @@ export function Toggle({
         styles.track,
         {
           backgroundColor: value ? theme.primary : theme.track,
-          borderColor: value ? theme.primary : theme.cardBorderStrong,
+          borderColor: value ? theme.primary : theme.controlBorder,
         },
       ]}>
       <Animated.View style={[styles.thumb, { backgroundColor: value ? '#FFFFFF' : theme.backgroundElement }, thumb]} />
@@ -178,7 +178,7 @@ export function Chip({
             ? theme.text
             : highlighted
               ? theme.primaryBorder
-              : theme.cardBorder,
+              : theme.controlBorder,
           transform: [{ scale: pressed ? 0.985 : 1 }],
         },
       ]}>
@@ -278,7 +278,7 @@ export function IconButton({
         {
           width: size,
           height: size,
-          borderColor: theme.cardBorder,
+          borderColor: theme.controlBorder,
           backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
         },
       ]}>
