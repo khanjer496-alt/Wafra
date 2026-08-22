@@ -124,7 +124,7 @@ const tapTab = async (page, label) => {
 const paintedText = (page) => page.evaluate(() => {
   const out = [];
   const seen = new Set();
-  for (const el of document.querySelectorAll('div,span')) {
+  for (const el of document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')) {
     if (el.children.length) continue;
     const s = (el.textContent || '').trim();
     if (!s) continue;
@@ -282,6 +282,10 @@ ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 // the "+N more" figure come back to it — the bug this replaced showed AED
 // 70,976 over rows adding to 15,785 with nothing to say where the rest was.
 {
+  // The presence check above scrolls "All activity" into view after checking
+  // this section. Bring the heading back before reading viewport-only painted
+  // text, or a valid section just above the fold is reported as missing.
+  await visibleText(page, /leaving in \d+ days/i);
   const t = await paintedText(page);
   const head = t.find((x) => /leaving in \d+ days/i.test(x.t));
   if (!head) {

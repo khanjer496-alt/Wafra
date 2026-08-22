@@ -4,7 +4,7 @@ import React from 'react';
 import { WafraMark } from '@/components/wafra-logo';
 import styles from '@/marketing/home.module.css';
 import {
-  ANDROID_ZIP_URL,
+  ANDROID_APK_URL,
   FAQ_SCHEMA,
   MARKETING_DESCRIPTION,
   MARKETING_TITLE,
@@ -81,17 +81,17 @@ export default function MarketingHome() {
               </a>
               <a
                 className={styles.secondaryAction}
-                href={ANDROID_ZIP_URL}
+                href={ANDROID_APK_URL}
                 target="_blank"
                 rel="noreferrer"
-                aria-label="Download the ZIP containing the Wafra Android test APK"
+                aria-label="Download the Wafra Android test APK"
               >
                 <span className={styles.actionPlatform}>Android</span>
-                <span>Download ZIP</span>
+                <span>Download APK</span>
                 <span className={styles.actionArrow} aria-hidden="true">↓</span>
               </a>
             </div>
-            <p className={styles.betaNote}>Public beta builds · Android: unzip, then open the APK to install</p>
+            <p className={styles.betaNote}>Public beta builds · Android installs outside Google Play</p>
             <dl className={styles.heroFacts}>
               <div><dt>0</dt><dd>bank logins</dd></div>
               <div><dt>2</dt><dd>languages</dd></div>
