@@ -206,14 +206,15 @@ which optional secrets were set.
 schema is `CREATE TABLE IF NOT EXISTS` throughout, a redeploy replaces the code,
 and setting a secret replaces its value.
 
-### The other two inputs
+### The other input
 
-- **apply_schema** (default on) re-applies `server/schema.sql` to the live
-  database. It is additive and idempotent, and the workflow refuses to run the
-  file at all if anyone ever adds a `DROP`, `DELETE` or `TRUNCATE` to it. Turn
-  it off to deploy code only.
 - **relay_url** is only for the rare case where the job cannot work out the
   URL it deployed to. It tells you when that happens; leave it empty otherwise.
+
+The schema has no opt-out. Every deploy first refuses destructive statements,
+then re-applies the additive, idempotent `server/schema.sql`. Authentication
+reads `automation_generations` on every authenticated route, so deploying code
+without the current schema would take the entire private API offline.
 
 ---
 
@@ -226,17 +227,20 @@ The green run is the answer. Specifically, before it goes green the job has:
   `{"ok":true}`. It retries for 75 seconds, because a workers.dev DNS record
   registered minutes ago may still be propagating;
 - **checked the database** — read the remote table list and confirmed that every
-  table declared in `server/schema.sql` is there. Today that is eight:
-  `device_invites`, `devices`, `ingest_limits`, `ingest_receipts`,
-  `pair_limits`, `push_registrations`, `queue`, `vaults`. The list is read out
-  of the schema file at run time, so a table added later is checked too.
+  table declared in `server/schema.sql` is there. The current 12 are
+  `admin_deletion_receipts`, `automation_generations`, `device_invites`,
+  `devices`, `feedback`, `feedback_limits`, `ingest_limits`,
+  `ingest_receipts`, `pair_limits`, `push_registrations`, `queue`, and `vaults`.
+  The list is read out of the schema file at run time, so a table added later is
+  checked too.
 
-What that still does **not** prove: that the Worker's *binding* to D1 resolves.
-`/v1/health` returns a constant and never touches the database, and the table
-check talks to D1 directly rather than through the Worker. The only test that
-covers the binding is pairing a throwaway device and deleting it again — it is
-written out in `server/DEPLOY.md` under "Verify it worked", and it needs a
-terminal.
+`/v1/health` performs read-only queries through the Worker's D1 binding and
+checks the known additive setup/auth/push sentinels: `devices.market`,
+`push_registrations.push_sent_at`, and `automation_generations`. The separate
+catalogue check confirms every table declared by `schema.sql`; neither is a
+column-by-column proof of the whole schema. Pairing a throwaway device and
+deleting it again covers the authenticated write path and is written out in
+`server/DEPLOY.md` under "Verify it worked".
 
 You can also just open the URL in your phone's browser and add `/v1/health` to
 it. It should show `{"ok":true}`.

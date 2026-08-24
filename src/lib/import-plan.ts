@@ -43,6 +43,16 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
   captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
+  /**
+   * Server-bound proof of the exact Shortcut branch and setup generation.
+   * Only a marker for this receiving device's current generation may prove
+   * automation; manual Shortcut runs intentionally carry no marker.
+   */
+  captureAutomation?: {
+    kind: 'message';
+    sourceDeviceId: string;
+    generation: string;
+  };
   /** Launch pack that produced this body-free relay row. */
   market?: 'AE' | 'SA';
   /**

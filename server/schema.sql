@@ -40,6 +40,17 @@ CREATE TABLE IF NOT EXISTS devices (
   last_seen   INTEGER NOT NULL
 );
 
+-- A user-visible Message-automation attestation is a generation, not a clock.
+-- The app rotates this opaque value after the user confirms the automation;
+-- the ingest route seals that exact generation with later Messages rows. An
+-- old queued/staged row therefore cannot become fresh merely because the phone
+-- processes it after a new setup attempt. The value is not a credential.
+CREATE TABLE IF NOT EXISTS automation_generations (
+  device_id   TEXT PRIMARY KEY,
+  generation  TEXT NOT NULL,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+
 -- Admin-created, one-use, ten-minute invitations. Only the token digest is
 -- stored, so a database leak cannot enroll a new phone into a user's vault.
 CREATE TABLE IF NOT EXISTS device_invites (
@@ -66,10 +77,11 @@ CREATE TABLE IF NOT EXISTS queue (
   epk        TEXT NOT NULL,  -- ephemeral X25519 public key, base64
   iv         TEXT NOT NULL,  -- AES-GCM nonce, base64
   -- Sealed parsed row, base64. Since the relay gained sender and timestamp
-  -- awareness this blob also carries the SMS sender id, the message's own
-  -- timestamp and the market pack it was parsed under. All of them are INSIDE
-  -- the seal: none is a column, an index or a log line, so the service still
-  -- cannot say which banks text this device or when.
+  -- awareness this blob also carries the SMS sender id, the relay-sealed event
+  -- timestamp (receipt time for the official Shortcut), and the market pack it
+  -- was parsed under. All of them are INSIDE the seal: none is a column, an
+  -- index or a log line, so the service still cannot say which banks text this
+  -- device or when.
   ct         TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );

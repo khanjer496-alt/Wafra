@@ -12,6 +12,7 @@ import {
   getBackgroundRelayConfig,
   getRelayConfig,
   markRelayVerified,
+  recordRelayAutomationProof,
   syncRelay,
   type BackgroundRelayConfig,
   type RelayConfig,
@@ -64,7 +65,10 @@ export interface BackgroundCaptureAdapter {
   stage: (rows: ScannedSms[]) => Promise<ScannedSms[]>;
   /** Announce only rows that were not already staged. */
   announce: (fresh: ScannedSms[]) => Promise<void>;
-  recordAutomationProof: (cfg: BackgroundRelayConfig) => Promise<void>;
+  recordAutomationProof: (
+    cfg: BackgroundRelayConfig,
+    marker: NonNullable<ScannedSms['captureAutomation']>,
+  ) => Promise<void>;
 }
 
 interface CaptureExecutorDependencies {
@@ -78,6 +82,10 @@ interface CaptureExecutorDependencies {
     ids: string[],
   ) => Promise<void>;
   markVerified: (cfg: RelayConfig) => Promise<RelayConfig>;
+  recordAutomationProof: (
+    cfg: Pick<RelayConfig, 'deviceId' | 'syncToken' | 'automationGeneration'>,
+    marker: NonNullable<ScannedSms['captureAutomation']>,
+  ) => Promise<void>;
 }
 
 export interface CaptureExecutorOptions {
@@ -164,6 +172,7 @@ export const createCaptureExecutor = ({
     sync: syncRelay,
     acknowledge: ackRelay,
     markVerified: markRelayVerified,
+    recordAutomationProof: recordRelayAutomationProof,
     ...overrides,
   };
 
@@ -179,6 +188,22 @@ export const createCaptureExecutor = ({
     const current = activeLedger.getState();
     return !current.hydrated || current.captureOptOut ||
       (current.privateMode && source === 'relay');
+  };
+
+  const recordForegroundAutomationProof = async (
+    rows: readonly ScannedSms[],
+    knownConfig?: RelayConfig,
+  ): Promise<void> => {
+    const active = knownConfig ?? await dependencies.getRelay();
+    if (!active || active.setupState === 'paired' || !active.automationGeneration) return;
+    const marker = rows.find((row) =>
+      row.captureSource === 'shortcut' &&
+      row.captureAutomation?.kind === 'message' &&
+      row.captureAutomation.sourceDeviceId === active.deviceId &&
+      row.captureAutomation.generation === active.automationGeneration
+    )?.captureAutomation;
+    if (!marker) return;
+    await dependencies.recordAutomationProof(active, marker);
   };
 
   const executeRoutine = async (): Promise<CaptureExecutionOutcome> => {
@@ -255,7 +280,10 @@ export const createCaptureExecutor = ({
       }
       // A deduplicated relay row may only exist in current React state because
       // an earlier encrypted write failed. Flush before dropping its sealed copy.
-      if (collected.source === 'relay' && reviewCandidates.length === 0) {
+      if (
+        collected.source === 'relay' &&
+        (reviewCandidates.length === 0 || collected.parsed.length > 0)
+      ) {
         await activeLedger.ensureDurable();
         if (captureStopped(activeLedger, collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
@@ -263,6 +291,12 @@ export const createCaptureExecutor = ({
       }
       if (captureStopped(activeLedger, collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
+      if (collected.source === 'relay') {
+        await recordForegroundAutomationProof(collected.parsed);
+        if (captureStopped(activeLedger, collected.source)) {
+          return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+        }
       }
       await collected.commit();
       return {
@@ -277,6 +311,12 @@ export const createCaptureExecutor = ({
     await receipt.durable;
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+    }
+    if (collected.source === 'relay') {
+      await recordForegroundAutomationProof(collected.parsed);
+      if (captureStopped(activeLedger, collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
     }
     await collected.commit();
     return {
@@ -324,6 +364,7 @@ export const createCaptureExecutor = ({
       await activeLedger.ensureDurable();
     }
 
+    await recordForegroundAutomationProof(queued.parsed, cfg);
     const acknowledge = acknowledgementsFor(queued, true);
     if (acknowledge.length > 0) await dependencies.acknowledge(cfg, acknowledge);
     return hasChanges(plan)
@@ -346,9 +387,13 @@ export const createCaptureExecutor = ({
       // A quiet banner is never allowed to strand a row that is already safe
       // in the encrypted inbox. Delivery can retry; financial capture must not.
     }
-    if (queued.parsed.some((row) => row.captureSource === 'shortcut')) {
-      await background.recordAutomationProof(cfg);
-    }
+    const marker = queued.parsed.find((row) =>
+      row.captureSource === 'shortcut' &&
+      row.captureAutomation?.kind === 'message' &&
+      row.captureAutomation.sourceDeviceId === cfg.deviceId &&
+      row.captureAutomation.generation === cfg.automationGeneration
+    )?.captureAutomation;
+    if (marker) await background.recordAutomationProof(cfg, marker);
     const acknowledge = acknowledgementsFor(queued);
     if (acknowledge.length > 0) await dependencies.acknowledge(cfg, acknowledge);
     return { kind: 'background', received: queued.parsed.length, fresh: fresh.length };
@@ -362,7 +407,12 @@ export const createCaptureExecutor = ({
     if (!cfg) return { kind: 'needs-setup' };
     const queued = await dependencies.sync(cfg);
     alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
-    const shortcutRow = queued.parsed.find((row) => row.captureSource === 'shortcut');
+    const shortcutRow = queued.parsed.find((row) =>
+      row.captureSource === 'shortcut' &&
+      row.captureAutomation?.kind === 'message' &&
+      row.captureAutomation.sourceDeviceId === cfg.deviceId &&
+      row.captureAutomation.generation === cfg.automationGeneration
+    );
     const proofObserved = queued.testReceived > 0 || shortcutRow !== undefined;
 
     const reviewCandidates = queued.reviewCandidates ?? [];
@@ -403,6 +453,7 @@ export const createCaptureExecutor = ({
     // failure then leaves the relay row available for a retry instead of
     // forcing the user to run the Shortcut again.
     const verified = await dependencies.markVerified(cfg);
+    await recordForegroundAutomationProof(queued.parsed, verified);
     if (queued.ids.length > 0) await dependencies.acknowledge(cfg, queued.ids);
     return {
       kind: 'setup-observed',

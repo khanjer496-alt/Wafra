@@ -30,6 +30,8 @@ interface ButtonProps {
   inline?: boolean;
   /** Overrides the label colour on surfaces that ignore the OS theme. */
   labelColor?: string;
+  /** Let long/localized labels grow the control instead of clipping to one line. */
+  wrapLabel?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -42,6 +44,7 @@ export function Button({
   disabled,
   inline,
   labelColor: labelColorOverride,
+  wrapLabel = false,
   style,
 }: ButtonProps) {
   const theme = useTheme();
@@ -81,7 +84,10 @@ export function Button({
         style,
       ]}>
       {icon && <Icon name={icon} size={15} color={labelColor} />}
-      <ThemedText type="smallBold" numberOfLines={1} style={{ color: labelColor }}>
+      <ThemedText
+        type="smallBold"
+        numberOfLines={wrapLabel ? undefined : 1}
+        style={[styles.buttonLabel, { color: labelColor }]}>
         {label}
       </ThemedText>
     </Pressable>
@@ -305,6 +311,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
   },
+  buttonLabel: { flexShrink: 1, textAlign: 'center' },
   track: {
     width: 44,
     height: 26,

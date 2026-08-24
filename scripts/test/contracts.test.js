@@ -679,19 +679,19 @@ function ktSources(dir) {
   ok('background sync reserves setup proof markers for the foreground verifier',
     /const reserved = new Set\(queued\.testIds\)/.test(executor) &&
       /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
-  ok('only a parsed Shortcut headless delivery records automation proof',
+  ok('only a parsed Messages-automation delivery records proof after durable storage',
     executor.indexOf('await background.stage(queued.parsed)') <
-      executor.indexOf('await background.recordAutomationProof(cfg)') &&
-      /queued\.parsed\.some\(\(row\) => row\.captureSource === 'shortcut'\)/.test(executor));
-  ok('email and PDF headless delivery cannot impersonate the Message automation',
-    /captureSource === 'shortcut'/.test(executor) &&
-      !/executeSupplemental[\s\S]*recordAutomationProof/.test(
-        executor.slice(executor.indexOf('const executeSupplemental'), executor.indexOf('const executeBackground')),
-      ));
+      executor.indexOf('await background.recordAutomationProof(cfg, marker)') &&
+      /row\.captureSource === 'shortcut'[\s\S]{0,240}row\.captureAutomation\?\.kind === 'message'[\s\S]{0,240}sourceDeviceId === cfg\.deviceId[\s\S]{0,240}generation === cfg\.automationGeneration/.test(executor));
+  ok('email, PDF, and manual Shortcut delivery cannot impersonate Message automation',
+    /row\.captureSource === 'shortcut'[\s\S]{0,240}row\.captureAutomation\?\.kind === 'message'/.test(executor) &&
+      /row\.captureSource !== 'shortcut'/.test(relay) &&
+      /candidate\.sourceDeviceId/.test(relay) &&
+      /AUTOMATION_GENERATION_RE\.test\(candidate\.generation\)/.test(relay));
   ok('a synthetic relay probe cannot make Home claim automation is active',
     /AUTOMATION_PROOF_KEY/.test(relay) &&
       /getRelayAutomationProof\(cfg\?\.deviceId \?\? null\)/.test(home) &&
-      /cfg\?\.setupState === 'verified' && automationProof/.test(home) &&
+      /isRelayAutomationProofCurrent\(cfg, automationProof\)/.test(home) &&
       /\? 'active'[\s\S]*\? 'pipe-ready'/.test(home));
   ok('locked background credentials use the sync-only bearer',
     /BackgroundRelayConfig = Pick<[\s\S]*'syncToken'[\s\S]*>;/.test(read('src/lib/relay.ts')) &&
@@ -852,18 +852,19 @@ function ktSources(dir) {
       /used to identify its card or account/.test(copy));
   ok('technical sender limits appear after success instead of blocking setup comprehension',
     setup.indexOf('(captured || captureOn)') < setup.indexOf("t('iosTestLimit')") &&
-      /first real bank alert is the final check/.test(copy) &&
+      /first supported bank alert is the final check/.test(copy) &&
       /correct bank or card/.test(copy));
-  ok('returning from the install page cannot falsely confirm Shortcut setup',
-    !/AppState\.addEventListener/.test(setup) &&
-      /Shortcut is ready — clear code & continue/.test(copy));
+  ok('returning to setup refreshes proof without falsely confirming installation',
+    /AppState\.addEventListener\('change'/.test(setup) &&
+      /next === 'active'[\s\S]{0,160}send\(\{ type: 'refresh-proof' \}\)/.test(setup) &&
+      /I added Wafra Capture/.test(copy));
   ok('clearing the copied setup credential does not trigger an iOS paste read prompt',
     /sensitiveCopyPending/.test(setupWorkflow) &&
       /writeClipboard\(''\)/.test(setupWorkflow) &&
       !/Clipboard\.getStringAsync/.test(setupWorkflow));
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /الإدخال: «الرسالة المستلمة»/.test(copy) &&
-      /الاختصار جاهز — امسح الرمز وتابع/.test(copy) &&
+      /أضفت «Wafra Capture»/.test(copy) &&
       /محتوى الرسالة الخام/.test(copy) &&
       /اسم مرسل البنك/.test(copy));
   ok('the next production build rejects the exact broken public Shortcut snapshot',

@@ -79,6 +79,9 @@ import {
  */
 declare const __DEV__: boolean | undefined;
 
+/** Known-broken public snapshot; never hand a new setup back to it. */
+const RETIRED_CAPTURE_SHORTCUT_ID = '85bd1e080e5849b591049eccffb9a3a1';
+
 /**
  * Expo inlines this public build setting. It is intentionally not a fallback:
  * a release with no deployed relay must fail setup visibly, not send financial
@@ -103,6 +106,24 @@ const DEFAULT_MARKET = 'AE';
 const TIMEOUT_MS = 15_000;
 /** Matches the Worker's `LIMIT 200` page and its `/v1/ack` ceiling. */
 const PAGE = 200;
+const AUTOMATION_GENERATION_RE = /^[A-Za-z0-9_-]{40,128}$/;
+const automationProofListeners = new Set<() => void>();
+
+/** Observe local proof/config changes so mounted automation status stays honest. */
+export function subscribeRelayAutomationProof(listener: () => void): () => void {
+  automationProofListeners.add(listener);
+  return () => automationProofListeners.delete(listener);
+}
+
+const publishRelayAutomationProofChange = (): void => {
+  for (const listener of automationProofListeners) {
+    try {
+      listener();
+    } catch {
+      // A status observer must never make a completed Keychain mutation fail.
+    }
+  }
+};
 
 type RandomValuesCrypto = {
   getRandomValues(array: Uint8Array): Uint8Array;
@@ -179,9 +200,13 @@ export interface RelayConfig {
   /** The URL the user's Shortcut POSTs to. */
   ingestUrl: string;
   pairedAt: number;
-  /** Paired alone cannot capture; configured means the automation was created. */
+  /** Install progress: paired → Shortcut confirmed/configured → safe pipe verified. */
   setupState: 'paired' | 'configured' | 'verified';
   verifiedAt?: number;
+  /** When the user confirmed the Messages automation was created on this device. */
+  automationPreparedAt?: number;
+  /** Opaque per-device server generation that later Message rows must match exactly. */
+  automationGeneration?: string;
   /**
    * When the relay last refused this credential outright — see
    * markRelayRevoked(). A stamped credential is no longer a pairing:
@@ -195,7 +220,13 @@ export interface RelayConfig {
 /** Least-privilege credentials available to a silent wake after first unlock. */
 export type BackgroundRelayConfig = Pick<
   RelayConfig,
-  'baseUrl' | 'deviceId' | 'syncToken' | 'privateKey' | 'setupState' | 'revokedAt'
+  | 'baseUrl'
+  | 'deviceId'
+  | 'syncToken'
+  | 'privateKey'
+  | 'setupState'
+  | 'automationGeneration'
+  | 'revokedAt'
 >;
 
 type RelaySyncConfig = Pick<RelayConfig, 'baseUrl' | 'syncToken' | 'privateKey'>;
@@ -225,9 +256,11 @@ export function normalizeShortcutInstallUrl(
   if (!value?.trim()) return null;
   try {
     const url = new URL(value.trim());
+    const iCloudPath = url.pathname.match(/^\/shortcuts\/([A-Za-z0-9_-]+)\/?$/);
     const isICloudShortcut =
       (url.hostname === 'www.icloud.com' || url.hostname === 'icloud.com') &&
-      /^\/shortcuts\/[A-Za-z0-9_-]+\/?$/.test(url.pathname);
+      iCloudPath !== null &&
+      iCloudPath[1] !== RETIRED_CAPTURE_SHORTCUT_ID;
     const isSignedBetaFile =
       allowSignedFileBeta &&
       url.hostname === 'raw.githubusercontent.com' &&
@@ -318,7 +351,32 @@ function decodeStoredRelayConfig(raw: string, includeRevoked = false): RelayConf
   ) {
     throw new Error('Invalid stored relay credentials');
   }
-  return { ...cfg, baseUrl, market, setupState, emailToken, forwardingAddress } as RelayConfig;
+  const verifiedAt =
+    typeof cfg.verifiedAt === 'number' && Number.isFinite(cfg.verifiedAt) && cfg.verifiedAt > 0
+      ? cfg.verifiedAt
+      : undefined;
+  const automationPreparedAt =
+    typeof cfg.automationPreparedAt === 'number' &&
+    Number.isFinite(cfg.automationPreparedAt) &&
+    cfg.automationPreparedAt > 0
+      ? cfg.automationPreparedAt
+      : undefined;
+  const automationGeneration =
+    typeof cfg.automationGeneration === 'string' &&
+    AUTOMATION_GENERATION_RE.test(cfg.automationGeneration)
+      ? cfg.automationGeneration
+      : undefined;
+  return {
+    ...cfg,
+    baseUrl,
+    market,
+    setupState,
+    emailToken,
+    forwardingAddress,
+    verifiedAt,
+    automationPreparedAt,
+    automationGeneration,
+  } as RelayConfig;
 }
 
 /**
@@ -372,23 +430,52 @@ const enqueueCredentialMutation = <T,>(task: () => Promise<T>): Promise<T> => {
   return operation;
 };
 
-async function writeRelayConfig(cfg: RelayConfig): Promise<void> {
+async function writeForegroundRelayConfig(cfg: RelayConfig): Promise<void> {
   await SecureStore.setItemAsync(KEY, JSON.stringify(cfg), {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
-  const background: BackgroundRelayConfig = {
+}
+
+function backgroundRelayConfig(cfg: RelayConfig): BackgroundRelayConfig {
+  return {
     baseUrl: cfg.baseUrl,
     deviceId: cfg.deviceId,
     syncToken: cfg.syncToken,
     privateKey: cfg.privateKey,
     setupState: cfg.setupState,
+    ...(cfg.automationGeneration
+      ? { automationGeneration: cfg.automationGeneration }
+      : {}),
     // Spread rather than assigned: an absent marker must stay absent in the
     // stored JSON, because the locked-phone item is asserted key-for-key.
     ...(cfg.revokedAt ? { revokedAt: cfg.revokedAt } : {}),
   };
+}
+
+async function writeBackgroundRelayConfig(cfg: RelayConfig): Promise<void> {
+  const background = backgroundRelayConfig(cfg);
   await SecureStore.setItemAsync(BACKGROUND_KEY, JSON.stringify(background), {
     keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
   });
+}
+
+async function writeRelayConfig(cfg: RelayConfig): Promise<void> {
+  await writeForegroundRelayConfig(cfg);
+  await writeBackgroundRelayConfig(cfg);
+}
+
+/**
+ * Preparation must remain visibly retryable after either Keychain write fails.
+ *
+ * Writing the locked-phone subset first means a failed first write changes
+ * nothing, while a failed second write leaves the foreground config on the
+ * previous generation. The setup screen therefore still offers Retry. A
+ * partially newer background generation cannot prove setup by itself because
+ * every status surface requires exact equality with the foreground config.
+ */
+async function writeAutomationPreparation(cfg: RelayConfig): Promise<void> {
+  await writeBackgroundRelayConfig(cfg);
+  await writeForegroundRelayConfig(cfg);
 }
 
 async function publishRelayConfig(
@@ -405,6 +492,7 @@ async function publishRelayConfig(
 async function updateRelayConfigIfCurrent(
   expected: Pick<RelayConfig, 'deviceId' | 'syncToken'>,
   update: (current: RelayConfig) => RelayConfig,
+  write: (next: RelayConfig) => Promise<void> = writeRelayConfig,
 ): Promise<RelayConfig | null> {
   return enqueueCredentialMutation(async () => {
     const current = await getRelayConfig();
@@ -414,7 +502,7 @@ async function updateRelayConfigIfCurrent(
       current.syncToken !== expected.syncToken
     ) return null;
     const next = update(current);
-    await writeRelayConfig(next);
+    await write(next);
     return next;
   });
 }
@@ -440,7 +528,10 @@ export async function getBackgroundRelayConfig(): Promise<BackgroundRelayConfig 
       decodeKey(cfg.privateKey).length !== 32 ||
       (cfg.setupState !== 'paired' &&
         cfg.setupState !== 'configured' &&
-        cfg.setupState !== 'verified')
+        cfg.setupState !== 'verified') ||
+      (cfg.automationGeneration !== undefined &&
+        (typeof cfg.automationGeneration !== 'string' ||
+          !AUTOMATION_GENERATION_RE.test(cfg.automationGeneration)))
     ) {
       return null;
     }
@@ -456,6 +547,7 @@ async function deleteRelayCredentials(): Promise<void> {
     SecureStore.deleteItemAsync(BACKGROUND_KEY),
     SecureStore.deleteItemAsync(AUTOMATION_PROOF_KEY),
   ]);
+  publishRelayAutomationProofChange();
 }
 
 async function deleteRelayCredentialsIfCurrent(
@@ -528,12 +620,14 @@ export function isRelayRevokedError(error: unknown): boolean {
  * before the user re-paired must never stamp the pairing that replaced it.
  */
 export async function markRelayRevoked(syncToken: string, at = Date.now()): Promise<void> {
-  await enqueueCredentialMutation(async () => {
-    await Promise.all([
+  const changed = await enqueueCredentialMutation(async () => {
+    const results = await Promise.all([
       stampRevoked(KEY, syncToken, at, SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY),
       stampRevoked(BACKGROUND_KEY, syncToken, at, SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY),
     ]);
+    return results.some(Boolean);
   });
+  if (changed) publishRelayAutomationProofChange();
 }
 
 async function stampRevoked(
@@ -541,12 +635,12 @@ async function stampRevoked(
   syncToken: string,
   at: number,
   keychainAccessible: SecureStore.KeychainAccessibilityConstant,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const raw = await SecureStore.getItemAsync(key);
-    if (!raw) return;
+    if (!raw) return false;
     const cfg = JSON.parse(raw) as { syncToken?: unknown; revokedAt?: unknown };
-    if (cfg.syncToken !== syncToken || revokedAt(cfg) !== null) return;
+    if (cfg.syncToken !== syncToken || revokedAt(cfg) !== null) return false;
     // Merged into whatever is stored rather than rebuilt from a validated
     // config: a blob this build cannot fully parse is still a blob the user
     // may need, and losing a field here would be the destruction this exists
@@ -556,9 +650,11 @@ async function stampRevoked(
     await SecureStore.setItemAsync(key, JSON.stringify({ ...cfg, revokedAt: at }), {
       keychainAccessible,
     });
+    return true;
   } catch {
     // A Keychain that will not answer leaves the app in the state it was
     // already in. The next sync gets the same 401 and tries again.
+    return false;
   }
 }
 
@@ -578,39 +674,66 @@ export async function getRelayRevokedAt(): Promise<number | null> {
 
 /**
  * A synthetic setup probe proves only Shortcut → relay → encrypted sync. The
- * stronger proof is written exclusively by the headless notification task
- * after it stages a parsed bank transaction while the UI is not involved.
+ * stronger proof is written only after a parsed Messages-automation row is
+ * durably staged or imported. The headless task is the usual path; foreground
+ * recovery may write the same device-bound proof after silent delivery fails.
  */
 export async function recordRelayAutomationProof(
-  cfg: Pick<BackgroundRelayConfig, 'deviceId' | 'syncToken'>,
-  at = Date.now(),
+  cfg: Pick<BackgroundRelayConfig, 'deviceId' | 'syncToken' | 'automationGeneration'>,
+  marker: NonNullable<ScannedSms['captureAutomation']>,
 ): Promise<void> {
   await enqueueCredentialMutation(async () => {
     const current = await getBackgroundRelayConfig();
     if (
       !current ||
       current.deviceId !== cfg.deviceId ||
-      current.syncToken !== cfg.syncToken
+      current.syncToken !== cfg.syncToken ||
+      !current.automationGeneration ||
+      marker.kind !== 'message' ||
+      marker.sourceDeviceId !== current.deviceId ||
+      marker.generation !== current.automationGeneration ||
+      marker.generation !== cfg.automationGeneration
     ) return;
     await SecureStore.setItemAsync(
       AUTOMATION_PROOF_KEY,
-      JSON.stringify({ deviceId: cfg.deviceId, at }),
+      JSON.stringify({ deviceId: cfg.deviceId, generation: marker.generation }),
       { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY },
     );
+    publishRelayAutomationProofChange();
   });
 }
 
-export async function getRelayAutomationProof(deviceId: string | null): Promise<number | null> {
+export async function getRelayAutomationProof(deviceId: string | null): Promise<string | null> {
   if (!deviceId) return null;
   try {
     const raw = await SecureStore.getItemAsync(AUTOMATION_PROOF_KEY);
-    const proof = raw ? JSON.parse(raw) as { deviceId?: unknown; at?: unknown } : null;
-    return proof?.deviceId === deviceId && Number.isFinite(proof.at) && Number(proof.at) > 0
-      ? Number(proof.at)
+    const proof = raw
+      ? JSON.parse(raw) as { deviceId?: unknown; generation?: unknown }
+      : null;
+    return proof?.deviceId === deviceId &&
+      typeof proof.generation === 'string' &&
+      AUTOMATION_GENERATION_RE.test(proof.generation)
+      ? proof.generation
       : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * A proof belongs to the current setup generation only by exact equality.
+ * Processing time is deliberately irrelevant: an old relay retry or staged
+ * local row must stay old even when it is imported after a new attestation.
+ */
+export function isRelayAutomationProofCurrent(
+  cfg: Pick<RelayConfig, 'setupState' | 'automationGeneration'> | null,
+  proof: string | null,
+): boolean {
+  return Boolean(
+    cfg?.setupState === 'verified' &&
+    cfg.automationGeneration &&
+    proof === cfg.automationGeneration,
+  );
 }
 
 async function request(url: string, init: RequestInit & { token?: string }): Promise<Response> {
@@ -949,9 +1072,66 @@ export async function deleteTrustedVault(cfg: RelayConfig): Promise<void> {
 export async function markRelayConfigured(cfg: RelayConfig): Promise<RelayConfig> {
   const next = await updateRelayConfigIfCurrent(cfg, (current) => ({
     ...current,
-    setupState: 'configured' as const,
+    // A repeated install confirmation must not downgrade a pipe that was
+    // already verified; it only records progress for a paired device.
+    setupState: current.setupState === 'paired' ? 'configured' as const : current.setupState,
   }));
   if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
+  return next;
+}
+
+export async function markRelayAutomationPrepared(
+  cfg: RelayConfig,
+  at = Date.now(),
+): Promise<RelayConfig> {
+  if (!Number.isFinite(at) || at <= 0) {
+    throw new RelayError('Invalid automation preparation time.', false, 'invalid_request');
+  }
+  // The server makes each generation current as soon as it issues it. Keep
+  // that rotation and both Keychain writes in one credential-queue operation:
+  // otherwise two reversed responses can leave this phone on the generation
+  // the server has already superseded.
+  const next = await enqueueCredentialMutation(async () => {
+    const current = await getRelayConfig();
+    if (
+      !current ||
+      current.deviceId !== cfg.deviceId ||
+      current.syncToken !== cfg.syncToken
+    ) return null;
+
+    let res: Response;
+    try {
+      res = await request(`${current.baseUrl}/v1/automation-generation`, {
+        method: 'POST',
+        token: current.adminToken,
+      });
+    } catch {
+      throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+    }
+    if (!res.ok) {
+      throw await responseError(res, `Automation preparation failed (${res.status}).`);
+    }
+    const body = (await res.json().catch(() => null)) as { generation?: unknown } | null;
+    if (
+      typeof body?.generation !== 'string' ||
+      !AUTOMATION_GENERATION_RE.test(body.generation)
+    ) {
+      throw new RelayError(
+        'Automation preparation returned an unexpected response.',
+        false,
+        'bad_response',
+      );
+    }
+    const prepared = {
+      ...current,
+      automationPreparedAt: at,
+      automationGeneration: body.generation,
+    };
+    await writeAutomationPreparation(prepared);
+    return prepared;
+  });
+  if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
+  publishRelayAutomationProofChange();
   return next;
 }
 
@@ -1129,7 +1309,7 @@ export const relayReviewRowToReviewAlert = (row: RelayReviewRow): ReviewAlert =>
  * for the app's problem. When `eas.json` carries a different link, the gate
  * opens by itself — no second commit, and nobody has to remember.
  */
-const SENDER_BLIND_SHORTCUT_ID = '85bd1e080e5849b591049eccffb9a3a1';
+const SENDER_BLIND_SHORTCUT_ID = RETIRED_CAPTURE_SHORTCUT_ID;
 
 /**
  * Can this row's bank be named at all?
@@ -1304,17 +1484,15 @@ export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
   /** The Worker discards raw Message Content before sealing the row. */
   raw?: never;
   /**
-   * When the MESSAGE arrived, not when the relay received it.
-   *
-   * This is the app's strong duplicate guard: `smsKey` in import-plan.ts is a
-   * fingerprint of the timestamp and the amount. While the relay stamped its
-   * own receipt time here, a Shortcut that fired twice produced two different
-   * fingerprints for one purchase and the charge was filed twice. The Worker
-   * now honours the Shortcut's timestamp, bounded to a sane window, and this
-   * field is what carries it — see resolveReceivedAt in server/src/index.ts.
+   * Event time sealed by the relay. The official 50-action Shortcut omits a
+   * Message date because iOS 26.1 does not expose one for this input, so those
+   * rows use relay receipt time. Older/manual clients may still send a bounded
+   * `receivedAt`; the Worker keeps that wire compatibility.
    */
   receivedAt?: string;
   captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
+  /** Untrusted optional proof metadata; conversion validates it independently. */
+  captureAutomation?: unknown;
   /** Structured sender label only; raw Message Content never reaches sync. */
   sender?: string;
   /** Market pack the relay parsed this row under ('AE', 'SA'). */
@@ -1541,10 +1719,36 @@ export function relayRowToScannedSms(
   fallbackTs = Date.now(),
 ): ScannedSms {
   const ts = row.receivedAt ? Date.parse(row.receivedAt) : NaN;
-  const { receivedAt: _receipt, ...structured } = row;
+  const {
+    receivedAt: _receipt,
+    captureAutomation: untrustedAutomation,
+    ...structured
+  } = row;
   const parsedMarket = validRelayMarket(row.market);
+  const marker = (() => {
+    if (
+      row.captureSource !== 'shortcut' ||
+      typeof untrustedAutomation !== 'object' ||
+      untrustedAutomation === null ||
+      Array.isArray(untrustedAutomation)
+    ) return undefined;
+    const candidate = untrustedAutomation as Record<string, unknown>;
+    if (
+      candidate.kind !== 'message' ||
+      typeof candidate.sourceDeviceId !== 'string' ||
+      !/^[0-9a-f-]{36}$/i.test(candidate.sourceDeviceId) ||
+      typeof candidate.generation !== 'string' ||
+      !AUTOMATION_GENERATION_RE.test(candidate.generation)
+    ) return undefined;
+    return {
+      kind: 'message' as const,
+      sourceDeviceId: candidate.sourceDeviceId,
+      generation: candidate.generation,
+    };
+  })();
   return {
     ...structured,
+    ...(marker ? { captureAutomation: marker } : {}),
     market: parsedMarket === 'AE' || parsedMarket === 'SA' ? parsedMarket : undefined,
     smsTs: Number.isFinite(ts) ? ts : fallbackTs,
   };

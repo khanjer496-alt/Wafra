@@ -423,11 +423,13 @@ A TestFlight build of Wafra today is a real, working ledger. Several things
 that the App Store version will do are **inert**, and none of them is a bug.
 Read this before concluding something is broken.
 
-### Automatic bank capture does not work yet
+### Automatic bank capture still needs physical release proof
 
 iOS does not let an app read Messages, and Wafra does not claim to. Automatic
-capture on iOS is a chain of three things, and **two of them are external state
-that does not exist yet**:
+capture on iOS is a chain of three things. The repository contains the app and
+relay pieces, and the `capture-beta` and `production` profiles point at the
+published, structurally verified Shortcut candidate. Deployment and physical
+end-to-end proof remain:
 
 1. **The relay must be deployed.** The Cloudflare Worker in `server/` is what
    receives a forwarded bank alert, parses it in memory and stores only the
@@ -436,21 +438,20 @@ that does not exist yet**:
    the same as that URL answering. Deploy it first:
    [`deploy-from-github.md`](./deploy-from-github.md), which is the same
    phone-only shape as this page.
-2. **The Wafra Capture Shortcut must be built and published** to iCloud, from
-   [`ios-shortcut-spec.md`](./ios-shortcut-spec.md), and its public URL put in
-   `EXPO_PUBLIC_WAFRA_SHORTCUT_URL`.
-
-   **That variable is not in `eas.json`.** Only `EXPO_PUBLIC_WAFRA_RELAY_URL`
-   is. Expo inlines these at build time, so in this build the Shortcut URL is
-   **empty** and the setup flow has no Shortcut to offer you. `src/lib/relay.ts`
-   deliberately provides no fallback: "a release with no deployed relay must
-   fail setup visibly, not send financial messages to a domain that merely
-   looks plausible."
+2. **Verify the published Wafra Capture candidate on a physical iPhone.** The
+   `capture-beta` and `production` profiles use
+   `https://www.icloud.com/shortcuts/03d2ab22a33f4fef9d503142575a70fb`.
+   Its downloaded action graph passes `check-ios-shortcut-artifact.sh`; this
+   proves the public link and graph, not iOS execution. Install that exact
+   Shortcut, create the Message automation, lock the phone, and receive one
+   real bank alert before treating automatic capture as release-verified. See
+   [`ios-shortcut-spec.md`](./ios-shortcut-spec.md).
 3. **You must create the personal Message automation** in Shortcuts yourself,
    pointed at the bank conversations you choose. That part is yours and works
    fine — once 1 and 2 exist.
 
-Until then, the iOS setup flow will not complete. Expect that.
+Until then, production automatic capture must be treated as unverified, even
+though the public Shortcut can be imported and its graph is valid.
 
 ### Push wakes probably do not arrive
 
@@ -558,7 +559,8 @@ thing a submission cannot work out from the bundle identifier alone if you ever
 end up with two app records. It is found at **App Store Connect → Apps → Wafra
 → App Store → App Information → General Information → Apple ID**.
 
-The other thing worth adding, when the Shortcut is published, is
-`EXPO_PUBLIC_WAFRA_SHORTCUT_URL` alongside `EXPO_PUBLIC_WAFRA_RELAY_URL` in the
-`production` and `preview` build profiles' `env` blocks. Until then, see "What
-this build cannot do yet".
+The replacement Shortcut is now published and configured in `capture-beta` and
+`production`; ad-hoc `preview` intentionally omits automatic capture. After its
+exact link passes the locked-phone bank-alert test on a physical iPhone, record
+that evidence and promote automatic capture from candidate to release-verified.
+Until then, see "What this build cannot do yet".

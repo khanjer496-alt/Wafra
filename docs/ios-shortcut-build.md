@@ -54,7 +54,8 @@ else iPhone capture works until they have finished:
    source of the “path must be contained within the directory” failure.
 2. Complete steps 1 through 4 below so the Shortcut accepts **Messages** and
    **Text**, extracts **Content** and **Sender**, explicitly converts Sender to
-   **Text**, and posts `text`, `sender` and `eventId`.
+   **Text**, and posts `text`, `sender`, `eventId`, and the fixed
+   `automation: "message"` discriminator only from the Messages branch.
 3. Use **Customise Shortcut** to answer the setup import question with the
    setup code from their own copy of Wafra, then run
    `WAFRA_CAPTURE_TEST_V1`; Wafra should reach "pipe ready".
@@ -77,21 +78,26 @@ complete sender-aware graph, and macOS can sign it so any iPhone will import
 it. On this Mac:
 
 ```bash
-node scripts/build-ios-capture-shortcut.mjs artifacts/shortcut/WafraCapture.json
-plutil -convert binary1 artifacts/shortcut/WafraCapture.json \
-  -o artifacts/shortcut/WafraCapture-unsigned.shortcut
+node scripts/build-ios-capture-shortcut.mjs "artifacts/shortcut/Wafra Capture.json"
+plutil -convert binary1 "artifacts/shortcut/Wafra Capture.json" \
+  -o "artifacts/shortcut/Wafra Capture-unsigned.shortcut"
 shortcuts sign --mode anyone \
-  --input artifacts/shortcut/WafraCapture-unsigned.shortcut \
-  --output artifacts/shortcut/WafraCapture.shortcut
+  --input "artifacts/shortcut/Wafra Capture-unsigned.shortcut" \
+  --output "artifacts/shortcut/Wafra Capture.shortcut"
 ```
 
 `shortcuts sign` prints harmless `Unrecognized attribute string flag` noise;
 exit code 0 and an `AEA1`-magic output file mean it worked. The generated graph
-passes the same import-question, no-file-action, no-literal and
-sender/eventId/receivedAt assertions that
+contains 50 actions and passes the same import-question, no-file-action,
+no-literal, sender/eventId/branch-discriminator and no-Message-Date assertions
+that
 `scripts/check-ios-shortcut-artifact.sh` applies to a published link.
 
-Send `WafraCapture.shortcut` to the tester by AirDrop, email or iMessage —
+The signed output filename is part of the import contract: iOS installs the
+Shortcut using the file's basename. Keep it exactly `Wafra Capture.shortcut`
+so the app's `shortcuts://` handoff can find `Wafra Capture` by name.
+
+Send `Wafra Capture.shortcut` to the tester by AirDrop, email or iMessage —
 never the unsigned file, and never a setup code. On the iPhone they tap the
 file, Shortcuts opens it, Apple asks the setup import question, they paste the
 setup code copied from **their own** Wafra app, and tap **Add Shortcut**. That
@@ -160,48 +166,61 @@ is the exact failure shown by the TestFlight tester.
 
 ## 3. Read the message
 
-6. **If** — Condition: `Shortcut Input` **is of type** **Text**
-    - True branch: **Set Variable** `text` to **Shortcut Input**.
-    - Otherwise: **Get Details of Messages** → **Content**, then **Set
-      Variable** `text` to it. Then **Get Details of Messages** → **Sender**,
-      then **Text** (an explicit Text action, converting the contact), then
-      **Set Variable** `sender` to that Text. Then **Get Details of Messages**
-      → **Date** → **Format Date** using UTC and custom format
-      `yyyy-MM-dd'T'HH:mm:ss.SSS'Z'` → **Set Variable** `receivedAt`.
+6. Generate one UUID-shaped `eventId`. The repo graph derives it from two
+   random numbers plus Current Date, hashes that seed with SHA-256, and formats
+   the hash as a UUID. Current Date is used only as entropy for this event id;
+   it is never sent as the message timestamp.
+7. Add **Get Type** for `Shortcut Input`, then **If** the resulting Type is
+   **Text**:
+    - True branch: add a **Text** action containing `Shortcut Input`, explicitly
+      coerced to Text. Stop this branch without a request when that text is
+      empty.
+    - Otherwise: add one **Text** action containing `Shortcut Input`'s
+      **Content**, explicitly coerced to Text, and a second **Text** action
+      containing `Shortcut Input`'s **Sender**, also explicitly coerced to
+      Text. Stop this branch without a request when Content is empty.
 
 The explicit **Text** action on the sender matters. Without it the value is a
 contact object, and what lands at the relay is not the bank label.
 
-7. **If** — `text` **has no value** → **Stop This Shortcut**. An empty message
-    must not become a request.
+On iOS 26.1 the native `WFMessageContentItem` exposes Content, Name, Recipients
+and Sender, but no Date. Do not add **Get Details of Messages → Date**,
+**Format Date**, **Convert Time Zone**, or use Current Date as a `receivedAt`
+field. The relay uses its receipt time for this official graph. It still
+accepts an optional plausible `receivedAt` from older or alternate clients
+that can obtain the real message timestamp.
 
 ---
 
 ## 4. Send it
 
-8. **UUID** → **Set Variable** `eventId`.
-9. **Get Dictionary Value** — Value for key `url`, from the setup Dictionary →
-   **Set Variable** `endpoint`.
-10. **Get Dictionary Value** — Value for key `token` → **Set Variable** `token`.
-11. **Get Contents of URL** — URL: `endpoint`. Expand **Show More**:
+8. In both branches, add **Get Contents of URL** using the `url` from the setup
+   Dictionary. Expand **Show More**:
     - Method: **POST**
     - Headers:
       - `Authorization` → `Bearer ` + `token` *(type the word Bearer, a space,
         then insert the variable)*
       - `Content-Type` → `application/json`
-    - Request Body: **JSON**
+    - Text branch JSON body:
       - `text` (Text) → variable `text`
-      - `sender` (Text) → variable `sender`
       - `eventId` (Text) → variable `eventId`
-      - `receivedAt` (Text) → variable `receivedAt`
+    - Messages branch JSON body:
+      - `text` (Text) → converted Content
+      - `sender` (Text) → converted Sender
+      - `eventId` (Text) → variable `eventId`
+      - `automation` (Text) → literal `message`
 
-The manual Text setup test has no Message Date; omit `receivedAt` in that
-branch. Never stamp a real alert with the current time merely because the
-automation ran late.
+The manual Text setup test is not automation evidence, so it omits both
+`sender` and `automation`. Both branches omit `receivedAt`.
 
-**Nothing after this action.** No Show Result, no Quick Look, no Copy to
-Clipboard, no Speak. A `202` means the row was accepted and a `204` means the
-alert was deliberately ignored; neither is worth putting a bank alert's
+9. Close the top-level **If**, then add **Stop This Shortcut** as the final
+   action outside it. Leave the stop action empty. This makes both successful
+   branches discard Get Contents of URL's response instead of asking the user
+   to let the Shortcut output a response file.
+
+**Nothing after Stop This Shortcut.** No Show Result, no Quick Look, no Copy
+to Clipboard, no Speak. A `202` means the row was accepted and a `204` means
+the alert was deliberately ignored; neither is worth putting a bank alert's
 response on screen for.
 
 ---
@@ -236,6 +255,14 @@ WAFRA_CAPTURE_TEST_V1
 Wafra's setup screen should move to "pipe ready". That proves the Shortcut, the
 relay, the encryption and the sync path — and **only** those. It does not prove
 the automation fires on a real alert; step 8 is that.
+
+After the user finishes the personal-automation instructions and confirms that
+step in Wafra, the app rotates an opaque, server-issued generation for this
+iPhone. A later parsed Messages-branch row carries server-bound proof for that
+device and generation. Another trusted phone's alert and a row left over from
+an earlier setup attempt cannot activate this iPhone. The generation is not in
+the Shortcut or its request body; the Shortcut sends only the fixed
+`automation: "message"` branch discriminator.
 
 Now publish: Shortcut → **Share** → **Copy iCloud Link**. The link looks like
 

@@ -38,7 +38,13 @@ import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
-import { getRelayAutomationProof, getRelayConfig, getRelayRevokedAt } from '@/lib/relay';
+import {
+  getRelayAutomationProof,
+  getRelayConfig,
+  getRelayRevokedAt,
+  isRelayAutomationProofCurrent,
+  subscribeRelayAutomationProof,
+} from '@/lib/relay';
 import { useStore } from '@/lib/store';
 
 /** The one-time setup that must not repeat: reminders and relay. */
@@ -116,6 +122,37 @@ export type CaptureSurfaceState =
   | 'unsupported';
 
 /**
+ * Reduce the three independent iOS facts to the one status the UI renders.
+ *
+ * A verified setup probe proves the Shortcut → relay → encrypted-sync
+ * pipe, but it does not prove Apple's Message automation exists or runs in
+ * the background. Only a device-bound automation proof written after a real
+ * Shortcut row may produce `active`.
+ */
+export function resolveIosCaptureSurfaceState({
+  hasConfig,
+  setupState,
+  automationProofCurrent,
+  revokedAt,
+}: {
+  hasConfig: boolean;
+  setupState: 'paired' | 'configured' | 'verified' | null;
+  automationProofCurrent: boolean;
+  revokedAt: number | null;
+}): CaptureSurfaceState {
+  const cfg = hasConfig ? { setupState } : null;
+  return revokedAt
+    ? 'revoked'
+    : cfg?.setupState === 'verified' && automationProofCurrent
+      ? 'active'
+      : cfg?.setupState === 'verified'
+        ? 'pipe-ready'
+        : cfg
+          ? 'needs-test'
+          : 'off';
+}
+
+/**
  * Foreground resume, pull-to-refresh and the capture card can all request a
  * scan within the same second. Reading and parsing the same inbox twice is
  * both expensive and a race between two import plans built from one stale
@@ -184,6 +221,46 @@ export function useAutoImport(
     smsAccessSnapshot,
   );
   const previousCaptureOptOut = useRef(state.captureOptOut);
+  const statusRefreshGeneration = useRef(0);
+
+  const refreshCaptureStatus = useCallback(async (): Promise<void> => {
+    const generation = ++statusRefreshGeneration.current;
+    const isCurrent = () => generation === statusRefreshGeneration.current;
+
+    if (state.captureOptOut) {
+      if (!isCurrent()) return;
+      setNeedsPermission(false);
+      setCaptureState('off');
+      return;
+    }
+    if (Platform.OS === 'ios') {
+      const [cfg, revokedAt] = await Promise.all([
+        getRelayConfig(),
+        getRelayRevokedAt(),
+      ]);
+      const automationProof = await getRelayAutomationProof(cfg?.deviceId ?? null);
+      if (!isCurrent()) return;
+      // Revocation is stored independently because a revoked credential reads
+      // as no config at all. It therefore outranks even a proof that was valid
+      // before this device was removed.
+      setCaptureState(resolveIosCaptureSurfaceState({
+        hasConfig: cfg !== null,
+        setupState: cfg?.setupState ?? null,
+        automationProofCurrent: isRelayAutomationProofCurrent(cfg, automationProof),
+        revokedAt,
+      }));
+      return;
+    }
+    if (Platform.OS === 'android' && isSmsScanningAvailable()) {
+      const granted = await hasSmsPermission().catch(() => false);
+      if (!isCurrent()) return;
+      if (!granted) setSharedSmsAccessUnavailable(true);
+      setNeedsPermission(!granted);
+      setCaptureState(granted && !sharedAccessUnavailable ? 'active' : 'off');
+      return;
+    }
+    if (isCurrent()) setCaptureState('unsupported');
+  }, [sharedAccessUnavailable, state.captureOptOut]);
 
   // Read the real platform capability whenever the screen regains focus. This
   // makes the card turn on immediately after returning from Settings or iOS
@@ -195,54 +272,37 @@ export function useAutoImport(
   useFocusEffect(
     useCallback(() => {
       if (!watchStatus) return;
-      let current = true;
-      void (async () => {
-        if (state.captureOptOut) {
-          setNeedsPermission(false);
-          setCaptureState('off');
-          return;
-        }
-        if (Platform.OS === 'ios') {
-          const [cfg, revokedAt] = await Promise.all([
-            getRelayConfig(),
-            getRelayRevokedAt(),
-          ]);
-          const automationProof = await getRelayAutomationProof(cfg?.deviceId ?? null);
-          if (!current) return;
-          // The revocation check comes first and is not derived from `cfg`,
-          // because a revoked credential reads as no config at all. It also
-          // outranks the automation proof: that marker is written once and
-          // never expires, so a device the relay has cut off still carries
-          // proof that its Shortcut worked — which is exactly how this card
-          // went on saying "syncing silently" over a dead pipe.
-          setCaptureState(
-            revokedAt
-              ? 'revoked'
-              : cfg?.setupState === 'verified' && automationProof
-                ? 'active'
-                : cfg?.setupState === 'verified'
-                  ? 'pipe-ready'
-                  : cfg
-                    ? 'needs-test'
-                    : 'off',
-          );
-          return;
-        }
-        if (Platform.OS === 'android' && isSmsScanningAvailable()) {
-          const granted = await hasSmsPermission().catch(() => false);
-          if (!current) return;
-          if (!granted) setSharedSmsAccessUnavailable(true);
-          setNeedsPermission(!granted);
-          setCaptureState(granted && !sharedAccessUnavailable ? 'active' : 'off');
-          return;
-        }
-        if (current) setCaptureState('unsupported');
-      })();
+      void refreshCaptureStatus().catch(() => {});
       return () => {
-        current = false;
+        statusRefreshGeneration.current += 1;
       };
-    }, [sharedAccessUnavailable, state.captureOptOut, watchStatus]),
+    }, [refreshCaptureStatus, watchStatus]),
   );
+
+  // Returning from Shortcuts does not change navigation focus: Home stays the
+  // focused route while the app backgrounds. Refresh status on the lifecycle
+  // transition itself so a newly proven automation appears immediately even
+  // when the inbox scan below is still inside its freshness throttle.
+  useEffect(() => {
+    if (!watchStatus) return;
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') void refreshCaptureStatus().catch(() => {});
+    });
+    return () => {
+      sub.remove();
+      statusRefreshGeneration.current += 1;
+    };
+  }, [refreshCaptureStatus, watchStatus]);
+
+  // Proof may be written by the foreground recovery scan after the AppState
+  // refresh above already read null. The local proof signal closes that race
+  // without polling or coupling status to one particular scan caller.
+  useEffect(() => {
+    if (!watchStatus || Platform.OS !== 'ios') return;
+    return subscribeRelayAutomationProof(() => {
+      void refreshCaptureStatus().catch(() => {});
+    });
+  }, [refreshCaptureStatus, watchStatus]);
 
   const performAutoImport = useCallback(
     async (interactive: boolean): Promise<AutoImportOutcome> => {

@@ -33,7 +33,7 @@ the service must not be able to read:
 | Field | Why it is there | Why it is inside the seal |
 | --- | --- | --- |
 | `sender` | The SMS sender ID is the **only** thing that says which bank sent a message — no UAE bank but HSBC names itself in the body. Without it, a card that is branded on Android is grey and nameless on iOS, and three sender-gated parser rules never fire. | A column of sender IDs is a record of which banks each device hears from. |
-| `receivedAt` | The app's strong duplicate guard fingerprints the message timestamp together with the amount. While this was the relay's own receipt time, a Shortcut that fired twice produced two different fingerprints and the same charge landed twice. | A timestamp column is a record of when each device receives bank messages. |
+| `receivedAt` | It gives the phone a chronology and one input to its duplicate guard. The official iOS 26.1 graph cannot obtain Message Date, so the relay uses receipt time; older or alternate clients may still supply a real timestamp. Shortcut HTTP retries are collapsed separately by `eventId`. | A timestamp column would be a record of when each device receives bank messages. |
 | `market` | Which pack the row was parsed under, so a mis-set country is diagnosable from the phone rather than only from the wire. | It is a fact about the user's country, and it costs nothing to keep it sealed. |
 
 `sender` is validated by `src/ingest-row.ts` before it is used. A malformed or
@@ -41,9 +41,12 @@ over-long value is **discarded, never truncated**, while the transaction is
 still parsed without bank identity — truncating could store the first eighty
 characters of a bank message in a field meant to hold a bank name, while
 rejecting the request would silently lose the whole alert.
-`receivedAt` is honoured only when it is plausible: further than a day ahead or
-a year behind falls back to now, because a hand-edited value would either park a
-row at the top of the ledger forever or trip the app's 45-day stale-due cutoff.
+An optional `receivedAt` is honoured only when it is plausible: further than a
+day ahead or a year behind falls back to relay receipt time, because a
+hand-edited value would either park a row at the top of the ledger forever or
+trip the app's 45-day stale-due cutoff. The publishable 50-action Shortcut does
+not send this field: native inspection on iOS 26.1 found Content, Name,
+Recipients and Sender on `WFMessageContentItem`, but no Date.
 
 There is deliberately **no digest of the message text** anywhere, sealed or not.
 Shortcut retries are collapsed by `ingest_receipts`, which stores an HMAC keyed
@@ -95,6 +98,14 @@ SHA-256 admin-token digest and exact route. This closes the failure window where
 the relay returns `204` but iOS cannot immediately clear Keychain: the same
 request can prove the completed deletion again without restoring the device,
 queue, or Shortcut authority. The cron deletes expired receipts.
+
+Message-automation proof keeps one additional unsealed row per configured
+device in `automation_generations`: the device id and an opaque random
+generation, with no timestamp or credential. The app rotates it after the user
+confirms the personal automation. The ingest route binds later
+`automation: "message"` requests to the authenticated source device and that
+server-held generation, then places the resulting marker only inside each
+device-sealed parsed row. Deleting the device or vault deletes its generation.
 
 Note what those 30 days are *of*: rows nobody can read, including us. Services
 that keep full message bodies for a month can re-run a fixed parser over stored
@@ -156,16 +167,21 @@ npm run setup            # creates or finds the "wafra" D1 database, writes its
                          # database_id into wrangler.toml, and applies schema.sql
 npx wrangler secret put PUSH_TOKEN_KEY
 npx wrangler secret put EXPO_ACCESS_TOKEN
-npm run deploy
+npm run deploy           # predeploy re-applies additive schema before publish
 ```
 
 `npm run setup` is idempotent — run it on a machine that already has the
 database and it finds the existing one. A D1 binding is resolved at build time
 and there is no environment-variable substitution for it, which is why the id
-has to be written into `wrangler.toml` rather than injected. `npm run deploy`
-runs `node scripts/d1.mjs check` first (as `predeploy`) and refuses while the id
-is still the placeholder, so a fresh clone fails with a sentence instead of an
-opaque Cloudflare API error.
+has to be written into `wrangler.toml` rather than injected. Before publishing,
+`npm run deploy` automatically runs the guarded, idempotent schema migration
+and refuses while the id is still the placeholder, so a fresh clone fails with
+a sentence instead of an opaque Cloudflare API error.
+
+Authentication joins the per-device `automation_generations` table on every
+authenticated request, so publishing before that additive table exists would
+break all authenticated routes. Keeping migration inside `predeploy` makes that
+ordering automatic; `migrate` is idempotent and passes `--yes`.
 
 `npm run typecheck` deliberately does **not** shell out to `wrangler types
 --check`. That is what made `npm run check:server` exit 127 on a clean
@@ -179,7 +195,7 @@ If you would rather do it by hand:
 ```bash
 npx wrangler d1 create wafra          # copy the printed uuid
 # paste it into wrangler.toml -> [[d1_databases]] database_id
-npx wrangler d1 execute wafra --remote --file=./schema.sql
+npx wrangler d1 execute wafra --remote --file=./schema.sql --yes
 npx wrangler deploy
 ```
 
@@ -245,11 +261,12 @@ which stays in the foreground app.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/v1/pair` | `{publicKey, market?, deviceName?}` (base64 X25519, 32 bytes) → `{deviceId, ingestToken, syncToken, adminToken, market}` |
-| `POST` | `/v1/ingest` | Ingest bearer + `{text, sender?, receivedAt?, eventId?}` → `202` for a parsed or safe structured-review row, or `204` when intentionally ignored |
+| `POST` | `/v1/ingest` | Ingest bearer + `{text, sender?, receivedAt?, eventId?, automation?}` → `202` for a parsed or safe structured-review row, or `204` when intentionally ignored |
 | `GET` | `/v1/sync` | Sync bearer → `{items: [{id, epk, iv, ct}]}` |
 | `POST` | `/v1/ack` | Sync bearer + `{ids}` → `204`, rows deleted |
 | `PATCH` | `/v1/device` | Admin bearer + `{market}` → `{market}` |
 | `DELETE` | `/v1/device` | Admin bearer → `204`, device and queue erased |
+| `POST` | `/v1/automation-generation` | Admin bearer → rotate and return `{generation}` for this device's Message-automation proof |
 | `PUT` | `/v1/push` | Admin bearer + `{expoPushToken, projectId}` → register/refresh a wake-only token |
 | `DELETE` | `/v1/push` | Admin bearer → remove wake-only delivery |
 | `POST` | `/v1/device-invites` | Owner bearer → one-use ten-minute join token |
@@ -286,6 +303,15 @@ The published Shortcut should send one random `eventId` per automation run and
 reuse it if its HTTP action retries; a legacy `{text}` call falls back to a
 normalized-body fingerprint. Either form is suppressed for 15 minutes by the
 keyed receipt described above.
+
+`automation` is also optional for wire compatibility. The official graph sends
+the exact scalar `"message"` only from its Messages-input branch. The relay
+never accepts a source device or generation from that body: after ingest
+authentication it attaches
+`{kind: "message", sourceDeviceId: device.id, generation: currentGeneration}`
+inside the sealed parsed row. Unknown values and Messages requests made before
+the app has created a generation capture normally but do not become setup
+proof.
 
 Forwarded email has a separate inject-only credential for a specific reason:
 SMTP headers expose the destination address outside the app/relay TLS
@@ -390,40 +416,43 @@ from `npm --prefix server test`, which nothing called.
 `npm test` at the root also typechecks this directory against
 `@cloudflare/workers-types`. It used to be excluded from typecheck and CI both.
 
-## The Shortcut the user builds
+## The Shortcut and personal automation the user sets up
 
-In **Shortcuts → Automation → New → When I get a message**, then either:
+The user installs the signed, credential-free **Wafra Capture** Shortcut; they
+do not rebuild its HTTP request by hand. Apple's import question asks for the
+one-paste setup code generated for that iPhone. Keep the signed basename
+exactly `Wafra Capture.shortcut`, because iOS uses the basename as the installed
+Shortcut name and the app launches `Wafra Capture` by that name.
 
-- select the existing bank conversations Wafra lists, which keeps the filter
-  narrow and is much better for privacy; or
-- leave Sender empty and set **Message Contains** to `AED`, if the trigger's
-  Sender field turns out to accept only contacts and phone numbers — UAE bank
-  alerts arrive from alphanumeric sender IDs, which are not contacts.
+The audited iOS 26.1 graph has 50 actions and two request branches:
 
-**Which of those two is actually available has not been verified on a physical
-device, and nothing may be claimed in a store listing until it is.** They differ
-in exactly the way that matters: the first sends only bank messages to this
-Worker, the second sends every message containing "AED".
+- manual Text sends `{text, eventId}` for the harmless setup probe;
+- Messages explicitly converts Content and Sender to Text, then sends
+  `{text, sender, eventId, automation: "message"}`.
 
-Then, whichever trigger is used:
+It sends no `receivedAt`. `WFMessageContentItem` on iOS 26.1 exposes Content,
+Name, Recipients and Sender, but no Date, so the relay applies receipt time.
+The optional `receivedAt` field remains supported for older or alternate
+clients that can supply a plausible real message timestamp.
 
-1. **Run Immediately.** This is the make-or-break step: left on "Run After
-   Confirmation" the product silently does nothing and the user blames Wafra.
-   Since iOS 17 an automation set to Run Immediately always posts a
-   notification when it fires — there is no way to turn that off, and the setup
-   flow has to set that expectation rather than let it be a surprise.
-2. Action: **Get Contents of URL**
-   - URL: the `ingestUrl` the app shows after pairing
-   - Method: `POST`
-   - Headers: `Authorization: Bearer <ingest token>`, `Content-Type: application/json`
-   - Request Body: JSON —
-     `text` = Shortcut Input (message content),
-     `sender` = Shortcut Input (sender),
-     `receivedAt` = Current Date, ISO 8601
+The one Apple artifact the user must create themselves is the personal
+automation:
 
-`sender` and `receivedAt` are optional on the wire, and a Shortcut built before
-they existed keeps working — it just gets grey cards and the weaker duplicate
-guard.
+1. **Message → Sender**, then select the supported bank conversations Wafra
+   lists. A broad Message Contains rule sends unrelated messages to the relay
+   and is not the setup spec.
+2. Choose **Run Immediately** (or disable **Ask Before Running**, on an older
+   iOS label). This is the make-or-break step: confirmation mode silently waits
+   for a tap instead of capturing automatically.
+3. Add **Run Shortcut → Wafra Capture** and pass the **Messages** variable — the
+   whole received Message — as Shortcut Input. Passing Content alone loses the
+   sender and therefore bank identity.
+
+The exact graph and physical-device release test are in
+[`../docs/ios-shortcut-spec.md`](../docs/ios-shortcut-spec.md). Apple's
+documentation does not prove what a real alphanumeric bank SMS supplies to Run
+Shortcut, so the locked-phone physical test remains required before making a
+store claim.
 
 ### Three limits to be honest about
 
@@ -451,15 +480,25 @@ If the user misses the "Run Immediately" tap, nothing works and there is no
 error anywhere — the absence of rows is the only signal, so the app has to read
 it. Pairing therefore has three states, not two: `paired` (credentials exist),
 `configured` (the user says the automation is built) and `verified` (a
-synthetic probe travelled Shortcut → relay → encrypted sync).
+synthetic Text probe travelled Shortcut → relay → encrypted sync).
 
-`verified` still only proves the *pipe*. The stronger proof is a separate
-timestamp written exclusively by the headless task after it stages a parsed
-**bank** row with the UI uninvolved — that is the only evidence a Message
-automation is actually firing. A phone that is paired and verified but has never
-recorded that proof is the case a "your automation may still be asking before it
-runs" repair card should hang off. Letting the ledger quietly stay empty is the
-worst available outcome.
+`verified` still proves only the *pipe*. When the user confirms the personal
+automation, the app calls admin-authenticated
+`POST /v1/automation-generation`; this rotates an opaque generation bound to
+that device. A later parsed Messages-branch ingest causes the relay to seal
+`{kind: "message", sourceDeviceId, generation}` into the row. Foreground sync,
+background sync and recovery from an already staged local row may all record
+the stronger proof, but only when the source device and generation exactly
+match the current setup.
+
+That equality is what makes the status meaningful in a multi-device vault: an
+alert from one trusted phone cannot activate another phone's setup card. It
+also makes retries safe: after setup rotates the generation, an old queued or
+locally staged row retains its old generation and cannot be reprocessed into
+fresh proof. A phone that has a verified pipe but no matching Message marker is
+the case a "your automation may still be asking before it runs" repair card
+should hang off. Letting the ledger quietly stay empty is the worst available
+outcome.
 
 ### How fast a row actually lands
 

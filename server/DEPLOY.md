@@ -75,6 +75,11 @@ creation, `schema.sql` is `CREATE TABLE IF NOT EXISTS` throughout, and a
 failure at step 5 leaves the database and its recorded id intact so a re-run
 only retries the schema.
 
+Do not skip this schema application when rolling out the iOS automation-proof
+change. Authentication now reads the additive `automation_generations` table,
+so deploying the updated Worker before that table exists breaks every
+authenticated route — not only `POST /v1/automation-generation`.
+
 **`server/wrangler.toml` is modified by this step and the change must be
 committed** (or re-run on every machine that deploys). A D1 binding is resolved
 at build time and wrangler has no environment-variable substitution for it, so
@@ -116,15 +121,22 @@ them in the file. The Worker reads them the same way either way.
 
 ### 5. `npm --prefix server run deploy`
 
-`predeploy` runs `node scripts/d1.mjs check` first, which exits 1 while
+`predeploy` automatically runs `npm run migrate` before Wrangler publishes any
+code. That migration checks the configured D1 binding, then applies
+`server/schema.sql` remotely with `--yes`. The schema is additive and
+idempotent, so it is safe even when `setup` just applied it. If migration fails,
+npm never starts `wrangler deploy`.
+
+The migration runs `node scripts/d1.mjs check` first, which exits 1 while
 `database_id` is still `REPLACE_WITH_D1_DATABASE_ID`, and npm then refuses to
 run `deploy` at all. That guard is verified: with the placeholder in place the
 check exits 1 with the message telling you to run `npm run setup`, and npm does
 not proceed to the deploy script when a `pre` script fails.
 
-Two things the guard does *not* cover, so that they are not a surprise:
+Two bypasses remain, so that they are not a surprise:
 
-- `npx wrangler deploy` run directly bypasses it. Use the npm script.
+- `npx wrangler deploy` run directly bypasses both migration and the binding
+  guard. Use the npm script.
 - `npm run build:check` (`wrangler deploy --dry-run`, part of
   `npm run check:server`) passes with the placeholder still present, because a
   dry run bundles the code without resolving the D1 id against the API. CI
@@ -150,15 +162,18 @@ wrangler enables the `workers.dev` URL by default.
 
 Three checks, weakest to strongest. Do all three.
 
-**The Worker is up** — unauthenticated, touches nothing:
+**The Worker and setup/auth/push D1 sentinels are up** — unauthenticated and read-only:
 
 ```bash
 curl -sS https://wafra-relay.<your-subdomain>.workers.dev/v1/health
 # {"ok":true}
 ```
 
-Note what this does *not* prove: `/v1/health` returns a constant and never
-touches D1. A green health check with a broken binding is possible.
+`/v1/health` checks `devices.market`, `push_registrations.push_sent_at`, and
+`automation_generations` through the Worker's D1 binding without reading user
+rows. It is not a column-by-column proof of the whole schema and does not prove
+authenticated writes, encryption, or queue delivery; the catalogue and
+throwaway pair/delete checks below cover those progressively stronger claims.
 
 **The schema is really in the remote database:**
 
@@ -168,11 +183,15 @@ npx wrangler d1 execute wafra --remote --command \
   "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
 ```
 
-Expect these eight: `device_invites`, `devices`, `ingest_limits`,
-`ingest_receipts`, `pair_limits`, `push_registrations`, `queue`, `vaults`.
-D1 keeps internal tables of its own (`_cf_KV` and similar) in the same
-catalogue, so extra names beginning with an underscore are normal. There is no
-messages table — that is the design, not a missed migration.
+Expect these 12 application tables: `admin_deletion_receipts`,
+`automation_generations`, `device_invites`, `devices`, `feedback`,
+`feedback_limits`, `ingest_limits`, `ingest_receipts`, `pair_limits`,
+`push_registrations`, `queue`, `vaults`. D1 keeps internal tables of its own
+(`_cf_KV` and similar) in the same catalogue, so extra names beginning with an
+underscore are normal. There is no messages table — that is the design, not a
+missed migration. `automation_generations` is the additive per-device setup
+proof table; it stores only a device id and opaque generation, not a timestamp
+or credential.
 
 **The Worker can actually reach D1** — pairs a throwaway device, then deletes
 it. This is the only check that exercises the binding:

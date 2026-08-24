@@ -24,10 +24,11 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import { shareText, shareTextFile } from '@/lib/share-text';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  AppState as RNAppState,
   I18nManager,
   Linking,
   Platform,
@@ -84,10 +85,13 @@ import { isProActive, trialDaysLeft } from '@/lib/purchases';
 // contracts (four scoped tokens here vs one there), and mixing their entry
 // points compiles on a good day and 401s on the device.
 import {
+  getRelayAutomationProof,
   getRelayConfig,
   getRelayConfigStrict,
+  isRelayAutomationProofCurrent,
   isRelayPlatform,
   RelayError,
+  subscribeRelayAutomationProof,
   unpairDevice,
   type RelayConfig,
 } from '@/lib/relay';
@@ -153,6 +157,12 @@ export default function SettingsScreen() {
   const [relay, setRelay] = useState<RelayConfig | null | undefined>(
     isRelayPlatform() ? undefined : null,
   );
+  // `undefined` means the device-bound proof has not been read yet. `null`
+  // means it was read and no real Message-automation row has been observed.
+  const [relayAutomationProof, setRelayAutomationProof] = useState<string | null | undefined>(
+    isRelayPlatform() ? undefined : null,
+  );
+  const relayStatusRefreshGeneration = useRef(0);
   const [smsGranted, setSmsGranted] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
@@ -178,20 +188,53 @@ export default function SettingsScreen() {
   // has to be drawn under whichever row is actually last.
   const chargeAlertsAvailable = instantAvailable || isRelayPlatform();
 
+  const refreshRelayStatus = useCallback(async (): Promise<void> => {
+    const generation = ++relayStatusRefreshGeneration.current;
+    try {
+      const cfg = await getRelayConfig();
+      const proof = await getRelayAutomationProof(cfg?.deviceId ?? null);
+      if (generation !== relayStatusRefreshGeneration.current) return;
+      setRelay(cfg);
+      setRelayAutomationProof(proof);
+    } catch {
+      if (generation !== relayStatusRefreshGeneration.current) return;
+      setRelay(null);
+      setRelayAutomationProof(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isRelayPlatform()) return;
+      void refreshRelayStatus();
+      return () => {
+        relayStatusRefreshGeneration.current += 1;
+      };
+    }, [refreshRelayStatus]),
+  );
+
+  // Settings remains focused while Wafra is backgrounded behind Shortcuts.
+  // Navigation focus therefore cannot refresh this row on its own.
   useEffect(() => {
     if (!isRelayPlatform()) return;
-    let live = true;
-    getRelayConfig()
-      .then((cfg) => {
-        if (live) setRelay(cfg);
-      })
-      .catch(() => {
-        if (live) setRelay(null);
-      });
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') void refreshRelayStatus();
+    });
     return () => {
-      live = false;
+      sub.remove();
+      relayStatusRefreshGeneration.current += 1;
     };
-  }, []);
+  }, [refreshRelayStatus]);
+
+  // A foreground recovery scan can write proof just after this screen's
+  // AppState refresh read null. Listen for the durable local write so Settings
+  // cannot remain stale until another background/foreground cycle.
+  useEffect(() => {
+    if (!isRelayPlatform()) return;
+    return subscribeRelayAutomationProof(() => {
+      void refreshRelayStatus();
+    });
+  }, [refreshRelayStatus]);
 
   useEffect(() => {
     if (!isSmsScanningAvailable()) return;
@@ -887,20 +930,27 @@ export default function SettingsScreen() {
   );
   const trial = trialDaysLeft(state);
   const captureAvailable = isSmsScanningAvailable() || isRelayPlatform();
+  const iosPipeVerified = relay?.setupState === 'verified';
+  const iosAutomationVerified = isRelayAutomationProofCurrent(
+    relay ?? null,
+    relayAutomationProof ?? null,
+  );
   const captureActive = !state.privateMode && !state.captureOptOut && (
     isSmsScanningAvailable()
       ? smsGranted
-      : relay?.setupState === 'verified'
+      : iosAutomationVerified
   );
   const captureStatus = state.privateMode || state.captureOptOut
     ? t('settingStatusOff')
     : isSmsScanningAvailable()
       ? t(smsGranted ? 'settingStatusOn' : 'settingStatusOff')
-      : relay === undefined
+      : relay === undefined || relayAutomationProof === undefined
         ? t('settingStatusChecking')
-        : relay?.setupState === 'verified'
-          ? t('settingStatusOn')
-          : t('settingStatusSetup');
+        : iosAutomationVerified
+          ? t('settingStatusAutomationVerified')
+          : iosPipeVerified
+            ? t('settingStatusPipeVerified')
+            : t('settingStatusSetup');
   const statusFacts: StatusFact[] = [
     {
       key: 'summary',
@@ -1085,13 +1135,15 @@ export default function SettingsScreen() {
                 t('automaticCapture'),
                 state.captureOptOut
                   ? t('captureIosOff')
-                  : relay === undefined
+                  : relay === undefined || relayAutomationProof === undefined
                   ? t('captureChecking')
                   : relay === null
                     ? t('captureIosOff')
-                    : relay.setupState === 'verified'
+                    : iosAutomationVerified
                       ? t('captureIosOn')
-                      : t('captureIosNeedsTest'),
+                      : relay.setupState === 'verified'
+                        ? t('captureIosPipeReady')
+                        : t('captureIosNeedsTest'),
                 () => void openIosCaptureSetup(),
               )}
             {/* Gated like every other capture row above it. Rendering this

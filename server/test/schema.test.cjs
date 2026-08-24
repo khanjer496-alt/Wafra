@@ -95,6 +95,19 @@ ok('Shortcut rows are explicitly distinguished from email, PDF, and CSV imports'
     /captureSource: 'email'/.test(worker) &&
     /captureSource: 'pdf'/.test(worker) &&
     /captureSource: 'csv'/.test(worker));
+ok('only the exact Messages Shortcut branch can carry server-bound automation proof',
+  /body\?\.automation === 'message'/.test(worker) &&
+    /sourceDeviceId: device\.id/.test(worker) &&
+    /generation: device\.automationGeneration/.test(worker) &&
+    /CREATE TABLE IF NOT EXISTS automation_generations/.test(schema));
+ok('automation proof generation rotates only with the foreground admin credential',
+  /url\.pathname === '\/v1\/automation-generation'/.test(worker) &&
+    /authenticate\(req, env, 'admin'\)/.test(
+      worker.slice(
+        worker.indexOf("url.pathname === '/v1/automation-generation'"),
+        worker.indexOf("url.pathname === '/v1/ingest'"),
+      ),
+    ));
 ok('replay receipts are keyed digests rather than bodies',
   /CREATE TABLE IF NOT EXISTS ingest_receipts/.test(schema) &&
     /keyedFingerprint\(device\.requestSecret, replayMaterial\)/.test(worker));

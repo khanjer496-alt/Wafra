@@ -138,7 +138,7 @@ function makeDb(transformSchema = (sql) => sql) {
 }
 
 const ALL_TABLES = [
-  'vaults', 'devices', 'device_invites', 'queue',
+  'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
   'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
@@ -986,14 +986,53 @@ const CARD_PAYMENT_DEBIT =
         },
       })).status === 400);
 
+    const ownerProbe = await call(env, 'POST', '/v1/ingest', {
+      token: owner.ingestToken,
+      body: { text: RELAY_TEST_MESSAGE },
+    });
+    const ownerProbeRows = await drainOpened(env, owner);
+    const memberProbeRows = await drainOpened(env, member);
+    ok('fan-out: a setup probe is delivered only to the phone that ran it',
+      ownerProbe.status === 202 &&
+        ownerProbeRows.length === 1 && ownerProbeRows[0].relayTest === true &&
+        memberProbeRows.length === 0,
+      JSON.stringify({ owner: ownerProbeRows, member: memberProbeRows }));
+
+    const preparedRes = await call(env, 'POST', '/v1/automation-generation', {
+      token: owner.adminToken,
+    });
+    const prepared = await preparedRes.json();
+    ok('automation generation: only the foreground admin credential rotates this phone proof',
+      preparedRes.status === 200 &&
+        typeof prepared.generation === 'string' &&
+        /^[A-Za-z0-9_-]{40,128}$/.test(prepared.generation) &&
+        (await call(env, 'POST', '/v1/automation-generation', {
+          token: owner.syncToken,
+        })).status === 401 &&
+        (await call(env, 'POST', '/v1/automation-generation', {
+          token: owner.ingestToken,
+        })).status === 401,
+      JSON.stringify({ status: preparedRes.status, generation: prepared.generation }));
+
     await call(env, 'POST', '/v1/ingest', {
-      token: owner.ingestToken, body: { text: AE_PURCHASE, sender: 'ADCB' },
+      token: owner.ingestToken,
+      body: { text: AE_PURCHASE, sender: 'ADCB', automation: 'message' },
     });
     const ownerCopy = await syncOpened(env, owner);
     const memberCopy = await syncOpened(env, member);
     ok('fan-out: one message reaches both phones', ownerCopy.rows.length === 1 && memberCopy.rows.length === 1);
     ok('fan-out: the second phone opens its own copy with its own key',
       memberCopy.rows[0].amountFils === 4000 && memberCopy.rows[0].merchant === '% Arabica');
+    ok('fan-out: Message automation proof is sealed with its source device and generation',
+      ownerCopy.rows[0].captureAutomation?.kind === 'message' &&
+        ownerCopy.rows[0].captureAutomation?.sourceDeviceId === owner.deviceId &&
+        ownerCopy.rows[0].captureAutomation?.generation === prepared.generation,
+      JSON.stringify(ownerCopy.rows[0].captureAutomation));
+    ok('fan-out: another phone can identify that proof as belonging to the source phone',
+      memberCopy.rows[0].captureAutomation?.sourceDeviceId === owner.deviceId &&
+        memberCopy.rows[0].captureAutomation?.sourceDeviceId !== member.deviceId &&
+        memberCopy.rows[0].captureAutomation?.generation === prepared.generation,
+      JSON.stringify(memberCopy.rows[0].captureAutomation));
     ok('fan-out: the two copies are sealed separately, not shared',
       ownerCopy.items[0].ct !== memberCopy.items[0].ct);
     let crossOpen = false;
@@ -2249,6 +2288,21 @@ const CARD_PAYMENT_DEBIT =
         res.status === 503 && body.ok === false && body.error === 'schema_drift',
         `${res.status} ${JSON.stringify(body)}`);
     }
+    const withoutAutomationGenerations = (sql) => sql.replace(
+      /CREATE TABLE IF NOT EXISTS automation_generations \([\s\S]*?\n\);\n/,
+      '',
+    );
+    const missingAutomationGenerations = await call(
+      { DB: makeDb(withoutAutomationGenerations) },
+      'GET',
+      '/v1/health',
+    );
+    const missingAutomationBody = await missingAutomationGenerations.json();
+    ok('health: refuses when automation_generations is missing',
+      missingAutomationGenerations.status === 503 &&
+        missingAutomationBody.ok === false &&
+        missingAutomationBody.error === 'schema_drift',
+      `${missingAutomationGenerations.status} ${JSON.stringify(missingAutomationBody)}`);
     ok('routing: an unknown path is 404', (await call(env, 'GET', '/v1/nope')).status === 404);
     ok('routing: the right path with the wrong method is 404',
       (await call(env, 'GET', '/v1/pair')).status === 404);

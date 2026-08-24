@@ -237,7 +237,7 @@ async function performBackgroundSync(): Promise<number> {
     background: {
       stage: appendDurable,
       announce: announceCharges,
-      recordAutomationProof: (cfg) => recordRelayAutomationProof(cfg),
+      recordAutomationProof: (cfg, marker) => recordRelayAutomationProof(cfg, marker),
     },
   });
   const outcome = await executor.execute('background');

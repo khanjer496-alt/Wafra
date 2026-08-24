@@ -30,6 +30,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
+  AppState as RNAppState,
   Platform,
   ScrollView,
   StyleSheet,
@@ -53,6 +55,7 @@ import {
   INITIAL_IOS_SETUP_MODEL,
   type IosSetupFailure,
   type IosSetupIntent,
+  type IosSetupModel,
 } from '@/lib/ios-capture-setup';
 import { getActiveMarket } from '@/lib/markets';
 import { useStore } from '@/lib/store';
@@ -61,9 +64,21 @@ import { useStore } from '@/lib/store';
 const STEPS: readonly StringKey[] = [
   'iosStepConnect',
   'iosStepShortcut',
-  'iosStepAutomation',
   'iosStepTest',
+  'iosStepAutomation',
 ] as const;
+
+type AnnouncedSetupState = Pick<
+  IosSetupModel,
+  | 'step'
+  | 'failure'
+  | 'captured'
+  | 'timedOut'
+  | 'automationActive'
+  | 'automationPrepared'
+  | 'listening'
+  | 'copied'
+>;
 
 /**
  * A failed pairing, said in the user's language and as a next step.
@@ -94,6 +109,11 @@ function failureCopy(failure: IosSetupFailure): { message: string; detail: strin
       return { message: t('iosDisconnectFailed'), detail: null };
     case 'shortcut-install':
       return { message: t('iosShortcutInstallFailed'), detail: null };
+    case 'shortcuts-missing':
+      return {
+        message: t('iosShortcutsMissing'),
+        detail: t('iosShortcutsMissingRecovery'),
+      };
     case 'shortcuts-open':
       return { message: t('iosShortcutsOpenFailed'), detail: null };
     case 'shortcut-run':
@@ -115,7 +135,10 @@ function failureCopy(failure: IosSetupFailure): { message: string; detail: strin
 export default function IosSetupScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ fromOnboarding?: string }>();
+  const params = useLocalSearchParams<{
+    fromOnboarding?: string;
+    shortcutResult?: string;
+  }>();
   const {
     state,
     importBatch,
@@ -129,10 +152,22 @@ export default function IosSetupScreen() {
   stateRef.current = state;
   const controllerRef = useRef<ReturnType<typeof createIosCaptureSetup> | null>(null);
   const [setup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
+  const consumedShortcutCallback = useRef<string | null>(null);
+  const previousAnnouncedSetup = useRef<AnnouncedSetupState>({
+    step: 0,
+    failure: null,
+    captured: null,
+    timedOut: false,
+    automationActive: false,
+    automationPrepared: false,
+    listening: false,
+    copied: null,
+  });
   const banks = getActiveMarket().banks.map((bank) => bank.name);
 
   useEffect(() => {
     const controller = createIosCaptureSetup({
+      fromOnboarding: params.fromOnboarding === '1',
       ledger: {
         getState: () => stateRef.current,
         importBatch,
@@ -150,7 +185,14 @@ export default function IosSetupScreen() {
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
-  }, [ensureDurable, importBatch, setMarket, setPrivateMode, stageReviewAlerts]);
+  }, [
+    ensureDurable,
+    importBatch,
+    params.fromOnboarding,
+    setMarket,
+    setPrivateMode,
+    stageReviewAlerts,
+  ]);
 
   const send = useCallback((intent: IosSetupIntent): Promise<void> =>
     controllerRef.current?.send(intent) ?? Promise.resolve(), []);
@@ -172,6 +214,36 @@ export default function IosSetupScreen() {
   const openAutomation = useCallback(() => send({ type: 'open-automation' }), [send]);
   const automationReady = useCallback(() => send({ type: 'automation-ready' }), [send]);
   const startTest = useCallback(() => void send({ type: 'start-test' }), [send]);
+  const continueToAutomation = useCallback(
+    () => void send({ type: 'continue-to-automation' }),
+    [send],
+  );
+
+  // A background task may persist the first real Message proof in a separate
+  // JS lifecycle. Re-read the device-bound generation whenever Wafra becomes
+  // active so this still-mounted setup screen cannot stay on “waiting”.
+  useEffect(() => {
+    const sub = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') void send({ type: 'refresh-proof' });
+    });
+    return () => sub.remove();
+  }, [send]);
+
+  useEffect(() => {
+    if (setup.loading) return;
+    const result = params.shortcutResult;
+    if (result === undefined) {
+      consumedShortcutCallback.current = null;
+      return;
+    }
+    if (result !== 'success' && result !== 'cancel' && result !== 'error') return;
+    if (consumedShortcutCallback.current === result) return;
+    consumedShortcutCallback.current = result;
+    void send({ type: 'shortcut-callback', result });
+    // Consume the callback so another safe test returning the same result can
+    // be observed, while a render caused by this send cannot process it twice.
+    router.setParams({ shortcutResult: undefined });
+  }, [params.shortcutResult, router, send, setup.loading]);
 
   const finish = useCallback(() => {
     if (params.fromOnboarding === '1') {
@@ -200,6 +272,8 @@ export default function IosSetupScreen() {
     timedOut,
     copied,
     captureOn,
+    automationActive,
+    automationPrepared,
     paired,
     loading,
     relayAvailable,
@@ -211,6 +285,71 @@ export default function IosSetupScreen() {
   const errorCopy = failure ? failureCopy(failure) : null;
   const error = errorCopy?.message ?? null;
   const errorDetail = errorCopy?.detail ?? null;
+  // A known failure on this mounted attempt blocks confirmation. A clean
+  // remount does not: iOS may reclaim Wafra while Shortcuts is open, and the
+  // next source-bound relay probe remains the durable proof of installation.
+  const shortcutAdvanceBlocked =
+    disconnecting ||
+    preparing ||
+    failure === 'shortcut-install' ||
+    failure === 'shortcuts-missing';
+
+  useEffect(() => {
+    const previous = previousAnnouncedSetup.current;
+    const current: AnnouncedSetupState = {
+      step,
+      failure,
+      captured,
+      timedOut,
+      automationActive,
+      automationPrepared,
+      listening,
+      copied,
+    };
+    if (loading) return;
+    previousAnnouncedSetup.current = current;
+
+    const announcements: string[] = [];
+    if (step !== previous.step) {
+      announcements.push(tf('iosStepProgress', {
+        n: step + 1,
+        total: STEPS.length,
+        name: t(STEPS[step]),
+      }));
+    }
+    if (failure && failure !== previous.failure && error) {
+      announcements.push(errorDetail ? `${error}. ${errorDetail}` : error);
+    } else if (captured && captured !== previous.captured) {
+      announcements.push(
+        `${captured.merchant}. ${t(captured.isTest ? 'iosTestCaught' : 'iosCaught')}`,
+      );
+    } else if (timedOut && !previous.timedOut) {
+      announcements.push(t('iosTimedOut'));
+    } else if (automationActive && !previous.automationActive) {
+      announcements.push(`${t('iosAlreadyWorkingTitle')}. ${t('iosAlreadyWorkingBody')}`);
+    } else if (automationPrepared && !previous.automationPrepared) {
+      announcements.push(`${t('iosAutomationWaitingTitle')}. ${t('iosAutomationWaitingBody')}`);
+    } else if (listening && !previous.listening) {
+      announcements.push(t('iosWaitingLabel'));
+    }
+    if (copied && copied !== previous.copied) announcements.push(t('iosCopied'));
+
+    if (announcements.length > 0) {
+      AccessibilityInfo.announceForAccessibility(announcements.join('. '));
+    }
+  }, [
+    automationActive,
+    automationPrepared,
+    captured,
+    copied,
+    error,
+    errorDetail,
+    failure,
+    listening,
+    loading,
+    step,
+    timedOut,
+  ]);
   const errorBlock = error ? (
     <View accessibilityLiveRegion="polite">
       <Block style={styles.note}>
@@ -233,6 +372,14 @@ export default function IosSetupScreen() {
           label={t('openSettings')}
           variant="outline"
           onPress={() => void send({ type: 'open-settings' })}
+          style={styles.ctaSecondary}
+        />
+      )}
+      {recovery === 'shortcut' && failure === 'shortcuts-missing' && (
+        <Button
+          label={t('iosInstallShortcuts')}
+          variant="outline"
+          onPress={() => void send({ type: 'open-shortcuts-store' })}
           style={styles.ctaSecondary}
         />
       )}
@@ -282,8 +429,8 @@ export default function IosSetupScreen() {
               <View style={[styles.preview, { borderColor: theme.cardBorder }]}>
                 {([
                   ['upload', 'iosPreviewInstall', 'iosPreviewInstallBody'],
-                  ['spark', 'iosPreviewAutomation', 'iosPreviewAutomationBody'],
                   ['check', 'iosPreviewProof', 'iosPreviewProofBody'],
+                  ['spark', 'iosPreviewAutomation', 'iosPreviewAutomationBody'],
                 ] as const).map(([icon, title, body], index) => (
                   <View
                     key={title}
@@ -337,6 +484,7 @@ export default function IosSetupScreen() {
               <Button
                 label={t('iosContinueManual')}
                 variant="outline"
+                wrapLabel
                 onPress={finish}
                 style={styles.ctaSecondary}
               />
@@ -373,7 +521,7 @@ export default function IosSetupScreen() {
                   <SectionHeader title={t('iosSetupCode')} />
                   <Row
                     last
-                    onPress={() => void copy('setup')}
+                    onPress={disconnecting || preparing ? undefined : () => void copy('setup')}
                     accessibilityLabel={t('iosCopySetupCode')}>
                     <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
                       WAFRA ··· {setup.tokenPreview?.slice(-6)}
@@ -393,7 +541,7 @@ export default function IosSetupScreen() {
                   </Block>
                   <SectionHeader title={t('iosYourAddress')} />
                   <Row
-                    onPress={() => void copy('url')}
+                    onPress={disconnecting || preparing ? undefined : () => void copy('url')}
                     accessibilityLabel={t('iosCopyAddress')}>
                     <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
                       {setup.ingestUrl}
@@ -404,7 +552,7 @@ export default function IosSetupScreen() {
                   </Row>
                   <Row
                     last
-                    onPress={() => void copy('token')}
+                    onPress={disconnecting || preparing ? undefined : () => void copy('token')}
                     accessibilityLabel={t('iosCopyToken')}>
                     <ThemedText type="nano" numberOfLines={1} style={styles.mono}>
                       {setup.tokenPreview}
@@ -416,40 +564,25 @@ export default function IosSetupScreen() {
                 </>
               )}
 
-              {banks.length > 0 && (
-                <>
-                  <SectionHeader title={t('iosRunFor')} />
-                  <Block>
-                    <ThemedText type="nano" themeColor="textSecondary">
-                      {banks.join(' · ')}
-                    </ThemedText>
-                  </Block>
-                </>
-              )}
-
-              <Block style={styles.note}>
-                <Icon name="alert" size={16} color={theme.warning} />
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
-                  {t('iosSenderCaveat')}
-                </ThemedText>
-              </Block>
-
               {errorBlock}
 
               <Button
                 label={shortcutAvailable ? t('iosOpenShortcut') : t('iosOpenShortcutsApp')}
                 icon="upload"
+                wrapLabel
+                disabled={disconnecting || preparing}
                 onPress={() => void installShortcut()}
                 style={styles.cta}
               />
               <Button
                 label={t('iosInstalledIt')}
                 variant="ghost"
+                disabled={shortcutAdvanceBlocked}
                 onPress={() => void shortcutInstalled()}
                 style={styles.ctaSecondary}
               />
               <Button
-                label={disconnecting ? t('iosConnecting') : t('iosDisconnect')}
+                label={disconnecting ? t('iosDisconnecting') : t('iosDisconnect')}
                 variant="ghost"
                 disabled={disconnecting}
                 onPress={() => void disconnect()}
@@ -461,68 +594,11 @@ export default function IosSetupScreen() {
           {step === 2 && (
             <Animated.View entering={FadeInDown.duration(240)}>
               <ThemedText type="title" accessibilityRole="header">
-                {t('iosAutomationTitle')}
+                {t('iosTestTitle')}
               </ThemedText>
               <ThemedText themeColor="textSecondary" style={styles.body}>
-                {t('iosAutomationBody')}
+                {t('iosTestBody')}
               </ThemedText>
-
-              <Block style={styles.automationSteps}>
-                <ThemedText type="nano">{t('iosAutomationTrigger')}</ThemedText>
-                <ThemedText type="nano">{t('iosAutomationSenders')}</ThemedText>
-                <ThemedText type="nano">{t('iosAutomationImmediate')}</ThemedText>
-                <ThemedText type="nano">{t('iosAutomationAction')}</ThemedText>
-                <ThemedText type="nano">{t('iosAutomationInput')}</ThemedText>
-              </Block>
-
-              {banks.length > 0 && (
-                <>
-                  <SectionHeader title={t('iosRunFor')} />
-                  <Block>
-                    <ThemedText type="nano" themeColor="textSecondary">
-                      {banks.join(' · ')}
-                    </ThemedText>
-                  </Block>
-                </>
-              )}
-
-              {errorBlock}
-
-              <Button
-                label={t('iosOpenShortcutsApp')}
-                icon="upload"
-                onPress={() => void openAutomation()}
-                style={styles.cta}
-              />
-              <Button
-                label={t('iosAutomationReadyTest')}
-                variant="ghost"
-                disabled={preparing}
-                onPress={() => void automationReady()}
-                style={styles.ctaSecondary}
-              />
-              <Button
-                label={t('iosBackToShortcut')}
-                variant="ghost"
-                onPress={() => goToStep(1)}
-                style={styles.ctaSecondary}
-              />
-            </Animated.View>
-          )}
-
-          {step === 3 && (
-            <Animated.View entering={FadeInDown.duration(240)}>
-              <ThemedText type="title" accessibilityRole="header">
-                {captureOn ? t('iosAlreadyWorkingTitle') : t('iosTestTitle')}
-              </ThemedText>
-              <ThemedText themeColor="textSecondary" style={styles.body}>
-                {captureOn ? t('iosAlreadyWorkingBody') : t('iosTestBody')}
-              </ThemedText>
-              {captureOn && (
-                <ThemedText type="nano" themeColor="textTertiary" style={styles.body}>
-                  {t('iosIntroBody2')}
-                </ThemedText>
-              )}
               {(captured || captureOn) && (
                 <ThemedText type="nano" themeColor="textTertiary" style={styles.body}>
                   {t('iosTestLimit')}
@@ -565,10 +641,13 @@ export default function IosSetupScreen() {
 
               {errorBlock}
 
-              {captured ? (
-                <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
-              ) : captureOn && !listening ? (
-                <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
+              {(captured || captureOn) && !listening ? (
+                <Button
+                  label={t('iosContinueToAutomation')}
+                  wrapLabel
+                  onPress={continueToAutomation}
+                  style={styles.cta}
+                />
               ) : !listening && paired ? (
                 <Button
                   label={timedOut ? t('iosTryAgain') : t('iosStartListening')}
@@ -577,16 +656,9 @@ export default function IosSetupScreen() {
                 />
               ) : null}
 
-              {captureOn && !captured && !listening && paired && (
-                <Button
-                  label={t('iosRunTestAgain')}
-                  variant="ghost"
-                  onPress={startTest}
-                  style={styles.ctaSecondary}
-                />
-              )}
-
-              {(timedOut || recovery === 'shortcut') && (
+              {(timedOut || (
+                recovery === 'shortcut' && failure !== 'shortcuts-missing'
+              )) && (
                 <Button
                   label={t('iosReinstallShortcut')}
                   variant="ghost"
@@ -596,17 +668,99 @@ export default function IosSetupScreen() {
               )}
 
               <Button
-                label={t('iosBackToAutomation')}
+                label={t('iosBackToShortcut')}
                 variant="ghost"
-                onPress={() => goToStep(2)}
+                onPress={() => goToStep(1)}
                 style={styles.ctaSecondary}
               />
 
-              {!captured && !captureOn && (
+              {!captured && !captureOn && !listening && (
                 <Button
                   label={t('iosSkipForNow')}
                   variant="ghost"
+                  wrapLabel
                   onPress={finish}
+                  style={styles.ctaSecondary}
+                />
+              )}
+            </Animated.View>
+          )}
+
+          {step === 3 && (
+            <Animated.View entering={FadeInDown.duration(240)}>
+              <ThemedText type="title" accessibilityRole="header">
+                {automationActive
+                  ? t('iosAlreadyWorkingTitle')
+                  : automationPrepared
+                    ? t('iosAutomationWaitingTitle')
+                    : t('iosAutomationTitle')}
+              </ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.body}>
+                {automationActive
+                  ? t('iosAlreadyWorkingBody')
+                  : automationPrepared
+                    ? t('iosAutomationWaitingBody')
+                    : t('iosAutomationBody')}
+              </ThemedText>
+
+              {!automationPrepared && !automationActive && (
+                <>
+                  <Block style={styles.automationSteps}>
+                    <ThemedText type="nano">{t('iosAutomationTrigger')}</ThemedText>
+                    <ThemedText type="nano">{t('iosAutomationSenders')}</ThemedText>
+                    <ThemedText type="nano">{t('iosAutomationImmediate')}</ThemedText>
+                    <ThemedText type="nano">{t('iosAutomationAction')}</ThemedText>
+                    <ThemedText type="nano">{t('iosAutomationInput')}</ThemedText>
+                  </Block>
+
+                  {banks.length > 0 && (
+                    <>
+                      <SectionHeader title={t('iosRunFor')} />
+                      <Block>
+                        <ThemedText type="nano" themeColor="textSecondary">
+                          {banks.join(' · ')}
+                        </ThemedText>
+                      </Block>
+                    </>
+                  )}
+
+                  <Block style={styles.note}>
+                    <Icon name="alert" size={16} color={theme.warning} />
+                    <ThemedText type="meta" themeColor="textSecondary" style={styles.noteText}>
+                      {t('iosSenderCaveat')}
+                    </ThemedText>
+                  </Block>
+                </>
+              )}
+
+              {errorBlock}
+
+              {automationPrepared || automationActive ? (
+                <Button label={t('iosDone')} onPress={finish} style={styles.cta} />
+              ) : (
+                <>
+                  <Button
+                    label={t('iosOpenShortcutsApp')}
+                    icon="upload"
+                    onPress={() => void openAutomation()}
+                    style={styles.cta}
+                  />
+                  <Button
+                    label={t('iosAutomationReadyTest')}
+                    variant="ghost"
+                    wrapLabel
+                    disabled={preparing || failure === 'shortcuts-missing'}
+                    onPress={() => void automationReady()}
+                    style={styles.ctaSecondary}
+                  />
+                </>
+              )}
+
+              {!automationActive && (
+                <Button
+                  label={t('iosBackToTest')}
+                  variant="ghost"
+                  onPress={() => goToStep(2)}
                   style={styles.ctaSecondary}
                 />
               )}

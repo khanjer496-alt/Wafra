@@ -209,6 +209,8 @@ interface Device {
   public_key: string;
   /** Market pack this device's messages are parsed under — 'AE', 'SA', … */
   market: string;
+  /** Server-owned setup generation captured when this request authenticates. */
+  automationGeneration: string | null;
   /** Present only for this request; never written, returned, sealed or logged. */
   requestSecret: string;
 }
@@ -258,7 +260,12 @@ async function authenticateSecret(
           ? 'sync_token_hash'
           : 'admin_token_hash';
   const row = await env.DB.prepare(
-    `SELECT id, vault_id, role, public_key, market, ${column} AS token_hash FROM devices WHERE ${column} = ?1`,
+    `SELECT d.id, d.vault_id, d.role, d.public_key, d.market,
+            d.${column} AS token_hash,
+            ag.generation AS automation_generation
+       FROM devices d
+       LEFT JOIN automation_generations ag ON ag.device_id = d.id
+      WHERE d.${column} = ?1`,
   )
     .bind(digest)
     .first<{
@@ -268,6 +275,7 @@ async function authenticateSecret(
       public_key: string;
       market: string | null;
       token_hash: string;
+      automation_generation: string | null;
     }>();
   if (!row || !timingSafeEqual(row.token_hash, digest)) return null;
   // Shortcut traffic is not proof the app still exists: an automation can
@@ -285,6 +293,7 @@ async function authenticateSecret(
     // A row written before the column existed reads NULL. Falling back keeps
     // those devices parsing under exactly what they were parsing under.
     market: validMarket(row.market) ?? DEFAULT_MARKET,
+    automationGeneration: row.automation_generation,
     requestSecret: token,
   };
 }
@@ -479,21 +488,13 @@ function friendlyName(value: unknown): string | null | undefined {
 }
 
 /**
- * When the MESSAGE arrived, according to the Shortcut.
+ * Optional compatibility timestamp from older or manually edited Shortcuts.
  *
- * This is not bookkeeping — it is the app's strong duplicate guard. `smsKey` in
- * import-plan.ts fingerprints the message TIMESTAMP together with the amount,
- * so stamping the relay's own receipt time here gave a Shortcut that fired
- * twice two different fingerprints for one purchase, and the charge was filed
- * twice.
- *
- * The reason it was receipt time in the first place is real, and is answered by
- * bounding rather than by ignoring the client: an unbounded caller value lets a
- * broken automation park a valid transaction years in the past or in the
- * future. Further than a day ahead or a year behind is not a clock, it is a
- * mistake, and those fall back to now — a value that is merely late instead of
- * one that trips the 45-day stale-due cutoff or sits at the top of the ledger
- * forever.
+ * The audited 50-action iOS 26.1 graph deliberately omits `receivedAt`: the
+ * Messages input available to that graph has no Date field. Official captures
+ * therefore use this relay's receipt time. A legacy/manual Shortcut may still
+ * send a timestamp, but an unbounded caller value could park a valid transaction
+ * years in the past or future, so implausible values fall back to now.
  */
 function resolveReceivedAt(value: unknown, nowMs: number): number {
   if (typeof value !== 'string' && typeof value !== 'number') return nowMs;
@@ -616,14 +617,16 @@ async function queueStructuredRow(
   row: Record<string, unknown>,
   replayKey: string,
   receiptTtlSeconds: number,
+  targetDeviceId: string | null = null,
 ): Promise<string[]> {
   const { results: vaultDevices } = await env.DB.prepare(
     `SELECT d.id, d.public_key
        FROM devices d
       WHERE d.vault_id = ?1
+        AND (?3 IS NULL OR d.id = ?3)
         AND (SELECT COUNT(*) FROM queue q WHERE q.device_id = d.id) < ?2`,
   )
-    .bind(device.vault_id, MAX_QUEUED_ROWS)
+    .bind(device.vault_id, MAX_QUEUED_ROWS, targetDeviceId)
     .all<{ id: string; public_key: string }>();
   const targets = vaultDevices ?? [];
   if (targets.length === 0) return [];
@@ -1048,6 +1051,7 @@ export default {
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(target.id),
+        env.DB.prepare('DELETE FROM automation_generations WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM devices WHERE id = ?1').bind(target.id),
       ]);
       return empty(204);
@@ -1074,11 +1078,36 @@ export default {
         env.DB.prepare(
           'DELETE FROM ingest_limits WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
         ).bind(device.vault_id),
+        env.DB.prepare(
+          'DELETE FROM automation_generations WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
+        ).bind(device.vault_id),
         env.DB.prepare('DELETE FROM device_invites WHERE vault_id = ?1').bind(device.vault_id),
         env.DB.prepare('DELETE FROM devices WHERE vault_id = ?1').bind(device.vault_id),
         env.DB.prepare('DELETE FROM vaults WHERE id = ?1').bind(device.vault_id),
       ]);
       return empty(204);
+    }
+
+    // ── Message-automation attestation generation ──
+    //
+    // Processing time is not proof time: an old sealed row can be retried from
+    // the relay or replayed from the encrypted local inbox days later. Rotate
+    // an opaque, server-owned generation when the foreground user confirms
+    // the automation, then stamp that captured generation on later ingest
+    // requests. No phone/server clock comparison is involved.
+    if (req.method === 'POST' && url.pathname === '/v1/automation-generation') {
+      const device = await authenticate(req, env, 'admin');
+      if (!device) return json({ error: 'unauthorized' }, 401);
+      const generation = randomToken();
+      await env.DB.prepare(
+        `INSERT INTO automation_generations (device_id, generation)
+         VALUES (?1, ?2)
+         ON CONFLICT(device_id) DO UPDATE SET
+           generation = excluded.generation`,
+      )
+        .bind(device.id, generation)
+        .run();
+      return json({ generation });
     }
 
     // ── Ingest: one message from the user's Shortcut ──
@@ -1095,6 +1124,7 @@ export default {
         eventId?: unknown;
         sender?: unknown;
         receivedAt?: unknown;
+        automation?: unknown;
       } | null => {
         try {
           const parsed = JSON.parse(incoming.text) as unknown;
@@ -1105,6 +1135,7 @@ export default {
               eventId?: unknown;
               sender?: unknown;
               receivedAt?: unknown;
+              automation?: unknown;
             };
           }
           return null;
@@ -1131,6 +1162,19 @@ export default {
       // validator strict, discard only the unusable optional label, and parse
       // the message through the same safe no-sender path older Shortcuts use.
       const sender = validatedSender === undefined ? null : validatedSender;
+      // The official Shortcut adds this exact discriminator only on its
+      // Messages-input branch. Manual Text runs intentionally omit it, so a
+      // harmless setup test cannot masquerade as proof that the personal
+      // automation fired. Unknown values remain backwards-compatible and are
+      // simply discarded rather than crossing the encrypted row boundary.
+      const captureAutomation =
+        body?.automation === 'message' && device.automationGeneration
+          ? {
+              kind: 'message' as const,
+              sourceDeviceId: device.id,
+              generation: device.automationGeneration,
+            }
+          : null;
 
       const isTest = text.trim() === RELAY_TEST_MESSAGE;
       // Choose UAE/Saudi from this alert's sender/currency evidence. The
@@ -1203,14 +1247,17 @@ export default {
       const rowWithReceipt = {
         ...row,
         ...(!isTest && { captureSource: 'shortcut' as const }),
+        ...(!isTest && parsed && captureAutomation
+          ? { captureAutomation }
+          : {}),
         // Sealed alongside the parsed row and nowhere else. The setup probe is
         // not a bank message, so it gets no bank label.
         ...(!isTest && parsed && sender ? { sender } : {}),
         // Which pack this row was parsed under, sealed with it. Not a column.
         ...(!isTest && parsed ? { market: parsedMarket } : {}),
-        // The MESSAGE's time when the Shortcut sent a plausible one, this
-        // relay's receipt time otherwise — see resolveReceivedAt. A probe is
-        // not a bank message and is always stamped now.
+        // The audited official graph omits receivedAt on iOS 26.1, so its rows
+        // use relay receipt time. Bounded legacy/manual values remain accepted;
+        // probes are not bank messages and are always stamped now.
         receivedAt,
       };
       // A SETUP PROBE IS NEVER A REPLAY, and treating it as one locked users
@@ -1238,6 +1285,9 @@ export default {
         rowWithReceipt,
         replayKey,
         isTest ? 0 : REPLAY_WINDOW_SECONDS,
+        // A test proves only that THIS phone ran its installed Shortcut. Real
+        // financial rows still fan out to every device sharing the vault.
+        isTest ? device.id : null,
       );
       if (insertedTargets.length === 0 && (await queueIsFull(env, device.id))) {
         return json({ error: 'queue_full' }, 429);
@@ -1633,6 +1683,7 @@ export default {
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(device.id),
+        env.DB.prepare('DELETE FROM automation_generations WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM devices WHERE id = ?1').bind(device.id),
       ]);
       await env.DB.prepare(
@@ -1821,15 +1872,18 @@ export default {
        * finish setup, and this endpoint reported healthy throughout. So did
        * `npm run deploy`, whose runbook step is to curl exactly this.
        *
-       * It now reads the columns the request path depends on. `LIMIT 0`
-       * returns no rows and no user data; a missing column still makes D1
-       * throw at prepare/execute time, which is the whole signal. Naming the
-       * columns rather than counting tables is deliberate: the outage was
-       * columns, and `SELECT 1` would have passed then too.
+       * It now reads the known additive schema surfaces whose absence breaks
+       * pairing, authentication, or push registration. `LIMIT 0` returns no
+       * rows and no user data; a missing column or table still makes D1 throw
+       * at prepare/execute time, which is the whole signal. This is a focused
+       * sentinel, not a substitute for checking the complete schema catalogue.
        */
       try {
         await env.DB.prepare('SELECT market FROM devices LIMIT 0').all();
         await env.DB.prepare('SELECT push_sent_at FROM push_registrations LIMIT 0').all();
+        await env.DB.prepare(
+          'SELECT device_id, generation FROM automation_generations LIMIT 0',
+        ).all();
       } catch {
         // The exception text can name internals, and this endpoint is public.
         return json({ ok: false, error: 'schema_drift' }, 503);
@@ -2041,6 +2095,9 @@ export default {
     ).run();
     await env.DB.prepare(
       'DELETE FROM ingest_receipts WHERE device_id NOT IN (SELECT id FROM devices)',
+    ).run();
+    await env.DB.prepare(
+      'DELETE FROM automation_generations WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();
     await env.DB.prepare(
       'DELETE FROM vaults WHERE id NOT IN (SELECT DISTINCT vault_id FROM devices)',

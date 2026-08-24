@@ -28,10 +28,6 @@ on:
           - deploy
           - create-database
         default: deploy
-      apply_schema:
-        description: 'Re-apply server/schema.sql before deploying. Safe: every statement is CREATE TABLE IF NOT EXISTS.'
-        type: boolean
-        default: true
       relay_url:
         description: 'Optional. Only needed if the job cannot work out the deployed URL by itself, e.g. https://wafra-relay.yourname.workers.dev'
         type: string
@@ -342,7 +338,6 @@ jobs:
 
       # ---- Guard 2: nothing destructive may reach a live database.
       - name: Refuse a schema file that could destroy data
-        if: inputs.apply_schema
         run: |
           if grep -inE '^[[:space:]]*(DROP|DELETE|TRUNCATE)[[:space:]]' server/schema.sql; then
             {
@@ -352,8 +347,8 @@ jobs:
               echo "additive. The lines above are DROP/DELETE/TRUNCATE."
               echo
               echo "A real migration is a deliberate act with a backup taken first"
-              echo "(\`wrangler d1 export\`) — see server/DEPLOY.md. Re-run with **apply_schema = false**"
-              echo "to deploy the Worker code without touching the schema."
+              echo "(\`wrangler d1 export\`) — see server/DEPLOY.md. This Worker cannot be deployed safely"
+              echo "without its current schema, so there is no schema opt-out."
             } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
@@ -526,7 +521,6 @@ jobs:
           esac
 
       - name: Apply the schema
-        if: inputs.apply_schema
         working-directory: server
         env:
           DB_NAME: ${{ steps.config.outputs.db_name }}
@@ -536,8 +530,8 @@ jobs:
           npx --no-install wrangler d1 execute "$DB_NAME" --remote --file=./schema.sql --yes
 
       # ---- The deploy itself. `npm run deploy` and not `wrangler deploy`,
-      #      because the npm script has a `predeploy` that re-runs the
-      #      placeholder guard; running wrangler directly would bypass it.
+      #      because predeploy re-runs the guarded, idempotent schema migration.
+      #      Running wrangler directly would bypass that release invariant.
       - name: Deploy the Worker
         id: deploy
         working-directory: server
@@ -698,15 +692,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
-      # ---- /v1/health returns a constant and never touches D1, so a green
-      #      health check proves the code is live and nothing about the
-      #      database. This reads the remote catalogue instead. It is still not
-      #      proof that the *Worker's binding* resolves — only a real pair call
-      #      is (server/DEPLOY.md has it) — but it is read-only, so it is the
-      #      strongest check that changes nothing.
+      # ---- /v1/health performs a read-only check through the Worker's D1
+      #      binding for the known additive setup/auth/push schema surfaces.
+      #      This separate catalogue read checks every declared table rather
+      #      than only the runtime-critical subset. A real pair/delete remains
+      #      the strongest write-path check (server/DEPLOY.md has it).
       - name: Check the schema really landed
         id: tables
-        continue-on-error: true
         working-directory: server
         env:
           DB_NAME: ${{ steps.config.outputs.db_name }}
@@ -763,7 +755,7 @@ jobs:
           WORKER: ${{ steps.config.outputs.worker }}
           DB_NAME: ${{ steps.config.outputs.db_name }}
           DB_ID: ${{ steps.config.outputs.db_id }}
-          SCHEMA_APPLIED: ${{ inputs.apply_schema }}
+          SCHEMA_APPLIED: 'true'
         run: |
           if [ "$HEALTH" != "true" ]; then
             # Whichever step failed has already written the explanation.
@@ -784,11 +776,7 @@ jobs:
             echo "| --- | --- |"
             echo "| Worker | \`$WORKER\` |"
             echo "| D1 database | \`$DB_NAME\` · \`$DB_ID\` |"
-            if [ "$SCHEMA_APPLIED" = "true" ]; then
-              echo "| Schema | re-applied (additive, idempotent) |"
-            else
-              echo "| Schema | not touched this run |"
-            fi
+            echo "| Schema | re-applied (additive, idempotent) |"
             case "$TABLES" in
               success) echo "| Tables in D1 | every table in \`schema.sql\` is present |" ;;
               failure) echo "| Tables in D1 | ⚠️ check the \"Check the schema really landed\" step |" ;;
@@ -816,8 +804,8 @@ jobs:
             echo "1. Put the URL above into \`EXPO_PUBLIC_WAFRA_RELAY_URL\` for the app build. Expo inlines it at"
             echo "   build time, so this needs a **new build**, not a config push."
             echo "2. Uncomment \`EXPO_PROJECT_ID\` in \`server/wrangler.toml\` if push wakes are wanted, and re-run this workflow."
-            echo "3. The strongest check — pairing a throwaway device and deleting it — is in server/DEPLOY.md."
-            echo "   \`/v1/health\` never touches D1, so it cannot prove the binding resolves."
+            echo "3. The strongest write-path check — pairing a throwaway device and deleting it — is in server/DEPLOY.md."
+            echo "   \`/v1/health\` already checks the known setup/auth/push schema sentinels through the Worker's D1 binding."
             echo
             echo "Re-running this workflow is safe at any time."
           } >> "$GITHUB_STEP_SUMMARY"

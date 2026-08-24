@@ -86,16 +86,16 @@ const S = {
     ar: 'تُحلَّل هنا · لا يُرفع شيء',
   },
   captureIosOn: {
-    en: 'Shortcut connected · syncing silently',
-    ar: 'الاختصار متصل · مزامنة صامتة',
+    en: 'Message automation verified by a bank alert',
+    ar: 'تم التحقق من أتمتة الرسائل بتنبيه بنكي',
   },
   captureIosNeedsTest: {
-    en: 'Connected · finish the capture test',
-    ar: 'متصل · أكمل اختبار الالتقاط',
+    en: 'Connected · run the safe test',
+    ar: 'متصل · شغّل الاختبار الآمن',
   },
   captureIosPipeReady: {
-    en: 'Private pipe ready · waiting for the first bank alert',
-    ar: 'المسار الخاص جاهز · بانتظار أول تنبيه بنكي',
+    en: 'Private pipe verified · Message automation not proven yet',
+    ar: 'تم التحقق من المسار الخاص · لم تثبت أتمتة الرسائل بعد',
   },
   captureIosOff: {
     en: 'Connect your Shortcut once',
@@ -1451,8 +1451,8 @@ const S = {
     ar: 'يعالج الالتقاط التلقائي تنبيهات البنوك المدعومة على هذا الهاتف فقط، ولا يرفع محتوى الرسائل. ويُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل تخزينه في وفرة. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
   },
   onboardCapturePrivacyIos: {
-    en: 'Automatic capture forwards alerts only from bank conversations you select. Wafra’s encrypted relay parses them, discards raw text immediately, and queues only a device-sealed transaction. Or choose maximum privacy for no Messages access.',
-    ar: 'يمرّر الالتقاط التلقائي التنبيهات فقط من محادثات البنوك التي تختارها. يحللها مُرحّل وفرة المشفر، ويتخلص فوراً من النص الخام، ولا يضع في الطابور إلا عملية مشفرة لجهازك. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
+    en: 'Automatic capture forwards alerts only from bank conversations you select. Wafra’s encrypted relay parses them, discards raw text immediately, and seals each transaction separately for this iPhone and any trusted devices. Or choose maximum privacy for no Messages access.',
+    ar: 'يمرّر الالتقاط التلقائي التنبيهات فقط من محادثات البنوك التي تختارها. يحللها مُرحّل وفرة المشفر، ويتخلص فوراً من النص الخام، ويشفّر كل عملية بشكل منفصل لهذا الآيفون ولأي أجهزة موثوقة. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
   },
   onboardSmsDenied: {
     en: 'SMS access was not granted. You can continue and enable capture later.',
@@ -1509,13 +1509,13 @@ const S = {
   },
   iosOnboardPrivate: { en: 'Raw messages are never kept', ar: 'نص الرسالة الخام لا يُحفظ أبداً' },
   iosOnboardPrivateBody: {
-    en: 'The relay parses, discards the text, and seals the transaction to this iPhone',
-    ar: 'يحلّل المرحّل الرسالة ثم يحذف نصها ويشفّر العملية لهذا الآيفون وحده',
+    en: 'The relay parses, discards the text, and seals the transaction separately for this iPhone and trusted devices',
+    ar: 'يحلّل المرحّل الرسالة ثم يحذف نصها ويشفّر العملية بشكل منفصل لهذا الآيفون وللأجهزة الموثوقة',
   },
   iosOnboardSetupTitle: { en: 'Make it automatic.', ar: 'اجعله تلقائياً.' },
   iosOnboardSetupBody: {
-    en: 'A guided setup connects the private relay. Your first real bank alert verifies Apple’s automation afterward.',
-    ar: 'إعداد موجه يربط المرحّل الخاص. وبعده يتحقق أول تنبيه بنكي حقيقي من أتمتة آبل.',
+    en: 'A guided setup connects the private relay. Your first supported bank alert verifies Apple’s automation afterward.',
+    ar: 'إعداد موجه يربط المرحّل الخاص. وبعده يتحقق أول تنبيه بنكي مدعوم من أتمتة آبل.',
   },
   iosOnboardSetupCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
   readingInbox: { en: 'Reading your inbox.', ar: 'جارٍ قراءة رسائلك.' },
@@ -1998,38 +1998,38 @@ const S = {
   iosSetupTitle: { en: 'Automatic capture', ar: 'الالتقاط التلقائي' },
   iosStepConnect: { en: 'Connect', ar: 'الربط' },
   iosStepBanks: { en: 'Banks', ar: 'البنوك' },
-  iosStepShortcut: { en: 'Shortcut', ar: 'الاختصار' },
-  iosStepAutomation: { en: 'Automation', ar: 'الأتمتة' },
-  iosStepTest: { en: 'Test', ar: 'الاختبار' },
+  iosStepShortcut: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
+  iosStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
+  iosStepTest: { en: 'Safe test', ar: 'اختبار آمن' },
   iosStepProgress: { en: 'Step {n} of {total}: {name}', ar: 'الخطوة {n} من {total}: {name}' },
 
   iosIntroTitle: { en: 'Set it once. Wafra keeps up.', ar: 'اضبطه مرة. ووفرة يتابع.' },
   iosIntroBody1: {
-    en: 'Install Wafra Capture, choose your bank conversations, then let one safe test light up the private pipe.',
-    ar: 'ثبّت «التقاط وفرة»، واختر محادثات بنوكك، ثم شغّل اختباراً آمناً لمسار الربط الخاص.',
+    en: 'Connect this iPhone, add Wafra Capture, run one safe pipe test, then create a Message automation.',
+    ar: 'اربط هذا الآيفون، وأضف «Wafra Capture»، وشغّل اختباراً آمناً للمسار، ثم أنشئ أتمتة «رسالة».',
   },
   iosIntroBody2: {
-    en: 'After setup, alerts file themselves while Wafra is closed. After a restart or force-quit, open Wafra once to resume silent delivery.',
-    ar: 'بعد الإعداد تُسجّل التنبيهات ووفرة مغلق. بعد إعادة التشغيل أو الإغلاق بالقوة، افتح وفرة مرة لاستئناف التسليم الصامت.',
+    en: 'A safe probe verifies the private pipe. Only a later supported bank alert can prove Apple’s Message automation runs while Wafra is closed.',
+    ar: 'يتحقق الاختبار الآمن من المسار الخاص. ولا يثبت عمل أتمتة «الرسالة» من Apple ووفرة مغلق إلا تنبيه بنكي مدعوم لاحق.',
   },
   iosPreviewTime: {
     en: 'ABOUT 3 MINUTES · APPLE SHORTCUTS OPENS NEXT',
     ar: 'نحو ٣ دقائق · سيفتح تطبيق الاختصارات تالياً',
   },
-  iosPreviewInstall: { en: 'Install one private Shortcut', ar: 'ثبّت اختصاراً خاصاً واحداً' },
+  iosPreviewInstall: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
   iosPreviewInstallBody: {
     en: 'Paste this iPhone’s private setup code once.',
     ar: 'ألصق رمز الإعداد الخاص بهذا الآيفون مرة واحدة.',
   },
-  iosPreviewAutomation: { en: 'Choose your bank conversations', ar: 'اختر محادثات بنوكك' },
+  iosPreviewAutomation: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
   iosPreviewAutomationBody: {
     en: 'Apple’s sender picker limits exactly which alerts can run.',
     ar: 'تحدد قائمة مرسلي آبل التنبيهات المسموح بتشغيلها بدقة.',
   },
-  iosPreviewProof: { en: 'See the private pipe answer', ar: 'شاهد استجابة المسار الخاص' },
+  iosPreviewProof: { en: 'Run one safe test', ar: 'شغّل اختباراً آمناً واحداً' },
   iosPreviewProofBody: {
-    en: 'A safe probe checks the pipe; the first bank alert verifies the trigger.',
-    ar: 'يفحص اختبار آمن المسار؛ ويتحقق أول تنبيه بنكي من المشغّل.',
+    en: 'A safe probe checks the pipe; the first supported bank alert verifies the trigger.',
+    ar: 'يفحص اختبار آمن المسار؛ ويتحقق أول تنبيه بنكي مدعوم من المشغّل.',
   },
   /**
    * The sentence this note used to start with was "The relay discards raw
@@ -2044,8 +2044,8 @@ const S = {
    * retention detail follows it.
    */
   iosPrivacyNote: {
-    en: 'Apple gives no app access to the Messages inbox, so on iPhone the alert text is sent to Wafra’s relay to be read. That is the one difference from Android, where it never leaves the phone. The relay discards raw Message Content after parsing. It keeps only the structured transaction and, when the Shortcut supplies it, the bank Sender label used to identify its card or account; both are sealed to this iPhone and queued for up to 30 days.',
-    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل، لذلك يُرسَل نص التنبيه على الآيفون إلى خادم ترحيل وفرة ليُقرأ. وهذا هو الفارق الوحيد عن أندرويد، حيث لا يغادر النص الهاتف إطلاقاً. ويتخلّص خادم الترحيل من محتوى الرسالة الخام بعد تحليله. ولا يحتفظ إلا ببيانات العملية المنظمة، وباسم مرسل البنك عندما يرسله الاختصار، لتحديد البطاقة أو الحساب؛ وتُشفّر هذه البيانات لهذا الآيفون وقد تبقى في قائمة الانتظار حتى ٣٠ يوماً.',
+    en: 'Apple gives no app access to the Messages inbox, so on iPhone the alert text is sent to Wafra’s relay to be read. That is the one difference from Android, where it never leaves the phone. The relay discards raw Message Content after parsing. It keeps only the structured transaction and, when the Shortcut supplies it, the bank Sender label used to identify its card or account; both are sealed separately for this iPhone and any trusted devices, then queued for up to 30 days.',
+    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل، لذلك يُرسَل نص التنبيه على الآيفون إلى خادم ترحيل وفرة ليُقرأ. وهذا هو الفارق الوحيد عن أندرويد، حيث لا يغادر النص الهاتف إطلاقاً. ويتخلّص خادم الترحيل من محتوى الرسالة الخام بعد تحليله. ولا يحتفظ إلا ببيانات العملية المنظمة، وباسم مرسل البنك عندما يرسله الاختصار، لتحديد البطاقة أو الحساب؛ وتُشفّر هذه البيانات بشكل منفصل لهذا الآيفون ولأي أجهزة موثوقة، ثم قد تبقى في قائمة الانتظار حتى ٣٠ يوماً.',
   },
   iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
   iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
@@ -2093,10 +2093,10 @@ const S = {
   iosBanksSkip: { en: 'Skip — I will pick later', ar: 'تخطَّ — سأختار لاحقاً' },
   iosBankSelected: { en: '{name}, selected', ar: '{name}، محدد' },
 
-  iosShortcutTitle: { en: 'Install the Shortcut', ar: 'ثبّت الاختصار' },
+  iosShortcutTitle: { en: 'Add Wafra Capture', ar: 'أضف «Wafra Capture»' },
   iosShortcutBody: {
-    en: 'Tap below to copy this iPhone’s private setup code and open Shortcuts. Add Wafra Capture, run it once, and paste when Apple asks. Return here only after it says the Shortcut is ready.',
-    ar: 'اضغط أدناه لنسخ رمز الإعداد الخاص بهذا الآيفون وفتح الاختصارات. أضف «Wafra Capture»، وشغّله مرة واحدة، ثم الصق الرمز عندما تطلبه Apple. عد إلى هنا فقط بعد أن يؤكد الاختصار أنه جاهز.',
+    en: 'Open the install page, add Wafra Capture, then run it once. Paste this iPhone’s setup code when asked. Return only after Wafra Capture says it is ready.',
+    ar: 'افتح صفحة التثبيت، وأضف «Wafra Capture»، ثم شغّله مرة. الصق رمز إعداد هذا الآيفون عندما يُطلب منك. لا تعد إلا بعد أن يؤكد «Wafra Capture» أنه جاهز.',
   },
   iosShortcutReplaceNote: {
     en: 'Already installed Wafra Capture? Delete the old Shortcut before adding this version. Keeping both can make Apple run the broken copy.',
@@ -2117,11 +2117,24 @@ const S = {
     ar: 'لا يحتوي هذا الإصدار على رابط تثبيت منشور. ما زال بإمكانك إنشاء «Wafra Capture» يدوياً باستخدام العنوان والرمز أدناه.',
   },
   iosInstalledIt: {
-    en: 'Shortcut is ready — clear code & continue',
-    ar: 'الاختصار جاهز — امسح الرمز وتابع',
+    en: 'I added Wafra Capture',
+    ar: 'أضفت «Wafra Capture»',
   },
 
-  iosAutomationTitle: { en: 'Make it run by itself', ar: 'اجعله يعمل تلقائياً' },
+  iosShortcutsMissing: {
+    en: 'Apple Shortcuts is not installed.',
+    ar: 'تطبيق «الاختصارات» من Apple غير مثبّت.',
+  },
+  iosShortcutsMissingRecovery: {
+    en: 'Install Shortcuts from the App Store, return to Wafra, and try this step again.',
+    ar: 'ثبّت «الاختصارات» من App Store، ثم عد إلى وفرة وأعد محاولة هذه الخطوة.',
+  },
+  iosInstallShortcuts: {
+    en: 'Install Apple Shortcuts',
+    ar: 'ثبّت «الاختصارات» من Apple',
+  },
+
+  iosAutomationTitle: { en: 'Create a Message automation', ar: 'أنشئ أتمتة «رسالة»' },
   iosAutomationBody: {
     en: 'In Shortcuts → Automation, create a Message automation with these five choices:',
     ar: 'في الاختصارات ← الأتمتة، أنشئ أتمتة «رسالة» بهذه الخيارات الخمسة:',
@@ -2151,22 +2164,22 @@ const S = {
     ar: 'اخترت «تشغيل فوراً»',
   },
 
-  iosTestTitle: { en: 'Let us prove it works', ar: 'لنتأكد أنه يعمل' },
+  iosTestTitle: { en: 'Run a safe test', ar: 'شغّل اختباراً آمناً' },
   iosTestBody: {
-    en: 'Run one harmless test through the installed Shortcut, then return here. It will not add a fake purchase.',
-    ar: 'شغّل اختباراً آمناً واحداً عبر الاختصار المثبّت ثم عد إلى هنا. لن يضيف عملية شراء وهمية.',
+    en: 'Wafra Capture sends a harmless probe through the private pipe. The first time, tap Allow when Apple asks for network access. It does not add a transaction.',
+    ar: 'يرسل «Wafra Capture» اختباراً آمناً عبر المسار الخاص. في المرة الأولى، اضغط «سماح» عندما تطلب Apple الوصول إلى الشبكة. ولا يضيف أي عملية.',
   },
   iosTestLimit: {
-    en: 'The Shortcut and private sync work. The first real bank alert is the final check: it should appear under the correct bank or card.',
-    ar: 'يعمل الاختصار والمزامنة الخاصة. التنبيه البنكي الحقيقي الأول هو الاختبار الأخير: يجب أن يظهر تحت البنك أو البطاقة الصحيحة.',
+    en: 'The Shortcut and private sync work. Create the Message automation next. The first supported bank alert is the final check: it should appear under the correct bank or card.',
+    ar: 'يعمل الاختصار والمزامنة الخاصة. أنشئ أتمتة «الرسالة» تالياً. التنبيه البنكي المدعوم الأول هو الاختبار الأخير: يجب أن يظهر تحت البنك أو البطاقة الصحيحة.',
   },
   iosCaught: {
     en: 'Captured and filed through the same path future alerts use.',
     ar: 'التُقطت وسُجّلت عبر المسار نفسه الذي ستستخدمه التنبيهات لاحقاً.',
   },
   iosTestCaught: {
-    en: 'Shortcut, relay and encrypted sync answered. The first real bank alert completes automation verification.',
-    ar: 'استجاب الاختصار والترحيل والمزامنة المشفّرة. يُكمل أول تنبيه بنكي حقيقي التحقق من الأتمتة.',
+    en: 'The Shortcut, relay, and encrypted sync are verified. Automatic capture is not verified yet; create the Message automation next.',
+    ar: 'تم التحقق من الاختصار والترحيل والمزامنة المشفّرة. لم يتم التحقق من الالتقاط التلقائي بعد؛ أنشئ أتمتة «الرسالة» تالياً.',
   },
   iosListening: { en: 'Waiting for the Shortcut…', ar: 'في انتظار الاختصار…' },
   iosWaitingLabel: {
@@ -2185,6 +2198,7 @@ const S = {
     ar: 'إنهاء الآن — يظل التسجيل اليدوي متاحاً',
   },
   iosDisconnect: { en: 'Disconnect this iPhone', ar: 'افصل هذا الآيفون' },
+  iosDisconnecting: { en: 'Disconnecting…', ar: 'جارٍ الفصل…' },
   iosDisconnectFailed: {
     en: 'Could not disconnect. Stay online and try again so the relay copy can be erased.',
     ar: 'تعذّر الفصل. ابقَ متصلاً وحاول مجدداً حتى يمكن مسح نسخة الترحيل.',
@@ -2194,16 +2208,29 @@ const S = {
   // flow had a reachable state where the screen said nothing about what to do
   // next: a failure with no undo, a step with no way back to the one that
   // caused it, or a finished setup that still asked to be proved.
-  iosAlreadyWorkingTitle: { en: 'Automatic capture is on', ar: 'الالتقاط التلقائي مُفعّل' },
+  iosAlreadyWorkingTitle: { en: 'Automatic capture is verified', ar: 'تم التحقق من الالتقاط التلقائي' },
   iosAlreadyWorkingBody: {
-    en: 'This iPhone is connected and the private pipe has already answered. New bank alerts file themselves from here.',
-    ar: 'هذا الآيفون مرتبط، وقد استجاب المسار الخاص فعلاً. تُسجّل تنبيهات البنوك الجديدة نفسها من الآن.',
+    en: 'Wafra received a supported bank alert through the Message automation. New matching alerts can now file themselves.',
+    ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». يمكن الآن تسجيل التنبيهات المطابقة تلقائياً.',
+  },
+  iosAutomationWaitingTitle: {
+    en: 'Private pipe verified',
+    ar: 'تم التحقق من المسار الخاص',
+  },
+  iosAutomationWaitingBody: {
+    en: 'Wafra cannot create or inspect Apple’s automation. The next supported bank alert will prove that its Message trigger ran. Until then, automatic capture is not verified.',
+    ar: 'لا يمكن لوفرة إنشاء أتمتة Apple أو فحصها. سيثبت التنبيه البنكي المدعوم التالي أن مشغّل «الرسالة» عمل. وحتى ذلك لم يتم التحقق من الالتقاط التلقائي.',
+  },
+  iosContinueToAutomation: {
+    en: 'Create Message automation',
+    ar: 'أنشئ أتمتة الرسائل',
   },
   iosRunTestAgain: { en: 'Run the test again', ar: 'أعد تشغيل الاختبار' },
   iosBackToShortcut: { en: 'Back to the setup code', ar: 'العودة إلى رمز الإعداد' },
+  iosBackToTest: { en: 'Back to the safe test', ar: 'العودة إلى الاختبار الآمن' },
   iosBackToAutomation: { en: 'Back to the automation steps', ar: 'العودة إلى خطوات الأتمتة' },
   iosReinstallShortcut: { en: 'Reinstall the Shortcut', ar: 'أعد تثبيت الاختصار' },
-  iosAutomationReadyTest: { en: 'I built it — test it now', ar: 'أنشأتها — اختبرها الآن' },
+  iosAutomationReadyTest: { en: 'I created the Message automation', ar: 'أنشأت أتمتة «الرسالة»' },
   iosShortcutInstallFailed: {
     en: 'Could not open the install page. Check your connection and try again.',
     ar: 'تعذّر فتح صفحة التثبيت. تحقق من اتصالك ثم حاول مجدداً.',
@@ -2633,6 +2660,11 @@ const S = {
   settingStatusOff: { en: 'Off', ar: 'متوقف' },
   settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
   settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
+  settingStatusPipeVerified: { en: 'Pipe verified', ar: 'تم التحقق من المسار' },
+  settingStatusAutomationVerified: {
+    en: 'Automation verified',
+    ar: 'تم التحقق من الأتمتة',
+  },
   feedbackIntro: {
     en: 'Send a note directly to Wafra maintainers. Nothing from your ledger is attached, and nothing leaves this phone until you confirm.',
     ar: 'أرسل ملاحظة مباشرة إلى مشرفي وفرة. لا يُرفق شيء من سجلك، ولا يغادر شيء الهاتف حتى تؤكد.',

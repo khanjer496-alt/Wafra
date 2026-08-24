@@ -778,9 +778,17 @@ jobs:
             echo "## What will not work in this build"
             echo
             echo "Read docs/testflight.md, \"What this build cannot do yet\", before concluding something is broken."
-            echo "In short: automatic bank capture on iOS needs the relay deployed *and* the Wafra Capture Shortcut"
-            echo "published, and \`EXPO_PUBLIC_WAFRA_SHORTCUT_URL\` is not set in \`eas.json\`, so the setup flow has no"
-            echo "Shortcut to install. In-app purchases are also inert until a RevenueCat Apple key exists."
+            echo "In short: automatic bank capture on iOS needs the relay deployed and one locked-phone bank alert"
+            echo "verified on a physical iPhone."
+            if [ "$PROFILE" = "preview" ]; then
+              echo "This ad-hoc preview profile intentionally omits the Shortcut; use the capture-beta profile for the"
+              echo "physical capture test."
+            else
+              echo "The production profile references the structurally verified Wafra Capture candidate"
+              echo "\`03d2ab22a33f4fef9d503142575a70fb\`; physical end-to-end proof is still required."
+            fi
+            echo "In-app purchases"
+            echo "are also inert until a RevenueCat Apple key exists."
             echo "Manual entry, import, and the whole ledger work normally."
           } >> "$GITHUB_STEP_SUMMARY"
 
