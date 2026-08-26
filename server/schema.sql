@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS devices (
   -- Sync/ack has its own least-privilege token because it must be available
   -- to a locked-device background wake. Destructive management stays admin.
   ingest_token_hash TEXT NOT NULL UNIQUE,
+  -- A copied Shortcut can outlive the app and keep its ingest bearer. This
+  -- per-device switch retires that one capture surface without deleting the
+  -- device, its already-sealed queue, or the app's sync/admin capabilities.
   -- Forwarded email has its own inject-only credential because SMTP headers
   -- expose the destination address outside the app/relay TLS connection.
   email_token_hash  TEXT UNIQUE,
@@ -189,11 +192,10 @@ CREATE TABLE IF NOT EXISTS feedback_limits (
 );
 
 -- Upgrading a database created before these columns existed. SQLite has no
--- ADD COLUMN IF NOT EXISTS and re-running this file has to stay safe, so they
--- are commented rather than executed: the error from a second run would be the
--- expected outcome, and a migration whose expected outcome is an error is one
--- nobody can tell apart from a broken one. Run the matching commands in
--- server/README.md once, by hand, against a database that predates them.
+-- ADD COLUMN IF NOT EXISTS and re-running this file has to stay safe. The
+-- Shortcut-retirement column is therefore owned by the tracked D1 migration;
+-- the older market/push columns remain documented manual upgrades for legacy
+-- databases that predate the migration ledger.
 -- ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE';
 -- ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0;
 

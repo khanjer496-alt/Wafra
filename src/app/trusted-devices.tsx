@@ -31,6 +31,7 @@ import {
   createTrustedDeviceInvite,
   deleteTrustedVault,
   getRelayConfig,
+  isLegacyShortcutCaptureActive,
   joinTrustedVault,
   listTrustedDevices,
   pairDevice,
@@ -367,7 +368,9 @@ export default function TrustedDevicesScreen() {
       // Only for this phone. Another device's Shortcut lives on that phone,
       // and telling this user to go delete it here would send them looking
       // for something that is not on their device.
-      if (isSelf && shortcutCleanupApplies(true)) setShortcutLeft(true);
+      if (isSelf && shortcutCleanupApplies(
+        isLegacyShortcutCaptureActive(config),
+      )) setShortcutLeft(true);
     } catch (error) {
       showError(error);
     } finally {
@@ -392,7 +395,9 @@ export default function TrustedDevicesScreen() {
       committed();
       // Every device in the vault is revoked, including this one. This is the
       // only one whose Shortcut this screen can speak to.
-      if (shortcutCleanupApplies(true)) setShortcutLeft(true);
+      if (shortcutCleanupApplies(
+        isLegacyShortcutCaptureActive(config),
+      )) setShortcutLeft(true);
     } catch (error) {
       showError(error);
     } finally {

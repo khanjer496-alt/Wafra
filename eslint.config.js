@@ -31,7 +31,7 @@ module.exports = defineConfig([
     // does not grant those — so a new tool file failed `eslint .` in CI while
     // passing `eslint src` locally. Say what these files are instead of
     // contorting them around a config gap.
-    files: ["scripts/**"],
+    files: ["scripts/**", "modules/**/plugin/**"],
     languageOptions: { globals: { ...globals.node } },
   }
 ]);

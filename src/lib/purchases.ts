@@ -82,6 +82,28 @@ export function yearlySavingMonths(prices = PRO_PRICES): number {
  *  a storefront introductory trial: it would begin after this local trial and
  *  silently turn the advertised three days into as many as six. */
 export const TRIAL_DAYS = 3;
+export const TRIAL_DURATION_MS = TRIAL_DAYS * 86_400_000;
+
+export interface LocalCaptureEntitlementLease {
+  expiresAtMs: number | null;
+  lifetime: boolean;
+}
+
+/**
+ * The source-free local grant mirrored into the iOS App Intent store.
+ * Purchased `pro` is deliberately absent: only a fresh RevenueCat snapshot
+ * may create or extend the separate storefront lease.
+ */
+export function localCaptureEntitlementLease(
+  state: { founderPro?: boolean; trialStartTs: number },
+): LocalCaptureEntitlementLease | null {
+  if (state.founderPro === true) return { expiresAtMs: null, lifetime: true };
+  if (!Number.isFinite(state.trialStartTs) || state.trialStartTs <= 0) return null;
+  const expiresAtMs = state.trialStartTs + TRIAL_DURATION_MS;
+  return Number.isFinite(expiresAtMs) && expiresAtMs >= 0
+    ? { expiresAtMs, lifetime: false }
+    : null;
+}
 
 /**
  * Whole days of trial remaining, always within 0…TRIAL_DAYS.
@@ -122,7 +144,7 @@ export function isProActive(
  * WHERE THE PAYWALL SITS, AND WHY IT MOVED.
  *
  * Wafra's promise is that you never type a transaction. Android delivers it by
- * reading the inbox; iPhone delivers it through a Shortcut and the relay. Both
+ * reading the inbox; iPhone delivers it through a personal local automation. Both
  * are Wafra doing the work, both are Pro. But iOS ALSO has to offer pasting a
  * message, because Apple allows nothing else without that setup — and pasting
  * was gated too, on a screen titled "Read my inbox" that on iPhone cannot read
@@ -136,7 +158,7 @@ export function isProActive(
  *            parses, categorises and files it. That is a better keyboard, and
  *            charging for a better keyboard on one platform only is indefensible.
  *   Pro    — Wafra collects messages by itself: the Android inbox scan, and the
- *            iPhone relay capture. Identical value, identical gate, both platforms.
+ *            iPhone local automation. Identical value, identical gate, both platforms.
  *
  * `requiresPro` is the single place that decision lives. Screens ask it rather
  * than testing `Platform.OS`, which is how the two platforms stay in step.
@@ -147,10 +169,10 @@ export function isProActive(
  *
  * `manual` covers typing an entry and pasting a bank message: the user is
  * holding the message and handing it over. `inboxScan` (Android) and
- * `relayCapture` (iPhone) are the same feature wearing the platform's clothes —
+ * `localAutomation` (iPhone) are the same feature wearing the platform's clothes —
  * Wafra collecting messages without being asked.
  */
-export type CaptureMethod = 'manual' | 'inboxScan' | 'relayCapture';
+export type CaptureMethod = 'manual' | 'inboxScan' | 'localAutomation';
 
 /**
  * The only gate. Anything a user does by hand stays free on every platform;
@@ -163,7 +185,7 @@ export function requiresPro(method: CaptureMethod): boolean {
 /** What "automatic" means on this device — and whether it exists here at all. */
 export function autoCaptureMethod(): Exclude<CaptureMethod, 'manual'> | null {
   if (Platform.OS === 'android') return 'inboxScan';
-  if (Platform.OS === 'ios') return 'relayCapture';
+  if (Platform.OS === 'ios') return 'localAutomation';
   return null;
 }
 

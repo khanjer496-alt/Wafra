@@ -89,6 +89,70 @@ const S = {
     en: 'Message automation verified by a bank alert',
     ar: 'تم التحقق من أتمتة الرسائل بتنبيه بنكي',
   },
+  captureIosNeedsAutomation: {
+    en: 'Finish the one-time Message automation',
+    ar: 'أكمل إعداد أتمتة الرسائل لمرة واحدة',
+  },
+  captureIosWaitingForAlert: {
+    en: 'Ready — waiting for the first bank alert',
+    ar: 'جاهز — بانتظار أول تنبيه مصرفي',
+  },
+  captureIosFirstAlertCaptured: {
+    en: 'First bank alert captured locally',
+    ar: 'تم التقاط أول تنبيه مصرفي محلياً',
+  },
+  captureIosQueueWarning: {
+    en: 'Capture needs attention; open recovery',
+    ar: 'يحتاج الالتقاط إلى انتباه؛ افتح الاسترداد',
+  },
+  captureIosMigrationRetry: {
+    en: 'Local capture works; finish retiring the old Shortcut upload',
+    ar: 'يعمل الالتقاط المحلي؛ أكمل إيقاف رفع الاختصار القديم',
+  },
+  captureIosLocalPrivacy: {
+    en: 'The new bank-alert capture path processes Messages on this iPhone and does not upload their text. An old Wafra Capture automation may still upload until removed or retired.',
+    ar: 'يعالج مسار التقاط التنبيهات المصرفية الجديد الرسائل على هذا الآيفون ولا يرفع نصوصها. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها.',
+  },
+  captureIosQueueWarningDetail: {
+    en: 'This status shows only source-free counts. Accepted pending records may keep Message text and sender protected and encrypted on this iPhone; they expire after 30 days and are removed the next time capture runs or Wafra checks the queue.',
+    ar: 'تعرض هذه الحالة أعداداً خالية من بيانات المصدر فقط. وقد تحتفظ السجلات المعلّقة المقبولة بنص الرسالة واسم المرسل محميَّين ومشفَّرين على هذا الآيفون؛ وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية.',
+  },
+  captureIosQueueCounts: {
+    en: 'Pending {pending} · dropped {dropped} · corrupt {corrupt}',
+    ar: 'قيد الانتظار {pending} · مفقودة {dropped} · تالفة {corrupt}',
+  },
+  captureIosRecoveryTitle: {
+    en: 'Process pending alerts and finish recovery?',
+    ar: 'معالجة التنبيهات المعلّقة وإكمال الاسترداد؟',
+  },
+  captureIosRecoveryBody: {
+    en: 'Wafra will process the protected pending queue. If a dropped or corrupt warning exists, Wafra clears only that exact warning. Alerts already reported as dropped or corrupt cannot be restored; add any missing entries manually. Recovery works while tracking is paused and does not turn capture on.',
+    ar: 'ستعالج وفرة صف الانتظار المحمي. وإذا وُجد تحذير عن تنبيهات مفقودة أو تالفة، فستمحو وفرة ذلك التحذير المحدد فقط. لا يمكن استعادة التنبيهات التي أُبلغ بأنها مفقودة أو تالفة؛ أضف أي عمليات ناقصة يدوياً. يعمل الاسترداد أثناء توقف التتبع ولا يفعّل الالتقاط.',
+  },
+  captureIosRecoveryAction: {
+    en: 'Process & recover',
+    ar: 'عالج واسترد',
+  },
+  captureIosRecoveryCompleteTitle: {
+    en: 'Capture recovery complete',
+    ar: 'اكتمل استرداد الالتقاط',
+  },
+  captureIosRecoveryCompleteBody: {
+    en: 'Recoverable pending alerts were processed. Check the ledger and add any alert that was previously dropped or corrupt.',
+    ar: 'تمت معالجة التنبيهات المعلّقة القابلة للاسترداد. تحقق من السجل وأضف يدوياً أي تنبيه كان مفقوداً أو تالفاً.',
+  },
+  captureIosRecoveryRetryTitle: {
+    en: 'Recovery needs another try',
+    ar: 'يحتاج الاسترداد إلى محاولة أخرى',
+  },
+  captureIosRecoveryRetryBody: {
+    en: 'A new warning arrived or some pending alerts could not be saved. Nothing was cleared early. Keep Wafra open and try recovery again.',
+    ar: 'وصل تحذير جديد أو تعذّر حفظ بعض التنبيهات المعلّقة. لم يُمسح شيء مبكراً. أبقِ وفرة مفتوحة وحاول الاسترداد مرة أخرى.',
+  },
+  captureIosMigrationRetryDetail: {
+    en: 'The new capture path stays local, but the old Shortcut automation may keep uploading until cleanup succeeds or you remove it.',
+    ar: 'يبقى مسار الالتقاط الجديد محلياً، لكن أتمتة الاختصار القديمة قد تستمر في الرفع حتى يكتمل إيقافها أو تحذفها.',
+  },
   captureIosNeedsTest: {
     en: 'Connected · run the safe test',
     ar: 'متصل · شغّل الاختبار الآمن',
@@ -119,12 +183,13 @@ const S = {
   },
   captureReady: { en: 'ON', ar: 'مفعّل' },
   captureFinish: { en: 'FINISH', ar: 'أكمل' },
+  captureRecover: { en: 'RECOVER', ar: 'استرداد' },
   captureVerify: { en: 'VERIFY', ar: 'تحقق' },
   captureEnable: { en: 'ENABLE', ar: 'فعّل' },
   capturePaused: { en: 'Tracking paused', ar: 'توقف التتبع' },
   pausedBadge: { en: 'PAUSED', ar: 'متوقف' },
   captureChecking: { en: 'Checking capture…', ar: 'جارٍ التحقق من الالتقاط…' },
-  captureSyncNow: { en: 'Up to date · new alerts file themselves', ar: 'محدّث · تُسجّل التنبيهات الجديدة تلقائياً' },
+  captureSyncNow: { en: 'Up to date · new alerts are captured automatically', ar: 'محدّث · تُلتقط التنبيهات الجديدة تلقائياً' },
   captureIosSetupDetail: { en: 'One-time setup in Apple Shortcuts', ar: 'إعداد لمرة واحدة في اختصارات آبل' },
   captureLatest: { en: 'Latest filed {date}', ar: 'آخر عملية مسجّلة {date}' },
   emptyPeriodBody: { en: 'Pull down to check for new bank activity. One transaction is enough to start the month.', ar: 'اسحب للأسفل للتحقق من نشاط بنكي جديد. تكفي عملية واحدة لبدء الشهر.' },
@@ -478,16 +543,20 @@ const S = {
   // mode does the same on Android, by the user's own choice. See
   // noFormatsReason() in lib/accuracy.ts.
   formatsNotKeptRow: {
-    en: 'Card diagnostic · message text is not kept on this phone',
-    ar: 'تشخيص البطاقات · لا يُحتفظ بنص الرسائل على هذا الهاتف',
+    en: 'Accuracy report · processed Message text is not retained in the ledger; protected pending records expire after 30 days and are removed on the next queue access',
+    ar: 'تقرير الدقة · لا يُحتفظ بنص الرسالة المعالَجة في السجل؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف',
   },
   formatsNotKeptRelay: {
-    en: 'This iPhone never receives the text of a bank message. The relay reads each one, sends only the figures it parsed, and discards the rest — so the app cannot tell you which formats it is misreading, and an empty list here is not a clean bill of health. The card diagnostic below still works: it reports what the ledger did with every card row.',
-    ar: 'لا يستقبل هذا الآيفون نص الرسالة البنكية إطلاقاً. يقرأ الوسيط كل رسالة ويرسل الأرقام التي استخرجها فقط ثم يتخلص من الباقي، لذا لا يستطيع التطبيق إخبارك بالصيغ التي يخطئ في قراءتها، وخلوّ هذه القائمة ليس دليلاً على سلامة القراءة. أما تشخيص البطاقات بالأسفل فيعمل: يعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+    en: 'Rows delivered by the old Wafra Capture relay never included Message text, so they cannot appear in this list and an empty list does not audit them. The card diagnostic below still works: it reports what the ledger did with every card row.',
+    ar: 'لم تتضمن العمليات التي سلّمها مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا يمكن أن تظهر في هذه القائمة ولا يعني خلوّها أن تلك العمليات خضعت للتدقيق. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+  },
+  formatsNotKeptIosLocal: {
+    en: 'Local capture parses new bank alerts on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
+    ar: 'يعالج الالتقاط المحلي التنبيهات المصرفية الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
   },
   formatsNotKeptPrivate: {
-    en: 'Private mode removed the retained message text and keeps new imports from storing any, so the app cannot tell you which formats it is misreading. An empty list here is not a clean bill of health. The card diagnostic below still works: it reports what the ledger did with every card row.',
-    ar: 'أزال الوضع الخاص نصوص الرسائل المحفوظة ويمنع عمليات الاستيراد الجديدة من حفظ أي منها، لذا لا يستطيع التطبيق إخبارك بالصيغ التي يخطئ في قراءتها، وخلوّ هذه القائمة ليس دليلاً على سلامة القراءة. أما تشخيص البطاقات بالأسفل فيعمل: يعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
+    en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access. The card diagnostic below still reports what the ledger did with every card row.',
+    ar: 'يحذف الوضع الخاص نص الرسالة التشخيصي من السجل ويمنع العمليات الجديدة من الاحتفاظ به، لذلك لا تستطيع هذه القائمة تحديد الصيغ التي أسيءت قراءتها. ويستمر الالتقاط المحلي؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. أما تشخيص البطاقات بالأسفل فيعرض ما فعله السجل بكل عملية مرتبطة ببطاقة.',
   },
   // ── the phone measuring its own parser ──
   //
@@ -626,8 +695,8 @@ const S = {
   trustedTitle: { en: 'Trusted devices', ar: 'الأجهزة الموثوقة' },
   trustedSettingsRow: { en: 'Trusted devices & family', ar: 'الأجهزة الموثوقة والعائلة' },
   trustedSettingsDetail: {
-    en: 'Share future relay captures with up to 8 devices',
-    ar: 'شارك عمليات الالتقاط المستقبلية مع ما يصل إلى ٨ أجهزة',
+    en: 'Share future relay-delivered supplemental imports with up to 8 devices',
+    ar: 'شارك الواردات الإضافية المستقبلية المرسلة عبر المرحّل مع ما يصل إلى ٨ أجهزة',
   },
   trustedHeroTitle: { en: 'One vault. Your trusted phones.', ar: 'خزنة واحدة. لأجهزتك الموثوقة.' },
   trustedHeroBody: {
@@ -639,8 +708,8 @@ const S = {
     ar: 'تبقى رسائل البنك على هذا الأندرويد وتُحلَّل محلياً ولا تُرفع. تستقبل الأجهزة الموثوقة فقط العناصر المستقبلية المرسلة عبر المرحّل.',
   },
   trustedIosTruth: {
-    en: 'Each future Shortcut capture is sealed to trusted devices. Joining never backfills older transactions.',
-    ar: 'تُشفّر كل عملية التقاط مستقبلية من الاختصار للأجهزة الموثوقة. لا يسترجع الانضمام العمليات السابقة.',
+    en: 'Local iPhone Message captures stay on this iPhone. Only separately relay-delivered supplemental imports can reach trusted devices, and joining never backfills older transactions.',
+    ar: 'تبقى التقاطات الرسائل المحلية على هذا الآيفون. لا تصل إلى الأجهزة الموثوقة إلا الواردات الإضافية المرسلة بشكل منفصل عبر المرحّل، ولا يسترجع الانضمام العمليات السابقة.',
   },
   trustedPreview: { en: 'SAMPLE HOUSEHOLD', ar: 'عائلة تجريبية' },
   trustedDisabled: { en: 'DEMO', ar: 'تجريبي' },
@@ -914,8 +983,8 @@ const S = {
   },
   privateModeEnableTitle: { en: 'Turn on Private Mode?', ar: 'تفعيل الوضع الخاص؟' },
   privateModeEnableIosBody: {
-    en: 'This removes retained diagnostic message text and disconnects automatic Shortcuts capture. Structured entries already on this iPhone stay.',
-    ar: 'سيحذف نصوص الرسائل التشخيصية المحفوظة ويفصل الالتقاط التلقائي عبر الاختصارات. ستبقى العمليات المنظّمة الموجودة على هذا الآيفون.',
+    en: 'This removes retained diagnostic message text and disconnects the old relay. Local automatic capture and structured entries on this iPhone stay.',
+    ar: 'سيحذف نصوص الرسائل التشخيصية المحفوظة ويفصل المرحّل القديم. سيبقى الالتقاط التلقائي المحلي والعمليات المنظّمة على هذا الآيفون.',
   },
   privateModeEnable: { en: 'Turn on', ar: 'تفعيل' },
   privateModeFailed: {
@@ -927,12 +996,12 @@ const S = {
     ar: 'تعذّر على وفرة حفظ إعداد الالتقاط التلقائي. حاول مرة أخرى.',
   },
   privacyRetentionExact: {
-    en: 'Android alerts are parsed on-device. On iPhone, your Shortcut sends selected bank alerts to Wafra’s relay; it deletes the raw text immediately and keeps only a device-sealed transaction for up to 30 days. Private Mode is local-only and disables iPhone Shortcut capture.',
-    ar: 'تُحلَّل تنبيهات أندرويد على الجهاز. وعلى الآيفون يرسل الاختصار تنبيهات البنوك المحددة إلى مرحّل وفرة؛ فيحذف النص فوراً ولا يحتفظ إلا بعملية مشفّرة لهذا الجهاز لمدة أقصاها ٣٠ يوماً. الوضع الخاص محلي فقط ويوقف التقاط الاختصار على الآيفون.',
+    en: 'The capture status and warning on this screen keep only source-free counts; they do not keep Message text or sender. Pending Message records wait in the protected local capture queue—a short-lived encrypted queue. They expire after 30 days and are removed the next time capture runs or Wafra checks the queue. Private Mode keeps local capture working.',
+    ar: 'لا تحتفظ حالة الالتقاط والتنبيه في هذه الشاشة إلا بأعداد خالية من بيانات المصدر، ولا تحفظان نص الرسالة أو اسم المرسل. تبقى سجلات الرسائل المعلّقة في صف الالتقاط المحلي المحمي، وهو صف مشفّر قصير الأجل. وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ويستمر الالتقاط المحلي في الوضع الخاص.',
   },
   privacySecurityExact: {
-    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone; optional bank-app alerts wait only in a short-lived encrypted queue. iPhone uses your personal Shortcut and Wafra’s encrypted relay. Wafra cannot sign in to a bank, reply to messages, approve a payment or move money.',
-    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات الرسائل على هذا الهاتف، وتنتظر تنبيهات تطبيقات البنوك الاختيارية فقط في طابور مشفر قصير المدة. ويستخدم الآيفون اختصارك الشخصي ومُرحّل وفرة المشفر. ولا يستطيع وفرة تسجيل الدخول إلى بنك أو الرد على الرسائل أو الموافقة على دفعة أو نقل الأموال.',
+    en: 'Automatic capture is optional. Android SMS alerts are processed on this phone, and local iPhone capture never uploads SMS content. However, an old Wafra Shortcut automation can continue uploading the bank alerts you selected until you remove it or Wafra confirms retirement. Wafra cannot sign in to a bank, read Messages history, reply, approve a payment or move money. For separately connected email, PDF or CSV imports, the encrypted relay parses them, discards raw text immediately, and returns only structured rows.',
+    ar: 'الالتقاط التلقائي اختياري. تُعالج تنبيهات رسائل أندرويد على هذا الهاتف، ولا يرفع الالتقاط المحلي على الآيفون محتوى الرسائل. لكن أتمتة الاختصار القديمة «Wafra Capture» قد تستمر في رفع تنبيهات البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة اكتمال إيقافها. لا تستطيع وفرة تسجيل الدخول إلى بنك أو قراءة سجل الرسائل أو الرد أو الموافقة على دفعة أو نقل الأموال. أما واردات البريد أو PDF أو CSV المربوطة منفصلةً، فيحللها المرحّل المشفّر ويحذف النص فوراً ويعيد عمليات منظّمة فقط.',
   },
   country: { en: 'Country', ar: 'الدولة' },
   language: { en: 'Language', ar: 'اللغة' },
@@ -1110,8 +1179,8 @@ const S = {
     ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف نهائياً. أما رسائل بنكك فتبقى في صندوق رسائل هاتفك — ولا تستطيع وفرة حذفها — لذا ستُقرأ العمليات من جديد عند الفحص التالي. أما ما علّمته لوفرة فلن يعود.',
   },
   eraseEverythingIosBody: {
-    en: 'All accounts, entries, bills, goals, and this iPhone’s relay queue will be permanently deleted. Wafra cannot delete your Capture Shortcut — Apple gives no app that power — so it will show you how to remove it yourself straight afterwards.',
-    ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف وصف انتظار الترحيل لهذا الآيفون نهائياً. لا تستطيع وفرة حذف اختصار الالتقاط — لا تمنح آبل أي تطبيق هذه الصلاحية — لذا ستوضّح لك بعد ذلك مباشرةً كيف تحذفه بنفسك.',
+    en: 'All accounts, entries, bills, goals, and this iPhone’s relay queue will be permanently deleted. If you previously installed the old Wafra Capture automation, Wafra cannot delete it — Apple gives no app that power — so you will get a link to check Shortcuts straight afterwards.',
+    ar: 'ستُحذف جميع الحسابات والعمليات والفواتير والأهداف وصف انتظار الترحيل لهذا الآيفون نهائياً. إذا سبق أن ثبّتَّ أتمتة Wafra Capture القديمة فلا تستطيع وفرة حذفها — لا تمنح آبل أي تطبيق هذه الصلاحية — لذلك ستحصل بعد ذلك مباشرةً على رابط للتحقق من تطبيق الاختصارات.',
   },
   eraseRelayFailedTitle: {
     en: 'Could not erase everything',
@@ -1147,6 +1216,10 @@ const S = {
     en: 'Wafra disconnected the relay and revoked this iPhone’s tokens, but the encrypted ledger on this phone could not be deleted. Restart Wafra and erase again.',
     ar: 'فصلت وفرة المرحّل وألغت رموز هذا الآيفون، لكن تعذّر حذف السجل المشفّر الموجود على هذا الهاتف. أعد تشغيل وفرة ثم امسح مرة أخرى.',
   },
+  eraseCaptureDisableFailedBody: {
+    en: 'Wafra could not stop new local alerts before erasing. Nothing was erased. Restart Wafra and try again.',
+    ar: 'تعذّر على وفرة إيقاف التنبيهات المحلية الجديدة قبل المسح. لم يُمسح شيء. أعد تشغيل وفرة وحاول مرة أخرى.',
+  },
   eraseLocalInitializeFailedTitle: {
     en: 'Your data was erased',
     ar: 'تم محو بياناتك',
@@ -1164,20 +1237,20 @@ const S = {
     ar: 'محَت وفرة السجل، لكن تعذّر حذف رسائل بنكية مشفّرة ما زالت بانتظار الاستيراد على هذا الهاتف. أُوقف الاستيراد والحفظ. استخدم «إعادة المحاولة» في شاشة الاسترداد.',
   },
   shortcutStillInstalledTitle: {
-    en: 'One thing left: your Shortcut',
-    ar: 'بقي شيء واحد: اختصارك',
+    en: 'Check for an old Shortcut',
+    ar: 'تحقق من وجود اختصار قديم',
   },
   shortcutCleanupErased: {
-    en: 'Everything on this phone is gone and the relay rejects this iPhone’s token from now on. The Wafra Capture Shortcut is still installed, and it still sends each bank alert you pointed it at over the network, where it is now refused. Only you can delete it: Shortcuts → Automation → delete the Wafra automation, then My Shortcuts → delete Wafra Capture.',
-    ar: 'حُذف كل شيء على هذا الهاتف وأصبح المرحّل يرفض رمز هذا الآيفون من الآن. لكن اختصار «Wafra Capture» ما زال مثبّتاً، وما زال يرسل كل تنبيه بنكي وجّهته إليه عبر الشبكة حيث يُرفض الآن. أنت وحدك من يستطيع حذفه: الاختصارات ← الأتمتة ← احذف أتمتة وفرة، ثم اختصاراتي ← احذف Wafra Capture.',
+    en: 'Everything on this phone is gone and the relay rejects this iPhone’s token from now on. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep sending selected bank alerts over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
+    ar: 'حُذف كل شيء على هذا الهاتف وأصبح المرحّل يرفض رمز هذا الآيفون من الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل إرسال تنبيهات البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
   },
   shortcutCleanupLeft: {
-    en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. The Wafra Capture Shortcut is still installed and still forwards each bank alert you pointed it at over the network, where it is now refused. Only you can delete it: Shortcuts → Automation → delete the Wafra automation, then My Shortcuts → delete Wafra Capture.',
-    ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. لكن اختصار «Wafra Capture» ما زال مثبّتاً وما زال يمرّر كل تنبيه بنكي وجّهته إليه عبر الشبكة حيث يُرفض الآن. أنت وحدك من يستطيع حذفه: الاختصارات ← الأتمتة ← احذف أتمتة وفرة، ثم اختصاراتي ← احذف Wafra Capture.',
+    en: 'This iPhone’s relay token is revoked, so nothing it sends can be filed again. If you previously installed the old “Wafra Capture” automation, it can remain in Shortcuts and keep forwarding selected bank alerts over the network, where they are now refused. Check Shortcuts → Automation and My Shortcuts, and delete the old Wafra items if present.',
+    ar: 'أُلغي رمز ترحيل هذا الآيفون، فلن يُسجَّل أي شيء يرسله بعد الآن. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تبقى في تطبيق الاختصارات وتواصل تمرير تنبيهات البنوك المحددة عبر الشبكة، حيث تُرفض الآن. تحقق من «الاختصارات» ← «الأتمتة» ومن «اختصاراتي»، واحذف عناصر Wafra القديمة إن وُجدت.',
   },
   shortcutCleanupUncertain: {
-    en: 'Wafra could not confirm that this iPhone’s relay token was revoked. Automatic capture is off in Wafra, but the installed Shortcut may still forward selected bank alerts over the network. Delete it now in Shortcuts → Automation, then My Shortcuts, and retry disconnection when you are online.',
-    ar: 'تعذّر على وفرة تأكيد إلغاء رمز ترحيل هذا الآيفون. الالتقاط التلقائي متوقف داخل وفرة، لكن الاختصار المثبّت قد يستمر في تمرير تنبيهات البنوك المحددة عبر الشبكة. احذفه الآن من الاختصارات ← الأتمتة، ثم «اختصاراتي»، وأعد محاولة الفصل عند توفر الإنترنت.',
+    en: 'Wafra could not confirm that this iPhone’s relay token was revoked. Automatic capture is off in Wafra. If you previously installed the old “Wafra Capture” automation, it may still forward selected bank alerts over the network. Delete the old Wafra items if present in Shortcuts → Automation or My Shortcuts, then retry disconnection when you are online.',
+    ar: 'تعذّر على وفرة تأكيد إلغاء رمز ترحيل هذا الآيفون. الالتقاط التلقائي متوقف داخل وفرة. إذا سبق أن ثبّتَّ أتمتة «Wafra Capture» القديمة فقد تستمر في تمرير تنبيهات البنوك المحددة عبر الشبكة. احذف عناصر Wafra القديمة إن وُجدت من «الاختصارات» ← «الأتمتة» أو «اختصاراتي»، ثم أعد محاولة الفصل عند توفر الإنترنت.',
   },
   /**
    * Removing SOMEBODY ELSE'S iPhone. Their Shortcut is on their phone, which
@@ -1185,8 +1258,8 @@ const S = {
    * button anyone here can press.
    */
   trustedRemoveShortcutNote: {
-    en: 'If that device is an iPhone, its Wafra Capture Shortcut keeps sending bank alerts to the relay — refused from now on, but still leaving that phone. Only its owner can delete it, in the Shortcuts app.',
-    ar: 'إذا كان ذلك الجهاز آيفون، فسيظل اختصار «Wafra Capture» فيه يرسل التنبيهات البنكية إلى المرحّل — مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. مالك الجهاز وحده يستطيع حذفه من تطبيق الاختصارات.',
+    en: 'If that device is an iPhone and its owner previously installed the old Wafra Capture automation, it can remain there and keep sending selected bank alerts to the relay — refused from now on, but still leaving that phone. Ask its owner to check the Shortcuts app and delete the old Wafra items if present.',
+    ar: 'إذا كان ذلك الجهاز آيفون وسبق لمالكه تثبيت أتمتة Wafra Capture القديمة، فقد تبقى هناك وتواصل إرسال تنبيهات البنوك المحددة إلى المرحّل — وهي مرفوضة من الآن، لكنها تغادر ذلك الهاتف فعلاً. اطلب من مالكه التحقق من تطبيق الاختصارات وحذف عناصر Wafra القديمة إن وُجدت.',
   },
   activeOnThisDevice: { en: 'Active on this device', ar: 'مفعّل على هذا الجهاز' },
   founderProActive: { en: 'Founder access · active on this device', ar: 'وصول المؤسس · مفعّل على هذا الجهاز' },
@@ -1315,8 +1388,8 @@ const S = {
   storageRecoveryEraseCta: { en: 'Erase and start over', ar: 'محو والبدء من جديد' },
   storageRecoveryEraseTitle: { en: 'Erase everything on this device?', ar: 'محو كل شيء على هذا الجهاز؟' },
   storageRecoveryEraseBody: {
-    en: 'This destroys Wafra’s encrypted ledger and any captured messages waiting inside Wafra. It cannot be undone. Bank SMS remain in Messages, and on iPhone you must separately delete the Wafra Shortcut automation.',
-    ar: 'سيؤدي هذا إلى إتلاف سجل وفرة المشفّر وأي رسائل ملتقطة تنتظر داخل وفرة. لا يمكن التراجع. ستبقى رسائل البنك في تطبيق الرسائل، وعلى الآيفون يجب حذف أتمتة اختصار وفرة بشكل منفصل.',
+    en: 'This destroys Wafra’s encrypted ledger and any captured messages waiting inside Wafra. It cannot be undone. Bank SMS remain in Messages. If this iPhone previously configured the old “Wafra Capture” automation, Wafra opens Shortcuts afterward so you can remove the old items.',
+    ar: 'سيؤدي هذا إلى إتلاف سجل وفرة المشفّر وأي رسائل ملتقطة تنتظر داخل وفرة. لا يمكن التراجع. ستبقى رسائل البنك في تطبيق الرسائل. إذا سبق إعداد أتمتة «Wafra Capture» القديمة على هذا الآيفون، فستفتح وفرة تطبيق الاختصارات بعد ذلك كي تتمكن من حذف العناصر القديمة.',
   },
   storageRecoveryEraseConfirm: { en: 'Erase permanently', ar: 'محو نهائي' },
   storageRecoveryEraseKeep: { en: 'Keep my data', ar: 'احتفظ ببياناتي' },
@@ -1426,12 +1499,12 @@ const S = {
   onboardCaptureIosCta: { en: 'Set up automatic capture', ar: 'إعداد الالتقاط التلقائي' },
   onboardAutomaticChoice: { en: 'Keep it automatic', ar: 'اجعله تلقائياً' },
   onboardAutomaticChoiceAndroidBody: {
-    en: 'Build history now, then file supported bank SMS as they arrive. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
-    ar: 'أنشئ السجل الآن، ثم صنّف رسائل البنوك المدعومة عند وصولها. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
+    en: 'Build history now, then capture supported bank SMS as they arrive and file them when Wafra next runs. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
+    ar: 'أنشئ السجل الآن، ثم التقط رسائل البنوك المدعومة عند وصولها وصنّفها عند تشغيل وفرة لاحقاً. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
   },
   onboardAutomaticChoiceIosBody: {
-    en: 'Connect a personal Shortcut for the bank conversations you choose. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
-    ar: 'اربط اختصاراً شخصياً لمحادثات البنوك التي تختارها. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
+    en: 'Connect a personal Shortcut once. It receives new Messages from Any Sender, then Wafra filters supported bank alerts locally on this iPhone. Automatic capture is included during your first 3 app days, then requires Wafra Pro.',
+    ar: 'اربط اختصاراً شخصياً مرة واحدة. يستقبل الرسائل الجديدة من أي مرسل، ثم يرشّح وفرة تنبيهات البنوك المدعومة محلياً على هذا الآيفون. الالتقاط التلقائي مشمول خلال أول ٣ أيام من استخدام التطبيق، ثم يتطلب وفرة برو.',
   },
   onboardManualChoice: { en: 'I’ll add things myself', ar: 'سأضيف العمليات بنفسي' },
   onboardManualChoiceBody: {
@@ -1451,8 +1524,8 @@ const S = {
     ar: 'يعالج الالتقاط التلقائي تنبيهات البنوك المدعومة على هذا الهاتف فقط، ولا يرفع محتوى الرسائل. ويُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل تخزينه في وفرة. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
   },
   onboardCapturePrivacyIos: {
-    en: 'Automatic capture forwards alerts only from bank conversations you select. Wafra’s encrypted relay parses them, discards raw text immediately, and seals each transaction separately for this iPhone and any trusted devices. Or choose maximum privacy for no Messages access.',
-    ar: 'يمرّر الالتقاط التلقائي التنبيهات فقط من محادثات البنوك التي تختارها. يحللها مُرحّل وفرة المشفر، ويتخلص فوراً من النص الخام، ويشفّر كل عملية بشكل منفصل لهذا الآيفون ولأي أجهزة موثوقة. أو اختر أقصى خصوصية دون أي وصول إلى الرسائل.',
+    en: 'Apple does not give Wafra access to your Messages inbox. A personal automation passes newly arriving Messages to Wafra on this iPhone, where Wafra filters supported bank alerts locally and does not upload their text. Accepted pending records stay encrypted on-device; they expire after 30 days and are removed the next time capture runs or Wafra checks the queue. An old Wafra Capture automation may still upload until removed or retired. Or choose manual entry for no Messages access.',
+    ar: 'لا تمنح آبل وفرة وصولاً إلى صندوق الرسائل. تمرّر أتمتة شخصية الرسائل الجديدة إلى وفرة على هذا الآيفون، حيث يرشّح وفرة تنبيهات البنوك المدعومة محلياً ولا يرفع نصوصها. تبقى السجلات المعلّقة المقبولة مشفّرة على الجهاز؛ وتنتهي صلاحيتها بعد ٣٠ يوماً وتُزال عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها. أو اختر الإدخال اليدوي دون أي وصول إلى الرسائل.',
   },
   onboardSmsDenied: {
     en: 'SMS access was not granted. You can continue and enable capture later.',
@@ -1604,7 +1677,7 @@ const S = {
   // iPhone gets the same feature by a different road — Apple lets no app read
   // Messages, so a Shortcut forwards them. Describing it as "reads your SMS"
   // there would promise something the platform forbids.
-  featAutoTrackingIosText: { en: 'Each bank alert your iPhone forwards becomes a transaction, card or due on its own. Set up once.', ar: 'كل رسالة بنكية يحوّلها هاتفك تتحول تلقائياً إلى عملية أو بطاقة أو مستحق. إعداد مرة واحدة.' },
+  featAutoTrackingIosText: { en: 'Supported bank alerts passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج تنبيهات البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
   featPasteFree: { en: 'Pasting is always free', ar: 'لصق الرسائل مجاني دائماً' },
   featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
   featInsights: { en: 'Insights & subscriptions', ar: 'تحليلات واشتراكات' },
@@ -2003,6 +2076,133 @@ const S = {
   iosStepTest: { en: 'Safe test', ar: 'اختبار آمن' },
   iosStepProgress: { en: 'Step {n} of {total}: {name}', ar: 'الخطوة {n} من {total}: {name}' },
 
+  // Two-stage, device-local iPhone capture setup.
+  iosLocalStepShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
+  iosLocalStepAutomation: { en: 'Message automation', ar: 'أتمتة الرسائل' },
+  iosLocalShortcutTitle: {
+    en: 'Add Wafra Local Capture',
+    ar: 'أضف «Wafra Local Capture»',
+  },
+  iosLocalShortcutBody: {
+    en: 'Add the ordinary Shortcut once. It has no account code to paste and cannot install Apple’s personal automation for you.',
+    ar: 'أضف الاختصار العادي مرة واحدة. لا يحتوي على رمز حساب للصقه، ولا يمكنه تثبيت أتمتة Apple الشخصية نيابةً عنك.',
+  },
+  iosLocalInstallShortcut: {
+    en: 'Open Wafra Local Capture',
+    ar: 'افتح «Wafra Local Capture»',
+  },
+  iosLocalAlreadyAdded: {
+    en: 'I already added it',
+    ar: 'أضفته بالفعل',
+  },
+  iosLocalShortcutUnavailable: {
+    en: 'The verified install link is not published in this build. Manual tracking and past-alert import still work.',
+    ar: 'رابط التثبيت المتحقق منه غير منشور في هذا الإصدار. يظل التسجيل اليدوي واستيراد التنبيهات السابقة متاحين.',
+  },
+  iosLocalUnsupported: {
+    en: 'Automatic local capture needs iOS 16 or later. Manual tracking and past-alert import still work.',
+    ar: 'يتطلب الالتقاط المحلي التلقائي iOS 16 أو أحدث. يظل التسجيل اليدوي واستيراد التنبيهات السابقة متاحين.',
+  },
+  iosLocalUpdateRequired: {
+    en: 'This Wafra build is missing local capture. Update Wafra, then return here. Reinstalling the Shortcut will not repair this build.',
+    ar: 'يفتقد هذا الإصدار من وفرة ميزة الالتقاط المحلي. حدّث وفرة ثم عد إلى هنا. لن تؤدي إعادة تثبيت الاختصار إلى إصلاح هذا الإصدار.',
+  },
+  iosLocalPrivacyTitle: {
+    en: 'Processed on this iPhone',
+    ar: 'تُعالج على هذا الآيفون',
+  },
+  iosLocalPrivacyBody: {
+    en: 'Apple does not give Wafra general access to your Messages inbox; only the personal automation can pass a newly arriving Message. Wafra filters and parses bank-alert candidates on this iPhone. During local parsing, Wafra uses the complete Message Content and, when the Shortcut supplies it, the bank Sender label; that label is used to identify its card or account. After successful local processing, Wafra discards raw Message Content after parsing, along with the Sender label, and keeps only structured transaction fields. If processing cannot finish, accepted raw text and sender stay in the protected encrypted queue; they expire after 30 days and are removed the next time capture runs or Wafra checks the queue. The new local capture path does not upload them.',
+    ar: 'لا تمنح Apple وفرة وصولاً عاماً إلى صندوق رسائلك؛ وحدها الأتمتة الشخصية تستطيع تمرير رسالة جديدة عند وصولها. تُرشّح وفرة تنبيهات البنوك المرشحة وتُحلّلها على هذا الآيفون. أثناء التحليل المحلي، تستخدم وفرة محتوى الرسالة الخام كاملاً، واسم مرسل البنك عندما يمرّره الاختصار، للتعرّف إلى البطاقة أو الحساب. بعد نجاح المعالجة المحلية، تتخلص وفرة من محتوى الرسالة الخام واسم المرسل وتحتفظ فقط بحقول العملية المنظمة. وإذا تعذّر إكمال المعالجة، فيبقى النص الخام المقبول واسم المرسل في الصف المحلي المحمي والمشفّر؛ وتنتهي صلاحيتهما بعد ٣٠ يوماً ويُزالان عند تشغيل الالتقاط أو فحص وفرة للصف في المرة التالية. ولا يرفع مسار الالتقاط المحلي الجديد أياً منهما.',
+  },
+  iosLocalMigrationTitle: {
+    en: 'Using the older automation?',
+    ar: 'هل تستخدم الأتمتة القديمة؟',
+  },
+  iosLocalMigrationBody: {
+    en: 'If you still have the old “Wafra Capture” automation, it can continue uploading the bank alerts you selected until you delete it or Wafra confirms retirement after the first local bank alert.',
+    ar: 'إذا كانت أتمتة «Wafra Capture» القديمة ما زالت موجودة، فقد تستمر في رفع تنبيهات البنوك التي اخترتها إلى أن تحذفها أو تؤكد وفرة إيقافها بعد أول تنبيه بنكي محلي.',
+  },
+  iosLocalAutomationTitle: {
+    en: 'Turn on automatic capture',
+    ar: 'فعّل الالتقاط التلقائي',
+  },
+  iosLocalAutomationBody: {
+    en: 'In Shortcuts → Automation, create one personal automation with these exact choices:',
+    ar: 'في «الاختصارات» ← «الأتمتة»، أنشئ أتمتة شخصية واحدة بهذه الخيارات بالضبط:',
+  },
+  iosLocalChoiceMessage: { en: 'Message', ar: 'رسالة' },
+  iosLocalChoiceAnySender: { en: 'Any Sender', ar: 'أي مرسل' },
+  iosLocalChoiceContainsEmpty: {
+    en: 'Message Contains: leave empty',
+    ar: '«تحتوي الرسالة»: اتركه فارغاً',
+  },
+  iosLocalChoiceImmediate: { en: 'Run Immediately', ar: '«تشغيل فوراً»' },
+  iosLocalChoiceRunShortcut: {
+    en: 'Run Shortcut → Wafra Local Capture',
+    ar: 'تشغيل اختصار ← Wafra Local Capture',
+  },
+  iosLocalChoiceCompleteMessage: {
+    en: 'Input → complete Received Message',
+    ar: 'الإدخال ← «الرسالة المستلمة» كاملة',
+  },
+  iosLocalAutomationGuideLabel: {
+    en: 'Illustrated guide to the six Message automation choices. No message content is shown.',
+    ar: 'دليل مصوّر لخيارات أتمتة الرسائل الستة. لا يظهر أي محتوى للرسائل.',
+  },
+  iosLocalOpenAutomation: {
+    en: 'Open Automation',
+    ar: 'افتح الأتمتة',
+  },
+  iosLocalAutomationAdded: {
+    en: 'I added the automation',
+    ar: 'أضفت الأتمتة',
+  },
+  iosLocalTestExplainer: {
+    en: 'Confirmation runs only a harmless setup check. It cannot add a purchase or prove that Apple’s Message trigger works.',
+    ar: 'يشغّل التأكيد فحص إعداد آمناً فقط. لا يمكنه إضافة عملية شراء أو إثبات عمل مشغّل الرسائل من Apple.',
+  },
+  iosLocalWaitingTitle: {
+    en: 'Ready — waiting for the first bank alert',
+    ar: 'جاهز — في انتظار أول تنبيه بنكي',
+  },
+  iosLocalWaitingBody: {
+    en: 'The Shortcut test worked. Only a real future bank alert can prove Apple’s Message automation ran.',
+    ar: 'نجح اختبار الاختصار. لا يمكن إثبات تشغيل أتمتة الرسائل من Apple إلا بتنبيه بنكي حقيقي في المستقبل.',
+  },
+  iosLocalFirstAlertCaptured: {
+    en: 'First bank alert captured locally',
+    ar: 'تم التقاط أول تنبيه بنكي محلياً',
+  },
+  iosLocalFirstAlertBody: {
+    en: 'Wafra durably processed the first qualifying alert on this iPhone. It may have been filed, reviewed, reconciled, or recognized as an existing entry.',
+    ar: 'عالجت وفرة أول تنبيه مؤهل بشكل دائم على هذا الآيفون. ربما سُجّل أو أُرسل للمراجعة أو استُخدم للمطابقة أو تم التعرّف عليه كعملية موجودة.',
+  },
+  iosLocalNotProvenTitle: {
+    en: 'Finish the one-time automation',
+    ar: 'أكمل الأتمتة لمرة واحدة',
+  },
+  iosLocalNotProvenBody: {
+    en: 'Wafra cannot create or inspect Apple’s personal automation. Follow the choices below, then confirm it here.',
+    ar: 'لا يمكن لوفرة إنشاء أتمتة Apple الشخصية أو فحصها. اتبع الخيارات أدناه ثم أكّدها هنا.',
+  },
+  iosLocalManualTracking: { en: 'Manual tracking', ar: 'التسجيل اليدوي' },
+  iosLocalImportPast: { en: 'Import past alerts', ar: 'استيراد التنبيهات السابقة' },
+  iosLocalContinue: { en: 'Continue', ar: 'متابعة' },
+  iosLocalBackToShortcut: { en: 'Back to Shortcut', ar: 'العودة إلى الاختصار' },
+  iosLocalShortcutInstallFailed: {
+    en: 'Could not open the verified install page. Check your connection and try again.',
+    ar: 'تعذّر فتح صفحة التثبيت المتحقق منها. تحقق من اتصالك ثم حاول مجدداً.',
+  },
+  iosLocalShortcutRunFailed: {
+    en: 'Could not run Wafra Local Capture. Check that it is installed with that exact name, then try again.',
+    ar: 'تعذّر تشغيل «Wafra Local Capture». تأكد من تثبيته بهذا الاسم تماماً ثم حاول مجدداً.',
+  },
+  iosLocalManualExitFailed: {
+    en: 'Wafra could not stop local capture. Stay on this screen and try again.',
+    ar: 'تعذّر على وفرة إيقاف الالتقاط المحلي. ابقَ في هذه الشاشة وحاول مجدداً.',
+  },
+
   iosIntroTitle: { en: 'Set it once. Wafra keeps up.', ar: 'اضبطه مرة. ووفرة يتابع.' },
   iosIntroBody1: {
     en: 'Connect this iPhone, add Wafra Capture, run one safe pipe test, then create a Message automation.',
@@ -2031,21 +2231,10 @@ const S = {
     en: 'A safe probe checks the pipe; the first supported bank alert verifies the trigger.',
     ar: 'يفحص اختبار آمن المسار؛ ويتحقق أول تنبيه بنكي مدعوم من المشغّل.',
   },
-  /**
-   * The sentence this note used to start with was "The relay discards raw
-   * Message Content after parsing" — which is true, and which presupposes the
-   * thing it never said: that the relay received the message in the first
-   * place. Someone skimming the screen before tapping Connect could read the
-   * whole note and not learn that their bank alert leaves the phone.
-   *
-   * That is the one way iPhone capture differs from Android, where parsing is
-   * entirely on-device, and it is the difference a person is entitled to be
-   * told before they agree to it rather than after. So it now leads, and the
-   * retention detail follows it.
-   */
+  /** Retained for old screen snapshots; current setup uses iosLocalPrivacyBody. */
   iosPrivacyNote: {
-    en: 'Apple gives no app access to the Messages inbox, so on iPhone the alert text is sent to Wafra’s relay to be read. That is the one difference from Android, where it never leaves the phone. The relay discards raw Message Content after parsing. It keeps only the structured transaction and, when the Shortcut supplies it, the bank Sender label used to identify its card or account; both are sealed separately for this iPhone and any trusted devices, then queued for up to 30 days.',
-    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل، لذلك يُرسَل نص التنبيه على الآيفون إلى خادم ترحيل وفرة ليُقرأ. وهذا هو الفارق الوحيد عن أندرويد، حيث لا يغادر النص الهاتف إطلاقاً. ويتخلّص خادم الترحيل من محتوى الرسالة الخام بعد تحليله. ولا يحتفظ إلا ببيانات العملية المنظمة، وباسم مرسل البنك عندما يرسله الاختصار، لتحديد البطاقة أو الحساب؛ وتُشفّر هذه البيانات بشكل منفصل لهذا الآيفون ولأي أجهزة موثوقة، ثم قد تبقى في قائمة الانتظار حتى ٣٠ يوماً.',
+    en: 'Apple gives no app access to the Messages inbox. A personal automation passes each new Message to Wafra on this iPhone, where supported bank alerts are filtered and processed locally without uploading their text. Protected pending records expire after 30 days and are physically removed on the next capture or queue check.',
+    ar: 'لا تتيح آبل لأي تطبيق الوصول إلى صندوق الرسائل. تمرّر أتمتة شخصية كل رسالة جديدة إلى وفرة على هذا الآيفون، حيث تُرشّح تنبيهات البنوك المدعومة وتُعالج محلياً من دون رفع نصوصها. تنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال فعلياً عند تشغيل الالتقاط أو فحص الصف في المرة التالية.',
   },
   iosConnecting: { en: 'Connecting…', ar: 'جارٍ الربط…' },
   iosConnectCta: { en: 'Connect this iPhone', ar: 'اربط هذا الآيفون' },
@@ -2210,8 +2399,8 @@ const S = {
   // caused it, or a finished setup that still asked to be proved.
   iosAlreadyWorkingTitle: { en: 'Automatic capture is verified', ar: 'تم التحقق من الالتقاط التلقائي' },
   iosAlreadyWorkingBody: {
-    en: 'Wafra received a supported bank alert through the Message automation. New matching alerts can now file themselves.',
-    ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». يمكن الآن تسجيل التنبيهات المطابقة تلقائياً.',
+    en: 'Wafra received a supported bank alert through the Message automation. New matching alerts are captured automatically and filed when Wafra next runs.',
+    ar: 'استلمت وفرة تنبيهاً بنكياً مدعوماً عبر أتمتة «الرسالة». تُلتقط التنبيهات المطابقة تلقائياً وتُسجّل عند تشغيل وفرة لاحقاً.',
   },
   iosAutomationWaitingTitle: {
     en: 'Private pipe verified',
@@ -2659,6 +2848,8 @@ const S = {
   settingStatusOn: { en: 'On', ar: 'مفعّل' },
   settingStatusOff: { en: 'Off', ar: 'متوقف' },
   settingStatusChecking: { en: 'Checking', ar: 'جارٍ التحقق' },
+  settingStatusYes: { en: 'yes', ar: 'نعم' },
+  settingStatusNo: { en: 'no', ar: 'لا' },
   settingStatusSetup: { en: 'Set up', ar: 'يحتاج إعداداً' },
   settingStatusPipeVerified: { en: 'Pipe verified', ar: 'تم التحقق من المسار' },
   settingStatusAutomationVerified: {

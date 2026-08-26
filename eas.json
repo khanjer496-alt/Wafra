@@ -36,6 +36,8 @@
     },
     "preview": {
       "extends": "base",
+      "channel": "preview",
+      "environment": "preview",
       "distribution": "internal",
       "autoIncrement": true,
       "env": {
@@ -62,6 +64,8 @@
     },
     "corpus-preview": {
       "extends": "base",
+      "channel": "corpus-preview",
+      "environment": "preview",
       "distribution": "internal",
       "autoIncrement": true,
       "android": {
@@ -77,6 +81,7 @@
     },
     "capture-beta": {
       "extends": "base",
+      "channel": "capture-beta",
       "distribution": "store",
       "environment": "preview",
       "autoIncrement": true,
@@ -92,12 +97,21 @@
     },
     "production": {
       "extends": "base",
+      "channel": "production",
+      "environment": "production",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "0",
-        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
-        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/03d2ab22a33f4fef9d503142575a70fb",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
+    },
+    "production-candidate": {
+      "extends": "production",
+      "channel": "production-candidate",
+      "environment": "production",
+      "env": {
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
@@ -112,6 +126,9 @@
         "appleTeamId": "UV7YN4GQ66",
         "ascAppId": "6799171482"
       }
+    },
+    "production-candidate": {
+      "extends": "production"
     }
   }
 }

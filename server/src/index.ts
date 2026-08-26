@@ -211,6 +211,8 @@ interface Device {
   market: string;
   /** Server-owned setup generation captured when this request authenticates. */
   automationGeneration: string | null;
+  /** False only for the copied Shortcut ingest surface; app scopes remain live. */
+  shortcutIngestEnabled: boolean;
   /** Present only for this request; never written, returned, sealed or logged. */
   requestSecret: string;
 }
@@ -261,6 +263,7 @@ async function authenticateSecret(
           : 'admin_token_hash';
   const row = await env.DB.prepare(
     `SELECT d.id, d.vault_id, d.role, d.public_key, d.market,
+            d.shortcut_ingest_enabled,
             d.${column} AS token_hash,
             ag.generation AS automation_generation
        FROM devices d
@@ -274,6 +277,7 @@ async function authenticateSecret(
       role: 'owner' | 'member';
       public_key: string;
       market: string | null;
+      shortcut_ingest_enabled: number;
       token_hash: string;
       automation_generation: string | null;
     }>();
@@ -294,6 +298,7 @@ async function authenticateSecret(
     // those devices parsing under exactly what they were parsing under.
     market: validMarket(row.market) ?? DEFAULT_MARKET,
     automationGeneration: row.automation_generation,
+    shortcutIngestEnabled: row.shortcut_ingest_enabled === 1,
     requestSecret: token,
   };
 }
@@ -383,6 +388,52 @@ async function overRateLimit(env: Env, deviceId: string): Promise<boolean> {
     .bind(deviceId, windowStart)
     .first<{ request_count: number }>();
   return (row?.request_count ?? INGEST_PER_HOUR + 1) > INGEST_PER_HOUR;
+}
+
+/**
+ * Allocate one request from the Shortcut's historical fixed-hour traffic
+ * budget. The enabled-device predicate is part of the write itself: if an
+ * admin retirement wins the race after authentication, this statement cannot
+ * recreate the counter that retirement deleted.
+ */
+async function consumeShortcutRateLimit(
+  env: Env,
+  deviceId: string,
+  windowStart: number,
+): Promise<number | null> {
+  const row = await env.DB.prepare(
+    `INSERT INTO ingest_limits (device_id, window_start, request_count)
+     SELECT ?1, ?2, 1
+      WHERE EXISTS (
+        SELECT 1 FROM devices
+         WHERE id = ?1 AND shortcut_ingest_enabled = 1
+      )
+     ON CONFLICT(device_id) DO UPDATE SET
+       request_count = CASE
+         WHEN ingest_limits.window_start = excluded.window_start
+         THEN ingest_limits.request_count + 1
+         ELSE 1
+       END,
+       window_start = excluded.window_start
+     WHERE EXISTS (
+       SELECT 1 FROM devices
+        WHERE id = ?1 AND shortcut_ingest_enabled = 1
+     )
+     RETURNING request_count`,
+  )
+    .bind(deviceId, windowStart)
+    .first<{ request_count: number }>();
+  return row?.request_count ?? null;
+}
+
+/** Null means the authenticated row was deleted, not explicitly retired. */
+async function shortcutIngestEnabled(env: Env, deviceId: string): Promise<boolean | null> {
+  const row = await env.DB.prepare(
+    'SELECT shortcut_ingest_enabled AS enabled FROM devices WHERE id = ?1',
+  )
+    .bind(deviceId)
+    .first<{ enabled: number }>();
+  return row ? row.enabled === 1 : null;
 }
 
 /**
@@ -611,14 +662,25 @@ function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): strin
   });
 }
 
+type QueueStructuredRowOptions =
+  | {
+    sourceScope: 'shortcut';
+    targetDeviceId?: string | null;
+  }
+  | {
+    sourceScope: 'supplemental';
+    targetDeviceId?: string | null;
+  };
+
 async function queueStructuredRow(
   env: Env,
   device: Device,
   row: Record<string, unknown>,
   replayKey: string,
   receiptTtlSeconds: number,
-  targetDeviceId: string | null = null,
+  options: QueueStructuredRowOptions,
 ): Promise<string[]> {
+  const targetDeviceId = options.targetDeviceId ?? null;
   const { results: vaultDevices } = await env.DB.prepare(
     `SELECT d.id, d.public_key
        FROM devices d
@@ -630,11 +692,36 @@ async function queueStructuredRow(
     .all<{ id: string; public_key: string }>();
   const targets = vaultDevices ?? [];
   if (targets.length === 0) return [];
-  const sealedTargets = await Promise.all(
-    targets.map(async (target) => ({ id: target.id, sealed: await seal(target.public_key, row) })),
-  );
-  const results = await env.DB.batch([
-    ...sealedTargets.map((target) =>
+  const sealedTargets = await Promise.all(targets.map(async (target) => ({
+    id: target.id,
+    queueId: crypto.randomUUID(),
+    sealed: await seal(target.public_key, row),
+  })));
+  const queueStatements = options.sourceScope === 'shortcut'
+    ? sealedTargets.map((target) =>
+      env.DB.prepare(
+        `INSERT INTO queue (id, device_id, epk, iv, ct, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, unixepoch()
+          WHERE EXISTS (
+            SELECT 1 FROM devices
+             WHERE id = ?6 AND shortcut_ingest_enabled = 1
+          )
+            AND NOT EXISTS (
+              SELECT 1 FROM ingest_receipts
+               WHERE device_id = ?6 AND replay_key = ?7 AND expires_at > unixepoch()
+            )
+            AND (SELECT COUNT(*) FROM queue WHERE device_id = ?2) < ?8`,
+      ).bind(
+        target.queueId,
+        target.id,
+        target.sealed.epk,
+        target.sealed.iv,
+        target.sealed.ct,
+        device.id,
+        `${replayKey}:${target.id}`,
+        MAX_QUEUED_ROWS,
+      ))
+    : sealedTargets.map((target) =>
       env.DB.prepare(
         `INSERT INTO queue (id, device_id, epk, iv, ct, created_at)
          SELECT ?1, ?2, ?3, ?4, ?5, unixepoch()
@@ -643,25 +730,55 @@ async function queueStructuredRow(
              WHERE device_id = ?6 AND replay_key = ?7 AND expires_at > unixepoch()
           )`,
       ).bind(
-        crypto.randomUUID(),
+        target.queueId,
         target.id,
         target.sealed.epk,
         target.sealed.iv,
         target.sealed.ct,
         device.id,
-        replayKey,
-      ),
-    ),
-    env.DB.prepare(
+        `${replayKey}:${target.id}`,
+      ));
+  // A replay receipt belongs to one source event AND one target. A shared
+  // receipt lets one full phone suppress delivery to itself after a peer
+  // succeeds. Target-scoped keys keep retries idempotent for successful peers
+  // while allowing the missed phone to recover when it has capacity again.
+  const receiptStatements = sealedTargets.map((target) => options.sourceScope === 'shortcut'
+    ? env.DB.prepare(
       `INSERT INTO ingest_receipts (device_id, replay_key, created_at, expires_at)
-       VALUES (?1, ?2, unixepoch(), unixepoch() + ?3)
+       SELECT ?1, ?2, unixepoch(), unixepoch() + ?3
+        WHERE EXISTS (
+          SELECT 1 FROM devices
+           WHERE id = ?1 AND shortcut_ingest_enabled = 1
+        )
+          AND EXISTS (SELECT 1 FROM queue WHERE id = ?4)
        ON CONFLICT(device_id, replay_key) DO UPDATE SET
          created_at = excluded.created_at,
          expires_at = excluded.expires_at`,
-    ).bind(device.id, replayKey, receiptTtlSeconds),
+    ).bind(
+      device.id,
+      `${replayKey}:${target.id}`,
+      receiptTtlSeconds,
+      target.queueId,
+    )
+    : env.DB.prepare(
+      `INSERT INTO ingest_receipts (device_id, replay_key, created_at, expires_at)
+       SELECT ?1, ?2, unixepoch(), unixepoch() + ?3
+        WHERE EXISTS (SELECT 1 FROM queue WHERE id = ?4)
+       ON CONFLICT(device_id, replay_key) DO UPDATE SET
+         created_at = excluded.created_at,
+         expires_at = excluded.expires_at`,
+    ).bind(
+      device.id,
+      `${replayKey}:${target.id}`,
+      receiptTtlSeconds,
+      target.queueId,
+    ));
+  const results = await env.DB.batch([
+    ...queueStatements,
+    ...receiptStatements,
   ]);
   return sealedTargets
-    .filter((_, index) => (results[index].meta.changes ?? 0) > 0)
+    .filter((_, index) => results[index].meta.changes === 1)
     .map((target) => target.id);
 }
 
@@ -719,6 +836,7 @@ async function queueEmailRows(
       },
       `${baseKey}:${index}`,
       REPLAY_WINDOW_SECONDS,
+      { sourceScope: 'supplemental' },
     );
     for (const targetId of inserted) wake.add(targetId);
   }
@@ -1110,11 +1228,47 @@ export default {
       return json({ generation });
     }
 
+    // Retire only the ingest bearer already copied into an Apple Shortcut.
+    // Sync/admin/email credentials, sealed queue rows, device membership,
+    // invites, push registration and the vault all remain usable.
+    if (req.method === 'POST' && url.pathname === '/v1/device/retire-shortcut-capture') {
+      const device = await authenticate(req, env, 'admin');
+      if (!device) return json({ error: 'unauthorized' }, 401);
+      await env.DB.batch([
+        env.DB.prepare(
+          'UPDATE devices SET shortcut_ingest_enabled = 0 WHERE id = ?1',
+        ).bind(device.id),
+        env.DB.prepare(
+          'DELETE FROM automation_generations WHERE device_id = ?1',
+        ).bind(device.id),
+        env.DB.prepare(
+          'DELETE FROM ingest_receipts WHERE device_id = ?1',
+        ).bind(device.id),
+        env.DB.prepare(
+          'DELETE FROM ingest_limits WHERE device_id = ?1',
+        ).bind(device.id),
+      ]);
+      return empty(204);
+    }
+
     // ── Ingest: one message from the user's Shortcut ──
     if (req.method === 'POST' && url.pathname === '/v1/ingest') {
       const device = await authenticate(req, env, 'ingest');
-      if (!device) return json({ error: 'unauthorized' }, 401);
-      if (await overRateLimit(env, device.id)) return json({ error: 'rate_limited' }, 429);
+      if (!device || !device.shortcutIngestEnabled) {
+        return json({ error: 'unauthorized' }, 401);
+      }
+      const rateLimitWindowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
+      const shortcutRequestCount = await consumeShortcutRateLimit(
+        env,
+        device.id,
+        rateLimitWindowStart,
+      );
+      if (shortcutRequestCount === null) {
+        return json({ error: 'unauthorized' }, 401);
+      }
+      if (shortcutRequestCount > INGEST_PER_HOUR) {
+        return json({ error: 'rate_limited' }, 429);
+      }
       if (await queueIsFull(env, device.id)) return json({ error: 'queue_full' }, 429);
 
       const incoming = await readBody(req, MAX_BODY_BYTES);
@@ -1287,10 +1441,21 @@ export default {
         isTest ? 0 : REPLAY_WINDOW_SECONDS,
         // A test proves only that THIS phone ran its installed Shortcut. Real
         // financial rows still fan out to every device sharing the vault.
-        isTest ? device.id : null,
+        {
+          sourceScope: 'shortcut',
+          targetDeviceId: isTest ? device.id : null,
+        },
       );
-      if (insertedTargets.length === 0 && (await queueIsFull(env, device.id))) {
-        return json({ error: 'queue_full' }, 429);
+      if (insertedTargets.length === 0) {
+        // Authentication can race retirement. Queue and receipt writes are
+        // conditional in the same D1 transaction; this reread distinguishes
+        // that cutover from ordinary replay and queue-full zero-change cases.
+        if (await shortcutIngestEnabled(env, device.id) === false) {
+          return json({ error: 'unauthorized' }, 401);
+        }
+        if (await queueIsFull(env, device.id)) {
+          return json({ error: 'queue_full' }, 429);
+        }
       }
       // A setup probe is consumed by the foreground proof screen. Waking the
       // headless collector here could acknowledge the marker before that
@@ -1464,6 +1629,7 @@ export default {
           },
           `${baseKey}:${index}`,
           72 * 60 * 60,
+          { sourceScope: 'supplemental' },
         );
         for (const targetId of inserted) wake.add(targetId);
       }
@@ -1518,6 +1684,7 @@ export default {
           },
           `${baseKey}:${index}`,
           72 * 60 * 60,
+          { sourceScope: 'supplemental' },
         );
         for (const targetId of inserted) wake.add(targetId);
       }
@@ -1880,6 +2047,7 @@ export default {
        */
       try {
         await env.DB.prepare('SELECT market FROM devices LIMIT 0').all();
+        await env.DB.prepare('SELECT shortcut_ingest_enabled FROM devices LIMIT 0').all();
         await env.DB.prepare('SELECT push_sent_at FROM push_registrations LIMIT 0').all();
         await env.DB.prepare(
           'SELECT device_id, generation FROM automation_generations LIMIT 0',
@@ -1993,6 +2161,7 @@ export default {
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
+          { sourceScope: 'supplemental' },
         );
         for (const id of inserted) wake.add(id);
       }
@@ -2038,6 +2207,7 @@ export default {
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
+          { sourceScope: 'supplemental' },
         );
         for (const id of inserted) wake.add(id);
       }

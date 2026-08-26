@@ -35,7 +35,14 @@ import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme
 import { committed } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
 import { clearBackgroundRelayRows } from '@/lib/background-relay';
-import { getRelayConfigStrict, isRelayPlatform, unpairDevice } from '@/lib/relay';
+import { eraseIosCaptureStore, setIosCaptureEnabled } from '@/lib/capture';
+import {
+  getRelayConfigStrict,
+  isLegacyShortcutCaptureActive,
+  isRelayPlatform,
+  unpairDevice,
+} from '@/lib/relay';
+import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import type { StorageFailure } from '@/lib/storage-diagnostics';
 import { useStore, type StorageRecoveryState } from '@/lib/store';
 import NotificationReader from '../../modules/notification-reader';
@@ -85,11 +92,16 @@ export function StorageRecovery({
     setErasing(true);
     setEraseFailed(false);
     try {
+      if (Platform.OS === 'ios') await setIosCaptureEnabled(false);
       const relay = isRelayPlatform() ? await getRelayConfigStrict() : null;
+      const hadLegacyShortcut = isLegacyShortcutCaptureActive(relay);
       if (relay) await unpairDevice(relay);
       const notificationReader = NotificationReader;
       const cleanupCaptureQueue = isRelayPlatform()
-        ? clearBackgroundRelayRows
+        ? async () => {
+            await eraseIosCaptureStore();
+            await clearBackgroundRelayRows();
+          }
         : Platform.OS === 'android'
           ? async () => {
               if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
@@ -102,6 +114,13 @@ export function StorageRecovery({
           : undefined;
       await clearAll(cleanupCaptureQueue);
       committed();
+      if (shortcutCleanupApplies(hadLegacyShortcut)) {
+        // The destructive confirmation already explains this handoff. clearAll
+        // replaces the failed store and can unmount this screen immediately,
+        // so open Apple's only cleanup surface before that transition can hide
+        // a second in-app control.
+        openShortcutsApp();
+      }
     } catch {
       // `clearAll` throws when the erase or the blank-store write failed. The
       // reason is already recorded to logcat and to the diagnostics file; what

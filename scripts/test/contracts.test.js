@@ -493,9 +493,24 @@ function ktSources(dir) {
   // the store" as "has not paid" locks a paying customer out of their own
   // ledger the first time they open the app on a plane.
   ok('a null entitlement leaves the cached flag alone',
-    /snapshot\) apply\(snapshot\)/.test(layout));
+    /generation === refreshGeneration && snapshot\) void apply\(snapshot, allowEqual\)/
+      .test(layout));
   ok('refreshEntitlement can return null',
     /Promise<EntitlementSnapshot \| null>/.test(sdk));
+  ok('billing snapshots carry the exact RevenueCat expiration into native capture',
+    /expirationDateMs: number \| null/.test(sdk) &&
+      /entitlement\.expirationDateMillis/.test(sdk) &&
+      /setIosStoreCaptureEntitlementLease/.test(sdk) &&
+      /syncStoreCaptureEntitlement/.test(layout));
+  ok('active-to-active renewals update native capture before the cached Pro shortcut',
+    /await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?snapshot\.active === currentPro\.current/
+      .test(layout));
+  ok('offline unknown never writes a storefront capture lease',
+    /generation === refreshGeneration && snapshot/.test(layout) &&
+      !/refreshEntitlement\(\)[\s\S]{0,180}else[\s\S]{0,120}syncStoreCaptureEntitlement/.test(layout));
+  ok('purchase and restore mirror their exact CustomerInfo before reporting completion',
+    /purchasePackage\(selectedPackage\)[\s\S]*?await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?return 'granted'/.test(sdk) &&
+      /restorePurchases\(\)[\s\S]*?await syncStoreCaptureEntitlement\(snapshot\)[\s\S]*?return snapshot\.active/.test(sdk));
 
   // A secret key in the client is a real incident. RevenueCat's platform
   // public SDK keys may be committed because native builds need them baked
@@ -613,10 +628,12 @@ function ktSources(dir) {
   ok('enabling Private Mode disconnects an existing iOS relay first',
     settings.indexOf('await unpairDevice(relay)') <
       settings.indexOf('setPrivateMode(true)'));
-  ok('privacy copy names both platform paths and raw-body retention',
-    /Android alerts are parsed on-device/.test(copy) &&
-      /Shortcut sends selected bank alerts/.test(copy) &&
-      /deletes the raw text immediately/.test(copy));
+  ok('privacy copy names both local platform paths and protected retention',
+    /Android SMS alerts are processed on this phone/.test(copy) &&
+      /local iPhone capture never uploads SMS content/.test(copy) &&
+      /protected local capture queue/.test(copy) &&
+      /short-lived encrypted queue/.test(copy) &&
+      /Private Mode keeps local capture working/.test(copy));
 }
 
 /* ── relay acknowledgement follows encrypted durability ─────────────── */
@@ -688,11 +705,10 @@ function ktSources(dir) {
       /row\.captureSource !== 'shortcut'/.test(relay) &&
       /candidate\.sourceDeviceId/.test(relay) &&
       /AUTOMATION_GENERATION_RE\.test\(candidate\.generation\)/.test(relay));
-  ok('a synthetic relay probe cannot make Home claim automation is active',
+  ok('a synthetic relay probe cannot make Home claim local automation is ready',
     /AUTOMATION_PROOF_KEY/.test(relay) &&
-      /getRelayAutomationProof\(cfg\?\.deviceId \?\? null\)/.test(home) &&
-      /isRelayAutomationProofCurrent\(cfg, automationProof\)/.test(home) &&
-      /\? 'active'[\s\S]*\? 'pipe-ready'/.test(home));
+      !/getRelayAutomationProof|isRelayAutomationProofCurrent/.test(home) &&
+      /setupProofVersion/.test(home) && /firstCapturedAt/.test(home));
   ok('locked background credentials use the sync-only bearer',
     /BackgroundRelayConfig = Pick<[\s\S]*'syncToken'[\s\S]*>;/.test(read('src/lib/relay.ts')) &&
       !/BackgroundRelayConfig = Pick<[\s\S]*'adminToken'[\s\S]*>;/.test(read('src/lib/relay.ts')));
@@ -737,12 +753,12 @@ function ktSources(dir) {
     /revokedAt\(cfg\) !== null && !includeRevoked/.test(relay) &&
       /return decodeStoredRelayConfig\(raw\);/.test(relay) &&
       /if \(revokedAt\(cfg\) !== null\) return null;/.test(relay));
-  ok('the capture surface has a state for it, ahead of the automation proof',
-    /\| 'revoked'/.test(hook) &&
-      /revokedAt\s*\?\s*'revoked'/.test(hook) &&
-      hook.indexOf("? 'revoked'") < hook.indexOf("? 'active'"));
-  ok('and Home renders that state instead of falling through to "off"',
-    /status === 'revoked'/.test(home) && /captureIosRevoked/.test(home));
+  ok('relay revocation cannot replace truthful local capture state',
+    !/\| 'revoked'|revokedAt\s*\?\s*'revoked'/.test(hook) &&
+      /getCaptureStatus/.test(hook) && /setupProofVersion/.test(hook));
+  ok('and Home never turns a healthy local queue off because the relay was revoked',
+    !/status === 'revoked'|captureIosRevoked/.test(code(home)) &&
+      /first-alert-captured/.test(home));
   // A revocation discovered by the scan itself is the same outcome one tick
   // later, and it must not surface as an exception on an interactive refresh.
   // Every other sync failure still has to propagate: swallowing an offline
@@ -837,12 +853,13 @@ function ktSources(dir) {
   const shortcutSpec = read('docs/ios-shortcut-spec.md');
   const releaseCheck = read('scripts/lib/release-readiness.mjs');
   const testflight = read('.github/workflows/ios-testflight.yml');
-  const actionAt = setup.indexOf("t('iosAutomationAction')");
-  const inputAt = setup.indexOf("t('iosAutomationInput')");
 
-  ok('iOS setup explicitly passes the received Message object after choosing Wafra Capture',
-    actionAt !== -1 && inputAt > actionAt &&
-      /Input: Received Message \(not only Content\)/.test(copy));
+  ok('iOS setup shows the exact local Shortcut action before the complete Received Message input',
+    setup.indexOf("'iosLocalChoiceRunShortcut'") !== -1 &&
+      setup.indexOf("'iosLocalChoiceCompleteMessage'") >
+        setup.indexOf("'iosLocalChoiceRunShortcut'") &&
+      /Run Shortcut → Wafra Local Capture/.test(copy) &&
+      /Input → complete Received Message/.test(copy));
   ok('the installed Shortcut copy keeps its plain-text manual test compatible',
     /Accept \*\*Messages\*\* and \*\*Text\*\*/.test(shortcutSpec) &&
       /manual setup test/.test(shortcutSpec));
@@ -850,24 +867,27 @@ function ktSources(dir) {
     /discards raw Message Content after parsing/.test(copy) &&
       /when the Shortcut supplies it, the bank Sender label/.test(copy) &&
       /used to identify its card or account/.test(copy));
-  ok('technical sender limits appear after success instead of blocking setup comprehension',
-    setup.indexOf('(captured || captureOn)') < setup.indexOf("t('iosTestLimit')") &&
-      /first supported bank alert is the final check/.test(copy) &&
-      /correct bank or card/.test(copy));
-  ok('returning to setup refreshes proof without falsely confirming installation',
+  ok('local setup has no relay proof, test-limit, or captured-merchant state',
+    !/(?:captured \|\| captureOn|iosTestLimit|refresh-proof|relay)/.test(
+      `${setup}\n${setupWorkflow}`) &&
+      /firstCapturedAt !== null/.test(setupWorkflow) &&
+      /setupProofVersion === 1/.test(setupWorkflow));
+  ok('callbacks and foreground returns refresh native status without forging proof',
     /AppState\.addEventListener\('change'/.test(setup) &&
-      /next === 'active'[\s\S]{0,160}send\(\{ type: 'refresh-proof' \}\)/.test(setup) &&
-      /I added Wafra Capture/.test(copy));
-  ok('clearing the copied setup credential does not trigger an iOS paste read prompt',
-    /sensitiveCopyPending/.test(setupWorkflow) &&
-      /writeClipboard\(''\)/.test(setupWorkflow) &&
-      !/Clipboard\.getStringAsync/.test(setupWorkflow));
+      /next === 'active'[\s\S]{0,160}send\(\{ type: 'refresh-status' \}\)/.test(setup) &&
+      /case 'shortcut-callback':\s*await refreshStatus\(false\);\s*return;/.test(
+        setupWorkflow) &&
+      !/case 'shortcut-callback':[\s\S]{0,180}setCaptureEnabled/.test(setupWorkflow));
+  ok('local setup exposes no clipboard, setup-code, token, or credential clearing path',
+    !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
+      `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
-    /الإدخال: «الرسالة المستلمة»/.test(copy) &&
-      /أضفت «Wafra Capture»/.test(copy) &&
+    /الإدخال ← «الرسالة المستلمة» كاملة/.test(copy) &&
+      /أضفت الأتمتة/.test(copy) &&
       /محتوى الرسالة الخام/.test(copy) &&
       /اسم مرسل البنك/.test(copy));
-  ok('the next production build rejects the exact broken public Shortcut snapshot',
+  ok('the next production build rejects every exact retired Capture Shortcut snapshot',
+    /03d2ab22a33f4fef9d503142575a70fb/.test(releaseCheck) &&
     /85bd1e080e5849b591049eccffb9a3a1/.test(releaseCheck) &&
       /broken-capture-shortcut/.test(releaseCheck) &&
       /scripts\/check-release-config\.mjs/.test(testflight));
@@ -908,9 +928,11 @@ function ktSources(dir) {
   // joins one instead of starting its own used to inherit that silent
   // outcome and go unanswered. It must run its own follow-up once the shared
   // scan settles, without re-entering as a second concurrent scan.
-  ok('an interactive request joining a silent scan still gets its own follow-up',
+  ok('an interactive join preserves feedback without duplicating an iOS drain',
     /if \(!interactive \|\| existing\.interactive\) return existing\.promise\.then\(\(\) => undefined\);/.test(home) &&
-      /outcome === 'imported' \? undefined : startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home));
+      /shouldReplayJoinedAutoImport/.test(home) &&
+      /return startAutoImport\(true\)\.then\(\(\) => undefined\)/.test(home) &&
+      /Platform\.OS === 'ios' && outcome === 'up-to-date'[\s\S]*upToDateNoNew/.test(home));
 }
 
 /* ── every tab that shows captured money can go and refresh it ──────── */
@@ -999,11 +1021,12 @@ function ktSources(dir) {
   ok('a zero watermark reads the whole inbox, not just what is new',
     /state\.lastScanTs <= 0 \? 0 : state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
   ok('the foreground watch re-runs when the ledger is wiped',
-    /if \(!state\.hydrated \|\| !state\.onboarded\) return;/.test(hook) &&
+    /if \(!state\.hydrated\) return;/.test(hook) &&
+      /Platform\.OS !== 'ios' && !state\.onboarded/.test(hook) &&
       /state\.lastScanTs <= 0 \|\| captureJustEnabled/.test(hook));
   ok('the rebuild scan is not refused by the freshness throttle',
     /const scan = \(force = false\) => \{/.test(hook) &&
-      /if \(!force && Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS\) return;/.test(hook) &&
+      /Platform\.OS !== 'ios'[\s\S]*Date\.now\(\) - lastScanAt < RESCAN_AFTER_MS/.test(hook) &&
       /if \(!state\.captureOptOut\) scan\(state\.lastScanTs <= 0 \|\| captureJustEnabled\);/.test(hook));
   // Silent, not interactive. An interactive scan on an iPhone whose relay the
   // erase just unpaired pushes /ios-setup — a setup wizard thrown at a user
@@ -1028,7 +1051,7 @@ function ktSources(dir) {
   ok('the staged relay inbox is a different database from the ledger',
     !!nameOf(staged) && nameOf(staged) !== nameOf(ledger));
   ok('erasing empties the staged relay inbox too',
-    /\? clearBackgroundRelayRows/.test(settings) &&
+    /await clearBackgroundRelayRows\(\)/.test(settings) &&
       /SmsReader\.clearCaptured\(\)/.test(settings) &&
       /notificationReader\.clearCaptured\(\)/.test(settings) &&
       /await clearAll\(cleanupCaptureQueue\)/.test(settings));
@@ -1056,6 +1079,266 @@ function ktSources(dir) {
       /notificationReader\.clearCaptured\(\)/.test(recovery) &&
       store.indexOf('await afterErase()') <
         store.lastIndexOf("dispatch({ type: 'hydrate', state: persistedBlank })"));
+}
+
+/* ── iOS live capture is local-first and source-free ─────────────────── */
+{
+  const hook = code(read('src/hooks/use-auto-import.ts'));
+  const capture = code(read('src/lib/capture.ts'));
+  const types = read('src/lib/types.ts');
+  const store = code(read('src/lib/store.tsx'));
+  const home = read('src/screens/ledger-home-screen.tsx');
+  const settingsSource = read('src/app/settings.tsx');
+  const settings = code(settingsSource);
+  const recovery = code(read('src/components/storage-recovery.tsx'));
+  const layout = code(read('src/components/app-root-layout.tsx'));
+  const copy = read('src/lib/i18n.ts');
+
+  ok('the hook shares the local coordinator from the authoritative ledger adapter',
+    /getSharedIosLocalCaptureCoordinator\(/.test(hook) &&
+      /const captureLedger = useMemo/.test(hook) &&
+      /getState:\s*getStateSnapshot/.test(hook) &&
+      /getStateGeneration/.test(hook) &&
+      !/getState:\s*\(\)\s*=>\s*stateRef\.current/.test(hook));
+  ok('iOS lifecycle work is hydration-gated and every active event reaches the current scan',
+    /if \(!state\.hydrated\) return;/.test(hook) &&
+      /next === 'active'/.test(hook) &&
+      /latestScan\.current\(false\)/.test(hook));
+  ok('iOS local capture bypasses only the Android freshness throttle',
+    /Platform\.OS !== 'ios'[\s\S]*RESCAN_AFTER_MS/.test(hook));
+  ok('iOS relay collection is supplemental and only selected with a config outside Private Mode',
+    /iosRelayIntentFor/.test(hook) &&
+      /captureExecutor\.execute\(relayIntent\)/.test(hook) &&
+      !/Platform\.OS === 'ios'[\s\S]{0,500}execute\('routine'\)/.test(hook));
+  ok('status and foreground retirement retries stay behind the local coordinator',
+    /coordinator\.retryRetirementIfNeeded\(\)/.test(hook) &&
+      /const retireLegacyShortcutCapture[\s\S]*await retireRelayShortcutCapture\(cfg\)/.test(hook) &&
+      /retireShortcutCapture:\s*retireLegacyShortcutCapture/.test(hook) &&
+      !/export function useAutoImport[\s\S]*await retireRelayShortcutCapture\(/.test(hook));
+  ok('source-free status refresh is published and observed without message attributes',
+    /publishStatusRefresh\('(warning|drain)'\)/.test(hook) &&
+      /subscribeIosCaptureStatusRefresh/.test(hook) &&
+      /new Set<\(\) => void>/.test(capture));
+
+  ok('the native capability query is optional, iOS-16 gated, and never statically imports the module',
+    /requireOptionalNativeModule/.test(capture) &&
+      /Platform\.OS !== 'ios'/.test(capture) &&
+      /Platform\.Version/.test(capture) &&
+      !/from ['"].*wafra-live-capture['"]/.test(
+        capture.replace(/import type[^;]+;/g, ''),
+      ));
+
+  ok('the source-free warning state is exact and persisted on AppState',
+    /export interface IosCaptureWarningState\s*\{[\s\S]*dropped: number;[\s\S]*corrupt: boolean;[\s\S]*recordedAt: number;[\s\S]*nativeWarningId: string \| null;[\s\S]*\}/
+      .test(types) &&
+      /iosCaptureWarning: IosCaptureWarningState \| null/.test(types) &&
+      /recordIosCaptureWarning/.test(store) && /clearIosCaptureWarning/.test(store));
+  const warningRecord = store.match(
+    /const recordIosCaptureWarning[\s\S]*?\n\s*\}, \[dispatch, persist\]\);/,
+  )?.[0] || '';
+  ok('only targeted recovery acknowledges the exact warning after encrypted durability',
+    /await warningReceipt\.durable/.test(hook) &&
+      /await persistWarning\(status\)[\s\S]*?acknowledgeCaptureWarning\(status\.warningId\)/.test(hook) &&
+      !/runIosLocalCaptureCycle[\s\S]*?acknowledgeCaptureWarning/.test(
+        hook.slice(hook.indexOf('runIosLocalCaptureCycle'), hook.indexOf('interface IosCaptureRecoveryDependencies')),
+      ) &&
+      /persist\(next\)/.test(warningRecord) &&
+      /clearIosCaptureWarning[\s\S]*?persist\(next\)/.test(store));
+  const optOut = store.match(
+    /const setCaptureOptOut[\s\S]*?\n\s*\}, \[[^\]]*\]\);/,
+  )?.[0] || '';
+  ok('opting out disables native admission before dispatch or persistence',
+    /if \(enabled\)[\s\S]*await setIosCaptureEnabled\(false\)/.test(optOut) &&
+      optOut.indexOf('await setIosCaptureEnabled(false)') < optOut.indexOf("dispatch({ type: 'setCaptureOptOut'") &&
+      optOut.indexOf('await setIosCaptureEnabled(false)') < optOut.indexOf('persist(next)'));
+  ok('clearing opt-out never enables native admission implicitly',
+    !/setIosCaptureEnabled\(true\)/.test(optOut));
+  const clearAllReducer = store.match(
+    /case 'clearAll':[\s\S]*?case 'blockPersistence':/,
+  )?.[0] || '';
+  const loadDemo = store.match(
+    /const loadDemoData = useCallback\(\(\) => \{[\s\S]*?\n\s*\}, \[dispatch\]\);/,
+  )?.[0] || '';
+  ok('ledger erase preserves the original entitlement and trial clock',
+    /pro: state\.pro/.test(clearAllReducer) &&
+      /founderPro: state\.founderPro/.test(clearAllReducer) &&
+      /trialStartTs: state\.trialStartTs/.test(clearAllReducer));
+  ok('demo loading cannot restart the trial or discard cached access',
+    /pro: authoritativeState\.current\.pro/.test(loadDemo) &&
+      /founderPro: authoritativeState\.current\.founderPro/.test(loadDemo) &&
+      /trialStartTs: authoritativeState\.current\.trialStartTs/.test(loadDemo));
+
+  const settingsEraseStart = settingsSource.indexOf('const eraseAllData = async () => {');
+  const settingsErase = settingsSource.slice(
+    settingsEraseStart,
+    settingsSource.indexOf('const confirmErase', settingsEraseStart),
+  );
+  ok('Settings erase disables admission before clearAll and retries native erase inside cleanup',
+    settingsErase.indexOf('await setIosCaptureEnabled(false)') <
+      settingsErase.indexOf('await clearAll(cleanupCaptureQueue)') &&
+      /eraseIosCaptureStore/.test(settingsErase) &&
+      settingsErase.indexOf('eraseIosCaptureStore') <
+        settingsErase.indexOf('await clearAll(cleanupCaptureQueue)'));
+  ok('storage recovery applies the same native disable and retryable erase ordering',
+    recovery.indexOf('await setIosCaptureEnabled(false)') <
+      recovery.indexOf('await clearAll(cleanupCaptureQueue)') &&
+      /eraseIosCaptureStore/.test(recovery) &&
+      recovery.indexOf('eraseIosCaptureStore') <
+        recovery.indexOf('await clearAll(cleanupCaptureQueue)'));
+  const captureErase = capture.match(
+    /export const eraseIosCaptureStore[\s\S]*?\n\};/,
+  )?.[0] || '';
+  ok('native erase deterministically requests local and store entitlement reseeding',
+    /await native\.eraseAll\(\)[\s\S]*publishIosCaptureEntitlementReset\(\)/.test(captureErase) &&
+      /subscribeIosCaptureEntitlementReset\(syncLocalCaptureLease\)/.test(layout) &&
+      /subscribeIosCaptureEntitlementReset\(\(\) => \{[\s\S]*apply\(latestSnapshot, true\)/
+        .test(layout));
+  ok('erase can replay the same verified store snapshot while ordinary duplicates stay deduped',
+    /const apply = async \(snapshot: EntitlementSnapshot, allowEqual = false\)/.test(layout) &&
+      /!allowEqual && snapshot\.requestDateMs === latestRequestDateMs/.test(layout) &&
+      /apply\(latestSnapshot, true\)/.test(layout));
+  ok('storage recovery offers conditional legacy Shortcut cleanup after a successful erase',
+    /const hadLegacyShortcut = isLegacyShortcutCaptureActive\(relay\)/.test(recovery) &&
+      /await clearAll\(cleanupCaptureQueue\)[\s\S]*?shortcutCleanupApplies\(hadLegacyShortcut\)[\s\S]*?openShortcutsApp\(\)/.test(recovery) &&
+      /If this iPhone previously configured the old “Wafra Capture” automation/.test(copy));
+  ok('generic relay pairing never claims that an old Shortcut definitely exists',
+    /If you previously installed the old “Wafra Capture” automation/.test(copy) &&
+      /If that device is an iPhone and its owner previously installed/.test(copy) &&
+      !/The Wafra Capture Shortcut is still installed/.test(copy));
+
+  for (const [key, english] of [
+    ['captureIosNeedsAutomation', 'Finish the one-time Message automation'],
+    ['captureIosWaitingForAlert', 'Ready — waiting for the first bank alert'],
+    ['captureIosFirstAlertCaptured', 'First bank alert captured locally'],
+    ['captureIosQueueWarning', 'Capture needs attention; open recovery'],
+    ['captureIosMigrationRetry', 'Local capture works; finish retiring the old Shortcut upload'],
+  ]) {
+    ok(`${key} has exact English and genuine Arabic copy`,
+      new RegExp(`${key}: \\{[\\s\\S]*?en: '${english.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'[\\s\\S]*?ar: '[^']*[\\u0600-\\u06ff][^']*'`)
+        .test(copy));
+  }
+  ok('Home renders every closed local status instead of relay proof states',
+    /needs-automation/.test(home) && /waiting-for-alert/.test(home) &&
+      /first-alert-captured/.test(home) && /queue-warning/.test(home) &&
+      /migration-retry/.test(home) && !/pipe-ready|needs-test|revoked/.test(code(home)));
+  const queueWarningDetail = copy.match(
+    /captureIosQueueWarningDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueCounts:/,
+  )?.[0] || '';
+  ok('Home queue warning distinguishes source-free warning counts from protected pending source records',
+    /status === 'queue-warning'[\s\S]*?t\('captureIosQueueWarningDetail'\)/.test(home) &&
+      /status shows only source-free counts/.test(queueWarningDetail) &&
+      /pending records may keep Message text and sender/.test(queueWarningDetail) &&
+      /protected and encrypted on this iPhone/.test(queueWarningDetail) &&
+      /expire after 30 days/.test(queueWarningDetail) &&
+      /removed the next time capture runs or Wafra checks the queue/.test(queueWarningDetail) &&
+      /نص الرسالة/.test(queueWarningDetail) && /اسم المرسل/.test(queueWarningDetail) &&
+      /(?:30|٣٠)[^\n]*يوماً/.test(queueWarningDetail));
+  const localPrivacyDetail = copy.match(
+    /captureIosLocalPrivacy:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosQueueWarningDetail:/,
+  )?.[0] || '';
+  ok('Home waiting state qualifies local no-upload truth against the old uploading automation',
+    /active[\s\S]*?Platform\.OS === 'ios' \? t\('captureIosLocalPrivacy'\)/.test(home) &&
+      /new bank-alert capture path/.test(localPrivacyDetail) &&
+      /does not upload/.test(localPrivacyDetail) &&
+      /old Wafra Capture automation may still upload/.test(localPrivacyDetail) &&
+      /until removed or retired/.test(localPrivacyDetail) &&
+      /مسار التقاط التنبيهات المصرفية الجديد/.test(localPrivacyDetail) &&
+      /Wafra Capture/.test(localPrivacyDetail) &&
+      /تستمر[^\n]*في الرفع/.test(localPrivacyDetail));
+  const migrationRetryDetail = copy.match(
+    /captureIosMigrationRetryDetail:\s*\{[\s\S]*?\n\s*\},\n\s*captureIosNeedsTest:/,
+  )?.[0] || '';
+  ok('Home migration warning distinguishes the local new path from the uploading old automation',
+    /status === 'migration-retry'[\s\S]*?t\('captureIosMigrationRetryDetail'\)/.test(home) &&
+      /new capture path stays local/.test(migrationRetryDetail) &&
+      /old Shortcut automation may keep uploading/.test(migrationRetryDetail) &&
+      /until cleanup succeeds or you remove it/.test(migrationRetryDetail) &&
+      /مسار الالتقاط الجديد/.test(migrationRetryDetail) &&
+      /أتمتة الاختصار القديمة/.test(migrationRetryDetail) &&
+      /تستمر في الرفع/.test(migrationRetryDetail));
+  ok('Settings capture truth is the same closed local status and Private Mode is not off',
+    /useAutoImport\(false, true\)/.test(settings) &&
+      /captureState/.test(settings) &&
+      !/state\.privateMode \|\| state\.captureOptOut/.test(settings));
+  const iosCapturePreference = settings.match(
+    /const setIosAutomaticCapture[\s\S]*?\n\s*};\n/,
+  )?.[0] || '';
+  ok('Settings exposes a race-safe iOS capture switch whose off path is durable',
+    /iosCapturePreferenceInFlight/.test(iosCapturePreference) &&
+      /if \(iosCapturePreferenceInFlight\.current\) return/.test(iosCapturePreference) &&
+      /if \(!enabled\)[\s\S]*?await setCaptureOptOut\(true\)/.test(iosCapturePreference) &&
+      /await setCaptureOptOut\(false\)[\s\S]*?router\.push\('\/ios-setup'\)/.test(iosCapturePreference) &&
+      /Platform\.OS === 'ios'[\s\S]*?iosCaptureSwitchRow\([\s\S]*?setIosAutomaticCapture/.test(settings));
+  ok('Settings recovery is explicit, compare-and-clear, and independent of the Pro import gate',
+    /confirmIosCaptureRecovery/.test(settings) &&
+      /recoverIosCaptureQueue\(\)/.test(settings) &&
+      /captureIosRecoveryAction/.test(settings) &&
+      /const recoverIosCaptureQueue[\s\S]*?coordinator\.drain\(\)[\s\S]*?acknowledgeCaptureWarning\(status\.warningId\)[\s\S]*?clearWarning\(status\.warningId\)/.test(hook) &&
+      !/captureState === 'queue-warning'[\s\S]{0,220}runAutoImport/.test(settings));
+  ok('legacy iPhone charge alerts are gated for fresh and post-retirement local capture',
+    /isLegacyShortcutCaptureActive\(relay\)/.test(settings) &&
+      /const retireLegacyShortcutCapture[\s\S]*?if \(!cfg \|\| !isLegacyShortcutCaptureActive\(cfg\)\)[\s\S]*?await setChargeAlertsEnabled\(false\)[\s\S]*?await retireRelayShortcutCapture\(cfg\)[\s\S]*?await setChargeAlertsEnabled\(false\)/.test(hook) &&
+      /retirementPending:[\s\S]*?isLegacyShortcutCaptureActive\(cfg\)/.test(hook));
+
+  const privacyRetention = copy.match(
+    /privacyRetentionExact:\s*\{[\s\S]*?\n\s*\},\n\s*privacySecurityExact:/,
+  )?.[0] || '';
+  const privacySecurity = copy.match(
+    /privacySecurityExact:\s*\{[\s\S]*?\n\s*\},\n\s*country:/,
+  )?.[0] || '';
+  ok('privacy copy separates source-free UI counts from encrypted pending Message records',
+    /capture status and warning/.test(privacyRetention) &&
+      /source-free counts/.test(privacyRetention) &&
+      /do not keep Message text or sender/.test(privacyRetention) &&
+      /Pending Message records/.test(privacyRetention) &&
+      /protected local capture queue/.test(privacyRetention) &&
+      /short-lived encrypted queue/.test(privacyRetention));
+  ok('privacy copy states exact opportunistic 30-day expiry and removal',
+    /expire after 30 days/.test(privacyRetention) &&
+      /removed the next time capture runs or Wafra checks the queue/.test(privacyRetention) &&
+      /(?:30|٣٠)[^\n]*يوماً/.test(privacyRetention));
+  ok('privacy copy discloses that a legacy Shortcut can upload until removal or retirement',
+    /old Wafra Shortcut automation/.test(privacySecurity) &&
+      /continue uploading/.test(privacySecurity) &&
+      /remove it or Wafra confirms retirement/.test(privacySecurity) &&
+      /أتمتة[^\n]*الاختصار[^\n]*القديمة/.test(privacySecurity) &&
+      /رفع[^\n]*إلى أن/.test(privacySecurity));
+
+  const accuracyScreen = read('src/app/accuracy.tsx');
+  const settingsAccuracyRow = copy.match(
+    /formatsNotKeptRow:\s*\{[\s\S]*?\n\s*\},\n\s*formatsNotKeptRelay:/,
+  )?.[0] || '';
+  const iosAccuracyCopy = copy.match(
+    /formatsNotKeptIosLocal:\s*\{[\s\S]*?\n\s*\},\n\s*formatsNotKeptPrivate:/,
+  )?.[0] || '';
+  ok('Accuracy renders a local-capture-aware iOS source-retention state',
+    /localCaptureAvailable:\s*isCaptureAvailable\(\)/.test(accuracyScreen) &&
+      /localCaptureAvailable:\s*isCaptureAvailable\(\)/.test(settings) &&
+      /noFormats === 'ios-local'[\s\S]*?'formatsNotKeptIosLocal'/.test(accuracyScreen) &&
+      /processed Message text is not retained in the ledger/.test(settingsAccuracyRow) &&
+      /pending records expire after 30 days/.test(settingsAccuracyRow) &&
+      /removed on the next queue access/.test(settingsAccuracyRow) &&
+      /parses new bank alerts on this iPhone/.test(iosAccuracyCopy) &&
+      /Successfully processed raw text is deleted/.test(iosAccuracyCopy) &&
+      !/low-confidence text can remain/.test(iosAccuracyCopy) &&
+      /protected pending records expire after 30 days/.test(iosAccuracyCopy) &&
+      /removed on the next queue access/.test(iosAccuracyCopy) &&
+      /old Wafra Capture relay never included Message text/.test(iosAccuracyCopy) &&
+      /يعالج[^\n]*التنبيهات المصرفية الجديدة/.test(iosAccuracyCopy) &&
+      /٣٠ يوماً/.test(iosAccuracyCopy));
+
+  const purchases = read('src/lib/purchases.ts');
+  const proScreen = read('src/app/pro.tsx');
+  const proIosCopy = copy.match(
+    /featAutoTrackingIosText:\s*\{[^\n]*\}/,
+  )?.[0] || '';
+  ok('Pro models iPhone automation as local capture and does not promise every alert imports',
+    /'manual' \| 'inboxScan' \| 'localAutomation'/.test(purchases) &&
+      /Platform\.OS === 'ios'\) return 'localAutomation'/.test(purchases) &&
+      !/relayCapture/.test(purchases) && !/relayCapture/.test(proScreen) &&
+      /autoCaptureMethod\(\) === 'localAutomation'/.test(proScreen) &&
+      /Supported bank alerts passed by your personal automation are processed locally/.test(proIosCopy) &&
+      /تنبيهات البنوك المدعومة/.test(proIosCopy));
 }
 
 /* ── the budget editor answers the same question as the budget bar ──── */
@@ -1492,7 +1775,13 @@ ok('the spoken label agrees with the sign on screen',
  * subtraction was unbounded above, and the paywall offered "your first 3 days
  * — 8 days left". */
 {
-  const { trialDaysLeft, TRIAL_DAYS, isProActive } = require('./build/purchases');
+  const {
+    trialDaysLeft,
+    TRIAL_DAYS,
+    TRIAL_DURATION_MS,
+    isProActive,
+    localCaptureEntitlementLease,
+  } = require('./build/purchases');
   const DAY = 86400000;
   const now = Date.UTC(2026, 5, 1);
 
@@ -1511,6 +1800,20 @@ ok('the spoken label agrees with the sign on screen',
   ok('no clock reading produces a day count outside 0…TRIAL_DAYS',
     out.every((v) => Number.isInteger(v) && v >= 0 && v <= TRIAL_DAYS),
     out.filter((v) => v < 0 || v > TRIAL_DAYS).join(' | '));
+  ok('the native local-capture trial lease keeps the original absolute deadline',
+    JSON.stringify(localCaptureEntitlementLease({ trialStartTs: now, pro: false })) ===
+      JSON.stringify({ expiresAtMs: now + TRIAL_DURATION_MS, lifetime: false }));
+  ok('a cached purchased flag cannot mint a native lifetime lease',
+    JSON.stringify(localCaptureEntitlementLease({ trialStartTs: now, pro: true })) ===
+      JSON.stringify({ expiresAtMs: now + TRIAL_DURATION_MS, lifetime: false }));
+  ok('founder capture is the only local lifetime grant',
+    JSON.stringify(localCaptureEntitlementLease({
+      trialStartTs: now,
+      founderPro: true,
+      pro: false,
+    })) === JSON.stringify({ expiresAtMs: null, lifetime: true }));
+  ok('an invalid local trial timestamp creates no native entitlement',
+    localCaptureEntitlementLease({ trialStartTs: Number.NaN, pro: true }) === null);
 }
 
 /* ── a store that cannot be reached is not a customer who never paid ─── */

@@ -675,17 +675,67 @@ const DECLINE_SMS = [{
     s.parsed.length === 0 && s.declined.length === 1 && s.declined[0].smsTs === DECLINE_TS,
     s);
   const state = { ...BASE, transactions: [DECLINED_ROW] };
-  const plan = buildImportPlan(s.parsed, state, s.newestTs, new Date(2026, 7, 2), s.declined);
+  const localDeclines = [{
+    ...s.declined[0],
+    localRecordId: '10000000-0000-4000-8000-000000000001',
+  }];
+  const plan = buildImportPlan(
+    s.parsed, state, s.newestTs, new Date(2026, 7, 2), localDeclines,
+  );
   ok('a re-read removes the expense a decline alert had created',
     plan.batch.updates.filter((u) => u.remove).map((u) => u.id).join() === 'declined-1108',
     plan.batch.updates);
+  ok('the decline receipt counts only an admitted removal',
+    plan.declineReconciledCount === 1, plan);
+  ok('the decline receipt names the exact admitted local record',
+    JSON.stringify(plan.declineReconciledIds) ===
+      JSON.stringify(['10000000-0000-4000-8000-000000000001']), plan);
+  ok('the decline receipt attests the exact removed transaction identity',
+    JSON.stringify(plan.declineReconciliations) === JSON.stringify([{
+      localRecordId: '10000000-0000-4000-8000-000000000001',
+      removedTransactionId: 'declined-1108',
+    }]), plan);
   ok('...and imports nothing in its place', plan.txCount === 0, plan.batch.transactions);
 
   // Once it is gone there is nothing to find, so a later scan is a no-op.
   const healed = { ...state, transactions: [] };
-  ok('the sweep is idempotent',
-    buildImportPlan(s.parsed, healed, s.newestTs, new Date(2026, 7, 2), s.declined)
-      .batch.updates.length === 0);
+  const repeated = buildImportPlan(
+    s.parsed, healed, s.newestTs, new Date(2026, 7, 2), localDeclines,
+  );
+  ok('the sweep is idempotent', repeated.batch.updates.length === 0);
+  ok('a no-op decline does not claim a reconciliation milestone',
+    repeated.declineReconciledCount === 0, repeated);
+  ok('a no-op decline returns no local qualification identity',
+    Array.isArray(repeated.declineReconciledIds) && repeated.declineReconciledIds.length === 0,
+    repeated);
+  ok('a no-op decline returns no removal attestation',
+    Array.isArray(repeated.declineReconciliations) &&
+      repeated.declineReconciliations.length === 0, repeated);
+}
+
+{
+  const earlierNoOp = {
+    smsTs: DECLINE_TS - 1_000,
+    reason: 'declined',
+    localRecordId: '10000000-0000-4000-8000-000000000002',
+  };
+  const laterReconciled = {
+    smsTs: DECLINE_TS,
+    reason: 'declined',
+    localRecordId: '10000000-0000-4000-8000-000000000003',
+  };
+  const plan = buildImportPlan(
+    [], { ...BASE, transactions: [DECLINED_ROW] }, DECLINE_TS,
+    new Date(2026, 7, 2), [earlierNoOp, laterReconciled],
+  );
+  ok('an earlier no-op decline cannot become the exact qualification receipt',
+    JSON.stringify(plan.declineReconciledIds) ===
+      JSON.stringify(['10000000-0000-4000-8000-000000000003']), plan);
+  ok('the planner maps only the later admitted decline to the removed row',
+    JSON.stringify(plan.declineReconciliations) === JSON.stringify([{
+      localRecordId: '10000000-0000-4000-8000-000000000003',
+      removedTransactionId: 'declined-1108',
+    }]), plan);
 }
 
 /* Callers that cannot supply declines get the old behaviour, not a guess.

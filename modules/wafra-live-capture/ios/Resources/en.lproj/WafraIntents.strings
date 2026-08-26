@@ -1,0 +1,8 @@
+"live.setup_proof.title" = "Record Wafra capture setup proof";
+"live.setup_proof.error" = "Wafra could not record the setup proof.";
+"live.stage.title" = "Stage Wafra live message";
+"live.stage.sender.parameter" = "Sender";
+"live.stage.message.parameter" = "Message";
+"live.stage.event_id.parameter" = "Event ID";
+"live.stage.observed_at.parameter" = "Observed at";
+"live.stage.error" = "Wafra could not stage this message.";

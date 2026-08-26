@@ -3097,15 +3097,15 @@ ok('stale: a stale statement that gets paid leaves openDues',
   // feedback nobody ever receives. Private mode does the same on Android by
   // stripping raw on write.
   ok('accuracy: with retention on, an empty list is a real finding',
-    accuracy.noFormatsReason({ relayPlatform: false, privateMode: false }) === 'none-found');
-  ok('accuracy: the relay platform cannot know, and says so',
-    accuracy.noFormatsReason({ relayPlatform: true, privateMode: false }) === 'relay');
+    accuracy.noFormatsReason({ relayPlatform: false, localCaptureAvailable: false, privateMode: false }) === 'none-found');
+  ok('accuracy: a legacy-only relay platform cannot know, and says so',
+    accuracy.noFormatsReason({ relayPlatform: true, localCaptureAvailable: false, privateMode: false }) === 'relay');
+  ok('accuracy: current iOS local capture is not mislabeled as relay-only',
+    accuracy.noFormatsReason({ relayPlatform: true, localCaptureAvailable: true, privateMode: false }) === 'ios-local');
   ok('accuracy: private mode cannot know either',
-    accuracy.noFormatsReason({ relayPlatform: false, privateMode: true }) === 'private');
-  // Turning private mode off on an iPhone does not bring the text back, so
-  // blaming private mode there points the user at a switch that cannot fix it.
-  ok('accuracy: on iOS the platform is named, not the private-mode switch',
-    accuracy.noFormatsReason({ relayPlatform: true, privateMode: true }) === 'relay');
+    accuracy.noFormatsReason({ relayPlatform: false, localCaptureAvailable: false, privateMode: true }) === 'private');
+  ok('accuracy: Private Mode truth wins on local-capture iOS',
+    accuracy.noFormatsReason({ relayPlatform: true, localCaptureAvailable: true, privateMode: true }) === 'private');
 }
 
 // ── the ledger measures its own parser ──

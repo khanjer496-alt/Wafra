@@ -271,6 +271,31 @@ ok(
   );
 }
 ok(
+  'iOS onboarding teaches Any Sender with local filtering instead of bank-conversation selection',
+  /Platform\.OS === 'ios' \? 'onboardAutomaticChoiceIosBody'/.test(gateSource) &&
+    /Any Sender/.test(i18n.t('onboardAutomaticChoiceIosBody', 'en')) &&
+    /filters supported bank alerts locally on this iPhone/.test(i18n.t('onboardAutomaticChoiceIosBody', 'en')) &&
+    /أي مرسل/.test(i18n.t('onboardAutomaticChoiceIosBody', 'ar')) &&
+    /محلياً/.test(i18n.t('onboardAutomaticChoiceIosBody', 'ar')) &&
+    !/bank conversations|محادثات البنوك/.test(
+      `${i18n.t('onboardAutomaticChoiceIosBody', 'en')} ${i18n.t('onboardAutomaticChoiceIosBody', 'ar')}`,
+    ),
+);
+ok(
+  'rendered iOS onboarding privacy copy discloses local processing, bounded pending records, and legacy upload',
+  /Platform\.OS === 'ios'[\s\S]*?'onboardCapturePrivacyIos'/.test(gateSource) &&
+    /does not give Wafra access to your Messages inbox/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
+    /filters supported bank alerts locally/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
+    /does not upload their text/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
+    /expire after 30 days/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
+    /removed the next time capture runs or Wafra checks the queue/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
+    /old Wafra Capture automation may still upload/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
+    /صندوق الرسائل/.test(i18n.t('onboardCapturePrivacyIos', 'ar')) &&
+    /محلياً/.test(i18n.t('onboardCapturePrivacyIos', 'ar')) &&
+    /٣٠ يوماً/.test(i18n.t('onboardCapturePrivacyIos', 'ar')) &&
+    /Wafra Capture/.test(i18n.t('onboardCapturePrivacyIos', 'ar')),
+);
+ok(
   'onboarding uses real scan and import results rather than fake personalization delays',
   /progress\.scanned/.test(gateSource) &&
     /progress\.found/.test(gateSource) &&
@@ -320,6 +345,31 @@ ok(
   'iOS Shortcut setup returns to the personalized completion',
   gateSource.includes('/ios-setup?fromOnboarding=1') &&
     iosSource.includes("router.replace('/?onboarding=complete')"),
+);
+const manualExitAt = iosSource.indexOf('const continueManually = useCallback');
+const manualDisableAt = iosSource.indexOf(
+  "await send({ type: 'manual-only' })",
+  manualExitAt,
+);
+const manualOptOutAt = iosSource.indexOf(
+  'await setCaptureOptOut(true)',
+  manualDisableAt,
+);
+const manualRouteAt = iosSource.indexOf(
+  "router.replace('/?onboarding=complete')",
+  manualOptOutAt,
+);
+ok(
+  'iOS setup manual-only completion disables local admission before navigation',
+  manualExitAt !== -1 &&
+    manualDisableAt > manualExitAt &&
+    manualOptOutAt > manualDisableAt &&
+    manualRouteAt > manualOptOutAt,
+);
+ok(
+  'iOS setup history import remains reachable without becoming an opt-out',
+  /const importPastAlerts = useCallback\(\(\) => \{[\s\S]{0,180}router\.push\('\/import-sms'\);[\s\S]{0,180}\},/.test(iosSource) &&
+    !/const importPastAlerts[\s\S]{0,360}(?:manual-only|setCaptureOptOut)/.test(iosSource),
 );
 ok(
   'first run cannot silently pin a worldwide user to the AED sample ledger',
@@ -455,21 +505,20 @@ eq('balance-coverage copy resolves every placeholder',
       /<SupplementImports \/>/.test(importSource));
 }
 
-/* The relay's own words are not copy.
- *
- * `RelayError.message` is English written for a developer — "Pairing failed
- * (503)." — and it was rendered verbatim on the screen the whole iPhone
- * product rests on, in an app that ships in Arabic. */
+/* Native failures stay source-free and translated. A thrown storage or
+ * Linking exception must never become user-facing text. */
 {
-  ok('iOS setup never renders a relay exception message',
+  ok('iOS setup never renders a native or Linking exception message',
     !/\b(?:e|err|error)\.message\b/.test(iosSource) &&
       !/\b(?:e|err|error)\.message\b/.test(iosControllerSource));
-  ok('it maps the relay error to translated copy instead',
-    /error instanceof RelayError/.test(iosControllerSource) &&
-      /error\.code === 'rate_limited'/.test(iosControllerSource) &&
-      /case 'connect-rate-limited':/.test(iosSource));
-  ok('and the failure block has room for what to do next',
-    /errorDetail && \(/.test(iosSource));
+  ok('it maps each bounded controller failure to translated copy instead',
+    /case 'shortcut-install':/.test(iosSource) &&
+      /case 'shortcut-run':/.test(iosSource) &&
+      /case 'shortcuts-missing':/.test(iosSource) &&
+      /case 'load':/.test(iosSource));
+  ok('and the failure block is announced without source data',
+    /accessibilityLiveRegion="polite"/.test(iosSource) &&
+      /AccessibilityInfo\.announceForAccessibility/.test(iosSource));
 }
 
 console.log(`\nonboarding: ${pass} passed, ${fail} failed`);

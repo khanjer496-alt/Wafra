@@ -50,6 +50,11 @@ const { execFileSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 const schema = fs.readFileSync(path.join(root, 'schema.sql'), 'utf8');
+const migrations = fs.readdirSync(path.join(root, 'migrations'))
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))
+  .join('\n');
 const worker = fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8');
 const imports = fs.readFileSync(path.join(root, 'src/imports.ts'), 'utf8');
 const ingestRow = fs.readFileSync(path.join(root, 'src/ingest-row.ts'), 'utf8');
@@ -70,8 +75,10 @@ function ok(name, condition, detail = '') {
   }
 }
 
-execFileSync('sqlite3', [':memory:'], { input: `${schema}\nPRAGMA integrity_check;` });
-ok('schema applies cleanly to SQLite', true);
+execFileSync('sqlite3', [':memory:'], {
+  input: `${schema}\n${migrations}\nPRAGMA integrity_check;`,
+});
+ok('schema and tracked migrations apply cleanly to SQLite', true);
 ok('there is no raw-message column',
   !/\b(?:raw|body|message_text|email_body)\s+(?:TEXT|BLOB)\b/i.test(schema));
 ok('push tokens are ciphertext columns, not plaintext',

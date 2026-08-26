@@ -2,21 +2,24 @@
  * Two pipes, one UX.
  *
  * Android reads the SMS inbox on device and never touches the network. iOS
- * cannot read SMS at all, so a Shortcut the user configured POSTs each bank
- * message to the relay, which parses it and holds the sealed row until the app
- * collects it. Those are completely different mechanisms with completely
- * different failure modes, and every screen above this file is entitled to not
- * care: both arrive here as `ScannedSms[]` and go through the same
- * buildImportPlan() — same deduplication, same card mapping, same transfer
- * detection, same rescan healing.
+ * cannot read SMS at all, so a personal Message automation passes each new
+ * Received Message to Wafra's App Intent. The protected native queue is drained
+ * and parsed locally. A separately configured relay may still supply legacy or
+ * supplemental imports. These mechanisms have different failure modes, but
+ * every screen above this file receives `ScannedSms[]` and applies the same
+ * buildImportPlan() — same deduplication, card mapping and transfer detection.
  *
  * The one thing the durable capture executor must honour is `commit()`.
- * Android has nothing to
- * commit — the inbox is still the inbox. On iOS the relay keeps a queue row
- * until the phone says it has it, so `commit()` is what stops the same
- * transaction arriving forever. It calls this only once the batch is persisted; a
- * crash before that costs a duplicate sync, not a lost transaction.
+ * Android has nothing to commit — the inbox is still the inbox. A relay queue
+ * row remains until the phone says it has it, so relay `commit()` is what stops
+ * the same supplemental transaction arriving forever. It runs only after the
+ * batch is persisted; a crash before that costs a duplicate sync, not a lost
+ * transaction. The local iOS coordinator owns the equivalent native boundary.
  */
+/* eslint-disable @typescript-eslint/no-require-imports -- These dependencies are
+ * resolved only inside iOS-gated helpers so the shared collector remains
+ * import-safe on Android, web, and pure-logic test runtimes. */
+import type { WafraLiveCaptureNativeModule } from '../../modules/wafra-live-capture';
 import {
   isSmsScanningAvailable,
   scanInbox,
@@ -78,6 +81,121 @@ export interface CaptureResult {
 }
 
 const NOOP = async () => {};
+
+const iosCaptureStatusListeners = new Set<() => void>();
+const iosCaptureEntitlementResetListeners = new Set<() => void>();
+
+/** Subscribe to a source-free request to reread native capture health. */
+export const subscribeIosCaptureStatusRefresh = (listener: () => void): (() => void) => {
+  iosCaptureStatusListeners.add(listener);
+  return () => iosCaptureStatusListeners.delete(listener);
+};
+
+/** Publish no payload: every observer must reread its own source-free status. */
+export const publishIosCaptureStatusRefresh = (): void => {
+  for (const listener of iosCaptureStatusListeners) {
+    try {
+      listener();
+    } catch {
+      // One screen must never make a completed durable capture fail.
+    }
+  }
+};
+
+/** Subscribe to a source-free notice that native erase removed its leases. */
+export const subscribeIosCaptureEntitlementReset = (listener: () => void): (() => void) => {
+  iosCaptureEntitlementResetListeners.add(listener);
+  return () => iosCaptureEntitlementResetListeners.delete(listener);
+};
+
+const publishIosCaptureEntitlementReset = (): void => {
+  for (const listener of iosCaptureEntitlementResetListeners) {
+    try {
+      listener();
+    } catch {
+      // Erase has already succeeded; one lease observer cannot undo it.
+    }
+  }
+};
+
+const iosVersionMajor = (): number => {
+  const { Platform } = require('react-native') as typeof import('react-native');
+  const value = Platform.Version;
+  if (typeof value === 'number') return Math.trunc(value);
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Resolve the optional module only on a runtime that can execute its App Intents. */
+export const getIosCaptureNativeModule = (): WafraLiveCaptureNativeModule | null => {
+  const { Platform } = require('react-native') as typeof import('react-native');
+  if (Platform.OS !== 'ios' || iosVersionMajor() < 16) return null;
+  const { requireOptionalNativeModule } = require('expo') as typeof import('expo');
+  return requireOptionalNativeModule<WafraLiveCaptureNativeModule>('WafraLiveCapture');
+};
+
+/** Explicit native admission control. Clearing an app preference never calls this with true. */
+export const setIosCaptureEnabled = async (enabled: boolean): Promise<boolean> => {
+  const { Platform } = require('react-native') as typeof import('react-native');
+  if (Platform.OS !== 'ios' || iosVersionMajor() < 16) return false;
+  const native = getIosCaptureNativeModule();
+  if (!native) throw new Error('iOS live capture module is unavailable');
+  await native.setCaptureEnabled(enabled);
+  return true;
+};
+
+/**
+ * Persist the installation's exact local grant for the App Intent process.
+ * A founder grant is lifetime; a trial grant carries its original absolute
+ * end, so opening the app again cannot slide the deadline forward.
+ */
+export const setIosLocalCaptureEntitlementLease = async (
+  expiresAtMs: number | null,
+  lifetime: boolean,
+): Promise<boolean> => {
+  const { Platform } = require('react-native') as typeof import('react-native');
+  if (Platform.OS !== 'ios' || iosVersionMajor() < 16) return false;
+  if (
+    lifetime !== (expiresAtMs === null) ||
+    (expiresAtMs !== null && (!Number.isFinite(expiresAtMs) || expiresAtMs < 0))
+  ) throw new Error('Invalid local capture entitlement lease');
+  const native = getIosCaptureNativeModule();
+  if (!native) throw new Error('iOS live capture module is unavailable');
+  return native.setLocalCaptureEntitlementLease(expiresAtMs, lifetime);
+};
+
+/**
+ * Apply one RevenueCat answer with its request timestamp. Native storage owns
+ * the monotonic compare, so a late async response cannot resurrect or shorten
+ * a newer subscription lease.
+ */
+export const setIosStoreCaptureEntitlementLease = async (
+  expiresAtMs: number | null,
+  lifetime: boolean,
+  verifiedAtMs: number,
+): Promise<boolean> => {
+  const { Platform } = require('react-native') as typeof import('react-native');
+  if (Platform.OS !== 'ios' || iosVersionMajor() < 16) return false;
+  if (
+    (!lifetime && expiresAtMs !== null && (!Number.isFinite(expiresAtMs) || expiresAtMs < 0)) ||
+    (lifetime && expiresAtMs !== null) ||
+    !Number.isFinite(verifiedAtMs) ||
+    verifiedAtMs < 0
+  ) throw new Error('Invalid store capture entitlement lease');
+  const native = getIosCaptureNativeModule();
+  if (!native) throw new Error('iOS live capture module is unavailable');
+  return native.setStoreCaptureEntitlementLease(expiresAtMs, lifetime, verifiedAtMs);
+};
+
+/** Idempotent native queue cleanup used inside the store's retryable erase boundary. */
+export const eraseIosCaptureStore = async (): Promise<void> => {
+  const { Platform } = require('react-native') as typeof import('react-native');
+  if (Platform.OS !== 'ios' || iosVersionMajor() < 16) return;
+  const native = getIosCaptureNativeModule();
+  if (!native) throw new Error('iOS live capture module is unavailable');
+  await native.eraseAll();
+  publishIosCaptureEntitlementReset();
+};
 
 class SmsHistoryUnavailableError extends Error {
   readonly code = 'ERR_SMS_HISTORY_UNAVAILABLE';
@@ -343,5 +461,6 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
 
 /** True when this build can capture at all, configured or not. */
 export function isCaptureAvailable(): boolean {
-  return isSmsScanningAvailable() || isRelayPlatform();
+  if (isSmsScanningAvailable()) return true;
+  return getIosCaptureNativeModule() !== null;
 }

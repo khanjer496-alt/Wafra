@@ -31,24 +31,67 @@ import {
   openSmsPermissionSettings,
   requestSmsPermission,
 } from '@/lib/auto-import';
-import { enableRelayBackgroundSync } from '@/lib/background-relay';
-import { isCaptureAvailable } from '@/lib/capture';
-import { createCaptureExecutor } from '@/lib/capture-executor';
+import { enableRelayBackgroundSync, setChargeAlertsEnabled } from '@/lib/background-relay';
+import {
+  getIosCaptureNativeModule,
+  isCaptureAvailable,
+  publishIosCaptureStatusRefresh,
+  subscribeIosCaptureStatusRefresh,
+} from '@/lib/capture';
+import { createCaptureExecutor, type CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { committed } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { isProActive } from '@/lib/purchases';
 import {
-  getRelayAutomationProof,
   getRelayConfig,
-  getRelayRevokedAt,
-  isRelayAutomationProofCurrent,
-  subscribeRelayAutomationProof,
+  isLegacyShortcutCaptureActive,
+  retireRelayShortcutCapture,
 } from '@/lib/relay';
+import {
+  getSharedIosLocalCaptureCoordinator,
+} from '@/lib/ios-local-capture';
 import { useStore } from '@/lib/store';
+import type { AppState, IosCaptureWarningState } from '@/lib/types';
+import type {
+  WafraLiveCaptureNativeModule,
+  WafraLiveCaptureStatus,
+} from '../../modules/wafra-live-capture';
 
 /** The one-time setup that must not repeat: reminders and relay. */
 let sessionSetupRan = false;
+
+type IosCaptureWarningFacts = Pick<
+  IosCaptureWarningState,
+  'dropped' | 'corrupt' | 'nativeWarningId'
+>;
+
+// Warning persistence is deliberately attempted for every native observation,
+// but a persistent `corrupt` flag must not make two mounted status surfaces
+// publish each other into an infinite reread loop. This remembers only the
+// source-free facts last broadcast by this JS session; it is never durability
+// evidence and is never authorization to acknowledge native evidence.
+const lastPublishedIosCaptureWarnings = new WeakMap<
+  IosLocalCaptureCycleDependencies['getStateSnapshot'],
+  IosCaptureWarningFacts
+>();
+
+const warningFactsAdvance = (
+  previous: IosCaptureWarningFacts | null,
+  next: IosCaptureWarningFacts,
+): boolean => previous === null || next.dropped > previous.dropped ||
+  (next.corrupt && !previous.corrupt) || next.nativeWarningId !== previous.nativeWarningId;
+
+const retireLegacyShortcutCapture = async (): Promise<'not-needed' | 'complete'> => {
+  const cfg = await getRelayConfig();
+  if (!cfg || !isLegacyShortcutCaptureActive(cfg)) {
+    await setChargeAlertsEnabled(false);
+    return 'not-needed';
+  }
+  await retireRelayShortcutCapture(cfg);
+  await setChargeAlertsEnabled(false);
+  return 'complete';
+};
 
 /**
  * How long a scan stays fresh enough to skip on returning to the app.
@@ -106,51 +149,320 @@ export type AutoImportOutcome =
 
 export type CaptureSurfaceState =
   | 'checking'
-  | 'active'
-  | 'pipe-ready'
-  | 'needs-test'
-  /**
-   * The relay has cut this device off — the vault owner removed it from
-   * another phone. Distinct from 'off' on purpose: 'off' is a user who has not
-   * set capture up, this is a user who did, whose card said ON for weeks
-   * afterwards, and who has to be told why it stopped before "set it up again"
-   * means anything.
-   */
-  | 'revoked'
+  | 'first-alert-captured'
+  | 'waiting-for-alert'
+  | 'needs-automation'
+  | 'queue-warning'
+  | 'migration-retry'
   | 'off'
   | 'paused'
   | 'unsupported';
 
-/**
- * Reduce the three independent iOS facts to the one status the UI renders.
- *
- * A verified setup probe proves the Shortcut → relay → encrypted-sync
- * pipe, but it does not prove Apple's Message automation exists or runs in
- * the background. Only a device-bound automation proof written after a real
- * Shortcut row may produce `active`.
- */
 export function resolveIosCaptureSurfaceState({
-  hasConfig,
-  setupState,
-  automationProofCurrent,
-  revokedAt,
+  hydrated = true,
+  supported = true,
+  proActive = true,
+  entitled = true,
+  captureOptOut = false,
+  enabled,
+  setupProofVersion,
+  firstCapturedAt,
+  pending,
+  dropped,
+  corrupt,
+  retirementPending,
 }: {
-  hasConfig: boolean;
-  setupState: 'paired' | 'configured' | 'verified' | null;
-  automationProofCurrent: boolean;
-  revokedAt: number | null;
+  hydrated?: boolean;
+  supported?: boolean;
+  proActive?: boolean;
+  entitled?: boolean;
+  captureOptOut?: boolean;
+  enabled: boolean;
+  setupProofVersion: number | null;
+  firstCapturedAt: number | null;
+  pending: number;
+  dropped: number;
+  corrupt: boolean;
+  retirementPending: boolean;
 }): CaptureSurfaceState {
-  const cfg = hasConfig ? { setupState } : null;
-  return revokedAt
-    ? 'revoked'
-    : cfg?.setupState === 'verified' && automationProofCurrent
-      ? 'active'
-      : cfg?.setupState === 'verified'
-        ? 'pipe-ready'
-        : cfg
-          ? 'needs-test'
-          : 'off';
+  if (!hydrated) return 'checking';
+  if (!supported) return 'unsupported';
+  if (captureOptOut) return 'off';
+  if (pending > 0 || dropped > 0 || corrupt) return 'queue-warning';
+  if (!proActive || !entitled) return 'paused';
+  if (!enabled) return 'off';
+  if (retirementPending) return 'migration-retry';
+  if (setupProofVersion !== 1) return 'needs-automation';
+  if (firstCapturedAt !== null) return 'first-alert-captured';
+  return 'waiting-for-alert';
 }
+
+export const iosRelayIntentFor = ({
+  hasRelayConfig,
+  privateMode,
+}: {
+  hasRelayConfig: boolean;
+  privateMode: boolean;
+}): 'supplemental' | null => hasRelayConfig && !privateMode ? 'supplemental' : null;
+
+export const shouldReplayJoinedAutoImport = ({
+  platform,
+  outcome,
+}: {
+  platform: string;
+  outcome: AutoImportOutcome;
+}): boolean => outcome !== 'imported' && !(platform === 'ios' && outcome === 'up-to-date');
+
+type IosLocalCoordinator = ReturnType<typeof getSharedIosLocalCaptureCoordinator>;
+
+interface IosLocalCaptureCycleDependencies {
+  getStateSnapshot: () => Pick<
+    AppState,
+    'hydrated' | 'captureOptOut' | 'privateMode' | 'iosCaptureWarning'
+  >;
+  native: Pick<WafraLiveCaptureNativeModule, 'getCaptureStatus'>;
+  coordinator: IosLocalCoordinator;
+  recordWarning: (warning: IosCaptureWarningState) => { durable: Promise<void> };
+  publishStatusRefresh: (origin: 'warning' | 'drain') => void;
+  now: () => number;
+}
+
+export interface IosLocalCaptureCycleResult {
+  status: WafraLiveCaptureStatus | null;
+  drain: Awaited<ReturnType<IosLocalCoordinator['drain']>> | null;
+  retirement: Awaited<ReturnType<IosLocalCoordinator['retryRetirementIfNeeded']>>;
+}
+
+/** One source-free local lifecycle operation, shared by hook effects and tests. */
+export const runIosLocalCaptureCycle = async (
+  dependencies: IosLocalCaptureCycleDependencies,
+  mode: 'drain' | 'status',
+): Promise<IosLocalCaptureCycleResult> => {
+  const before = dependencies.getStateSnapshot();
+  if (!before.hydrated || before.captureOptOut) {
+    return { status: null, drain: null, retirement: 'not-needed' };
+  }
+
+  const status = await dependencies.native.getCaptureStatus();
+  const afterStatus = dependencies.getStateSnapshot();
+  if (!afterStatus.hydrated || afterStatus.captureOptOut) {
+    return { status, drain: null, retirement: 'not-needed' };
+  }
+
+  if (status.dropped > 0 || status.corrupt) {
+    // AppState changes synchronously before its encrypted write settles. It is
+    // therefore evidence of observation, never evidence of durability: every
+    // native warning observation earns a fresh persistence receipt before any
+    // later targeted-recovery acknowledgement.
+    const warningWasCleared = afterStatus.iosCaptureWarning == null;
+    const warningFacts: IosCaptureWarningFacts = {
+      dropped: Math.max(status.dropped, afterStatus.iosCaptureWarning?.dropped ?? 0),
+      corrupt: Boolean(status.corrupt || afterStatus.iosCaptureWarning?.corrupt),
+      nativeWarningId: status.warningId,
+    };
+    if (warningWasCleared) {
+      lastPublishedIosCaptureWarnings.delete(dependencies.getStateSnapshot);
+    }
+    const warningReceipt = dependencies.recordWarning({
+      dropped: status.dropped,
+      corrupt: status.corrupt,
+      recordedAt: dependencies.now(),
+      nativeWarningId: status.warningId,
+    });
+    await warningReceipt.durable;
+    const publishDurableWarning = () => {
+      // A cleared store deleted the prior lifetime above. Otherwise only
+      // advancing facts publish; every repeated observation still received the
+      // fresh durability write that completed before this callback was built.
+      const lastPublishedWarning =
+        lastPublishedIosCaptureWarnings.get(dependencies.getStateSnapshot) ?? null;
+      if (warningFactsAdvance(lastPublishedWarning, warningFacts)) {
+        lastPublishedIosCaptureWarnings.set(dependencies.getStateSnapshot, warningFacts);
+        dependencies.publishStatusRefresh('warning');
+      }
+    };
+    // Native evidence remains until the user runs targeted recovery. Status
+    // reads never erase a loss/corruption warning merely because it was seen.
+    publishDurableWarning();
+  }
+
+  const current = dependencies.getStateSnapshot();
+  if (!current.hydrated || current.captureOptOut) {
+    return { status, drain: null, retirement: 'not-needed' };
+  }
+
+  if (mode === 'drain') {
+    let drain: Awaited<ReturnType<IosLocalCoordinator['drain']>> | null = null;
+    if (status.enabled) {
+      try {
+        drain = await dependencies.coordinator.drain();
+      } finally {
+        // A partial page can update native counts or a first-capture milestone
+        // before a later durability/ACK step fails. Surfaces must reread those
+        // facts even when the drain rejects.
+        dependencies.publishStatusRefresh('drain');
+      }
+    }
+    return {
+      status,
+      drain,
+      retirement: drain?.retirement ?? 'not-needed',
+    };
+  }
+
+  const retirement = await dependencies.coordinator.retryRetirementIfNeeded();
+  return { status, drain: null, retirement };
+};
+
+interface IosCaptureRecoveryDependencies {
+  getStateSnapshot: IosLocalCaptureCycleDependencies['getStateSnapshot'];
+  native: Pick<
+    WafraLiveCaptureNativeModule,
+    'getCaptureStatus' | 'acknowledgeCaptureWarning'
+  >;
+  coordinator: IosLocalCoordinator;
+  recordWarning: IosLocalCaptureCycleDependencies['recordWarning'];
+  clearWarning: (
+    expectedWarningId: string | null,
+  ) => { cleared: boolean; durable: Promise<void> };
+  publishStatusRefresh: () => void;
+  now: () => number;
+}
+
+/**
+ * Process a bounded recoverable backlog, then compare-and-clear only the exact
+ * source-free warning generation the user chose to acknowledge.
+ */
+export const recoverIosCaptureQueue = async (
+  dependencies: IosCaptureRecoveryDependencies,
+): Promise<boolean> => {
+  const usable = () => {
+    const state = dependencies.getStateSnapshot();
+    return state.hydrated && !state.captureOptOut;
+  };
+  if (!usable()) return false;
+
+  // This intentionally bypasses the subscription paywall. It drains only the
+  // already bounded backlog and never re-enables native admission.
+  await dependencies.coordinator.drain();
+  if (!usable()) return false;
+
+  const persistWarning = async (status: WafraLiveCaptureStatus): Promise<void> => {
+    const receipt = dependencies.recordWarning({
+      dropped: status.dropped,
+      corrupt: status.corrupt,
+      recordedAt: dependencies.now(),
+      nativeWarningId: status.warningId,
+    });
+    await receipt.durable;
+  };
+
+  let status = await dependencies.native.getCaptureStatus();
+  if (!usable()) return false;
+  if (status.pending > 0) {
+    if (status.dropped > 0 || status.corrupt) await persistWarning(status);
+    dependencies.publishStatusRefresh();
+    return false;
+  }
+
+  if (status.dropped > 0 || status.corrupt) {
+    await persistWarning(status);
+    if (!status.warningId ||
+      !(await dependencies.native.acknowledgeCaptureWarning(status.warningId))) {
+      const raced = await dependencies.native.getCaptureStatus();
+      if (raced.dropped > 0 || raced.corrupt) await persistWarning(raced);
+      dependencies.publishStatusRefresh();
+      return false;
+    }
+    const cleared = dependencies.clearWarning(status.warningId);
+    if (!cleared.cleared) {
+      dependencies.publishStatusRefresh();
+      return false;
+    }
+    await cleared.durable;
+  } else {
+    // Covers a crash after the native compare-and-clear but before SQLCipher
+    // persisted the source-free AppState clear.
+    const stale = dependencies.getStateSnapshot().iosCaptureWarning;
+    if (stale) {
+      const cleared = dependencies.clearWarning(stale.nativeWarningId);
+      if (cleared.cleared) await cleared.durable;
+    }
+  }
+
+  status = await dependencies.native.getCaptureStatus();
+  if (status.dropped > 0 || status.corrupt) {
+    await persistWarning(status);
+    dependencies.publishStatusRefresh();
+    return false;
+  }
+  dependencies.publishStatusRefresh();
+  return status.pending === 0;
+};
+
+export interface CoalescingStatusRefresh {
+  request(): Promise<void>;
+  /** Invalidate a screen/focus generation without permanently stopping it. */
+  invalidate(): void;
+  /** Permanently stop work for an unmounted hook consumer. */
+  dispose(): void;
+}
+
+/**
+ * Source-free signals are edge notifications, not state. A signal that lands
+ * during a native read therefore queues exactly one newer read and invalidates
+ * the older result instead of disappearing behind an `inFlight` boolean.
+ */
+export const createCoalescingStatusRefresh = (
+  readAndCommit: (isCurrent: () => boolean) => Promise<void>,
+): CoalescingStatusRefresh => {
+  let running: Promise<void> | null = null;
+  let pending = false;
+  let generation = 0;
+  let disposed = false;
+
+  const request = (): Promise<void> => {
+    if (disposed) return Promise.resolve();
+    pending = true;
+    generation += 1;
+    if (running) return running;
+
+    const operation = (async () => {
+      let failure: unknown = null;
+      try {
+        while (!disposed && pending) {
+          pending = false;
+          const readGeneration = generation;
+          try {
+            await readAndCommit(
+              () => !disposed && readGeneration === generation,
+            );
+          } catch (error) {
+            failure ??= error;
+          }
+        }
+        if (failure) throw failure;
+      } finally {
+        running = null;
+      }
+    })();
+    running = operation;
+    return operation;
+  };
+
+  return {
+    request,
+    invalidate: () => {
+      generation += 1;
+      pending = false;
+    },
+    dispose: () => {
+      disposed = true;
+      generation += 1;
+      pending = false;
+    },
+  };
+};
 
 /**
  * Foreground resume, pull-to-refresh and the capture card can all request a
@@ -176,6 +488,10 @@ export type AutoImport = {
   needsPermission: boolean;
   /** What the capture surface should say on this platform right now. */
   captureState: CaptureSurfaceState;
+  /** Source-free native counts for Settings recovery. */
+  iosCaptureStatus: WafraLiveCaptureStatus | null;
+  /** Process the existing bounded iOS backlog and clear one exact warning. */
+  recoverIosCaptureQueue: () => Promise<boolean>;
 };
 
 /**
@@ -190,64 +506,143 @@ export function useAutoImport(
 ): AutoImport {
   const {
     state,
+    getStateSnapshot,
+    getStateGeneration,
     importBatch,
     stageReviewAlerts,
     undoBatch,
     ensureDurable,
     setMarket,
+    recordIosCaptureWarning,
+    clearIosCaptureWarning,
   } = useStore();
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
+    getState: getStateSnapshot,
+    getStateGeneration,
+    importBatch,
+    stageReviewAlerts,
+    ensureDurable,
+    setMarket,
+  }), [
+    ensureDurable,
+    getStateGeneration,
+    getStateSnapshot,
+    importBatch,
+    setMarket,
+    stageReviewAlerts,
+  ]);
   const captureExecutor = useMemo(
     () =>
       createCaptureExecutor({
-        ledger: {
-          getState: () => stateRef.current,
-          importBatch,
-          stageReviewAlerts,
-          ensureDurable,
-          setMarket,
-        },
+        ledger: captureLedger,
       }),
-    [ensureDurable, importBatch, setMarket, stageReviewAlerts],
+    [captureLedger],
   );
+  const iosNative = useMemo(() => getIosCaptureNativeModule(), []);
+  const statusReadInProgress = useRef(false);
+  const ignoreOwnWarningSignal = useRef(false);
+  const iosCoordinator = useMemo(() => {
+    if (!iosNative) return null;
+    return getSharedIosLocalCaptureCoordinator({
+      native: iosNative,
+      ledger: captureLedger,
+      retireShortcutCapture: retireLegacyShortcutCapture,
+    });
+  }, [captureLedger, iosNative]);
+  const iosCycleDependencies = useMemo<IosLocalCaptureCycleDependencies | null>(() => {
+    if (!iosNative || !iosCoordinator) return null;
+    return {
+      getStateSnapshot,
+      native: iosNative,
+      coordinator: iosCoordinator,
+      recordWarning: recordIosCaptureWarning,
+      publishStatusRefresh: (origin) => {
+        const ignoreForThisHook = origin === 'warning' && statusReadInProgress.current;
+        if (ignoreForThisHook) ignoreOwnWarningSignal.current = true;
+        try {
+          publishIosCaptureStatusRefresh();
+        } finally {
+          if (ignoreForThisHook) ignoreOwnWarningSignal.current = false;
+        }
+      },
+      now: Date.now,
+    };
+  }, [getStateSnapshot, iosCoordinator, iosNative, recordIosCaptureWarning]);
   const toast = useToast();
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
   const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
+  const [iosCaptureStatus, setIosCaptureStatus] = useState<WafraLiveCaptureStatus | null>(null);
+  const entitlementActive = isProActive(state);
   const sharedAccessUnavailable = React.useSyncExternalStore(
     subscribeSmsAccess,
     smsAccessSnapshot,
     smsAccessSnapshot,
   );
   const previousCaptureOptOut = useRef(state.captureOptOut);
-  const statusRefreshGeneration = useRef(0);
+  const iosRecoveryInFlight = useRef<Promise<boolean> | null>(null);
 
-  const refreshCaptureStatus = useCallback(async (): Promise<void> => {
-    const generation = ++statusRefreshGeneration.current;
-    const isCurrent = () => generation === statusRefreshGeneration.current;
-
-    if (state.captureOptOut) {
+  const readAndCommitCaptureStatus = useCallback(async (
+    isCurrent: () => boolean,
+  ): Promise<void> => {
+    const current = getStateSnapshot();
+    if (!current.hydrated) {
+      if (isCurrent()) setCaptureState('checking');
+      return;
+    }
+    if (current.captureOptOut) {
+      if (Platform.OS === 'ios' && iosNative) {
+        // Opt-out stops admission, but a previously staged record can cross
+        // its logical 30-day expiry while capture is off. Touch only the
+        // native expiry path here—never list or drain message records.
+        await iosNative.purgeExpired().catch(() => 0);
+      }
       if (!isCurrent()) return;
       setNeedsPermission(false);
+      setIosCaptureStatus(null);
       setCaptureState('off');
       return;
     }
     if (Platform.OS === 'ios') {
-      const [cfg, revokedAt] = await Promise.all([
-        getRelayConfig(),
-        getRelayRevokedAt(),
-      ]);
-      const automationProof = await getRelayAutomationProof(cfg?.deviceId ?? null);
+      if (!iosCycleDependencies) {
+        if (isCurrent()) {
+          setIosCaptureStatus(null);
+          setCaptureState('unsupported');
+        }
+        return;
+      }
+      const entitlementActive = isProActive(current);
+      let cycle: IosLocalCaptureCycleResult;
+      statusReadInProgress.current = true;
+      try {
+        cycle = await runIosLocalCaptureCycle(iosCycleDependencies, 'status');
+      } finally {
+        statusReadInProgress.current = false;
+      }
+      const cfg = await getRelayConfig();
       if (!isCurrent()) return;
-      // Revocation is stored independently because a revoked credential reads
-      // as no config at all. It therefore outranks even a proof that was valid
-      // before this device was removed.
+      const latest = getStateSnapshot();
+      const warning = latest.iosCaptureWarning;
+      const nativeStatus = cycle.status;
+      setIosCaptureStatus(nativeStatus ? {
+        ...nativeStatus,
+        dropped: Math.max(nativeStatus.dropped, warning?.dropped ?? 0),
+        corrupt: Boolean(nativeStatus.corrupt || warning?.corrupt),
+      } : null);
       setCaptureState(resolveIosCaptureSurfaceState({
-        hasConfig: cfg !== null,
-        setupState: cfg?.setupState ?? null,
-        automationProofCurrent: isRelayAutomationProofCurrent(cfg, automationProof),
-        revokedAt,
+        hydrated: latest.hydrated,
+        supported: nativeStatus !== null,
+        proActive: entitlementActive,
+        entitled: nativeStatus?.entitled ?? false,
+        captureOptOut: latest.captureOptOut,
+        enabled: nativeStatus?.enabled ?? false,
+        setupProofVersion: nativeStatus?.setupProofVersion ?? null,
+        firstCapturedAt: nativeStatus?.firstCapturedAt ?? null,
+        pending: nativeStatus?.pending ?? 0,
+        dropped: Math.max(nativeStatus?.dropped ?? 0, warning?.dropped ?? 0),
+        corrupt: Boolean(nativeStatus?.corrupt || warning?.corrupt),
+        retirementPending: nativeStatus?.firstCapturedAt !== null &&
+          isLegacyShortcutCaptureActive(cfg),
       }));
       return;
     }
@@ -256,11 +651,57 @@ export function useAutoImport(
       if (!isCurrent()) return;
       if (!granted) setSharedSmsAccessUnavailable(true);
       setNeedsPermission(!granted);
-      setCaptureState(granted && !sharedAccessUnavailable ? 'active' : 'off');
+      setCaptureState(granted && !sharedAccessUnavailable ? 'waiting-for-alert' : 'off');
       return;
     }
     if (isCurrent()) setCaptureState('unsupported');
-  }, [sharedAccessUnavailable, state.captureOptOut]);
+  }, [getStateSnapshot, iosCycleDependencies, iosNative, sharedAccessUnavailable]);
+  const latestStatusRead = useRef(readAndCommitCaptureStatus);
+  latestStatusRead.current = readAndCommitCaptureStatus;
+  const statusRefresh = useMemo(
+    () => createCoalescingStatusRefresh(
+      (isCurrent) => latestStatusRead.current(isCurrent),
+    ),
+    [],
+  );
+  const refreshCaptureStatus = useCallback(
+    (): Promise<void> => statusRefresh.request(),
+    [statusRefresh],
+  );
+
+  const recoverIosCapture = useCallback((): Promise<boolean> => {
+    if (iosRecoveryInFlight.current) return iosRecoveryInFlight.current;
+    if (!iosNative || !iosCoordinator) return Promise.resolve(false);
+    const operation = recoverIosCaptureQueue({
+      getStateSnapshot,
+      native: iosNative,
+      coordinator: iosCoordinator,
+      recordWarning: recordIosCaptureWarning,
+      clearWarning: clearIosCaptureWarning,
+      publishStatusRefresh: publishIosCaptureStatusRefresh,
+      now: Date.now,
+    }).finally(() => {
+      if (iosRecoveryInFlight.current === operation) {
+        iosRecoveryInFlight.current = null;
+      }
+    });
+    iosRecoveryInFlight.current = operation;
+    return operation;
+  }, [
+    clearIosCaptureWarning,
+    getStateSnapshot,
+    iosCoordinator,
+    iosNative,
+    recordIosCaptureWarning,
+  ]);
+
+  useEffect(() => () => {
+    // Effect cleanup is replayed immediately in React Strict Mode. Invalidate
+    // the current generation without permanently poisoning the memoized
+    // scheduler that the replayed setup reuses; listener effects clean up their
+    // own subscriptions, and an actual unmount drops the scheduler afterward.
+    statusRefresh.invalidate();
+  }, [statusRefresh]);
 
   // Read the real platform capability whenever the screen regains focus. This
   // makes the card turn on immediately after returning from Settings or iOS
@@ -274,10 +715,18 @@ export function useAutoImport(
       if (!watchStatus) return;
       void refreshCaptureStatus().catch(() => {});
       return () => {
-        statusRefreshGeneration.current += 1;
+        statusRefresh.invalidate();
       };
-    }, [refreshCaptureStatus, watchStatus]),
+    }, [refreshCaptureStatus, statusRefresh, watchStatus]),
   );
+
+  // Store hydration is asynchronous. Focus may have read the intentional
+  // `checking` state before SQLCipher finished; the false -> true transition
+  // must request a new status read even when navigation focus never changes.
+  useEffect(() => {
+    if (!watchStatus) return;
+    void refreshCaptureStatus().catch(() => {});
+  }, [entitlementActive, refreshCaptureStatus, state.hydrated, watchStatus]);
 
   // Returning from Shortcuts does not change navigation focus: Home stays the
   // focused route while the app backgrounds. Refresh status on the lifecycle
@@ -290,22 +739,23 @@ export function useAutoImport(
     });
     return () => {
       sub.remove();
-      statusRefreshGeneration.current += 1;
+      statusRefresh.invalidate();
     };
-  }, [refreshCaptureStatus, watchStatus]);
+  }, [refreshCaptureStatus, statusRefresh, watchStatus]);
 
-  // Proof may be written by the foreground recovery scan after the AppState
-  // refresh above already read null. The local proof signal closes that race
-  // without polling or coupling status to one particular scan caller.
+  // A drain or durable warning can finish just after another mounted surface
+  // read status. The signal carries no record data; observers reread status.
   useEffect(() => {
     if (!watchStatus || Platform.OS !== 'ios') return;
-    return subscribeRelayAutomationProof(() => {
+    return subscribeIosCaptureStatusRefresh(() => {
+      if (ignoreOwnWarningSignal.current) return;
       void refreshCaptureStatus().catch(() => {});
     });
   }, [refreshCaptureStatus, watchStatus]);
 
   const performAutoImport = useCallback(
     async (interactive: boolean): Promise<AutoImportOutcome> => {
+      const state = getStateSnapshot();
       // Never scan against a ledger that has not finished loading. Every
       // duplicate check in the plan is a lookup against state.transactions,
       // so an unhydrated store means nothing matches and the entire inbox
@@ -332,10 +782,41 @@ export function useAutoImport(
       // on.
       if (state.captureOptOut) return 'unavailable';
       if (!isCaptureAvailable()) return 'unavailable';
+      let outcome: Awaited<ReturnType<typeof captureExecutor.execute>> | null = null;
       // Android needs the SMS permission before it can read anything. iOS has
       // no permission to ask for — its messages arrive over the relay — so the
       // prompt is skipped there rather than shown and refused.
-      if (isSmsScanningAvailable()) {
+      if (Platform.OS === 'ios') {
+        if (!iosCycleDependencies) return 'unavailable';
+        const localCycle = await runIosLocalCaptureCycle(iosCycleDependencies, 'drain');
+        const local = localCycle.drain;
+        const cfg = await getRelayConfig();
+        const relayIntent = iosRelayIntentFor({
+          hasRelayConfig: cfg !== null,
+          privateMode: getStateSnapshot().privateMode,
+        });
+        const supplemental = relayIntent
+          ? await captureExecutor.execute(relayIntent)
+          : null;
+        const supplementalSummary = supplemental &&
+          (supplemental.kind === 'imported' || supplemental.kind === 'up-to-date')
+          ? supplemental
+          : null;
+        const localChanged = Boolean(local && (local.imported > 0 || local.reviews > 0));
+        outcome = {
+          kind: localChanged || supplementalSummary?.kind === 'imported'
+            ? 'imported' as const
+            : 'up-to-date' as const,
+          source: supplementalSummary?.source ?? ('none' as const),
+          transactions: (local?.imported ?? 0) + (supplementalSummary?.transactions ?? 0),
+          dues: supplementalSummary?.dues ?? 0,
+          bills: supplementalSummary?.bills ?? 0,
+          healed: supplementalSummary?.healed ?? 0,
+          newAccounts: supplementalSummary?.newAccounts ?? 0,
+          transactionIds: supplementalSummary?.transactionIds ?? [],
+          reviewAlerts: (local?.reviews ?? 0) + (supplementalSummary?.reviewAlerts ?? 0),
+        };
+      } else if (isSmsScanningAvailable()) {
         let granted = await hasSmsPermission();
         if (!granted && interactive) granted = await requestSmsPermission();
         if (!granted) {
@@ -354,28 +835,30 @@ export function useAutoImport(
           return 'no-permission';
         }
         setNeedsPermission(false);
-        setCaptureState('active');
+        setCaptureState('waiting-for-alert');
       }
 
-      let outcome;
-      try {
-        outcome = await captureExecutor.execute('routine');
-      } catch (error) {
-        if (!isSmsInboxAccessError(error)) throw error;
-        setSharedSmsAccessUnavailable(true);
-        setNeedsPermission(true);
-        setCaptureState('off');
-        if (interactive) {
-          toast.show(t('smsAccessOff'), {
-            tone: 'warning',
-            actions: [{
-              label: t('openSettings'),
-              onPress: () => void openSmsPermissionSettings().catch(() => {}),
-            }],
-          });
+      if (Platform.OS !== 'ios') {
+        try {
+          outcome = await captureExecutor.execute('routine');
+        } catch (error) {
+          if (!isSmsInboxAccessError(error)) throw error;
+          setSharedSmsAccessUnavailable(true);
+          setNeedsPermission(true);
+          setCaptureState('off');
+          if (interactive) {
+            toast.show(t('smsAccessOff'), {
+              tone: 'warning',
+              actions: [{
+                label: t('openSettings'),
+                onPress: () => void openSmsPermissionSettings().catch(() => {}),
+              }],
+            });
+          }
+          return 'no-permission';
         }
-        return 'no-permission';
       }
+      if (!outcome) return 'unavailable';
       setSharedSmsAccessUnavailable(false);
       // Only a completed native/relay read makes capture fresh. A provider
       // restriction thrown above must not suppress the immediate retry after
@@ -386,17 +869,6 @@ export function useAutoImport(
         return 'not-hydrated';
       }
       if (outcome.kind === 'needs-setup') {
-        // The relay is not paired yet, so silence here means "not connected",
-        // not "nothing new". Only say so when the user actually asked.
-        //
-        // The card is corrected here as well as on focus. A scan is what
-        // DISCOVERS a revocation, and the screen it happens on is already
-        // mounted and focused — waiting for the next focus event would leave
-        // "syncing silently" on screen for the rest of the session.
-        if (Platform.OS === 'ios') {
-          const revokedAt = await getRelayRevokedAt().catch(() => null);
-          setCaptureState(revokedAt ? 'revoked' : 'off');
-        }
         if (interactive) router.push('/ios-setup');
         return 'needs-setup';
       }
@@ -450,7 +922,7 @@ export function useAutoImport(
       );
       return 'imported';
     },
-    [captureExecutor, state, undoBatch, toast, router],
+    [captureExecutor, getStateSnapshot, iosCycleDependencies, undoBatch, toast, router],
   );
 
   // The single owner of `importInFlight`. Always starts a fresh scan — callers
@@ -482,11 +954,17 @@ export function useAutoImport(
       // reading or importing, so re-running interactively is a fresh first
       // attempt for this request, not a second scan of the same data. The one
       // exception is `'imported'`, whose toast already fires unconditionally.
-      return existing.promise.then((outcome) =>
-        outcome === 'imported' ? undefined : startAutoImport(true).then(() => undefined),
-      );
+      return existing.promise.then((outcome) => {
+        if (shouldReplayJoinedAutoImport({ platform: Platform.OS, outcome })) {
+          return startAutoImport(true).then(() => undefined);
+        }
+        if (Platform.OS === 'ios' && outcome === 'up-to-date') {
+          toast.show(t('upToDateNoNew'));
+        }
+        return undefined;
+      });
     },
-    [startAutoImport],
+    [startAutoImport, toast],
   );
 
   /**
@@ -532,7 +1010,8 @@ export function useAutoImport(
     // from the iOS setup route. Mounted must not mean active: scanning and
     // rebuilding projections behind the welcome flow competes with the one
     // progress surface the user is actually watching.
-    if (!state.hydrated || !state.onboarded) return;
+    if (!state.hydrated) return;
+    if (Platform.OS !== 'ios' && !state.onboarded) return;
     const captureJustEnabled = previousCaptureOptOut.current && !state.captureOptOut;
     previousCaptureOptOut.current = state.captureOptOut;
 
@@ -541,7 +1020,8 @@ export function useAutoImport(
      * it, and only for a ledger with no watermark at all.
      */
     const scan = (force = false) => {
-      if (!force && Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
+      if (!force && Platform.OS !== 'ios' &&
+        Date.now() - lastScanAt < RESCAN_AFTER_MS) return;
       void latestScan.current(false).catch(() => {
         // Best-effort; manual import still available.
       });
@@ -574,7 +1054,7 @@ export function useAutoImport(
     // real scan even if another scan happened less than 30 seconds earlier.
     if (!state.captureOptOut) scan(state.lastScanTs <= 0 || captureJustEnabled);
 
-    if (!sessionSetupRan) {
+    if (state.onboarded && !sessionSetupRan) {
       sessionSetupRan = true;
       void (async () => {
         try {
@@ -630,6 +1110,8 @@ export function useAutoImport(
     runAutoImport,
     needsPermission: needsPermission || sharedAccessUnavailable,
     captureState: sharedAccessUnavailable ? 'off' : captureState,
+    iosCaptureStatus,
+    recoverIosCaptureQueue: recoverIosCapture,
   };
 }
 

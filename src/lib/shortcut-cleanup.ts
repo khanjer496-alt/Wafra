@@ -29,15 +29,15 @@ import { Linking, Platform } from 'react-native';
 const SHORTCUTS_APP_URL = 'shortcuts://';
 
 /**
- * True only when a Shortcut can actually exist: this is an iPhone, and the
- * relay pairing that the Shortcut was built against was really there.
+ * True only when a legacy Shortcut can actually exist: this is an iPhone and
+ * the caller has explicit automation-generation provenance from the old flow.
  *
- * Passing `false` for `hadPairing` matters. A user who never set up iPhone
+ * Passing `false` for `hadLegacyAutomation` matters. A user who never set up iPhone
  * capture has no automation to delete, and telling them to go hunting for one
  * teaches them to ignore the warning on the day it is true.
  */
-export function shortcutCleanupApplies(hadPairing: boolean): boolean {
-  return Platform.OS === 'ios' && hadPairing;
+export function shortcutCleanupApplies(hadLegacyAutomation: boolean): boolean {
+  return Platform.OS === 'ios' && hadLegacyAutomation;
 }
 
 /**

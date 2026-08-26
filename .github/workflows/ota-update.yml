@@ -1,0 +1,198 @@
+name: Mobile OTA update
+
+# EAS Update changes the JavaScript and bundled assets executed by already
+# installed store binaries. It is deliberately manual, serialized, and limited
+# to committed revisions. Candidate publishing and production promotion are two
+# separate operations so the exact artifact tested on iOS and Android is the
+# artifact that reaches customers.
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Publish a candidate, promote a verified candidate, expand its rollout, or revert that rollout.'
+        type: choice
+        options:
+          - publish-candidate
+          - promote-candidate
+          - expand-rollout
+          - revert-rollout
+          - rollback-production
+        default: publish-candidate
+      message:
+        description: 'Required for candidate publishing: concise user-visible change description.'
+        type: string
+        default: ''
+      update_group_id:
+        description: 'Promotion: candidate group UUID. Expand/revert/rollback: production group UUID.'
+        type: string
+        default: ''
+      rollout_percentage:
+        description: 'Initial or expanded production rollout percentage.'
+        type: choice
+        options:
+          - '5'
+          - '10'
+          - '25'
+          - '50'
+          - '100'
+        default: '10'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wafra-production-ota
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: production-ota
+    timeout-minutes: 30
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      OPERATION: ${{ github.event.inputs.operation }}
+      MESSAGE: ${{ github.event.inputs.message }}
+      UPDATE_GROUP_ID: ${{ github.event.inputs.update_group_id }}
+      ROLLOUT_PERCENTAGE: ${{ github.event.inputs.rollout_percentage }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+
+      - name: Validate request before installing anything
+        run: |
+          set -euo pipefail
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "::error::EXPO_TOKEN is not configured in GitHub Actions secrets."
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::OTA publishing and every production mutation must run from main."
+            exit 1
+          fi
+          case "$OPERATION" in
+            publish-candidate)
+              if [ -z "${MESSAGE//[[:space:]]/}" ]; then
+                echo "::error::A candidate update needs a concise change message."
+                exit 1
+              fi
+              ;;
+            promote-candidate|expand-rollout|revert-rollout|rollback-production)
+              if ! [[ "$UPDATE_GROUP_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+                echo "::error::Paste a valid EAS update group UUID."
+                exit 1
+              fi
+              ;;
+          esac
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate OTA configuration
+        run: npm run update:check
+
+      - name: Authenticate to EAS
+        run: npx --yes eas-cli@22.4.0 whoami
+
+      - name: Verify production update environment
+        if: github.event.inputs.operation == 'publish-candidate'
+        run: |
+          npx --yes eas-cli@22.4.0 env:exec production \
+            "node scripts/check-update-config.mjs --environment production" \
+            --non-interactive
+
+      - name: Verify candidate code
+        if: github.event.inputs.operation == 'publish-candidate'
+        run: |
+          npm run typecheck
+          npm run lint
+          npm test
+
+      - name: Publish production-equivalent candidate
+        if: github.event.inputs.operation == 'publish-candidate'
+        run: |
+          npx --yes eas-cli@22.4.0 update \
+            --channel production-candidate \
+            --environment production \
+            --platform all \
+            --message "$MESSAGE (${GITHUB_SHA::12})" \
+            --non-interactive
+
+      - name: Show candidate selected for production
+        if: github.event.inputs.operation == 'promote-candidate'
+        run: npx --yes eas-cli@22.4.0 update:view "$UPDATE_GROUP_ID" --insights --days 7
+
+      - name: Verify selected update group provenance
+        if: github.event.inputs.operation != 'publish-candidate'
+        run: |
+          if [ "$OPERATION" = "promote-candidate" ]; then
+            expected_branch=production-candidate
+          else
+            expected_branch=production
+          fi
+          set -o pipefail
+          npx --yes eas-cli@22.4.0 update:view "$UPDATE_GROUP_ID" --json |
+            node scripts/check-update-group.mjs \
+              --group "$UPDATE_GROUP_ID" \
+              --branch "$expected_branch"
+
+      - name: Promote exact candidate bundle to production
+        if: github.event.inputs.operation == 'promote-candidate'
+        run: |
+          npx --yes eas-cli@22.4.0 update:republish \
+            --group "$UPDATE_GROUP_ID" \
+            --destination-channel production \
+            --rollout-percentage "$ROLLOUT_PERCENTAGE" \
+            --message "Promote verified candidate $UPDATE_GROUP_ID at $ROLLOUT_PERCENTAGE%" \
+            --platform all \
+            --non-interactive
+
+      - name: Expand an existing production rollout
+        if: github.event.inputs.operation == 'expand-rollout'
+        run: |
+          npx --yes eas-cli@22.4.0 update:edit "$UPDATE_GROUP_ID" \
+            --rollout-percentage "$ROLLOUT_PERCENTAGE" \
+            --non-interactive
+
+      - name: Revert the active production rollout
+        if: github.event.inputs.operation == 'revert-rollout'
+        run: |
+          npx --yes eas-cli@22.4.0 update:revert-update-rollout \
+            --group "$UPDATE_GROUP_ID" \
+            --message "Emergency rollback of $UPDATE_GROUP_ID" \
+            --non-interactive
+
+      - name: Roll back a fully released production update
+        if: github.event.inputs.operation == 'rollback-production'
+        run: |
+          npx --yes eas-cli@22.4.0 update:rollback "$UPDATE_GROUP_ID" \
+            --message "Emergency rollback of $UPDATE_GROUP_ID" \
+            --platform all \
+            --non-interactive
+
+      - name: Record the immutable source revision
+        run: |
+          {
+            echo "## Wafra OTA operation"
+            echo
+            echo "- Operation: \`$OPERATION\`"
+            echo "- Source: \`$GITHUB_SHA\`"
+            echo "- Actor: \`$GITHUB_ACTOR\`"
+            if [ -n "$UPDATE_GROUP_ID" ]; then
+              echo "- Update group: \`$UPDATE_GROUP_ID\`"
+            fi
+            if [ "$OPERATION" = "publish-candidate" ]; then
+              echo "- Next gate: verify the update on production-candidate iOS and Android builds before promotion."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

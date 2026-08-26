@@ -1,5 +1,15 @@
 # Wafra Capture — publishable Shortcut specification
 
+> **CURRENT STATUS — RETIRED / DO NOT USE FOR NEW SETUP**
+>
+> This document preserves the historical relay-uploading **Wafra Capture**
+> design for audit purposes. Do not build, publish, configure, or restore this
+> Shortcut for a new user. The current local-capture implementation and its
+> remaining physical-iPhone release gates are defined in
+> [`2026-08-25-ios-local-capture.md`](./superpowers/plans/2026-08-25-ios-local-capture.md).
+> Nothing below is evidence that a replacement Shortcut has been exported,
+> signed, tested on a physical iPhone, or published to iCloud.
+
 This is the source-of-truth action graph for the credential-free iCloud
 Shortcut referenced by `EXPO_PUBLIC_WAFRA_SHORTCUT_URL`. The published Shortcut
 must contain no Wafra server URL, bearer token, device identifier, bank name or

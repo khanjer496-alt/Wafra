@@ -56,7 +56,8 @@ ok('the founder grant is durable, excluded from backups, and preserved by ledger
   /case 'unlockFounderPro':[\s\S]{0,100}founderPro: true/.test(store) &&
     /founderPro: _founderPro/.test(store) &&
     /founderPro: state\.founderPro/.test(store) &&
-    /case 'clearAll':[\s\S]{0,500}founderPro: state\.founderPro/.test(store));
+    /case 'clearAll':[\s\S]{0,800}founderPro: state\.founderPro/.test(store) &&
+    /case 'clearAll':[\s\S]{0,800}trialStartTs: state\.trialStartTs/.test(store));
 ok('RevenueCat status cannot revoke founder access',
   /state\.pro \|\| state\.founderPro === true \|\|/.test(purchases));
 

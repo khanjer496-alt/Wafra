@@ -91,17 +91,27 @@ import {
   onboardingIncomeBasis,
 } from '@/lib/onboarding';
 
-import type {
-  ImportBatchInput,
-  Account,
-  AppState,
-  Bill,
-  Budget,
-  CardDue,
-  CategoryId,
-  Goal,
-  OnboardingPlanPreferences,
-  Transaction,
+import {
+  isLocalCaptureQualificationCandidate,
+  mergeIosCaptureWarningState,
+  mergeLocalCaptureQualifications,
+  normalizeIosCaptureWarningState,
+  normalizeLocalCaptureQualifications,
+  type Account,
+  type AppState,
+  type Bill,
+  type Budget,
+  type CardDue,
+  type CategoryId,
+  type Goal,
+  type ImportBatchInput,
+  type IosCaptureWarningState,
+  type LocalCaptureDeclineQualificationMapping,
+  type LocalCaptureQualificationCandidate,
+  type LocalCaptureQualificationReceipt,
+  type LocalCaptureReviewQualificationCandidate,
+  type OnboardingPlanPreferences,
+  type Transaction,
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -144,6 +154,8 @@ const EMPTY_STATE: AppState = {
   hydrated: false,
   ledgerMoney: null,
   reviewTray: emptyAlertReviewTray(),
+  localCaptureQualifications: [],
+  iosCaptureWarning: null,
   accounts: [],
   transactions: [],
   budgets: [],
@@ -239,6 +251,11 @@ export function migratePersistedState(
 ): Partial<Omit<AppState, 'hydrated'>> {
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
+  parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
+    parsed.localCaptureQualifications,
+    Date.now(),
+  );
+  parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -589,7 +606,10 @@ type Action =
   | { type: 'addTransaction'; transaction: Transaction }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
   | { type: 'deleteTransaction'; id: string }
-  | ({ type: 'importBatch' } & MaterializedImportBatch)
+  | ({
+      type: 'importBatch';
+      localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+    } & MaterializedImportBatch)
   | { type: 'undoBatch'; ids: string[] }
   | { type: 'upsertBudget'; budget: Budget }
   | { type: 'deleteBudget'; category: Budget['category'] }
@@ -618,6 +638,8 @@ type Action =
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
+  | { type: 'recordIosCaptureWarning'; warning: IosCaptureWarningState }
+  | { type: 'clearIosCaptureWarning'; expectedWarningId: string | null }
   | { type: 'setHistoryImport'; progress: HistoryImportProgress }
   | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
@@ -628,7 +650,11 @@ type Action =
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
   | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
-  | { type: 'setReviewTray'; reviewTray: AppState['reviewTray'] }
+  | {
+      type: 'setReviewTray';
+      reviewTray: AppState['reviewTray'];
+      localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+    }
   | {
       type: 'promoteReviewAlert';
       transaction: Transaction;
@@ -682,6 +708,10 @@ function reduceState(state: AppState, action: Action): AppState {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
       next.historyImport = normalizeHistoryImportProgress(next.historyImport);
+      next.localCaptureQualifications = normalizeLocalCaptureQualifications(
+        next.localCaptureQualifications,
+        Date.now(),
+      );
       // Month grouping is computed all over the app; sync the global before
       // anything renders against the hydrated state.
       applyMonthStartDay(next.monthStartDay || 1);
@@ -745,7 +775,19 @@ function reduceState(state: AppState, action: Action): AppState {
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
     case 'setReviewTray':
-      return { ...state, reviewTray: action.reviewTray };
+      return {
+        ...state,
+        reviewTray: action.reviewTray,
+        ...(action.localCaptureQualifications
+          ? { localCaptureQualifications: action.localCaptureQualifications }
+          : {}),
+      };
+    case 'recordIosCaptureWarning':
+      return { ...state, iosCaptureWarning: action.warning };
+    case 'clearIosCaptureWarning':
+      return state.iosCaptureWarning?.nativeWarningId === action.expectedWarningId
+        ? { ...state, iosCaptureWarning: null }
+        : state;
     case 'promoteReviewAlert':
       return {
         ...state,
@@ -810,7 +852,10 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
     case 'importBatch': {
-      return applyMaterializedImportBatch(state, action);
+      const imported = applyMaterializedImportBatch(state, action);
+      return action.localCaptureQualifications
+        ? { ...imported, localCaptureQualifications: action.localCaptureQualifications }
+        : imported;
     }
     case 'undoBatch': {
       const ids = new Set(action.ids);
@@ -1003,7 +1048,11 @@ function reduceState(state: AppState, action: Action): AppState {
         // entries the user just deleted.
         captureOptOut: state.captureOptOut,
         // Founder access belongs to this installation, not to ledger data.
+        pro: state.pro,
         founderPro: state.founderPro,
+        // Erasing a ledger must not mint another local trial on the next
+        // hydrate or discard the original absolute entitlement deadline.
+        trialStartTs: state.trialStartTs,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1068,8 +1117,14 @@ interface StoreValue {
    * Bulk import. `durable` resolves only after SQLCipher has committed the
    * rows; relay callers must await it before acknowledging the server queue.
    */
-  importBatch: (input: ImportBatchInput) => ImportReceipt;
-  stageReviewAlerts: (items: ReviewAlert[]) => { admitted: number; durable: Promise<void> };
+  importBatch: (
+    input: ImportBatchInput,
+    qualifications?: readonly LocalCaptureDeclineQualificationMapping[],
+  ) => ImportReceipt;
+  stageReviewAlerts: (
+    items: ReviewAlert[],
+    qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+  ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
   dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
@@ -1102,6 +1157,10 @@ interface StoreValue {
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
+  recordIosCaptureWarning: (input: IosCaptureWarningState) => { durable: Promise<void> };
+  clearIosCaptureWarning: (
+    expectedWarningId: string | null,
+  ) => { cleared: boolean; durable: Promise<void> };
   setHistoryImportProgress: (progress: HistoryImportProgress) => Promise<void>;
   beginHistoryImport: () => Promise<void>;
   setDailySummary: (enabled: boolean) => void;
@@ -1124,7 +1183,98 @@ const StoreContext = createContext<StoreValue | null>(null);
 
 export interface ImportReceipt {
   ids: string[];
+  qualificationIds: string[];
   durable: Promise<void>;
+}
+
+function reviewQualificationMap(
+  items: readonly ReviewAlert[],
+  qualifications: readonly LocalCaptureReviewQualificationCandidate[] | undefined,
+): Map<string, LocalCaptureQualificationCandidate & { kind: 'review' }> {
+  if (!qualifications || qualifications.length === 0) return new Map();
+  if (qualifications.length !== items.length) {
+    throw new Error('Local capture review qualification mapping is invalid');
+  }
+  const itemIds = new Set(items.map((item) => item.id));
+  const reviewIds = new Set<string>();
+  const qualificationIds = new Set<string>();
+  const mapped = new Map<string, LocalCaptureQualificationCandidate & { kind: 'review' }>();
+  for (const entry of qualifications) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+      JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(['qualification', 'reviewId']) ||
+      typeof entry.reviewId !== 'string' || !itemIds.has(entry.reviewId) ||
+      reviewIds.has(entry.reviewId) ||
+      !isLocalCaptureQualificationCandidate(entry.qualification) ||
+      entry.qualification.kind !== 'review' ||
+      qualificationIds.has(entry.qualification.id)) {
+      throw new Error('Local capture review qualification mapping is invalid');
+    }
+    reviewIds.add(entry.reviewId);
+    qualificationIds.add(entry.qualification.id);
+    mapped.set(entry.reviewId, entry.qualification);
+  }
+  if (reviewIds.size !== itemIds.size) {
+    throw new Error('Local capture review qualification mapping is invalid');
+  }
+  return mapped;
+}
+
+function attestDeclineQualifications(
+  state: AppState,
+  batch: MaterializedImportBatch,
+  postImportState: AppState,
+  mappings: readonly LocalCaptureDeclineQualificationMapping[],
+): LocalCaptureQualificationCandidate[] {
+  const qualificationIds = new Set<string>();
+  const removedTransactionIds = new Set<string>();
+  const candidates: LocalCaptureQualificationCandidate[] = [];
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping) ||
+      JSON.stringify(Object.keys(mapping).sort()) !==
+        JSON.stringify(['qualification', 'removedTransactionId']) ||
+      !isLocalCaptureQualificationCandidate(mapping.qualification) ||
+      mapping.qualification.kind !== 'decline' ||
+      typeof mapping.removedTransactionId !== 'string' ||
+      mapping.removedTransactionId.length === 0 ||
+      qualificationIds.has(mapping.qualification.id) ||
+      removedTransactionIds.has(mapping.removedTransactionId)) {
+      throw new Error('Local capture decline qualification mapping is invalid');
+    }
+    const matchingRows = state.transactions.filter(
+      (transaction) => transaction.id === mapping.removedTransactionId,
+    );
+    const matchingUpdates = batch.updates.filter(
+      (update) => update.id === mapping.removedTransactionId,
+    );
+    if (matchingRows.length !== 1 || matchingUpdates.length !== 1 ||
+      matchingUpdates[0].remove !== true || postImportState.transactions.some(
+        (transaction) => transaction.id === mapping.removedTransactionId,
+      )) {
+      throw new Error('Local capture decline qualification mapping is not admitted');
+    }
+    qualificationIds.add(mapping.qualification.id);
+    removedTransactionIds.add(mapping.removedTransactionId);
+    candidates.push(mapping.qualification);
+  }
+  return candidates;
+}
+
+function persistedQualificationIds(
+  receipts: readonly LocalCaptureQualificationReceipt[] | undefined,
+  candidates: readonly LocalCaptureQualificationCandidate[],
+): string[] {
+  if (candidates.length === 0) return [];
+  const byId = new Map((receipts ?? []).map((receipt) => [receipt.id, receipt]));
+  const ids: string[] = [];
+  for (const candidate of candidates) {
+    const receipt = byId.get(candidate.id);
+    if (!receipt || receipt.kind !== candidate.kind ||
+      receipt.observedAt !== candidate.observedAt) {
+      throw new Error('Local capture qualification was not persisted');
+    }
+    ids.push(receipt.id);
+  }
+  return ids;
 }
 
 /**
@@ -1504,17 +1654,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteTransaction', id });
   }, [dispatch]);
 
-  const importBatch = useCallback((input: ImportBatchInput): ImportReceipt => {
+  const importBatch = useCallback((
+    input: ImportBatchInput,
+    qualifications: readonly LocalCaptureDeclineQualificationMapping[] = [],
+  ): ImportReceipt => {
     if (!authoritativeState.current.hydrated) {
       return {
         ids: [],
+        qualificationIds: [],
         durable: Promise.reject(new Error('Ledger persistence is blocked')),
       };
     }
     const base = authoritativeState.current;
+    const materialized = materializeImportBatch(input, base, makeId);
+    const postImportState = applyMaterializedImportBatch(base, materialized);
+    const qualificationCandidates = attestDeclineQualifications(
+      base,
+      materialized,
+      postImportState,
+      qualifications,
+    );
+    const localCaptureQualifications = qualificationCandidates.length > 0
+      ? mergeLocalCaptureQualifications(
+          base.localCaptureQualifications,
+          qualificationCandidates,
+          Date.now(),
+        )
+      : undefined;
+    const qualificationIds = persistedQualificationIds(
+      localCaptureQualifications,
+      qualificationCandidates,
+    );
     const action: Action = {
       type: 'importBatch',
-      ...materializeImportBatch(input, base, makeId),
+      ...materialized,
+      ...(localCaptureQualifications ? { localCaptureQualifications } : {}),
     };
     // React dispatch is intentionally not treated as persistence. Compute the
     // exact next snapshot from the same action and enqueue its encrypted write
@@ -1530,7 +1704,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted ledger write failed');
     });
-    return { ids: action.transactions.map((t) => t.id), durable };
+    return {
+      ids: action.transactions.map((t) => t.id),
+      qualificationIds,
+      durable,
+    };
   }, [dispatch, persist]);
 
   const ensureDurable = useCallback(async () => {
@@ -1542,28 +1720,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Encrypted ledger write failed');
   }, [persist]);
 
-  const stageReviewAlerts = useCallback((items: ReviewAlert[]) => {
+  const stageReviewAlerts = useCallback((
+    items: ReviewAlert[],
+    qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+  ) => {
     if (!authoritativeState.current.hydrated || items.length === 0) {
-      return { admitted: 0, durable: ensureDurable() };
+      return { admitted: 0, qualificationIds: [], durable: ensureDurable() };
     }
+    const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     let reviewTray = authoritativeState.current.reviewTray;
     let admitted = 0;
+    const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
     const now = Date.now();
     for (const item of items) {
       const result = admitPreparedReviewAlert(reviewTray, item, now);
       reviewTray = result.state;
-      if (result.outcome === 'admitted') admitted += 1;
+      if (result.outcome === 'admitted') {
+        admitted += 1;
+        const qualification = qualificationByReviewId.get(item.id);
+        if (qualification) admittedQualifications.push(qualification);
+      }
     }
-    if (admitted === 0) return { admitted, durable: ensureDurable() };
+    if (admitted === 0) {
+      return { admitted, qualificationIds: [], durable: ensureDurable() };
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const next = dispatch({ type: 'setReviewTray', reviewTray });
+    const localCaptureQualifications = admittedQualifications.length > 0
+      ? mergeLocalCaptureQualifications(
+          authoritativeState.current.localCaptureQualifications,
+          admittedQualifications,
+          now,
+        )
+      : undefined;
+    const qualificationIds = persistedQualificationIds(
+      localCaptureQualifications,
+      admittedQualifications,
+    );
+    const next = dispatch({
+      type: 'setReviewTray',
+      reviewTray,
+      ...(localCaptureQualifications ? { localCaptureQualifications } : {}),
+    });
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted review-tray write failed');
     });
-    return { admitted, durable };
+    return {
+      admitted,
+      qualificationIds,
+      durable,
+    };
   }, [dispatch, ensureDurable, persist]);
 
   const dismissReviewAlert = useCallback(async (
@@ -1724,6 +1932,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch, persist]);
 
   const setCaptureOptOut = useCallback(async (enabled: boolean) => {
+    if (enabled) {
+      const { setIosCaptureEnabled } = await import('@/lib/capture');
+      await setIosCaptureEnabled(false);
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -1731,6 +1943,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({ type: 'setCaptureOptOut', enabled });
     const written = await persist(next);
     if (!written) throw new Error('Capture preference could not be saved');
+  }, [dispatch, persist]);
+
+  const recordIosCaptureWarning = useCallback((input: IosCaptureWarningState) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const warning = mergeIosCaptureWarningState(
+      authoritativeState.current.iosCaptureWarning,
+      input,
+    );
+    const next = dispatch({ type: 'recordIosCaptureWarning', warning });
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('iOS capture warning could not be saved');
+    });
+    return { durable };
+  }, [dispatch, persist]);
+
+  const clearIosCaptureWarning = useCallback((expectedWarningId: string | null) => {
+    const current = authoritativeState.current.iosCaptureWarning;
+    if (!current || current.nativeWarningId !== expectedWarningId) {
+      return { cleared: false, durable: Promise.resolve() };
+    }
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'clearIosCaptureWarning', expectedWarningId });
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('iOS capture warning recovery could not be saved');
+    });
+    return { cleared: true, durable };
   }, [dispatch, persist]);
 
   const setHistoryImportProgress = useCallback(async (progress: HistoryImportProgress) => {
@@ -1821,17 +2065,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       founderPro: state.founderPro,
       trialStartTs: state.trialStartTs,
       reviewTray: state.reviewTray,
+      captureOptOut: state.captureOptOut,
+      localCaptureQualifications: state.localCaptureQualifications,
+      iosCaptureWarning: state.iosCaptureWarning,
     };
     dispatch({ type: 'restore', state: safeState });
     return true;
-  }, [dispatch, state.founderPro, state.pro, state.reviewTray, state.trialStartTs]);
+  }, [
+    dispatch,
+    state.captureOptOut,
+    state.founderPro,
+    state.iosCaptureWarning,
+    state.localCaptureQualifications,
+    state.pro,
+    state.reviewTray,
+    state.trialStartTs,
+  ]);
 
   const loadDemoData = useCallback(() => {
     dispatch({
       type: 'loadDemo',
       state: {
         ...demoState(),
+        pro: authoritativeState.current.pro,
         founderPro: authoritativeState.current.founderPro,
+        trialStartTs: authoritativeState.current.trialStartTs,
       },
     });
   }, [dispatch]);
@@ -1959,6 +2217,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      recordIosCaptureWarning,
+      clearIosCaptureWarning,
       setHistoryImportProgress,
       beginHistoryImport,
       applyFxUpdates,
@@ -2015,6 +2275,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      recordIosCaptureWarning,
+      clearIosCaptureWarning,
       setHistoryImportProgress,
       beginHistoryImport,
       applyFxUpdates,

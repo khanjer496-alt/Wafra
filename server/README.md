@@ -167,21 +167,23 @@ npm run setup            # creates or finds the "wafra" D1 database, writes its
                          # database_id into wrangler.toml, and applies schema.sql
 npx wrangler secret put PUSH_TOKEN_KEY
 npx wrangler secret put EXPO_ACCESS_TOKEN
-npm run deploy           # predeploy re-applies additive schema before publish
+npm run deploy           # predeploy applies schema + tracked migrations first
 ```
 
 `npm run setup` is idempotent — run it on a machine that already has the
 database and it finds the existing one. A D1 binding is resolved at build time
 and there is no environment-variable substitution for it, which is why the id
 has to be written into `wrangler.toml` rather than injected. Before publishing,
-`npm run deploy` automatically runs the guarded, idempotent schema migration
+`npm run deploy` automatically runs the guarded schema and tracked D1 migrations
 and refuses while the id is still the placeholder, so a fresh clone fails with
 a sentence instead of an opaque Cloudflare API error.
 
-Authentication joins the per-device `automation_generations` table on every
+Authentication reads `devices.shortcut_ingest_enabled` and joins the per-device
+`automation_generations` table on every
 authenticated request, so publishing before that additive table exists would
 break all authenticated routes. Keeping migration inside `predeploy` makes that
-ordering automatic; `migrate` is idempotent and passes `--yes`.
+ordering automatic; `migrate` applies `schema.sql`, then Wrangler's tracked
+migrations, and passes `--yes`.
 
 `npm run typecheck` deliberately does **not** shell out to `wrangler types
 --check`. That is what made `npm run check:server` exit 127 on a clean
@@ -196,21 +198,32 @@ If you would rather do it by hand:
 npx wrangler d1 create wafra          # copy the printed uuid
 # paste it into wrangler.toml -> [[d1_databases]] database_id
 npx wrangler d1 execute wafra --remote --file=./schema.sql --yes
+npx wrangler d1 migrations apply wafra --remote --yes
 npx wrangler deploy
 ```
 
-**Upgrading a database created before the market and coalescing columns
-existed** — SQLite has no `ADD COLUMN IF NOT EXISTS`, so these are commented out
-in `schema.sql` and run once, by hand:
+**Upgrading a database created before the market, Shortcut-retirement and
+coalescing columns existed** — `npm run migrate` automatically applies the
+tracked Shortcut-retirement migration exactly once. The older market and push
+columns still require the documented manual check on databases that predate
+the migration ledger; repeating either manual `ALTER` is expected to fail:
 
 ```bash
 npx wrangler d1 execute wafra --remote \
   --command "ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE'"
 npx wrangler d1 execute wafra --remote \
+  --command "PRAGMA table_info(devices)"
+npx wrangler d1 migrations apply wafra --remote --yes
+npx wrangler d1 execute wafra --remote \
+  --command "PRAGMA table_info(devices)"
+npx wrangler d1 execute wafra --remote \
   --command "ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0"
 ```
 
-Existing devices keep parsing under AE, which is what they were doing anyway.
+Existing devices keep parsing under AE and keep Shortcut ingest enabled, which
+is what they were doing before these columns existed. Apply the retirement
+migration before publishing Worker code that selects the new flag; `/v1/health`
+reads it as a schema-drift sentinel.
 
 **Secrets.** `PUSH_TOKEN_KEY` is standard base64 containing exactly 32 random
 bytes; without it the Worker registers no push tokens and sends no wakes, and
@@ -265,6 +278,7 @@ which stays in the foreground app.
 | `GET` | `/v1/sync` | Sync bearer → `{items: [{id, epk, iv, ct}]}` |
 | `POST` | `/v1/ack` | Sync bearer + `{ids}` → `204`, rows deleted |
 | `PATCH` | `/v1/device` | Admin bearer + `{market}` → `{market}` |
+| `POST` | `/v1/device/retire-shortcut-capture` | Admin bearer → idempotent `204`; disable only this device's copied Shortcut ingest scope |
 | `DELETE` | `/v1/device` | Admin bearer → `204`, device and queue erased |
 | `POST` | `/v1/automation-generation` | Admin bearer → rotate and return `{generation}` for this device's Message-automation proof |
 | `PUT` | `/v1/push` | Admin bearer + `{expoPushToken, projectId}` → register/refresh a wake-only token |
@@ -298,6 +312,34 @@ an imported transaction; the phone must show and confirm it explicitly.
 Re-pairing mints a new ingest token, and the old one is baked into the user's
 Shortcut where nothing in the app can reach it — capture would die silently
 while the app looked healthy.
+
+`POST /v1/device/retire-shortcut-capture` solves the inverse problem: an
+installed Shortcut can outlive the app and retain a copied ingest bearer. The
+admin-authenticated, idempotent route flips only `shortcut_ingest_enabled` and
+clears the device's `automation_generations`, `ingest_receipts` and
+`ingest_limits`. It deliberately preserves the device, vault, already-sealed
+queue, sync/admin/email credentials, push registration and trusted-device
+invites. Existing queue rows therefore remain collectable and email/PDF/CSV
+supplements remain active.
+
+Every authenticated Shortcut request first consumes the same fixed-hour traffic
+budget, including an empty, invalid, ignored, replayed or queue-full request.
+That single UPSERT has an enabled-device predicate in the write itself. If
+retirement commits after authentication but before the UPSERT, it changes zero
+rows and the Worker returns `401` without recreating the counter retirement
+deleted.
+
+Queue inserts and their replay receipt then share a transactional D1 batch and
+repeat the enabled-device guard. Each candidate queue row gets a fresh id
+before the batch; the receipt INSERT/UPSERT runs only if at least one of those
+exact ids was inserted by an earlier statement in the batch. A target that
+fills after selection therefore returns `queue_full` without creating a replay
+receipt, and the same event can be retried after capacity is freed. A replay
+also leaves its existing receipt deadline unchanged. `D1Result.meta.changes`
+selects only the targets whose insert actually admitted a row. If retirement
+wins between traffic accounting and this batch, its transaction removes the
+counter, every guarded admission changes zero rows, and the Worker rereads the
+flag and returns `401`.
 
 The published Shortcut should send one random `eventId` per automation run and
 reuse it if its HTTP action retries; a legacy `{text}` call falls back to a

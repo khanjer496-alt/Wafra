@@ -43,14 +43,15 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: 'production = App Store signing, the only kind TestFlight accepts. preview = ad-hoc, installs only on UDIDs registered with eas device:create (see docs/ios-device-install.md).'
+        description: 'production = public runtime. production-candidate = production-equivalent OTA verification through TestFlight. preview = ad-hoc and installs only on registered UDIDs.'
         type: choice
         options:
           - production
+          - production-candidate
           - preview
         default: production
       submit:
-        description: 'Also send the finished build to TestFlight. Requires profile = production.'
+        description: 'Also send the finished store-signed build to TestFlight. Supported by production and production-candidate; preview is ad-hoc only.'
         type: boolean
         default: false
       wait:
@@ -136,7 +137,7 @@ jobs:
       #      Two independent reasons, both of which surface as a confusing
       #      failure thirty minutes in. Stop now instead.
       - name: Refuse a combination that cannot reach TestFlight
-        if: inputs.submit_build_id == '' && inputs.submit && inputs.profile != 'production'
+        if: inputs.submit_build_id == '' && inputs.submit && inputs.profile == 'preview'
         run: |
           {
             echo "# Not started — \`preview\` builds cannot go to TestFlight"
@@ -153,6 +154,7 @@ jobs:
             echo "| Goal | profile | submit |"
             echo "| --- | --- | --- |"
             echo "| Get it on your iPhone via TestFlight | \`production\` | on |"
+            echo "| Verify a production-equivalent OTA candidate | \`production-candidate\` | on |"
             echo "| Check that it compiles, send nothing to Apple | \`production\` | off |"
             echo "| Side-load onto one registered device without Apple review | \`preview\` | off — see \`docs/ios-device-install.md\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -177,13 +179,21 @@ jobs:
           PROFILE: ${{ inputs.profile }}
           WANT_SUBMIT: ${{ inputs.submit }}
         run: |
-          node scripts/check-release-config.mjs \
-            --intent build \
-            --platform ios \
-            --profile "$PROFILE" \
-            --submit "$WANT_SUBMIT" \
-            --github-output "$GITHUB_OUTPUT" \
+          args=(
+            scripts/check-release-config.mjs
+            --intent build
+            --platform ios
+            --profile "$PROFILE"
+            --submit "$WANT_SUBMIT"
+            --github-output "$GITHUB_OUTPUT"
             --github-summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [ "$PROFILE" = "preview" ]; then
+            node "${args[@]}"
+          else
+            printf -v check_command '%q ' node "${args[@]}"
+            npx --yes eas-cli@22.4.0 env:exec production "$check_command" --non-interactive
+          fi
 
       # ---- The Apple credentials.
       #
@@ -359,6 +369,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Validate OTA-enabled store build configuration
+        if: inputs.submit_build_id == '' && inputs.profile != 'preview'
+        run: npm run update:check
 
       # Keep the CI binary aligned with eas.json's cli.version contract. Bumping
       # EAS is deliberate: validate the workflow with the new CLI before moving

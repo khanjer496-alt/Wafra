@@ -207,6 +207,8 @@ export interface RelayConfig {
   automationPreparedAt?: number;
   /** Opaque per-device server generation that later Message rows must match exactly. */
   automationGeneration?: string;
+  /** Foreground Keychain proof that the copied Shortcut ingest scope was retired. */
+  shortcutCaptureRetiredAt?: number;
   /**
    * When the relay last refused this credential outright — see
    * markRelayRevoked(). A stamped credential is no longer a pairing:
@@ -284,6 +286,18 @@ export function normalizeShortcutInstallUrl(
 /** iOS is the only platform that needs the relay; Android reads the inbox. */
 export function isRelayPlatform(): boolean {
   return Platform.OS === 'ios';
+}
+
+/** The old per-charge banner exists only while Shortcut ingest is still active. */
+export function isLegacyShortcutCaptureActive(
+  config: Pick<
+    RelayConfig,
+    'automationGeneration' | 'shortcutCaptureRetiredAt'
+  > | null | undefined,
+): boolean {
+  return config != null && config.shortcutCaptureRetiredAt === undefined &&
+    typeof config.automationGeneration === 'string' &&
+    AUTOMATION_GENERATION_RE.test(config.automationGeneration);
 }
 
 /** A market id the app actually ships a pack for, or null. */
@@ -366,6 +380,12 @@ function decodeStoredRelayConfig(raw: string, includeRevoked = false): RelayConf
     AUTOMATION_GENERATION_RE.test(cfg.automationGeneration)
       ? cfg.automationGeneration
       : undefined;
+  const shortcutCaptureRetiredAt =
+    typeof cfg.shortcutCaptureRetiredAt === 'number' &&
+    Number.isFinite(cfg.shortcutCaptureRetiredAt) &&
+    cfg.shortcutCaptureRetiredAt > 0
+      ? cfg.shortcutCaptureRetiredAt
+      : undefined;
   return {
     ...cfg,
     baseUrl,
@@ -376,6 +396,7 @@ function decodeStoredRelayConfig(raw: string, includeRevoked = false): RelayConf
     verifiedAt,
     automationPreparedAt,
     automationGeneration,
+    shortcutCaptureRetiredAt,
   } as RelayConfig;
 }
 
@@ -964,6 +985,33 @@ export async function setRelayMarket(cfg: RelayConfig, market: string): Promise<
   const next = await updateRelayConfigIfCurrent(cfg, (current) => ({ ...current, market: pack }));
   if (!next) throw new RelayError('This relay pairing was replaced.', false, 'stale_pairing');
   return next;
+}
+
+/**
+ * Retire only the bearer embedded in the user's installed Shortcut.
+ *
+ * The server operation is idempotent. Local completion is written afterwards
+ * through the serialized current-pairing compare-and-set, so a late response
+ * can neither stamp replacement credentials nor expose this foreground-only
+ * state in the locked-phone background item.
+ */
+export async function retireRelayShortcutCapture(cfg: RelayConfig): Promise<void> {
+  let res: Response;
+  try {
+    res = await request(`${cfg.baseUrl}/v1/device/retire-shortcut-capture`, {
+      method: 'POST',
+      token: cfg.adminToken,
+    });
+  } catch {
+    throw new RelayError('Could not reach Wafra.', true, 'unavailable');
+  }
+  if (res.status !== 204) {
+    throw await responseError(res, `Shortcut retirement failed (${res.status}).`);
+  }
+  await updateRelayConfigIfCurrent(cfg, (current) => ({
+    ...current,
+    shortcutCaptureRetiredAt: Date.now(),
+  }));
 }
 
 export async function listTrustedDevices(cfg: RelayConfig): Promise<TrustedDevice[]> {

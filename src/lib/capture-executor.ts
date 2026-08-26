@@ -18,7 +18,12 @@ import {
   type RelayConfig,
   type RelaySyncResult,
 } from '@/lib/relay';
-import type { AppState, ImportBatchInput } from '@/lib/types';
+import type {
+  AppState,
+  ImportBatchInput,
+  LocalCaptureDeclineQualificationMapping,
+  LocalCaptureReviewQualificationCandidate,
+} from '@/lib/types';
 import type { ReviewAlert } from '@/lib/alert-review-tray';
 
 export type CaptureIntent = 'routine' | 'supplemental' | 'setup-verification' | 'background';
@@ -53,11 +58,19 @@ export interface CaptureExecutor {
 
 export interface CaptureLedgerAdapter {
   getState: () => AppState;
-  importBatch: (input: ImportBatchInput) => { ids: string[]; durable: Promise<void> };
+  /** Replacement generation; local iOS capture refuses to drain without it. */
+  getStateGeneration?: () => number;
+  importBatch: (
+    input: ImportBatchInput,
+    qualifications?: readonly LocalCaptureDeclineQualificationMapping[],
+  ) => { ids: string[]; qualificationIds?: string[]; durable: Promise<void> };
   ensureDurable: () => Promise<void>;
   /** Persist a launch pack selected from strong per-alert AED/SAR evidence. */
   setMarket?: (id: 'AE' | 'SA') => boolean;
-  stageReviewAlerts?: (items: ReviewAlert[]) => { admitted: number; durable: Promise<void> };
+  stageReviewAlerts?: (
+    items: ReviewAlert[],
+    qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+  ) => { admitted: number; qualificationIds?: string[]; durable: Promise<void> };
 }
 
 export interface BackgroundCaptureAdapter {
@@ -329,16 +342,23 @@ export const createCaptureExecutor = ({
   const executeSupplemental = async (): Promise<CaptureExecutionOutcome> => {
     const activeLedger = requireLedger();
     if (!activeLedger.getState().hydrated) return { kind: 'not-hydrated' };
+    const stopped = (): CaptureExecutionOutcome => ({
+      kind: 'up-to-date',
+      source: 'none',
+      ...EMPTY_SUMMARY,
+    });
 
     const cfg = await dependencies.getRelay();
+    if (captureStopped(activeLedger, 'relay')) return stopped();
     if (!cfg) return { kind: 'needs-setup' };
 
     const queued = await dependencies.sync(cfg);
+    if (captureStopped(activeLedger, 'relay')) return stopped();
     alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     // Network collection can overlap a foreground import or an edit. Plan
     // against the authoritative ledger after that wait, not the snapshot that
     // happened to be current when the request started.
-    const state = activeLedger.getState();
+    let state = activeLedger.getState();
     if (!state.hydrated) return { kind: 'not-hydrated' };
     let reviewAlerts = 0;
     const reviewCandidates = queued.reviewCandidates ?? [];
@@ -346,9 +366,12 @@ export const createCaptureExecutor = ({
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
+      if (captureStopped(activeLedger, 'relay')) return stopped();
       const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
+      if (captureStopped(activeLedger, 'relay')) return stopped();
+      state = activeLedger.getState();
     }
     const newestTs = queued.parsed.reduce(
       (max, row) => Math.max(max, row.smsTs ?? 0),
@@ -357,16 +380,25 @@ export const createCaptureExecutor = ({
     const plan = dependencies.planRows(queued.parsed, state, newestTs);
     let transactionIds: string[] = [];
     if (queued.parsed.length > 0) {
+      if (captureStopped(activeLedger, 'relay')) return stopped();
       const receipt = activeLedger.importBatch(plan.batch);
       transactionIds = receipt.ids;
       await receipt.durable;
+      if (captureStopped(activeLedger, 'relay')) return stopped();
     } else if (reviewCandidates.length === 0) {
+      if (captureStopped(activeLedger, 'relay')) return stopped();
       await activeLedger.ensureDurable();
+      if (captureStopped(activeLedger, 'relay')) return stopped();
     }
 
+    if (captureStopped(activeLedger, 'relay')) return stopped();
     await recordForegroundAutomationProof(queued.parsed, cfg);
+    if (captureStopped(activeLedger, 'relay')) return stopped();
     const acknowledge = acknowledgementsFor(queued, true);
-    if (acknowledge.length > 0) await dependencies.acknowledge(cfg, acknowledge);
+    if (acknowledge.length > 0) {
+      if (captureStopped(activeLedger, 'relay')) return stopped();
+      await dependencies.acknowledge(cfg, acknowledge);
+    }
     return hasChanges(plan)
       ? { kind: 'imported', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) }
       : { kind: 'up-to-date', source: 'relay', ...summary(plan, transactionIds, reviewAlerts) };

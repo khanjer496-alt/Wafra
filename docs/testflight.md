@@ -1,5 +1,16 @@
 # Getting Wafra onto your iPhone via TestFlight, from a phone
 
+> **CURRENT STATUS — LEGACY RELAY SHORTCUT RETIRED / DO NOT USE FOR NEW SETUP**
+>
+> The general EAS/TestFlight account and build instructions remain reference
+> material. Any section that tells you to deploy the Message relay, install the
+> old **Wafra Capture** Shortcut, or use its iCloud URL is historical and must
+> not be followed for a new setup. The current local-capture implementation and
+> its still-blocked physical-iPhone release gates are defined in
+> [`2026-08-25-ios-local-capture.md`](./superpowers/plans/2026-08-25-ios-local-capture.md).
+> This page is not evidence of a new build, submission, signed replacement
+> Shortcut, published iCloud URL, or physical-device test.
+
 You have an Android phone and no Mac. That is fine: **EAS Build compiles iOS on
 Expo's own macOS machines**, so nothing on this page needs a Mac. What it needs
 is a terminal — exactly once, and there is a way to get one in a browser tab.
@@ -423,7 +434,12 @@ A TestFlight build of Wafra today is a real, working ledger. Several things
 that the App Store version will do are **inert**, and none of them is a bug.
 Read this before concluding something is broken.
 
-### Automatic bank capture still needs physical release proof
+### Legacy relay automatic capture — retired historical notes
+
+> **RETIRED / DO NOT USE FOR NEW SETUP.** The numbered procedure and URL below
+> are preserved only to explain the previous architecture. They are not a
+> current release checklist. Use the local-capture plan linked at the top of
+> this page instead.
 
 iOS does not let an app read Messages, and Wafra does not claim to. Automatic
 capture on iOS is a chain of three things. The repository contains the app and
@@ -559,8 +575,9 @@ thing a submission cannot work out from the bundle identifier alone if you ever
 end up with two app records. It is found at **App Store Connect → Apps → Wafra
 → App Store → App Information → General Information → Apple ID**.
 
-The replacement Shortcut is now published and configured in `capture-beta` and
-`production`; ad-hoc `preview` intentionally omits automatic capture. After its
-exact link passes the locked-phone bank-alert test on a physical iPhone, record
-that evidence and promote automatic capture from candidate to release-verified.
-Until then, see "What this build cannot do yet".
+Historical note: the retired relay Shortcut was once described as published
+and configured in `capture-beta` and `production`, while ad-hoc `preview`
+omitted it. That statement does not qualify the old URL or establish a current
+replacement. Do not restore or promote it. Follow the local-capture plan and
+record its separate physical-iPhone gates before making any new automatic-
+capture release claim.

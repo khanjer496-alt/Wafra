@@ -64,6 +64,9 @@ ok('migrate is gated by the same guard', /d1\.mjs check/.test(pkg.scripts.migrat
 ok('migrate applies schema.sql remotely without an interactive prompt',
   /d1 execute wafra --remote --file=\.\/schema\.sql/.test(pkg.scripts.migrate) &&
     /--yes/.test(pkg.scripts.migrate));
+ok('migrate applies tracked D1 migrations before Worker publication',
+  /d1 migrations apply wafra --remote/.test(pkg.scripts.migrate) &&
+    /--yes/.test(pkg.scripts.migrate));
 ok('the GitHub deploy has no schema opt-out',
   !/apply_schema/.test(deployWorkflow));
 ok('the GitHub post-deploy schema check is fatal',

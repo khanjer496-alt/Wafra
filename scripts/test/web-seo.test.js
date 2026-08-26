@@ -19,6 +19,26 @@ function ok(name, condition, detail = '') {
 const root = path.join(__dirname, '../..');
 const finalizer = path.join(root, 'scripts/finalize-web-seo.mjs');
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-web-seo-'));
+const landing = fs.readFileSync(path.join(root, 'src/marketing/home.web.tsx'), 'utf8');
+const content = fs.readFileSync(path.join(root, 'src/marketing/content.ts'), 'utf8');
+
+ok(
+  'the landing page teaches Any Sender with supported-bank filtering on the iPhone',
+  /iPhone[\s\S]{0,500}Any Sender[\s\S]{0,500}supported bank alerts[\s\S]{0,200}locally/.test(landing) &&
+    !/bank senders you select/.test(landing),
+);
+ok(
+  'the visible and structured FAQ agree on local Any Sender capture',
+  (content.match(/Any Sender/g) || []).length >= 2 &&
+    (content.match(/supported bank alerts/g) || []).length >= 2 &&
+    (content.match(/locally on (?:this |the )?iPhone/g) || []).length >= 2 &&
+    !/selected bank senders/.test(content),
+);
+ok(
+  'the landing privacy list names capture opt-out as manual-only instead of Private Mode',
+  /<strong>Manual-only<\/strong>[\s\S]{0,220}Leave automatic Message capture off/.test(landing) &&
+    !/<strong>Private mode<\/strong>[\s\S]{0,220}Leave message access off/.test(landing),
+);
 
 try {
   const placeholder = spawnSync(process.execPath, [finalizer, output], {

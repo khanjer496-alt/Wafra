@@ -70,7 +70,7 @@ function features(): FeatureRow[] {
       icon: 'spark',
       titleKey: 'featAutoTracking',
       textKey:
-        autoCaptureMethod() === 'relayCapture' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
+        autoCaptureMethod() === 'localAutomation' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
     },
   ];
 }

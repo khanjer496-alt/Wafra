@@ -1,5 +1,16 @@
 # Building and publishing Wafra Capture — tap by tap
 
+> **CURRENT STATUS — RETIRED / DO NOT USE FOR NEW SETUP**
+>
+> The procedure below is retained as historical documentation for the old
+> relay-uploading **Wafra Capture** Shortcut. Do not follow it, distribute its
+> artifact, or put its iCloud URL into a new build. The current local-capture
+> implementation and the physical-device evidence still required for release
+> are defined in
+> [`2026-08-25-ios-local-capture.md`](./superpowers/plans/2026-08-25-ios-local-capture.md).
+> No replacement artifact, signature, checksum, iCloud URL, or physical-device
+> result is established by this document.
+
 **Do this once, ever.** It is the last thing standing between an iPhone tester
 and three-minute setup. Until this exists, every tester has to build the action
 graph themselves from `docs/ios-shortcut-spec.md`, which is fine for a

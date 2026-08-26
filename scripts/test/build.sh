@@ -41,6 +41,7 @@ rewrite() {
       -e "s|import('@/components/ui/icon').IconName|string|g" \
       -e "s|from '../../modules/notification-reader'|from './notification-reader'|" \
       -e "s|from '../../modules/sms-reader'|from './sms-reader'|" \
+      -e "s|from '../../modules/wafra-live-capture'|from './wafra-live-capture-types'|" \
       -e "s|from 'react-native'|from './stub-react-native'|" \
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
       -e "s|from 'expo-constants'|from './stub-expo-constants'|" \
@@ -71,7 +72,8 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          ledger-money review-promotion alert-ai-suggestion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
-         alert-market-packs alert-semantics alert-rollout feedback-wire historical-import; do
+         alert-market-packs alert-semantics alert-rollout feedback-wire historical-import \
+         ios-bank-senders.generated ios-bank-senders local-message-record ios-local-capture; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
@@ -96,6 +98,19 @@ done
 # and in Expo Go anyway.
 rewrite ../../modules/sms-reader/index.ts build/sms-reader.ts
 rewrite ../../modules/notification-reader/index.ts build/notification-reader.ts
+rewrite ../../modules/wafra-live-capture/src/WafraLiveCapture.types.ts \
+  build/wafra-live-capture-types.ts
+
+# ios-local-capture consumes only this adapter contract. Extract it from the
+# shipping executor so the pure harness cannot drift while avoiding that
+# executor's relay/native runtime graph.
+{
+  echo "import type { ReviewAlert } from './alert-review-tray';"
+  echo "import type { AppState, ImportBatchInput, LocalCaptureDeclineQualificationMapping, LocalCaptureReviewQualificationCandidate } from './types';"
+  echo
+  awk '/^export interface CaptureLedgerAdapter \{/,/^\}/' \
+    ../../src/lib/capture-executor.ts
+} > build/capture-executor.ts
 
 # `store.tsx` is a React module and cannot be compiled here, but auto-import and
 # relay both take their batch shape from it. The two interfaces are EXTRACTED

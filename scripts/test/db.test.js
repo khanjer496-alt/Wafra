@@ -53,6 +53,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
 
 let pass = 0;
 let fail = 0;
@@ -280,7 +281,7 @@ const store = stripComments(read('src/lib/store.tsx'));
  * override table do to each other across a launch, and every one of the three
  * doubles hides the defect it exists to catch.
  */
-function loadHydrationExports(realModules = {}) {
+function loadHydrationExports(realModules = {}, captureProvider = false) {
   const ts = require('typescript');
   const execute = (rel, requireModule) => {
     const filename = path.join(ROOT, rel);
@@ -345,7 +346,11 @@ function loadHydrationExports(realModules = {}) {
   };
   const identityState = (state) => state;
   const modules = {
-    'react/jsx-runtime': { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') },
+    'react/jsx-runtime': {
+      jsx: (_type, props) => captureProvider ? props.value : {},
+      jsxs: (_type, props) => captureProvider ? props.value : {},
+      Fragment: Symbol('Fragment'),
+    },
     react,
     'expo-localization': { useLocales: () => [{ languageCode: 'en' }] },
     'react-native': {
@@ -358,6 +363,8 @@ function loadHydrationExports(realModules = {}) {
       mergeDuplicateAccounts: identityState,
       mergeRenewedCard: identityState,
       repairCardPaymentAccounts: identityState,
+      repairDuplicateStatements: identityState,
+      removeDeclinedTransactions: identityState,
     },
     '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
     '@/lib/theme-preference': { setThemePreference() {} },
@@ -394,6 +401,7 @@ function loadHydrationExports(realModules = {}) {
       mergeDeferredOnboardingPlan: (budgets, goals) => ({ budgets, goals }),
     },
     '@/lib/alert-review-tray': require('./build/alert-review-tray'),
+    '@/lib/types': require('./build/types'),
     '@/lib/review-promotion': require('./build/review-promotion'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
@@ -592,6 +600,272 @@ ok('an in-flight hydration can be superseded',
 // ---------------------------------------------------------------------------
 // 2c. Persisted-ledger migrations are lossless for authoritative user data.
 // ---------------------------------------------------------------------------
+
+{
+  const now = Date.now();
+  const validId = '40000000-0000-4000-8000-000000000001';
+  const duplicateId = '40000000-0000-4000-8000-000000000002';
+  const receipt = (id, kind, observedAt, expiresAt, extra = {}) => ({
+    v: 1, id, kind, observedAt, expiresAt, ...extra,
+  });
+  const migrated = hydration.migratePersistedState({
+    localCaptureQualifications: [
+      receipt(validId, 'review', now - 2_000, now + 10_000),
+      receipt(duplicateId, 'review', now - 1_000, now + 10_000),
+      receipt(duplicateId, 'decline', now - 1_000, now + 10_000),
+      receipt('40000000-0000-4000-8000-000000000003', 'review', now - 1_000, now),
+      receipt('40000000-0000-4000-8000-000000000004', 'review', now - 1_000, now + 10_000,
+        { body: 'must not hydrate' }),
+    ],
+  });
+  ok('hydration fails closed and prunes encrypted local qualification receipts',
+    JSON.stringify(migrated.localCaptureQualifications?.map((entry) => entry.id)) ===
+      JSON.stringify([validId]) &&
+      !JSON.stringify(migrated.localCaptureQualifications).includes('must not hydrate'),
+    JSON.stringify(migrated.localCaptureQualifications));
+}
+
+{
+  const saved = [];
+  const persistence = {
+    load: async () => null,
+    save: async (snapshot) => {
+      saved.push(JSON.parse(JSON.stringify(snapshot)));
+      return true;
+    },
+    block() {},
+    reset: async () => {},
+    destroy: async () => {},
+  };
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => persistence,
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+  }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  const initialized = ledger.restoreBackup(JSON.stringify({
+    app: 'wafra', version: 1, data: { transactions: [] },
+  }));
+  const consentPreserved = ledger.restoreBackup(JSON.stringify({
+    app: 'wafra', version: 1, data: {
+      transactions: [],
+      captureOptOut: true,
+    },
+  }));
+  ok('backup restore cannot replace this device’s local capture consent',
+    initialized && consentPreserved && ledger.getStateSnapshot().captureOptOut === false,
+    JSON.stringify(ledger.getStateSnapshot().captureOptOut));
+  const warningId = '00000000-0000-0000-0000-00000000000A';
+  const warningReceipt = ledger.recordIosCaptureWarning({
+    dropped: 2,
+    corrupt: true,
+    recordedAt: 1_800_000_000_000,
+    nativeWarningId: warningId,
+  });
+  const mismatchedWarningClear = ledger.clearIosCaptureWarning(
+    '00000000-0000-0000-0000-00000000000B',
+  );
+  const matchingWarningClear = ledger.clearIosCaptureWarning(warningId);
+  ok('iOS warning recovery compare-and-clears only the matching opaque generation',
+    initialized && typeof warningReceipt?.durable?.then === 'function' &&
+      !mismatchedWarningClear.cleared && matchingWarningClear.cleared &&
+      ledger.getStateSnapshot().iosCaptureWarning === null &&
+      saved.some((snapshot) => snapshot.iosCaptureWarning?.nativeWarningId === warningId) &&
+      saved.at(-1).iosCaptureWarning === null,
+    JSON.stringify({ mismatchedWarningClear, matchingWarningClear, latest: saved.at(-1) }));
+  const now = Date.now();
+  const reviewRecordId = '50000000-0000-4000-8000-000000000001';
+  const reviewItem = {
+    id: 'atomic_review_item_00001',
+    sourceKey: 'atomic_review_source_001',
+    observedAt: now - 2_000,
+    expiresAt: now + 86_400_000,
+    channel: 'inbox',
+    parserVersion: 1,
+    market: 'AE',
+    institution: 'fab',
+    grammar: {
+      id: 'fab-launch-review', version: 1, channel: 'bank-alert',
+      status: 'experimental', provenance: 'launch-registry',
+    },
+    amount: { currency: 'AED', minorUnits: '250000', exponent: 2 },
+    direction: 'credit',
+    family: 'transfer',
+    rail: null,
+    instrument: null,
+  };
+  const reviewReceipt = ledger.stageReviewAlerts([reviewItem], [{
+    reviewId: reviewItem.id,
+    qualification: { id: reviewRecordId, kind: 'review', observedAt: reviewItem.observedAt },
+  }]);
+  const reviewSnapshot = saved.at(-1);
+  ok('the encrypted review write atomically contains admission and its exact qualification receipt',
+    initialized && reviewReceipt.admitted === 1 &&
+      JSON.stringify(reviewReceipt.qualificationIds) === JSON.stringify([reviewRecordId]) &&
+      reviewSnapshot.reviewTray.pending.some((item) => item.id === reviewItem.id) &&
+      reviewSnapshot.localCaptureQualifications.some((receipt) => receipt.id === reviewRecordId),
+    JSON.stringify(reviewSnapshot));
+
+  const declineRecordId = '50000000-0000-4000-8000-000000000002';
+  const prior = {
+    id: 'decline-atomic-row', type: 'expense', amountFils: 110800, category: 'other',
+    accountId: 'main', title: 'Noon', date: '2026-08-25', source: 'sms',
+  };
+  const restored = ledger.restoreBackup(JSON.stringify({
+    app: 'wafra', version: 1, data: { transactions: [prior] },
+  }));
+  let importReceipt = null;
+  let validAttestationError = null;
+  try {
+    importReceipt = ledger.importBatch({
+      transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [],
+      snapshots: {}, bankNames: {}, cardTypes: {}, lastScanTs: 0,
+      updates: [{ id: prior.id, remove: true }],
+    }, [{
+      qualification: { id: declineRecordId, kind: 'decline', observedAt: now - 1_000 },
+      removedTransactionId: prior.id,
+    }]);
+  } catch (error) {
+    validAttestationError = error;
+  }
+  const declineSnapshot = saved.at(-1);
+  ok('the encrypted import write atomically contains decline removal and its exact qualification receipt',
+    restored && !validAttestationError &&
+      !declineSnapshot.transactions.some((row) => row.id === prior.id) &&
+      declineSnapshot.localCaptureQualifications.some((receipt) => receipt.id === declineRecordId) &&
+      JSON.stringify(importReceipt.qualificationIds) === JSON.stringify([declineRecordId]),
+    String(validAttestationError ?? JSON.stringify(declineSnapshot)));
+  ok('atomic qualification persistence contains no alert source attributes',
+    !/(sender|body|merchant|amount|account|bank)/i.test(JSON.stringify(
+      declineSnapshot.localCaptureQualifications,
+    )), JSON.stringify(declineSnapshot.localCaptureQualifications));
+
+  const emptyImport = (updates) => ({
+    transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [],
+    snapshots: {}, bankNames: {}, cardTypes: {}, lastScanTs: 0, updates,
+  });
+  const mapping = (id, removedTransactionId, extra = {}) => ({
+    qualification: { id, kind: 'decline', observedAt: now - 1_000 },
+    removedTransactionId,
+    ...extra,
+  });
+  const second = { ...prior, id: 'decline-second-row' };
+  const invalidAttestations = [
+    ['empty/no-op batch', [], [mapping(
+      '50000000-0000-4000-8000-000000000010', prior.id,
+    )]],
+    ['unrelated remove', [{ id: second.id, remove: true }], [mapping(
+      '50000000-0000-4000-8000-000000000011', prior.id,
+    )]],
+    ['missing row', [{ id: 'missing-row', remove: true }], [mapping(
+      '50000000-0000-4000-8000-000000000012', 'missing-row',
+    )]],
+    ['wrong transaction', [{ id: prior.id, remove: true }], [mapping(
+      '50000000-0000-4000-8000-000000000013', second.id,
+    )]],
+    ['remove:false', [{ id: prior.id, remove: false }], [mapping(
+      '50000000-0000-4000-8000-000000000014', prior.id,
+    )]],
+    ['duplicate native identity', [
+      { id: prior.id, remove: true }, { id: second.id, remove: true },
+    ], [
+      mapping('50000000-0000-4000-8000-000000000015', prior.id),
+      mapping('50000000-0000-4000-8000-000000000015', second.id),
+    ]],
+    ['duplicate removed identity', [{ id: prior.id, remove: true }], [
+      mapping('50000000-0000-4000-8000-000000000016', prior.id),
+      mapping('50000000-0000-4000-8000-000000000017', prior.id),
+    ]],
+    ['open mapping schema', [{ id: prior.id, remove: true }], [mapping(
+      '50000000-0000-4000-8000-000000000018', prior.id, { sender: 'must-not-persist' },
+    )]],
+  ];
+  for (const [name, updates, attestations] of invalidAttestations) {
+    ledger.restoreBackup(JSON.stringify({
+      app: 'wafra', version: 1, data: { transactions: [prior, second] },
+    }));
+    const writesBefore = saved.length;
+    let error = null;
+    try {
+      ledger.importBatch(emptyImport(updates), attestations);
+    } catch (caught) {
+      error = caught;
+    }
+    ok(`decline attestation rejects ${name} before encrypted persistence`,
+      error && saved.length === writesBefore &&
+        !/(sender|body|merchant|amount|account|bank)/i.test(String(error)),
+      JSON.stringify({ error: String(error), writesBefore, writesAfter: saved.length }));
+  }
+
+  {
+    const pinned = { ...prior, id: 'decline-user-edited-row', userEdited: true };
+    const forgedId = '50000000-0000-4000-8000-000000000019';
+    ledger.restoreBackup(JSON.stringify({
+      app: 'wafra', version: 1, data: { transactions: [pinned] },
+    }));
+    const writesBefore = saved.length;
+    let receipt = null;
+    let error = null;
+    try {
+      receipt = ledger.importBatch(emptyImport([{ id: pinned.id, remove: true }]), [
+        mapping(forgedId, pinned.id),
+      ]);
+    } catch (caught) {
+      error = caught;
+    }
+    const current = ledger.getStateSnapshot();
+    ok('decline attestation rejects a remove:true patch when materialization preserves userEdited',
+      error && receipt === null && saved.length === writesBefore &&
+        current.transactions.some((row) => row.id === pinned.id) &&
+        !current.localCaptureQualifications?.some((entry) => entry.id === forgedId) &&
+        !/(sender|body|merchant|amount|account|bank)/i.test(String(error)),
+      JSON.stringify({
+        error: String(error), receipt, writesBefore, writesAfter: saved.length,
+        transactions: current.transactions.map((row) => row.id),
+        qualifications: current.localCaptureQualifications,
+      }));
+  }
+
+  {
+    const removable = { ...prior, id: 'decline-mixed-removable-row' };
+    const pinned = {
+      ...prior, id: 'decline-mixed-user-edited-row', userEdited: true,
+    };
+    const validId = '50000000-0000-4000-8000-000000000020';
+    const forgedId = '50000000-0000-4000-8000-000000000021';
+    ledger.restoreBackup(JSON.stringify({
+      app: 'wafra', version: 1, data: { transactions: [removable, pinned] },
+    }));
+    const writesBefore = saved.length;
+    let receipt = null;
+    let error = null;
+    try {
+      receipt = ledger.importBatch(emptyImport([
+        { id: removable.id, remove: true },
+        { id: pinned.id, remove: true },
+      ]), [
+        mapping(validId, removable.id),
+        mapping(forgedId, pinned.id),
+      ]);
+    } catch (caught) {
+      error = caught;
+    }
+    const current = ledger.getStateSnapshot();
+    ok('one surviving mapped row rejects the whole mixed decline batch atomically',
+      error && receipt === null && saved.length === writesBefore &&
+        current.transactions.some((row) => row.id === removable.id) &&
+        current.transactions.some((row) => row.id === pinned.id) &&
+        !current.localCaptureQualifications?.some(
+          (entry) => entry.id === validId || entry.id === forgedId,
+        ) && !/(sender|body|merchant|amount|account|bank)/i.test(String(error)),
+      JSON.stringify({
+        error: String(error), receipt, writesBefore, writesAfter: saved.length,
+        transactions: current.transactions.map((row) => row.id),
+        qualifications: current.localCaptureQualifications,
+      }));
+  }
+}
 
 const account = (id, extra = {}) => ({
   id,
@@ -2195,6 +2469,63 @@ if (!workflow) {
   ok('...and stops the screen asking again',
     uncategorisedMerchants(withPin({ acme: 'shopping' })).merchants.length === 0,
     JSON.stringify(uncategorisedMerchants(withPin({ acme: 'shopping' })).merchants));
+}
+
+/* ── relay Shortcut-ingest retirement migration ────────────────────────────
+ *
+ * Production D1 databases predate the scoped flag, while a fresh install is
+ * created directly from schema.sql. Exercise both paths with SQLite itself;
+ * static wording checks alone cannot prove the ALTER applies or defaults an
+ * existing device to enabled.
+ */
+{
+  const relaySchema = read('server/schema.sql');
+  const migration = readIfPresent(
+    'server/migrations/2026-08-25-shortcut-ingest-retirement.sql',
+  );
+  const enabledColumn = /\bshortcut_ingest_enabled\s+INTEGER\s+NOT NULL\s+DEFAULT\s+1\s+CHECK\s*\(\s*shortcut_ingest_enabled\s+IN\s*\(\s*0\s*,\s*1\s*\)\s*\)/i;
+  ok('relay retirement: the additive column is owned by the tracked migration',
+    !enabledColumn.test(stripComments(relaySchema)));
+  ok('relay retirement: the one-time migration is present and contains exactly one ALTER',
+    migration !== null &&
+      (stripComments(migration).match(/\bALTER\s+TABLE\b/gi) ?? []).length === 1 &&
+      /ALTER\s+TABLE\s+devices\s+ADD\s+COLUMN\s+shortcut_ingest_enabled\s+INTEGER\s+NOT NULL\s+DEFAULT\s+1\s+CHECK\s*\(\s*shortcut_ingest_enabled\s+IN\s*\(\s*0\s*,\s*1\s*\)\s*\)/i
+        .test(stripComments(migration)) &&
+      !/\b(DROP|DELETE|UPDATE)\b/i.test(stripComments(migration)));
+
+  if (migration !== null && !enabledColumn.test(stripComments(relaySchema))) {
+    const db = new DatabaseSync(':memory:');
+    db.exec(relaySchema);
+    db.prepare('INSERT INTO vaults (id, created_at) VALUES (?, unixepoch())').run('legacy-vault');
+    db.prepare(
+      `INSERT INTO devices
+         (id, vault_id, role, public_key, market, ingest_token_hash,
+          sync_token_hash, admin_token_hash, created_at, last_seen)
+       VALUES ('legacy-device', 'legacy-vault', 'owner', 'public', 'AE',
+               'ingest-hash', 'sync-hash', 'admin-hash', unixepoch(), unixepoch())`,
+    ).run();
+    db.exec(migration);
+    const column = db.prepare('PRAGMA table_info(devices)').all()
+      .find((entry) => entry.name === 'shortcut_ingest_enabled');
+    const legacy = db.prepare(
+      'SELECT shortcut_ingest_enabled AS enabled FROM devices WHERE id = ?',
+    ).get('legacy-device');
+    let invalidFlagRejected = false;
+    try {
+      db.prepare(
+        'UPDATE devices SET shortcut_ingest_enabled = 2 WHERE id = ?',
+      ).run('legacy-device');
+    } catch {
+      invalidFlagRejected = true;
+    }
+    ok('relay retirement: migration adds a non-null integer flag with default one',
+      column?.type === 'INTEGER' && column?.notnull === 1 && column?.dflt_value === '1' &&
+        invalidFlagRejected,
+      JSON.stringify(column));
+    ok('relay retirement: an existing paired device remains enabled after migration',
+      legacy?.enabled === 1, JSON.stringify(legacy));
+    db.close();
+  }
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

@@ -94,6 +94,8 @@ export interface DeclinedSms {
   reason?: NonPostingReason | 'exact-provider-duplicate';
   /** Opaque iOS history identity or stable Android provider-row identity. */
   sourceEventId?: string;
+  /** Native live-queue UUID, used only for a source-free durable qualification receipt. */
+  localRecordId?: string;
 }
 
 export interface ImportPlan {
@@ -103,6 +105,15 @@ export interface ImportPlan {
   dueCount: number;
   /** Already-imported rows the parser now reads better (renamed/recategorized). */
   healedCount: number;
+  /** Decline candidates that actually admitted a guarded remove update. */
+  declineReconciledCount: number;
+  /** Exact local queue identities whose decline candidates admitted removal. */
+  declineReconciledIds: string[];
+  /** One-to-one local queue identity to the exact admitted removed ledger row. */
+  declineReconciliations: {
+    localRecordId: string;
+    removedTransactionId: string;
+  }[];
   billDues: ScannedSms[];
 }
 
@@ -133,6 +144,9 @@ function emptyPlan(): ImportPlan {
     newAccountCount: 0,
     dueCount: 0,
     healedCount: 0,
+    declineReconciledCount: 0,
+    declineReconciledIds: [],
+    declineReconciliations: [],
     billDues: [],
   };
 }
@@ -991,6 +1005,9 @@ export function buildImportPlan(
   // Plus the guards the sweep above uses: never a transfer, never a row the
   // user has edited, never a split (its parts are their own rows), and never a
   // row this device did not import from a message.
+  let declineReconciledCount = 0;
+  const declineReconciledIds: string[] = [];
+  const declineReconciliations: ImportPlan['declineReconciliations'] = [];
   if (declined.length > 0) {
     // Same derivation dedupe.ts uses: prefer the stored timestamp, fall back to
     // the one inside `s{ts}-{amount}` for rows that predate the `ts` column.
@@ -1021,6 +1038,14 @@ export function buildImportPlan(
         if (row.source !== 'sms' || row.userEdited || row.splits) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
+        declineReconciledCount += 1;
+        if (d.localRecordId) {
+          declineReconciledIds.push(d.localRecordId);
+          declineReconciliations.push({
+            localRecordId: d.localRecordId,
+            removedTransactionId: row.id,
+          });
+        }
         continue;
       }
       if (d.sourceEventId) {
@@ -1034,6 +1059,14 @@ export function buildImportPlan(
         if (row.raw !== undefined && !isNonPostingMessage(row.raw)) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
+        declineReconciledCount += 1;
+        if (d.localRecordId) {
+          declineReconciledIds.push(d.localRecordId);
+          declineReconciliations.push({
+            localRecordId: d.localRecordId,
+            removedTransactionId: row.id,
+          });
+        }
         continue;
       }
       if (!Number.isFinite(d.smsTs) || parsedTs.has(d.smsTs)) continue;
@@ -1047,6 +1080,14 @@ export function buildImportPlan(
       if (row.raw !== undefined && !isNonPostingMessage(row.raw)) continue;
       swept.add(row.id);
       updates.push({ id: row.id, remove: true });
+      declineReconciledCount += 1;
+      if (d.localRecordId) {
+        declineReconciledIds.push(d.localRecordId);
+        declineReconciliations.push({
+          localRecordId: d.localRecordId,
+          removedTransactionId: row.id,
+        });
+      }
     }
   }
 
@@ -1126,6 +1167,9 @@ export function buildImportPlan(
     newAccountCount: newAccounts.length,
     dueCount: newDues.length,
     healedCount: updates.length,
+    declineReconciledCount,
+    declineReconciledIds,
+    declineReconciliations,
     billDues: latestBillDues,
   };
 }

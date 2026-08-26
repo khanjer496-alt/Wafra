@@ -57,7 +57,9 @@ bash build.sh
 NATIVE_SUITES=0
 if [ "$(uname -s)" = "Darwin" ]; then
   bash native-history-store.sh
-  NATIVE_SUITES=1
+  NATIVE_SUITES=$((NATIVE_SUITES + 1))
+  bash native-live-capture-store.sh
+  NATIVE_SUITES=$((NATIVE_SUITES + 1))
 fi
 
 # The Worker's own suites: the PDF/email statement parser and the encrypted push

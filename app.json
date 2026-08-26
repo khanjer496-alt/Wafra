@@ -7,6 +7,15 @@
     "icon": "./assets/images/icon.png",
     "scheme": "wafra",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/fa920e7b-c661-4517-917d-26e8b4878721",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 1500
+    },
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "app.wafra.ios",
@@ -154,6 +163,7 @@
       ],
       "expo-sharing",
       "./modules/wafra-message-history/plugin",
+      "./modules/wafra-live-capture/plugin",
       [
         "expo-localization",
         {

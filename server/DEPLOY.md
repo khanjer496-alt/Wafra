@@ -123,9 +123,10 @@ them in the file. The Worker reads them the same way either way.
 
 `predeploy` automatically runs `npm run migrate` before Wrangler publishes any
 code. That migration checks the configured D1 binding, then applies
-`server/schema.sql` remotely with `--yes`. The schema is additive and
-idempotent, so it is safe even when `setup` just applied it. If migration fails,
-npm never starts `wrangler deploy`.
+`server/schema.sql` and Wrangler's tracked D1 migrations remotely with `--yes`.
+The schema is additive and idempotent; Wrangler records each one-shot
+migration, so both are safe after setup. If either step fails, npm never starts
+`wrangler deploy`.
 
 The migration runs `node scripts/d1.mjs check` first, which exits 1 while
 `database_id` is still `REPLACE_WITH_D1_DATABASE_ID`, and npm then refuses to

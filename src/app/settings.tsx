@@ -51,6 +51,7 @@ import { WafraMark } from '@/components/wafra-logo';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useAutoImport } from '@/hooks/use-auto-import';
 import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { uncategorisedMerchants } from '@/lib/uncategorised';
 import {
@@ -85,16 +86,19 @@ import { isProActive, trialDaysLeft } from '@/lib/purchases';
 // contracts (four scoped tokens here vs one there), and mixing their entry
 // points compiles on a good day and 401s on the device.
 import {
-  getRelayAutomationProof,
   getRelayConfig,
   getRelayConfigStrict,
-  isRelayAutomationProofCurrent,
+  isLegacyShortcutCaptureActive,
   isRelayPlatform,
   RelayError,
-  subscribeRelayAutomationProof,
   unpairDevice,
   type RelayConfig,
 } from '@/lib/relay';
+import {
+  eraseIosCaptureStore,
+  isCaptureAvailable,
+  setIosCaptureEnabled,
+} from '@/lib/capture';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import {
   buildExpenseReportHtml,
@@ -157,12 +161,13 @@ export default function SettingsScreen() {
   const [relay, setRelay] = useState<RelayConfig | null | undefined>(
     isRelayPlatform() ? undefined : null,
   );
-  // `undefined` means the device-bound proof has not been read yet. `null`
-  // means it was read and no real Message-automation row has been observed.
-  const [relayAutomationProof, setRelayAutomationProof] = useState<string | null | undefined>(
-    isRelayPlatform() ? undefined : null,
-  );
   const relayStatusRefreshGeneration = useRef(0);
+  const iosCapturePreferenceInFlight = useRef<Promise<void> | null>(null);
+  const {
+    captureState,
+    iosCaptureStatus,
+    recoverIosCaptureQueue,
+  } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
   const formats = useMemo(() => unreadFormatCount(state), [state]);
   // Home only offers the categorise prompt above a floor, so a user who sorts
@@ -173,6 +178,7 @@ export default function SettingsScreen() {
   // A count of 0 is not a verdict on every device — see noFormatsReason().
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
+    localCaptureAvailable: isCaptureAvailable(),
     privateMode: state.privateMode,
   });
   const version = Constants.expoConfig?.version ?? '1.0.0';
@@ -186,20 +192,18 @@ export default function SettingsScreen() {
   // The per-charge alert exists on both platforms by two different mechanisms
   // and on the web by neither, so the notification group's closing hairline
   // has to be drawn under whichever row is actually last.
-  const chargeAlertsAvailable = instantAvailable || isRelayPlatform();
+  const legacyChargeAlertsAvailable = isLegacyShortcutCaptureActive(relay);
+  const chargeAlertsAvailable = instantAvailable || legacyChargeAlertsAvailable;
 
   const refreshRelayStatus = useCallback(async (): Promise<void> => {
     const generation = ++relayStatusRefreshGeneration.current;
     try {
       const cfg = await getRelayConfig();
-      const proof = await getRelayAutomationProof(cfg?.deviceId ?? null);
       if (generation !== relayStatusRefreshGeneration.current) return;
       setRelay(cfg);
-      setRelayAutomationProof(proof);
     } catch {
       if (generation !== relayStatusRefreshGeneration.current) return;
       setRelay(null);
-      setRelayAutomationProof(null);
     }
   }, []);
 
@@ -224,16 +228,6 @@ export default function SettingsScreen() {
       sub.remove();
       relayStatusRefreshGeneration.current += 1;
     };
-  }, [refreshRelayStatus]);
-
-  // A foreground recovery scan can write proof just after this screen's
-  // AppState refresh read null. Listen for the durable local write so Settings
-  // cannot remain stale until another background/foreground cycle.
-  useEffect(() => {
-    if (!isRelayPlatform()) return;
-    return subscribeRelayAutomationProof(() => {
-      void refreshRelayStatus();
-    });
   }, [refreshRelayStatus]);
 
   useEffect(() => {
@@ -365,13 +359,54 @@ export default function SettingsScreen() {
     }
   };
 
-  const openIosCaptureSetup = async () => {
-    try {
-      await setCaptureOptOut(false);
-      router.push('/ios-setup');
-    } catch {
-      Alert.alert(t('capturePreferenceFailed'));
-    }
+  const setIosAutomaticCapture = (enabled: boolean): Promise<void> => {
+    if (iosCapturePreferenceInFlight.current) return iosCapturePreferenceInFlight.current;
+    const operation = (async () => {
+      try {
+        if (!enabled) {
+          await setCaptureOptOut(true);
+          return;
+        }
+        await setCaptureOptOut(false);
+        router.push('/ios-setup');
+      } catch {
+        Alert.alert(t('capturePreferenceFailed'));
+      }
+    })().finally(() => {
+      if (iosCapturePreferenceInFlight.current === operation) {
+        iosCapturePreferenceInFlight.current = null;
+      }
+    });
+    iosCapturePreferenceInFlight.current = operation;
+    return operation;
+  };
+
+  const confirmIosCaptureRecovery = () => {
+    setConfirmation({
+      question: t('captureIosRecoveryTitle'),
+      body: t('captureIosRecoveryBody'),
+      confirmLabel: t('captureIosRecoveryAction'),
+      cancelLabel: t('iosDone'),
+      onConfirm: () => {
+        void recoverIosCaptureQueue()
+          .then((recovered) => {
+            Alert.alert(
+              t(recovered
+                ? 'captureIosRecoveryCompleteTitle'
+                : 'captureIosRecoveryRetryTitle'),
+              t(recovered
+                ? 'captureIosRecoveryCompleteBody'
+                : 'captureIosRecoveryRetryBody'),
+            );
+          })
+          .catch(() => {
+            Alert.alert(
+              t('captureIosRecoveryRetryTitle'),
+              t('captureIosRecoveryRetryBody'),
+            );
+          });
+      },
+    });
   };
 
   const toggleInstantAlerts = async (enabled: boolean) => {
@@ -474,6 +509,14 @@ export default function SettingsScreen() {
       current = false;
     };
   }, []);
+  useEffect(() => {
+    if (relay === undefined || legacyChargeAlertsAvailable || !chargeAlerts) return;
+    setChargeAlerts(false);
+    void setChargeAlertsEnabled(false).catch(() => {
+      // The switch remains hidden without an active legacy Shortcut. A later
+      // status refresh retries the same source-free preference cleanup.
+    });
+  }, [chargeAlerts, legacyChargeAlertsAvailable, relay]);
   const toggleChargeAlerts = async (enabled: boolean) => {
     setChargeAlerts(enabled);
     try {
@@ -706,6 +749,14 @@ export default function SettingsScreen() {
   };
 
   const eraseAllData = async () => {
+    if (Platform.OS === 'ios') {
+      try {
+        await setIosCaptureEnabled(false);
+      } catch {
+        Alert.alert(t('eraseLocalFailedTitle'), t('eraseCaptureDisableFailedBody'));
+        return;
+      }
+    }
     // Re-read rather than using the `relay` state: this is the destructive
     // path, and a pairing created since this screen mounted must still be
     // torn down.
@@ -720,6 +771,7 @@ export default function SettingsScreen() {
       return;
     }
 
+    const hadLegacyShortcut = isLegacyShortcutCaptureActive(cfg);
     if (cfg) {
       try {
         await unpairDevice(cfg);
@@ -746,7 +798,10 @@ export default function SettingsScreen() {
     try {
       const notificationReader = NotificationReader;
       const cleanupCaptureQueue = isRelayPlatform()
-        ? clearBackgroundRelayRows
+        ? async () => {
+            await eraseIosCaptureStore();
+            await clearBackgroundRelayRows();
+          }
         : Platform.OS === 'android'
           ? async () => {
               if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
@@ -773,7 +828,7 @@ export default function SettingsScreen() {
       const failureBody = cleanupFailed
         ? t('eraseQueueCleanupFailedBody')
         : t('eraseLocalInitializeFailedBody');
-      if (shortcutCleanupApplies(cfg !== null)) {
+      if (shortcutCleanupApplies(hadLegacyShortcut)) {
         Alert.alert(
           failureTitle,
           `${failureBody}\n\n${t('shortcutCleanupErased')}`,
@@ -789,7 +844,7 @@ export default function SettingsScreen() {
     // installed and still puts bank-message text on the network on every
     // matching alert. The relay refuses it now, but refusing is not the same
     // as not sending, and no API in existence lets this app delete it.
-    if (shortcutCleanupApplies(cfg !== null)) {
+    if (shortcutCleanupApplies(hadLegacyShortcut)) {
       // Not a question, but the only door out of it is a button, so it is a
       // confirmation shaped like one: "Done" declines, "Open Shortcuts" acts.
       setConfirmation({
@@ -834,7 +889,9 @@ export default function SettingsScreen() {
     // cries wolf on that phone is a warning ignored on the one where it counts.
     // `undefined` is "not read yet", and on iOS the cautious reading is that a
     // pairing exists.
-    const mentionsShortcut = Platform.OS === 'ios' && relay !== null;
+    const mentionsShortcut = shortcutCleanupApplies(
+      isLegacyShortcutCaptureActive(relay),
+    );
     setConfirmation({
       question: t('eraseEverythingQ'),
       body: mentionsShortcut
@@ -928,29 +985,73 @@ export default function SettingsScreen() {
       <Toggle value={value} onChange={onChange} label={title} />
     </Row>
   );
-  const trial = trialDaysLeft(state);
-  const captureAvailable = isSmsScanningAvailable() || isRelayPlatform();
-  const iosPipeVerified = relay?.setupState === 'verified';
-  const iosAutomationVerified = isRelayAutomationProofCurrent(
-    relay ?? null,
-    relayAutomationProof ?? null,
+  const iosCaptureSwitchRow = (
+    subtitle: string,
+    value: boolean,
+    onManage: () => void,
+  ) => (
+    <Row>
+      <Pressable
+        accessible={false}
+        style={styles.rowText}
+        onPress={() => {
+          tapped();
+          onManage();
+        }}>
+        <ThemedText type="small">{t('automaticCapture')}</ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary">
+          {subtitle}
+        </ThemedText>
+      </Pressable>
+      <Toggle
+        value={value}
+        onChange={(enabled) => {
+          if (enabled && captureState === 'queue-warning') {
+            confirmIosCaptureRecovery();
+            return;
+          }
+          if (enabled && captureState === 'paused') {
+            router.push('/pro');
+            return;
+          }
+          void setIosAutomaticCapture(enabled);
+        }}
+        label={t('automaticCapture')}
+      />
+    </Row>
   );
-  const captureActive = !state.privateMode && !state.captureOptOut && (
+  const trial = trialDaysLeft(state);
+  const captureAvailable = isSmsScanningAvailable() || isCaptureAvailable();
+  const iosCaptureHealthy = captureState === 'waiting-for-alert' ||
+    captureState === 'first-alert-captured' || captureState === 'migration-retry';
+  const iosCaptureEnabled = !state.captureOptOut && iosCaptureStatus?.enabled === true;
+  const captureActive = !state.captureOptOut && (
     isSmsScanningAvailable()
       ? smsGranted
-      : iosAutomationVerified
+      : iosCaptureHealthy
   );
-  const captureStatus = state.privateMode || state.captureOptOut
+  const iosCaptureCopy = captureState === 'checking'
+    ? t('settingStatusChecking')
+    : captureState === 'first-alert-captured'
+      ? t('captureIosFirstAlertCaptured')
+      : captureState === 'waiting-for-alert'
+        ? t('captureIosWaitingForAlert')
+        : captureState === 'needs-automation'
+          ? t('captureIosNeedsAutomation')
+          : captureState === 'queue-warning'
+            ? t('captureIosQueueWarning')
+            : captureState === 'migration-retry'
+              ? t('captureIosMigrationRetry')
+              : captureState === 'paused'
+                ? t('capturePaused')
+                : captureState === 'unsupported'
+                  ? t('capturePhoneOnly')
+                  : t('captureIosOff');
+  const captureStatus = state.captureOptOut
     ? t('settingStatusOff')
     : isSmsScanningAvailable()
       ? t(smsGranted ? 'settingStatusOn' : 'settingStatusOff')
-      : relay === undefined || relayAutomationProof === undefined
-        ? t('settingStatusChecking')
-        : iosAutomationVerified
-          ? t('settingStatusAutomationVerified')
-          : iosPipeVerified
-            ? t('settingStatusPipeVerified')
-            : t('settingStatusSetup');
+      : iosCaptureCopy;
   const statusFacts: StatusFact[] = [
     {
       key: 'summary',
@@ -1056,7 +1157,7 @@ export default function SettingsScreen() {
                 },
                 true,
               )}
-            {isRelayPlatform() &&
+            {legacyChargeAlertsAvailable &&
               switchRow(
                 t('alertEveryCharge'),
                 // Borrowed from the daily digest because it is the only plain
@@ -1124,27 +1225,59 @@ export default function SettingsScreen() {
                 ) : null}
               </Block>
             ) : null}
-            {/* iPhone capture is a privacy setting as much as a feature: the
-                relay is the ONE path in the whole app where anything derived
-                from a message leaves the phone. It belongs in this section,
-                stated plainly, rather than filed under convenience — and this
-                row is also the only way into (and back out of) that setup from
-                Settings, which the base branch had no entry point for at all. */}
-            {isRelayPlatform() &&
-              linkRow(
-                t('automaticCapture'),
+            {/* iPhone capture is a privacy setting as much as a feature. Live
+                Message alerts now stay in the protected local queue; any
+                configured relay is supplemental and retained here only for
+                legacy cleanup plus email/PDF/CSV collection. */}
+            {Platform.OS === 'ios' && captureAvailable &&
+              iosCaptureSwitchRow(
                 state.captureOptOut
                   ? t('captureIosOff')
-                  : relay === undefined || relayAutomationProof === undefined
-                  ? t('captureChecking')
-                  : relay === null
-                    ? t('captureIosOff')
-                    : iosAutomationVerified
-                      ? t('captureIosOn')
-                      : relay.setupState === 'verified'
-                        ? t('captureIosPipeReady')
-                        : t('captureIosNeedsTest'),
-                () => void openIosCaptureSetup(),
+                  : captureState === 'queue-warning' && iosCaptureStatus
+                    ? tf('captureIosQueueCounts', {
+                        pending: iosCaptureStatus.pending,
+                        dropped: iosCaptureStatus.dropped,
+                        corrupt: iosCaptureStatus.corrupt
+                          ? t('settingStatusYes')
+                          : t('settingStatusNo'),
+                      })
+                    : iosCaptureCopy,
+                iosCaptureEnabled,
+                () => {
+                  if (captureState === 'paused') {
+                    router.push('/pro');
+                    return;
+                  }
+                  if (captureState === 'queue-warning') {
+                    confirmIosCaptureRecovery();
+                    return;
+                  }
+                  if (state.captureOptOut || captureState === 'off' ||
+                    captureState === 'needs-automation') {
+                    void setIosAutomaticCapture(true);
+                    return;
+                  }
+                  router.push('/ios-setup');
+                },
+              )}
+            {Platform.OS === 'ios' && captureAvailable &&
+              captureState === 'queue-warning' && (
+                <Block style={styles.historyImportSettings}>
+                  <View style={styles.historyImportSettingsCopy}>
+                    <ThemedText type="smallBold">
+                      {t('captureIosRecoveryAction')}
+                    </ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {t('captureIosRecoveryBody')}
+                    </ThemedText>
+                  </View>
+                  <Button
+                    inline
+                    variant="outline"
+                    label={t('captureIosRecoveryAction')}
+                    onPress={confirmIosCaptureRecovery}
+                  />
+                </Block>
               )}
             {/* Gated like every other capture row above it. Rendering this
                 unconditionally made it the one dead end in the section on

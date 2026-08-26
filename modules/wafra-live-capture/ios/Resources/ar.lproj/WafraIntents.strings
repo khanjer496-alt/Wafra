@@ -1,0 +1,8 @@
+"live.setup_proof.title" = "تسجيل إثبات إعداد الالتقاط في وفرة";
+"live.setup_proof.error" = "تعذّر على وفرة تسجيل إثبات الإعداد.";
+"live.stage.title" = "حفظ رسالة مباشرة في وفرة";
+"live.stage.sender.parameter" = "المرسل";
+"live.stage.message.parameter" = "الرسالة";
+"live.stage.event_id.parameter" = "معرّف الحدث";
+"live.stage.observed_at.parameter" = "وقت الرصد";
+"live.stage.error" = "تعذّر على وفرة حفظ هذه الرسالة.";

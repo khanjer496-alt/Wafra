@@ -320,12 +320,216 @@ export interface OnboardingPlanPreferences {
   budgetId: 'essentials' | 'balanced' | 'flexible';
 }
 
+export const LOCAL_CAPTURE_QUALIFICATION_VERSION = 1 as const;
+export const LOCAL_CAPTURE_QUALIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const LOCAL_CAPTURE_QUALIFICATION_CAP = 2_000;
+
+export interface LocalCaptureQualificationCandidate {
+  id: string;
+  kind: 'review' | 'decline';
+  observedAt: number;
+}
+
+export interface LocalCaptureReviewQualificationCandidate {
+  reviewId: string;
+  qualification: LocalCaptureQualificationCandidate & { kind: 'review' };
+}
+
+export interface LocalCaptureDeclineQualificationMapping {
+  qualification: LocalCaptureQualificationCandidate & { kind: 'decline' };
+  removedTransactionId: string;
+}
+
+export interface LocalCaptureQualificationReceipt {
+  v: typeof LOCAL_CAPTURE_QUALIFICATION_VERSION;
+  id: string;
+  kind: LocalCaptureQualificationCandidate['kind'];
+  observedAt: number;
+  expiresAt: number;
+}
+
+/** Source-free evidence that the native live-capture queue needs attention. */
+export interface IosCaptureWarningState {
+  dropped: number;
+  corrupt: boolean;
+  recordedAt: number;
+  /** Opaque native compare-and-clear generation; never contains Message data. */
+  nativeWarningId: string | null;
+}
+
+const IOS_CAPTURE_WARNING_ID_RE =
+  /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
+
+export const normalizeIosCaptureWarningState = (
+  value: unknown,
+): IosCaptureWarningState | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate).sort();
+  const legacy = keys.length === 3 && keys[0] === 'corrupt' && keys[1] === 'dropped' &&
+    keys[2] === 'recordedAt';
+  const current = keys.length === 4 && keys[0] === 'corrupt' && keys[1] === 'dropped' &&
+    keys[2] === 'nativeWarningId' && keys[3] === 'recordedAt';
+  if ((!legacy && !current) || typeof candidate.corrupt !== 'boolean' ||
+    !Number.isSafeInteger(candidate.dropped) || (candidate.dropped as number) < 0 ||
+    !Number.isSafeInteger(candidate.recordedAt) || (candidate.recordedAt as number) < 0) {
+    return null;
+  }
+  const nativeWarningId = legacy ? null : candidate.nativeWarningId;
+  if (nativeWarningId !== null &&
+    (typeof nativeWarningId !== 'string' || !IOS_CAPTURE_WARNING_ID_RE.test(nativeWarningId))) {
+    return null;
+  }
+  return {
+    dropped: candidate.dropped as number,
+    corrupt: candidate.corrupt,
+    recordedAt: candidate.recordedAt as number,
+    nativeWarningId: nativeWarningId as string | null,
+  };
+};
+
+/**
+ * Merge observations without counting one native counter twice.
+ *
+ * Several mounted surfaces may read the same dropped counter before its
+ * durable acknowledgement completes. `max`, rather than addition, makes
+ * those concurrent observations idempotent while never reducing an older
+ * warning. Corruption remains sticky until Erase Everything clears the state.
+ */
+export const mergeIosCaptureWarningState = (
+  current: unknown,
+  observed: IosCaptureWarningState,
+): IosCaptureWarningState => {
+  const normalizedObserved = normalizeIosCaptureWarningState(observed);
+  if (!normalizedObserved) {
+    throw new Error('iOS capture warning is invalid');
+  }
+  const normalizedCurrent = normalizeIosCaptureWarningState(current);
+  if (!normalizedCurrent) return normalizedObserved;
+  return {
+    dropped: Math.max(normalizedCurrent.dropped, normalizedObserved.dropped),
+    corrupt: normalizedCurrent.corrupt || normalizedObserved.corrupt,
+    recordedAt: Math.max(normalizedCurrent.recordedAt, normalizedObserved.recordedAt),
+    nativeWarningId: normalizedObserved.nativeWarningId ?? normalizedCurrent.nativeWarningId,
+  };
+};
+
+const LOCAL_CAPTURE_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LOCAL_CAPTURE_RECEIPT_KEYS = ['expiresAt', 'id', 'kind', 'observedAt', 'v'];
+
+const compareLocalCaptureReceiptAge = (
+  left: LocalCaptureQualificationReceipt,
+  right: LocalCaptureQualificationReceipt,
+): number => left.expiresAt - right.expiresAt ||
+  left.observedAt - right.observedAt || left.id.localeCompare(right.id, 'en-US');
+
+const exactLocalCaptureReceipt = (
+  value: unknown,
+  now: number,
+): value is LocalCaptureQualificationReceipt => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate).sort();
+  return keys.length === LOCAL_CAPTURE_RECEIPT_KEYS.length &&
+    keys.every((key, index) => key === LOCAL_CAPTURE_RECEIPT_KEYS[index]) &&
+    candidate.v === LOCAL_CAPTURE_QUALIFICATION_VERSION &&
+    typeof candidate.id === 'string' && LOCAL_CAPTURE_UUID_RE.test(candidate.id) &&
+    (candidate.kind === 'review' || candidate.kind === 'decline') &&
+    Number.isSafeInteger(candidate.observedAt) && (candidate.observedAt as number) >= 0 &&
+    Number.isSafeInteger(candidate.expiresAt) &&
+    (candidate.expiresAt as number) > now &&
+    (candidate.expiresAt as number) <= now + LOCAL_CAPTURE_QUALIFICATION_TTL_MS;
+};
+
+export const isLocalCaptureQualificationCandidate = (
+  value: unknown,
+): value is LocalCaptureQualificationCandidate => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate).sort();
+  return keys.length === 3 && keys[0] === 'id' && keys[1] === 'kind' &&
+    keys[2] === 'observedAt' && typeof candidate.id === 'string' &&
+    LOCAL_CAPTURE_UUID_RE.test(candidate.id) &&
+    (candidate.kind === 'review' || candidate.kind === 'decline') &&
+    Number.isSafeInteger(candidate.observedAt) && (candidate.observedAt as number) >= 0;
+};
+
+/** Drop expired/malformed/ambiguous receipts and keep the newest bounded set. */
+export function normalizeLocalCaptureQualifications(
+  value: unknown,
+  now: number = Date.now(),
+): LocalCaptureQualificationReceipt[] {
+  if (!Number.isSafeInteger(now) || now < 0 || !Array.isArray(value)) return [];
+  const exact = value.filter((entry) => exactLocalCaptureReceipt(entry, now));
+  const counts = new Map<string, number>();
+  for (const entry of exact) counts.set(entry.id, (counts.get(entry.id) ?? 0) + 1);
+  return exact
+    .filter((entry) => counts.get(entry.id) === 1)
+    .sort(compareLocalCaptureReceiptAge)
+    .slice(-LOCAL_CAPTURE_QUALIFICATION_CAP);
+}
+
+/** Merge validated replay evidence without ever storing alert attributes. */
+export function mergeLocalCaptureQualifications(
+  current: unknown,
+  candidates: readonly LocalCaptureQualificationCandidate[],
+  now: number = Date.now(),
+): LocalCaptureQualificationReceipt[] {
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new Error('Local capture qualification clock is invalid');
+  }
+  if (candidates.length > LOCAL_CAPTURE_QUALIFICATION_CAP) {
+    throw new Error('Local capture qualification capacity is exceeded');
+  }
+  const ids = new Set<string>();
+  for (const candidate of candidates) {
+    if (!isLocalCaptureQualificationCandidate(candidate) || ids.has(candidate.id)) {
+      throw new Error('Local capture qualification identity is invalid');
+    }
+    ids.add(candidate.id);
+  }
+  const prior = new Map(
+    normalizeLocalCaptureQualifications(current, now).map((receipt) => [receipt.id, receipt]),
+  );
+  const incoming: LocalCaptureQualificationReceipt[] = [];
+  for (const candidate of candidates) {
+    const existing = prior.get(candidate.id);
+    if (existing && (existing.kind !== candidate.kind ||
+      existing.observedAt !== candidate.observedAt)) {
+      throw new Error('Local capture qualification identity conflicts');
+    }
+    incoming.push(existing ?? {
+      v: LOCAL_CAPTURE_QUALIFICATION_VERSION,
+      ...candidate,
+      expiresAt: now + LOCAL_CAPTURE_QUALIFICATION_TTL_MS,
+    });
+    prior.delete(candidate.id);
+  }
+  const priorCapacity = LOCAL_CAPTURE_QUALIFICATION_CAP - incoming.length;
+  const retainedPrior = priorCapacity === 0
+    ? []
+    : [...prior.values()]
+        .sort(compareLocalCaptureReceiptAge)
+        .slice(-priorCapacity);
+  const result = [...retainedPrior, ...incoming].sort(compareLocalCaptureReceiptAge);
+  if (incoming.some((receipt) =>
+    result.filter((candidate) => candidate.id === receipt.id).length !== 1)) {
+    throw new Error('Local capture qualification capacity reservation failed');
+  }
+  return result;
+}
+
 export interface AppState {
   hydrated: boolean;
   /** Explicit meaning of every legacy `*Fils` integer; null before a ledger has money. */
   ledgerMoney: LedgerMoneySpec | null;
   /** Encrypted, structured global alerts awaiting an explicit user decision. */
   reviewTray: AlertReviewTrayState;
+  /** Source-free replay evidence for durable local review/decline qualification. */
+  localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+  /** Durable, source-free native queue health evidence. */
+  iosCaptureWarning: IosCaptureWarningState | null;
   accounts: Account[];
   transactions: Transaction[];
   budgets: Budget[];

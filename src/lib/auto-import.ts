@@ -12,8 +12,16 @@ import {
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { nonPostingReason, type ParsedSms } from '@/lib/sms-parser';
-import { createLaunchAlertSession, hasBankAlertMoneyHint } from '@/lib/launch-alert-parser';
+import {
+  nonPostingReason,
+  type NonPostingReason,
+  type ParsedSms,
+} from '@/lib/sms-parser';
+import {
+  createLaunchAlertSession,
+  hasBankAlertMoneyHint,
+  type LaunchAlertSession,
+} from '@/lib/launch-alert-parser';
 import {
   inspectUnparsedLaunchAlert,
   normalizeUnparsedLaunchTemplate,
@@ -202,7 +210,7 @@ const sha256 = (data: string): Promise<string> => {
  * local fingerprint, so a copied tombstone cannot be tested against guessed
  * bank messages offline. No second key or erase path is introduced.
  */
-async function reviewCaptureIdentity(
+export async function reviewCaptureIdentity(
   source: string,
   sender: string,
   observedAt: number,
@@ -232,6 +240,91 @@ async function reviewCaptureIdentity(
     templateKey: `art1_${templateDigest}`,
   };
 }
+
+export type SourceFreeReviewCandidate = Omit<
+  ReviewAlert,
+  'id' | 'sourceKey' | 'templateKey'
+>;
+
+export interface SourceFreeReviewIdentity {
+  id: string;
+  sourceKey: string;
+  templateKey?: string;
+}
+
+export type SourceFreeRefusedAlertDecision =
+  | { kind: 'declined'; reason: NonPostingReason }
+  | { kind: 'review'; candidate: SourceFreeReviewCandidate }
+  | { kind: 'ignored' };
+
+/**
+ * One source-free refusal policy shared by Android inbox capture and iOS local
+ * capture. Source and sender are consumed only while inspecting; neither can
+ * appear in the returned decision.
+ */
+export function inspectSourceFreeRefusedAlert(input: {
+  source: string;
+  sender: string;
+  observedAt: number;
+  channel: CaptureChannel;
+  session: Pick<LaunchAlertSession, 'inspect'>;
+  existingInspection?: UniversalAlertReview | null;
+}): SourceFreeRefusedAlertDecision {
+  const reason = nonPostingReason(input.source);
+  if (reason) return { kind: 'declined', reason };
+  if (!hasBankAlertMoneyHint(input.source)) return { kind: 'ignored' };
+
+  const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
+  const prepared = inspection
+    ? prepareReviewAlert({
+        id: 'capture_probe_id_0001',
+        sourceKey: 'capture_probe_key_001',
+        observedAt: input.observedAt,
+        channel: input.channel,
+        inspection,
+      })
+    : null;
+  // A globally routed or ambiguous result has already been judged by the
+  // global inspector. The launch fallback is only for alerts with no route.
+  const launchReview = inspection === null
+    ? inspectUnparsedLaunchAlert(input.source, input.sender)
+    : null;
+  const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
+    ? prepareLaunchReviewAlert({
+        id: 'capture_probe_id_0001',
+        sourceKey: 'capture_probe_key_001',
+        observedAt: input.observedAt,
+        channel: input.channel,
+        review: launchReview.review,
+      })
+    : null);
+  if (!reviewPrepared) return { kind: 'ignored' };
+  const {
+    id: _id,
+    sourceKey: _sourceKey,
+    templateKey: _templateKey,
+    ...candidate
+  } = reviewPrepared;
+  return { kind: 'review', candidate };
+}
+
+/** Attach an opaque identity only after review admission has removed source. */
+export function identifySourceFreeReviewAlert(
+  candidate: SourceFreeReviewCandidate,
+  identity: SourceFreeReviewIdentity,
+): ReviewAlert | null {
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(identity.id) ||
+    !/^[A-Za-z0-9_-]{16,128}$/.test(identity.sourceKey) ||
+    (identity.templateKey !== undefined &&
+      !/^[A-Za-z0-9_-]{16,128}$/.test(identity.templateKey))) {
+    return null;
+  }
+  return { ...candidate, ...identity };
+}
+
+export const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
+  parsedAlert.type === 'income' && !parsedAlert.transferHint &&
+  parsedAlert.categoryGuess === 'other' && !parsedAlert.categoryDeliberate;
 
 /**
  * Reads the inbox from `sinceMs` to now in pages (full history when sinceMs = 0)
@@ -286,49 +379,35 @@ export async function scanInbox(
     existingInspection: UniversalAlertReview | null = null,
     sourceEventId?: string,
   ): Promise<boolean> => {
-    // A refusal, code challenge, hold or returned instrument is affirmative
-    // proof that no settled money movement happened. It belongs only in the
-    // guarded healing channel and must never become a reviewable charge.
-    const reason = nonPostingReason(body);
-    if (reason) {
-      declined.push({ smsTs: ts, sender, channel, reason, sourceEventId });
+    const decision = inspectSourceFreeRefusedAlert({
+      source: body,
+      sender,
+      observedAt: ts,
+      channel,
+      session: launchSession,
+      existingInspection,
+    });
+    if (decision.kind === 'declined') {
+      declined.push({
+        smsTs: ts,
+        sender,
+        channel,
+        reason: decision.reason,
+        sourceEventId,
+      });
       return false;
     }
-    if (!hasBankAlertMoneyHint(body)) return false;
-    const inspection = existingInspection ?? inspectWorldwide(body, sender);
-    // Refuse unsafe/global-ambiguous evidence before touching Keychain or
-    // hashing source-derived material.
-    const prepared = inspection
-      ? prepareReviewAlert({
-          id: 'capture_probe_id_0001',
-          sourceKey: 'capture_probe_key_001',
-          observedAt: ts,
-          channel,
-          inspection,
-        })
-      : null;
-    // A globally routed/ambiguous alert has already been judged by the global
-    // inspector. Never let a Gulf sender alias bypass that refusal. The launch
-    // fallback is reserved for alerts that have no global route at all.
-    const launchReview = inspection === null
-      ? inspectUnparsedLaunchAlert(body, sender)
-      : null;
-    const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
-      ? prepareLaunchReviewAlert({
-          id: 'capture_probe_id_0001',
-          sourceKey: 'capture_probe_key_001',
-          observedAt: ts,
-          channel,
-          review: launchReview.review,
-        })
-      : null);
-    if (!reviewPrepared) return false;
+    if (decision.kind === 'ignored') return false;
     const key = await databaseKey();
     if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
     const identity = await reviewCaptureIdentity(body, sender, ts, channel, key);
     if (!identity) throw new ReviewIdentityError('Encrypted review identity is invalid');
+    const reviewPrepared = identifySourceFreeReviewAlert(decision.candidate, identity);
+    if (!reviewPrepared) throw new ReviewIdentityError('Encrypted review identity is invalid');
     if (reviewSourceKeys.has(identity.sourceKey)) return true;
     reviewSourceKeys.add(identity.sourceKey);
+    // Keep the explicit encrypted-identity merge visible to the repository's
+    // static safety contract even though the shared helper validated it too.
     reviewCandidates.push({ ...reviewPrepared, ...identity });
     // Inbox, delivery and push are collected in different phases. Keep the
     // newest bounded set by event time—not whichever channel happened to run
@@ -339,9 +418,6 @@ export async function scanInbox(
     }
     return true;
   };
-  const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
-    parsedAlert.type === 'income' && !parsedAlert.transferHint &&
-    parsedAlert.categoryGuess === 'other' && !parsedAlert.categoryDeliberate;
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
   let newestTs = sinceMs;

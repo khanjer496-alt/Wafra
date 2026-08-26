@@ -43,6 +43,9 @@ const { DatabaseSync } = require('node:sqlite');
 const { readFileSync } = require('node:fs');
 
 const SCHEMA_PATH = require.resolve('../../server/schema.sql');
+const SHORTCUT_RETIREMENT_MIGRATION_PATH = require.resolve(
+  '../../server/migrations/2026-08-25-shortcut-ingest-retirement.sql',
+);
 
 // Read at module load by relay.ts, exactly as Expo inlines it into a build. Set
 // before the require below, deliberately: a build with no relay configured must
@@ -68,6 +71,16 @@ function eq(name, actual, expected) {
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
   ok(name, a === e, `\n    got ${a}\n    want ${e}`);
 }
+const controlledPromise = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+};
+const nextMicrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const KEY = 'wafra.relay.v1';
 const BACKGROUND_KEY = 'wafra.relay.background.v1';
@@ -227,6 +240,17 @@ async function queueItem(id, row, publicKey) {
         'https://raw.githubusercontent.com/other/repo/3f43134e280bfe7b0cd82aabe55a664139debf1a/assets/shortcuts/Wafra%20Capture.shortcut',
         true,
       ), null);
+    ok('legacy charge alerts are unavailable without a relay pairing',
+      relay.isLegacyShortcutCaptureActive(null) === false);
+    ok('generic pairing is not proof that the old Shortcut automation exists',
+      relay.isLegacyShortcutCaptureActive({}) === false);
+    ok('legacy charge alerts require automation provenance before scoped retirement',
+      relay.isLegacyShortcutCaptureActive({
+        automationGeneration: AUTOMATION_GENERATION_A,
+      }) === true && relay.isLegacyShortcutCaptureActive({
+        automationGeneration: AUTOMATION_GENERATION_A,
+        shortcutCaptureRetiredAt: 1,
+      }) === false);
   }
 
   /* ═════════════════════════ Pairing ═════════════════════════ */
@@ -469,6 +493,113 @@ async function queueItem(id, row, publicKey) {
     net.on('POST /v1/pair', () => json(200, credentials(market)));
     const cfg = await relay.pairDevice(BASE, undefined, market);
     return { net, cfg };
+  }
+
+  /* ═════════════ Retiring copied Shortcut capture authority ═════════════ */
+
+  ok('shortcut retirement client: exports the scoped retirement operation',
+    typeof relay.retireRelayShortcutCapture === 'function');
+  if (typeof relay.retireRelayShortcutCapture === 'function') {
+    {
+      const { net, cfg } = await paired();
+      net.on('POST /v1/device/retire-shortcut-capture', () => json(204));
+      const before = Date.now();
+      await relay.retireRelayShortcutCapture(cfg);
+      const foreground = storedConfig(KEY);
+      const background = storedConfig(BACKGROUND_KEY);
+      const req = net.last('POST /v1/device/retire-shortcut-capture');
+      ok('shortcut retirement client: authenticates the idempotent POST with foreground admin scope',
+        req?.auth === `Bearer ${cfg.adminToken}` && req.body === null);
+      ok('shortcut retirement client: stores a finite encrypted completion timestamp after 204',
+        typeof foreground?.shortcutCaptureRetiredAt === 'number' &&
+          foreground.shortcutCaptureRetiredAt >= before &&
+          foreground.shortcutCaptureRetiredAt <= Date.now());
+      ok('shortcut retirement client: the locked-phone sync subset never gains retirement metadata',
+        !('shortcutCaptureRetiredAt' in background) &&
+          Object.keys(background).sort().join(',') ===
+            ['baseUrl', 'deviceId', 'privateKey', 'setupState', 'syncToken'].sort().join(','));
+
+      await relay.retireRelayShortcutCapture(await relay.getRelayConfig());
+      ok('shortcut retirement client: repeating a completed retirement remains safe',
+        net.count('POST /v1/device/retire-shortcut-capture') === 2 &&
+          Number.isFinite(storedConfig(KEY).shortcutCaptureRetiredAt));
+
+      secure.__keychain.items.set(KEY, JSON.stringify({
+        ...storedConfig(KEY), shortcutCaptureRetiredAt: 'not-a-clock',
+      }));
+      ok('shortcut retirement client: malformed stored retirement metadata is discarded',
+        (await relay.getRelayConfig())?.shortcutCaptureRetiredAt === undefined);
+    }
+
+    {
+      const { net, cfg } = await paired();
+      net.on('POST /v1/device/retire-shortcut-capture', () => json(503, { error: 'unavailable' }));
+      let error = null;
+      try {
+        await relay.retireRelayShortcutCapture(cfg);
+      } catch (caught) {
+        error = caught;
+      }
+      ok('shortcut retirement client: a remote failure leaves local completion unstamped',
+        error?.retryable === true && storedConfig(KEY).shortcutCaptureRetiredAt === undefined);
+    }
+
+    {
+      const { net, cfg } = await paired();
+      net.on('POST /v1/device/retire-shortcut-capture', () => json(204));
+      const originalSetItem = secure.setItemAsync;
+      let failForegroundOnce = true;
+      secure.setItemAsync = async (key, value, options) => {
+        if (key === KEY && failForegroundOnce) {
+          failForegroundOnce = false;
+          throw new Error('keychain write unavailable');
+        }
+        return originalSetItem(key, value, options);
+      };
+      let rejected = false;
+      try {
+        await relay.retireRelayShortcutCapture(cfg);
+      } catch {
+        rejected = true;
+      } finally {
+        secure.setItemAsync = originalSetItem;
+      }
+      ok('shortcut retirement client: a failed Keychain write remains visibly retryable',
+        rejected && storedConfig(KEY).shortcutCaptureRetiredAt === undefined);
+      await relay.retireRelayShortcutCapture(await relay.getRelayConfig());
+      ok('shortcut retirement client: retry repairs local state after remote success',
+        net.count('POST /v1/device/retire-shortcut-capture') === 2 &&
+          Number.isFinite(storedConfig(KEY).shortcutCaptureRetiredAt));
+    }
+
+    {
+      freshDevice();
+      const originalIssued = credentials();
+      const replacementIssued = credentials();
+      const issued = [originalIssued, replacementIssued];
+      let finishRetirement;
+      let retirementStarted;
+      const started = new Promise((resolve) => { retirementStarted = resolve; });
+      const net = transport().install()
+        .on('POST /v1/pair', () => json(200, issued.shift()))
+        .on('POST /v1/device/retire-shortcut-capture', () => new Promise((resolve) => {
+          finishRetirement = resolve;
+          retirementStarted();
+        }));
+      const original = await relay.pairDevice(BASE, 'Original', 'AE');
+      const pending = relay.retireRelayShortcutCapture(original);
+      await started;
+      const replacement = await relay.pairDevice(BASE, 'Replacement', 'AE');
+      finishRetirement(json(204));
+      await pending;
+      const current = storedConfig(KEY);
+      ok('shortcut retirement client: a late success cannot stamp a replacement pairing',
+        current.deviceId === replacement.deviceId &&
+          current.syncToken === replacement.syncToken &&
+          current.shortcutCaptureRetiredAt === undefined &&
+          net.count('POST /v1/device/retire-shortcut-capture') === 1,
+        JSON.stringify({ current: current.deviceId, replacement: replacement.deviceId }));
+    }
   }
 
   /* ═════════════════════ Changing country ═════════════════════ */
@@ -1229,6 +1360,7 @@ async function queueItem(id, row, publicKey) {
     freshDevice();
     const db = new DatabaseSync(':memory:');
     db.exec(readFileSync(SCHEMA_PATH, 'utf8'));
+    db.exec(readFileSync(SHORTCUT_RETIREMENT_MIGRATION_PATH, 'utf8'));
     // D1 is SQLite. The adapter renames methods and reports `changes`, which is
     // what the Worker reads to tell a queued row from one a replay receipt
     // refused — get that wrong and the duplicate assertions below go green for
@@ -1246,9 +1378,16 @@ async function queueItem(id, row, publicKey) {
       DB: {
         prepare: (sql) => statement(sql),
         batch: async (statements) => {
-          const out = [];
-          for (const s of statements) out.push(await s.run());
-          return out;
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const out = [];
+            for (const s of statements) out.push(await s.run());
+            db.exec('COMMIT');
+            return out;
+          } catch (error) {
+            db.exec('ROLLBACK');
+            throw error;
+          }
         },
       },
       // 32 bytes, standard base64 — the Worker secret that encrypts push tokens
@@ -2395,6 +2534,170 @@ async function queueItem(id, row, publicKey) {
         await executor.execute('supplemental');
         eq('capture executor: supplemental persistence precedes acknowledgement and reserves probes',
           events, ['persist', 'ack:bank-row']);
+      }
+
+      {
+        const network = controlledPromise();
+        const events = [];
+        let current = {
+          ...hydrated, captureOptOut: false, privateMode: false, marketId: 'AE',
+        };
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            setMarket: (market) => { events.push(`market:${market}`); return true; },
+            stageReviewAlerts: () => {
+              events.push('stage-review');
+              return { admitted: 1, durable: Promise.resolve() };
+            },
+            importBatch: () => {
+              events.push('persist');
+              return { ids: ['tx'], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => void events.push('flush'),
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => {
+              events.push('sync');
+              return network.promise;
+            },
+            planRows: () => changedPlan,
+            recordAutomationProof: async () => void events.push('proof'),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        const running = executor.execute('supplemental');
+        await nextMicrotask();
+        current = { ...current, captureOptOut: true };
+        network.resolve({
+          parsed: [{
+            ...row(20, 'PANDA'), market: 'SA', captureSource: 'shortcut',
+            captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+          }],
+          reviewCandidates: [{ id: 'review' }],
+          ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+          shortcutRows: 1, shortcutRowsWithBank: 1,
+        });
+        const outcome = await running;
+        ok('capture executor: opt-out during relay sync blocks market, stage, import, proof, and ACK',
+          outcome.kind === 'up-to-date' && outcome.source === 'none' &&
+            JSON.stringify(events) === JSON.stringify(['sync']),
+          JSON.stringify({ outcome, events }));
+      }
+
+      {
+        const reviewDurability = controlledPromise();
+        const events = [];
+        let current = { ...hydrated, captureOptOut: false, privateMode: false };
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            stageReviewAlerts: () => {
+              events.push('stage-review');
+              return {
+                admitted: 1,
+                durable: reviewDurability.promise.then(() => void events.push('review-durable')),
+              };
+            },
+            importBatch: () => {
+              events.push('persist');
+              return { ids: ['tx'], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => void events.push('flush'),
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => {
+              events.push('sync');
+              return {
+                parsed: [{
+                  ...row(21, 'LULU'), captureSource: 'shortcut',
+                  captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+                }],
+                reviewCandidates: [{ id: 'review' }],
+                ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+                shortcutRows: 1, shortcutRowsWithBank: 1,
+              };
+            },
+            planRows: () => changedPlan,
+            recordAutomationProof: async () => void events.push('proof'),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        const running = executor.execute('supplemental');
+        for (let attempt = 0; attempt < 5 && !events.includes('stage-review'); attempt += 1) {
+          await nextMicrotask();
+        }
+        current = { ...current, privateMode: true };
+        reviewDurability.resolve();
+        const outcome = await running;
+        ok('capture executor: Private Mode during review durability blocks relay import, proof, and ACK',
+          outcome.kind === 'up-to-date' && outcome.source === 'none' &&
+            JSON.stringify(events) === JSON.stringify(['sync', 'stage-review', 'review-durable']),
+          JSON.stringify({ outcome, events }));
+      }
+
+      {
+        const importDurability = controlledPromise();
+        const events = [];
+        let current = { ...hydrated, captureOptOut: false, privateMode: false };
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => {
+              events.push('persist');
+              return {
+                ids: ['tx'],
+                durable: importDurability.promise.then(() => void events.push('persist-durable')),
+              };
+            },
+            ensureDurable: async () => void events.push('flush'),
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => {
+              events.push('sync');
+              return {
+                parsed: [{
+                  ...row(22, 'NOON'), captureSource: 'shortcut',
+                  captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+                }],
+                ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+                shortcutRows: 1, shortcutRowsWithBank: 1,
+              };
+            },
+            planRows: () => changedPlan,
+            recordAutomationProof: async () => void events.push('proof'),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        const running = executor.execute('supplemental');
+        for (let attempt = 0; attempt < 5 && !events.includes('persist'); attempt += 1) {
+          await nextMicrotask();
+        }
+        current = { ...current, captureOptOut: true };
+        importDurability.resolve();
+        const outcome = await running;
+        ok('capture executor: opt-out during import durability keeps relay proof and rows unacknowledged',
+          outcome.kind === 'up-to-date' && outcome.source === 'none' &&
+            JSON.stringify(events) === JSON.stringify(['sync', 'persist', 'persist-durable']),
+          JSON.stringify({ outcome, events }));
       }
 
       {

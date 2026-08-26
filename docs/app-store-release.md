@@ -1,5 +1,15 @@
 # Wafra — App Store release playbook
 
+> **CURRENT STATUS — LEGACY RELAY SHORTCUT RETIRED / DO NOT USE FOR NEW SETUP**
+>
+> The relay-uploading **Wafra Capture** instructions and App Review wording
+> preserved below are historical, not the current iOS capture path. Do not use
+> the old Shortcut, setup code, or iCloud URL in a new build. Follow
+> [`2026-08-25-ios-local-capture.md`](./superpowers/plans/2026-08-25-ios-local-capture.md)
+> for the local-capture implementation and its unresolved physical-iPhone
+> release gates. This repository does not yet record a qualified replacement
+> Shortcut or physical-device proof.
+
 The iPhone build does not claim to read SMS. Apple does not expose another
 app's Messages inbox to Wafra. Automatic capture is a user-created personal
 automation in Shortcuts: a Message trigger, restricted to bank conversations
@@ -20,7 +30,9 @@ and production-submit profiles. Run `npm run release:check` before attempting a
 production build. It intentionally blocks while any relay, EAS, Shortcut,
 billing, database, support, or legal value is missing.
 
-## Shortcut release gate
+## Legacy Shortcut release gate — retired
+
+> **Historical procedure only. Do not use it for a new setup or release.**
 
 Build the credential-free Shortcut exactly from
 [`ios-shortcut-spec.md`](./ios-shortcut-spec.md). A per-device setup code is
@@ -45,7 +57,10 @@ that automations using that trigger do not display a run notification:
 - https://support.apple.com/guide/shortcuts/enable-or-disable-a-personal-automation-apd602971e63/ios
 - https://support.apple.com/guide/shortcuts/communication-triggers-apdd711f9dff/ios
 
-## App Review notes — draft
+## Legacy relay App Review notes — retired draft
+
+> This draft describes the retired relay-uploading Shortcut and must not be
+> submitted as the description of the current local-capture implementation.
 
 > Wafra does not access or monitor Messages. During an explicit setup flow, the
 > user installs a personal Shortcut and creates Apple's own Message automation

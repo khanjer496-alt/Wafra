@@ -3,7 +3,7 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { AppState, Platform, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
@@ -11,8 +11,19 @@ import { OnboardingGate } from '@/components/onboarding-gate';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
-import { observeEntitlement, refreshEntitlement } from '@/lib/billing';
+import {
+  observeEntitlement,
+  refreshEntitlement,
+  syncStoreCaptureEntitlement,
+  type EntitlementSnapshot,
+} from '@/lib/billing';
+import {
+  publishIosCaptureStatusRefresh,
+  setIosLocalCaptureEntitlementLease,
+  subscribeIosCaptureEntitlementReset,
+} from '@/lib/capture';
 import { PeriodProvider } from '@/lib/period-context';
+import { localCaptureEntitlementLease } from '@/lib/purchases';
 import { StoreProvider, useStore } from '@/lib/store';
 // Required at module scope so expo-task-manager can load the wake-only relay
 // handler when iOS launches the JS bundle in the background.
@@ -30,36 +41,90 @@ function BillingSync() {
   const currentPro = useRef(state.pro);
   currentPro.current = state.pro;
 
+  const syncLocalCaptureLease = useCallback(() => {
+    if (!state.hydrated || Platform.OS !== 'ios') return;
+    const lease = localCaptureEntitlementLease({
+      founderPro: state.founderPro,
+      trialStartTs: state.trialStartTs,
+    });
+    if (!lease) return;
+    void setIosLocalCaptureEntitlementLease(lease.expiresAtMs, lease.lifetime)
+      .then((applied) => {
+        if (applied) publishIosCaptureStatusRefresh();
+      })
+      .catch(() => {
+        // The optional native module failing closed must not crash the ledger.
+        // Setup will stay paused until a build containing the module is installed.
+      });
+  }, [state.founderPro, state.hydrated, state.trialStartTs]);
+
+  useEffect(() => {
+    syncLocalCaptureLease();
+  }, [syncLocalCaptureLease]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    return subscribeIosCaptureEntitlementReset(syncLocalCaptureLease);
+  }, [syncLocalCaptureLease]);
+
   useEffect(() => {
     if (!state.hydrated) return;
     let disposed = false;
     let stopObserving = () => {};
     let latestRequestDateMs = 0;
+    let latestSnapshot: EntitlementSnapshot | null = null;
     let refreshGeneration = 0;
-    const apply = (snapshot: { active: boolean; requestDateMs: number }) => {
-      if (disposed || snapshot.requestDateMs <= latestRequestDateMs) return;
-      latestRequestDateMs = snapshot.requestDateMs;
+    const apply = async (snapshot: EntitlementSnapshot, allowEqual = false) => {
+      if (
+        disposed ||
+        snapshot.requestDateMs < latestRequestDateMs ||
+        (!allowEqual && snapshot.requestDateMs === latestRequestDateMs)
+      ) return;
+      latestRequestDateMs = Math.max(latestRequestDateMs, snapshot.requestDateMs);
+      let nativeAccepted = true;
+      if (Platform.OS === 'ios') {
+        try {
+          nativeAccepted = await syncStoreCaptureEntitlement(snapshot);
+        } catch {
+          // Billing remains usable if a malformed/missing native build is
+          // installed; native admission itself still fails closed.
+        }
+      }
+      if (disposed || snapshot.requestDateMs !== latestRequestDateMs || !nativeAccepted) return;
+      latestSnapshot = snapshot;
       if (snapshot.active === currentPro.current) return;
       currentPro.current = snapshot.active;
       setPro(snapshot.active);
     };
     void observeEntitlement((snapshot) => {
       refreshGeneration += 1;
-      apply(snapshot);
+      void apply(snapshot);
     }).then((cleanup) => {
       if (disposed) cleanup();
       else stopObserving = cleanup;
     });
-    const appState = AppState.addEventListener('change', (next) => {
-      if (next !== 'active') return;
+    const refreshStoreLease = (allowEqual = false) => {
       const generation = ++refreshGeneration;
       void refreshEntitlement().then((snapshot) => {
-        if (generation === refreshGeneration && snapshot) apply(snapshot);
+        if (generation === refreshGeneration && snapshot) void apply(snapshot, allowEqual);
       });
+    };
+    const entitlementReset = Platform.OS === 'ios'
+      ? subscribeIosCaptureEntitlementReset(() => {
+          // Replay the last confirmed answer without requiring connectivity;
+          // native accepts an identical revision and rejects equal conflicts.
+          if (latestSnapshot) void apply(latestSnapshot, true);
+          else refreshStoreLease(true);
+        })
+      : () => {};
+    const appState = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      refreshStoreLease();
     });
     return () => {
       disposed = true;
       appState.remove();
+      entitlementReset();
       stopObserving();
     };
   }, [setPro, state.hydrated]);

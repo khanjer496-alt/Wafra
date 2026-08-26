@@ -12,6 +12,7 @@ import { Money } from '@/components/ui/money';
 import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { cardDiagnostics, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { isCaptureAvailable } from '@/lib/capture';
 import { shareText } from '@/lib/share-text';
 import { categoryLabel } from '@/lib/categories';
 import { isRelayPlatform } from '@/lib/relay';
@@ -46,6 +47,7 @@ export default function AccuracyScreen() {
   // the same green check for both — see noFormatsReason() in lib/accuracy.ts.
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
+    localCaptureAvailable: isCaptureAvailable(),
     privateMode: state.privateMode,
   });
 
@@ -176,6 +178,8 @@ export default function AccuracyScreen() {
               {t(
                 noFormats === 'relay'
                   ? 'formatsNotKeptRelay'
+                  : noFormats === 'ios-local'
+                    ? 'formatsNotKeptIosLocal'
                   : noFormats === 'private'
                     ? 'formatsNotKeptPrivate'
                     : 'improveAccuracyHint',

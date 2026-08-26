@@ -1,0 +1,50 @@
+/** Shared constants for the credential-free, device-local iPhone Shortcut. */
+export const IOS_LOCAL_CAPTURE_SHORTCUT_NAME = 'Wafra Local Capture';
+export const IOS_LOCAL_CAPTURE_TEST_SENTINEL = 'WAFRA_LOCAL_CAPTURE_TEST_V1';
+
+const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
+  // Retired relay-backed release URL.
+  '03d2ab22a33f4fef9d503142575a70fb',
+  // Older graph with Apple's invalid file-path action.
+  '85bd1e080e5849b591049eccffb9a3a1',
+]);
+
+/**
+ * Accept only Apple's exact public Shortcut URL shape.
+ *
+ * This deliberately does not share the relay-era normalizer. A URL with a
+ * credential, query, fragment, extra path, non-hex ID, or retired graph must
+ * leave setup unavailable instead of handing financial automation to an
+ * ambiguous artifact.
+ */
+export function normalizeIosLocalCaptureShortcutUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/.exec(value);
+  if (!match) return null;
+  const id = match[1].toLowerCase();
+  if (RETIRED_CAPTURE_SHORTCUT_IDS.has(id)) return null;
+  return `https://www.icloud.com/shortcuts/${id}`;
+}
+
+/** Expo inlines this public value into each build profile. */
+export const IOS_LOCAL_CAPTURE_SHORTCUT_URL = normalizeIosLocalCaptureShortcutUrl(
+  process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
+);
+
+/** Run the installed Shortcut with a non-financial, opaque setup sentinel. */
+export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
+  const callback = (result: 'success' | 'cancel' | 'error') =>
+    encodeURIComponent(
+      `wafra://ios-setup?shortcutResult=${result}${
+        fromOnboarding ? '&fromOnboarding=1' : ''
+      }`,
+    );
+
+  return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
+    IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
+  )}` +
+    `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_TEST_SENTINEL)}` +
+    `&x-success=${callback('success')}` +
+    `&x-cancel=${callback('cancel')}` +
+    `&x-error=${callback('error')}`;
+}

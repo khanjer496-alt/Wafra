@@ -76,7 +76,7 @@ function AutomaticCapture({
   onPress: () => void;
 }) {
   const theme = useTheme();
-  const active = status === 'active';
+  const active = status === 'waiting-for-alert' || status === 'first-alert-captured';
   const title =
     status === 'paused'
       ? t('trialEndedBanner')
@@ -85,19 +85,17 @@ function AutomaticCapture({
       : status === 'unsupported'
         ? t('capturePhoneOnly')
         : Platform.OS === 'ios'
-          ? active
-            ? t('captureIosOn')
-            // Ahead of every other iOS branch: a device the relay cut off has
-            // a config that still looks finished, and reading it as merely
-            // "off" would send the user back through setup with no idea that
-            // the phone they are holding was removed on purpose.
-            : status === 'revoked'
-              ? t('captureIosRevoked')
-            : status === 'pipe-ready'
-              ? t('captureIosPipeReady')
-            : status === 'needs-test'
-              ? t('captureIosNeedsTest')
-              : t('captureIosOff')
+          ? status === 'first-alert-captured'
+            ? t('captureIosFirstAlertCaptured')
+            : status === 'waiting-for-alert'
+              ? t('captureIosWaitingForAlert')
+              : status === 'needs-automation'
+                ? t('captureIosNeedsAutomation')
+                : status === 'queue-warning'
+                  ? t('captureIosQueueWarning')
+                  : status === 'migration-retry'
+                    ? t('captureIosMigrationRetry')
+                    : t('captureIosOff')
           : active
             ? t('captureAndroidOn')
             : t('turnOnTracking');
@@ -112,16 +110,14 @@ function AutomaticCapture({
     ? null
     : status === 'checking'
     ? t('capturePhoneOnly')
+    : status === 'first-alert-captured' && lastCaptureDate
+    ? tf('captureLatest', { date: shortDate(lastCaptureDate) })
     : active
-    ? lastCaptureDate
-      ? tf('captureLatest', { date: shortDate(lastCaptureDate) })
-      : Platform.OS === 'ios'
-        ? t('captureSyncNow')
-        : t('captureAndroidPrivate')
-    : status === 'revoked'
-      ? t('captureIosRevokedDetail')
-    : status === 'pipe-ready'
-      ? t('iosTestLimit')
+      ? Platform.OS === 'ios' ? t('captureIosLocalPrivacy') : t('captureAndroidPrivate')
+    : status === 'queue-warning'
+      ? t('captureIosQueueWarningDetail')
+    : status === 'migration-retry'
+      ? t('captureIosMigrationRetryDetail')
     : Platform.OS === 'android'
       ? t('trackingPrivacy')
       : t('captureIosSetupDetail');
@@ -129,9 +125,9 @@ function AutomaticCapture({
     ? t('pausedBadge')
     : active
     ? t('captureReady')
-    : status === 'pipe-ready'
-      ? t('captureVerify')
-    : status === 'needs-test'
+    : status === 'queue-warning'
+      ? t('captureRecover')
+    : status === 'needs-automation' || status === 'migration-retry'
       ? t('captureFinish')
       : status === 'checking' || status === 'unsupported'
         ? null
@@ -699,10 +695,10 @@ export default function LedgerHomeScreen() {
   // connected", live dot, ON badge — tapped it and was dropped back into the
   // four-step setup they had finished weeks earlier, with no way to sync from
   // the surface whose whole job is syncing.
-  const captureStatus: CaptureSurfaceState = !isProActive(state)
-    ? 'paused'
-    : state.captureOptOut || needsPermission
-      ? 'off'
+  const captureStatus: CaptureSurfaceState = state.captureOptOut || needsPermission
+    ? 'off'
+    : Platform.OS === 'android' && !isProActive(state)
+      ? 'paused'
       : captureState;
 
   const [now, setNow] = useState(() => new Date());
@@ -881,16 +877,11 @@ export default function LedgerHomeScreen() {
                     // opt-out and make this first tap look broken.
                   }).catch(() => Alert.alert(t('capturePreferenceFailed')));
                 }
-                // Only iOS states that still owe the user setup go to the
-                // wizard: 'off' (no relay config), 'needs-test' (paired but
-                // unverified), 'pipe-ready' (verified pipe, automation not yet
-                // proven) and 'revoked' (the relay cut this device off, so the
-                // way back is a new pairing) each have something left to finish
-                // there — and 'revoked' is why this stayed a !== test. 'active'
-                // does not — its own detail line is "tap to sync now" — so it
-                // gets the sync, exactly as Android does.
-                else if (Platform.OS === 'ios' && captureStatus !== 'active') {
+                else if (Platform.OS === 'ios' &&
+                  (captureStatus === 'off' || captureStatus === 'needs-automation')) {
                   router.push('/ios-setup');
+                } else if (captureStatus === 'queue-warning') {
+                  router.push('/settings');
                 } else void runAutoImport(true);
               }}
             />
