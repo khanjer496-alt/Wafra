@@ -56,7 +56,7 @@ build number instead of every install reporting build `1`. See
 ### 1. Generate the registration link — **terminal**
 
 ```bash
-npx eas-cli device:create
+npx eas-cli@22.4.0 device:create
 ```
 
 Expo documents the prompts:
@@ -122,11 +122,11 @@ membership is approved, before you need a build, and the wait costs nothing.
 Check what is registered at any time:
 
 ```bash
-npx eas-cli device:list
+npx eas-cli@22.4.0 device:list
 ```
 
 Devices added via the website/QR show up as a bare UDID;
-`npx eas-cli device:rename` gives them a readable name
+`npx eas-cli@22.4.0 device:rename` gives them a readable name
 ([Managing devices](https://docs.expo.dev/build/internal-distribution/#managing-devices)).
 
 ---
@@ -134,7 +134,7 @@ Devices added via the website/QR show up as a bare UDID;
 ## Build
 
 ```bash
-npx eas-cli build --platform ios --profile preview
+npx eas-cli@22.4.0 build --platform ios --profile preview
 ```
 
 The first interactive run will ask you to log in to the Apple account and
@@ -210,13 +210,13 @@ provisioning profile is an allow-list fixed at build time.
 
 So, to add a phone:
 
-1. `npx eas-cli device:create`, new phone installs the profile.
+1. `npx eas-cli@22.4.0 device:create`, new phone installs the profile.
 2. Wait out Apple's processing if the membership is new (24–72 h).
 3. Either rebuild interactively, selecting both devices —
    or re-sign the existing `.ipa` without a full rebuild:
 
 ```bash
-npx eas-cli build:resign
+npx eas-cli@22.4.0 build:resign
 ```
 
 Expo documents `build:resign` as re-signing an existing iOS `.ipa` with a new
@@ -317,8 +317,8 @@ Two profiles cover this:
   restated explicitly. This is the profile to use on a Mac.
 
 ```bash
-npx eas-cli build --platform ios --profile preview-simulator
-npx eas-cli build:run -p ios --latest
+npx eas-cli@22.4.0 build --platform ios --profile preview-simulator
+npx eas-cli@22.4.0 build:run -p ios --latest
 ```
 
 `eas build:run` downloads and installs onto the simulator

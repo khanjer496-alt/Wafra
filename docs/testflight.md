@@ -237,7 +237,7 @@ Rotate the phone to landscape. It is cramped but it is a real shell.
 In the Codespace terminal:
 
 ```bash
-npm install -g eas-cli
+npm install -g eas-cli@22.4.0
 eas login
 npx testflight
 ```
@@ -253,14 +253,14 @@ The 2FA code arrives on the same iPhone. Have it in your hand.
 If you would rather do it in pieces, the equivalent is:
 
 ```bash
-eas init                 # creates the project, writes extra.eas.projectId
-eas credentials --platform ios     # sign in to Apple; also where you store the ASC key
-eas build --platform ios --profile production   # answer any remaining prompts
+npx eas-cli@22.4.0 init                 # creates the project, writes extra.eas.projectId
+npx eas-cli@22.4.0 credentials --platform ios     # sign in to Apple; also where you store the ASC key
+npx eas-cli@22.4.0 build --platform ios --profile production   # answer any remaining prompts
 ```
 
 ### Then commit one line
 
-`eas init` writes the EAS project UUID into `app.json`:
+`npx eas-cli@22.4.0 init` writes the EAS project UUID into `app.json`:
 
 ```json
   "extra": {

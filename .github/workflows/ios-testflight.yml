@@ -97,7 +97,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.3
           cache: npm
 
       # -----------------------------------------------------------------
@@ -360,17 +360,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # eas-cli is not a dependency of this project and should not become one —
-      # it is a tool, not a library, and pinning it in package.json would mean
-      # a Dependabot PR every week for something only CI runs.
-      #
-      # 19.1.0 is the floor: --refresh-ad-hoc-provisioning-profile arrived
-      # there, and it is the version Expo's internal-distribution docs name for
-      # non-interactive iOS. Latest is used so that Apple-side changes (which
-      # Apple ships without notice) arrive without a commit here.
+      # Keep the CI binary aligned with eas.json's cli.version contract. Bumping
+      # EAS is deliberate: validate the workflow with the new CLI before moving
+      # both pins together.
       - name: Install EAS CLI
         run: |
-          npm install -g eas-cli@latest
+          npm install -g eas-cli@22.4.0
           eas --version
 
       # ---- Prove the token before the build, not during it. `eas whoami` is
@@ -639,7 +634,7 @@ jobs:
               echo "tab and it works on a phone. In it:"
               echo
               echo '```'
-              echo "npm install -g eas-cli"
+              echo "npm install -g eas-cli@22.4.0"
               echo "eas login"
               echo "npx testflight"
               echo '```'

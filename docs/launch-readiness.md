@@ -277,20 +277,20 @@ curl --fail --show-error https://<production-relay>/v1/health
 1. Freeze a candidate commit and record its SHA.
 2. Run the final release command set below and make `release:check` pass with
    the production environment.
-3. Confirm `npx eas-cli@latest whoami` and `eas project:info` resolve to the
+3. Confirm `npx eas-cli@22.4.0 whoami` and `npx eas-cli@22.4.0 project:info` resolve to the
    intended publisher/project; configure credentials with
-   `eas credentials --platform ios`.
+   `npx eas-cli@22.4.0 credentials --platform ios`.
 4. Build the production archive:
 
    ```bash
-   npx eas-cli@latest build --platform ios --profile production
+   npx eas-cli@22.4.0 build --platform ios --profile production
    ```
 
 5. Inspect the build page, configuration, credentials, commit SHA, build
    number, and archive validation. Submit only that build:
 
    ```bash
-   npx eas-cli@latest submit --platform ios --profile production
+   npx eas-cli@22.4.0 submit --platform ios --profile production
    ```
 
 6. Wait for App Store Connect processing and answer export-compliance prompts.
@@ -579,12 +579,12 @@ npx expo config --type public
 npx expo config --type introspect
 
 # iOS production build and TestFlight upload.
-npx eas-cli@latest build --platform ios --profile production
-npx eas-cli@latest submit --platform ios --profile production
+npx eas-cli@22.4.0 build --platform ios --profile production
+npx eas-cli@22.4.0 submit --platform ios --profile production
 
 # Android EAS lane, only if EAS owns the same accepted upload key.
-npx eas-cli@latest build --platform android --profile production
-npx eas-cli@latest submit --platform android --profile production
+npx eas-cli@22.4.0 build --platform android --profile production
+npx eas-cli@22.4.0 submit --platform android --profile production
 ```
 
 `npm run check` currently covers TypeScript, ESLint, unit/contract/corpus tests,

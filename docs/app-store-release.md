@@ -80,9 +80,9 @@ test Shortcut action. Do not provide a real user's token or bank message.
 ## Build commands
 
 ```bash
-npx eas-cli build --platform ios --profile preview
-npx eas-cli build --platform ios --profile production
-npx eas-cli submit --platform ios --profile production
+npx eas-cli@22.4.0 build --platform ios --profile preview
+npx eas-cli@22.4.0 build --platform ios --profile production
+npx eas-cli@22.4.0 submit --platform ios --profile production
 ```
 
 Production signing, submission, hosted legal URLs, billing products, the relay,

@@ -21,6 +21,7 @@ module.exports = defineConfig([
       "ios/*",
       "server/*",
       ".claude/worktrees/**",
+      ".superpowers/**",
     ],
   },
   {
