@@ -19,6 +19,13 @@ on:
         description: 'Internal ARM64 APK with the temporary full-inbox parser corpus exporter'
         type: boolean
         default: false
+      architecture:
+        description: 'ARM64 for modern Android phones; universal for all supported CPUs'
+        type: choice
+        options:
+          - arm64
+          - universal
+        default: arm64
   push:
     branches:
       - main
@@ -237,8 +244,9 @@ jobs:
         working-directory: android
         env:
           CORPUS_BUILD: ${{ github.event.inputs.corpus == 'true' && 'true' || 'false' }}
+          APK_ARCHITECTURE: ${{ github.event.inputs.architecture || 'universal' }}
         run: |
-          if [ "$CORPUS_BUILD" = "true" ]; then
+          if [ "$CORPUS_BUILD" = "true" ] || [ "$APK_ARCHITECTURE" = "arm64" ]; then
             ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
           else
             ./gradlew assembleRelease --no-daemon
