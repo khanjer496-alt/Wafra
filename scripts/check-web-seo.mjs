@@ -71,8 +71,8 @@ check(
 );
 const imageCount = (index.match(/<img\b/g) ?? []).length;
 const accessibleImageCount = (index.match(/<img\b[^>]*\balt="[^"]+"/g) ?? []).length;
-check('two static product images with alt text', imageCount === 2 && accessibleImageCount === 2);
-check('static product image URLs', index.includes('src="/wafra-app-home.png"') && index.includes('src="/wafra-app-bills.png"'));
+check('one static product image with alt text', imageCount === 1 && accessibleImageCount === 1);
+check('static product image URL', index.includes('src="/wafra-app-home.png"'));
 check(
   'public beta download links',
   index.includes('https://testflight.apple.com/join/jbwzCgZ6') &&
