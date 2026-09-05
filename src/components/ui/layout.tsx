@@ -4,6 +4,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { SectionHeader as CanonicalSectionHeader } from '@/components/ui/section-header';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { Motion, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -62,7 +63,7 @@ export function Section({
   );
 }
 
-/** Caps header with an optional trailing figure or link. */
+/** @deprecated Import SectionHeader from ui/section-header. */
 export function SectionHeader({
   title,
   action,
@@ -74,22 +75,13 @@ export function SectionHeader({
   onAction?: () => void;
   trailing?: React.ReactNode;
 }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.sectionHeader}>
-      <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
-        {title}
-      </ThemedText>
-      {trailing}
-      {action && (
-        <Pressable accessibilityRole="button" hitSlop={8} onPress={onAction}>
-          <ThemedText type="micro" style={{ color: theme.primary }}>
-            {action}
-          </ThemedText>
-        </Pressable>
-      )}
-    </View>
-  );
+  if (action && onAction) {
+    return <CanonicalSectionHeader title={title} action={{ label: action, onPress: onAction }} />;
+  }
+  if (trailing !== undefined) {
+    return <CanonicalSectionHeader title={title} trailing={trailing} />;
+  }
+  return <CanonicalSectionHeader title={title} />;
 }
 
 /**
@@ -227,13 +219,6 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
 }
 
 const styles = StyleSheet.create({
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    paddingBottom: Spacing.two,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

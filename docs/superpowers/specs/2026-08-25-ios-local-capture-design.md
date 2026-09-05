@@ -1,14 +1,21 @@
 # iOS Local Capture Design
 
+> **Superseded setup correction (2026-09-04):** This historical design's
+> `Any Sender` plus empty `Message Contains` instructions are not active. On
+> iOS 26.6.1 that configuration did not enable **Next**. Apple requires an
+> explicitly selected sender or phrase; Wafra now limits future automatic
+> capture to bank senders the user selects. History import and manual entry
+> remain available.
+
 **Status:** Approved on 2026-08-25.
 
 ## Objective
 
 Replace Wafra's four-step, relay-backed iPhone setup with the smallest flow
 Apple permits: install one ordinary Shortcut and create one device-local
-Message automation. Incoming bank-alert text is filtered and staged on the
-iPhone, parsed by Wafra, and deleted after a durable ledger write. The live
-capture path does not upload raw Message text.
+Message automation. Each newly arriving Message delivered by that automation
+is staged on the iPhone, filtered and parsed by Wafra, then deleted after a
+durable local outcome. The live capture path does not upload raw Message text.
 
 This specification covers future alerts. Historical import is a separate
 subsystem described in
@@ -59,7 +66,7 @@ two short stages on one screen:
 - Wafra shows the five exact choices above, one annotated screenshot, and a
   single **Open Automation** button.
 - Returning users tap **I added the automation**. Wafra runs the installed
-  Shortcut with the exact text `WAFRA_LOCAL_CAPTURE_TEST_V1`. Immediately
+  Shortcut with no input, which selects its setup-proof branch. Immediately
   before that explicit confirmation, Wafra enables native capture admission;
   a fresh install keeps admission disabled by default.
 - The test writes only an opaque setup proof through Wafra's native action. It
@@ -81,13 +88,13 @@ user has not yet deleted cannot recreate staged data.
 
 ### Credential-free Capture Shortcut
 
-The published **Wafra Local Capture** Shortcut accepts only Messages and Text:
+The published **Wafra Local Capture** Shortcut accepts only Messages:
 
-- Text input is accepted only when it exactly equals
-  `WAFRA_LOCAL_CAPTURE_TEST_V1`. It invokes the native setup-proof action and
-  stops. All other Text input stops without side effects.
-- Message input is explicitly coerced into bounded Sender and Content text.
-  It generates one request UUID and invokes the native live-message action.
+- A run with no input invokes the native setup-proof action and stops.
+- Message input is explicitly coerced into Sender, Content and GUID text. The
+  Shortcut hashes the GUID with SHA-256, normalizes the full digest to lowercase
+  and passes that stable 64-hex identity plus the Message's actual lower-case
+  `date` property to the native live-message action.
 - It has no URL, bearer token, device ID, file action, clipboard action,
   analytics, logging, notification, or HTTP action.
 - It never displays, copies, speaks, or returns Message content.
@@ -107,10 +114,11 @@ The iOS app target exposes two background-capable App Intents:
    - never marks real-message automation as verified.
 2. `StageWafraLiveMessageIntent`
    - parameters: `sender: String`, `body: String`, `eventId: String`, and
-     `observedAt: Date`; `observedAt` is Shortcuts' Current Date at receipt,
-     not an assumed Date property on the triggered Message;
+     `observedAt: Date`; `eventId` is the full lowercase SHA-256 of Apple's
+     Message GUID and `observedAt` is the triggered Message's Date;
    - validates all fields before persistence;
-   - runs the native sender gate below;
+   - validates all bounded fields without treating a sender allowlist as the
+     financial parser;
    - returns one of `accepted`, `ignored`, `invalid`, `capacityReached`, or
      `disabled`
      without echoing the input.
@@ -124,32 +132,23 @@ They must not open Wafra. On iOS 16–25 they use App Intents' background defaul
 the iOS 16 floor without referencing the iOS 26-only `supportedModes` API on
 older systems.
 
-### Native Sender Gate
+### Native admission and parser routing
 
-The sender gate exists to avoid persisting ordinary conversations while
-keeping the TypeScript parser authoritative. Version 1 accepts a record only
-when Sender exactly matches a versioned, case/format-normalized UAE or Saudi
-bank sender alias in `config/ios-bank-senders.json`. Unknown senders fail
-closed without writing Content. There is no native body-phrase fallback and no
-native financial parser.
+Sender labels vary by carrier, so a production-empty alias registry cannot be
+an admission gate. Native code accepts any nonempty, bounded, control-free
+Sender and bounded Content delivered by the user's Any Sender automation. This
+means an ordinary new Message can remain briefly in the protected local queue
+until Wafra classifies it. There is no native body-phrase fallback and no native
+financial parser.
 
-The registry includes only exact aliases supported by parser fixtures and the
-physical sender corpus. Every alias records its market and canonical bank ID.
-Normalization is NFKC, locale-independent lowercase, then removal of ASCII
-space, hyphen, underscore, and period. Controls, bidi marks, and an empty or
-over-80-character result are rejected before lookup. Substring, prefix,
-domain, regex, body-name, and fuzzy matches are prohibited.
-
-After the sender gate accepts a record, the TypeScript launch parser decides
-whether a transaction, payment, statement, due, decline, ignored message, or
-review item exists. Known-bank OTPs, promotions, balance-only notices, and
-other nonposting messages are therefore staged briefly but deleted on the
-next drain without ledger mutation.
-
-The canonical JSON registry is the only hand-edited sender-policy source. A
-config-plugin generator produces the Swift constants, and JavaScript tests read
-the same JSON. Broad attribution regexes from `src/lib/markets.ts` must not be
-used as a persistence gate.
+The TypeScript launch parser remains authoritative. A physically evidenced
+exact sender attribution wins. Otherwise existing sender/body/currency routing
+selects a UAE or Saudi market only when evidence is unambiguous; the current
+ledger market must not relabel an explicit SAR alert as AED or vice versa.
+Transactions, payments, statements, dues, declines, ignored messages and
+source-free review items use the same policy as Android. OTPs, promotions,
+balance-only notices and unsupported messages are deleted on the next drain
+without ledger mutation.
 
 ### Protected Live Queue
 
@@ -159,7 +158,7 @@ sessions and the relay inbox. Each record has this exact logical shape:
 ```json
 {
   "v": 1,
-  "id": "<UUID-shaped event ID>",
+  "id": "<lowercase SHA-256 of Apple Message GUID, or legacy UUID>",
   "text": "<Message Content>",
   "sender": "<plain sender label>",
   "observedAt": "<UTC ISO-8601 instant>",
@@ -188,11 +187,11 @@ Queue invariants:
 No live Message content is placed in UserDefaults, Keychain, URLs, the
 clipboard, logs, analytics, notifications, crash metadata, D1, or the relay.
 
-The UUID identifies one Shortcut invocation, not one globally stable Apple
-Message. Two automations or two independent invocations may stage the same
-alert with different UUIDs. The drain coordinator must run both through the
-existing semantic duplicate guard; automated tests prove that distinct source
-IDs for the same alert produce one ledger row.
+The SHA-256 identity is stable for one Apple Message and is shared with history
+import. An exact retry is therefore idempotent and a later history run can match
+the same new Message by identity, while two distinct Message GUIDs remain two
+events even when their text and timestamp are identical. Legacy UUID records
+remain readable only for migration.
 
 ### Native Bridge and Concurrency
 
@@ -325,7 +324,9 @@ Capture Shortcut.
 - Synthetic proof timeout: return to the two-stage setup with one retry button.
 - Capture disabled: do not stage the Message; show setup only after the user
   opens Wafra, without exposing Message data.
-- Unknown sender or nonfinancial content: stop silently on-device.
+- Unknown sender: let the shared parser route from available sender/body/
+  currency evidence; fail closed on ambiguous market evidence.
+- Nonfinancial content: delete it silently on-device after classification.
 - Queue full: preserve existing records, increment a dropped count, and show a
   recovery notice on next app open.
 - Locked before first unlock after reboot: do not weaken file protection. The
@@ -338,9 +339,9 @@ Automated verification must cover:
 
 - generated Shortcut contains no network/file/clipboard action or literal
   financial data;
-- Text input accepts only the setup-proof sentinel;
-- Message input supplies bounded Sender, Content, UUID, and Date to the native
-  action;
+- no-input setup executes only the setup-proof branch;
+- Message input supplies bounded Sender and Content, full lowercase
+  SHA-256(GUID), and the actual Message Date to the native action;
 - sender registry normalization, exact aliases including exact shortcodes and
   business IDs, controls, bidi, lookalikes, and false-positive personal
   messages;
@@ -366,8 +367,8 @@ The physical-iPhone gate must demonstrate on the current stable iOS version:
 4. receive a real alphanumeric UAE bank alert while Wafra is closed and the
    phone is locked;
 5. open Wafra and verify the correct locally parsed ledger row;
-6. send an unrelated personal SMS and prove it creates no staged record or
-   network request;
+6. send an unrelated personal SMS and prove it creates no ledger/review row,
+   leaves no raw record after the next drain, and causes no network request;
 7. repeat after force quit and after reboot plus first unlock;
 8. verify Arabic/RTL, shortcode, dual-SIM, offline, low-storage, retry, and
    queue-capacity behavior;

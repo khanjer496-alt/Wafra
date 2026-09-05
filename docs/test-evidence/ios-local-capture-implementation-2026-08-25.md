@@ -1,13 +1,24 @@
 # iOS local capture implementation handoff
 
 **Recorded:** 2026-08-26 (Asia/Dubai)
-**Status:** implementation Tasks 1–7 verified; setup/evidence beta build 38 is valid in internal TestFlight; functional release remains blocked at the physical-iPhone Tasks 0 and 8
+**Status:** implementation and exact public artifact verified; real locked-phone
+bank-alert capture remains a physical TestFlight gate
 **Branch:** `codex/universal-parser-adversarial-tests`
 **Base commit:** `114dc63bf0d7b464f6d5fac351b305e3d0b0aa5e`
 
 This record is deliberately source-free. It contains no Message text, sender
 label, account/card data, token, signing material, private device identifier,
 or invented Apple result.
+
+## 2026-09-04 sender-scope correction
+
+The earlier implementation notes below describing **Any Sender** with an empty
+**Message Contains** field are superseded as setup guidance. On a physical iOS
+26.6.1 phone, that configuration did not enable **Next**. Apple requires an
+explicitly selected sender or phrase. Wafra's future automatic capture is
+therefore limited to bank senders the user selects; history import and manual
+entry remain available. This correction does not qualify the future-capture
+path: the locked-phone selected-sender bank-alert observation remains required.
 
 ## Verified implementation
 
@@ -35,13 +46,36 @@ or invented Apple result.
   Wafra is closed; consent remains separate so a verified renewal resumes the
   existing automation. Pending-only queues remain visibly recoverable after
   entitlement expiry without enabling new admission.
-- Task 7 setup: complete. The relay-backed wizard is replaced with two stages;
-  the exact choices are Message, Any Sender, empty Message Contains, Run
-  Immediately, Run Shortcut → Wafra Local Capture, and complete Received
-  Message input. Manual and history routes remain available.
+- Task 7 setup: the relay-backed wizard was replaced with two stages. Its
+  earlier Any Sender instructions are superseded by the sender-scope correction
+  above; setup now requires a selected bank sender. Manual and history routes
+  remain available.
 - The setup protocol rejects known retired Shortcut IDs and accepts only the
-  exact public iCloud URL shape. Because no qualified replacement URL exists,
-  the install CTA is intentionally unavailable.
+  exact public iCloud URL shape. The current beta profile uses the distinct
+  public **Wafra Local Capture** URL
+  `https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168`.
+
+## 2026-09-02 public artifact gate
+
+The downloadable unsigned graph behind the URL above matches the generated
+**Wafra Local Capture** graph exactly after removing only Apple's share-time
+Watch surface and restoring the public record name. Apple's record reports
+`signingStatus: APPROVED`. The graph has a no-input local setup-proof branch and
+a Received Message branch that extracts Sender, Body, GUID and Date, hashes the
+GUID, and calls `StageWafraLiveMessageIntent`. It contains no network, relay,
+Files, clipboard, logging, notification, analytics or source-output action.
+
+This artifact result proves what will be installed; it does not replace the
+remaining physical trigger test. Before calling future capture qualified, a
+TestFlight user must create the Apple personal Message automation and observe
+one real bank alert while the phone is locked, followed by Wafra draining and
+parsing the protected queue on its next foreground.
+
+Wafra 1.0.0 build 45 embeds this exact URL and Apple reports the uploaded build
+as `VALID`. At the user's explicit request on 2026-09-03 it was assigned to the
+internal **Team (Expo)** and external **Beta** groups; Apple reports both states
+as `IN_BETA_TESTING`. The real bank-alert trigger gate above remains outstanding
+and the public availability is not recorded as proof of that behavior.
 
 Independent read-only reviews for Tasks 1–7 are recorded in the task reports
 under `.superpowers/sdd/2026-08-25-ios-local-capture/`. The final Task 6,
@@ -89,12 +123,13 @@ Task 8: the required `Wafra Local Capture` graph must reject every network,
 Files, clipboard, logging, notification, analytics, credential, and source-data
 output action.
 
-## Physical and artifact gates — blocked
+## Remaining physical gates
 
 `xcrun xctrace list devices` found this Mac and simulators only. No physical
 iPhone was connected. Consequently none of the following is claimed:
 
-1. Current stable iOS accepts Message + Any Sender + empty Message Contains.
+1. A selected bank sender can be represented by the Apple Message trigger on
+   the target iPhone.
 2. The automation preserves complete Received Message input and exposes the
    actual sender to the local App Intent.
 3. Run Immediately executes while Wafra is closed and the phone is locked.
@@ -102,14 +137,10 @@ iPhone was connected. Consequently none of the following is claimed:
 5. An unrelated personal message creates no staged row or network request.
 6. Force-quit, reboot/first-unlock, dual-SIM, offline, low-storage, Arabic/RTL,
    shortcode, and queue-capacity cases pass on a physical device.
-7. The exact App Intent action graph has been exported from Apple Shortcuts.
-8. A signed `Wafra Local Capture` artifact exists or has a checksum.
-9. The exact tested artifact has been published to iCloud.
-
-Because Apple's private action serialization cannot be synthesized safely,
-`docs/ios-local-capture-shortcut-source.json` was not created and the legacy
-Shortcut builder/checker was not rewritten. There is no signed-artifact path,
-checksum, or replacement iCloud URL to record.
+The exact published artifact and action-graph checks are now complete as
+recorded above. Items 1–6 remain physical-device evidence requirements; in
+particular, no real locked-phone bank alert has yet qualified the complete
+future-capture path.
 
 ## TestFlight setup/evidence beta
 

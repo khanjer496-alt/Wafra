@@ -89,8 +89,41 @@
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
-        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/03d2ab22a33f4fef9d503142575a70fb",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168",
+        "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158",
         "EXPO_PUBLIC_WAFRA_SHORTCUT_FILE_BETA": "1",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
+    },
+    "history-beta": {
+      "extends": "base",
+      "channel": "history-beta",
+      "distribution": "store",
+      "environment": "preview",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
+        "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168",
+        "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158",
+        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
+        "WAFRA_SMS_CORPUS_EXPORT": "0"
+      }
+    },
+    "ios-parity-device": {
+      "extends": "base",
+      "channel": "ios-parity-device",
+      "distribution": "internal",
+      "environment": "preview",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
+        "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168",
+        "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
@@ -102,7 +135,10 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "0",
+        "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
+        "EXPO_PUBLIC_WAFRA_SHORTCUT_URL": "https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168",
+        "EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL": "https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
@@ -128,6 +164,9 @@
       }
     },
     "production-candidate": {
+      "extends": "production"
+    },
+    "history-beta": {
       "extends": "production"
     }
   }

@@ -22,6 +22,7 @@ export interface WafraLiveCaptureNativeModule {
   acknowledgeRecords(ids: string[]): Promise<void>;
   purgeExpired(): Promise<number>;
   getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
+  getAutomationInputProbeAt(): Promise<number | null>;
   acknowledgeCaptureWarning(warningId: string): Promise<boolean>;
   recordFirstCapturedAt(observedAt: number): Promise<void>;
   eraseAll(): Promise<void>;

@@ -50,6 +50,16 @@ fi
 # `npm run check:server` needs the same build to run the behavioural Worker
 # suite; see the header there.
 bash build.sh
+node ../universal-test/run.cjs
+node ../universal-evidence/nonposting-regressions.test.cjs
+node ../universal-evidence/money-regressions.test.cjs
+node ../universal-evidence/evaluator.test.cjs
+node ../universal-evidence-round2/run.cjs
+
+# Run the parser timing invariant before the cold Xcode builds below saturate
+# every core and heat the machine. It remains declared in SUITES for the exact
+# on-disk/count gate, and the loop skips only this already-completed suite.
+node invariants.test.js
 
 # The protected iPhone history bridge is Foundation-only. Exercise the actual
 # Swift store whenever this gate runs on macOS; Linux CI has a separate Xcode
@@ -98,8 +108,8 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=61
-SUITES=(parser bank-corpus unit worker relay invariants import-plan arabic instant-alert \
+EXPECTED_SUITES=71
+SUITES=(parser bank-corpus invariants unit worker relay import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
         trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
 SUITES+=(historical-import)
@@ -108,19 +118,29 @@ SUITES+=(launch-performance)
 SUITES+=(screen-section-contract)
 SUITES+=(parser-capabilities)
 SUITES+=(accessibility-layout)
+SUITES+=(ui-foundation-contract)
+SUITES+=(ui-polish-contract)
 SUITES+=(alert-market-packs)
 SUITES+=(alert-institution-grammars)
 SUITES+=(alert-market-detection)
 SUITES+=(alert-review-tray)
 SUITES+=(unparsed-launch-alert)
 SUITES+=(review-promotion)
-SUITES+=(alert-ai-suggestion)
+SUITES+=(review-source-bindings)
+SUITES+=(provider-source-identity)
+SUITES+=(home-presentation)
+SUITES+=(money-display)
+SUITES+=(merchant-logos)
 SUITES+=(launch-review-rollout)
 SUITES+=(android-review-capture)
 SUITES+=(ledger-money)
 SUITES+=(review-alerts-ui)
 SUITES+=(release-readiness)
 SUITES+=(ios-capture-setup)
+SUITES+=(e2e-export-cache)
+SUITES+=(ios-history-native-contract)
+SUITES+=(ios-history-shortcut-artifact)
+SUITES+=(ios-local-capture-shortcut-artifact)
 SUITES+=(ios-shortcut-artifact)
 SUITES+=(ios-shortcuts-config)
 SUITES+=(ios-setup-ux)
@@ -160,6 +180,7 @@ if [ "${#SUITES[@]}" -ne "$EXPECTED_SUITES" ]; then
 fi
 
 for t in "${SUITES[@]}"; do
+  [ "$t" = "invariants" ] && continue
   node "$t.test.js"
 done
 

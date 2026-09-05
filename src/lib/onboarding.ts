@@ -11,6 +11,23 @@ export type OnboardingMarketId = 'AE' | 'SA';
 export type OnboardingGoalId = OnboardingPlanPreferences['goalIds'][number];
 export type OnboardingBudgetId = OnboardingPlanPreferences['budgetId'];
 
+/** Resolve first-run navigation only after durable preferences/setup have loaded. */
+export function onboardingResumeDestination({
+  platform,
+  pendingIosSetup,
+  hasSavedPlan,
+  completedCallback,
+}: {
+  platform: string;
+  pendingIosSetup: boolean;
+  hasSavedPlan: boolean;
+  completedCallback: boolean;
+}): 'welcome' | 'capture' | 'ios-setup' | 'complete' {
+  if (completedCallback) return 'complete';
+  if (platform === 'ios' && pendingIosSetup) return 'ios-setup';
+  return hasSavedPlan ? 'capture' : 'welcome';
+}
+
 export interface OnboardingAnswers {
   marketId: OnboardingMarketId;
   goalIds: OnboardingGoalId[];

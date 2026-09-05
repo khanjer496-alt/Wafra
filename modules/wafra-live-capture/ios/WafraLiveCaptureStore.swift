@@ -38,11 +38,18 @@ public final class WafraLiveCaptureStore {
   public static let maxAcknowledgedIds = 10_000
   public static let recordTTL: TimeInterval = 30 * 24 * 60 * 60
   public static let maxFutureSkew: TimeInterval = 5 * 60
+#if DEBUG
+  public static let automationInputProbePayload = "WAFRA_AUTOMATION_INPUT_PROBE_V1"
+#endif
+  private static let appleMessageIdentifier = try! NSRegularExpression(
+    pattern: "^[0-9a-f]{64}$"
+  )
 
   public enum StoreError: Error {
     case lockUnavailable
     case invalidAcknowledgement
     case invalidSetupProof
+    case invalidAutomationInputProbe
     case invalidMilestone
     case invalidManifest
     case invalidEntitlementLease
@@ -84,13 +91,14 @@ public final class WafraLiveCaptureStore {
     var warningId: String?
     var setupProofVersion: Int?
     var setupProofAt: TimeInterval?
+    var automationInputProbeAt: TimeInterval?
     var firstCapturedAt: TimeInterval?
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
       case localEntitlementLifetime, localEntitlementExpiresAt
       case storeEntitlementLifetime, storeEntitlementExpiresAt, storeEntitlementVerifiedAt
-      case setupProofVersion, setupProofAt, firstCapturedAt
+      case setupProofVersion, setupProofAt, automationInputProbeAt, firstCapturedAt
     }
 
     init() {}
@@ -132,6 +140,10 @@ public final class WafraLiveCaptureStore {
       warningId = try values.decodeIfPresent(String.self, forKey: .warningId)
       setupProofVersion = try values.decodeIfPresent(Int.self, forKey: .setupProofVersion)
       setupProofAt = try values.decodeIfPresent(TimeInterval.self, forKey: .setupProofAt)
+      automationInputProbeAt = try values.decodeIfPresent(
+        TimeInterval.self,
+        forKey: .automationInputProbeAt
+      )
       firstCapturedAt = try values.decodeIfPresent(TimeInterval.self, forKey: .firstCapturedAt)
     }
 
@@ -157,20 +169,17 @@ public final class WafraLiveCaptureStore {
 
   private let rootOverride: URL?
   private let clock: () -> Date
-  private let senderIdentity: (String) -> WafraBankSenderIdentity?
   private let acknowledgementRemoveItem: (URL) throws -> Void
 
   public init(
     root: URL? = nil,
     now: @escaping () -> Date = Date.init,
-    senderIdentity: @escaping (String) -> WafraBankSenderIdentity? = WafraBankSenderRegistry.identity,
     acknowledgementRemoveItem: @escaping (URL) throws -> Void = {
       try FileManager.default.removeItem(at: $0)
     }
   ) {
     rootOverride = root
     clock = now
-    self.senderIdentity = senderIdentity
     self.acknowledgementRemoveItem = acknowledgementRemoveItem
   }
 
@@ -194,8 +203,6 @@ public final class WafraLiveCaptureStore {
         validSender(sender),
         validBody(body)
       else { return .invalid }
-
-      guard senderIdentity(sender) != nil else { return .ignored }
 
       let observedAtString = Self.iso8601(observedAt)
       guard let serializedDate = Self.parseISO8601(observedAtString) else { return .invalid }
@@ -481,6 +488,25 @@ public final class WafraLiveCaptureStore {
     }
   }
 
+#if DEBUG
+  public func recordAutomationInputProbe(body: String, at: Date) throws -> Bool {
+    guard body == Self.automationInputProbePayload else { return false }
+    guard validDate(at) else { throw StoreError.invalidAutomationInputProbe }
+    return try withExclusiveLock { root in
+      var manifest = try loadManifest(in: root)
+      manifest.automationInputProbeAt = at.timeIntervalSince1970
+      try writeManifest(manifest, in: root)
+      return true
+    }
+  }
+#endif
+
+  public func automationInputProbeAt() throws -> TimeInterval? {
+    try withExclusiveLock { root in
+      try loadManifest(in: root).automationInputProbeAt
+    }
+  }
+
   public func recordFirstCapturedAt(_ date: Date) throws {
     try withExclusiveLock { root in
       guard validDate(date) else { throw StoreError.invalidMilestone }
@@ -611,6 +637,7 @@ public final class WafraLiveCaptureStore {
       manifest.warningId.map({ canonicalWarningId($0) == $0 }) ?? true,
       manifest.setupProofVersion.map({ $0 > 0 }) ?? true,
       manifest.setupProofAt.map({ $0.isFinite }) ?? true,
+      manifest.automationInputProbeAt.map({ $0.isFinite }) ?? true,
       manifest.firstCapturedAt.map({ $0.isFinite }) ?? true,
       validLeaseShape(
         lifetime: manifest.localEntitlementLifetime,
@@ -756,6 +783,12 @@ public final class WafraLiveCaptureStore {
   }
 
   private func canonicalEventId(_ value: String) -> String? {
+    if Self.appleMessageIdentifier.firstMatch(
+      in: value,
+      range: NSRange(value.startIndex..., in: value)
+    ) != nil {
+      return value
+    }
     guard value.utf8.count == 36, let uuid = UUID(uuidString: value) else { return nil }
     return uuid.uuidString.uppercased()
   }

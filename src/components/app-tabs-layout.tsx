@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 
 import { WafraTabBar } from '@/components/tab-bar';
+import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import { useHistoryImport } from '@/hooks/use-history-import';
 
@@ -47,7 +48,7 @@ function CaptureOwner() {
  */
 export default function TabsLayout() {
   return (
-    <>
+    <TabBarMetricsProvider>
       <CaptureOwner />
       <Tabs
         screenOptions={{ headerShown: false }}
@@ -57,6 +58,6 @@ export default function TabsLayout() {
         <Tabs.Screen name="bills" />
         <Tabs.Screen name="wallet" />
       </Tabs>
-    </>
+    </TabBarMetricsProvider>
   );
 }

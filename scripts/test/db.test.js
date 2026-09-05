@@ -305,7 +305,11 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     return loaded.exports;
   };
 
+  const sourceIdentity = execute('src/lib/capture-source-identity.ts', (id) => {
+    throw new Error(`unexpected source identity dependency ${id}`);
+  });
   const dedupe = execute('src/lib/dedupe.ts', (id) => {
+    if (id === '@/lib/capture-source-identity') return sourceIdentity;
     throw new Error(`unexpected dedupe dependency ${id}`);
   });
   const parser = {
@@ -358,6 +362,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
       Platform: { OS: 'web' },
     },
+    '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
+    '@/lib/backup-validation': execute('src/lib/backup-validation.ts', () => { throw new Error('unexpected validation dependency'); }),
     '@/lib/accounts': {
       markCardsDistinct: identityState,
       mergeDuplicateAccounts: identityState,
@@ -366,15 +372,18 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
       repairDuplicateStatements: identityState,
       removeDeclinedTransactions: identityState,
     },
-    '@/lib/format': { setMonthStartDay() {}, toISODate: () => '2026-08-03' },
-    '@/lib/theme-preference': { setThemePreference() {} },
-    '@/lib/i18n': { detectLanguage: () => 'en', setLanguage() {} },
+    '@/lib/format': { getMonthStartDay: () => 1, setMonthStartDay() {}, toISODate: () => '2026-08-03' },
+    '@/lib/theme-preference': { getThemePreference: () => 'system', setThemePreference() {} },
+    '@/lib/i18n': { getLanguage: () => 'en', detectLanguage: () => 'en', setLanguage() {} },
     '@/lib/system-language': require('./build/system-language'),
     // `setActiveMarket` returns whether the pack was applied: it refuses a pack
     // denominated differently from money the ledger already holds. The stub
     // says yes, which is the empty-ledger answer these fixtures start from.
     '@/lib/markets': {
       detectMarketId: () => 'AE',
+      getActiveMarket: () => ({ id: 'AE' }),
+      pinnedLedgerCurrencyCode: () => null,
+      ledgerCurrencyExponent: () => 2,
       setActiveMarket: () => true,
       setLedgerCurrency() {},
       marketCurrencyCode: (id) => (id === 'SA' ? 'SAR' : 'AED'),
@@ -383,11 +392,13 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/heal': heal,
     '@/lib/sms-parser': parser,
     '@/lib/ledger': { internalTransferIds: () => new Set() },
+    '@/lib/categories': require('./build/categories'),
+    '@/lib/review-source-bindings': require('./build/review-source-bindings'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
     '@/lib/bills': require('./build/bills'),
     '@/lib/dedupe': dedupe,
     '@/lib/payment-flow': require('./build/payment-flow'),
-    '@/lib/ledger-import': require('./build/ledger-import'),
+    '@/lib/ledger-import': execute('src/lib/ledger-import.ts', (id) => require(id.replace('@/lib/', './build/'))),
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
       LedgerResetError: class LedgerResetError extends Error {},
@@ -715,10 +726,24 @@ ok('an in-flight hydration can be superseded',
   const restored = ledger.restoreBackup(JSON.stringify({
     app: 'wafra', version: 1, data: { transactions: [prior] },
   }));
+  const beforeMismatch = ledger.getStateSnapshot();
+  let refused = null;
+  try {
+    refused = ledger.importBatch({
+      importMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 },
+      transactions: [{ ...prior, title: 'Wrong currency' }], newAccounts: [], newHints: {},
+      newDues: [], snapshots: {}, bankNames: {}, lastScanTs: 0,
+    });
+    refused?.durable?.catch(() => {});
+  } catch {}
+  ok('mismatched import returns rejected durability without synchronous throw or mutation',
+    refused?.ids?.length === 0 && typeof refused?.durable?.then === 'function' &&
+    ledger.getStateSnapshot() === beforeMismatch);
   let importReceipt = null;
   let validAttestationError = null;
   try {
     importReceipt = ledger.importBatch({
+      importMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
       transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [],
       snapshots: {}, bankNames: {}, cardTypes: {}, lastScanTs: 0,
       updates: [{ id: prior.id, remove: true }],
@@ -742,6 +767,7 @@ ok('an in-flight hydration can be superseded',
     )), JSON.stringify(declineSnapshot.localCaptureQualifications));
 
   const emptyImport = (updates) => ({
+    importMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
     transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [],
     snapshots: {}, bankNames: {}, cardTypes: {}, lastScanTs: 0, updates,
   });
@@ -1019,8 +1045,10 @@ const tx = (id, extra = {}) => ({
     transactions: [pinnedAtm],
     merchantOverrides: { 'atm withdrawal': 'shopping' },
   });
-  ok('an explicit ATM merchant rule outranks the automatic cash category',
-    migrated.transactions[0]?.category === 'shopping');
+  ok('a future ATM rule preserves the existing category during hydration',
+    migrated.transactions[0]?.category === 'other');
+  ok('the same ATM rule still applies to a newly parsed entry',
+    require('./build/sms-parser').guessCategory('ATM withdrawal', 'expense', { 'atm withdrawal': 'shopping' }, 'ATM withdrawal') === 'shopping');
 }
 
 {
@@ -1246,6 +1274,85 @@ const restoreBackupBody = bodyOf(store, 'const restoreBackup = useCallback');
 ok('backup restore migrates old state before dispatching it',
   !!restoreBackupBody &&
     inOrder(restoreBackupBody, 'parseBackupForRestore(json)', "dispatch({ type: 'restore'"));
+
+{
+  const markets = require('./build/markets');
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+  markets.setLedgerCurrency('KWD', 3);
+  const runtime = loadHydrationExports({ '@/lib/markets': markets });
+  runtime.parseBackupForRestore(JSON.stringify({ app: 'wafra', data: {
+    transactions: [], marketId: 'SA',
+  } }));
+  ok('backup preview preserves active parser and accounting context',
+    markets.getActiveMarket().id === 'AE' && markets.pinnedLedgerCurrencyCode() === 'KWD' &&
+    markets.ledgerCurrencyExponent() === 3);
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+}
+{
+  let month = 1, theme = 'system', language = 'en';
+  const runtime = loadHydrationExports({
+    '@/lib/format': { setMonthStartDay: (v) => { month = v; }, getMonthStartDay: () => month },
+    '@/lib/theme-preference': { setThemePreference: (v) => { theme = v; }, getThemePreference: () => theme },
+    '@/lib/i18n': { detectLanguage: () => 'en', setLanguage: (v) => { language = v; }, getLanguage: () => language },
+    '@/lib/accounts': { mergeDuplicateAccounts: () => { throw new Error('normalization failed'); } },
+  }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  const before = ledger.getStateSnapshot();
+  let result = 'threw';
+  try { result = ledger.restoreBackup(JSON.stringify({ app: 'wafra', data: {
+    transactions: [], monthStartDay: 20, themePreference: 'dark', language: 'ar',
+  } })); } catch {}
+  ok('normalization failure refuses restore without replacing ledger or preferences',
+    result === false && ledger.getStateSnapshot() === before && month === 1 && theme === 'system' && language === 'en');
+}
+
+// External backups must be rejected before reducer side effects or replacement.
+for (const [name, data] of [
+  ['object accounts', { transactions: [], accounts: {} }],
+  ['string budgets', { transactions: [], budgets: 'bad' }],
+  ['negative expense', { transactions: [tx('invalid', { amountFils: -500, source: 'manual' })] }],
+  ['fractional minor units', { transactions: [tx('invalid', { amountFils: 1.5, source: 'manual' })] }],
+  ['impossible date', { transactions: [tx('invalid', { date: '2026-02-31', source: 'manual' })] }],
+  ['duplicate transaction ids', { transactions: [tx('duplicate'), tx('duplicate')] }],
+  ['invalid account reference type', { transactions: [tx('invalid', { accountId: {} })] }],
+  ['invalid split total', { transactions: [tx('invalid', { splits: [{ category: 'other', amountFils: 1 }] })] }],
+  ['invalid preferences', { transactions: [], monthStartDay: 90, appLock: 'false' }],
+]) {
+  ok(`backup rejects ${name}`, hydration.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data })) === null);
+}
+
+// Capture identity controls duplicate reconciliation after restore. Only a
+// four-digit tail and the closed instrument vocabulary may supply that proof.
+for (const [name, captureInstrument] of [
+  ['non-object capture identity', '4844'],
+  ['null capture identity', null],
+  ['incomplete capture tail', { last4: '44', kind: 'credit' }],
+  ['non-digit capture tail', { last4: 'XX44', kind: 'credit' }],
+  ['numeric capture tail', { last4: 4844, kind: 'credit' }],
+  ['unknown capture kind', { last4: '4844', kind: 'cash' }],
+  ['non-text capture bank', { last4: '4844', kind: 'credit', bankIdentity: {} }],
+  ['empty capture bank', { last4: '4844', kind: 'credit', bankIdentity: '' }],
+]) {
+  const backup = { app: 'wafra', version: 1, data: {
+    transactions: [tx('invalid-capture', { captureInstrument })],
+  } };
+  ok(`backup rejects ${name}`, hydration.parseBackupForRestore(JSON.stringify(backup)) === null);
+}
+for (const captureInstrument of [
+  undefined,
+  { last4: '0044', kind: 'unknown' },
+  { last4: '4844', kind: 'credit', bankIdentity: 'enbd' },
+]) {
+  const restored = hydration.parseBackupForRestore(JSON.stringify({
+    app: 'wafra', version: 1, data: {
+      transactions: [tx('valid-capture', { captureInstrument, userEdited: true })],
+    },
+  }));
+  ok(`backup preserves ${captureInstrument ? 'valid capture identity ' + captureInstrument.kind : 'legacy missing capture identity'}`,
+    !!restored && JSON.stringify(restored.transactions[0].captureInstrument) === JSON.stringify(captureInstrument));
+}
 
 const { ledgerStateHasMoney } = require('./build/ledger-money');
 ok('account-only ledgers pin their accounting currency',
@@ -2527,6 +2634,84 @@ if (!workflow) {
     db.close();
   }
 }
+
+// Actual StoreProvider integration: generic reviews cannot borrow native proof,
+// and identity-only repair commits before the next parser plan observes state.
+asyncSuites.push((async () => {
+  const saved = [];
+  let writable = true;
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null,
+        save: async (snapshot) => { if (!writable) return false; saved.push(JSON.parse(JSON.stringify(snapshot))); return true; },
+        block() {}, reset: async () => {}, destroy: async () => {} }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+  }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  const money = { schemaVersion: 2, currency: 'CAD', exponent: 2 };
+  const account = { id: 'generic-bank', name: 'Generic bank', kind: 'bank', last4: '1234', openingFils: 0, color: '#246A54' };
+  ok('generic store fixture hydrates a native-currency ledger', ledger.restoreBackup(JSON.stringify({
+    app: 'wafra', version: 1, data: { accounts: [account], transactions: [], ledgerMoney: money },
+  })));
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const { prepareUniversalReviewAlert } = require('./build/alert-review-tray.js');
+  const now = Date.now();
+  const item = prepareUniversalReviewAlert({ id: 'generic_store_review_0001', sourceKey: 'generic_store_source_0001',
+    observedAt: now, channel: 'paste',
+    event: inspectUniversalBankEvent('Refund CAD 25.00 credited to account 1234 on 2026-09-05.') });
+  ok('real extractor and whitelist produce a generic credit review', !!item && item.event.direction === 'credit');
+  const before = ledger.getStateSnapshot();
+  let invalidProof = false;
+  try { ledger.stageReviewAlerts([item], [{ reviewId: item.id, qualification: {
+    id: '60000000-0000-4000-8000-000000000001', kind: 'review', observedAt: now,
+  } }]); } catch { invalidProof = true; }
+  ok('generic review rejects known-bank qualification before any state mutation',
+    invalidProof && ledger.getStateSnapshot() === before);
+  writable = false;
+  const failed = ledger.stageReviewAlerts([item]);
+  let rejectedWrite = false;
+  try { await failed.durable; } catch { rejectedWrite = true; }
+  ok('failed generic staging has no durable success or qualification receipt',
+    rejectedWrite && failed.qualificationIds.length === 0);
+  writable = true;
+  await ledger.stageReviewAlerts([item]).durable;
+  ok('retry persists the same proposal exactly once without native qualification',
+    saved.at(-1).reviewTray.pending.filter((row) => row.id === item.id).length === 1 &&
+    saved.at(-1).localCaptureQualifications.length === 0);
+  const input = { reviewId: item.id, type: 'income', title: 'Refund', category: 'other',
+    accountId: account.id, date: '2026-09-05', betweenOwnAccounts: false,
+    universal: { confirmed: true, postingStatus: 'posted', amount: item.event.amount.value,
+      expectedSourceKey: item.sourceKey, expectedObservedAt: item.observedAt } };
+  const result = await ledger.promoteReviewAlert(input);
+  const posted = ledger.getStateSnapshot();
+  ok('generic credit confirmation persists Other income in its exact CAD scale',
+    result === 'added' && posted.transactions.length === 1 && posted.transactions[0].amountFils === 2500 &&
+    posted.transactions[0].category === 'other' && posted.transactions[0].type === 'income' &&
+    posted.ledgerMoney.currency === 'CAD' && posted.ledgerMoney.exponent === 2 &&
+    posted.reviewTray.pending.length === 0 && saved.at(-1).transactions.length === 1);
+  let staleRefused = false;
+  try { await ledger.promoteReviewAlert(input); } catch { staleRefused = true; }
+  ok('a repeated UI confirmation cannot replay its cached transaction batch',
+    staleRefused && ledger.getStateSnapshot().transactions.length === 1);
+
+  const legacyHash = 'a'.repeat(64);
+  const legacyKey = 'arc1_' + legacyHash;
+  const old = { id: 'legacy-reviewed-row', type: 'expense', amountFils: 895000, category: 'shopping',
+    accountId: account.id, title: 'My corrected shop', date: '2026-09-05', ts: now,
+    source: 'sms', smsKey: legacyKey, userEdited: true, titleEdited: true, note: 'Keep this note' };
+  ledger.restoreBackup(JSON.stringify({ app: 'wafra', version: 1,
+    data: { accounts: [account], transactions: [old], ledgerMoney: money } }));
+  const binding = { legacyId: 'ari1_' + legacyHash, legacySourceKey: legacyKey,
+    id: 'ari1_' + 'b'.repeat(64), sourceKey: 'android_message_review_source_a17', observedAt: now };
+  const identityReceipt = ledger.stageReviewAlerts([], undefined, [binding]);
+  await identityReceipt.durable;
+  const repaired = ledger.getStateSnapshot().transactions[0];
+  ok('parsed-only legacy attestation durably rekeys identity without changing money or user fields',
+    identityReceipt.admitted === 0 && repaired.smsKey === 'ha17t' + now &&
+    JSON.stringify({ ...repaired, smsKey: legacyKey }) === JSON.stringify(old) &&
+    saved.at(-1).transactions[0].smsKey === 'ha17t' + now);
+})().catch((error) => ok('generic store integration completes', false, String(error))));
 
 // The erase-race contract in 2c is behavioural, so it settles after this file
 // finishes executing. Counting before it lands would report a green run that

@@ -65,4 +65,5 @@ scripts/test/build/
 # Local screenshots, packages, and generated application builds
 artifacts/
 builds/
+/--output
 /modules/*/android/build/

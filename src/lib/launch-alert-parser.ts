@@ -10,8 +10,11 @@ import {
   getActiveMarket,
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
-import type { ParsedSms } from '@/lib/sms-parser';
+import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
+import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
+import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import type { UniversalBankEvent } from '@/lib/universal-types';
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
@@ -19,7 +22,31 @@ export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|R
 const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 
 export const hasBankAlertMoneyHint = (source: string): boolean =>
-  REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source);
+  REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source) ||
+  [...source.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/giu)]
+    .some((match) => currencyMinorUnits(match[1]) !== null) ||
+  Object.keys(CURRENCY_SYMBOL_CANDIDATES).some((symbol) => source.includes(symbol));
+
+// Review eligibility needs financial-alert context, not merely a currency in
+// a personal conversation. None of these words grants automatic import.
+const GENERIC_BANK_CONTEXT = /\b(?:(?:credit|debit|covered|prepaid|charge)\s+card|card\s+(?:purchase|payment|ending|number|no\b)|(?:your|available|current)\s+(?:account|balance|credit)|bank\s+(?:alert|account|fee|transfer|statement|notification)|(?:minimum|total)\s+(?:amount\s+)?due|(?:account|a\/?c)\s+(?:ending|number|no\b)|iban|swift|sepa|upi|neft|imps|statement|paiement\s+par\s+carte|kartenzahlung|kontoauszug|compra\s+con\s+tarjeta|pagamento\s+con\s+carta|rekeningoverzicht)\b|بطاق[هة]|حساب|رصيد|كشف\s+حساب|فاتور[هة]/iu;
+
+export const hasGenericBankAlertContext = (source: string, sender = ''): boolean =>
+  GENERIC_BANK_CONTEXT.test(source) || detectLaunchMarketFromSender(sender) !== null ||
+  hasUniversalInstitutionSender(sender);
+
+/** Generic evidence augments misses in every country; it is always review-only. */
+export const inspectGenericBankEventForReview = (
+  source: string,
+  sender = '',
+): UniversalBankEvent | null => {
+  if (!hasGenericBankAlertContext(source, sender)) return null;
+  const event = inspectUniversalBankEvent(source, { sender });
+  if (event.decision !== 'review') return null;
+  if (event.status === 'unknown' && event.family === 'unknown' &&
+    event.instrument.evidence !== 'explicit') return null;
+  return event;
+};
 
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
@@ -82,6 +109,7 @@ export const createLaunchAlertSession = ({
     inspection: UniversalAlertReview | null = null,
     forcedMarket?: string,
   ): Extract<BankAlertInterpretation, { outcome: 'parsed' }> | null => {
+    if (pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR') return null;
     if (
       inspection?.route.decision === 'single' &&
       inspection.route.market !== 'AE' &&
@@ -119,4 +147,23 @@ export const createLaunchAlertSession = ({
   ): ParsedSms | null => interpret(source, sender, inspection, forcedMarket)?.parsed ?? null;
 
   return { inspect, interpret, parse, detectedMarket: () => detected };
+};
+
+/**
+ * Manual paste uses the same money and semantic policy as capture. Pasted
+ * text supplies no authenticated sender: body mentions may route an alert,
+ * but never manufacture the issuer evidence needed for global review.
+ * Retain the batch parser's bilingual-restatement deduplication.
+ */
+export const parsePastedBankAlerts = (
+  text: string,
+  overrides: Record<string, CategoryId>,
+  onRefused?: (source: string) => void,
+): ParsedSms[] => {
+  const session = createLaunchAlertSession({ overrides });
+  return parseSmsBatch(text, overrides, (source) => {
+    const parsed = session.parse(source, '', session.inspect(source, ''));
+    if (!parsed) onRefused?.(source);
+    return parsed;
+  });
 };

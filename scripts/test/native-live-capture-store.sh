@@ -11,8 +11,7 @@ fi
 test_dir="$(mktemp -d /tmp/wafra-native-live.XXXXXX)"
 trap 'rm -rf "$test_dir"' EXIT
 
-swiftc \
-  modules/wafra-live-capture/ios/WafraBankSenderRegistry.generated.swift \
+swiftc -D DEBUG \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
   scripts/test/native-live-capture-store.swift \
   -o "$test_dir/native-live-capture-store-tests"
@@ -37,6 +36,45 @@ swiftc \
   -o "$test_dir/native-live-capture-bridge-tests"
 
 "$test_dir/native-live-capture-bridge-tests"
+
+ios_simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+mkdir -p "$test_dir/intent-debug" "$test_dir/intent-release"
+
+xcrun swiftc \
+  -parse-as-library \
+  -emit-module \
+  -module-name WafraLiveCapture \
+  -D DEBUG \
+  -target arm64-apple-ios15.1-simulator \
+  -sdk "$ios_simulator_sdk" \
+  -emit-module-path "$test_dir/intent-debug/WafraLiveCapture.swiftmodule" \
+  modules/wafra-live-capture/ios/Tests/WafraLiveCaptureIntentModuleStub.swift
+
+xcrun swiftc \
+  -typecheck \
+  -D DEBUG \
+  -target arm64-apple-ios15.1-simulator \
+  -sdk "$ios_simulator_sdk" \
+  -I "$test_dir/intent-debug" \
+  ios/Wafra/WafraLiveCaptureIntent.swift
+echo "✓ Debug App Intent source includes and type-checks the automation-input probe"
+
+xcrun swiftc \
+  -parse-as-library \
+  -emit-module \
+  -module-name WafraLiveCapture \
+  -target arm64-apple-ios15.1-simulator \
+  -sdk "$ios_simulator_sdk" \
+  -emit-module-path "$test_dir/intent-release/WafraLiveCapture.swiftmodule" \
+  modules/wafra-live-capture/ios/Tests/WafraLiveCaptureIntentModuleStub.swift
+
+xcrun swiftc \
+  -typecheck \
+  -target arm64-apple-ios15.1-simulator \
+  -sdk "$ios_simulator_sdk" \
+  -I "$test_dir/intent-release" \
+  ios/Wafra/WafraLiveCaptureIntent.swift
+echo "✓ Release App Intent source type-checks without the diagnostic probe writer"
 
 swiftc \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \

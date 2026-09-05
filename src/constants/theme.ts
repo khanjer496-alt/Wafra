@@ -1,14 +1,7 @@
 /**
- * Wafra design tokens — "Ledger & Light".
- *
- * Warm neutrals only: limestone paper and warm charcoal, never a cool grey and
- * never a true black. One accent hue (a desaturated green) carries brand and
- * affirmative meaning; beyond that, colour is reserved for meaning alone —
- * `income`, `expense`, `warning`. Category identity comes from its glyph, not
- * from seventeen competing hues.
- *
- * Grouping is done with 1px dividers, not cards. A card only earns its border
- * when the whole thing is tappable or dismissible.
+ * Wafra: clear records, useful status, a readable daily agenda.
+ * Cool neutral surfaces carry the content. Blue identifies actions and selection;
+ * income, expense and warning colours retain their financial meaning.
  */
 
 import '@/global.css';
@@ -17,79 +10,83 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#16130F', // ink — off-black, warm. never #000
-    textSecondary: '#57524A', // 6.87:1 on paper
-    textTertiary: '#6B6559', // 5.13:1 on paper — row meta, caps labels
-    background: '#F4F1EA', // limestone paper
-    backgroundElement: '#FBF9F4',
-    backgroundSelected: '#EDEAE1',
-    card: '#FBF9F4',
-    cardBorder: '#E3DED2',
-    cardBorderStrong: '#D3CCBD',
-    // Interactive boundaries must remain visible without relying on colour.
-    // 3.65:1 against backgroundElement, clearing WCAG's 3:1 non-text floor.
-    controlBorder: '#8A8173',
-    controlBorderHigh: '#6B6559',
-    primary: '#1F6B52', // the only accent
-    primarySoft: '#E4EDE8',
-    primaryBorder: '#C3D8CD',
-    onPrimary: '#F7FBF8',
-    // These three carry meaning as TEXT — "+2,400", "over by AED 431", "3 days
-    // late" — so they are held to WCAG AA (4.5:1) on paper, not the 3:1 that
-    // would be enough for a bar or a dot. The lighter values they replaced
-    // measured 3.77, 4.48 and 3.47:1 respectively.
-    income: '#1E7355', // 5.12:1 on paper
-    expense: '#A3402D', // 5.59:1 — clay red, not pink
-    warning: '#7E5F14', // 5.27:1
-    // …and these are the same three as INK: bars, dots, chart fills. WCAG asks
-    // 3:1 of a graphic rather than 4.5:1, and the text-grade values go muddy
-    // at bar size — a near-limit bar in #7E5F14 reads as olive sludge. These
-    // are the pre-AA values, which measure 3.77, 4.48 and 3.47:1.
-    incomeGraphic: '#2E8A63',
-    expenseGraphic: '#B4503C',
-    warningGraphic: '#A07B2A',
-    track: '#E3DED2',
-    expenseSoftBg: '#FBF3F0',
-    expenseSoftBorder: '#E7D3CD',
-    /** @deprecated warm accent kept as an alias so older screens still build. */
-    gold: '#A07B2A',
-    /** @deprecated */
-    goldSoft: '#F1E9D8',
+    text: '#152033',
+    textSecondary: '#4C5A70',
+    textTertiary: '#5D6B81',
+    background: '#F6F8FC',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#E9EDF5',
+    card: '#FFFFFF',
+    cardBorder: '#DCE3EE',
+    cardBorderStrong: '#BDC9DA',
+    controlBorder: '#73839C',
+    controlBorderHigh: '#485D7A',
+    inverseSurface: '#152033',
+    inverseText: '#F3F6FC',
+    scrim: 'rgba(15, 21, 32, 0.42)',
+    primary: '#2855D9',
+    primarySoft: '#E8EEFF',
+    primaryBorder: '#BDCFF9',
+    onPrimary: '#FFFFFF',
+    income: '#16724C',
+    expense: '#B83D4A',
+    warning: '#865C05',
+    incomeGraphic: '#16724C',
+    expenseGraphic: '#B83D4A',
+    warningGraphic: '#865C05',
+    track: '#DCE3EE',
+    expenseSoftBg: '#FFF0F2',
+    expenseSoftBorder: '#EABFC7',
+    gold: '#865C05',
+    goldSoft: '#FFF3D4',
   },
   dark: {
-    text: '#F2EFE8',
-    textSecondary: '#A9A29A', // 7.41:1
-    textTertiary: '#9B948A',
-    background: '#14120F', // warm charcoal. never #070D0B
-    backgroundElement: '#1C1A16',
-    backgroundSelected: '#232019',
-    card: '#1C1A16',
-    cardBorder: '#3B362E',
-    cardBorderStrong: '#4A443A',
-    // 3.55:1 against backgroundElement; the high-contrast value reaches 6.88:1.
-    controlBorder: '#777064',
-    controlBorderHigh: '#A9A29A',
-    primary: '#57B894',
-    primarySoft: '#1E3A31',
-    primaryBorder: '#3B362E',
-    onPrimary: '#0F2C23',
-    income: '#6BC79E',
-    expense: '#E0836B',
-    warning: '#D9AE62',
-    // Dark mode already clears AA as text (9.16, 6.79 and 9.06:1), so the
-    // graphic pair is the same colour — the split exists for light mode.
-    incomeGraphic: '#6BC79E',
-    expenseGraphic: '#E0836B',
-    warningGraphic: '#D9AE62',
-    track: '#3B362E',
-    expenseSoftBg: '#2A1D18',
-    expenseSoftBorder: '#4A322A',
-    /** @deprecated */
-    gold: '#D9AE62',
-    /** @deprecated */
-    goldSoft: '#332A18',
+    text: '#F3F6FC',
+    textSecondary: '#BAC5D7',
+    textTertiary: '#9BAAC1',
+    background: '#0F1520',
+    backgroundElement: '#172130',
+    backgroundSelected: '#222F44',
+    card: '#172130',
+    cardBorder: '#334159',
+    cardBorderStrong: '#4B5E7A',
+    controlBorder: '#7186A8',
+    controlBorderHigh: '#AABAD2',
+    inverseSurface: '#F3F6FC',
+    inverseText: '#152033',
+    scrim: 'rgba(0, 0, 0, 0.54)',
+    primary: '#9DBAFF',
+    primarySoft: '#1C3158',
+    primaryBorder: '#3D5475',
+    onPrimary: '#102044',
+    income: '#77D8AE',
+    expense: '#FF9DA7',
+    warning: '#F1C66F',
+    incomeGraphic: '#77D8AE',
+    expenseGraphic: '#FF9DA7',
+    warningGraphic: '#F1C66F',
+    track: '#334159',
+    expenseSoftBg: '#3C222D',
+    expenseSoftBorder: '#6D3C49',
+    gold: '#F1C66F',
+    goldSoft: '#392F1B',
   },
 };
+
+export const DataViz = {
+  light: {
+    ramp: ['#2855D9', '#5377D8', '#809AE4', '#A8B9EC', '#CDDAF7'],
+    neutral: '#DCE3EE',
+    axis: '#5D6B81',
+    expenseSoft: '#987082',
+  },
+  dark: {
+    ramp: ['#9DBAFF', '#779BFA', '#527BE1', '#385CAC', '#283F74'],
+    neutral: '#334159',
+    axis: '#9BAAC1',
+    expenseSoft: '#AC7382',
+  },
+} as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
@@ -98,17 +95,17 @@ export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
  *
  * React Native applies no synthetic weights on Android — a `fontWeight` on a
  * custom family is silently dropped — so every weight has to be its own
- * family name. Geist Mono carries every figure in the app.
+ * family name. Plex carries reading and money; Mono is reserved for code/editing.
  */
 export const Fonts = {
-  sans: 'Geist-Regular',
-  sansMedium: 'Geist-Medium',
-  sansSemi: 'Geist-SemiBold',
+  sans: 'IBMPlexSans',
+  sansMedium: 'IBMPlexSans-Medm',
+  sansSemi: 'IBMPlexSans-SmBld',
   mono: 'GeistMono-Regular',
   monoMedium: 'GeistMono-Medium',
   monoSemi: 'GeistMono-SemiBold',
-  arabic: 'NotoKufiArabic-Regular',
-  arabicBold: 'NotoKufiArabic-Bold',
+  arabic: 'IBMPlexSansArabic',
+  arabicBold: 'IBMPlexSansArabic-SmBld',
 } as const;
 
 // The .ttf files themselves are required in `src/app/_layout.tsx`, not here:

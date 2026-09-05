@@ -162,6 +162,8 @@ const afterFirst = apply(BASE, first);
 {
   const original = scan([INBOX[0]]).parsed[0];
   const existing = apply(BASE, buildImportPlan([original], BASE, original.smsTs));
+  // Actual retained source proves this is a reparse, not merely a shared clock.
+  existing.transactions = existing.transactions.map((t) => ({ ...t, raw: original.raw }));
   // The legacy local-SMS identity includes amountFils. A corrected parser or
   // updated fallback FX table therefore creates a different s-key for the
   // exact same retained provider message unless timestamp identity catches it.
@@ -478,6 +480,7 @@ const afterFirst = apply(BASE, first);
 {
   const saState = {
     ...BASE,
+    marketId: 'SA',
     accounts: [{
       id: 'albilad-card', name: 'Bank Albilad Credit Card •4567', kind: 'card',
       cardType: 'credit', last4: '4567', bankName: 'Bank Albilad',
@@ -1474,18 +1477,17 @@ const DECLINE_SMS = [{
     plan.txCount === 0 && plan.batch.updates.length === 0,
     { txCount: plan.txCount, updates: plan.batch.updates });
 
-  // Same message, same override, but the stored row was the parser's guess
-  // rather than the user's. That one may be corrected — it is the identical
-  // heal Android gets from a rescan, and refusing it here would leave the two
-  // platforms disagreeing about what the user asked for.
+  // A remember-for-future rule applies to new rows only. Apply-all changes
+  // existing rows in Store immediately; a parser reread must not widen that
+  // choice even when the old category originally came from the parser.
   const parserOwned = {
     ...editedState,
     transactions: [{ ...editedState.transactions[0], userEdited: undefined }],
   };
   const healPlan = buildImportPlan([relayRow], parserOwned, ts);
-  ok('...while a parser-owned duplicate of the same row is healed to the rule',
+  ok('a future-only merchant rule preserves the prior parser-owned Dining category',
     healPlan.txCount === 0 &&
-      healPlan.batch.updates.some((u) => u.category === 'groceries'),
+      healPlan.batch.updates.every((u) => u.category === undefined),
     healPlan.batch.updates);
 }
 
@@ -2387,6 +2389,290 @@ const DECLINE_SMS = [{
       duplicateRepair.batch.updates[0].id === 'duplicate-1405' &&
       duplicateRepair.batch.updates[0].remove === true,
     duplicateRepair.batch.updates);
+}
+
+// Existing redacted ENBD specimen: currency is an admission fact, not a
+// display preference. Cover every side effect before account creation/healing.
+{
+  const markets = require('./build/markets.js');
+  markets.setLedgerCurrency(null);
+  markets.setActiveMarket('AE');
+  const body = require('./fixtures/uae-bank-formats')
+    .find((row) => row.id === 'enbd-credit-card-purchase').body;
+  const row = { ...parseSms(body), smsTs: Date.UTC(2026, 8, 4, 10), sender: 'ENBD' };
+  for (const [currency, exponent] of [['USD', 2], ['KWD', 3], ['JPY', 0], ['SAR', 2], ['AED', 3]]) {
+    let rejection;
+    try {
+      buildImportPlan([row], { ...BASE, marketId: 'AE',
+        ledgerMoney: { schemaVersion: 2, currency, exponent } }, row.smsTs);
+    } catch (error) { rejection = error; }
+    ok(`${currency}/${exponent}: planner rejects before returning a batch or advancing its watermark`,
+      rejection?.name === 'ImportMoneyError', rejection?.message);
+  }
+
+  const valid = buildImportPlan([row], { ...BASE, marketId: 'AE',
+    ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 } }, row.smsTs);
+  ok('accepted launch batch preserves its money specification for commit-time validation',
+    valid.txCount === 1 && valid.batch.transactions[0].amountFils === 8950 &&
+      valid.batch.importMoney?.currency === 'AED' && valid.batch.importMoney?.exponent === 2,
+    valid.batch);
+  const missing = { ...row }; delete missing.currency;
+  let missingRejection;
+  try { buildImportPlan([missing], { ...BASE, marketId: 'AE' }, row.smsTs); }
+  catch (error) { missingRejection = error; }
+  ok('currency-less money rejects the whole batch rather than looking already filed',
+    missingRejection?.name === 'ImportMoneyError');
+  let mixedRejection;
+  try { buildImportPlan([row, { ...row, currency: 'SAR' }], BASE, row.smsTs); }
+  catch (error) { mixedRejection = error; }
+  ok('a mixed batch rejects atomically instead of acknowledging discarded sources',
+    mixedRejection?.name === 'ImportMoneyError');
+  let unsafeRejection;
+  try { buildImportPlan([{ ...row, amountFils: Number.MAX_SAFE_INTEGER + 1 }], BASE, row.smsTs); }
+  catch (error) { unsafeRejection = error; }
+  ok('an unsafe amount rejects atomically with a source-free typed failure',
+    unsafeRejection?.name === 'ImportMoneyError' && !unsafeRejection.message.includes(body));
+
+}
+
+// A masked account number that does not expose four trailing digits cannot
+// justify using whichever account happens to appear first in Wallet.
+{
+  setActiveMarket('AE');
+  const ts = Date.parse('2026-09-05T10:00:00Z');
+  const masked = 'AED 7,000.00 has been debited from your account no. 095XXX13XXX01 TO LIV FROM EMERGENCY FUNDS. The available balance is AED 7,939.20.';
+  const row = { ...parseSms(masked), date: '2026-09-05', smsTs: ts, sender: 'ENBD', channel: 'inbox' };
+  const state = {
+    ...BASE,
+    accounts: [
+      { id: 'first-bank', name: 'FAB account', kind: 'bank', last4: '1111', bankName: 'FAB', openingFils: 0, snapshotFils: 100000, snapshotKind: 'balance' },
+      { id: 'second-bank', name: 'ENBD account', kind: 'bank', last4: '2501', bankName: 'Emirates NBD', openingFils: 0, snapshotFils: 200000, snapshotKind: 'balance' },
+    ],
+  };
+  const plan = buildImportPlan([row], state, ts);
+  ok('an unresolved masked account retains the event without asserting a balance',
+    plan.txCount === 1 && Object.keys(plan.batch.snapshots).length === 0, plan.batch);
+  const old = {
+    ...state,
+    transactions: [{
+      id: 'old-masked', accountId: 'second-bank', type: 'expense', amountFils: 700000,
+      category: 'other', title: 'Savings transfer', date: '2026-09-05', source: 'sms',
+      smsKey: `s${ts}-700000`, ts,
+    }],
+  };
+  const reread = buildImportPlan([row], old, ts);
+  ok('a no-instrument reread cannot move an existing row to the fallback account',
+    reread.txCount === 0 && reread.batch.updates.every((u) => u.accountId === undefined),
+    reread.batch.updates);
+  const identified = {
+    ...parseSms('AED 7,000.00 has been debited from your account ending 2501. The available balance is AED 7,939.20.'),
+    date: '2026-09-05', smsTs: ts, sender: 'ENBD', channel: 'inbox',
+  };
+  const known = buildImportPlan([identified], state, ts);
+  ok('an explicitly identified bank account still receives its quoted balance',
+    known.batch.snapshots['second-bank']?.fils === 793920 &&
+      known.batch.snapshots['first-bank'] === undefined, known.batch.snapshots);
+}
+
+// Same merchant and amount do not identify a purchase across instruments or
+// directions. These grammar probes reuse the ENBD corpus purchase format.
+{
+  setActiveMarket('AE');
+  const ts = Date.parse('2026-09-05T10:00:00Z');
+  const purchase = (last4) =>
+    `Purchase of AED 89.50 with Credit Card ending ${last4} at CARREFOUR, DUBAI. Avl Cr. Limit AED 14,671.30`;
+  const row = (body, offset, channel = 'inbox') => ({
+    ...parseSms(body), date: '2026-09-05', smsTs: ts + offset,
+    sender: 'ENBD', channel,
+  });
+  const first = row(purchase('4844'), 0);
+  const second = row(purchase('4833'), 30000);
+  const twoCards = buildImportPlan([first, second], BASE, ts + 30000);
+  ok('equal purchases on two explicit cards both survive a close capture window',
+    twoCards.txCount === 2 &&
+      new Set(twoCards.batch.transactions.map((t) => t.accountId)).size === 2 &&
+      twoCards.batch.transactions.reduce((sum, t) => sum + t.amountFils, 0) === 17900,
+    twoCards.batch.transactions);
+  const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+  const { reconcileCaptureDuplicates } = require('./build/dedupe.js');
+  let nextId = 0;
+  const committed = applyMaterializedImportBatch(BASE,
+    materializeImportBatch(twoCards.batch, BASE, (prefix) => `${prefix}-${nextId++}`));
+  const restored = reconcileCaptureDuplicates(JSON.parse(JSON.stringify(committed.transactions)));
+  ok('two explicit-card purchases survive materialization, reducer reconciliation and rehydration',
+    restored.length === 2 && restored.reduce((sum, t) => sum + t.amountFils, 0) === 17900 &&
+      restored.every((t) => t.captureInstrument?.last4), restored);
+  const sameCard = buildImportPlan([first, row(purchase('4844'), 30000, 'delivery')], BASE, ts + 30000);
+  ok('provider and delivery copies on the same card still import once', sameCard.txCount === 1);
+  const refund = row('Refund of AED 89.50 credited to your Credit Card ending 4844 at CARREFOUR.', 30000);
+  const reversed = buildImportPlan([first, refund], BASE, ts + 30000);
+  ok('a purchase and an equal merchant refund retain both directions',
+    reversed.txCount === 2 && reversed.batch.transactions.some((t) => t.type === 'income') &&
+      reversed.batch.transactions.some((t) => t.type === 'expense'),
+    reversed.batch.transactions);
+
+  const prior = apply(BASE, buildImportPlan([first], BASE, ts));
+  const otherPush = { ...second, merchant: 'Card purchase', channel: 'push' };
+  const pushPlan = buildImportPlan([otherPush], prior, ts + 30000);
+  ok('a generic push naming a different card cannot match another card SMS',
+    pushPlan.txCount === 1, pushPlan.batch);
+  const samePush = buildImportPlan([
+    { ...first, smsTs: ts + 30000, merchant: 'Card purchase', channel: 'push' },
+  ], prior, ts + 30000);
+  ok('a generic push for the same explicit card still matches its SMS', samePush.txCount === 0);
+
+  const editedPushState = {
+    ...prior,
+    transactions: prior.transactions.map((t) => ({
+      ...t, title: 'Weekly groceries', viaPush: true, userEdited: true,
+    })),
+  };
+  const afterEditedPush = buildImportPlan([second], editedPushState, ts + 30000);
+  ok('an edited push on another explicit card cannot silence a later SMS',
+    afterEditedPush.txCount === 1 && afterEditedPush.batch.updates.length === 0,
+    afterEditedPush.batch);
+  const sameEditedPush = buildImportPlan([
+    row(purchase('4844'), 30000),
+  ], editedPushState, ts + 30000);
+  ok('an edited push on the same card remains protected and deduplicated',
+    sameEditedPush.txCount === 0 && sameEditedPush.batch.updates.length === 0,
+    sameEditedPush.batch);
+  const noInstrumentPush = buildImportPlan([
+    { ...first, card: null, smsTs: ts + 30000, merchant: 'Card purchase', channel: 'push' },
+  ], { ...prior, accounts: [{ id: 'cash', kind: 'cash', name: 'Cash', openingFils: 0 }, ...prior.accounts] }, ts + 30000);
+  ok('a card-less push keeps cross-channel matching despite a different fallback account',
+    noInstrumentPush.txCount === 0, noInstrumentPush.batch);
+  const priorIdentifiedPush = {
+    ...prior,
+    accounts: [{ id: 'cash', kind: 'cash', name: 'Cash', openingFils: 0 }, ...prior.accounts],
+    transactions: prior.transactions.map((t) => ({ ...t, viaPush: true, title: 'Card purchase' })),
+  };
+  const noInstrumentSms = buildImportPlan([
+    { ...first, card: null, smsTs: ts + 30000 },
+  ], priorIdentifiedPush, ts + 30000);
+  const { applyHealUpdates } = require('./build/heal.js');
+  const [retained] = applyHealUpdates(priorIdentifiedPush.transactions, noInstrumentSms.batch.updates);
+  ok('a card-less fuller SMS preserves an identified push account and source instrument',
+    noInstrumentSms.txCount === 0 && retained.accountId === prior.transactions[0].accountId &&
+      retained.captureInstrument?.last4 === '4844', noInstrumentSms.batch);
+}
+
+// Synthetic date boundaries around the existing generated-statement format:
+// only an explicit payment deadline may become a CardDue date.
+{
+  setActiveMarket('AE');
+  const cases = [
+    ['direct due-date label', '01/08/2026', 'Payment due date 25/08/2026.', '2026-08-25', '2026-08-01'],
+    ['December to January deadline', '20/12/2026', 'Payment due on 05/01/2027.', '2027-01-05', '2026-12-20'],
+    ['invalid explicit deadline', '01/02/2026', 'Payment due date is 30/02/2026.', null, '2026-02-01'],
+    ['missing explicit deadline', '01/08/2026', 'Please review your statement.', null, '2026-08-01'],
+  ];
+  for (const [name, generated, ending, expected, captured] of cases) {
+    const body = `Your Credit Card ending 4821 statement is generated on ${generated}. Total due AED 3,240.00, minimum due AED 162.00. ${ending}`;
+    const parsed = parseSms(body);
+    const ts = Date.parse(`${captured}T10:00:00Z`);
+    const plan = buildImportPlan(parsed ? [{ ...parsed, smsTs: ts, sender: 'ENBD', channel: 'inbox' }] : [], BASE, ts, new Date(ts));
+    ok(`${name}: only the stated deadline reaches the imported card obligation`,
+      expected ? plan.batch.newDues.length === 1 && plan.batch.newDues[0].dueDate === expected
+        : plan.batch.newDues.length === 0,
+      { parsed: { date: parsed?.date, dueDay: parsed?.dueDay }, dues: plan.batch.newDues });
+  }
+  const clauses = [
+    // Existing ENBD mini-statement wording; second ordering is a synthetic
+    // boundary probe using the same explicit labels and money.
+    'Total Amt Due AED 4061.96, Due Date 23/07/26. Min Amt Due AED 203.10',
+    'Min Amt Due AED 203.10, Total Amt Due AED 4061.96, Due Date 23/07/26.',
+  ];
+  for (const [index, clause] of clauses.entries()) {
+    const body = `Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/06/26. ${clause}`;
+    const parsed = parseSms(body);
+    const now = new Date('2026-07-01T10:00:00Z');
+    const plan = buildImportPlan(parsed ? [{ ...parsed, smsTs: now.getTime(), sender: 'ENBD', channel: 'inbox' }] : [], BASE, now.getTime(), now);
+    const due = plan.batch.newDues[0];
+    ok(`ENBD abbreviated statement ordering ${index + 1}: total and stated minimum retain distinct roles`,
+      due?.totalDueFils === 406196 && due?.minDueFils === 20310 &&
+        due.minDueEstimated !== true && due.dueDate === '2026-07-23', due);
+  }
+}
+
+// Equal clocks and amounts are weak delivery keys, not card identities.
+{
+  setActiveMarket('AE');
+  const ts = Date.parse('2026-09-05T10:00:00Z');
+  const row = (last4, offset = 0, sender = 'ENBD', channel = 'push') => ({
+    ...parseSms(`Purchase of AED 89.50 with Credit Card ending ${last4} at CARREFOUR, DUBAI. Avl Cr. Limit AED 14,671.30`),
+    date: '2026-09-05', smsTs: ts + offset, sender, channel,
+  });
+  const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+  const { reconcileCaptureDuplicates } = require('./build/dedupe.js');
+  let serial = 0;
+  const commit = (state, plan) => JSON.parse(JSON.stringify(applyMaterializedImportBatch(state,
+    materializeImportBatch(plan.batch, state, (prefix) => `${prefix}-collision-${serial++}`))));
+  const together = buildImportPlan([row('4844'), row('4833')], BASE, ts);
+  const restored = commit(BASE, together);
+  ok('same-time equal purchases on distinct cards survive import and persisted reconciliation',
+    together.txCount === 2 && reconcileCaptureDuplicates(restored.transactions).length === 2 &&
+    restored.transactions.reduce((sum, t) => sum + t.amountFils, 0) === 17900, restored.transactions);
+  const first = commit(BASE, buildImportPlan([row('4844')], BASE, ts));
+  const history = { ...row('4833', 0, 'ENBD', 'inbox'), sourceEventId: 'other-card-same-clock' };
+  const incoming = buildImportPlan([history], first, ts);
+  const merged = commit(first, incoming);
+  ok('history exact-time bridge never moves an existing purchase to another card',
+    incoming.txCount === 1 && incoming.batch.updates.length === 0 && merged.transactions.length === 2 &&
+    merged.transactions.find((t) => t.id === first.transactions[0].id)?.captureInstrument.last4 === '4844', incoming.batch);
+  const reloadAgain = buildImportPlan([row('4844'), row('4833')], restored, ts);
+  ok('both same-clock cards reimport idempotently after reload',
+    reloadAgain.txCount === 0 && reloadAgain.batch.updates.every((u) => u.accountId === undefined), reloadAgain.batch);
+  const same = buildImportPlan([{ ...row('4844', 0, 'ENBD', 'inbox'), sourceEventId: 'same-card-clock' }], first, ts);
+  ok('same-card exact-time history overlap still imports once', same.txCount === 0);
+  const senderFree = row('4844', 5000, '', 'inbox');
+  delete senderFree.sender;
+  const richer = commit(first, buildImportPlan([senderFree], first, ts + 5000));
+  ok('sender-free fuller SMS retains the prior bank identity across storage',
+    richer.transactions[0].captureInstrument.bankIdentity === 'emirates nbd', richer.transactions);
+  const hsbc = buildImportPlan([row('4844', 10000, 'HSBC')], richer, ts + 10000);
+  ok('a later equal HSBC purchase survives after a sender-free ENBD overlap', hsbc.txCount === 1, hsbc.batch);
+}
+
+{
+  const { interpretBankAlert } = require('./build/bank-alert-interpreter.js');
+  const source = 'Credit Card ending 1234 statement: Minimum due AED 50.00. Due on 05/10/2026.';
+  const result = interpretBankAlert({ source, sender: 'ENBD', market: 'AE' });
+  const plan = buildImportPlan(result.outcome === 'parsed' ? [result.parsed] : [], BASE, 0);
+  ok('refused minimum-only statement creates no transaction, obligation, account or snapshot',
+    result.outcome === 'refuse' && plan.txCount === 0 && plan.batch.newDues.length === 0 &&
+    plan.batch.newAccounts.length === 0 && Object.keys(plan.batch.snapshots).length === 0, plan.batch);
+}
+
+{
+  const ts = Date.parse('2026-07-01T10:00:00Z');
+  const body = 'Your salary of AED 10,000.00 has been credited to your account ending 5678 on 01/07/2026.';
+  const salary = { ...parseSms(body), sender: 'ENBD', smsTs: ts, channel: 'inbox' };
+  const prior = { ...BASE, transactions: [{ id: 'old-salary', source: 'sms', type: 'expense',
+    amountFils: 1000000, accountId: 'bank', category: 'other', title: 'Card purchase', date: '2026-07-01',
+    smsKey: `s${ts}-1000000`, ts, raw: body }],
+    accounts: [{ id: 'bank', name: 'Bank', kind: 'bank', last4: '5678', openingFils: 0 }] };
+  const plan = buildImportPlan([salary], prior, ts);
+  ok('identical retained salary source heals its old direction without adding an opposite row',
+    plan.txCount === 0 && plan.batch.updates.some((u) => u.id === 'old-salary' && u.type === 'income'), plan.batch);
+  const purchase = { ...parseSms('Purchase of AED 89.50 with Credit Card ending 4844 at CARREFOUR.'),
+    date: '2026-07-01', sender: 'ENBD', smsTs: ts, channel: 'inbox' };
+  const state = apply(BASE, buildImportPlan([purchase], BASE, ts));
+  const refund = { ...parseSms('Refund of AED 20.00 credited to your Credit Card ending 4844 at CARREFOUR.'),
+    date: '2026-07-01', sender: 'ENBD', smsTs: ts, channel: 'inbox' };
+  const differentPrice = { ...purchase, amountFils: 2000 };
+  const distinct = buildImportPlan([differentPrice], state, ts);
+  ok('rawless same-clock purchases with different prices both survive',
+    distinct.txCount === 1 && distinct.batch.transactions[0].amountFils === 2000 &&
+    distinct.batch.updates.length === 0, distinct.batch);
+  const identifiedState = { ...state, transactions: state.transactions.map((t) => ({ ...t, smsKey: 'hstable-provider-price' })) };
+  const evidencedDrift = buildImportPlan([{ ...differentPrice, sourceEventId: 'stable-provider-price' }], identifiedState, ts);
+  ok('strong provider identity still preserves the originally booked amount across parser or FX drift',
+    evidencedDrift.txCount === 0 && evidencedDrift.batch.updates.every((u) => u.amountFils === undefined), evidencedDrift.batch);
+  const incoming = buildImportPlan([refund], state, ts);
+  ok('clock-only legacy matching preserves a distinct smaller refund and original purchase',
+    incoming.txCount === 1 && incoming.batch.transactions[0].amountFils === 2000 &&
+    incoming.batch.transactions[0].type === 'income' && incoming.batch.updates.length === 0, incoming.batch);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

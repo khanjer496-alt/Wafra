@@ -1,4 +1,3 @@
-import { toWholeDirhamFils } from './format';
 import type { Account, AppState } from './types';
 
 /**
@@ -12,7 +11,7 @@ import type { Account, AppState } from './types';
 type BalanceState = Pick<AppState, 'accounts' | 'transactions'>;
 
 export interface NetWorthBreakdown {
-  /** Known positive balances, rounded exactly as Wallet displays each account. */
+  /** Known positive balances in exact ledger minor units. */
   balanceFils: number;
   /** Absolute value of known negative balances, including card amounts owed. */
   debtFils: number;
@@ -118,11 +117,10 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
       continue;
     }
 
-    const shown = toWholeDirhamFils(reliable);
-    balanceByAccountId[account.id] = shown;
+    balanceByAccountId[account.id] = reliable;
     knownAccountCount += 1;
-    if (shown < 0) debtFils += Math.abs(shown);
-    else balanceFils += shown;
+    if (reliable < 0) debtFils += Math.abs(reliable);
+    else balanceFils += reliable;
   }
 
   return {

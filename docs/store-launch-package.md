@@ -18,10 +18,10 @@ every change.
   to justify the requested core permission.
 - **Future global draft:** lead with private manual money tracking only after
   arbitrary ledger currencies ship. Do not imply universal bank parsing.
-- **iPhone:** never say the app reads the Messages inbox. The current live path
-  is a user-owned Message automation. Past-message import is a separate,
-  user-run iOS 26.5+ Shortcut and stays out of acquisition copy until its exact
-  published link passes the physical-device checklist.
+- **iPhone:** never say the app reads the Messages inbox. The live path is a
+  user-owned Message automation. Past-message import is a separate, user-run
+  iOS 26+ Shortcut whose physically tested beta path covers fewer than 3,000
+  retained Messages and fails closed when complete coverage cannot be proved.
 
 RevenueCat and both stores may be configured for additional territories in
 advance, but public app distribution remains AE/SA until the product currency

@@ -319,6 +319,34 @@ const CARD_PAYMENT_DEBIT =
   'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.';
 
 (async () => {
+  // Exercise the shipping readers independently of D1 and parser behavior.
+  const readerSource = fs.readFileSync(path.join(repoRoot, 'server/src/index.ts'), 'utf8');
+  const readerSection = readerSource.slice(readerSource.indexOf('async function readBody('), readerSource.indexOf('interface Device {'));
+  const readerOutput = ts.transpileModule('const textEncoder = new TextEncoder();\n' + readerSection + '\nexport { readBody, readBytes };', {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const readers = { exports: {} };
+  Function('exports', readerOutput)(readers.exports);
+  for (const name of ['readBody', 'readBytes']) {
+    let pulls = 0, cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls > 64) controller.close();
+        else controller.enqueue(new Uint8Array(1024));
+      },
+      cancel() { cancelled = true; },
+    });
+    const request = new Request('https://relay.test/stream', { method: 'POST', body: stream, duplex: 'half' });
+    const result = await readers.exports[name](request, 2048);
+    ok(`${name}: oversized unknown-length stream is cancelled without consuming its tail`,
+      result.tooLarge && cancelled && pulls <= 4, JSON.stringify({ pulls, cancelled }));
+    const exact = await readers.exports[name](new Request('https://relay.test/stream', {
+      method: 'POST', body: 'a'.repeat(2048),
+    }), 2048);
+    ok(`${name}: exact byte limit is accepted`, !exact.tooLarge && (exact.text?.length ?? exact.bytes?.length) === 2048);
+  }
+
   /* ═══════════════════════ Crypto: seal ↔ open ═══════════════════════ */
 
   const device = deviceKeypair(webcrypto.getRandomValues(new Uint8Array(32)));

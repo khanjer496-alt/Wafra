@@ -1,5 +1,4 @@
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
+import { shareTextFile } from '@/lib/share-text';
 import { Platform } from 'react-native';
 
 import SmsReader from '../../modules/sms-reader';
@@ -36,21 +35,9 @@ export const shareSmsCorpus = async (
     onProgress,
   );
   const date = new Date().toISOString().slice(0, 10);
-  const directory = FileSystem.cacheDirectory;
-  if (!directory || !(await Sharing.isAvailableAsync())) {
-    throw new Error('sms_corpus_share_unavailable');
-  }
-  const uri = `${directory}wafra-sms-corpus-${date}.json`;
-  await FileSystem.writeAsStringAsync(uri, serializeSmsCorpus(messages), {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
-  // Never fall back to a React Native text-sharing payload. A large inbox can
-  // exceed Android's Binder transaction limit and kill the process before a
-  // JavaScript catch can run. Sharing the short file URI has constant size.
-  await Sharing.shareAsync(uri, {
+  await shareTextFile(`wafra-sms-corpus-${date}.json`, serializeSmsCorpus(messages), {
     mimeType: 'application/json',
     dialogTitle: 'Share parser corpus',
-    UTI: 'public.json',
   });
   return messages.length;
 };

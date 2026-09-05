@@ -8,7 +8,12 @@ import type { UniversalAlertReview } from '@/lib/alert-market-detection';
 import {
   prepareLaunchReviewAlert,
   prepareReviewAlert,
+  prepareUniversalReviewAlert,
+  isUniversalReviewAlert,
+  REVIEW_ALERT_TTL_MS,
+  type ReviewEntry,
   type ReviewAlert,
+  type UniversalReviewAlert,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
@@ -20,6 +25,8 @@ import {
 import {
   createLaunchAlertSession,
   hasBankAlertMoneyHint,
+  hasGenericBankAlertContext,
+  inspectGenericBankEventForReview,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
 import {
@@ -31,6 +38,7 @@ import {
   trustedBankNotificationSender,
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
+import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 
 const PAGE_SIZE = 1000;
 const MAX_REVIEW_CANDIDATES = 50;
@@ -130,6 +138,8 @@ export interface ScanInboxOptions {
   cursor?: InboxScanCursor | null;
   /** Omit for the existing complete scan; history import uses one page. */
   maxInboxPages?: number;
+  /** Exact old source hashes currently retained by the authoritative ledger/tray. */
+  legacyReviewSourceKeys?: readonly string[];
 }
 
 export interface ScanResult {
@@ -139,7 +149,9 @@ export interface ScanResult {
    * inspector can ground strongly enough for review. These never enter
    * `parsed`, so this scanner cannot auto-import them.
    */
-  reviewCandidates: ReviewAlert[];
+  reviewCandidates: ReviewEntry[];
+  /** Transient, source-attested identity migrations; never a persisted payload. */
+  reviewSourceBindings?: ReviewSourceBinding[];
   /**
    * Body-free identities of non-posting alerts and proven provider duplicates.
    *
@@ -241,10 +253,28 @@ export async function reviewCaptureIdentity(
   };
 }
 
-export type SourceFreeReviewCandidate = Omit<
-  ReviewAlert,
-  'id' | 'sourceKey' | 'templateKey'
->;
+type KeyedReviewIdentity = NonNullable<Awaited<ReturnType<typeof reviewCaptureIdentity>>>;
+const ANDROID_PROVIDER_ID_RE = /^a(?:0|[1-9]\d{0,39})$/;
+
+async function bindProviderReviewIdentity(
+  legacy: KeyedReviewIdentity,
+  sourceEventId?: string,
+): Promise<KeyedReviewIdentity> {
+  if (!sourceEventId || !ANDROID_PROVIDER_ID_RE.test(sourceEventId)) return legacy;
+  const providerDigest = await sha256([
+    REVIEW_IDENTITY_DOMAIN, 'provider', legacy.id, sourceEventId,
+  ].join('\u0000'));
+  if (!/^[0-9a-f]{64}$/i.test(providerDigest)) throw new ReviewIdentityError('Encrypted review identity is invalid');
+  return {
+    ...legacy,
+    id: `ari1_${providerDigest}`,
+    sourceKey: `android_message_review_source_${sourceEventId}`,
+  };
+}
+
+export type SourceFreeReviewCandidate =
+  | Omit<ReviewAlert, 'id' | 'sourceKey' | 'templateKey'>
+  | Omit<UniversalReviewAlert, 'id' | 'sourceKey'>;
 
 export interface SourceFreeReviewIdentity {
   id: string;
@@ -272,7 +302,8 @@ export function inspectSourceFreeRefusedAlert(input: {
 }): SourceFreeRefusedAlertDecision {
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
-  if (!hasBankAlertMoneyHint(input.source)) return { kind: 'ignored' };
+  if (!hasBankAlertMoneyHint(input.source) &&
+    !hasGenericBankAlertContext(input.source, input.sender)) return { kind: 'ignored' };
 
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
   const prepared = inspection
@@ -298,7 +329,19 @@ export function inspectSourceFreeRefusedAlert(input: {
         review: launchReview.review,
       })
     : null);
-  if (!reviewPrepared) return { kind: 'ignored' };
+  if (!reviewPrepared) {
+    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    const universal = event ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001',
+      sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt,
+      channel: input.channel,
+      event,
+    }) : null;
+    if (!universal) return { kind: 'ignored' };
+    const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
+    return { kind: 'review', candidate };
+  }
   const {
     id: _id,
     sourceKey: _sourceKey,
@@ -312,12 +355,15 @@ export function inspectSourceFreeRefusedAlert(input: {
 export function identifySourceFreeReviewAlert(
   candidate: SourceFreeReviewCandidate,
   identity: SourceFreeReviewIdentity,
-): ReviewAlert | null {
+): ReviewEntry | null {
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(identity.id) ||
     !/^[A-Za-z0-9_-]{16,128}$/.test(identity.sourceKey) ||
     (identity.templateKey !== undefined &&
       !/^[A-Za-z0-9_-]{16,128}$/.test(identity.templateKey))) {
     return null;
+  }
+  if ('kind' in candidate && candidate.kind === 'universal') {
+    return { ...candidate, id: identity.id, sourceKey: identity.sourceKey };
   }
   return { ...candidate, ...identity };
 }
@@ -353,8 +399,27 @@ export async function scanInbox(
     channel: CaptureChannel;
     sourceEventId?: string;
   })[] = [];
-  const reviewCandidates: ReviewAlert[] = [];
+  const reviewCandidates: ReviewEntry[] = [];
+  const reviewSourceBindings: ReviewSourceBinding[] = [];
+  const requestedLegacySources = new Set((options.legacyReviewSourceKeys ?? [])
+    .filter((value) => /^arc1_[0-9a-f]{64}$/.test(value)));
+  const bindingPairs = new Set<string>();
+  const noteSourceBinding = (
+    legacy: KeyedReviewIdentity,
+    identity: KeyedReviewIdentity,
+    observedAt: number,
+  ) => {
+    if (!requestedLegacySources.has(legacy.sourceKey) || identity.sourceKey === legacy.sourceKey) return;
+    const pair = `${legacy.sourceKey}\u0000${identity.sourceKey}`;
+    if (bindingPairs.has(pair)) return;
+    bindingPairs.add(pair);
+    reviewSourceBindings.push({
+      legacyId: legacy.id, legacySourceKey: legacy.sourceKey,
+      id: identity.id, sourceKey: identity.sourceKey, observedAt,
+    });
+  };
   const reviewSourceKeys = new Set<string>();
+  const reviewDiscoveredAt = Date.now();
   let databaseKeyPromise: Promise<string | null> | null = null;
   const databaseKey = (): Promise<string | null> => {
     databaseKeyPromise ??= SecureStore.getItemAsync(DATABASE_KEY_NAME);
@@ -400,15 +465,30 @@ export async function scanInbox(
     if (decision.kind === 'ignored') return false;
     const key = await databaseKey();
     if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
-    const identity = await reviewCaptureIdentity(body, sender, ts, channel, key);
-    if (!identity) throw new ReviewIdentityError('Encrypted review identity is invalid');
-    const reviewPrepared = identifySourceFreeReviewAlert(decision.candidate, identity);
-    if (!reviewPrepared) throw new ReviewIdentityError('Encrypted review identity is invalid');
-    if (reviewSourceKeys.has(identity.sourceKey)) return true;
-    reviewSourceKeys.add(identity.sourceKey);
+    const legacyIdentity = await reviewCaptureIdentity(body, sender, ts, channel, key);
+    if (!legacyIdentity) throw new ReviewIdentityError('Encrypted review identity is invalid');
+    // Keep exact old/new tuples only when the ledger requested that old hash.
+    const identity = await bindProviderReviewIdentity(legacyIdentity, sourceEventId);
+    noteSourceBinding(legacyIdentity, identity, ts);
+    const identified = identifySourceFreeReviewAlert(decision.candidate, identity);
+    if (!identified) throw new ReviewIdentityError('Encrypted review identity is invalid');
+    const universal = isUniversalReviewAlert(identified);
+    const sourceIdentity = universal
+      ? { id: identity.id, sourceKey: identity.sourceKey }
+      : identity;
+    const reviewPrepared = {
+      ...identified,
+      ...sourceIdentity,
+      // Discovery is now even when this full scan finds an old Message.
+      // Keep event time and its stable identity; only review retention moves.
+      expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
+    };
+    if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return true;
+    reviewSourceKeys.add(sourceIdentity.sourceKey);
     // Keep the explicit encrypted-identity merge visible to the repository's
     // static safety contract even though the shared helper validated it too.
-    reviewCandidates.push({ ...reviewPrepared, ...identity });
+    if (universal) reviewCandidates.push(reviewPrepared);
+    else reviewCandidates.push({ ...reviewPrepared, ...identity });
     // Inbox, delivery and push are collected in different phases. Keep the
     // newest bounded set by event time—not whichever channel happened to run
     // first—so a full inbox cannot crowd out a fresh bank-app alert.
@@ -495,9 +575,21 @@ export async function scanInbox(
           )
         : false;
       if (p && !reviewed) {
+        // A parser improvement can turn an old review into a normal parsed
+        // row. Attest its old identity before planning, but do no extra source
+        // hashing on the ordinary path when there are no old hashes to join.
+        if (requestedLegacySources.size > 0) {
+          const key = await databaseKey();
+          if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
+          const legacy = await reviewCaptureIdentity(sms.body, sms.address, sms.date, 'inbox', key);
+          if (!legacy) throw new ReviewIdentityError('Encrypted review identity is invalid');
+          if (requestedLegacySources.has(legacy.sourceKey)) {
+            noteSourceBinding(legacy, await bindProviderReviewIdentity(legacy, sourceEventId), sms.date);
+          }
+        }
         parsed.push({
           ...p,
-          date: p.date ?? toISODate(new Date(sms.date)),
+          date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(sms.date)),
           smsTs: sms.date,
           sender: sms.address,
           channel: 'inbox',
@@ -574,7 +666,7 @@ export async function scanInbox(
           if (p && !reviewed) {
             parsed.push({
               ...p,
-              date: p.date ?? toISODate(new Date(sms.date)),
+              date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(sms.date)),
               smsTs: sms.date,
               sender: sms.address,
               channel: 'delivery',
@@ -631,7 +723,7 @@ export async function scanInbox(
         if (p && !reviewed) {
           parsed.push({
             ...p,
-            date: p.date ?? toISODate(new Date(n.ts)),
+            date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(n.ts)),
             smsTs: n.ts,
             // Package names usually contain the bank ("com.enbd...", "adcb...").
             sender: `${n.pkg} ${n.title}`,
@@ -667,6 +759,7 @@ export async function scanInbox(
   return {
     parsed,
     reviewCandidates,
+    reviewSourceBindings,
     declined,
     newestTs,
     inboxScannedCount,

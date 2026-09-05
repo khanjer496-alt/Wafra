@@ -1,0 +1,30 @@
+[
+  {
+    "id": "r2-holdout-02",
+    "expected": {
+      "status": "informational"
+    },
+    "reason": "Independent oracle author review: a temporary authorization explicitly not completed is known non-posting information, not unknown execution."
+  },
+  {
+    "id": "r2-holdout-12",
+    "expected": {
+      "status": "informational"
+    },
+    "reason": "Independent oracle author review: this aggregate describes two distinct movements and needs splitting; it must not become one confirmed transaction."
+  },
+  {
+    "id": "r2-holdout-13",
+    "expected": {
+      "status": "informational"
+    },
+    "reason": "Independent oracle author review: request under review with no debit is explicitly non-posting."
+  },
+  {
+    "id": "r2-holdout-category-04",
+    "expected": {
+      "needsReview": false
+    },
+    "reason": "Independent oracle author review: a known refund uses deliberate neutral Other under the category contract; merchant-business uncertainty does not make that financial-meaning choice uncertain."
+  }
+]

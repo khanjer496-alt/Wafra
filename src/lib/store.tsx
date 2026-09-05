@@ -18,9 +18,11 @@ import {
   repairCardPaymentAccounts,
   repairDuplicateStatements,
 } from '@/lib/accounts';
-import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
-import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
-import { detectLanguage, setLanguage } from '@/lib/i18n';
+import { cleanupGeneratedExports } from '@/lib/share-text';
+import { isValidBackupState } from '@/lib/backup-validation';
+import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
+import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
+import { detectLanguage, getLanguage, setLanguage } from '@/lib/i18n';
 import {
   resolveUiLanguage,
   type LanguagePreference,
@@ -28,6 +30,9 @@ import {
 import {
   canSelectMarket,
   detectMarketId,
+  getActiveMarket,
+  pinnedLedgerCurrencyCode,
+  ledgerCurrencyExponent,
   marketCurrencyCode,
   setActiveMarket,
   setLedgerCurrency,
@@ -44,10 +49,11 @@ import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
-  overrideFitsDirection,
   parseSms,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
+import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
+import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
   createLedgerPersistence,
   LedgerResetError,
@@ -65,7 +71,8 @@ import {
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   resolveReviewAlert as resolveAlertReviewItem,
-  type ReviewAlert,
+  type ReviewEntry,
+  isUniversalReviewAlert,
   type ReviewTombstone,
 } from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
@@ -73,6 +80,7 @@ import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
 import {
   applyMaterializedImportBatch,
+  assertImportBatchMoney,
   materializeImportBatch,
   type MaterializedImportBatch,
 } from '@/lib/ledger-import';
@@ -112,6 +120,7 @@ import {
   type LocalCaptureReviewQualificationCandidate,
   type OnboardingPlanPreferences,
   type Transaction,
+  type TransactionType,
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -367,15 +376,18 @@ export function migratePersistedState(
     // AT ALL; agreement decides what it moves.
     const claims = new Map<string, { categories: Set<CategoryId>; evidenced: boolean }>();
     for (const [key, category] of Object.entries(parsed.merchantOverrides)) {
-      const canonical = normalizeServiceName(key);
+      const scope = key.match(/^(income|expense):/)?.[1] as TransactionType | undefined;
+      const merchantKey = scope ? key.slice(scope.length + 1) : key;
+      const canonical = normalizeServiceName(merchantKey);
       if (!canonical) continue;
-      const canonicalKey = canonical.trim().toLowerCase();
+      const canonicalMerchant = canonical.trim().toLowerCase();
+      const canonicalKey = scope ? scopedMerchantOverrideKey(canonicalMerchant, scope) : canonicalMerchant;
       if (canonicalKey === key) continue;
       // An answer the user gave under the canonical name themselves is the
       // most recent thing they said about it, and outranks any re-key.
       if (parsed.merchantOverrides[canonicalKey] !== undefined) continue;
 
-      const under = rows.filter((t) => titleOf(t) === key);
+      const under = rows.filter((t) => titleOf(t) === merchantKey && (!scope || t.type === scope));
       const evidenced =
         // The user has written this name, so it is theirs however it
         // canonicalises. Not evidence — and it still votes, because refusing
@@ -385,9 +397,9 @@ export function migratePersistedState(
           rows.some(
             (t) =>
               parserOwned(t) &&
-              titleOf(t) === canonicalKey &&
+              titleOf(t) === canonicalMerchant && (!scope || t.type === scope) &&
               typeof t.raw === 'string' &&
-              t.raw.toLowerCase().includes(key),
+              t.raw.toLowerCase().includes(merchantKey),
           ));
 
       const claim = claims.get(canonicalKey);
@@ -495,6 +507,7 @@ export function migratePersistedState(
       ) {
         return t;
       }
+      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
       const category = guessCategory(
         t.title,
         t.type,
@@ -517,7 +530,8 @@ export function migratePersistedState(
       ) {
         return t;
       }
-      const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
+      const guessed = guessCategory(t.title, t.type, undefined, t.title);
       return guessed !== 'other' ? { ...t, category: guessed } : t;
     });
 
@@ -579,10 +593,22 @@ export function migratePersistedState(
   return parsed;
 }
 
+function captureMarketContext(): () => void {
+  const market = getActiveMarket().id;
+  const currency = pinnedLedgerCurrencyCode();
+  const exponent = ledgerCurrencyExponent();
+  return () => {
+    setLedgerCurrency(null);
+    setActiveMarket(market);
+    setLedgerCurrency(currency, exponent);
+  };
+}
+
 /** Validate and migrate an imported backup before it reaches the reducer. */
 export function parseBackupForRestore(
   json: string,
 ): Partial<Omit<AppState, 'hydrated'>> | null {
+  const restoreMarket = captureMarketContext();
   try {
     const parsed = JSON.parse(json) as { app?: unknown; version?: unknown; data?: unknown };
     if (
@@ -591,13 +617,15 @@ export function parseBackupForRestore(
       typeof parsed.data !== 'object' ||
       parsed.data === null ||
       !('transactions' in parsed.data) ||
-      !Array.isArray(parsed.data.transactions)
+      !isValidBackupState(parsed.data)
     ) {
       return null;
     }
     return migratePersistedState(parsed.data as Partial<Omit<AppState, 'hydrated'>>);
   } catch {
     return null;
+  } finally {
+    restoreMarket();
   }
 }
 
@@ -623,7 +651,7 @@ type Action =
   | { type: 'markBillPaid'; id: string; month: string; transaction: Transaction }
   | { type: 'upsertCardDue'; due: CardDue }
   | { type: 'payCardDue'; id: string; amountFils: number; transaction: Transaction | null; settledAt: string | null }
-  | { type: 'setMerchantOverride'; merchant: string; category: CategoryId; applyToExisting: boolean }
+  | { type: 'setMerchantOverride'; merchant: string; category: CategoryId; applyToExisting: boolean; direction?: TransactionType }
   | { type: 'setNotSubscription'; merchant: string; dismissed: boolean }
   | { type: 'reassignAccountHint'; last4: string; accountId: string }
   | { type: 'addGoal'; goal: Goal }
@@ -653,6 +681,7 @@ type Action =
   | {
       type: 'setReviewTray';
       reviewTray: AppState['reviewTray'];
+      sourceKeyUpdates?: { id: string; smsKey: string }[];
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
     }
   | {
@@ -697,7 +726,19 @@ function syncLedgerCurrency(next: AppState): AppState {
 }
 
 function reducer(state: AppState, action: Action): AppState {
-  return syncLedgerCurrency(reduceState(state, action));
+  const restoreMarket = captureMarketContext();
+  const month = getMonthStartDay();
+  const theme = getThemePreference();
+  const language = getLanguage();
+  try {
+    return syncLedgerCurrency(reduceState(state, action));
+  } catch (error) {
+    restoreMarket();
+    applyMonthStartDay(month);
+    applyThemePreference(theme);
+    setLanguage(language);
+    throw error;
+  }
 }
 
 function reduceState(state: AppState, action: Action): AppState {
@@ -778,6 +819,10 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         reviewTray: action.reviewTray,
+        ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
+          const update = action.sourceKeyUpdates!.find((candidate) => candidate.id === transaction.id);
+          return update ? { ...transaction, smsKey: update.smsKey } : transaction;
+        }) } : {}),
         ...(action.localCaptureQualifications
           ? { localCaptureQualifications: action.localCaptureQualifications }
           : {}),
@@ -789,6 +834,10 @@ function reduceState(state: AppState, action: Action): AppState {
         ? { ...state, iosCaptureWarning: null }
         : state;
     case 'promoteReviewAlert':
+      assertImportBatchMoney(state, {
+        importMoney: action.ledgerMoney, transactions: [action.transaction],
+        newAccounts: [], newDues: [], newBills: [], snapshots: {}, updates: [],
+      });
       return {
         ...state,
         ledgerMoney: action.ledgerMoney,
@@ -930,39 +979,15 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'setMerchantOverride': {
       const key = action.merchant.trim().toLowerCase();
-      const merchantOverrides = { ...state.merchantOverrides, [key]: action.category };
-      // `overrideAppliesTo` is expense-only, and an income category cannot
-      // decide an expense row — so an income rule moves nothing, and saying so
-      // here is what stops it moving everything. Correcting a credit to Salary
-      // and tapping "yes, update all" wrote `salary` onto every EXPENSE row
-      // carrying that merchant: the mirror of the crossing `overrideFitsDirection`
-      // was added to stop, on the one path that writes rather than reads.
-      // `sameMerchantCount` in entry-detail-sheet.tsx makes the same check, so
-      // the number on the button and the rows this moves stay the same set.
-      const reaches = overrideFitsDirection(action.category, 'expense');
-      const transactions =
-        action.applyToExisting && reaches
-        ? state.transactions.map((t) =>
-            // `overrideAppliesTo` is the ONE definition of this rule's blast
-            // radius. The screen that offers the tap prints a count computed
-            // from the same predicate, so the number the user reads and the
-            // rows this line rewrites cannot drift apart. A bare key match
-            // here — which is what this was — reverted hand-filed rows and
-            // stamped expense categories onto income refunds, neither of
-            // which was in the count printed on the button.
-            //
-            // `userEdited` is NOT set. It is immutable by the contract stated
-            // on migratePersistedState, and a merchant rule is a default
-            // rather than a per-row answer, so it must not masquerade as one:
-            // pinning here would launder hundreds of rows the user never
-            // opened into "hand-corrected" and hide them from every
-            // measurement that counts on the distinction. Nothing is lost by
-            // not pinning — the rule itself lives in `merchantOverrides`,
-            // which both `guessCategory` and `parseSms` take as an input, so
-            // a re-parse re-derives this category instead of undoing it.
-            overrideAppliesTo(t, key) ? { ...t, category: action.category } : t,
-          )
-        : state.transactions;
+      const direction = action.direction ?? getCategory(action.category).type;
+      if (!key || !categorySupportsType(action.category, direction)) return state;
+      const ruleKey = scopedMerchantOverrideKey(key, direction);
+      const merchantOverrides = { ...state.merchantOverrides, [ruleKey]: action.category };
+      // The UI count and the mutation use the same direction-aware predicate.
+      // Saving a future rule leaves existing classifications untouched.
+      const transactions = action.applyToExisting ? state.transactions.map((transaction) =>
+        overrideAppliesTo(transaction, key, direction)
+          ? { ...transaction, category: action.category } : transaction) : state.transactions;
       return { ...state, merchantOverrides, transactions };
     }
     case 'setNotSubscription': {
@@ -1122,8 +1147,9 @@ interface StoreValue {
     qualifications?: readonly LocalCaptureDeclineQualificationMapping[],
   ) => ImportReceipt;
   stageReviewAlerts: (
-    items: ReviewAlert[],
+    items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+    sourceBindings?: readonly ReviewSourceBinding[],
   ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
   dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
@@ -1147,7 +1173,7 @@ interface StoreValue {
   markBillPaid: (id: string, month: string, transaction: Omit<Transaction, 'id'>) => void;
   upsertCardDue: (due: Omit<CardDue, 'id'>) => void;
   payCardDue: (id: string, amountFils: number, transaction: Omit<Transaction, 'id'> | null, settled: boolean) => void;
-  setMerchantOverride: (merchant: string, category: CategoryId, applyToExisting: boolean) => void;
+  setMerchantOverride: (merchant: string, category: CategoryId, applyToExisting: boolean, direction?: TransactionType) => void;
   setNotSubscription: (merchant: string, dismissed: boolean) => void;
   reassignAccountHint: (last4: string, accountId: string) => void;
   addGoal: (g: Omit<Goal, 'id'>) => void;
@@ -1188,10 +1214,13 @@ export interface ImportReceipt {
 }
 
 function reviewQualificationMap(
-  items: readonly ReviewAlert[],
+  items: readonly ReviewEntry[],
   qualifications: readonly LocalCaptureReviewQualificationCandidate[] | undefined,
 ): Map<string, LocalCaptureQualificationCandidate & { kind: 'review' }> {
   if (!qualifications || qualifications.length === 0) return new Map();
+  if (items.some(isUniversalReviewAlert)) {
+    throw new Error('Generic review cannot qualify known-bank automation');
+  }
   if (qualifications.length !== items.length) {
     throw new Error('Local capture review qualification mapping is invalid');
   }
@@ -1397,6 +1426,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const authoritativeRevision = useRef(0);
   const stateGeneration = useRef(0);
   const dispatch = useCallback((action: Action): AppState => {
+    const next = reducer(authoritativeState.current, action);
     if (
       action.type === 'hydrate' ||
       action.type === 'restore' ||
@@ -1405,7 +1435,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) {
       stateGeneration.current += 1;
     }
-    const next = reducer(authoritativeState.current, action);
     authoritativeState.current = next;
     authoritativeRevision.current += 1;
     setState(next);
@@ -1436,6 +1465,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * is still running, or an unmount, must not let the older attempt dispatch.
    */
   const hydrationRun = useRef(0);
+
+  useEffect(() => {
+    const cleanup = () => { void cleanupGeneratedExports().catch(() => {}); };
+    cleanup();
+    const subscription = RNAppState.addEventListener('change', (status) => {
+      if (status === 'active') cleanup();
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -1666,6 +1704,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     }
     const base = authoritativeState.current;
+    try {
+      assertImportBatchMoney(base, input);
+    } catch (error) {
+      return { ids: [], qualificationIds: [], durable: Promise.reject(error) };
+    }
     const materialized = materializeImportBatch(input, base, makeId);
     const postImportState = applyMaterializedImportBatch(base, materialized);
     const qualificationCandidates = attestDeclineQualifications(
@@ -1721,17 +1764,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [persist]);
 
   const stageReviewAlerts = useCallback((
-    items: ReviewAlert[],
+    items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+    sourceBindings?: readonly ReviewSourceBinding[],
   ) => {
-    if (!authoritativeState.current.hydrated || items.length === 0) {
+    if (!authoritativeState.current.hydrated || (items.length === 0 && !sourceBindings?.length)) {
       return { admitted: 0, qualificationIds: [], durable: ensureDurable() };
     }
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
-    let reviewTray = authoritativeState.current.reviewTray;
+    const now = Date.now();
+    const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
+    let reviewTray = rebound.reviewTray;
     let admitted = 0;
     const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
-    const now = Date.now();
     for (const item of items) {
       const result = admitPreparedReviewAlert(reviewTray, item, now);
       reviewTray = result.state;
@@ -1741,7 +1786,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (qualification) admittedQualifications.push(qualification);
       }
     }
-    if (admitted === 0) {
+    if (admitted === 0 && !rebound.changed) {
       return { admitted, qualificationIds: [], durable: ensureDurable() };
     }
     if (saveTimer.current) {
@@ -1762,6 +1807,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const next = dispatch({
       type: 'setReviewTray',
       reviewTray,
+      ...(rebound.transactionKeyUpdates.length ? { sourceKeyUpdates: rebound.transactionKeyUpdates } : {}),
       ...(localCaptureQualifications ? { localCaptureQualifications } : {}),
     });
     const durable = persist(next).then((written) => {
@@ -1883,8 +1929,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setMerchantOverride = useCallback(
-    (merchant: string, category: CategoryId, applyToExisting: boolean) => {
-      dispatch({ type: 'setMerchantOverride', merchant, category, applyToExisting });
+    (merchant: string, category: CategoryId, applyToExisting: boolean, direction?: TransactionType) => {
+      dispatch({ type: 'setMerchantOverride', merchant, category, applyToExisting, direction });
     },
     [dispatch],
   );
@@ -2069,8 +2115,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       localCaptureQualifications: state.localCaptureQualifications,
       iosCaptureWarning: state.iosCaptureWarning,
     };
-    dispatch({ type: 'restore', state: safeState });
-    return true;
+    try {
+      dispatch({ type: 'restore', state: safeState });
+      return true;
+    } catch {
+      // Rejected normalization leaves both the ledger and process preferences intact.
+      return false;
+    }
   }, [
     dispatch,
     state.captureOptOut,
@@ -2094,7 +2145,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   }, [dispatch]);
 
-  const clearAll = useCallback(async (afterErase?: () => Promise<void>) => {
+  const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
+    const afterErase = async () => {
+      await captureCleanup?.();
+      await cleanupGeneratedExports({ eraseAll: true });
+    };
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -2127,7 +2182,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // data still exists when its encryption key is already gone. Keep the
         // intentional blank state and report only the failed initialization.
         let cleanupError: unknown = null;
-        if (afterErase) {
+        {
           try {
             await afterErase();
           } catch (error) {
@@ -2154,7 +2209,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       throw new ClearAllError('erase', original);
     }
 
-    if (afterErase) {
+    {
       try {
         await afterErase();
       } catch (error) {

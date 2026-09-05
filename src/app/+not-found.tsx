@@ -15,13 +15,12 @@
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
@@ -35,38 +34,31 @@ export default function NotFoundScreen() {
   const language = useLanguage();
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.body}>
-          <View style={[styles.glyph, { borderColor: theme.cardBorderStrong }]}>
-            <Icon name="search" size={22} color={theme.textTertiary} />
-          </View>
+    <ScreenScaffold scroll={false} contentStyle={styles.body}>
+      <View style={[styles.glyph, { borderColor: theme.cardBorderStrong }]}>
+        <Icon name="search" size={22} color={theme.textTertiary} />
+      </View>
 
-          <ThemedText type="heading">{t('notFoundTitle', language)}</ThemedText>
-          <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
-            {t('notFoundBody', language)}
-          </ThemedText>
+      <ThemedText type="heading">{t('notFoundTitle', language)}</ThemedText>
+      <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
+        {t('notFoundBody', language)}
+      </ThemedText>
 
-          <View style={styles.actions}>
-            <Button inline label={t('goHome', language)} onPress={() => router.replace('/')} />
-            {router.canGoBack() && (
-              <Button inline variant="outline" label={t('back', language)} onPress={() => router.back()} />
-            )}
-          </View>
-        </View>
-      </SafeAreaView>
-    </ThemedView>
+      <View style={styles.actions}>
+        <Button inline label={t('goHome', language)} onPress={() => router.replace('/')} />
+        {router.canGoBack() ? (
+          <Button inline variant="outline" label={t('back', language)} onPress={() => router.back()} />
+        ) : null}
+      </View>
+    </ScreenScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
   body: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'flex-start',
-    paddingHorizontal: ScreenPadding,
     gap: Spacing.two,
   },
   glyph: {

@@ -79,7 +79,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#14120F",
+        "backgroundColor": "#2855D9",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -110,10 +110,12 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#14120F",
-          "android": {
-            "image": "./assets/images/splash-icon.png",
-            "imageWidth": 170
+          "backgroundColor": "#F6F8FC",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 140,
+          "dark": {
+            "backgroundColor": "#0F1520",
+            "image": "./assets/images/splash-icon-dark.png"
           }
         }
       ],
@@ -121,14 +123,14 @@
         "expo-font",
         {
           "fonts": [
-            "./assets/fonts/Geist-Regular.ttf",
-            "./assets/fonts/Geist-Medium.ttf",
-            "./assets/fonts/Geist-SemiBold.ttf",
+            "./assets/fonts/IBMPlexSans-Regular.ttf",
+            "./assets/fonts/IBMPlexSans-Medium.ttf",
+            "./assets/fonts/IBMPlexSans-SemiBold.ttf",
             "./assets/fonts/GeistMono-Regular.ttf",
             "./assets/fonts/GeistMono-Medium.ttf",
             "./assets/fonts/GeistMono-SemiBold.ttf",
-            "./assets/fonts/NotoKufiArabic-Regular.ttf",
-            "./assets/fonts/NotoKufiArabic-Bold.ttf"
+            "./assets/fonts/IBMPlexSansArabic-Regular.ttf",
+            "./assets/fonts/IBMPlexSansArabic-SemiBold.ttf"
           ]
         }
       ],
@@ -169,8 +171,14 @@
         {
           "supportsRTL": true,
           "supportedLocales": {
-            "ios": ["en", "ar"],
-            "android": ["en", "ar"]
+            "ios": [
+              "en",
+              "ar"
+            ],
+            "android": [
+              "en",
+              "ar"
+            ]
           }
         }
       ]

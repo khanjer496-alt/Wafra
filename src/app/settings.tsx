@@ -18,12 +18,12 @@
  */
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
-import { shareText, shareTextFile } from '@/lib/share-text';
+import { buildLedgerCsv } from '@/lib/ledger-export';
+import { readBackupPickerCopy, shareText, shareTextFile } from '@/lib/share-text';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -33,22 +33,23 @@ import {
   Linking,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { StatusFacts, type StatusFact } from '@/components/settings/status-facts';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button, Segmented, Toggle } from '@/components/ui/controls';
+import { Button, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
+import { Block, Row, Section } from '@/components/ui/layout';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { SectionHeader } from '@/components/ui/section-header';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { WafraMark } from '@/components/wafra-logo';
-import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useAutoImport } from '@/hooks/use-auto-import';
@@ -81,6 +82,7 @@ import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { canSelectMarket, ledgerCurrencyDisplay, MARKETS } from '@/lib/markets';
 import { isProActive, trialDaysLeft } from '@/lib/purchases';
+import { configuredPublicUrl } from '@/lib/public-links';
 // Deliberately this branch's relay client, not the other one's isRelaySupported/
 // unpairRelay/stopRelayWake trio: the two relay clients speak incompatible wire
 // contracts (four scoped tokens here vs one there), and mixing their entry
@@ -99,6 +101,11 @@ import {
   isCaptureAvailable,
   setIosCaptureEnabled,
 } from '@/lib/capture';
+import {
+  createIosHistoryPostEraseCleanup,
+  eraseIosHistorySessions,
+} from '@/lib/ios-history-setup';
+import { clearIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import {
   buildExpenseReportHtml,
@@ -182,9 +189,14 @@ export default function SettingsScreen() {
     privateMode: state.privateMode,
   });
   const version = Constants.expoConfig?.version ?? '1.0.0';
+  const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
+  const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
+  const supportUrl = configuredPublicUrl('supportUrl');
   const founderUnlockEnabled =
     Platform.OS !== 'web' && isFounderUnlockBuild();
   const founderTapSequence = useRef(EMPTY_FOUNDER_TAP_SEQUENCE);
+  const [publicLinkNotice, setPublicLinkNotice] = useState(false);
+  const [privacyDetailsVisible, setPrivacyDetailsVisible] = useState(false);
 
   const [instantAlerts, setInstantAlerts] = useState(false);
   // Only builds carrying the delivery receiver can post at delivery time.
@@ -263,6 +275,15 @@ export default function SettingsScreen() {
   const gated = (fn: () => void) => () => {
     if (proActive) fn();
     else router.push('/pro');
+  };
+
+  const openPublicLink = async (url: string) => {
+    setPublicLinkNotice(false);
+    try {
+      await Linking.openURL(url);
+    } catch {
+      setPublicLinkNotice(true);
+    }
   };
 
   /* ── Privacy ────────────────────────────────────────────────────────── */
@@ -632,14 +653,9 @@ export default function SettingsScreen() {
   /* ── Data ───────────────────────────────────────────────────────────── */
 
   const exportCsv = () => {
-    const header = 'date,type,amount_aed,category,title,account,transfer';
-    const lines = state.transactions.map((tx) => {
-      const account = state.accounts.find((a) => a.id === tx.accountId)?.name ?? '';
-      const title = `"${tx.title.replace(/"/g, '""')}"`;
-      return `${tx.date},${tx.type},${(tx.amountFils / 100).toFixed(2)},${tx.category},${title},"${account}",${tx.isTransfer ? 1 : 0}`;
-    });
+    const csv = buildLedgerCsv(state.transactions, state.accounts, state.ledgerMoney);
     // A whole ledger is far past the intent-payload ceiling; share the file.
-    shareText('wafra-export.csv', [header, ...lines].join('\n'), {
+    shareText('wafra-export.csv', csv, {
       mimeType: 'text/csv',
     }).catch(() => {});
   };
@@ -731,7 +747,7 @@ export default function SettingsScreen() {
         copyToCacheDirectory: true,
       });
       if (picked.canceled || !picked.assets?.[0]) return;
-      const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
+      const content = await readBackupPickerCopy(picked.assets[0].uri);
       setConfirmation({
         question: t('restoreBackupQ'),
         body: t('restoreReplacesAll'),
@@ -798,10 +814,14 @@ export default function SettingsScreen() {
     try {
       const notificationReader = NotificationReader;
       const cleanupCaptureQueue = isRelayPlatform()
-        ? async () => {
-            await eraseIosCaptureStore();
-            await clearBackgroundRelayRows();
-          }
+        ? createIosHistoryPostEraseCleanup({
+            eraseCapture: eraseIosCaptureStore,
+            eraseHistory: eraseIosHistorySessions,
+            clearMessageSetup: clearIosMessageSetupProgress,
+            clearBackground: async () => {
+              await clearBackgroundRelayRows();
+            },
+          })
         : Platform.OS === 'android'
           ? async () => {
               if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
@@ -912,6 +932,10 @@ export default function SettingsScreen() {
   /* ── Rows ───────────────────────────────────────────────────────────── */
 
   const chevron = language === 'ar' ? 'chevron-left' : 'chevron-right';
+  const settingsHeader: ScreenHeaderProps = {
+    title: t('settingsTitle'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
   /**
    * A row that opens something — a screen, or a picker sheet. The chevron is
@@ -943,6 +967,25 @@ export default function SettingsScreen() {
         </View>
         {locked && <Icon name="lock" size={13} color={theme.warning} />}
         <Icon name={chevron} size={15} color={theme.textTertiary} />
+      </Row>
+    );
+  };
+
+  const publicLinkRow = (
+    title: string,
+    url: string | null,
+    last = false,
+  ) => {
+    if (url) return linkRow(title, null, () => void openPublicLink(url), { last });
+    return (
+      <Row last={last}>
+        <View style={styles.rowText}>
+          <ThemedText type="small">{title}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">
+            {t('publicLinkUnavailable')}
+          </ThemedText>
+        </View>
+        <Icon name="alert" size={15} color={theme.warning} />
       </Row>
     );
   };
@@ -1022,14 +1065,7 @@ export default function SettingsScreen() {
   );
   const trial = trialDaysLeft(state);
   const captureAvailable = isSmsScanningAvailable() || isCaptureAvailable();
-  const iosCaptureHealthy = captureState === 'waiting-for-alert' ||
-    captureState === 'first-alert-captured' || captureState === 'migration-retry';
   const iosCaptureEnabled = !state.captureOptOut && iosCaptureStatus?.enabled === true;
-  const captureActive = !state.captureOptOut && (
-    isSmsScanningAvailable()
-      ? smsGranted
-      : iosCaptureHealthy
-  );
   const iosCaptureCopy = captureState === 'checking'
     ? t('settingStatusChecking')
     : captureState === 'first-alert-captured'
@@ -1047,54 +1083,26 @@ export default function SettingsScreen() {
                 : captureState === 'unsupported'
                   ? t('capturePhoneOnly')
                   : t('captureIosOff');
-  const captureStatus = state.captureOptOut
-    ? t('settingStatusOff')
-    : isSmsScanningAvailable()
-      ? t(smsGranted ? 'settingStatusOn' : 'settingStatusOff')
-      : iosCaptureCopy;
-  const statusFacts: StatusFact[] = [
-    {
-      key: 'summary',
-      label: t('dailySummarySetting'),
-      value: t(state.dailySummary ? 'settingStatusOn' : 'settingStatusOff'),
-      active: state.dailySummary,
-    },
-    ...(captureAvailable
-      ? [{
-          key: 'capture',
-          label: t('automaticCapture'),
-          value: captureStatus,
-          active: captureActive,
-        }]
-      : []),
-    {
-      key: 'private',
-      label: t('privateMode'),
-      value: t(state.privateMode ? 'settingStatusOn' : 'settingStatusOff'),
-      active: state.privateMode,
-    },
-  ];
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('settingsTitle')} onBack={() => router.back()} />
-        </View>
-
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Section index={0}>
-            <Block onPress={() => router.push('/pro')}>
-              <View style={styles.proRow}>
-                <Icon name="diamond" size={19} color={theme.warning} />
-                <View style={styles.rowText}>
-                  <ThemedText type="small">{t('wafraPro')}</ThemedText>
-                  <ThemedText
-                    type="meta"
-                    style={{ color: proActive ? theme.textTertiary : theme.warning }}>
-                    {state.founderPro
-                      ? t('founderProActive')
-                      : state.pro
+    <React.Fragment>
+      <ScreenScaffold
+        headerMode="native"
+        header={settingsHeader}
+        contentStyle={styles.content}
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
+        <Section index={0}>
+          <Block onPress={() => router.push('/pro')}>
+            <View style={[styles.proRow, largeText && styles.proRowLarge]}>
+              <Icon name="diamond" size={19} color={theme.warning} />
+              <View style={styles.rowText}>
+                <ThemedText type="small">{t('wafraPro')}</ThemedText>
+                <ThemedText
+                  type="meta"
+                  style={{ color: proActive ? theme.textTertiary : theme.warning }}>
+                  {state.founderPro
+                    ? t('founderProActive')
+                    : state.pro
                       ? t('activeOnThisDevice')
                       : trial > 0
                         ? tf('settingsTrialDays', {
@@ -1102,327 +1110,289 @@ export default function SettingsScreen() {
                             s: trial === 1 ? '' : 's',
                           })
                         : t('trialEndedBanner')}
-                  </ThemedText>
-                </View>
-                <Icon name={chevron} size={15} color={theme.textTertiary} />
+                </ThemedText>
               </View>
+              <Icon name={chevron} size={15} color={theme.textTertiary} />
+            </View>
+          </Block>
+        </Section>
+
+        <Section index={1}>
+          <SectionHeader title={t('settingsMoneyHeader')} />
+          {hasGlobalLedger ? (
+            <Row last>
+              <View style={styles.rowText}>
+                <ThemedText type="small">{t('parserPack')}</ThemedText>
+                <ThemedText type="meta" themeColor="textTertiary">
+                  {tf('globalParserPackDetail', { currency: state.ledgerMoney!.currency })}
+                </ThemedText>
+              </View>
+            </Row>
+          ) : linkRow(
+            t('parserPack'),
+            tf('parserPackDetail', {
+              country: marketName(market.id),
+              currency: market.currency.display,
+            }),
+            () => setRegionSheet('country'),
+            { last: true },
+          )}
+        </Section>
+
+        <Section index={2}>
+          <SectionHeader title={t('settingsImportsHeader')} />
+          {Platform.OS === 'ios' && linkRow(
+            t('iosSetupTitle'),
+            t('iosMessageSettingsDetail'),
+            () => router.push('/ios-setup'),
+          )}
+          {isSmsScanningAvailable() &&
+            switchRow(
+              t('readBankSms'),
+              t(smsGranted && !state.captureOptOut ? 'smsGrantedLocal' : 'smsOffNoImport'),
+              smsGranted && !state.captureOptOut,
+              toggleSms,
+            )}
+          {state.historyImport && state.historyImport.status !== 'complete' ? (
+            <Block style={styles.historyImportSettings}>
+              <View style={styles.historyImportSettingsCopy}>
+                <ThemedText type="smallBold">{t('historyImportSettingsTitle')}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {state.historyImport.status === 'failed'
+                    ? t(state.historyImport.error === 'inbox-access'
+                        ? 'historyImportAccessBody'
+                        : 'historyImportSavedBody')
+                    : tf('historyImportLiveProgress', {
+                        scanned: state.historyImport.scanned,
+                        found: state.historyImport.found,
+                      })}
+                </ThemedText>
+              </View>
+              {state.historyImport.status === 'failed' ? (
+                <Button
+                  inline
+                  variant="outline"
+                  label={t(state.historyImport.error === 'inbox-access'
+                    ? 'openPhoneSettings'
+                    : 'retryHistoryImport')}
+                  onPress={() => void (state.historyImport?.error === 'inbox-access'
+                    ? openSmsPermissionSettings().then(() => beginHistoryImport())
+                    : beginHistoryImport())}
+                />
+              ) : null}
             </Block>
-          </Section>
-
-          <Section index={1}>
-            <SectionHeader title={t('settingsStatusHeader')} />
-            <StatusFacts facts={statusFacts} largeText={largeText} theme={theme} />
-          </Section>
-
-          {/* Notifications, out of "Privacy" and up here.
-              A 9pm digest of what you spent is not a privacy setting by any
-              reading, and neither is a per-charge banner — they were filed
-              there because the code that delivers them lives near the code
-              that captures. Turning an alert off is one of the two things
-              people actually open this screen to do, so it goes above the
-              things they do twice a year. The group carries no header until
-              one exists in both languages; the rows say what they are. */}
-          <Section index={2}>
-            {switchRow(
-              t('dailySummarySetting'),
-              state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
-              state.dailySummary,
-              (next) => void toggleDailySummary(next),
-              !chargeAlertsAvailable,
+          ) : null}
+          {Platform.OS === 'ios' && captureAvailable &&
+            iosCaptureSwitchRow(
+              state.captureOptOut
+                ? t('captureIosOff')
+                : captureState === 'queue-warning' && iosCaptureStatus
+                  ? tf('captureIosQueueCounts', {
+                      pending: iosCaptureStatus.pending,
+                      dropped: iosCaptureStatus.dropped,
+                      corrupt: iosCaptureStatus.corrupt
+                        ? t('settingStatusYes')
+                        : t('settingStatusNo'),
+                    })
+                  : iosCaptureCopy,
+              iosCaptureEnabled,
+              () => {
+                if (captureState === 'paused') {
+                  router.push('/pro');
+                  return;
+                }
+                if (captureState === 'queue-warning') {
+                  confirmIosCaptureRecovery();
+                  return;
+                }
+                if (state.captureOptOut || captureState === 'off' ||
+                  captureState === 'needs-automation') {
+                  void setIosAutomaticCapture(true);
+                  return;
+                }
+                router.push('/ios-setup');
+              },
             )}
-            {/* One outcome, one label.
-                Android fires this from the SMS broadcast the instant the
-                message lands; iPhone fires it when the relay wake delivers,
-                which can be a moment later. That is a true difference and an
-                invisible one — the two platforms are mutually exclusive, so no
-                user ever sees both rows, which is exactly why they must not
-                have had two different names ("Alert me on every charge" and
-                "Transaction alerts"). The timing nuance lives in the sub-line,
-                where it belongs. */}
-            {instantAvailable &&
-              switchRow(
-                t('alertEveryCharge'),
-                smsGranted
-                  ? instantAlerts
-                    ? t('instantAlertsOn')
-                    : t('instantAlertsOff')
-                  : t('instantAlertsNeedSms'),
-                instantAlerts && smsGranted,
-                (next) => {
-                  if (!smsGranted) {
-                    Alert.alert(t('turnOnSmsFirst'), t('turnOnSmsFirstBody'));
-                    return;
-                  }
-                  void toggleInstantAlerts(next);
-                },
-                true,
-              )}
-            {legacyChargeAlertsAvailable &&
-              switchRow(
-                t('alertEveryCharge'),
-                // Borrowed from the daily digest because it is the only plain
-                // "Off" in the string table; the iPhone row wants its own
-                // off-state sentence the way its Android twin has one.
-                chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
-                chargeAlerts,
-                (next) => void toggleChargeAlerts(next),
-                true,
-              )}
-          </Section>
-
-          <Section index={3}>
-            <SectionHeader title={t('supportHeader')} />
-            {linkRow(
-              t('sendFeedback'),
-              t('sendFeedbackDetail'),
-              () => router.push('/feedback'),
-              { last: true },
-            )}
-          </Section>
-
-          <Section index={4}>
-            <SectionHeader title={t('privacyHeader')} />
-            {switchRow(
-              t('privateMode'),
-              t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
-              state.privateMode,
-              togglePrivateMode,
-            )}
-            {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
-            {isSmsScanningAvailable() &&
-              switchRow(
-                t('readBankSms'),
-                t(smsGranted && !state.captureOptOut ? 'smsGrantedLocal' : 'smsOffNoImport'),
-                smsGranted && !state.captureOptOut,
-                toggleSms,
-              )}
-            {state.historyImport && state.historyImport.status !== 'complete' ? (
+          {Platform.OS === 'ios' && captureAvailable &&
+            captureState === 'queue-warning' && (
               <Block style={styles.historyImportSettings}>
                 <View style={styles.historyImportSettingsCopy}>
-                  <ThemedText type="smallBold">{t('historyImportSettingsTitle')}</ThemedText>
+                  <ThemedText type="smallBold">{t('captureIosRecoveryAction')}</ThemedText>
                   <ThemedText type="meta" themeColor="textSecondary">
-                    {state.historyImport.status === 'failed'
-                      ? t(state.historyImport.error === 'inbox-access'
-                          ? 'historyImportAccessBody'
-                          : 'historyImportSavedBody')
-                      : tf('historyImportLiveProgress', {
-                          scanned: state.historyImport.scanned,
-                          found: state.historyImport.found,
-                        })}
+                    {t('captureIosRecoveryBody')}
                   </ThemedText>
                 </View>
-                {state.historyImport.status === 'failed' ? (
-                  <Button
-                    inline
-                    variant="outline"
-                    label={t(state.historyImport.error === 'inbox-access'
-                      ? 'openPhoneSettings'
-                      : 'retryHistoryImport')}
-                    onPress={() => void (state.historyImport?.error === 'inbox-access'
-                      ? openSmsPermissionSettings().then(() => beginHistoryImport())
-                      : beginHistoryImport())}
-                  />
-                ) : null}
+                <Button
+                  inline
+                  variant="outline"
+                  label={t('captureIosRecoveryAction')}
+                  onPress={confirmIosCaptureRecovery}
+                />
               </Block>
-            ) : null}
-            {/* iPhone capture is a privacy setting as much as a feature. Live
-                Message alerts now stay in the protected local queue; any
-                configured relay is supplemental and retained here only for
-                legacy cleanup plus email/PDF/CSV collection. */}
-            {Platform.OS === 'ios' && captureAvailable &&
-              iosCaptureSwitchRow(
-                state.captureOptOut
-                  ? t('captureIosOff')
-                  : captureState === 'queue-warning' && iosCaptureStatus
-                    ? tf('captureIosQueueCounts', {
-                        pending: iosCaptureStatus.pending,
-                        dropped: iosCaptureStatus.dropped,
-                        corrupt: iosCaptureStatus.corrupt
-                          ? t('settingStatusYes')
-                          : t('settingStatusNo'),
-                      })
-                    : iosCaptureCopy,
-                iosCaptureEnabled,
-                () => {
-                  if (captureState === 'paused') {
-                    router.push('/pro');
-                    return;
-                  }
-                  if (captureState === 'queue-warning') {
-                    confirmIosCaptureRecovery();
-                    return;
-                  }
-                  if (state.captureOptOut || captureState === 'off' ||
-                    captureState === 'needs-automation') {
-                    void setIosAutomaticCapture(true);
-                    return;
-                  }
-                  router.push('/ios-setup');
-                },
-              )}
-            {Platform.OS === 'ios' && captureAvailable &&
-              captureState === 'queue-warning' && (
-                <Block style={styles.historyImportSettings}>
-                  <View style={styles.historyImportSettingsCopy}>
-                    <ThemedText type="smallBold">
-                      {t('captureIosRecoveryAction')}
-                    </ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">
-                      {t('captureIosRecoveryBody')}
-                    </ThemedText>
-                  </View>
-                  <Button
-                    inline
-                    variant="outline"
-                    label={t('captureIosRecoveryAction')}
-                    onPress={confirmIosCaptureRecovery}
-                  />
-                </Block>
-              )}
-            {/* Gated like every other capture row above it. Rendering this
-                unconditionally made it the one dead end in the section on
-                iOS: it read "Off · for banks that push instead of SMS", sent a
-                non-Pro user to the paywall first because of gated(), and only
-                then said notification access "works on the phone app only" —
-                to someone holding a phone. There is no iOS equivalent to
-                offer, so the row is not shown rather than shown broken. */}
-            {notifAvailable &&
-              linkRow(
-                t('bankAppNotifsTitle'),
-                t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
-                gated(onNotificationAccess),
-                { pro: true },
-              )}
-            {/* The retention disclosure, as a footnote under the rows it is
-                about rather than a ~50-word wall standing between the header
-                and the first setting. It still describes both platforms on a
-                device that is only ever one of them — cutting it to this phone
-                needs copy that does not exist yet. */}
+            )}
+          {notifAvailable &&
+            linkRow(
+              t('bankAppNotifsTitle'),
+              t(notifEnabled ? 'bankPushOn' : 'bankPushOff'),
+              gated(onNotificationAccess),
+              { last: true, pro: true },
+            )}
+        </Section>
+
+        <Section index={3}>
+          <SectionHeader title={t('settingsNotificationsHeader')} />
+          {switchRow(
+            t('dailySummarySetting'),
+            state.dailySummary ? t('dailySummaryOn') : t('dailySummaryOff'),
+            state.dailySummary,
+            (next) => void toggleDailySummary(next),
+            !chargeAlertsAvailable,
+          )}
+          {instantAvailable &&
+            switchRow(
+              t('alertEveryCharge'),
+              smsGranted
+                ? instantAlerts
+                  ? t('instantAlertsOn')
+                  : t('instantAlertsOff')
+                : t('instantAlertsNeedSms'),
+              instantAlerts && smsGranted,
+              (next) => {
+                if (!smsGranted) {
+                  Alert.alert(t('turnOnSmsFirst'), t('turnOnSmsFirstBody'));
+                  return;
+                }
+                void toggleInstantAlerts(next);
+              },
+              true,
+            )}
+          {legacyChargeAlertsAvailable &&
+            switchRow(
+              t('alertEveryCharge'),
+              chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
+              chargeAlerts,
+              (next) => void toggleChargeAlerts(next),
+              true,
+            )}
+        </Section>
+
+        <Section index={4}>
+          <SectionHeader title={t('settingsAppearanceLanguageHeader')} />
+          <Block>
+            <SegmentedControl
+              label={t('appearanceHeader')}
+              segments={[
+                { value: 'system', label: t('themeSystem') },
+                { value: 'light', label: t('themeLight') },
+                { value: 'dark', label: t('themeDark') },
+              ]}
+              value={themeChoice}
+              onChange={setThemePreference}
+            />
+            <ThemedText type="meta" themeColor="textTertiary">
+              {themeChoice === 'system'
+                ? t('followingPhone')
+                : tf('pinnedTheme', {
+                    theme: t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
+                  })}
+            </ThemedText>
+          </Block>
+          {linkRow(t('language'), languagePreference === 'system'
+            ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
+            : LANGUAGE_NAMES[language], () => setRegionSheet('language'), {
+            last: true,
+          })}
+        </Section>
+
+        <Section index={5}>
+          <SectionHeader title={t('privacyHeader')} />
+          {switchRow(
+            t('privateMode'),
+            t(state.privateMode ? 'privateModeOn' : 'privateModeOff'),
+            state.privateMode,
+            togglePrivateMode,
+          )}
+          {switchRow(t('appLockTitle'), t('appLockDetail'), state.appLock, toggleAppLock)}
+          {linkRow(t('messagesPrivacy'), null, () => setPrivacyDetailsVisible(true), { last: true })}
+          {(legacyChargeAlertsAvailable || relay === undefined) && (
             <Block style={styles.privacyCopy}>
-              <Icon name="lock" size={16} color={theme.textTertiary} />
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
-                {t('privacyRetentionExact')}
+              <Icon name="alert" size={16} color={theme.warning} />
+              <ThemedText type="small" themeColor="warning" style={styles.privacyCopyText}>
+                {t('legacyCapturePrivacyWarning')}
               </ThemedText>
             </Block>
-            <Block style={styles.privacyCopy}>
-              <Icon name="lock" size={16} color={theme.textTertiary} />
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopyText}>
-                {t('privacySecurityExact')}
-              </ThemedText>
-            </Block>
-          </Section>
+          )}
+        </Section>
 
-          <Section index={5}>
-            <SectionHeader title={t('dataHeader')} />
-            {/* Review and the two "teach the app" chores first: each carries a
-                live state, each is why someone opens this section on an
-                ordinary day, and none is an export. Back up and Restore follow,
-                marked. */}
-            {linkRow(
-              t('reviewAlertsTitle'),
-              reviewAlertCount > 0
-                ? tf('reviewAlertsSettingsCount', { count: reviewAlertCount })
-                : t('reviewAlertsNone'),
-              () => router.push('/review-alerts'),
-            )}
-            {linkRow(
-              t('sortShops'),
-              unsorted.merchants.length > 0
-                ? tf('sortShopsCount', {
-                    count: unsorted.merchants.length,
-                    s: unsorted.merchants.length === 1 ? '' : 's',
-                  })
-                : t('sortShopsNone'),
-              () => router.push('/categorise'),
-            )}
-            {/* "No unrecognized formats" is a claim about message text this
-                phone may never have had. On iOS the relay discards it before
-                the row arrives and private mode deletes it on purpose, so the
-                count is 0 either way — see noFormatsReason(). The row still
-                leads somewhere on those devices: the card diagnostic is built
-                from the ledger, not from raw, and works everywhere. */}
-            {linkRow(
-              t('improveAccuracy'),
-              formats > 0
-                ? tf('unreadFormatsCount', {
-                    count: formats,
-                    s: formats === 1 ? '' : 's',
-                  })
-                : noFormats === 'none-found'
-                  ? t('noUnrecognized')
-                  : t('formatsNotKeptRow'),
-              () => router.push('/accuracy'),
-            )}
-            {linkRow(t('backupJson'), null, backupJson)}
-            {linkRow(t('restoreBackup'), null, restoreFromFile)}
-            {linkRow(t('exportCsv'), null, exportCsv)}
-            {linkRow(
-              t('exportExpensePdf'),
-              null,
-              () => setReportScopeSheet(true),
-              { last: !isInternalLaunchDiagnosticsEnabled() },
-            )}
-            {isInternalLaunchDiagnosticsEnabled() &&
-              linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
-          </Section>
+        <Section index={6}>
+          <SectionHeader title={t('dataHeader')} />
+          {linkRow(
+            t('reviewAlertsTitle'),
+            reviewAlertCount > 0
+              ? tf('reviewAlertsSettingsCount', { count: reviewAlertCount })
+              : t('reviewAlertsNone'),
+            () => router.push('/review-alerts'),
+          )}
+          {linkRow(
+            t('sortShops'),
+            unsorted.merchants.length > 0
+              ? tf('sortShopsCount', {
+                  count: unsorted.merchants.length,
+                  s: unsorted.merchants.length === 1 ? '' : 's',
+                })
+              : t('sortShopsNone'),
+            () => router.push('/categorise'),
+          )}
+          {linkRow(
+            t('improveAccuracy'),
+            formats > 0
+              ? tf('unreadFormatsCount', {
+                  count: formats,
+                  s: formats === 1 ? '' : 's',
+                })
+              : noFormats === 'none-found'
+                ? t('noUnrecognized')
+                : t('formatsNotKeptRow'),
+            () => router.push('/accuracy'),
+          )}
+          {linkRow(t('backupJson'), null, backupJson)}
+          {linkRow(t('restoreBackup'), null, restoreFromFile)}
+          {linkRow(t('exportCsv'), null, exportCsv)}
+          {linkRow(
+            t('exportExpensePdf'),
+            null,
+            () => setReportScopeSheet(true),
+            { last: !isInternalLaunchDiagnosticsEnabled() },
+          )}
+          {isInternalLaunchDiagnosticsEnabled() &&
+            linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
+        </Section>
 
-          <Section index={6}>
-            <SectionHeader title={t('appearanceHeader')} />
-            <Block>
-              {/* The handoff said to follow the OS and offer no picker. That is
-                  the right default and it stays the default — but "follow the
-                  OS" is not a choice a user can make, it is the absence of one,
-                  and a money app gets read in bed and in sunlight on the same
-                  day. System stays first and stays selected until it is
-                  changed. */}
-              <Segmented
-                segments={[
-                  { value: 'system', label: t('themeSystem') },
-                  { value: 'light', label: t('themeLight') },
-                  { value: 'dark', label: t('themeDark') },
-                ]}
-                value={themeChoice}
-                onChange={setThemePreference}
-              />
-              <ThemedText type="meta" themeColor="textTertiary">
-                {themeChoice === 'system'
-                  ? t('followingPhone')
-                  : tf('pinnedTheme', {
-                      theme: t(themeChoice === 'light' ? 'themeLight' : 'themeDark'),
-                    })}
-              </ThemedText>
-            </Block>
-          </Section>
-
-          <Section index={7}>
-            <SectionHeader title={t('regionHeader')} />
-            {hasGlobalLedger ? (
-              <Row>
-                <View style={styles.rowText}>
-                  <ThemedText type="small">{t('parserPack')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {tf('globalParserPackDetail', { currency: state.ledgerMoney!.currency })}
-                  </ThemedText>
-                </View>
-              </Row>
-            ) : linkRow(
-              t('parserPack'),
-              tf('parserPackDetail', {
-                country: marketName(market.id),
-                currency: market.currency.display,
-              }),
-              () => setRegionSheet('country'),
-            )}
-            {/* The sub-line is the language that is ON, in that language —
-                the one thing a glance needs and the old one never said. */}
-            {linkRow(t('language'), languagePreference === 'system'
-              ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
-              : LANGUAGE_NAMES[language], () => setRegionSheet('language'), {
-              last: true,
-            })}
-          </Section>
-
-          <Section index={8} style={styles.about}>
+        <Section index={7}>
+          <SectionHeader title={t('supportHeader')} />
+          {linkRow(
+            t('sendFeedback'),
+            t('sendFeedbackDetail'),
+            () => router.push('/feedback'),
+          )}
+          {publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)}
+          {publicLinkRow(t('termsOfUse'), termsOfUseUrl)}
+          {publicLinkRow(t('supportWebsite'), supportUrl, true)}
+          {publicLinkNotice && (
+            <View
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+              style={styles.publicLinkNotice}>
+              <Icon name="alert" size={16} color={theme.expense} />
+              <View style={styles.rowText}>
+                <ThemedText type="smallBold">{t('legalLinkFailed')}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">
+                  {t('legalLinkFailedBody')}
+                </ThemedText>
+              </View>
+            </View>
+          )}
+          <View style={styles.about}>
             {founderUnlockEnabled ? (
               <Pressable
                 accessibilityRole="button"
@@ -1442,26 +1412,23 @@ export default function SettingsScreen() {
             <ThemedText type="nano" themeColor="textTertiary">
               Wafra {version}
             </ThemedText>
-          </Section>
+          </View>
+        </Section>
 
-          {/* Erase, alone.
-              It used to be the seventh row of the Data list, one hairline
-              below "Sort your shops", carrying the same chevron — a chevron
-              that on every other row of this screen pushes a screen and on
-              this one opened a destructive alert. Colour was the only thing
-              separating a chore from the irreversible act. A button says
-              "this does something" where a chevron says "a screen lives
-              here", and the gap above it is there to be crossed deliberately.
-              The confirmation copy behind it is untouched; it is the best
-              writing on the screen. */}
-          <Section index={9} style={styles.danger}>
-            <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
-          </Section>
-        </ScrollView>
-      </SafeAreaView>
+        <Section index={8} style={styles.danger}>
+          <SectionHeader title={t('settingsDangerHeader')} />
+          <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
+        </Section>
+      </ScreenScaffold>
 
-      {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
-          inherits its clipping and its scroll offset on web. */}
+      <BottomSheet visible={privacyDetailsVisible} onClose={() => setPrivacyDetailsVisible(false)}
+        title={t('messagesPrivacy')}>
+        <View style={{ gap: Spacing.three }}>
+          <ThemedText themeColor="textSecondary">{t('privacyRetentionExact')}</ThemedText>
+          <ThemedText themeColor="textSecondary">{t('privacySecurityExact')}</ThemedText>
+        </View>
+      </BottomSheet>
+
       <ChoiceSheet
         visible={regionSheet === 'country'}
         onClose={() => setRegionSheet(null)}
@@ -1499,32 +1466,21 @@ export default function SettingsScreen() {
           onConfirm={confirmation.onConfirm}
         />
       )}
-    </ThemedView>
+    </React.Fragment>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
   content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
     gap: Spacing.four + 2,
   },
   proRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
+  },
+  proRowLarge: {
+    alignItems: 'flex-start',
   },
   rowText: {
     flex: 1,
@@ -1568,6 +1524,11 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   historyImportSettingsCopy: { flex: 1, gap: Spacing.half },
+  publicLinkNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two,
+  },
   // Twice the gap every other section gets. Erase is the only control on this
   // screen that cannot be undone, and the distance is the point.
   danger: {

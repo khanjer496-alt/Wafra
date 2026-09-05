@@ -1,0 +1,71 @@
+{
+  "frozenAt": "2026-09-05T15:14:04.453Z",
+  "sourceHashes": {
+    "src/lib/universal-fields.ts": "a37c48e2070b790d1f717ae8077adf5879f292b2b839da35bf27d26a4b046968",
+    "src/lib/universal-dates.ts": "bd2bb871d32a6b25486a104afbfe77efbbdceafbc744b5829d87764bed295860",
+    "src/lib/universal-money.ts": "972572597b2e776a046571b5ef91e290453c58ab59a8c59d4e3315673a75ff08",
+    "src/lib/universal-parser.ts": "cb8871c959bdb80b0d2e496c7c29650a1fbbf9a6e877b8e3eebe358d020e61ab",
+    "src/lib/universal-categorization.ts": "bd43bf0dcc0fe60167c94297744a2cae35c13e60d177abb372a945f05371abaf"
+  },
+  "publicEventApi": "unchanged",
+  "verification": {
+    "round2Suites": 7,
+    "round2Checks": 424,
+    "priorUniversalSuites": 6,
+    "priorUniversalChecks": 323,
+    "priorEvidenceChecks": 72,
+    "strictDiagnostics": 0,
+    "eslint": "passed",
+    "independentReview": "bounded findings cleared"
+  },
+  "knownCases": {
+    "cases": 239,
+    "exactCases": 239,
+    "assertedFields": 1145,
+    "matchedFields": 1145,
+    "abstainedFields": 0,
+    "incorrectFields": 0,
+    "nonPostingChallenges": 17,
+    "falsePostedStatus": 0,
+    "nonPostingConfirmable": 0,
+    "nonPostingRecognized": 17,
+    "sourceGuardRefusals": 17,
+    "safetyWithoutGroundedAmount": 5,
+    "categoryAbstentions": 2,
+    "incorrectResolvedCategories": 0
+  },
+  "exposedHoldoutCases": {
+    "parser": {
+      "cases": 24,
+      "exactCases": 24,
+      "assertedFields": 92,
+      "matchedFields": 92,
+      "abstainedFields": 0,
+      "incorrectFields": 0,
+      "nonPostingChallenges": 10,
+      "falsePostedStatus": 0,
+      "nonPostingConfirmable": 0,
+      "nonPostingRecognized": 10,
+      "sourceGuardRefusals": 10,
+      "safetyWithoutGroundedAmount": 3,
+      "categoryAbstentions": 0,
+      "incorrectResolvedCategories": 0
+    },
+    "categorization": {
+      "cases": 8,
+      "exactCases": 8,
+      "assertedFields": 16,
+      "matchedFields": 16,
+      "abstainedFields": 0,
+      "incorrectFields": 0,
+      "nonPostingChallenges": 0,
+      "falsePostedStatus": 0,
+      "nonPostingConfirmable": 0,
+      "nonPostingRecognized": 0,
+      "sourceGuardRefusals": 0,
+      "safetyWithoutGroundedAmount": 0,
+      "categoryAbstentions": 0,
+      "incorrectResolvedCategories": 0
+    }
+  }
+}

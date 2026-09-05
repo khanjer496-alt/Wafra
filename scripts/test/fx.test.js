@@ -157,14 +157,14 @@ async function main() {
   setLedgerCurrency(null);
   setActiveMarket('AE');
   ok('an empty ledger still follows the pack it picks',
-    setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465');
+    setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465.20');
   setActiveMarket('AE');
 
   setLedgerCurrency('AED');
   ok('a pack denominated in another currency is refused, not applied',
     setActiveMarket('SA') === false && getActiveMarket().id === 'AE');
   ok('so stored fils keep the currency they were recorded in',
-    formatAED(46520, { decimals: false }) === 'AED 465');
+    formatAED(46520, { decimals: false }) === 'AED 465.20');
   ok('and the refusal is visible before it is attempted',
     canSelectMarket('SA') === false && canSelectMarket('AE') === true);
   ok('a pack in the SAME currency is never refused',
@@ -181,10 +181,10 @@ async function main() {
   // stored field to migrate, so an emptied ledger is free to move country.
   setLedgerCurrency(null);
   ok('releasing the pin lets the country change through again',
-    setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465');
+    setActiveMarket('SA') === true && formatAED(46520, { decimals: false }) === 'SAR 465.20');
   setLedgerCurrency('SAR');
   ok('an SAR ledger pins SAR, not whichever pack shipped first',
-    setActiveMarket('AE') === false && formatAED(46520, { decimals: false }) === 'SAR 465');
+    setActiveMarket('AE') === false && formatAED(46520, { decimals: false }) === 'SAR 465.20');
   setLedgerCurrency(null);
   setActiveMarket('AE');
 

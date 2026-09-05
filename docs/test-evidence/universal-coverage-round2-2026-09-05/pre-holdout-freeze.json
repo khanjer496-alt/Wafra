@@ -1,0 +1,12 @@
+{
+  "frozenAt": "2026-09-05T14:44:27.167Z",
+  "holdoutSha256": "8ea029e618d67596370076a89c677300a587ec8b259df6d2867a3e0988b82539",
+  "sourceHashes": {
+    "src/lib/universal-fields.ts": "ad315009e206ed4cc01d25720df212a5a5d8352d0b41af28c80d8d61bfb46951",
+    "src/lib/universal-dates.ts": "b8075c07d79a015ca1bf5922cbc694ff8272328185bcdf7a5cc223ce0bae74b1",
+    "src/lib/universal-money.ts": "76e131a18f525caddaa033476edaf86c3901bface00fc1b19c6fda68fcdb5c39",
+    "src/lib/universal-parser.ts": "bad2ceea13a4fd7def25ae977c813818798d8e34784eb784d1748a20e03eb09e",
+    "src/lib/universal-categorization.ts": "426270758ccfb7c97ef94e55ccd23935b9c3039ca170572f01059038f15d14b7"
+  },
+  "note": "Implementation frozen before first holdout read/run. Prior corpus all239 assertions-cases pass; these are now regression evidence."
+}

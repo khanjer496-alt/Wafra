@@ -62,11 +62,6 @@ struct NativeLiveCaptureStoreTests {
   private static func store(
     root: URL,
     now: @escaping () -> Date = { fixedClock },
-    senderIdentity: @escaping (String) -> WafraBankSenderIdentity? = { sender in
-      sender == knownSender
-        ? WafraBankSenderIdentity(market: "AE", bankId: "test-bank")
-        : nil
-    },
     acknowledgementRemoveItem: @escaping (URL) throws -> Void = {
       try FileManager.default.removeItem(at: $0)
     }
@@ -74,7 +69,6 @@ struct NativeLiveCaptureStoreTests {
     WafraLiveCaptureStore(
       root: root,
       now: now,
-      senderIdentity: senderIdentity,
       acknowledgementRemoveItem: acknowledgementRemoveItem
     )
   }
@@ -192,27 +186,6 @@ struct NativeLiveCaptureStoreTests {
         observedAt: fixedClock
       )
       Foundation.exit(nestedRejected && result == .accepted ? 0 : 94)
-    case "child-reentrant-sender":
-      var nestedRejected = false
-      var reentrantStore: WafraLiveCaptureStore!
-      reentrantStore = store(root: childRoot, senderIdentity: { sender in
-        do {
-          _ = try reentrantStore.status()
-        } catch {
-          nestedRejected = error is WafraLiveCaptureStore.StoreError
-        }
-        return sender == knownSender
-          ? WafraBankSenderIdentity(market: "AE", bankId: "test-bank")
-          : nil
-      })
-      try grantLifetimeAndEnable(reentrantStore)
-      let result = try reentrantStore.stage(
-        sender: knownSender,
-        body: messageBody,
-        eventId: eventId(60_001),
-        observedAt: fixedClock
-      )
-      Foundation.exit(nestedRejected && result == .accepted ? 0 : 95)
     default:
       return false
     }
@@ -228,7 +201,6 @@ struct NativeLiveCaptureStoreTests {
     let processRoot = root("process")
     let raceRoot = root("race")
     let reentrantNowRoot = root("reentrant-now")
-    let reentrantSenderRoot = root("reentrant-sender")
     let expiryRoot = root("expiry")
     let expiryDeletionFailureRoot = root("expiry-deletion-failure")
     let countRoot = root("count-capacity")
@@ -242,6 +214,7 @@ struct NativeLiveCaptureStoreTests {
     let acknowledgedRetryRoot = root("acknowledged-retry")
     let partialManifestRoot = root("partial-manifest")
     let unicodeDigestRoot = root("unicode-digest")
+    let automationInputProbeRoot = root("automation-input-probe")
     let milestoneRoot = root("milestones")
     let eraseRoot = root("erase")
     let localLeaseRoot = root("local-lease")
@@ -252,11 +225,11 @@ struct NativeLiveCaptureStoreTests {
     let malformedLeaseRoot = root("malformed-lease")
     let roots = [
       basicRoot, validationRoot, orderingRoot, precisionRoot, processRoot, raceRoot,
-      reentrantNowRoot, reentrantSenderRoot, expiryRoot, expiryDeletionFailureRoot,
+      reentrantNowRoot, expiryRoot, expiryDeletionFailureRoot,
       countRoot, byteRoot, corruptionRoot, manifestCorruptionRoot, regularOrphanRoot,
       hiddenOrphanRoot, deletionFailureRoot, acknowledgementDeletionFailureRoot,
       acknowledgedRetryRoot, milestoneRoot, eraseRoot,
-      partialManifestRoot, unicodeDigestRoot,
+      partialManifestRoot, unicodeDigestRoot, automationInputProbeRoot,
       localLeaseRoot, storeLeaseRoot, combinedLeaseRoot, disabledPurgeRoot,
       oldManifestRoot, malformedLeaseRoot,
     ]
@@ -635,57 +608,58 @@ struct NativeLiveCaptureStoreTests {
         && malformedLeaseStatus.corrupt
     )
 
-    var identityInput: String?
-    let validation = store(root: validationRoot, senderIdentity: { sender in
-      identityInput = sender
-      return sender == knownSender
-        ? WafraBankSenderIdentity(market: "AE", bankId: "test-bank")
-        : nil
-    })
-    var identityCalls = 0
-    let disabledIdentityRoot = root("disabled-identity")
-    let disabledIdentityStore = store(root: disabledIdentityRoot, senderIdentity: { _ in
-      identityCalls += 1
-      return WafraBankSenderIdentity(market: "AE", bankId: "test-bank")
-    })
-    defer { remove([disabledIdentityRoot]) }
-    _ = try disabledIdentityStore.stage(
-      sender: knownSender,
-      body: messageBody,
-      eventId: eventId(2),
-      observedAt: fixedClock
-    )
-    check("disabled admission fails before sender inspection", identityCalls == 0)
+    let validation = store(root: validationRoot)
     try grantLifetimeAndEnable(validation)
     check(
-      "unknown sender is ignored",
+      "an unlisted alphanumeric sender is staged for the shared parser",
       try validation.stage(
-        sender: "UNKNOWN",
+        sender: "UNLISTED-BANK-ALERT",
         body: messageBody,
         eventId: eventId(3),
         observedAt: fixedClock
-      ) == .ignored
+      ) == .accepted
     )
     check(
-      "substring sender is ignored",
+      "an unlisted phone-number sender is staged for the shared parser",
       try validation.stage(
-        sender: knownSender + "-suffix",
+        sender: "+971501234567",
         body: messageBody,
         eventId: eventId(4),
         observedAt: fixedClock
-      ) == .ignored
+      ) == .accepted
     )
+    let unlistedRows = try validation.listPendingRecords(limit: 50)
+      .compactMap(decoded)
     check(
-      "sender identity injection receives the exact input",
+      "native admission preserves unlisted sender and body values for the shared parser",
+      unlistedRows.count == 2
+        && unlistedRows.allSatisfy { $0["text"] as? String == messageBody }
+        && Set(unlistedRows.compactMap { $0["sender"] as? String })
+          == Set(["UNLISTED-BANK-ALERT", "+971501234567"])
+    )
+    let appleMessageHash = String(repeating: "a", count: 64)
+    check(
+      "canonical lowercase Apple Message SHA-256 identity is staged unchanged",
       try validation.stage(
         sender: knownSender,
         body: messageBody,
-        eventId: eventId(5),
+        eventId: appleMessageHash,
         observedAt: fixedClock
-      ) == .accepted && identityInput == knownSender
+      ) == .accepted
+        && validation.listPendingRecords(limit: 50).compactMap(rowId)
+          .contains(appleMessageHash)
     )
     check(
-      "invalid UUID is rejected",
+      "uppercase Apple Message SHA-256 identity is rejected as noncanonical",
+      try validation.stage(
+        sender: knownSender,
+        body: messageBody,
+        eventId: appleMessageHash.uppercased(),
+        observedAt: fixedClock
+      ) == .invalid
+    )
+    check(
+      "invalid event identity is rejected",
       try validation.stage(
         sender: knownSender,
         body: messageBody,
@@ -929,15 +903,6 @@ struct NativeLiveCaptureStoreTests {
       "reentrant now callback fails promptly without deadlocking",
       reentrantNowCompleted && reentrantNowChild.terminationStatus == 0
     )
-    let reentrantSenderChild = try launchChild([
-      "child-reentrant-sender", reentrantSenderRoot.path,
-    ])
-    let reentrantSenderCompleted = waitForExit(reentrantSenderChild, timeout: 2)
-    check(
-      "reentrant sender callback fails promptly without deadlocking",
-      reentrantSenderCompleted && reentrantSenderChild.terminationStatus == 0
-    )
-
     var expiryClock = fixedClock
     let expiry = store(root: expiryRoot, now: { expiryClock })
     try grantLifetimeAndEnable(expiry)
@@ -1365,6 +1330,37 @@ struct NativeLiveCaptureStoreTests {
       !unicodeDigestStatus.enabled && unicodeDigestStatus.corrupt
     )
 
+    let automationInputProbe = store(root: automationInputProbeRoot)
+    check(
+      "automation-input probe rejects non-matching text without recording proof",
+      try !automationInputProbe.recordAutomationInputProbe(
+        body: "not-the-probe-payload",
+        at: fixedClock
+      ) && automationInputProbe.automationInputProbeAt() == nil
+    )
+    check(
+      "automation-input probe records only an exact synthetic payload match",
+      try automationInputProbe.recordAutomationInputProbe(
+        body: WafraLiveCaptureStore.automationInputProbePayload,
+        at: fixedClock
+      ) && automationInputProbe.automationInputProbeAt() == fixedClock.timeIntervalSince1970
+    )
+    let automationInputProbeManifest = try Data(
+      contentsOf: automationInputProbeRoot.appendingPathComponent("manifest.plist")
+    )
+    check(
+      "automation-input probe persists no synthetic or real Message text",
+      automationInputProbeManifest.range(
+        of: Data(WafraLiveCaptureStore.automationInputProbePayload.utf8)
+      ) == nil
+    )
+    expectsThrow("automation-input probe rejects a non-finite timestamp") {
+      _ = try automationInputProbe.recordAutomationInputProbe(
+        body: WafraLiveCaptureStore.automationInputProbePayload,
+        at: Date(timeIntervalSince1970: .nan)
+      )
+    }
+
     let milestones = store(root: milestoneRoot)
     try milestones.recordSetupProof(version: 1, at: fixedClock)
     var milestoneStatus = try milestones.status()
@@ -1389,6 +1385,10 @@ struct NativeLiveCaptureStoreTests {
       verifiedAt: fixedClock.addingTimeInterval(100)
     )
     try erase.recordSetupProof(version: 1, at: fixedClock)
+    _ = try erase.recordAutomationInputProbe(
+      body: WafraLiveCaptureStore.automationInputProbePayload,
+      at: fixedClock
+    )
     try erase.recordFirstCapturedAt(fixedClock)
     _ = try erase.stage(
       sender: knownSender,
@@ -1398,11 +1398,13 @@ struct NativeLiveCaptureStoreTests {
     )
     try erase.eraseAll()
     let erased = try erase.status()
+    let erasedAutomationInputProbeAt = try erase.automationInputProbeAt()
     check(
       "erase leaves only disabled empty state",
       !erased.enabled && !erased.entitled
         && erased.pending == 0 && erased.dropped == 0 && !erased.corrupt
         && erased.setupProofVersion == nil && erased.setupProofAt == nil && erased.firstCapturedAt == nil
+        && erasedAutomationInputProbeAt == nil
     )
     let erasedFiles = try FileManager.default.contentsOfDirectory(
       at: eraseRoot,

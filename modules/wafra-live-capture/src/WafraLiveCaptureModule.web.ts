@@ -26,6 +26,9 @@ const WafraLiveCaptureModule: WafraLiveCaptureNativeModule = {
   async getCaptureStatus() {
     return unavailable();
   },
+  async getAutomationInputProbeAt() {
+    return unavailable();
+  },
   async acknowledgeCaptureWarning() {
     return unavailable();
   },

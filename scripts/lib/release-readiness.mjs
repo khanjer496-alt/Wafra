@@ -4,13 +4,15 @@ import path from 'node:path';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPLE_KEY = /^appl_[A-Za-z0-9]+$/;
 const GOOGLE_KEY = /^goog_[A-Za-z0-9]+$/;
-const SHORTCUT_PATH = /^\/shortcuts\/[A-Za-z0-9_-]+\/?$/;
-// Keep this release gate in lockstep with the runtime's retired-ID set. A URL
-// that the app deliberately refuses must never pass CI merely because its
-// iCloud shape is otherwise valid.
+const SHORTCUT_PATH = /^\/shortcuts\/[0-9a-f]{32}$/i;
+// A structurally valid iCloud URL can still identify a retired artifact, which
+// must not be included in a new production build.
 const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
   '03d2ab22a33f4fef9d503142575a70fb',
   '85bd1e080e5849b591049eccffb9a3a1',
+]);
+const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
+  'cc85a21db99a4e4698c1a498de670199',
 ]);
 
 const finding = (code, title, detail, remediation) => ({ code, title, detail, remediation });
@@ -54,9 +56,19 @@ const requireValue = (value, code, label, findings) => {
 const requireHttps = (value, code, label, findings, { host, pathPattern } = {}) => {
   if (!requireValue(value, code, label, findings)) return;
   try {
+    const hasSurroundingWhitespace = value !== value.trim();
+    const rawAuthority = pathPattern
+      ? value.match(/^https:\/\/([^/?#]*)/i)?.[1] ?? ''
+      : '';
+    const hasRawUserInfo = pathPattern && rawAuthority.includes('@');
+    const hasExplicitPort = pathPattern && /:\d*$/.test(rawAuthority);
     const url = new URL(value);
+    const hasExactHostedPath = !pathPattern ||
+      value === `https://${host}${url.pathname}`;
     if (url.protocol !== 'https:' || (host && url.hostname !== host) ||
-      (pathPattern && !pathPattern.test(url.pathname))) {
+      (pathPattern && (!pathPattern.test(url.pathname) || url.username ||
+        url.password || url.port || hasRawUserInfo || hasExplicitPort ||
+        hasSurroundingWhitespace || !hasExactHostedPath || url.search || url.hash))) {
       throw new Error('unexpected URL');
     }
   } catch {
@@ -220,12 +232,18 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
       host: 'www.icloud.com', pathPattern: SHORTCUT_PATH,
     });
     const captureShortcutId = typeof captureUrl === 'string'
-      ? captureUrl.match(/\/shortcuts\/([A-Za-z0-9_-]+)\/?$/)?.[1]?.toLowerCase()
+      ? captureUrl.match(/\/shortcuts\/([0-9a-f]{32})$/i)?.[1]?.toLowerCase()
       : undefined;
     if (captureShortcutId && RETIRED_CAPTURE_SHORTCUT_IDS.has(captureShortcutId)) {
       findings.push(finding('broken-capture-shortcut', 'The production Capture link is retired', 'That URL is a known retired artifact and the local setup rejects it at runtime.', 'Publish and physically test Wafra Local Capture, then replace the URL.'));
     }
-    if (captureUrl && historyUrl && captureUrl === historyUrl) {
+    const historyShortcutId = typeof historyUrl === 'string'
+      ? historyUrl.match(/\/shortcuts\/([0-9a-f]{32})$/i)?.[1]?.toLowerCase()
+      : undefined;
+    if (historyShortcutId && RETIRED_HISTORY_SHORTCUT_IDS.has(historyShortcutId)) {
+      findings.push(finding('retired-history-shortcut', 'The production History Shortcut link is retired', 'This shortcut has been superseded and must not be included in a new production build.', 'Publish and physically validate a replacement History Shortcut, then replace the URL.'));
+    }
+    if (captureShortcutId && historyShortcutId && captureShortcutId === historyShortcutId) {
       findings.push(finding('distinct-shortcuts', 'Capture and History links are identical', 'The two Shortcuts have different permissions and data paths.', 'Publish distinct iCloud links for Capture and History Import.'));
     }
     if (!APPLE_KEY.test(extra.revenueCatIosKey ?? '')) {

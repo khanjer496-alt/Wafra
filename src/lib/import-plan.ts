@@ -1,3 +1,4 @@
+import { canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
 import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
 import {
   bankBrandForName,
@@ -5,9 +6,14 @@ import {
   bankIdentityForName,
   bankFromName,
 } from '@/lib/markets';
-import { duplicateGuard } from '@/lib/dedupe';
+import { bodyPrint, compatibleCaptureInstrument, duplicateGuard, mergeCaptureInstrument } from '@/lib/dedupe';
 import { toISODate } from '@/lib/format';
 import { healPatch } from '@/lib/heal';
+import {
+  ledgerMoneyMatchesCurrentMetadata,
+  ledgerMoneySpec,
+  migrateLegacyLedgerMoney,
+} from '@/lib/ledger-money';
 import {
   isNonPostingMessage,
   overrideFitsDirection,
@@ -16,7 +22,7 @@ import {
   type ParsedSms,
 } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
-import type { Account, AppState, Bill, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
+import type { Account, AppState, Bill, CaptureInstrument, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
 /**
@@ -117,6 +123,14 @@ export interface ImportPlan {
   billDues: ScannedSms[];
 }
 
+/** Source-free failure: callers must not acknowledge a batch that was refused. */
+export class ImportMoneyError extends Error {
+  constructor() {
+    super('Bank alert money does not match ledger currency');
+    this.name = 'ImportMoneyError';
+  }
+}
+
 
 
 /**
@@ -198,20 +212,69 @@ export function buildImportPlan(
   // every caller has to pass through it.
   if (!state.hydrated) return emptyPlan();
 
+  // An Android provider ID without its original timestamp is not portable
+  // identity. Refuse the whole input before money, snapshots or cursor effects.
+  if ([...parsed, ...declined].some((row) => row.sourceEventId &&
+    !isUsableCaptureSourceIdentity(`h${row.sourceEventId}`, row.smsTs))) {
+    throw new Error('Native message identity requires a valid original timestamp');
+  }
+  const matchableTransactions = state.transactions.filter((row) =>
+    isUsableCaptureSourceIdentity(row.smsKey, row.ts));
+
+  // Currency survives transport as a parser fact. Validate it before account
+  // resolution, snapshots, dedupe or healing can change the ledger. Empty
+  // ledgers require one explicit launch currency; a mixed batch proves none.
+  const storedMoney = migrateLegacyLedgerMoney(state);
+  const currencies = new Set(parsed.map((row) => row.currency));
+  const singleCurrency = currencies.size === 1 ? [...currencies][0] : undefined;
+  const importMoney = storedMoney ?? (
+    singleCurrency === 'AED' || singleCurrency === 'SAR' ? ledgerMoneySpec(singleCurrency) : null
+  );
+  const acceptsLaunchMoney = importMoney !== null && importMoney.exponent === 2 &&
+    ledgerMoneyMatchesCurrentMetadata(importMoney) &&
+    (importMoney.currency === 'AED' || importMoney.currency === 'SAR');
+  const validMoney = (row: ScannedSms): boolean => acceptsLaunchMoney && row.currency === importMoney!.currency &&
+    Number.isSafeInteger(row.amountFils) && row.amountFils > 0 &&
+    (row.minDueFils == null || (Number.isSafeInteger(row.minDueFils) && row.minDueFils >= 0)) &&
+    (row.snapshotFils == null || Number.isSafeInteger(row.snapshotFils));
+  if (parsed.some((row) => !validMoney(row))) throw new ImportMoneyError();
+
   // A full-history scan surfaces statements from years back; only dues still
   // near their pay-by date are live obligations worth tracking.
   const staleDueCutoff = toISODate(new Date(today.getTime() - 45 * 86400000));
   // Three fingerprints, because the same transaction can reach us through
   // three capture channels. See dedupe.ts for why one is not enough.
-  const guard = duplicateGuard(state.transactions);
+  const guard = duplicateGuard(matchableTransactions);
+  const captureInstrumentOf = (p: ScannedSms): CaptureInstrument | undefined => {
+    if (!p.card) return undefined;
+    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+    return {
+      last4: p.card.last4,
+      kind: p.card.kind,
+      ...(bank ? { bankIdentity: bankIdentityForName(bank.name) } : {}),
+    };
+  };
   // Existing SMS rows by fingerprint, for rescan healing: a message that
   // dedupes but now parses BETTER upgrades its old row instead of being lost.
   const priorBySmsKey = new Map<string, Transaction>();
+  const priorsBySmsKey = new Map<string, Transaction[]>();
   const priorById = new Map<string, Transaction>();
-  for (const t of state.transactions) {
+  for (const t of matchableTransactions) {
     priorById.set(t.id, t);
-    if (t.smsKey && t.source === 'sms') priorBySmsKey.set(t.smsKey, t);
+    if (t.smsKey && t.source === 'sms') {
+      const sourceKey = canonicalCaptureSourceKey(t.smsKey, t.ts);
+      if (isUnboundAndroidSourceKey(sourceKey)) continue;
+      priorBySmsKey.set(sourceKey, t);
+      const rows = priorsBySmsKey.get(sourceKey) ?? [];
+      rows.push(t);
+      priorsBySmsKey.set(sourceKey, rows);
+    }
   }
+  const compatiblePrior = (key: string, p: ScannedSms): Transaction | undefined => {
+    const candidates = priorsBySmsKey.get(key) ?? [];
+    return candidates.find((t) => key.startsWith('h') ||
+      compatibleCaptureInstrument(t.captureInstrument, captureInstrumentOf(p)));
+  };
   /**
    * Stable identity for a local SMS across parser money corrections.
    *
@@ -220,8 +283,8 @@ export function buildImportPlan(
    * offline FX fallback) changed the key, so the same retained Message was
    * appended beside its old row. The provider timestamp is the only stable
    * identity older Android rows retained. Use it only when it is unique on
-   * both sides, belongs to a local SMS capture, is date-plausible, and any
-   * retained source text agrees byte-for-byte. Historical Shortcut timestamps
+   * both sides, belongs to a local SMS capture, is date-plausible, and retained
+   * source text proves identity for any changed amount or direction. Historical Shortcut timestamps
    * are rounded and therefore stay on their GUID-derived `h...` identity.
    */
   const rowTimestamp = (t: Transaction): number | undefined => {
@@ -230,7 +293,7 @@ export function buildImportPlan(
     return match ? Number(match[1]) : undefined;
   };
   const rowsByTimestamp = new Map<number, Transaction[]>();
-  for (const t of state.transactions) {
+  for (const t of matchableTransactions) {
     if (t.source !== 'sms') continue;
     const ts = rowTimestamp(t);
     if (ts === undefined) continue;
@@ -249,7 +312,13 @@ export function buildImportPlan(
     const rows = rowsByTimestamp.get(p.smsTs!);
     if (!rows || rows.length !== 1) return undefined;
     const prior = rows[0];
-    if (p.raw !== undefined && prior.raw !== undefined && p.raw !== prior.raw) return undefined;
+    if (!compatibleCaptureInstrument(prior.captureInstrument, captureInstrumentOf(p))) return undefined;
+    const sameBody = p.raw !== undefined && prior.raw !== undefined &&
+      bodyPrint(p.raw) === bodyPrint(prior.raw);
+    if (p.raw !== undefined && prior.raw !== undefined && !sameBody) return undefined;
+    // A clock cannot turn a purchase into a refund or establish its amount.
+    // Only retained source evidence can justify a legacy direction/amount correction.
+    if ((prior.type !== p.type || prior.amountFils !== p.amountFils) && !sameBody) return undefined;
     const messageDate = Date.parse(`${p.date ?? toISODate(new Date(p.smsTs!))}T12:00:00Z`);
     if (!Number.isFinite(messageDate) || Math.abs(messageDate - p.smsTs!) > 7 * 86400000) {
       return undefined;
@@ -264,7 +333,7 @@ export function buildImportPlan(
     cardPaymentSide?: 'debit' | 'receipt',
     stablePrior?: Transaction,
   ) => {
-    const prior = (smsKey ? priorBySmsKey.get(smsKey) : undefined) ?? stablePrior;
+    const prior = stablePrior ?? (smsKey ? compatiblePrior(smsKey, p) : undefined);
     // A hand-entered row may explain one bank alert for duplicate prevention,
     // but it is never parser-owned. Do not attach parser roles or move it to a
     // guessed account during a later inbox re-read.
@@ -283,11 +352,15 @@ export function buildImportPlan(
       p.paymentFlowSide === 'receipt' &&
       p.card != null &&
       prior.paymentInstrumentSource !== 'alert';
-    if (patch || accountChanged || instrumentProven) {
+    const captureInstrument = mergeCaptureInstrument(captureInstrumentOf(p), prior.captureInstrument);
+    const captureChanged = captureInstrument !== undefined &&
+      JSON.stringify(captureInstrument) !== JSON.stringify(prior.captureInstrument);
+    if (patch || accountChanged || instrumentProven || captureChanged) {
       updates.push({
         ...(patch ?? { id: prior.id }),
         ...(accountChanged ? { accountId: resolvedAccountId } : {}),
         ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
+        ...(captureChanged ? { captureInstrument } : {}),
       });
     }
   };
@@ -330,11 +403,13 @@ export function buildImportPlan(
       smsKey,
       ts: p.smsTs,
       viaPush: false,
+      ...(p.card ? { captureInstrument: mergeCaptureInstrument(
+            captureInstrumentOf(p), prior.captureInstrument) } : {}),
     });
   };
   const smsKeyOf = (p: ScannedSms): string | undefined =>
     p.sourceEventId
-      ? `h${p.sourceEventId}`
+      ? canonicalCaptureSourceKey(`h${p.sourceEventId}`, p.smsTs)
       : p.smsTs !== undefined
         ? `s${p.smsTs}-${p.amountFils}`
         : undefined;
@@ -429,7 +504,7 @@ export function buildImportPlan(
     ambiguousFallbackAccountId?: string,
     refuseAmbiguous = false,
   ): AccountResolution => {
-    if (!p.card) return { accountId: fallbackAccountId, confident: true };
+    if (!p.card) return { accountId: ambiguousFallbackAccountId ?? fallbackAccountId, confident: false };
     const { last4 } = p.card;
     // The parser owns card-kind evidence, including Arabic forms such as
     // Mada. Reinterpreting its structured result from English-only raw-text
@@ -748,7 +823,7 @@ export function buildImportPlan(
     }
     if (p.kind === 'cardPayment') {
       const smsKey = smsKeyOf(p);
-      const exactPrior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+      const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
       const stablePrior = exactPrior ?? stableLocalPrior(p);
       const prior = stablePrior;
       const resolution = resolveAccount(p, prior?.accountId);
@@ -769,8 +844,9 @@ export function buildImportPlan(
       // A card payment lands as income into the card account.
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
-        type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel,
+        type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
         accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
+        captureInstrument: captureInstrumentOf(p),
       };
       if (guard.has(candidate)) {
         const matchedId = guard.takeMatchedId();
@@ -815,19 +891,21 @@ export function buildImportPlan(
         smsKey,
         cardPaymentSide,
         isTransfer: true,
+        captureInstrument: captureInstrumentOf(p),
       });
       continue;
     }
     // Plain transaction. transferHint = the bank-side leg of a card payment /
     // own-account transfer: keep it for balances, exclude it from spending.
     const smsKey = smsKeyOf(p);
-    const exactPrior = smsKey ? priorBySmsKey.get(smsKey) : undefined;
+    const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
     const stablePrior = exactPrior ?? stableLocalPrior(p);
     const prior = stablePrior;
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
-      type: p.type, smsKey, ts: p.smsTs, channel: p.channel,
+      type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
       eventKind: 'transaction' as const,
+      captureInstrument: captureInstrumentOf(p),
     };
     const protectedSupersededId = guard.supersedes(captureCandidate);
     if (protectedSupersededId && priorById.get(protectedSupersededId)?.userEdited) {
@@ -904,10 +982,12 @@ export function buildImportPlan(
           title: p.merchant,
           category: p.categoryGuess,
           type: p.type,
-          accountId,
+          ...(resolution.confident ? { accountId } : {}),
           ts: p.smsTs,
           smsKey,
           viaPush: false,
+          ...(p.card ? { captureInstrument: mergeCaptureInstrument(
+            captureInstrumentOf(p), priorById.get(supersededId)?.captureInstrument) } : {}),
           isTransfer: p.transferHint,
           paymentFlowSide: p.paymentFlowSide,
           billIdentity: p.billIdentity,
@@ -953,6 +1033,7 @@ export function buildImportPlan(
       date,
       ts: p.smsTs,
       source: 'sms',
+      captureInstrument: captureInstrumentOf(p),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
       isTransfer: p.transferHint || undefined,
@@ -1019,7 +1100,7 @@ export function buildImportPlan(
     const parsedTs = new Set<number>();
     for (const p of parsed) if (p.smsTs !== undefined) parsedTs.add(p.smsTs);
     const rowsByTs = new Map<number, Transaction[]>();
-    for (const t of state.transactions) {
+    for (const t of matchableTransactions) {
       const ts = rowTs(t);
       if (ts === undefined) continue;
       const bucket = rowsByTs.get(ts);
@@ -1031,7 +1112,7 @@ export function buildImportPlan(
     for (const d of declined) {
       if (d.reason === 'exact-provider-duplicate') {
         if (!d.sourceEventId) continue;
-        const row = priorBySmsKey.get(`h${d.sourceEventId}`);
+        const row = priorBySmsKey.get(canonicalCaptureSourceKey(`h${d.sourceEventId}`, d.smsTs));
         if (!row || swept.has(row.id)) continue;
         // The scanner already proved byte-identical body, sender, adjacent
         // provider ids and sub-second delivery. Preserve anything user-owned.
@@ -1052,7 +1133,7 @@ export function buildImportPlan(
         // Historical Shortcut timestamps are commonly rounded to a second,
         // so timestamp equality is not identity. Only a row imported from the
         // exact same GUID-derived Message may be swept as a prior misparse.
-        const row = priorBySmsKey.get(`h${d.sourceEventId}`);
+        const row = priorBySmsKey.get(canonicalCaptureSourceKey(`h${d.sourceEventId}`, d.smsTs));
         if (!row || swept.has(row.id)) continue;
         if (row.source !== 'sms') continue;
         if (row.userEdited || row.isTransfer || row.splits) continue;
@@ -1160,6 +1241,7 @@ export function buildImportPlan(
       bankNames,
       cardTypes,
       confirmedLedgerCurrency: confirmedLedgerCurrency(parsed),
+      importMoney: importMoney ?? undefined,
       lastScanTs: newestTs,
       updates,
     },
@@ -1171,5 +1253,24 @@ export function buildImportPlan(
     declineReconciledIds,
     declineReconciliations,
     billDues: latestBillDues,
+  };
+}
+
+/** Track one reviewed reminder without importing or acknowledging its siblings. */
+export function buildTrackedBillBatch(
+  reminder: ScannedSms,
+  state: AppState,
+  today: Date = new Date(),
+): ImportBatchInput | null {
+  if (reminder.kind !== 'billDue') return null;
+  const plan = buildImportPlan([reminder], state, state.lastScanTs, today);
+  const bill = plan.batch.newBills?.[0];
+  if (!bill) return null;
+  return {
+    ...emptyPlan().batch,
+    importMoney: plan.batch.importMoney,
+    confirmedLedgerCurrency: plan.batch.confirmedLedgerCurrency,
+    newBills: [bill],
+    lastScanTs: state.lastScanTs,
   };
 }

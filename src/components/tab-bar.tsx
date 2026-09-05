@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { SpringPressable } from '@/components/ui/spring-pressable';
+import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
@@ -95,7 +96,7 @@ const AnimatedTabButton = ({
         <Animated.View
           style={[
             styles.activePill,
-            { backgroundColor: theme.backgroundSelected },
+            { backgroundColor: theme.primary },
             pillStyle,
           ]}
         />
@@ -111,8 +112,6 @@ const AnimatedTabButton = ({
       <Animated.View style={labelStyle}>
         <ThemedText
           type="meta"
-          numberOfLines={1}
-          maxFontSizeMultiplier={1.3}
           style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
           {label}
         </ThemedText>
@@ -127,6 +126,7 @@ const AnimatedTabButton = ({
 export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { measuredHeight, setMeasuredHeight } = useTabBarMetrics();
   /**
    * The language, read off the store and passed into every `t()` below.
    *
@@ -172,6 +172,10 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
 
   return (
     <View
+      onLayout={({ nativeEvent: { layout } }) => {
+        const height = Math.round(layout.height);
+        if (height !== measuredHeight) setMeasuredHeight(height);
+      }}
       style={[
         styles.wrap,
         { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
@@ -202,7 +206,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
@@ -215,11 +219,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   activePill: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 14,
+    position: 'absolute',
+    top: -6,
+    width: 20,
+    height: 3,
+    borderRadius: 2,
   },
   tabLabel: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
+    flexShrink: 1,
   },
 });

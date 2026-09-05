@@ -181,25 +181,42 @@ async function readBody(
   req: Request,
   maxBytes: number,
 ): Promise<{ text: string; tooLarge: boolean }> {
-  const declared = Number(req.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > maxBytes) return { text: '', tooLarge: true };
-  const text = await req.text();
-  return { text, tooLarge: textEncoder.encode(text).byteLength > maxBytes };
+  const result = await readBytes(req, maxBytes);
+  return {
+    text: result.tooLarge ? '' : new TextDecoder().decode(result.bytes),
+    tooLarge: result.tooLarge,
+  };
 }
 
 async function readBytes(
   req: Request,
   maxBytes: number,
-  // `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array`: the bytes go to
-  // crypto.subtle.digest, whose BufferSource rejects `ArrayBufferLike` when
-  // this file is compiled against the DOM lib for the Node test run.
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; tooLarge: boolean }> {
+  const refused = () => ({ bytes: new Uint8Array(0), tooLarge: true });
   const declared = Number(req.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
-    return { bytes: new Uint8Array(), tooLarge: true };
+    await req.body?.cancel().catch(() => {});
+    return refused();
   }
-  const bytes = new Uint8Array(await req.arrayBuffer());
-  return { bytes, tooLarge: bytes.byteLength > maxBytes };
+  if (!req.body) return { bytes: new Uint8Array(0), tooLarge: false };
+  const reader = req.body.getReader();
+  const buffer = new Uint8Array(maxBytes);
+  let length = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value.byteLength > maxBytes - length) {
+        await reader.cancel().catch(() => {});
+        return refused();
+      }
+      buffer.set(value, length);
+      length += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return { bytes: buffer.slice(0, length), tooLarge: false };
 }
 
 interface Device {

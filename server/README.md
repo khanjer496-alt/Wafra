@@ -1,14 +1,14 @@
-# Wafra iOS relay
+# Wafra optional import relay
 
-A Cloudflare Worker that exists for one reason: **iOS gives no app access to
-SMS**, so the Android design — scan the inbox on-device, never touch the
-network — cannot exist on iPhone.
+A Cloudflare Worker for opt-in email and statement imports, encrypted delivery
+to trusted devices, and compatibility with older relay-backed Shortcuts.
 
-What iOS does allow is a Shortcuts *personal automation* the user creates
-themselves: "when I get a message from my bank, send it to Wafra". A Shortcut
-cannot hand data to a sleeping app; it can only make an HTTP request. That is
-the whole reason this service exists, and why the Android build still has no
-server and never will.
+Current iPhone capture uses a user-created Message automation and a native
+App Intent to enqueue Messages locally. It does not require this Worker.
+Android inbox and bank-notification capture also run on-device. The legacy
+HTTP ingest protocol described below remains for compatibility; it is not the
+current iPhone setup path. Local capture does not send its raw Messages or
+ledger to this service.
 
 The device half lives in `src/lib/relay.ts` (pairing, sync, ack, unpair,
 trusted devices) and `src/lib/relay-crypto.ts` (the counterpart to

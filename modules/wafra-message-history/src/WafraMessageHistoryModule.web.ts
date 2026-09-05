@@ -1,8 +1,11 @@
 import type { WafraHistoryNativeModule } from './WafraMessageHistory.types';
 
 const unavailable: WafraHistoryNativeModule = {
-  async listSessionChunks() {
-    return [];
+  async getCompletedSession() {
+    return null;
+  },
+  async recoverCompletedSession() {
+    return null;
   },
   async readChunk() {
     return [];
@@ -11,6 +14,7 @@ const unavailable: WafraHistoryNativeModule = {
   async purgeExpired() {
     return 0;
   },
+  async eraseAll() {},
 };
 
 export default unavailable;

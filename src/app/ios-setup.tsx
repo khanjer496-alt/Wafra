@@ -3,59 +3,72 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   AppState as RNAppState,
+  Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChecklistRow } from '@/components/ios-message-setup/checklist-row';
+import { AutomationGuide } from '@/components/ios-message-setup/automation-guide';
+import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
-import { Block, ScreenHeader } from '@/components/ui/layout';
-import {
-  MaxContentWidth,
-  Radius,
-  ScreenPadding,
-  Spacing,
-} from '@/constants/theme';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { Block } from '@/components/ui/layout';
+import { ScreenHeader } from '@/components/ui/screen-header';
+import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
-import { t, tf, type StringKey } from '@/lib/i18n';
+import { t, type StringKey } from '@/lib/i18n';
 import {
+  completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
   INITIAL_IOS_SETUP_MODEL,
+  resolveIosFutureSetupStep,
   type IosSetupFailure,
   type IosSetupIntent,
-  type IosSetupModel,
 } from '@/lib/ios-capture-setup';
+import {
+  beginIosHistoryHandoffForOrigin,
+  cancelIosHistoryHandoff,
+  clearIosHistoryHandoff,
+  clearIosHistoryReturnOrigin,
+  confirmIosHistoryShortcutInstalled,
+  historyShortcutInstallUrl,
+  historyShortcutRunUrl,
+  iosSupportsMessageHistory,
+  iosHistorySetupStorageCoordinator,
+  IOS_HISTORY_HANDOFF_TTL_MS,
+  loadIosHistorySetup,
+  reconcileIosHistorySetup,
+  recoverIosHistoryHandoff,
+} from '@/lib/ios-history-setup';
+import {
+  dispatchIosMessageSetup,
+  loadIosMessageSetupProgress,
+  type IosMessageSetupEvent,
+  type IosMessageSetupProgress,
+} from '@/lib/ios-message-onboarding';
 import { useStore } from '@/lib/store';
 
-const STEPS: readonly StringKey[] = [
-  'iosLocalStepShortcut',
-  'iosLocalStepAutomation',
-] as const;
+const INITIAL_PROGRESS: IosMessageSetupProgress = {
+  version: 1,
+  activeSection: 'future',
+  futureShortcutConfirmed: false,
+  futureAutomationConfirmed: false,
+  futureStatus: 'not-started',
+  historyShortcutConfirmed: false,
+  historyStatus: 'not-started',
+  returnToOnboarding: false,
+};
 
-const AUTOMATION_CHOICES: readonly StringKey[] = [
-  'iosLocalChoiceMessage',
-  'iosLocalChoiceAnySender',
-  'iosLocalChoiceContainsEmpty',
-  'iosLocalChoiceImmediate',
-  'iosLocalChoiceRunShortcut',
-  'iosLocalChoiceCompleteMessage',
-] as const;
+const historyNativeModule = async () =>
+  (await import('../../modules/wafra-message-history')).default;
 
-function automationGuideLabel(): string {
-  return [
-    t('iosLocalAutomationGuideLabel'),
-    ...AUTOMATION_CHOICES.map((key) => t(key)),
-  ].join('. ');
-}
-
-function failureCopy(
-  failure: Exclude<IosSetupFailure, null>,
-  manualExitFailed: boolean,
-): string {
+const failureCopy = (failure: Exclude<IosSetupFailure, null>): string => {
   switch (failure) {
     case 'shortcut-install':
       return t('iosLocalShortcutInstallFailed');
@@ -65,39 +78,59 @@ function failureCopy(
       return t('iosShortcutsMissing');
     case 'load':
     default:
-      return t(manualExitFailed ? 'iosLocalManualExitFailed' : 'iosLocalUpdateRequired');
+      return t('iosLocalUpdateRequired');
   }
-}
-
-type AnnouncedState = Pick<IosSetupModel, 'stage' | 'readiness' | 'failure'>;
+};
 
 export default function IosSetupScreen() {
-  const theme = useTheme();
   const largeText = useLargeTextLayout();
   const router = useRouter();
   const params = useLocalSearchParams<{
     fromOnboarding?: string;
     shortcutResult?: string;
+    section?: string;
   }>();
-  const { setCaptureOptOut, setOnboarded } = useStore();
+  const { ensureDurable, setOnboarded, setCaptureOptOut } = useStore();
   const fromOnboarding = params.fromOnboarding === '1';
-  const screenActive = useRef(true);
+  const requestedSection = params.section === 'history' || params.section === 'future'
+    ? params.section : null;
+  const historyReturnOrigin = fromOnboarding ? 'onboarding' : 'ios-setup';
+  const historyInstallUrl = historyShortcutInstallUrl();
+  const historySupported = Platform.OS === 'ios' &&
+    iosSupportsMessageHistory(Platform.Version);
   const controllerRef = useRef<ReturnType<typeof createIosCaptureSetup> | null>(null);
-  const manualExitInFlight = useRef<Promise<void> | null>(null);
-  const [setup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
-  const [manualExitFailed, setManualExitFailed] = useState(false);
-  const [manualExiting, setManualExiting] = useState(false);
+  const screenActive = useRef(true);
+  const operationInFlight = useRef<Promise<void> | null>(null);
+  const refreshGeneration = useRef(0);
   const consumedShortcutCallback = useRef<string | null>(null);
-  const previousAnnounced = useRef<AnnouncedState>({
-    stage: 'shortcut',
-    readiness: 'not-added',
-    failure: null,
+  const previousReadiness = useRef(INITIAL_IOS_SETUP_MODEL.readiness);
+  const [setup, setSetup] = useState(INITIAL_IOS_SETUP_MODEL);
+  const [progress, setProgress] = useState(INITIAL_PROGRESS);
+  const [progressLoaded, setProgressLoaded] = useState(false);
+  const [historyReady, setHistoryReady] = useState(false);
+  const [historySetup, setHistorySetup] = useState({
+    installed: false,
+    handoffStartedAt: null as number | null,
   });
+  const [busy, setBusy] = useState(false);
+  const [finishRetryRequired, setFinishRetryRequired] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [detailsVisible, setDetailsVisible] = useState(false);
+  const [privacyExpanded, setPrivacyExpanded] = useState(false);
+  const [shortcutsMissing, setShortcutsMissing] = useState(false);
+  const [showAutomationGuide, setShowAutomationGuide] = useState(false);
+  const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
+  const futureReadyLabel = setup.readiness === 'first-alert-captured'
+    ? t('iosLocalFirstAlertCaptured')
+    : t('iosLocalWaitingTitle');
+  const setupComplete = progressLoaded && !setup.loading &&
+    setup.readiness !== 'not-added' && progress.historyStatus === 'complete';
 
   useEffect(() => {
     screenActive.current = true;
     return () => {
       screenActive.current = false;
+      refreshGeneration.current += 1;
     };
   }, []);
 
@@ -119,12 +152,104 @@ export default function IosSetupScreen() {
     [],
   );
 
+  const updateProgress = useCallback(
+    async (event: IosMessageSetupEvent): Promise<IosMessageSetupProgress> => {
+      const next = await dispatchIosMessageSetup(event);
+      if (screenActive.current) setProgress(next);
+      return next;
+    },
+    [],
+  );
+
+  const refreshSetup = useCallback(async (duringOperation = false): Promise<void> => {
+    // Foreground/callback recovery must not reopen a session while reset is
+    // discarding it. The explicit retry action may refresh inside its own lock.
+    while (!duringOperation && operationInFlight.current) {
+      await operationInFlight.current;
+    }
+    if (!screenActive.current) return;
+    const generation = ++refreshGeneration.current;
+    let restored: IosMessageSetupProgress;
+    try {
+      restored = await loadIosMessageSetupProgress();
+    } catch {
+      if (!screenActive.current || generation !== refreshGeneration.current) return;
+      setProgressLoaded(true);
+      setLocalError(t('historySetupStateFailed'));
+      return;
+    }
+    if (!screenActive.current || generation !== refreshGeneration.current) return;
+    setProgress(restored);
+    setProgressLoaded(true);
+
+    try {
+      let nextHistory: Awaited<ReturnType<typeof loadIosHistorySetup>>;
+      let recoveredSessionId: string | null = null;
+      if (historySupported) {
+        const native = await historyNativeModule();
+        if (!native || typeof native.getCompletedSession !== 'function' ||
+          typeof native.recoverCompletedSession !== 'function' ||
+          typeof native.readChunk !== 'function' || typeof native.discardSession !== 'function') {
+          throw new Error('history_native_unavailable');
+        }
+        const reconciliation = await iosHistorySetupStorageCoordinator.run(
+          () => reconcileIosHistorySetup({ native }),
+        );
+        nextHistory = reconciliation.snapshot;
+        recoveredSessionId = reconciliation.recoveredSessionId;
+      } else {
+        nextHistory = await iosHistorySetupStorageCoordinator.run(() => loadIosHistorySetup());
+      }
+      if (!screenActive.current || generation !== refreshGeneration.current) return;
+      setHistoryReady(historySupported);
+      setHistorySetup({
+        installed: nextHistory.installed,
+        handoffStartedAt: nextHistory.handoffStartedAt,
+      });
+      if (recoveredSessionId) {
+        router.replace({
+          pathname: '/import-sms',
+          params: { history: recoveredSessionId },
+        });
+      }
+    } catch {
+      if (!screenActive.current || generation !== refreshGeneration.current) return;
+      setHistoryReady(false);
+      setLocalError(t('historySetupStateFailed'));
+    }
+  }, [historySupported, router]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        if (fromOnboarding) {
+          await dispatchIosMessageSetup({ type: 'onboarding-started' });
+        }
+        if (requestedSection) {
+          await dispatchIosMessageSetup({ type: 'active-section-changed', section: requestedSection });
+        }
+        if (active) await refreshSetup();
+      } catch {
+        if (active) {
+          setProgressLoaded(true);
+          setLocalError(t('historySetupStateFailed'));
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [fromOnboarding, requestedSection, refreshSetup]);
+
   useEffect(() => {
     const subscription = RNAppState.addEventListener('change', (next) => {
-      if (next === 'active') void send({ type: 'refresh-status' });
+      if (next !== 'active') return;
+      void send({ type: 'refresh-status' });
+      void refreshSetup();
     });
     return () => subscription.remove();
-  }, [send]);
+  }, [refreshSetup, send]);
 
   useEffect(() => {
     if (setup.loading) return;
@@ -136,452 +261,432 @@ export default function IosSetupScreen() {
     if (result !== 'success' && result !== 'cancel' && result !== 'error') return;
     if (consumedShortcutCallback.current === result) return;
     consumedShortcutCallback.current = result;
-    void send({ type: 'shortcut-callback', result });
+    void (async () => {
+      await send({ type: 'shortcut-callback', result });
+      await refreshSetup();
+    })();
     router.setParams({ shortcutResult: undefined });
-  }, [params.shortcutResult, router, send, setup.loading]);
+  }, [params.shortcutResult, refreshSetup, router, send, setup.loading]);
 
   useEffect(() => {
-    if (setup.loading) return;
-    const previous = previousAnnounced.current;
-    const announcements: string[] = [];
+    if (setup.loading || !progressLoaded) return;
+    // Stored completion describes a previous setup attempt. Native admission
+    // can be disabled or unavailable later, so never present it as live proof.
+    const status = setup.readiness !== 'not-added'
+      ? 'complete'
+      : progress.futureStatus === 'complete' ? 'in-progress' : progress.futureStatus;
+    if (status === progress.futureStatus) return;
+    void updateProgress({ type: 'future-status-changed', status }).catch(() => {
+      if (screenActive.current) setLocalError(t('historySetupStateFailed'));
+    });
+  }, [progress.futureStatus, progressLoaded, setup.loading, setup.readiness, updateProgress]);
 
-    if (setup.stage !== previous.stage) {
-      const stepIndex = setup.stage === 'shortcut' ? 0 : 1;
-      announcements.push(tf('iosStepProgress', {
-        n: stepIndex + 1,
-        total: STEPS.length,
-        name: t(STEPS[stepIndex]),
-      }));
+  useEffect(() => {
+    if (
+      previousReadiness.current !== setup.readiness &&
+      setup.readiness !== 'not-added'
+    ) {
+      AccessibilityInfo.announceForAccessibility(futureReadyLabel);
     }
-    if (setup.readiness !== previous.readiness) {
-      if (setup.readiness === 'first-alert-captured') {
-        announcements.push(t('iosLocalFirstAlertCaptured'));
-      } else if (setup.readiness === 'shortcut-proven') {
-        announcements.push(t('iosLocalWaitingTitle'));
-      }
-    }
-    if (setup.failure !== previous.failure && setup.failure) {
-      announcements.push(failureCopy(setup.failure, manualExitFailed));
-    }
+    previousReadiness.current = setup.readiness;
+  }, [futureReadyLabel, setup.readiness]);
 
-    previousAnnounced.current = {
-      stage: setup.stage,
-      readiness: setup.readiness,
-      failure: setup.failure,
-    };
-    if (announcements.length > 0) {
-      AccessibilityInfo.announceForAccessibility(announcements.join('. '));
+  useEffect(() => {
+    if (setup.failure) {
+      AccessibilityInfo.announceForAccessibility(failureCopy(setup.failure));
     }
-  }, [
-    manualExitFailed,
-    setup.failure,
-    setup.loading,
-    setup.readiness,
-    setup.stage,
-  ]);
+  }, [setup.failure]);
 
-  const installShortcut = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    setManualExitFailed(false);
-    void send({ type: 'install-shortcut' });
-  }, [send]);
+  const runOperation = useCallback((
+    operation: () => Promise<void>,
+    errorMessage = t('historySetupStateFailed'),
+  ): Promise<void> => {
+    if (operationInFlight.current) return operationInFlight.current;
+    refreshGeneration.current += 1;
+    setBusy(true);
+    setLocalError(null);
+    const running = operation()
+      .catch(() => {
+        if (screenActive.current) setLocalError(errorMessage);
+      })
+      .finally(() => {
+        operationInFlight.current = null;
+        if (screenActive.current) setBusy(false);
+      });
+    operationInFlight.current = running;
+    return running;
+  }, []);
 
-  const shortcutAdded = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    setManualExitFailed(false);
-    void send({ type: 'shortcut-added' });
-  }, [send]);
+  const selectSection = useCallback((section: 'future' | 'history') => {
+    void runOperation(async () => {
+      setShowAutomationGuide(false);
+      await updateProgress({ type: 'active-section-changed', section });
+    });
+  }, [runOperation, updateProgress]);
+
+  const installFutureShortcut = useCallback(() => {
+    void runOperation(async () => {
+      await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      await send({ type: 'install-shortcut' });
+    });
+  }, [runOperation, send, updateProgress]);
+
+  const confirmFutureShortcut = useCallback(() => {
+    void runOperation(async () => {
+      await updateProgress({ type: 'future-shortcut-confirmed' });
+      await send({ type: 'shortcut-added' });
+    });
+  }, [runOperation, send, updateProgress]);
 
   const openAutomation = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    setManualExitFailed(false);
-    void send({ type: 'open-automation' });
-  }, [send]);
+    void runOperation(async () => {
+      await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      await send({ type: 'open-automation' });
+    });
+  }, [runOperation, send, updateProgress]);
 
-  const automationAdded = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    setManualExitFailed(false);
-    void send({ type: 'automation-added' });
-  }, [send]);
+  const confirmAutomation = useCallback(() => {
+    void runOperation(async () => {
+      await setCaptureOptOut(false);
+      await updateProgress({ type: 'future-automation-confirmed' });
+      await send({ type: 'automation-added' });
+      setShowAutomationGuide(false);
+    }, t('capturePreferenceFailed'));
+  }, [runOperation, send, setCaptureOptOut, updateProgress]);
+
+  const openHistoryInstall = useCallback(() => {
+    if (!historyInstallUrl) return;
+    void runOperation(async () => {
+      if (!await Linking.canOpenURL('shortcuts://')) {
+        setShortcutsMissing(true);
+        return;
+      }
+      setShortcutsMissing(false);
+      await updateProgress({ type: 'history-status-changed', status: 'in-progress' });
+      try {
+        await Linking.openURL(historyInstallUrl);
+      } catch (error) {
+        await updateProgress({ type: 'history-status-changed', status: 'not-started' });
+        throw error;
+      }
+    }, t('iosLocalShortcutInstallFailed'));
+  }, [historyInstallUrl, runOperation, updateProgress]);
+
+  const openHistoryRun = useCallback((newHandoff: boolean, confirmInstall = false) => {
+    void runOperation(async () => {
+      if (!await Linking.canOpenURL('shortcuts://')) {
+        setShortcutsMissing(true);
+        return;
+      }
+      setShortcutsMissing(false);
+      if (confirmInstall) {
+        await iosHistorySetupStorageCoordinator.run(async () => {
+          await confirmIosHistoryShortcutInstalled();
+        });
+        await updateProgress({ type: 'history-shortcut-confirmed' });
+        if (screenActive.current) {
+          setHistorySetup((current) => ({ ...current, installed: true }));
+        }
+      }
+      await updateProgress({ type: 'history-status-changed', status: 'in-progress' });
+      const startedAt = Date.now();
+      if (newHandoff) {
+        await iosHistorySetupStorageCoordinator.run(async () => {
+          await beginIosHistoryHandoffForOrigin(historyReturnOrigin, startedAt);
+        });
+      }
+      try {
+        // A handoff already in progress owns its native session and timestamp.
+        // Reopening its run URL would start a second import, not resume Apple.
+        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : 'shortcuts://');
+        if (newHandoff && screenActive.current) {
+          setHistorySetup((current) => ({
+            ...current,
+            handoffStartedAt: startedAt,
+          }));
+        }
+      } catch (error) {
+        if (newHandoff) {
+          await iosHistorySetupStorageCoordinator.run(async () => {
+            await Promise.all([clearIosHistoryHandoff(), clearIosHistoryReturnOrigin()]);
+          });
+        }
+        throw error;
+      }
+    }, t('iosLocalShortcutInstallFailed'));
+  }, [historyReturnOrigin, runOperation, updateProgress]);
+
+  const resetStoppedHistory = useCallback(() => {
+    setResetHistoryVisible(false);
+    void runOperation(async () => {
+      const native = await historyNativeModule();
+      await iosHistorySetupStorageCoordinator.run(() => cancelIosHistoryHandoff({
+        recover: () => recoverIosHistoryHandoff(historySetup.handoffStartedAt, native),
+        discard: (sessionId) => native.discardSession(sessionId),
+        clearHandoff: async () => {
+          await clearIosHistoryHandoff();
+          await clearIosHistoryReturnOrigin();
+        },
+      }));
+      await updateProgress({ type: 'history-status-changed', status: 'not-started' });
+      if (screenActive.current) {
+        setHistorySetup((current) => ({ ...current, handoffStartedAt: null }));
+      }
+    }, t('historyCancelCleanupFailed'));
+  }, [historySetup.handoffStartedAt, runOperation, updateProgress]);
+
+  useEffect(() => {
+    const startedAt = historySetup.handoffStartedAt;
+    if (startedAt === null || busy) return;
+    const remaining = Math.max(0, startedAt + IOS_HISTORY_HANDOFF_TTL_MS - Date.now());
+    const timer = setTimeout(() => void refreshSetup(), remaining);
+    return () => clearTimeout(timer);
+  }, [busy, historySetup.handoffStartedAt, refreshSetup]);
 
   const finish = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    if (fromOnboarding) {
-      router.replace('/?onboarding=complete');
-      return;
-    }
-    setOnboarded();
-    router.replace('/');
-  }, [fromOnboarding, router, setOnboarded]);
-
-  const continueManually = useCallback((): Promise<void> => {
-    if (manualExitInFlight.current) return manualExitInFlight.current;
-    setManualExitFailed(false);
-    setManualExiting(true);
-    const operation = (async () => {
-      try {
-        await send({ type: 'manual-only' });
-      } catch {
-        if (screenActive.current) setManualExitFailed(true);
-        return;
-      }
-      try {
-        await setCaptureOptOut(true);
-      } catch {
-        if (screenActive.current) {
-          setManualExitFailed(true);
-          AccessibilityInfo.announceForAccessibility(t('iosLocalManualExitFailed'));
-        }
-        return;
-      }
-
-      if (!screenActive.current) return;
+    if (!setupComplete) return;
+    void runOperation(async () => {
       if (fromOnboarding) {
-        router.replace('/?onboarding=complete');
+        const outcome = await completeIosMessageOnboardingAttempt({
+          retryRequired: finishRetryRequired,
+          ensureDurable,
+          markFinished: async () => {
+            await updateProgress({ type: 'onboarding-finished' });
+          },
+          markStarted: async () => {
+            await updateProgress({ type: 'onboarding-started' });
+          },
+          setOnboarded,
+        });
+        if (outcome === 'retry-required') {
+          if (screenActive.current) setFinishRetryRequired(true);
+          throw new Error('ios_message_onboarding_finish_failed');
+        }
+        if (screenActive.current) setFinishRetryRequired(false);
+        router.replace('/');
         return;
       }
-      router.push('/add-transaction');
-    })();
-    manualExitInFlight.current = operation.finally(() => {
-      manualExitInFlight.current = null;
-      if (screenActive.current) setManualExiting(false);
+      if (router.canGoBack()) {
+        router.back();
+        return;
+      }
+      router.replace('/');
+    }, t('iosMessageFinishFailed'));
+  }, [
+    ensureDurable,
+    finishRetryRequired,
+    fromOnboarding,
+    setupComplete,
+    router,
+    runOperation,
+    setOnboarded,
+    updateProgress,
+  ]);
+
+  const leave = useCallback(async () => {
+    if (busy || finishRetryRequired) return;
+    await runOperation(async () => {
+      if (fromOnboarding) {
+        await updateProgress({ type: 'onboarding-return-cleared' });
+      }
+      if (router.canGoBack()) {
+        router.back();
+        return;
+      }
+      router.replace('/');
     });
-    return manualExitInFlight.current;
-  }, [fromOnboarding, router, send, setCaptureOptOut]);
+  }, [busy, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
 
-  const importPastAlerts = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    if (fromOnboarding) setOnboarded();
-    router.push('/import-sms');
-  }, [fromOnboarding, router, setOnboarded]);
+  const futureStep = setup.failure === 'shortcut-install' &&
+    !progress.futureShortcutConfirmed
+    ? 'add-shortcut'
+    : resolveIosFutureSetupStep(progress, setup.readiness);
+  const futureStatus = !setup.loading && setup.readiness === 'not-added' && progress.futureStatus === 'complete'
+    ? 'in-progress' : progress.futureStatus;
+  const error = localError ?? (setup.failure ? failureCopy(setup.failure) : null);
+  const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
+  const historyRunning = historySetup.handoffStartedAt !== null;
+  const historyComplete = progress.historyStatus === 'complete';
+  const showingAutomation = futureStep === 'create-automation' ||
+    futureStep === 'prove-shortcut' || showAutomationGuide;
 
-  const leave = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    if (router.canGoBack()) {
-      router.back();
-      return;
+  const openHelp = () => {
+    setPrivacyExpanded(false);
+    setDetailsVisible(true);
+  };
+
+  const primaryAction = (): { label: StringKey; onPress(): void; disabled?: boolean } => {
+    if (setupComplete && !showAutomationGuide) {
+      return { label: fromOnboarding ? 'iosMessageContinue' : 'iosMessageDone', onPress: finish };
     }
-    finish();
-  }, [finish, router]);
-
-  const goToShortcut = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    void send({ type: 'go-to-stage', stage: 'shortcut' });
-  }, [send]);
-
-  const openShortcutsStore = useCallback(() => {
-    if (manualExitInFlight.current) return;
-    void send({ type: 'open-shortcuts-store' });
-  }, [send]);
-
-  const {
-    loading,
-    supported,
-    shortcutAvailable,
-    stage,
-    readiness,
-    opening,
-    failure,
-  } = setup;
-  const stepIndex = stage === 'shortcut' ? 0 : 1;
-  const error = manualExitFailed
-    ? t('iosLocalManualExitFailed')
-    : failure && !(failure === 'load' && stage === 'shortcut')
-      ? failureCopy(failure, false)
-      : null;
-  const showInstallCta =
-    supported && shortcutAvailable && failure !== 'load';
-  const actionsBlocked = opening || manualExiting;
+    if (progress.activeSection === 'history') {
+      if (historyComplete) return { label: 'iosMessageNextFuture', onPress: () => selectSection('future') };
+      if (!historySupported || !historyReady || !historyInstallUrl) {
+        return { label: 'iosMessageLearnMore', onPress: openHelp };
+      }
+      if (historyRunning) return { label: 'historyContinueAction', onPress: () => openHistoryRun(false) };
+      if (historyConfirmed) return { label: 'historyStartAction', onPress: () => openHistoryRun(true) };
+      if (progress.historyStatus === 'in-progress') {
+        return { label: 'iosMessageHistoryStartAfterAdding', onPress: () => openHistoryRun(true, true) };
+      }
+      return { label: 'historyAddAction', onPress: openHistoryInstall };
+    }
+    if (!setup.supported || setup.failure === 'load') {
+      return { label: 'iosMessageLearnMore', onPress: openHelp };
+    }
+    if (futureStep === 'add-shortcut') {
+      return { label: 'iosLocalInstallShortcut', onPress: installFutureShortcut, disabled: !setup.shortcutAvailable };
+    }
+    if (futureStep === 'confirm-shortcut') return { label: 'iosLocalAlreadyAdded', onPress: confirmFutureShortcut };
+    if (futureStep === 'ready' && !showAutomationGuide) {
+      return { label: 'iosMessageNextHistory', onPress: () => selectSection('history') };
+    }
+    return {
+      label: progress.futureAutomationConfirmed ? 'iosMessageRetryCheck' : 'iosLocalAutomationAdded',
+      onPress: confirmAutomation,
+    };
+  };
+  const action = primaryAction();
+  const helpActions: { label: string; onPress(): void }[] = [];
+  if (progress.activeSection === 'future') {
+    if (setup.supported && setup.shortcutAvailable) {
+      helpActions.push({ label: t('iosMessageAddAgain'), onPress: installFutureShortcut });
+    }
+    if (futureStep === 'ready') {
+      helpActions.push({ label: t('iosMessageReviewAutomation'), onPress: () => setShowAutomationGuide(true) });
+    }
+  } else if (historyRunning) {
+    helpActions.push({ label: t('iosMessageResetHistory'), onPress: () => setResetHistoryVisible(true) });
+  } else if (historyReady && historyInstallUrl) {
+    helpActions.push({ label: t('iosMessageAddAgain'), onPress: openHistoryInstall });
+    if (historyComplete) {
+      helpActions.push({ label: t('iosMessageImportAgain'), onPress: () => openHistoryRun(true) });
+    }
+  }
 
   return (
     <ThemedView style={styles.root}>
-      <Stack.Screen options={{ gestureEnabled: !manualExiting }} />
+      <Stack.Screen options={{ gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired }} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <ScrollView
+          style={styles.scroll}
           contentInsetAdjustmentBehavior="automatic"
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}>
-          <View
-            pointerEvents={manualExiting ? 'none' : 'auto'}
-            accessibilityElementsHidden={manualExiting}
-            importantForAccessibility={manualExiting ? 'no-hide-descendants' : 'auto'}>
-            <ScreenHeader title={t('iosSetupTitle')} onBack={leave} />
-          </View>
-
-          <ThemedText type="meta" themeColor="textSecondary">
-            {tf('iosStepProgress', {
-              n: stepIndex + 1,
-              total: STEPS.length,
-              name: t(STEPS[stepIndex]),
-            })}
-          </ThemedText>
-          <View
-            style={styles.progress}
-            accessibilityRole="progressbar"
-            accessibilityLabel={tf('iosStepProgress', {
-              n: stepIndex + 1,
-              total: STEPS.length,
-              name: t(STEPS[stepIndex]),
-            })}
-            accessibilityValue={{
-              min: 1,
-              max: STEPS.length,
-              now: stepIndex + 1,
-              text: t(STEPS[stepIndex]),
-            }}>
-            {STEPS.map((key, index) => (
-              <View
-                key={key}
-                style={[
-                  styles.progressSegment,
-                  {
-                    backgroundColor:
-                      index <= stepIndex ? theme.primary : theme.track,
-                  },
-                ]}
-              />
-            ))}
-          </View>
-
-          {loading && (
-            <View accessibilityLiveRegion="polite">
-              <ThemedText type="meta" themeColor="textSecondary">
-                {t('stillLoading')}
-              </ThemedText>
-            </View>
-          )}
-
-          {!loading && stage === 'shortcut' && (
-            <View style={styles.section}>
-              <View style={styles.heading}>
-                <ThemedText type="title" accessibilityRole="header">
-                  {t('iosLocalShortcutTitle')}
-                </ThemedText>
-                <ThemedText type="default" themeColor="textSecondary">
-                  {t('iosLocalShortcutBody')}
-                </ThemedText>
-              </View>
-
-              {!supported ? (
-                <Block>
+          <ScreenHeader
+            mode="inline"
+            title={t('iosMessageSetupHeading')}
+            subtitle={t('iosMessageSetupSubtitle')}
+            back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
+            actions={[{ label: t('iosMessageLearnMore'), onPress: openHelp, disabled: busy }]}
+          />
+          {!progressLoaded || setup.loading ? (
+            <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
+          ) : (
+            <View testID="ios-message-setup-checklist" style={styles.checklist}>
+              <ChecklistRow
+                step={1}
+                title={t('iosMessageFutureTitle')}
+                detail={setup.readiness === 'not-added' ? undefined : futureReadyLabel}
+                status={futureStatus}
+                expanded={progress.activeSection === 'future'}
+                onPress={() => selectSection('future')}>
+                {!setup.supported ? (
+                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUnsupported')}</ThemedText>
+                ) : setup.failure === 'load' ? (
+                  <ThemedText type="small" themeColor="textSecondary">{t('iosLocalUpdateRequired')}</ThemedText>
+                ) : showingAutomation ? (
+                  <>
+                    <AutomationGuide />
+                    <Button label={t('iosLocalOpenAutomation')} variant="ghost" onPress={openAutomation} disabled={busy} wrapLabel />
+                  </>
+                ) : futureStep === 'add-shortcut' || futureStep === 'confirm-shortcut' ? (
                   <ThemedText type="small" themeColor="textSecondary">
-                    {t('iosLocalUnsupported')}
+                    {t(!setup.shortcutAvailable ? 'iosLocalShortcutUnavailable'
+                      : futureStep === 'add-shortcut' ? 'iosMessageFutureInstallHelp' : 'iosMessageFutureReturnHelp')}
                   </ThemedText>
-                </Block>
-              ) : failure === 'load' && !manualExitFailed && !manualExiting ? (
-                <Block tone="expense">
-                  <ThemedText type="small" selectable>
-                    {t('iosLocalUpdateRequired')}
-                  </ThemedText>
-                </Block>
-              ) : (
-                <>
-                  {!shortcutAvailable && (
-                    <Block>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {t('iosLocalShortcutUnavailable')}
-                      </ThemedText>
-                    </Block>
-                  )}
-                  {showInstallCta && (
-                    <Button
-                      label={t('iosLocalInstallShortcut')}
-                      onPress={installShortcut}
-                      disabled={actionsBlocked}
-                      wrapLabel
-                    />
-                  )}
-                  <Button
-                    label={t('iosLocalAlreadyAdded')}
-                    variant="outline"
-                    onPress={shortcutAdded}
-                    disabled={actionsBlocked}
-                    wrapLabel
-                  />
-                </>
-              )}
-
-              <Block>
-                <View style={styles.noteCopy}>
-                  <ThemedText type="smallBold">
-                    {t('iosLocalPrivacyTitle')}
-                  </ThemedText>
+                ) : null}
+              </ChecklistRow>
+              <ChecklistRow
+                step={2}
+                title={t('iosMessagePastTitle')}
+                detail={historyComplete ? t('iosMessageHistoryDone') : undefined}
+                status={progress.historyStatus}
+                expanded={progress.activeSection === 'history'}
+                onPress={() => selectSection('history')}>
+                {!historySupported || !historyReady || !historyInstallUrl ? (
                   <ThemedText type="small" themeColor="textSecondary">
-                    {t('iosLocalPrivacyBody')}
+                    {t(!historySupported ? 'historyRequiresIos26'
+                      : !historyReady ? 'iosLocalUpdateRequired' : 'historyInstallUnavailable')}
                   </ThemedText>
-                </View>
-              </Block>
-
-              <Block>
-                <View style={styles.noteCopy}>
-                  <ThemedText type="smallBold">
-                    {t('iosLocalMigrationTitle')}
-                  </ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {t('iosLocalMigrationBody')}
-                  </ThemedText>
-                </View>
-              </Block>
-            </View>
-          )}
-
-          {!loading && stage === 'automation' && (
-            <View style={styles.section}>
-              <View style={styles.heading}>
-                <ThemedText type="title" accessibilityRole="header">
-                  {t('iosLocalAutomationTitle')}
-                </ThemedText>
-                <ThemedText type="default" themeColor="textSecondary">
-                  {t('iosLocalAutomationBody')}
-                </ThemedText>
-              </View>
-
-              <View
-                style={[
-                  styles.automationGuide,
-                  { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-                ]}
-                accessible
-                accessibilityRole="image"
-                accessibilityLabel={automationGuideLabel()}>
-                <View style={styles.mockHeader}>
-                  <View style={[styles.mockDot, { backgroundColor: theme.primary }]} />
-                  <ThemedText type="smallBold">
-                    {t('iosLocalStepAutomation')}
-                  </ThemedText>
-                </View>
-                <View>
-                  {AUTOMATION_CHOICES.map((key, index) => (
-                    <View
-                      key={key}
-                      style={[
-                        styles.choiceRow,
-                        index === AUTOMATION_CHOICES.length - 1
-                          ? styles.choiceRowLast
-                          : { borderBottomColor: theme.cardBorder },
-                      ]}>
-                      <View
-                        style={[
-                          styles.choiceNumber,
-                          { backgroundColor: theme.primarySoft },
-                        ]}>
-                        <ThemedText type="micro" style={{ color: theme.primary }} tabular>
-                          {index + 1}
-                        </ThemedText>
+                ) : !historyComplete ? (
+                  <>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {t(historyRunning ? 'iosMessageHistoryRunningHelp'
+                        : historyConfirmed ? 'iosMessageHistoryStartHelp'
+                          : progress.historyStatus === 'in-progress' ? 'iosMessageHistoryReturnHelp' : 'iosMessageHistoryInstallHelp')}
+                    </ThemedText>
+                    {!historyRunning && (
+                      <View style={styles.hints}>
+                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessagePastTiming')}</ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryKeepOpen')}</ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">{t('iosMessageHistoryCoverage')}</ThemedText>
                       </View>
-                      <ThemedText type="small" style={styles.choiceText}>
-                        {t(key)}
-                      </ThemedText>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
-              <View style={[styles.actionRow, largeText ? styles.largeTextActions : undefined]}>
-                <Button
-                  label={t('iosLocalOpenAutomation')}
-                  variant="outline"
-                  onPress={openAutomation}
-                  disabled={actionsBlocked}
-                  inline={!largeText}
-                  wrapLabel
-                />
-                <Button
-                  label={t('iosLocalAutomationAdded')}
-                  onPress={automationAdded}
-                  disabled={actionsBlocked}
-                  inline={!largeText}
-                  wrapLabel
-                />
-              </View>
-
-              <ThemedText type="meta" themeColor="textSecondary">
-                {t('iosLocalTestExplainer')}
-              </ThemedText>
-
-              <Block>
-                <View
-                  style={styles.noteCopy}
-                  accessibilityLiveRegion="polite">
-                  <ThemedText type="smallBold">
-                    {readiness === 'first-alert-captured'
-                      ? t('iosLocalFirstAlertCaptured')
-                      : readiness === 'shortcut-proven'
-                        ? t('iosLocalWaitingTitle')
-                        : t('iosLocalNotProvenTitle')}
-                  </ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary">
-                    {readiness === 'first-alert-captured'
-                      ? t('iosLocalFirstAlertBody')
-                      : readiness === 'shortcut-proven'
-                        ? t('iosLocalWaitingBody')
-                        : t('iosLocalNotProvenBody')}
-                  </ThemedText>
-                </View>
-              </Block>
-
-              <Button
-                label={t('iosLocalBackToShortcut')}
-                variant="ghost"
-                onPress={goToShortcut}
-                disabled={actionsBlocked}
-                wrapLabel
-              />
-              {readiness !== 'not-added' && (
-                <Button
-                  label={t('iosLocalContinue')}
-                  variant="outline"
-                  onPress={finish}
-                  disabled={actionsBlocked}
-                  wrapLabel
-                />
-              )}
+                    )}
+                  </>
+                ) : null}
+              </ChecklistRow>
             </View>
           )}
-
           {error && (
             <View accessibilityLiveRegion="polite">
               <Block tone="expense">
-                <ThemedText type="small" selectable>
-                  {error}
-                </ThemedText>
-              </Block>
-              {failure === 'shortcuts-missing' && (
+                <ThemedText type="small" selectable>{error}</ThemedText>
                 <Button
-                  label={t('iosInstallShortcuts')}
-                  variant="outline"
-                  onPress={openShortcutsStore}
-                  disabled={actionsBlocked}
+                  label={t('iosMessageRetrySetup')}
+                  variant="ghost"
+                  onPress={() => void runOperation(async () => {
+                    await send({ type: 'refresh-status' });
+                    await refreshSetup(true);
+                  })}
+                  disabled={busy}
                   wrapLabel
-                  style={styles.recoveryButton}
                 />
-              )}
+              </Block>
             </View>
           )}
-
-          <View
-            style={[
-              styles.fallbackActions,
-              largeText ? styles.largeTextActions : undefined,
-            ]}>
+          {(shortcutsMissing || setup.failure === 'shortcuts-missing') && (
             <Button
-              label={t('iosLocalManualTracking')}
-              variant="ghost"
-              onPress={() => void continueManually()}
-              disabled={actionsBlocked}
-              inline={!largeText}
+              label={t('iosInstallShortcuts')}
+              onPress={() => void runOperation(async () => {
+                await send({ type: 'open-shortcuts-store' });
+                setShortcutsMissing(false);
+              })}
+              disabled={busy}
               wrapLabel
             />
-            <Button
-              label={t('iosLocalImportPast')}
-              variant="ghost"
-              onPress={importPastAlerts}
-              disabled={actionsBlocked}
-              inline={!largeText}
-              wrapLabel
-            />
-          </View>
+          )}
         </ScrollView>
+        <View style={[styles.footer, largeText ? styles.footerLargeText : undefined]}>
+          <Button label={t(action.label)} onPress={action.onPress} disabled={busy || setup.loading || !progressLoaded || action.disabled} wrapLabel />
+        </View>
+        <ConfirmSheet
+          visible={resetHistoryVisible}
+          onClose={() => setResetHistoryVisible(false)}
+          question={t('iosMessageResetHistoryTitle')}
+          body={t('iosMessageResetHistoryBody')}
+          confirmLabel={t('iosMessageResetHistory')}
+          onConfirm={resetStoppedHistory}
+        />
+        <DetailsSheet
+          visible={detailsVisible}
+          onClose={() => setDetailsVisible(false)}
+          section={progress.activeSection}
+          fromOnboarding={fromOnboarding}
+          actions={helpActions}
+          privacyExpanded={privacyExpanded}
+          onTogglePrivacy={() => setPrivacyExpanded((value) => !value)}
+        />
       </SafeAreaView>
     </ThemedView>
   );
@@ -590,88 +695,16 @@ export default function IosSetupScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   safe: { flex: 1 },
+  scroll: { flex: 1 },
   content: {
-    width: '100%',
-    maxWidth: MaxContentWidth,
-    alignSelf: 'center',
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
-    gap: Spacing.four,
+    width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
+    paddingHorizontal: ScreenPadding, paddingBottom: Spacing.four, gap: Spacing.four,
   },
-  progress: {
-    flexDirection: 'row',
-    gap: Spacing.two,
+  checklist: { gap: Spacing.two },
+  hints: { gap: Spacing.one },
+  footer: {
+    width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center',
+    paddingHorizontal: ScreenPadding, paddingVertical: Spacing.three,
   },
-  progressSegment: {
-    flex: 1,
-    height: 4,
-    borderRadius: Radius.full,
-  },
-  section: {
-    gap: Spacing.four,
-  },
-  heading: {
-    gap: Spacing.two,
-  },
-  noteCopy: {
-    flex: 1,
-    gap: Spacing.two,
-  },
-  automationGuide: {
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
-    borderCurve: 'continuous',
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  mockHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    paddingBottom: Spacing.two,
-  },
-  mockDot: {
-    width: 10,
-    height: 10,
-    borderRadius: Radius.full,
-  },
-  choiceRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.two,
-  },
-  choiceRowLast: {
-    borderBottomWidth: 0,
-  },
-  choiceNumber: {
-    width: 28,
-    height: 28,
-    borderRadius: Radius.full,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  choiceText: {
-    flex: 1,
-    flexShrink: 1,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    alignItems: 'stretch',
-  },
-  fallbackActions: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    alignItems: 'stretch',
-    paddingTop: Spacing.two,
-  },
-  largeTextActions: {
-    flexDirection: 'column',
-  },
-  recoveryButton: {
-    marginTop: Spacing.two,
-  },
+  footerLargeText: { paddingBottom: Spacing.four },
 });

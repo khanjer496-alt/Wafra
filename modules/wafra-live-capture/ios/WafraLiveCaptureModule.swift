@@ -125,6 +125,10 @@ public class WafraLiveCaptureModule: Module {
       return record
     }
 
+    AsyncFunction("getAutomationInputProbeAt") { () -> Double? in
+      try epochMilliseconds(WafraLiveCaptureStore.shared.automationInputProbeAt())
+    }
+
     AsyncFunction("acknowledgeCaptureWarning") { (warningId: String) -> Bool in
       try WafraLiveCaptureStore.shared.acknowledgeCaptureWarning(id: warningId)
     }

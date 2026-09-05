@@ -1,3 +1,4 @@
+import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
 import { useEffect, useMemo, useRef } from 'react';
 
@@ -58,7 +59,7 @@ export function useHistoryImport(): void {
         getStateSnapshot().merchantOverrides,
         undefined,
         undefined,
-        { cursor, maxInboxPages: 1 },
+        { cursor, maxInboxPages: 1, legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()) },
       );
       return {
         ...page,
@@ -76,7 +77,7 @@ export function useHistoryImport(): void {
         if (!setMarket(page.detectedLaunchMarket)) throw new Error('market_mismatch');
       }
 
-      const reviewReceipt = stageReviewAlerts(page.reviewCandidates);
+      const reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
       await reviewReceipt.durable;
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket

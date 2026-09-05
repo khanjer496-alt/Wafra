@@ -1,3 +1,4 @@
+import { readMerchantCategoryOverride } from '@/lib/categories';
 /**
  * The merchants the app knows by name but not by kind.
  *
@@ -26,9 +27,8 @@
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import {
   isDeliberateOtherTitle,
-  overrideFitsDirection,
 } from '@/lib/sms-parser';
-import type { AppState, Transaction } from '@/lib/types';
+import type { AppState, Transaction, TransactionType } from '@/lib/types';
 
 /**
  * The parser's own words for "a card was charged and the message never named
@@ -269,13 +269,13 @@ function isCandidate(
   if (isDeliberateOtherTitle(title)) return false;
   // "The user already answered for this merchant" — but only if the answer can
   // reach this row. Every row that gets here is an expense (checked above), and
-  // `overrideFitsDirection` is what says an income category may not decide one.
+  // the directional rule reader is what says an income pin may not decide one.
   // Bare presence was the test, so an income pin — reachable by correcting a
   // credit and tapping Remember in the entry sheet — struck that merchant's
   // EXPENSE rows off the list on the strength of a rule that can never apply to
   // them. Those rows sit in `other` forever and are never asked about again.
-  const pinned = overrides[title.toLowerCase()];
-  if (pinned !== undefined && overrideFitsDirection(pinned, 'expense')) return false;
+  const pinned = readMerchantCategoryOverride(overrides, title, 'expense');
+  if (pinned !== undefined) return false;
   return true;
 }
 
@@ -303,11 +303,9 @@ function isCandidate(
  *    the exact exclusion `isCandidate` makes ("a decision, not a gap"), so
  *    honouring it there and ignoring it here meant the screen refused to ask
  *    about a row it then went and rewrote.
- *  - **Anything that is not an expense.** `EXPENSE_CATEGORIES` and
- *    `INCOME_CATEGORIES` are disjoint sets. Stamping `shopping` on a TALABAT
- *    refund does not merely mis-file it, it puts the row off-list: reopen it
- *    and the sheet renders the income chips, none of them selected, so the
- *    category it actually holds is invisible to the person trying to fix it.
+ *  - **The opposite direction.** A rule chosen for expenses does not apply
+ *    to income, and an income rule does not reclassify purchases. Other is a
+ *    valid category in both lists, but its remembered rule remains scoped.
  *  - **Transfers and card-payment legs.** Neither is spending, so "what kind
  *    of shop was this" has no answer to apply.
  *  - **Split rows.** Their parts were allocated by hand, and `category` on a
@@ -331,10 +329,12 @@ function isCandidate(
  * a merchant. That is the point: candidacy answers "should we nag about this
  * merchant", `count` answers "what does this tap move".
  */
-export function overrideAppliesTo(t: Transaction, key: string): boolean {
+export function overrideAppliesTo(
+  t: Transaction, key: string, type: TransactionType = 'expense',
+): boolean {
   if (t.title.trim().toLowerCase() !== key) return false;
   if (t.userEdited) return false;
-  if (t.type !== 'expense') return false;
+  if (t.type !== type) return false;
   if (t.isTransfer) return false;
   if (t.cardPaymentSide !== undefined) return false;
   if (t.splits && t.splits.length > 0) return false;

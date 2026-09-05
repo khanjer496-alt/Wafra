@@ -1,5 +1,8 @@
 "live.setup_proof.title" = "تسجيل إثبات إعداد الالتقاط في وفرة";
 "live.setup_proof.error" = "تعذّر على وفرة تسجيل إثبات الإعداد.";
+"live.automation_input_probe.title" = "اختبار إدخال أتمتة رسائل وفرة";
+"live.automation_input_probe.message.parameter" = "الرسالة الواردة";
+"live.automation_input_probe.error" = "تعذّر على وفرة تسجيل اختبار إدخال الأتمتة.";
 "live.stage.title" = "حفظ رسالة مباشرة في وفرة";
 "live.stage.sender.parameter" = "المرسل";
 "live.stage.message.parameter" = "الرسالة";

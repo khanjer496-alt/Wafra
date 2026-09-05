@@ -11,7 +11,7 @@ import { unreadFormatCount, REPORT_PROMPT_THRESHOLD } from '@/lib/accuracy';
 import { periodComparison, type PeriodComparison } from '@/lib/analytics';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
-import { composition, buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
+import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
@@ -74,8 +74,8 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const liveAccounts = liveAccountIds(state.accounts);
   const internal = internalTransferIds(state.transactions, liveAccounts);
   const summary = summarizeMonth(state.transactions, period, liveAccounts, internal);
-  const expenseFils = composition(summary).totalFils;
-  const incomeFils = Math.round(summary.incomeFils / 100) * 100;
+  const expenseFils = summary.expenseFils;
+  const incomeFils = summary.incomeFils;
   const cashOut = summarizeCashOutflow(state, period, {
     live: liveAccounts,
     internal,

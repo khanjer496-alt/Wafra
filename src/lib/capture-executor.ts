@@ -24,7 +24,8 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import type { ReviewAlert } from '@/lib/alert-review-tray';
+import type { ReviewEntry } from '@/lib/alert-review-tray';
+import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 
 export type CaptureIntent = 'routine' | 'supplemental' | 'setup-verification' | 'background';
 
@@ -68,8 +69,9 @@ export interface CaptureLedgerAdapter {
   /** Persist a launch pack selected from strong per-alert AED/SAR evidence. */
   setMarket?: (id: 'AE' | 'SA') => boolean;
   stageReviewAlerts?: (
-    items: ReviewAlert[],
+    items: ReviewEntry[],
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+    sourceBindings?: readonly ReviewSourceBinding[],
   ) => { admitted: number; qualificationIds?: string[]; durable: Promise<void> };
 }
 
@@ -240,14 +242,14 @@ export const createCaptureExecutor = ({
     }
     const reviewCandidates = collected.reviewCandidates ?? [];
     let reviewAlerts = 0;
-    if (reviewCandidates.length > 0) {
+    if (reviewCandidates.length > 0 || (collected.reviewSourceBindings?.length ?? 0) > 0) {
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
       // Review first, before an SMS cursor can advance. The authoritative
       // ledger is read again after this durability await: Restore may replace
       // the entire ledger while encrypted review staging is in flight.
-      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates);
+      const reviewReceipt = activeLedger.stageReviewAlerts(reviewCandidates, undefined, collected.reviewSourceBindings);
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
       if (captureStopped(activeLedger, collected.source)) {

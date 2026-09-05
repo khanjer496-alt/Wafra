@@ -1,12 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, TextInput } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import type { TextInput } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
-import { Radius, Spacing } from '@/constants/theme';
+import { TextField } from '@/components/ui/text-field';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
 import { parseAmountToFils } from '@/lib/format';
 import { t } from '@/lib/i18n';
 
@@ -56,8 +55,8 @@ export function AmountSheet({
   confirmLabel,
   onSubmit,
 }: AmountSheetProps) {
-  const theme = useTheme();
   const language = useLanguage();
+  const inputRef = useRef<TextInput>(null);
   const [text, setText] = useState('');
 
   // Cleared on open, not on close: a sheet that unmounts mid-animation would
@@ -82,26 +81,15 @@ export function AmountSheet({
           {question}
         </ThemedText>
       )}
-      <TextInput
-        accessibilityLabel={placeholder}
+      <TextField
+        ref={inputRef}
+        label={placeholder}
         value={text}
         onChangeText={setText}
-        placeholder={placeholder}
-        placeholderTextColor={theme.textTertiary}
-        selectionColor={theme.primary}
-        keyboardType="decimal-pad"
+        numeric
         autoFocus
         onSubmitEditing={submit}
         returnKeyType="done"
-        style={[
-          styles.input,
-          {
-            backgroundColor: theme.backgroundElement,
-            borderColor: theme.controlBorder,
-            color: theme.text,
-            textAlign: language === 'ar' ? 'right' : 'left',
-          },
-        ]}
       />
       {/*
         Disabled rather than accepting and discarding. The control this
@@ -113,14 +101,3 @@ export function AmountSheet({
     </BottomSheet>
   );
 }
-
-const styles = StyleSheet.create({
-  input: {
-    borderRadius: Radius.control,
-    borderWidth: 1,
-    paddingHorizontal: Spacing.three - 4,
-    paddingVertical: Spacing.three - 5,
-    fontSize: 17,
-    fontVariant: ['tabular-nums'],
-  },
-});

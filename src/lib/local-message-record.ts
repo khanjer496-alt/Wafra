@@ -3,14 +3,23 @@ import {
   inspectSourceFreeRefusedAlert,
   shouldReviewParsedIncome,
 } from '@/lib/auto-import';
-import type { ReviewAlert } from '@/lib/alert-review-tray';
+import {
+  appleMessageReviewIdentity,
+  isUniversalReviewAlert,
+  type ReviewEntry,
+} from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import {
   iosBankSenderIdentity,
   type IosBankSenderRegistry,
 } from '@/lib/ios-bank-senders';
 import type { LaunchAlertSession } from '@/lib/launch-alert-parser';
-import { MARKETS, bankFromSender, bankIdentityForName } from '@/lib/markets';
+import {
+  MARKETS,
+  bankFromSender,
+  bankIdentityForName,
+  detectLaunchMarketFromAlert,
+} from '@/lib/markets';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
 
@@ -20,9 +29,13 @@ export const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
 export const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHA256_EVENT_ID_RE = /^[0-9a-f]{64}$/;
 const UTC_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const UNSAFE_SENDER_RE = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/u;
 const ENVELOPE_KEYS = ['id', 'observedAt', 'sender', 'source', 'text', 'v'] as const;
+
+const validLocalMessageId = (value: unknown): value is string =>
+  typeof value === 'string' && (UUID_RE.test(value) || SHA256_EVENT_ID_RE.test(value));
 
 interface LocalMessageEnvelope {
   v: typeof LOCAL_MESSAGE_RECORD_VERSION;
@@ -37,6 +50,7 @@ export interface LocalMessageRecordPreflight {
   id: string;
   observedAt: number | null;
   attribution: IosBankSenderAttribution | null;
+  market: 'AE' | 'SA' | null;
   valid: boolean;
 }
 
@@ -49,8 +63,8 @@ export interface IosBankSenderAttribution {
 export type LocalMessageParseOutcome =
   | { kind: 'parsed'; market: 'AE' | 'SA'; row: ScannedSms; milestone: 'financial' }
   | { kind: 'declined'; market: 'AE' | 'SA'; row: DeclinedSms; milestone: 'decline-candidate' }
-  | { kind: 'review'; market: 'AE' | 'SA'; item: ReviewAlert; milestone: 'review-candidate' }
-  | { kind: 'ignored'; market: 'AE' | 'SA'; milestone: 'none' }
+  | { kind: 'review'; market: 'AE' | 'SA' | null; item: ReviewEntry; milestone: 'review-candidate' | 'none' }
+  | { kind: 'ignored'; market: 'AE' | 'SA' | null; milestone: 'none' }
   | { kind: 'invalid'; milestone: 'none' };
 
 /** UTF-8 length with an explicit malformed-surrogate failure for Hermes. */
@@ -104,7 +118,7 @@ function decodeLocalMessageEnvelope(
   if (!decoded || typeof decoded !== 'object' || Array.isArray(decoded)) return null;
   const value = decoded as Record<string, unknown>;
   if (!hasExactEnvelopeKeys(value) || value.v !== LOCAL_MESSAGE_RECORD_VERSION ||
-    typeof value.id !== 'string' || !UUID_RE.test(value.id) ||
+    !validLocalMessageId(value.id) ||
     typeof value.text !== 'string' ||
     typeof value.sender !== 'string' ||
     value.source !== 'message') {
@@ -165,7 +179,7 @@ export function preflightLocalMessageRecord(
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const object = value as Record<string, unknown>;
-  if (typeof object.id !== 'string' || !UUID_RE.test(object.id)) return null;
+  if (!validLocalMessageId(object.id)) return null;
   const attribution = typeof object.sender === 'string'
     ? attributeIosBankSender(object.sender)
     : null;
@@ -174,11 +188,19 @@ export function preflightLocalMessageRecord(
     id: object.id,
     observedAt: decoded?.observedAt ?? null,
     attribution,
-    valid: decoded !== null && attribution !== null,
+    market: decoded
+      ? attribution?.market ?? detectLaunchMarketFromAlert(
+          decoded.envelope.text,
+          decoded.envelope.sender,
+        )
+      : null,
+    valid: decoded !== null,
   };
 }
 
 function localReviewIdentity(id: string): { id: string; sourceKey: string } {
+  const appleMessage = appleMessageReviewIdentity(id);
+  if (appleMessage) return appleMessage;
   const opaque = id.replace(/-/g, '').toLocaleLowerCase('en-US');
   return {
     id: `local_review_id_${opaque}`,
@@ -189,7 +211,7 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
 function sanitizedRefusal(
   envelope: LocalMessageEnvelope,
   observedAt: number,
-  market: 'AE' | 'SA',
+  market: 'AE' | 'SA' | null,
   session: LaunchAlertSession,
   inspection: ReturnType<LaunchAlertSession['inspect']>,
 ): Exclude<LocalMessageParseOutcome, { kind: 'parsed' } | { kind: 'invalid' }> {
@@ -202,6 +224,7 @@ function sanitizedRefusal(
     existingInspection: inspection,
   });
   if (decision.kind === 'declined') {
+    if (market === null) return { kind: 'ignored', market, milestone: 'none' };
     return {
       kind: 'declined',
       market,
@@ -218,7 +241,11 @@ function sanitizedRefusal(
       decision.candidate,
       localReviewIdentity(envelope.id),
     );
-    if (item) return { kind: 'review', market, item, milestone: 'review-candidate' };
+    if (item) return {
+      kind: 'review', market, item,
+      milestone: !isUniversalReviewAlert(item) && item.market === market
+        ? 'review-candidate' : 'none',
+    };
   }
   return { kind: 'ignored', market, milestone: 'none' };
 }
@@ -227,7 +254,7 @@ function sanitizedRefusal(
 export function parseLocalMessageRecord(
   serialized: string,
   now: Date,
-  expectedMarket: 'AE' | 'SA',
+  expectedMarket: 'AE' | 'SA' | null,
   session: LaunchAlertSession,
 ): LocalMessageParseOutcome {
   const nowMs = now.getTime();
@@ -236,12 +263,17 @@ export function parseLocalMessageRecord(
   if (!decoded) return { kind: 'invalid', milestone: 'none' };
   const { envelope, observedAt } = decoded;
   const attribution = attributeIosBankSender(envelope.sender);
-  if (!attribution || attribution.market !== expectedMarket) {
+  const routedMarket = attribution?.market ??
+    detectLaunchMarketFromAlert(envelope.text, envelope.sender);
+  if (routedMarket !== expectedMarket) {
     return { kind: 'invalid', milestone: 'none' };
   }
 
   try {
     const inspection = session.inspect(envelope.text, envelope.sender);
+    if (expectedMarket === null) {
+      return sanitizedRefusal(envelope, observedAt, null, session, inspection);
+    }
     const parsed = session.parse(
       envelope.text,
       envelope.sender,
@@ -269,21 +301,23 @@ export function parseLocalMessageRecord(
       ...structured
     } = parsedWithEphemeralSender;
     const bankHint = structured.bankHint ?? bankFromSender(envelope.sender)?.name ??
-      attribution.bankHint;
-    if (canonicalBankId(bankHint) !== attribution.bankId) {
+      attribution?.bankHint;
+    if (attribution && canonicalBankId(bankHint ?? '') !== attribution.bankId) {
       return { kind: 'invalid', milestone: 'none' };
     }
     const row: ScannedSms = {
       ...structured,
-      bankHint,
-      date: structured.date ?? toISODate(new Date(observedAt)),
+      ...(bankHint ? { bankHint } : {}),
+      // Receipt time dates a transaction, never an unstated card deadline.
+      date: structured.kind === 'cardStatement' ? structured.date : structured.date ?? toISODate(new Date(observedAt)),
       smsTs: observedAt,
       channel: 'inbox',
-      market: attribution.market,
+      market: expectedMarket,
+      sourceEventId: envelope.id,
     };
     return {
       kind: 'parsed',
-      market: attribution.market,
+      market: expectedMarket,
       row,
       milestone: 'financial',
     };

@@ -388,6 +388,22 @@ await tapLabel(page, 'Close', 900);
 // ── Flow ──────────────────────────────────────────────────────────────
 await tapTab(page, 'Flow');
 ok('flow titles the screen', !!(await visibleText(page, /^Flow$/)));
+// Read the labelled figure before scrolling down to its composition rows.
+// The redesigned hero no longer lives in a fixed 110px band of the viewport.
+const flowTotalLabel = await visibleText(page, /^Total spent$/i);
+const flowTotalHeading = flowTotalLabel ? await flowTotalLabel.evaluate((label) => {
+  for (const node of label.parentElement?.querySelectorAll('div,span') ?? []) {
+    const text = node.textContent?.trim() ?? '';
+    if (node.childElementCount || !/^AED [\d,]+$/.test(text)) continue;
+    const r = node.getBoundingClientRect();
+    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    if (r.width > 0 && r.height > 0 && top &&
+      (node.contains(top) || top.contains(node)) && node.scrollWidth <= node.clientWidth + 1) {
+      return { t: text };
+    }
+  }
+  return null;
+}) : null;
 ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 /**
  * The "Total spent AED X" heading and the composition list beneath it are the same
@@ -399,9 +415,7 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 {
   const tiles = await compTiles(page);
   const t = await paintedText(page);
-  // "Total spent AED 11,375 · …" is one paragraph; the figure is its first AED run,
-  // and it sits above the composition bar.
-  const heading = t.find((x) => /^AED [\d,]+$/.test(x.t) && x.y < 110);
+  const heading = flowTotalHeading;
   const rows = t.filter((x) => /^[\d,]+$/.test(x.t));
   // A row's figure is the right-most plain number on the tile's own line.
   const perTile = (await page.evaluate(() => {
@@ -545,27 +559,12 @@ await tapText(page, /^Netflix$/, 1400);
   const label = t.find((x) => /^total paid$/i.test(x.t));
   const total = label && t.find((x) => x.y > label.y && x.y < label.y + 40 && /^AED/.test(x.t));
   const chargeTexts = await page.evaluate(() => {
-    const history = [...document.querySelectorAll('div,span')].find((node) => {
-      if (node.children.length || !/^history$/i.test((node.textContent || '').trim())) return false;
-      const box = node.getBoundingClientRect();
-      return box.width > 0 && box.height > 0;
-    });
-    if (!history) return [];
-
-    let block = history.parentElement;
-    while (block) {
-      const scroller = [...block.querySelectorAll('div')].find(
-        (node) => node.scrollHeight > node.clientHeight + 4,
-      );
-      if (scroller) {
-        return [...scroller.querySelectorAll('div,span')]
-          .filter((node) => node.children.length === 0)
-          .map((node) => (node.textContent || '').trim())
-          .filter((text) => /^AED [\d,]+$/.test(text));
-      }
-      block = block.parentElement;
-    }
-    return [];
+    const scroller = document.querySelector('[data-testid="subscription-history-scroll"]');
+    if (!scroller) return [];
+    return [...scroller.querySelectorAll('div,span')]
+      .filter((node) => node.children.length === 0)
+      .map((node) => (node.textContent || '').trim())
+      .filter((text) => /^AED [\d,]+$/.test(text));
   });
   const charges = chargeTexts.map((text) => money(text));
   const sum = charges.reduce((a, b) => a + b, 0);
@@ -614,7 +613,14 @@ await tapLabel(page, 'Back', 1200);
 await tapLabel(page, 'Settings', 1400);
 ok('settings leads with Pro', !!(await visibleText(page, 'Wafra Pro')));
 ok('settings shows the trial state', !!(await visibleText(page, /Free trial · \d day/)));
-ok('settings summarizes the current state', !!(await visibleText(page, 'Current state')));
+{
+  const groupedHeadings = await Promise.all(
+    ['Money', 'Imports', 'Notifications', 'Appearance & language', 'Danger zone']
+      .map((heading) => visibleText(page, heading)),
+  );
+  ok('settings shows the new grouped sections without a duplicate Current state',
+    groupedHeadings.every(Boolean) && await page.getByText('Current state', { exact: true }).count() === 0);
+}
 ok('settings keeps feedback easy to find', !!(await visibleText(page, 'Send feedback')));
 ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
 
@@ -679,7 +685,14 @@ ok('import offers to file the plan', !!fileBtn);
 await tapLabel(page, 'Back', 1200);
 await tapTab(page, 'Home');
 await tapLabel(page, 'Settings', 1400);
+await page.setViewportSize({ width: 402, height: 874 });
 await tapText(page, 'Wafra Pro', 1400);
+{
+  const hits = await overlappingText(page, 'Wafra Pro');
+  ok(`paywall: purchase controls do not overlap plan content at 402×874 (${hits.length} collisions)`,
+    hits.length === 0);
+  if (hits.length) console.log(hits.slice(0, 4));
+}
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
 ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial · \d day/)));
 
@@ -714,7 +727,14 @@ await page.evaluate(() => {
 });
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
-ok('expired trial pauses tracking on home', !!(await visibleText(page, 'Trial ended · tracking paused')));
+// Web correctly says phone capture is unsupported instead of pretending to be
+// Android/iOS. Verify expiry on the actual cross-platform entitlement surface.
+await tapLabel(page, 'Settings', 1200);
+await tapText(page, 'Wafra Pro', 1200);
+ok('expired trial shows the paused-capture paywall', !!(await visibleText(
+  page,
+  'Automatic bank-alert capture is paused. Your ledger and manual entries still work.',
+)));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

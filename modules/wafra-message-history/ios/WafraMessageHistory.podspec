@@ -19,4 +19,8 @@ Pod::Spec.new do |s|
   }
 
   s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
+  s.resource_bundles = {
+    'WafraMessageHistoryResources' => ['Resources/**/*']
+  }
+  s.resources = ['Resources/**/*']
 end

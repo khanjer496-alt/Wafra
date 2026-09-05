@@ -235,6 +235,9 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
     const swiftModule = readTask3Source(
       'modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift',
     );
+    const swiftStore = readTask3Source(
+      'modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift',
+    );
     const resourceHelper = readTask3Source(
       'modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift',
     );
@@ -277,6 +280,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       acknowledgeRecords(ids: string[]): Promise<void>;
       purgeExpired(): Promise<number>;
       getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
+      getAutomationInputProbeAt(): Promise<number | null>;
       acknowledgeCaptureWarning(warningId: string): Promise<boolean>;
       recordFirstCapturedAt(observedAt: number): Promise<void>;
       eraseAll(): Promise<void>;
@@ -304,6 +308,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       ['acknowledgeRecords', [['00000000-0000-0000-0000-000000000001']]],
       ['purgeExpired', []],
       ['getCaptureStatus', []],
+      ['getAutomationInputProbeAt', []],
       ['acknowledgeCaptureWarning', ['00000000-0000-0000-0000-000000000001']],
       ['recordFirstCapturedAt', [1_234_567]],
       ['eraseAll', []],
@@ -324,6 +329,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'acknowledgeRecords',
       'purgeExpired',
       'getCaptureStatus',
+      'getAutomationInputProbeAt',
       'acknowledgeCaptureWarning',
       'recordFirstCapturedAt',
       'eraseAll',
@@ -346,6 +352,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       nativeMethods.every((method) => {
         const storeMethod = {
           getCaptureStatus: 'status',
+          getAutomationInputProbeAt: 'automationInputProbeAt',
           setLocalCaptureEntitlementLease: 'setLocalEntitlementLease',
           setStoreCaptureEntitlementLease: 'setStoreEntitlementLease',
         }[method] || method;
@@ -383,6 +390,9 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
     const expectedLocalizationKeys = [
       'live.setup_proof.title',
       'live.setup_proof.error',
+      'live.automation_input_probe.title',
+      'live.automation_input_probe.message.parameter',
+      'live.automation_input_probe.error',
       'live.stage.title',
       'live.stage.sender.parameter',
       'live.stage.message.parameter',
@@ -412,14 +422,15 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       appPlugins.indexOf(livePlugin) > appPlugins.indexOf('./modules/wafra-message-history/plugin'),
       JSON.stringify(appPlugins));
 
-    eq('generated source declares both app-discoverable intents once', [
+    eq('generated source declares all three app-discoverable intents once', [
       generatedIntent.match(/struct RecordWafraCaptureSetupProofIntent:\s*AppIntent/g)?.length || 0,
+      generatedIntent.match(/struct ProbeWafraAutomationInputIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveMessageIntent:\s*AppIntent/g)?.length || 0,
-    ], [1, 1]);
-    eq('both intents are always allowed and do not launch Wafra', [
+    ], [1, 1, 1]);
+    eq('all intents are always allowed and do not launch Wafra', [
       generatedIntent.match(/authenticationPolicy:\s*IntentAuthenticationPolicy\s*=\s*\.alwaysAllowed/g)?.length || 0,
       generatedIntent.match(/openAppWhenRun\s*=\s*false/g)?.length || 0,
-    ], [2, 2]);
+    ], [3, 3]);
     ok('setup-proof intent has no parameters and records proof version 1', (() => {
       const match = generatedIntent.match(
         /struct RecordWafraCaptureSetupProofIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}/,
@@ -427,32 +438,55 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       return Boolean(match) && !/@Parameter/.test(match[1]) &&
         /recordSetupProof\(version:\s*1,\s*at:\s*Date\(\)\)/.test(match[1]);
     })(), generatedIntent);
-    ok('stage intent accepts only the exact four parameters and returns only raw stage result',
-      (generatedIntent.match(/@Parameter\(/g) || []).length === 4 &&
-        /var sender:\s*String/.test(generatedIntent) && /var body:\s*String/.test(generatedIntent) &&
-        /var eventId:\s*String/.test(generatedIntent) && /var observedAt:\s*Date/.test(generatedIntent) &&
-        /return \.result\(value:\s*result\.rawValue\)/.test(generatedIntent) &&
-        !/ProvidesDialog|dialog:/.test(generatedIntent), generatedIntent);
+    ok('probe intent auto-connects one String and records only exact-match proof', (() => {
+      const match = generatedIntent.match(
+        /struct ProbeWafraAutomationInputIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension ProbeWafraAutomationInputIntent/,
+      );
+      return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 1 &&
+        /inputConnectionBehavior:\s*\.connectToPreviousIntentResult/.test(match[1]) &&
+        /var message:\s*String/.test(match[1]) &&
+        /recordAutomationInputProbe\(\s*body:\s*message,\s*at:\s*Date\(\)\s*\)/.test(match[1]) &&
+        /return \.result\(value:\s*matched\)/.test(match[1]) &&
+        !/\.stage\(|recordSetupProof/.test(match[1]);
+    })(), generatedIntent);
+    ok('diagnostic probe intent is compiled only in Debug builds',
+      /#if DEBUG\s*@available\(iOS 16\.0, \*\)\s*struct ProbeWafraAutomationInputIntent:[\s\S]*?extension ProbeWafraAutomationInputIntent[\s\S]*?#endif/
+        .test(generatedIntent), generatedIntent);
+    ok('diagnostic probe write capability is compiled only in Debug builds',
+      /#if DEBUG\s*public static let automationInputProbePayload[\s\S]*?#endif/.test(swiftStore) &&
+        /#if DEBUG\s*public func recordAutomationInputProbe[\s\S]*?#endif/.test(swiftStore),
+      swiftStore);
+    ok('stage intent keeps its exact four parameters and raw stage result', (() => {
+      const match = generatedIntent.match(
+        /struct StageWafraLiveMessageIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveMessageIntent/,
+      );
+      return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 4 &&
+        /var sender:\s*String/.test(match[1]) && /var body:\s*String/.test(match[1]) &&
+        /var eventId:\s*String/.test(match[1]) && /var observedAt:\s*Date/.test(match[1]) &&
+        /return \.result\(value:\s*result\.rawValue\)/.test(match[1]);
+    })(), generatedIntent);
+    eq('probe adds exactly one parameter without changing the stage action',
+      generatedIntent.match(/@Parameter\(/g)?.length || 0, 5);
     eq('Apple-extracted titles and parameters initialize LocalizedStringResource directly', [
       generatedIntent.match(/static let title\s*=\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(/@Parameter\(title:\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(
         /(?:static let title\s*=|@Parameter\(title:)\s*WafraLiveCaptureResources\.localized\(/g,
       )?.length || 0,
-    ], [2, 4, 0]);
+    ], [3, 5, 0]);
     eq('Apple-extracted title and parameter resources use the required main bundle', [
       generatedIntent.match(/bundle:\s*\.main/g)?.length || 0,
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
-    ], [6, 0]);
+    ], [8, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
       expectedLocalizationKeys.every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     ok('iOS 26 supportedModes references occur only in availability extensions', (() => {
       const modes = generatedIntent.match(/supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}/g) || [];
       const extensions = generatedIntent.match(
-        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|StageWafraLiveMessageIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
+        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
       ) || [];
-      return modes.length === 2 && extensions.length === 2;
+      return modes.length === 3 && extensions.length === 3;
     })(), generatedIntent);
     ok('generated intents contain no network, file, clipboard, log, notification, or dialog capability',
       !/(?:https?:|URLSession|FileManager|NSFile|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|UNUserNotificationCenter|notification|ProvidesDialog|dialog:)/i
@@ -1095,6 +1129,7 @@ struct WafraBankSenderRegistryTests {
       return requireBuild(id);
     });
     const productionLocalMessage = require('./build/local-message-record.js');
+    const productionLocalCapture = require('./build/ios-local-capture.js');
     ok('every production alias agrees with the parser attribution bank ID',
       require('./build/ios-bank-senders.generated.js').IOS_BANK_SENDER_ALIASES.every((alias) => {
         const attributed = productionLocalMessage.attributeIosBankSender(alias.alias);
@@ -1115,15 +1150,18 @@ struct WafraBankSenderRegistryTests {
     {
       const reviewId = '20000000-0000-4000-8000-000000000001';
       const declineId = '20000000-0000-4000-8000-000000000002';
+      const digestReviewId = 'a'.repeat(64);
       const merged = mergeQualifications([], [
         { id: reviewId, kind: 'review', observedAt: NOW - 2_000 },
         { id: declineId, kind: 'decline', observedAt: NOW - 1_000 },
+        { id: digestReviewId, kind: 'review', observedAt: NOW - 500 },
       ], NOW);
       ok('qualification receipts contain only the closed source-free replay schema',
-        merged.length === 2 && merged.every((receipt) =>
+        merged.length === 3 && merged.every((receipt) =>
           JSON.stringify(Object.keys(receipt).sort()) ===
             JSON.stringify(['expiresAt', 'id', 'kind', 'observedAt', 'v']) &&
           receipt.expiresAt === NOW + QUALIFICATION_TTL) &&
+          merged.some((receipt) => receipt.id === digestReviewId) &&
           !/(sender|body|text|merchant|amount|account|bank)/i.test(JSON.stringify(merged)),
         JSON.stringify(merged));
     }
@@ -1132,6 +1170,8 @@ struct WafraBankSenderRegistryTests {
       const duplicateId = '20000000-0000-4000-8000-000000000004';
       const normalized = normalizeQualifications([
         qualification(validId, 'review', NOW - 1_000, NOW + 1_000),
+        qualification('b'.repeat(64), 'decline', NOW - 500, NOW + 1_000),
+        qualification('B'.repeat(64), 'decline', NOW - 400, NOW + 1_000),
         qualification(duplicateId, 'review', NOW - 2_000, NOW + 2_000),
         qualification(duplicateId, 'decline', NOW - 2_000, NOW + 2_000),
         qualification('20000000-0000-4000-8000-000000000005', 'review', NOW - 1_000, NOW + 1_000,
@@ -1140,7 +1180,7 @@ struct WafraBankSenderRegistryTests {
         qualification('20000000-0000-4000-8000-000000000006', 'review', NOW - 1_000, NOW),
       ], NOW);
       eq('hydration drops malformed, expired, closed-schema, and duplicate qualification identities',
-        normalized.map((receipt) => receipt.id), [validId]);
+        normalized.map((receipt) => receipt.id), [validId, 'b'.repeat(64)]);
     }
     {
       const oversized = Array.from({ length: 2001 }, (_, index) => qualification(
@@ -1246,8 +1286,9 @@ struct WafraBankSenderRegistryTests {
     });
 
     markets.setActiveMarket('AE');
+    const parsedId = nextId();
     const parsed = localMessage.parseLocalMessageRecord(
-      envelope(), new Date(NOW), 'AE', session('AE'),
+      envelope({ id: parsedId }), new Date(NOW), 'AE', session('AE'),
     );
     ok('local parser decodes an exact v1 envelope into a financial result',
       parsed.kind === 'parsed' && parsed.market === 'AE' && parsed.row.amountFils === 12000,
@@ -1256,8 +1297,67 @@ struct WafraBankSenderRegistryTests {
       parsed.kind === 'parsed' && !Object.hasOwn(parsed.row, 'raw') &&
         !Object.hasOwn(parsed.row, 'sender') && !JSON.stringify(parsed).includes(AE_BODY),
       JSON.stringify(parsed));
+    ok('local parser carries the stable native identity into planning',
+      parsed.kind === 'parsed' &&
+        parsed.row.sourceEventId === parsedId,
+      JSON.stringify(parsed));
     ok('local sender attribution agrees with the exact registry bank identity',
       parsed.kind === 'parsed' && parsed.row.bankHint === 'Emirates NBD', JSON.stringify(parsed));
+
+    const unknownSenderEnvelope = envelope({ sender: 'UNKNOWN', text: AE_BODY });
+    const unknownPreflight = localMessage.preflightLocalMessageRecord(
+      unknownSenderEnvelope,
+      new Date(NOW),
+    );
+    ok('sender-agnostic preflight keeps a valid unknown sender for the shared parser',
+      unknownPreflight?.valid === true && unknownPreflight.attribution === null &&
+        unknownPreflight.market === 'AE',
+      JSON.stringify(unknownPreflight));
+    const unknownParsed = localMessage.parseLocalMessageRecord(
+      unknownSenderEnvelope,
+      new Date(NOW),
+      'AE',
+      session('AE'),
+    );
+    ok('the shared parser—not the sender registry—accepts a supported unknown-sender alert',
+      unknownParsed.kind === 'parsed' && unknownParsed.market === 'AE' &&
+        unknownParsed.row.amountFils === 12000,
+      JSON.stringify(unknownParsed));
+
+    const digestId = '9'.repeat(64);
+    const digestEnvelope = envelope({ id: digestId });
+    const digestPreflight = localMessage.preflightLocalMessageRecord(
+      digestEnvelope,
+      new Date(NOW),
+    );
+    const digestParsed = localMessage.parseLocalMessageRecord(
+      digestEnvelope,
+      new Date(NOW),
+      'AE',
+      session('AE'),
+    );
+    ok('local capture accepts and preserves the canonical SHA-256 Message identity',
+      digestPreflight?.valid === true && digestPreflight.id === digestId &&
+        digestParsed.kind === 'parsed' && digestParsed.row.sourceEventId === digestId,
+      JSON.stringify({ digestPreflight, digestParsed }));
+
+    const productionSaudiEnvelope = envelope({ sender: 'ALRAJHI', text: SA_BODY });
+    const productionSaudiPreflight = productionLocalMessage.preflightLocalMessageRecord(
+      productionSaudiEnvelope,
+      new Date(NOW),
+    );
+    ok('an unknown registry sender still routes from explicit Saudi launch evidence',
+      productionSaudiPreflight?.valid === true &&
+        productionSaudiPreflight.attribution === null &&
+        productionSaudiPreflight.market === 'SA',
+      JSON.stringify(productionSaudiPreflight));
+    const ambiguousPreflight = productionLocalMessage.preflightLocalMessageRecord(
+      envelope({ sender: 'UNKNOWN', text: 'AED 10.00 and SAR 10.00 card purchase' }),
+      new Date(NOW),
+    );
+    ok('conflicting unknown-sender money systems fail closed at preflight',
+      ambiguousPreflight?.valid === true && ambiguousPreflight.market === null,
+      JSON.stringify(ambiguousPreflight));
 
     const invalidCases = [
       ['unknown envelope keys', envelope({ extra: { futureKey: true } })],
@@ -1287,9 +1387,7 @@ struct WafraBankSenderRegistryTests {
       ['numeric envelope source', envelope({ source: 1 })],
       ['wrong source', envelope({ source: 'relay' })],
       ['invalid UUID', envelope({ id: 'not-a-uuid' })],
-      ['substring sender', envelope({ sender: 'FAKE-EMIRATES-NBD-OFFER' })],
-      ['registry/body spoofing', envelope({ sender: 'UNKNOWN', text: AE_BODY })],
-      ['registry bank-ID mismatch', envelope({ sender: 'ENBD SPOOF', text: AE_BODY })],
+      ['uppercase SHA-256 identity', envelope({ id: 'A'.repeat(64) })],
     ];
     for (const [name, serialized] of invalidCases) {
       const result = localMessage.parseLocalMessageRecord(
@@ -1363,6 +1461,157 @@ struct WafraBankSenderRegistryTests {
       review.kind === 'review' && review.item.market === 'AE' &&
         !Object.hasOwn(review.item, 'sender') && !Object.hasOwn(review.item, 'raw') &&
         !JSON.stringify(review).includes(REVIEW_BODY), JSON.stringify(review));
+
+    const historicalParser = require('./build/historical-import.js');
+    const parityFields = (row) => ({
+      kind: row.kind,
+      type: row.type,
+      amountFils: row.amountFils,
+      merchant: row.merchant,
+      categoryGuess: row.categoryGuess,
+      categoryDeliberate: row.categoryDeliberate,
+      currency: row.currency,
+      card: row.card,
+      originalCurrency: row.originalCurrency,
+      originalAmountMinor: row.originalAmountMinor,
+      fxSource: row.fxSource,
+      bankHint: row.bankHint,
+      snapshotFils: row.snapshotFils,
+      snapshotKind: row.snapshotKind,
+    });
+    const parityFixtures = [
+      {
+        name: 'ENBD foreign-currency purchase',
+        sender: 'EMIRATES NBD',
+        text: 'Purchase of USD 20.00 with Debit Card ending 4733 at CURSOR, AI POWERED IDE, +9715504. Avl Balance is AED 13,933.26.',
+        overrides: {},
+        kind: 'parsed',
+      },
+      {
+        name: 'ADIB kindless Card',
+        sender: 'ADIB',
+        text: 'Your ADIB Card ending 4417 has been used for AED 250.00 at CARREFOUR. Your available limit is AED 8,240.00',
+        overrides: {},
+        kind: 'parsed',
+      },
+      {
+        name: 'category override',
+        sender: 'EMIRATES NBD',
+        text: 'Purchase of AED 55.00 at MYSTERY VENDOR with card ending 1111',
+        overrides: { 'mystery vendor': 'health' },
+        kind: 'parsed',
+      },
+      {
+        name: 'low-confidence income',
+        sender: 'FAB',
+        text: REVIEW_BODY,
+        overrides: {},
+        kind: 'review',
+      },
+      {
+        name: 'promotion',
+        sender: 'EMIRATES NBD',
+        text: 'Get 20% off at CARREFOUR when you use your card.',
+        overrides: {},
+        kind: 'ignored',
+      },
+      {
+        name: 'decline',
+        sender: 'EMIRATES NBD',
+        text: DECLINE_BODY,
+        overrides: {},
+        kind: 'declined',
+      },
+    ];
+    for (let index = 0; index < parityFixtures.length; index += 1) {
+      const fixture = parityFixtures[index];
+      const eventId = (index + 10).toString(16).padStart(64, '0');
+      const local = localMessage.parseLocalMessageRecord(
+        envelope({ id: eventId, sender: fixture.sender, text: fixture.text }),
+        new Date(NOW),
+        'AE',
+        createLaunchAlertSession({
+          overrides: fixture.overrides,
+          activeMarket: 'AE',
+          pinnedCurrency: 'AED',
+        }),
+      );
+      markets.setLedgerCurrency(null);
+      markets.setActiveMarket('AE');
+      const historyResult = historicalParser.parseHistoricalMessageRecords([
+        JSON.stringify({
+          v: 1,
+          id: eventId,
+          text: fixture.text,
+          sender: fixture.sender,
+          observedAt: undefined,
+          receivedAt: '2026-08-25T11:00:00.000Z',
+        }),
+      ], fixture.overrides, new Date(NOW));
+      const parity = fixture.kind === 'parsed'
+        ? local.kind === 'parsed' && historyResult.parsed.length === 1 &&
+          JSON.stringify(parityFields(local.row)) ===
+            JSON.stringify(parityFields(historyResult.parsed[0]))
+        : fixture.kind === 'review'
+          ? local.kind === 'review' && historyResult.reviewCandidates.length === 1 &&
+            local.item.id === historyResult.reviewCandidates[0].id &&
+            local.item.sourceKey === historyResult.reviewCandidates[0].sourceKey &&
+            JSON.stringify({
+              market: local.item.market,
+              amount: local.item.amount,
+              direction: local.item.direction,
+              family: local.item.family,
+            }) === JSON.stringify({
+              market: historyResult.reviewCandidates[0].market,
+              amount: historyResult.reviewCandidates[0].amount,
+              direction: historyResult.reviewCandidates[0].direction,
+              family: historyResult.reviewCandidates[0].family,
+            })
+          : fixture.kind === 'declined'
+            ? local.kind === 'declined' && historyResult.declined.length === 1 &&
+              local.row.reason === historyResult.declined[0].reason
+            : local.kind === 'ignored' && historyResult.ignoredCount === 1;
+      ok(`Android-equivalent parser semantics match history and local: ${fixture.name}`,
+        parity,
+        JSON.stringify({ local, historyResult }));
+    }
+
+    {
+      const eventId = '7'.repeat(64);
+      const sender = 'UNLISTED-SENDER';
+      const preflight = localMessage.preflightLocalMessageRecord(
+        envelope({ id: eventId, sender, text: SA_BODY }),
+        new Date(NOW),
+      );
+      const local = localMessage.parseLocalMessageRecord(
+        envelope({ id: eventId, sender, text: SA_BODY }),
+        new Date(NOW),
+        'SA',
+        createLaunchAlertSession({
+          overrides: {},
+          activeMarket: 'SA',
+          pinnedCurrency: 'SAR',
+        }),
+      );
+      markets.setLedgerCurrency(null);
+      markets.setActiveMarket('SA');
+      const history = historicalParser.parseHistoricalMessageRecords([
+        JSON.stringify({
+          v: 1,
+          id: eventId,
+          text: SA_BODY,
+          sender,
+          receivedAt: '2026-08-25T11:00:00.000Z',
+        }),
+      ], {}, new Date(NOW));
+      ok('Android-equivalent all-Saudi unknown-sender semantics match history and local',
+        preflight?.market === 'SA' && local.kind === 'parsed' &&
+          history.parsed.length === 1 &&
+          JSON.stringify(parityFields(local.row)) ===
+            JSON.stringify(parityFields(history.parsed[0])),
+        JSON.stringify({ preflight, local, history }));
+      markets.setActiveMarket('AE');
+    }
 
     const BASE_STATE = {
       hydrated: true,
@@ -1510,6 +1759,45 @@ struct WafraBankSenderRegistryTests {
       });
     };
 
+    // Frozen universal-extractor probe, admitted only as an unqualified suggestion.
+    {
+      const eventId = 'e'.repeat(64);
+      const text = 'Card purchase CAD 24.90 at MAPLE CAFE on 2026-09-05. Available balance CAD 500.00.';
+      const genericEnvelope = envelope({ id: eventId, sender: 'UNLISTED-BANK', text });
+      const local = productionLocalMessage.parseLocalMessageRecord(
+        genericEnvelope, new Date(NOW), null, createLaunchAlertSession({ overrides: {} }),
+      );
+      ok('unregistered native financial alerts reach generic review without bank qualification',
+        local.kind === 'review' && local.item.kind === 'universal' && local.milestone === 'none' &&
+          local.item.sourceKey === `apple_message_review_source_${eventId}`, JSON.stringify(local));
+      const native = nativeQueue([genericEnvelope]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, marketId: 'SA' });
+      const outcome = await coordinator(native, ledger).drain();
+      ok('universal native review persists and acknowledges without importing or changing ledger market',
+        outcome.reviews === 1 && outcome.imported === 0 && ledger.getState().marketId === 'SA' &&
+          native.acknowledged.includes(eventId) && !ledger.calls.some((call) => call.startsWith('market:')),
+        JSON.stringify({ outcome, calls: ledger.calls }));
+      ok('universal native review cannot establish firstCapturedAt or a known-bank receipt',
+        outcome.firstCapturedAt === null && native.milestones.length === 0 &&
+          ledger.getState().localCaptureQualifications.length === 0);
+      const failedNative = nativeQueue([genericEnvelope]);
+      const failedLedger = ledgerAdapter({ stageReviewAlerts: () => ({ admitted: 1,
+        durable: Promise.reject(new Error('review storage failed')) }) });
+      await rejects(() => coordinator(failedNative, failedLedger).drain(), /review storage failed/);
+      ok('failed universal review staging leaves the native source unacknowledged',
+        failedNative.acknowledged.length === 0 && failedNative.pending().length === 1 &&
+          failedNative.milestones.length === 0);
+      const mixedNative = nativeQueue([
+        envelope({ id: eventId, sender: 'UNLISTED-BANK', text, observedAt: '2026-08-25T10:00:00.000Z' }),
+        envelope(),
+      ]);
+      const mixed = await coordinator(mixedNative, ledgerAdapter()).drain();
+      ok('mixed native pages retain valid automatic rows without borrowing a generic review milestone',
+        mixed.imported === 1 && mixed.reviews === 1 && mixedNative.acknowledged.length === 2 &&
+          mixed.firstCapturedAt === Date.parse('2026-08-25T11:00:00.000Z'));
+    }
+
     {
       const native = nativeQueue([envelope()]);
       const ledger = ledgerAdapter({ getStateGeneration: undefined });
@@ -1577,6 +1865,39 @@ struct WafraBankSenderRegistryTests {
     }
 
     {
+      markets.setLedgerCurrency(null);
+      markets.setActiveMarket('AE');
+      const native = nativeQueue([productionSaudiEnvelope]);
+      const ledger = ledgerAdapter();
+      const outcome = await productionLocalCapture.createIosLocalCaptureCoordinator({
+        native,
+        ledger,
+        retireShortcutCapture: async () => 'not-needed',
+      }).drain();
+      ok('production unknown-sender capture aligns an AED ledger from explicit Saudi evidence',
+        ledger.getState().marketId === 'SA' &&
+          ledger.getState().transactions[0]?.amountFils === 12550 &&
+          ledger.calls.indexOf('market:SA') < ledger.calls.indexOf('import') &&
+          outcome.imported === 1,
+        JSON.stringify({ state: ledger.getState(), calls: ledger.calls, outcome }));
+    }
+
+    {
+      const reviewEventId = '6'.repeat(64);
+      const native = nativeQueue([
+        envelope({ id: reviewEventId, text: REVIEW_BODY, sender: 'FAB' }),
+      ]);
+      const ledger = ledgerAdapter();
+      const outcome = await coordinator(native, ledger).drain();
+      ok('SHA-256 local review identity survives the source-free durability receipt',
+        outcome.reviews === 1 &&
+          ledger.getState().localCaptureQualifications.some((receipt) =>
+            receipt.id === reviewEventId && receipt.kind === 'review') &&
+          native.acknowledged.includes(reviewEventId),
+        JSON.stringify({ outcome, state: ledger.getState(), native: native.calls }));
+    }
+
+    {
       const firstId = nextId();
       const secondId = nextId();
       const first = envelope({ id: firstId });
@@ -1584,18 +1905,78 @@ struct WafraBankSenderRegistryTests {
       const native = nativeQueue([first, second]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
-      ok('distinct local UUIDs with the same financial semantics produce one ledger row',
-        ledger.getState().transactions.length === 1 && outcome.scanned === 2 && outcome.imported === 1,
+      const smsKeys = new Set(ledger.getState().transactions.map((row) => row.smsKey));
+      ok('distinct local UUIDs with the same financial semantics remain distinct events',
+        ledger.getState().transactions.length === 2 && outcome.scanned === 2 &&
+          outcome.imported === 2 && smsKeys.size === 2 &&
+          smsKeys.has(`h${firstId}`) && smsKeys.has(`h${secondId}`),
         JSON.stringify({ state: ledger.getState(), outcome }));
       eq('acknowledgement names the exact page snapshot IDs', native.acknowledged, [firstId, secondId]);
+    }
+
+    {
+      const sharedId = '8'.repeat(64);
+      const localOutcome = productionLocalMessage.parseLocalMessageRecord(
+        envelope({ id: sharedId, sender: 'EMIRATES NBD', text: AE_BODY }),
+        new Date(NOW),
+        'AE',
+        session('AE'),
+      );
+      const historyOutcome = historicalParser.parseHistoricalMessageRecords([
+        JSON.stringify({
+          v: 1,
+          id: sharedId,
+          text: AE_BODY,
+          sender: 'EMIRATES NBD',
+          receivedAt: '2026-08-25T11:00:00.000Z',
+        }),
+      ], {}, new Date(NOW));
+      const ledger = ledgerAdapter();
+      const planner = require('./build/import-plan.js').buildImportPlan;
+      const localPlan = localOutcome.kind === 'parsed'
+        ? planner([localOutcome.row], ledger.getState(), 0, new Date(NOW))
+        : null;
+      if (localPlan) ledger.importBatch(localPlan.batch);
+      const historyPlan = planner(
+        historyOutcome.parsed,
+        ledger.getState(),
+        0,
+        new Date(NOW),
+        historyOutcome.declined,
+      );
+      ok('local and history ingestion share the exact Message identity and dedupe once',
+        localOutcome.kind === 'parsed' && localPlan?.txCount === 1 &&
+          ledger.getState().transactions[0]?.smsKey === `h${sharedId}` &&
+          historyOutcome.parsed[0]?.sourceEventId === sharedId &&
+          historyPlan.txCount === 0 && ledger.getState().transactions.length === 1,
+        JSON.stringify({ localOutcome, historyOutcome, localPlan, historyPlan }));
+    }
+
+    {
+      const replayId = '7'.repeat(64);
+      const ledger = ledgerAdapter();
+      const first = await coordinator(
+        nativeQueue([envelope({ id: replayId })]),
+        ledger,
+      ).drain();
+      ledger.calls.length = 0;
+      const secondNative = nativeQueue([envelope({ id: replayId })]);
+      const second = await coordinator(secondNative, ledger).drain();
+      ok('an exact local Message replay is idempotent after encrypted durability',
+        first.imported === 1 && second.imported === 0 &&
+          ledger.getState().transactions.length === 1 &&
+          ledger.getState().transactions[0]?.smsKey === `h${replayId}` &&
+          ledger.calls.includes('ensure') && secondNative.acknowledged.includes(replayId),
+        JSON.stringify({ first, second, state: ledger.getState(), calls: ledger.calls }));
     }
 
     {
       const id = nextId();
       const native = nativeQueue([envelope({ id })]);
       const existing = ledgerAdapter();
+      const { sourceEventId: _sourceEventId, ...relayParsed } = parsed.row;
       const relayRow = {
-        ...parsed.row,
+        ...relayParsed,
         channel: undefined,
         captureSource: 'shortcut',
       };
@@ -1634,7 +2015,7 @@ struct WafraBankSenderRegistryTests {
         }),
       });
       const native = nativeQueue([
-        envelope(),
+        envelope({ id: parsedId }),
         envelope({ text: REVIEW_BODY, sender: 'FAB' }),
       ]);
       const outcome = await coordinator(native, lateLedger).drain();
@@ -2117,9 +2498,19 @@ struct WafraBankSenderRegistryTests {
       const native = nativeQueue([envelope({ text: 'Your available balance is AED 5,000.00.' })]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
-      ok('an all-ignored page crosses ensureDurable before acknowledgement',
-        outcome.ignored === 1 && ledger.calls.includes('ensure') && native.acknowledged.length === 1,
+      ok('a balance-only page stays informational review and crosses durability before acknowledgement',
+        outcome.reviews === 1 && outcome.imported === 0 && outcome.firstCapturedAt === null &&
+          ledger.calls.includes('ensure') && native.acknowledged.length === 1,
         JSON.stringify({ outcome, calls: ledger.calls }));
+    }
+
+    {
+      const native = nativeQueue([envelope({ text: 'Get 20% off at CARREFOUR when you use your card.' })]);
+      const ledger = ledgerAdapter();
+      const outcome = await coordinator(native, ledger).drain();
+      ok('an all-ignored promotion page still crosses ensureDurable before acknowledgement',
+        outcome.ignored === 1 && outcome.reviews === 0 && ledger.calls.includes('ensure') &&
+          native.acknowledged.length === 1, JSON.stringify({ outcome, calls: ledger.calls }));
     }
 
     {
@@ -3180,6 +3571,166 @@ struct WafraBankSenderRegistryTests {
       supported: true,
       publishToSelf: true,
     });
+
+    {
+      const runtime = createHookRuntime();
+      let permissionGranted = false;
+      let permissionChecks = 0;
+      let providerFails = false;
+      const appStateListeners = new Set();
+      let storeState = {
+        hydrated: true,
+        captureOptOut: false,
+        privateMode: false,
+        iosCaptureWarning: null,
+        historyImport: null,
+        onboarded: false,
+        lastScanTs: 0,
+        dailySummary: false,
+        transactions: [],
+      };
+      const storeMethods = {
+        getStateSnapshot: () => storeState,
+        getStateGeneration: () => 0,
+        importBatch: () => ({ ids: [], durable: Promise.resolve() }),
+        stageReviewAlerts: () => ({ admitted: 0, durable: Promise.resolve() }),
+        ensureDurable: async () => {},
+        setMarket: () => true,
+        undoBatch: () => {},
+        recordIosCaptureWarning: () => ({ durable: Promise.resolve() }),
+        clearIosCaptureWarning: () => ({ cleared: false, durable: Promise.resolve() }),
+      };
+      const mountedAndroidHook = execute('src/hooks/use-auto-import.ts', (id) => {
+        if (id === 'react') return runtime.react;
+        if (id === 'expo-router') {
+          return {
+            useFocusEffect: (effect) => runtime.react.useEffect(effect, [effect]),
+            useRouter: () => ({ push: () => {} }),
+          };
+        }
+        if (id === 'react-native') {
+          return {
+            AppState: {
+              addEventListener: (_event, listener) => {
+                appStateListeners.add(listener);
+                return { remove: () => appStateListeners.delete(listener) };
+              },
+            },
+            Platform: { OS: 'android', Version: 36 },
+          };
+        }
+        if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/lib/auto-import') {
+          return {
+            hasSmsPermission: async () => {
+              permissionChecks += 1;
+              return permissionGranted;
+            },
+            isSmsInboxAccessError: (error) => error?.message === 'sms-provider-failure',
+            isSmsScanningAvailable: () => true,
+            openSmsPermissionSettings: async () => {},
+            requestSmsPermission: async () => permissionGranted,
+          };
+        }
+        if (id === '@/lib/background-relay') {
+          return { enableRelayBackgroundSync: async () => false };
+        }
+        if (id === '@/lib/capture') {
+          return {
+            getIosCaptureNativeModule: () => null,
+            isCaptureAvailable: () => true,
+            publishIosCaptureStatusRefresh: () => {},
+            subscribeIosCaptureStatusRefresh: () => () => {},
+          };
+        }
+        if (id === '@/lib/capture-executor') {
+          return {
+            createCaptureExecutor: () => ({
+              execute: async () => {
+                if (providerFails) throw new Error('sms-provider-failure');
+                return {
+                  kind: 'up-to-date', source: 'none', transactions: 0, dues: 0,
+                  bills: 0, healed: 0, newAccounts: 0, transactionIds: [], reviewAlerts: 0,
+                };
+              },
+            }),
+          };
+        }
+        if (id === '@/lib/haptics') return { committed: () => {} };
+        if (id === '@/lib/i18n') return { t: (key) => key, tf: (key) => key };
+        if (id === '@/lib/notifications') {
+          return { syncDailySummary: async () => {}, syncPaymentReminders: async () => {} };
+        }
+        if (id === '@/lib/purchases') return { isProActive: () => true };
+        if (id === '@/lib/relay') {
+          return {
+            getRelayConfig: async () => null,
+            isLegacyShortcutCaptureActive: () => false,
+            retireRelayShortcutCapture: async () => {},
+          };
+        }
+        if (id === '@/lib/ios-local-capture') {
+          return { getSharedIosLocalCaptureCoordinator: () => null };
+        }
+        if (id === '@/lib/store') {
+          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+        }
+        return {};
+      });
+      const render = () => runtime.render(() => ({
+        home: mountedAndroidHook.useAutoImport(false, true),
+        shell: mountedAndroidHook.useAutoImport(false, false),
+      }));
+      render();
+      await runtime.flush();
+      let models = render();
+      await runtime.flush();
+      models = render();
+      let model = models.home;
+      ok('mounted Android status: pre-onboarding denial is local and off',
+        model.needsPermission && model.captureState === 'off' && permissionChecks >= 1,
+        JSON.stringify({ model, permissionChecks }));
+
+      permissionGranted = true;
+      storeState = { ...storeState, onboarded: true };
+      render();
+      await runtime.flush();
+      models = render();
+      await runtime.flush();
+      models = render();
+      model = models.home;
+      ok('mounted Android status: onboarding grant becomes ready immediately',
+        !model.needsPermission && model.captureState === 'waiting-for-alert' &&
+          permissionChecks >= 2,
+        JSON.stringify({ model, permissionChecks }));
+
+      providerFails = true;
+      await models.shell.runAutoImport(false);
+      models = render();
+      await runtime.flush();
+      models = render();
+      for (const listener of appStateListeners) listener('active');
+      await nextMicrotask();
+      await nextMicrotask();
+      models = render();
+      model = models.home;
+      ok('mounted Android status: a real provider failure is shared and off',
+        model.needsPermission && model.captureState === 'off',
+        JSON.stringify({ model, permissionChecks }));
+
+      providerFails = false;
+      await models.shell.runAutoImport(false);
+      models = render();
+      await runtime.flush();
+      models = render();
+      await runtime.flush();
+      models = render();
+      model = models.home;
+      ok('mounted Android status: a successful retry immediately clears the shared failure',
+        !model.needsPermission && model.captureState === 'waiting-for-alert',
+        JSON.stringify({ model, permissionChecks }));
+      runtime.cleanup();
+    }
   }
 
   {
@@ -3333,14 +3884,14 @@ struct WafraBankSenderRegistryTests {
 
   eq('local capture protocol: stable Shortcut name',
     protocolModule.IOS_LOCAL_CAPTURE_SHORTCUT_NAME, 'Wafra Local Capture');
-  eq('local capture protocol: setup proof sentinel is exact',
-    protocolModule.IOS_LOCAL_CAPTURE_TEST_SENTINEL, 'WAFRA_LOCAL_CAPTURE_TEST_V1');
-  eq('local capture protocol: exact x-callback URL',
+  eq('local capture protocol: obsolete Text sentinel is not exported',
+    Object.hasOwn(protocolModule, 'IOS_LOCAL_CAPTURE_TEST_SENTINEL'), false);
+  eq('local capture protocol: exact no-input x-callback URL',
     protocolModule.iosLocalCaptureTestUrl(),
-    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Local%20Capture&input=text&text=WAFRA_LOCAL_CAPTURE_TEST_V1&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror');
+    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Local%20Capture&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror');
   eq('local capture protocol: onboarding survives every callback',
     protocolModule.iosLocalCaptureTestUrl(true),
-    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Local%20Capture&input=text&text=WAFRA_LOCAL_CAPTURE_TEST_V1&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess%26fromOnboarding%3D1&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel%26fromOnboarding%3D1&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror%26fromOnboarding%3D1');
+    'shortcuts://x-callback-url/run-shortcut?name=Wafra%20Local%20Capture&x-success=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dsuccess%26fromOnboarding%3D1&x-cancel=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Dcancel%26fromOnboarding%3D1&x-error=wafra%3A%2F%2Fios-setup%3FshortcutResult%3Derror%26fromOnboarding%3D1');
 
   eq('local capture protocol: valid iCloud IDs normalize to lowercase',
     protocolModule.normalizeIosLocalCaptureShortcutUrl(
@@ -3386,6 +3937,102 @@ struct WafraBankSenderRegistryTests {
       firstCapturedAt: 1_800_000_000_000,
     })),
     'not-added');
+
+  eq('setup restoration: a fresh Future row starts with the published Shortcut',
+    setupModule.resolveIosFutureSetupStep({
+      futureShortcutConfirmed: false,
+      futureAutomationConfirmed: false,
+      futureStatus: 'not-started',
+    }, 'not-added'), 'add-shortcut');
+  eq('setup restoration: a remount after the install handoff asks for confirmation',
+    setupModule.resolveIosFutureSetupStep({
+      futureShortcutConfirmed: false,
+      futureAutomationConfirmed: false,
+      futureStatus: 'in-progress',
+    }, 'not-added'), 'confirm-shortcut');
+  eq('setup restoration: a skipped Future row can restart from the published Shortcut',
+    setupModule.resolveIosFutureSetupStep({
+      futureShortcutConfirmed: false,
+      futureAutomationConfirmed: false,
+      futureStatus: 'skipped',
+    }, 'not-added'), 'add-shortcut');
+  eq('setup restoration: confirmed Shortcut progress resumes at Apple automation',
+    setupModule.resolveIosFutureSetupStep({
+      futureShortcutConfirmed: true,
+      futureAutomationConfirmed: false,
+      futureStatus: 'in-progress',
+    }, 'not-added'), 'create-automation');
+  eq('setup restoration: self-confirmed automation without native proof stays retryable',
+    setupModule.resolveIosFutureSetupStep({
+      futureShortcutConfirmed: true,
+      futureAutomationConfirmed: true,
+      futureStatus: 'in-progress',
+    }, 'not-added'), 'prove-shortcut');
+  eq('setup restoration: native no-input proof is the only ready transition',
+    setupModule.resolveIosFutureSetupStep({
+      futureShortcutConfirmed: true,
+      futureAutomationConfirmed: true,
+      futureStatus: 'in-progress',
+    }, 'shortcut-proven'), 'ready');
+
+  eq('setup trigger guard: one explicitly selected bank sender is supported',
+    setupModule.isSupportedIosMessageAutomationTrigger({
+      selectedSenderCount: 1,
+      messageContains: null,
+    }), true);
+  for (const [name, trigger] of [
+    ['Any Sender', { selectedSenderCount: 'any', messageContains: null }],
+    ['blank universal trigger', { selectedSenderCount: 0, messageContains: null }],
+    ['space trigger', { selectedSenderCount: 0, messageContains: ' ' }],
+    ['AED keyword trigger', { selectedSenderCount: 0, messageContains: 'AED' }],
+    ['SAR keyword trigger', { selectedSenderCount: 0, messageContains: 'SAR' }],
+  ]) {
+    eq(`setup trigger guard: rejects ${name}`,
+      setupModule.isSupportedIosMessageAutomationTrigger(trigger), false);
+  }
+
+  {
+    const events = [];
+    let durableCalls = 0;
+    const outcome = await setupModule.completeIosMessageOnboardingAttempt({
+      retryRequired: false,
+      ensureDurable: async () => {
+        durableCalls += 1;
+        events.push(`durable:${durableCalls}`);
+        if (durableCalls === 2) throw new Error('final save');
+      },
+      markFinished: async () => { events.push('progress:finished'); },
+      markStarted: async () => { events.push('progress:started'); },
+      setOnboarded: () => { events.push('ledger:onboarded'); },
+    });
+    eq('setup completion: a failed final save restores onboarding return for retry',
+      [outcome, events], [
+        'retry-required',
+        [
+          'durable:1',
+          'progress:finished',
+          'ledger:onboarded',
+          'durable:2',
+          'progress:started',
+        ],
+      ]);
+  }
+
+  {
+    const events = [];
+    const outcome = await setupModule.completeIosMessageOnboardingAttempt({
+      retryRequired: true,
+      ensureDurable: async () => { events.push('durable'); },
+      markFinished: async () => { events.push('progress:finished'); },
+      markStarted: async () => { events.push('progress:started'); },
+      setOnboarded: () => { events.push('ledger:onboarded'); },
+    });
+    eq('setup completion: retry skips the dangerous preflight and ledger mutation',
+      [outcome, events], [
+        'complete',
+        ['progress:finished', 'durable'],
+      ]);
+  }
 
   {
     const harness = controllerHarness({ supported: false });
@@ -3525,7 +4172,7 @@ struct WafraBankSenderRegistryTests {
     harness.native.setCaptureEnabled = async (value) => { events.push(`enable:${value}`); };
     await harness.controller.send({ type: 'load' });
     await harness.controller.send({ type: 'automation-added' });
-    eq('setup controller: explicit automation confirmation enables before exact sentinel run',
+    eq('setup controller: explicit automation confirmation enables before no-input proof run',
       events, [
         'can:shortcuts://',
         'enable:true',

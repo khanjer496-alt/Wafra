@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Icon } from '@/components/ui/icon';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { Button } from '@/components/ui/controls';
 import { SectionHeader } from '@/components/ui/period-pill';
-import { Elevation, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { TextField } from '@/components/ui/text-field';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, parseAmountToFils, shiftMonthKey, toWholeDirhamFils } from '@/lib/format';
+import { formatAED, formatAmount, parseAmountToFils, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
@@ -39,7 +40,6 @@ interface LimitSheetProps {
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const theme = useTheme();
-  const keyboardHeight = useKeyboardHeight();
   const { state, upsertBudget, deleteBudget } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
@@ -53,7 +53,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (!open) return;
     setPicked(category);
     const current = category ? state.budgets.find((b) => b.category === category) : undefined;
-    setText(current ? String(Math.round(current.limitFils / 100)) : '');
+    setText(current ? formatAmount(current.limitFils).replace(/,/g, '') : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, category]);
 
@@ -134,14 +134,8 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
         map.set(k, { title: t.title, totalFils: t.amountFils, count: 1 });
       }
     }
-    // Snap each merchant to whole dirhams BEFORE summing, because that is how
-    // every figure in this sheet is shown (decimals: false). Rounding once over
-    // rows that each round themselves is how a header of AED 226 came to sit
-    // above two rows reading 227 — the same defect the Wallet headline had, and
-    // a finance app disagreeing with its own arithmetic on one screen costs
-    // more credibility than the dirham is worth.
+    // Keep the same exact minor units in the header, visible rows and remainder.
     const all = [...map.values()]
-      .map((m) => ({ ...m, totalFils: toWholeDirhamFils(m.totalFils) }))
       .sort((a, b) => b.totalFils - a.totalFils);
     const shown = all.slice(0, MERCHANT_ROWS);
     const rest = all.slice(MERCHANT_ROWS);
@@ -206,39 +200,39 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     onClose();
   };
 
-  return (
-    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable
-          style={[
-            styles.sheet,
-            Elevation,
-            { backgroundColor: theme.card, borderColor: theme.cardBorder },
-            // Its own Modal, so the same rule applies: nothing resizes it for
-            // the keyboard, and the limit amount is typed at the bottom.
-            { marginBottom: keyboardHeight },
-          ]}
-          onPress={() => {}}>
-          <View style={styles.header}>
-            <ThemedText type="micro" themeColor="textTertiary">
-              {picked
-                ? tf('categoryLimit', { category: categoryLabel(getCategory(picked)) })
-                : t('newLimitTitle')}
-            </ThemedText>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('close')}
-              onPress={onClose}
-              hitSlop={10}>
-              <Icon name="close" size={18} color={theme.textSecondary} />
-            </Pressable>
-          </View>
+  const removeExisting = () => {
+    if (!existing) return;
+    deleteBudget(existing.category);
+    onClose();
+  };
 
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}>
+  return (
+    <BottomSheet
+      visible={open}
+      onClose={onClose}
+      title={
+        picked
+          ? tf('categoryLimit', { category: categoryLabel(getCategory(picked)) })
+          : t('newLimitTitle')
+      }
+      footer={(
+        <View style={styles.actions}>
+          {existing ? (
+            <Button
+              inline
+              label={t('remove')}
+              variant="danger"
+              onPress={removeExisting}
+            />
+          ) : null}
+          <Button
+            inline
+            label={t('saveLimit')}
+            disabled={!picked || !limitFils}
+            onPress={save}
+          />
+        </View>
+      )}>
             {!category && (
               <View style={styles.picker}>
                 {available.map((c) => {
@@ -300,23 +294,21 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             )}
 
             <View style={styles.amountBlock}>
-              <ThemedText type="micro" themeColor="textTertiary">
-                {t('monthlyLimit')}
-              </ThemedText>
-              <View style={[styles.amountRow, { borderBottomColor: theme.text }]}>
+              <TextField
+                numeric
+                label={t('monthlyLimit')}
+                value={text}
+                onChangeText={setText}
+                placeholder="0"
+                placeholderTextColor={theme.textTertiary}
+                selectionColor={theme.primary}
+                leading={(
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
                   {ledgerCurrencyDisplay()}
                 </ThemedText>
-                <TextInput
-                  value={text}
-                  onChangeText={setText}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  placeholderTextColor={theme.textTertiary}
-                  selectionColor={theme.primary}
-                  style={[styles.amountInput, { color: theme.text }]}
-                />
-              </View>
+                )}
+                style={styles.amountInput}
+              />
             </View>
 
             {picked && (
@@ -324,7 +316,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 {suggestions.map((s) => (
                   <Pressable
                     key={`${s.fils}-${s.note}`}
-                    onPress={() => setText(String(Math.round(s.fils / 100)))}
+                    onPress={() => setText(formatAmount(s.fils).replace(/,/g, ''))}
                     style={[
                       styles.chip,
                       {
@@ -385,37 +377,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 )}
               </View>
             )}
-          </ScrollView>
-
-          <View style={styles.actions}>
-            {existing && (
-              <Pressable
-                onPress={() => {
-                  deleteBudget(existing.category);
-                  onClose();
-                }}
-                style={[styles.btn, { borderWidth: 1, borderColor: theme.expenseSoftBorder }]}>
-                <ThemedText type="micro" style={{ color: theme.expense }}>
-                  {t('remove')}
-                </ThemedText>
-              </Pressable>
-            )}
-            <Pressable
-              onPress={save}
-              disabled={!picked || !limitFils}
-              style={[
-                styles.btn,
-                styles.btnPrimary,
-                { backgroundColor: theme.primary, opacity: !picked || !limitFils ? 0.45 : 1 },
-              ]}>
-              <ThemedText type="micro" style={{ color: theme.onPrimary }}>
-                {t('saveLimit')}
-              </ThemedText>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    </BottomSheet>
   );
 }
 
@@ -425,25 +387,7 @@ function roundToHundred(fils: number): number {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(22,19,15,0.42)' },
-  sheet: {
-    maxHeight: '88%',
-    flexShrink: 1,
-    borderTopLeftRadius: Radius.bottomSheet,
-    borderTopRightRadius: Radius.bottomSheet,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: ScreenPadding,
-    paddingTop: ScreenPadding,
-    paddingBottom: 30,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  scroll: { flexGrow: 0, flexShrink: 1 },
-  scrollContent: { paddingBottom: Spacing.three },
-  picker: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
+  picker: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   chip: {
     borderWidth: 1,
     borderRadius: Radius.full,
@@ -457,22 +401,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   track: { height: 8, borderRadius: 4, overflow: 'hidden' },
-  amountBlock: { marginTop: Spacing.four, gap: Spacing.two },
-  amountRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: Spacing.two,
-    borderBottomWidth: 1.5,
-    paddingBottom: Spacing.two,
-  },
+  amountBlock: { marginTop: Spacing.four },
   aed: { fontSize: 15 },
   amountInput: {
-    flex: 1,
-    fontFamily: Fonts.monoSemi,
     fontSize: 34,
     lineHeight: 40,
     letterSpacing: -0.7,
-    padding: 0,
   },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
   where: { marginTop: Spacing.five },
@@ -484,13 +418,5 @@ const styles = StyleSheet.create({
   },
   whereName: { flex: 1 },
   whereFigure: { minWidth: 62 },
-  actions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three },
-  btn: {
-    borderRadius: Radius.control,
-    paddingVertical: 15,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  btnPrimary: { flex: 1 },
+  actions: { flexDirection: 'row', gap: Spacing.two },
 });

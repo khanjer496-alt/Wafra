@@ -1109,7 +1109,25 @@ t('a .com merchant keeps its domain',
 // Transfer rails name the rail, not a shop.
 t('a FastPay transfer names the person',
   'Dear Ahmed Salem, AED 750.00 has been debited from your Saving Bank Account ending with 2501 for a FastPay transfer to Khalid Rashid. If this is not you; contact us immediately.',
-  { merchant: 'Transfer to Khalid Rashid', amountFils: 75000 });
+  { merchant: 'Transfer to Khalid Rashid', amountFils: 75000, card: { last4: '2501', kind: 'account' } });
+// The real FastPay wording above supplies the account tail. Changing its
+// preposition must preserve that identity; a partially visible tail must not
+// be completed from a reference or balance elsewhere in the message.
+t('FastPay account ending in keeps the same identity',
+  'AED 750.00 has been debited from your Saving Bank Account ending in 2501 for a FastPay transfer to Khalid Rashid.',
+  { card: { last4: '2501', kind: 'account' }, amountFils: 75000 });
+t('FastPay account ending with an incomplete tail stays unknown',
+  'AED 750.00 has been debited from your Saving Bank Account ending with XX01 for a FastPay transfer to Khalid Rashid.',
+  { card: null, amountFils: 75000 });
+
+// Real second accuracy corpus #89: ON-PUTTHA is part of the merchant name,
+// whereas "on 20/04/2024" below introduces the transaction date.
+t('a hyphenated ON surname stays in the merchant identity',
+  'Purchase of AED 250.57 with Debit Card ending 8783 at PRASERT ON-PUTTHA, PHUKET. Avl Balance is AED 35,865.43.  Pls refer stmt for exact amt.',
+  { merchant: 'Prasert On-puttha', category: 'other', amountFils: 25057, card: { last4: '8783', kind: 'debit' } });
+t('the ON surname does not swallow a following transaction date',
+  'Purchase of AED 250.57 with Debit Card ending 8783 at PRASERT ON-PUTTHA on 20/04/2024. Avl Balance is AED 35,865.43.',
+  { merchant: 'Prasert On-puttha', category: 'other', amountFils: 25057, date: '2024-04-20' });
 t('a mobile-banking IBAN transfer is a bank transfer',
   'AED 36.00 has been debited from your account no. 095XXX11XXX01 MOBILE BANKING TRANSFER TO AE····0021XXX85XXX01. The available balance is AED 26,209.80.',
   { merchant: 'Bank transfer', amountFils: 3600 });
@@ -3717,17 +3735,23 @@ t('a named payee after "for" is still read',
   'AED 25.00 has been debited from your account 1234 for SALIK on 12/06/2026.',
   { merchant: 'Salik', category: 'transport' });
 
-// The abbreviated card-summary block. Every label is short and the dates are
-// ISO, so neither the statement vocabulary nor the date grammar could read it:
-// a STATEMENT imported as a AED 154.32 purchase at a shop called "Last Stmt
-// 2022-05-11", and the payment that is actually due raised no reminder.
-{
-  const p = parseSms('Card XXXX8722\nAvailable Balance AED 440.10\nLast Stmt 2022-05-11\nMin Amt AED 154.32\nPymt due 2022-06-06\nLast Pymt AED 50.00\nLast Pymt date 2022-05-07');
-  ok('the abbreviated card summary is a statement, not a purchase',
-    p && p.kind === 'cardStatement' && p.merchant === 'Card •8722' && p.minDueFils === 15432 &&
-      p.date === '2022-06-06' && p.dueDay === 6 && p.card.kind === 'credit',
-    JSON.stringify(p && { k: p.kind, m: p.merchant, min: p.minDueFils, d: p.date, c: p.card }));
-}
+// The real abbreviated summary quotes a minimum, never a statement total.
+// It cannot safely become either spending or a fully settleable CardDue.
+t('the abbreviated minimum-only summary never invents a total',
+  'Card XXXX8722\nAvailable Balance AED 440.10\nLast Stmt 2022-05-11\nMin Amt AED 154.32\nPymt due 2022-06-06\nLast Pymt AED 50.00\nLast Pymt date 2022-05-07',
+  null);
+t('flattening the minimum-only summary cannot turn it into spending',
+  'Card XXXX8722 Available Balance AED440.10 Last Stmt2022-05-11 Min Amt AED154.32 Pymt due2022-06-06 Last Pymt AED50 Last Pymt date2022-05-07',
+  null);
+t('a minimum-only card summary without a readable deadline cannot become spending',
+  'Card XXXX8722 Min Amt AED154.32 Pymt due unknown',
+  null);
+t('a minimum-only cardless summary without a readable deadline cannot become spending',
+  'Your credit card statement: Min Amt AED154.32',
+  null);
+t('a purchase keeps its amount when a minimum reminder appears in the footer',
+  'Purchase of AED 45.00 with Credit Card ending 1234 at CARREFOUR. Minimum due AED 154.32. Payment due on 06/09/2026.',
+  { kind: 'transaction', amountFils: 4500, merchant: 'Carrefour' });
 // CONTROL: "Pls refer stmt for exact amt" is the commonest footer in this
 // corpus and sits on ordinary purchases. A bare "stmt" stem would have turned
 // every one of them into a statement.
@@ -4332,9 +4356,9 @@ t('a real-estate agency is not filed as rent', g('BLUE BAY REAL ESTATE L', 'DUBA
   // and categories.ts reaches i18n. Assert they agree rather than trusting it.
   ok('the parser and categories.ts agree on which categories are credits',
     INCOME_CATEGORIES.every((c) => overrideFitsDirection(c.id, 'income')) &&
-      INCOME_CATEGORIES.every((c) => !overrideFitsDirection(c.id, 'expense')) &&
+      INCOME_CATEGORIES.every((c) => c.id === 'other' || !overrideFitsDirection(c.id, 'expense')) &&
       EXPENSE_CATEGORIES.every((c) => overrideFitsDirection(c.id, 'expense')) &&
-      EXPENSE_CATEGORIES.every((c) => !overrideFitsDirection(c.id, 'income')),
+      EXPENSE_CATEGORIES.every((c) => c.id === 'other' || !overrideFitsDirection(c.id, 'income')),
     JSON.stringify({
       income: INCOME_CATEGORIES.map((c) => c.id),
       expense: EXPENSE_CATEGORIES.map((c) => c.id),
@@ -4568,14 +4592,37 @@ t('a MASKED total is refused rather than replaced by the minimum',
 t('the minimum is not promoted by the widened total pattern',
   'Your credit card statement for card 1234 is ready. Minimum amount due AED 425.00. Total amount due AED 8,500.00. Payment due date 18/08/2026.',
   { kind: 'cardStatement', amountFils: 850000, minDueFils: 42500 });
-// CONTROL: the abbreviated summary block states NO total, and is still a
-// readable reminder — refusing it would lose the payment date for no gain.
-{
-  const p = parseSms('Card XXXX8722\nAvailable Balance AED 440.10\nLast Stmt 2022-05-11\nMin Amt AED 154.32\nPymt due 2022-06-06\nLast Pymt AED 50.00\nLast Pymt date 2022-05-07');
-  ok('a summary that states only a minimum still raises its reminder',
-    p && p.kind === 'cardStatement' && p.minDueFils === 15432 && p.dueDay === 6,
-    JSON.stringify(p && { k: p.kind, a: p.amountFils, min: p.minDueFils, d: p.date }));
-}
+// Minimum-only variations of the existing English/Arabic statement fixtures.
+for (const [label, message] of [
+  ['English card', 'Your Credit Card ending 4821 statement is generated. Minimum due AED 162.00 by 05/08/2026'],
+  ['cardless', 'Your credit card statement is ready. Minimum due AED 162.00 by 05/08/2026'],
+  ['Arabic card', 'كشف حساب البطاقة المنتهية 4833: الحد الأدنى للدفع 162.00 درهم، تاريخ الاستحقاق 05/08/2026'],
+  ['masked total', 'Your credit card statement for card 1234 is ready. Total amount due AED ****8500.00. Minimum due AED 425.00 by 18/08/2026'],
+  ['malformed total', 'Your credit card statement for card 1234 is ready. Total amount due AED 8,50.00. Minimum due AED 425.00 by 18/08/2026'],
+]) t(`an incomplete ${label} statement does not promote minimum into total`, message, null);
+t('an explicitly equal total and minimum remains a valid full-payment statement',
+  'Your credit card statement for card 1234 is ready. Total due AED 425.00. Minimum due AED 425.00 by 18/08/2026',
+  { kind: 'cardStatement', amountFils: 42500, minDueFils: 42500 });
+
+// Existing semantics matrix names the total as the credit-card bill amount.
+t('an explicit credit card bill amount is the total with a yearless deadline',
+  'Credit card bill AED 1,200.00 due on 25 Aug. Minimum payment AED 100.00 for card 1234.',
+  { kind: 'cardStatement', amountFils: 120000, minDueFils: 10000, date: null, dueDay: 25 });
+t('a minimum before the explicit card bill sentence cannot replace its total',
+  'Minimum payment AED 100.00 for card 1234. Credit card bill AED 1,200.00 due on 25 Aug.',
+  { kind: 'cardStatement', amountFils: 120000, minDueFils: 10000, date: null, dueDay: 25 });
+for (const message of [
+  'Minimum credit card bill AED 100.00 due on 25 Aug. Minimum payment AED 100.00 for card 1234.',
+  'Minimum payment for credit card bill AED 100.00 due on 25 Aug for card 1234.',
+  'Credit card bill: Minimum payment AED 100.00 due on 25 Aug for card 1234.',
+  'Credit card bill AED 1,20.00 due on 25 Aug. Minimum payment AED 100.00 for card 1234.',
+  'Credit card bill AED ****1200.00 due on 25 Aug. Minimum payment AED 100.00 for card 1234.',
+]) t('a minimum-only or unreadable card bill label cannot create a total', message, null);
+t('an Arabic statement heading explicitly identifies its amount due',
+  'كشف حساب البطاقة الائتمانية 1234 المبلغ المستحق AED 1200.00 الحد الأدنى AED 100.00 تاريخ الاستحقاق 25/08/2026',
+  { kind: 'cardStatement', amountFils: 120000, minDueFils: 10000, dueDay: 25 });
+t('an Arabic minimum inserted before amount due cannot become total',
+  'كشف حساب البطاقة الائتمانية 1234 الحد الأدنى المبلغ المستحق AED 100.00 تاريخ الاستحقاق 25/08/2026', null);
 
 // ── AN AVAILABLE-LIMIT NOTICE IS NOT A PURCHASE ──
 //
@@ -4886,6 +4933,161 @@ t('a Georgia purchase remains visible through a fallback conversion',
   'Credit Card Purchase\nCard No XXXX3749\nGEL 25.00\nWOLT TBILISI GEO\n10/08/26 19:15\nAvailable Balance AED 9680.69',
   { type: 'expense', amountFils: 3505, originalCurrency: 'GEL', originalAmountMinor: 2500,
     fxSource: 'fallback' });
+
+// Proactive controls derived from the existing UAE purchase/reminder templates.
+// These are adversarial variations, not additional claimed bank formats.
+t('an expanded account-reference footer cannot replace a named seller',
+  'Purchase of AED 45.00 with Debit Card 1234 at STARBUCKS. YOUR ACCOUNT NO.-556677',
+  { merchant: 'Starbucks', category: 'dining', amountFils: 4500 });
+t('an unknown reference payee does not invent a utility bill',
+  'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 ABO ALO NO.-8765. The available balance is AED 7,587.88.',
+  { merchant: 'Abo Alo', category: 'other', amountFils: 193841 });
+for (const [title, message] of [
+  ['SEWA', 'AED 1,938.41 has been debited from your account no. 095-XXX11XXX-01 SEWA NO.-8765. The available balance is AED 7,587.88.'],
+  ['Homeinet', 'Dear Customer, Your payment instructions of AED 313.95 to homeinet for consumer number 1234026 has been processed on 13/07/2026 22:01'],
+]) {
+  const corrected = parseSms(message, { [title.toLowerCase()]: 'other' });
+  ok(`a user-pinned Other category survives the ${title} biller default`,
+    corrected?.categoryGuess === 'other' && corrected?.categoryPinned === true);
+}
+const dewaReminder = 'Your DEWA bill of AED 450.00 is due on 25/07/2026.';
+for (const suffix of [
+  ' Customer service is available online.',
+  ' Your account ending with 1234.',
+]) {
+  const reminder = parseSms(dewaReminder + suffix);
+  ok(`ordinary bill-footer prose cannot become an identity: ${suffix.trim()}`,
+    reminder?.kind === 'billDue' && reminder.billIdentity === undefined);
+}
+t('a prose identity decoy does not hide a later labelled account number',
+  dewaReminder + ' Customer service is available online. Account number 12345678.',
+  { kind: 'billDue', merchant: 'DEWA', billIdentity: 'account:5678' });
+t('a water park descriptor does not create a utility category',
+  'Purchase of AED 45.00 with Debit Card ending 1234 at WATER PARK, DUBAI. Avl Balance is AED 1000.00.',
+  { merchant: 'Water Park', category: 'entertainment', amountFils: 4500 });
+
+// Existing Emirates NBD mini-statement fixture, now asserting the actual dues.
+t('the real mini statement reads total and minimum abbreviated amount labels',
+  'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/06/26. Total Amt Due AED 4061.96, Due Date 23/07/26. Min Amt Due AED 203.10',
+  { kind: 'cardStatement', amountFils: 406196, minDueFils: 20310, date: '2026-07-23', dueDay: 23 });
+t('reordering mini statement figures cannot promote the minimum into the total',
+  'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/06/26. Min Amt Due AED 203.10, Total Amt Due AED 4061.96, Due Date 23/07/26.',
+  { kind: 'cardStatement', amountFils: 406196, minDueFils: 20310, date: '2026-07-23' });
+const generatedStatement = 'Your Credit Card ending 4821 statement is generated on 20/12/2026. Total due AED 3,240.00, minimum due AED 162.00. ';
+for (const deadline of ['Payment due on 05/01/2027.', 'Payment due date 05/01/2027.', 'Payment due date is 05Jan27.']) {
+  t(`a stated deadline beats the generation date: ${deadline}`,
+    generatedStatement + deadline,
+    { kind: 'cardStatement', date: '2027-01-05', dueDay: 5, amountFils: 324000 });
+}
+t('an impossible explicit deadline does not reuse the generation date',
+  generatedStatement + 'Payment due on 30/02/2027.',
+  { kind: 'cardStatement', date: null, dueDay: null });
+t('a yearless deadline preserves only its day, not the statement generation date',
+  generatedStatement + 'Payment due on 25 Aug.',
+  { kind: 'cardStatement', date: null, dueDay: 25 });
+t('a currency code beside total due cannot become a month name or due day',
+  'Your Credit Card ending 4821 statement is generated. Total due AED 3,240.00, minimum due AED 162.00.',
+  { kind: 'cardStatement', date: null, dueDay: null });
+
+// Structural variations of the existing universal challenge fixture. A known
+// sender and an amount never prove that a purchase awaiting OTP has posted.
+for (const currency of ['AED', 'CAD']) {
+  for (const clause of ['requires OTP123456', 'Enter OTP123456 to complete', 'Use OTP123456 to confirm']) {
+    const body = `Card purchase ${currency} 24.90 at LOCAL CAFE ${clause}.`;
+    t(`${currency} known-bank glued challenge ${clause} is not spending`, body, null, { sender: 'ENBD' });
+    ok(`${currency} glued challenge has bounded non-posting repair evidence`,
+      nonPostingReason(body) === 'security-challenge');
+  }
+}
+for (const [merchant, footer] of [
+  ['LOCAL CAFE', 'Do not share your OTP with anyone. Ref: 123456.'],
+  ['SECURITY CODE CAFE', 'Never disclose your PIN.'],
+  ['OTP123456 CAFE', 'Do not share your OTP with anyone.'],
+  ['USE OTP123456 CAFE', 'Never disclose your PIN.'],
+]) {
+  t(`completed purchase preserves authentication words in ${merchant} or its footer`,
+    `Purchase of AED 24.90 with Credit Card ending 1234 at ${merchant}. ${footer}`,
+    { kind: 'transaction', amountFils: 2490 }, { sender: 'ENBD' });
+}
+
+// Categorization-only structural variations of existing purchase fixtures.
+{
+  const { setActiveMarket, getActiveMarket } = require('./build/markets');
+  const { classifyMerchantDescription, overrideFitsDirection } = require('./build/sms-parser');
+  const originalMarket = getActiveMarket().id;
+  setActiveMarket('SA');
+  for (const [merchant, category] of [
+    ['LULU EXCHANGE', 'other'], ['DANUBE HOME', 'shopping'], ['STCPAY', 'other'],
+    ['LULU HYPERMARKET', 'groceries'], ['DANUBE SUPERMARKET', 'groceries'], ['STC MOBILE', 'telecom'],
+  ]) t(`specific ${merchant} activity beats a broad local brand stem`,
+    `Purchase of SAR 45.00 with Credit Card ending 1234 at ${merchant}.`,
+    { kind: 'transaction', type: 'expense', amountFils: 4500, category });
+  setActiveMarket('AE');
+  t('card branding cannot categorize a furniture purchase as telecom',
+    'Purchase of AED 100.00 with Etisalat Credit Card ending 1234 at HOME CENTRE.',
+    { kind: 'transaction', amountFils: 10000, merchant: 'Home Centre', category: 'shopping' });
+  for (const [merchant, category] of [
+    ['PAYPAL *UNKNOWN PAYEE', 'other'], ['PAYPAL *STARBUCKS', 'dining'],
+    ['PAYPAL *REALDEBRID', 'entertainment'], ['MARK AND SAVE', 'groceries'],
+    ['MARK & SAVE', 'groceries'], ['FIVERR GENERAL TRADING', 'shopping'],
+    ['ADOBE INTERIOR DECOR LLC', 'other'], ['FIVERR', 'software'], ['ADOBE.COM', 'software'],
+  ]) t(`merchant category respects the actual descriptor ${merchant}`,
+    `Purchase of AED 45.00 with Credit Card ending 1234 at ${merchant}.`,
+    { kind: 'transaction', type: 'expense', amountFils: 4500, category });
+  ok('the canonical Mark & Save title retains its grocery category',
+    classifyMerchantDescription('Mark & Save', 'expense', null).categoryGuess === 'groceries');
+  for (const active of ['AE', 'SA']) {
+    setActiveMarket(active);
+    ok(`explicit global classification ignores ambient ${active} market keywords`,
+      classifyMerchantDescription('PANDA', 'expense', null).categoryGuess === 'other');
+  }
+  ok('undefined classification context preserves the active-market compatibility path',
+    classifyMerchantDescription('PANDA', 'expense').categoryGuess === 'groceries');
+  ok('an explicitly selected local refinement remains available',
+    classifyMerchantDescription('PANDA', 'expense', 'SA').categoryGuess === 'groceries');
+  setActiveMarket('AE');
+  const overrides = { 'expense:starbucks': 'groceries', 'income:starbucks': 'other' };
+  const expense = parseSms('Purchase of AED 45.00 with Credit Card ending 1234 at STARBUCKS.', overrides);
+  const income = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', overrides);
+  ok('directional merchant rules give purchases and refunds independent defaults',
+    expense.categoryGuess === 'groceries' && expense.categoryPinned === true &&
+    income.categoryGuess === 'other' && income.categoryPinned === true);
+  const legacy = parseSms('Refund of AED 45.00 to your Credit Card ending 1234 from STARBUCKS.', { starbucks: 'other' });
+  ok('legacy expense Other does not silently become an income rule', legacy.categoryPinned !== true);
+  ok('direction compatibility accepts Other both ways and rejects unknown IDs',
+    overrideFitsDirection('other', 'income') && overrideFitsDirection('other', 'expense') &&
+    !overrideFitsDirection('made-up-category', 'expense') && !overrideFitsDirection('salary', 'expense'));
+  setActiveMarket(originalMarket);
+}
+
+// Exact retained corpus evidence and explicitly labelled descriptor mutations.
+t('real PayPal CXIANGHUI01L has unknown category, unchanged native money/date',
+  'From HSBC: 08SEP25 PAYPAL *CXIANGHUI01L Purchase from 041-340***-001 AED 259.40- by Card Ending with 6737. Your available balance is AED 7.03',
+  { kind: 'transaction', type: 'expense', amountFils: 25940, date: '2025-09-08', category: 'other' });
+t('real PayPal FARHANAUSMA cannot inherit a goods category from its processor',
+  'Your Cr.Card XXX7720 was used for AED99.18 (plus foreign transaction fee of 2.1%) on 15/06/2024 17:49:27 at PAYPAL *FARHANAUSMA,····9001-GB. Avl. Cr.limit is AED4322.45',
+  { kind: 'transaction', type: 'expense', amountFils: 9918, date: '2024-06-15', category: 'other' });
+t('Etisalat branded-card fixture with furniture payee follows the shop, not plastic',
+  'Please note the details of a recent transaction on your Mashreq Credit Card. Your Etisalat Card ending with 0000 was used for a purchase of USD 24.00 at AL SAAD FURNITURE EST US on 22Jan18 09:35 AM. Available limit is AED 2207.33.',
+  { kind: 'transaction', type: 'expense', amountFils: 8814, date: '2018-01-22', category: 'shopping' });
+{
+  const { classifyMerchantDescription } = require('./build/sms-parser');
+  for (const descriptor of ['LULU EXCHANGE', 'LULU EXCHANGE LLC', 'LULU EXCHANGE, DUBAI',
+    'STC PAY', 'STC PAY WALLET']) {
+    ok(`specific statement descriptor ${descriptor} avoids a broad Saudi category`,
+      classifyMerchantDescription(descriptor, 'expense', 'SA').categoryGuess === 'other');
+  }
+  for (const descriptor of ['ADOBE INTERIOR DECOR LLC', 'LINKEDIN MARKETING FZE']) {
+    ok(`local activity ${descriptor} stays in Other rather than Software`,
+      classifyMerchantDescription(descriptor, 'expense', null).categoryGuess === 'other');
+  }
+  ok('GLOBAL includes shared cross-border vocabulary without selecting an AE country proxy',
+    classifyMerchantDescription('LIME*RIDE COST', 'expense', null).categoryGuess === 'transport');
+}
+
+t('an Etisalat merchant containing Card Services remains telecom',
+  'Purchase of AED 45.00 with Credit Card ending 1234 at ETISALAT CARD SERVICES.',
+  { kind: 'transaction', amountFils: 4500, category: 'telecom' });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -38,10 +38,12 @@ rewrite() {
       -e "s|from '@/lib/|from './|g" \
       -e "s|import('@/lib/|import('./|g" \
       -e "s|import type { IconName } from '@/components/ui/icon';|type IconName = string;|" \
+      -e "s|import type { IconName } from '@/components/ui/icon.types';|type IconName = string;|" \
       -e "s|import('@/components/ui/icon').IconName|string|g" \
       -e "s|from '../../modules/notification-reader'|from './notification-reader'|" \
       -e "s|from '../../modules/sms-reader'|from './sms-reader'|" \
       -e "s|from '../../modules/wafra-live-capture'|from './wafra-live-capture-types'|" \
+      -e "s|from '../../modules/wafra-message-history/src/WafraMessageHistory.types'|from './wafra-message-history-types'|" \
       -e "s|from 'react-native'|from './stub-react-native'|" \
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
       -e "s|from 'expo-constants'|from './stub-expo-constants'|" \
@@ -59,7 +61,7 @@ rewrite() {
 # relay-crypto and relay are deliberately NOT in this list: they import @noble's
 # ESM-only subpath exports, which the node10 resolution implied by
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
-for f in types routes format categories ledger dedupe arabic-sms sms-parser import-plan bills \
+for f in types routes format categories ledger capture-source-identity dedupe arabic-sms bank-amount-tokens sms-parser import-plan bills \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics period purchases markets i18n system-language balances \
          brand-marks leaving-soon accounts heal accuracy onboarding reminders auto-import \
          history-import \
@@ -68,11 +70,12 @@ for f in types routes format categories ledger dedupe arabic-sms sms-parser impo
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
-         alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray unparsed-launch-alert \
-         ledger-money review-promotion alert-ai-suggestion launch-review-rollout trusted-bank-notification-packages \
+         alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
+         universal-types universal-dates universal-fields universal-money universal-parser universal-import universal-categorization \
+         ledger-money backup-validation ledger-export review-promotion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
-         alert-market-packs alert-semantics alert-rollout feedback-wire historical-import \
+         alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-local-capture; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
@@ -100,12 +103,15 @@ rewrite ../../modules/sms-reader/index.ts build/sms-reader.ts
 rewrite ../../modules/notification-reader/index.ts build/notification-reader.ts
 rewrite ../../modules/wafra-live-capture/src/WafraLiveCapture.types.ts \
   build/wafra-live-capture-types.ts
+rewrite ../../modules/wafra-message-history/src/WafraMessageHistory.types.ts \
+  build/wafra-message-history-types.ts
 
 # ios-local-capture consumes only this adapter contract. Extract it from the
 # shipping executor so the pure harness cannot drift while avoiding that
 # executor's relay/native runtime graph.
 {
-  echo "import type { ReviewAlert } from './alert-review-tray';"
+  echo "import type { ReviewSourceBinding } from './review-source-bindings';"
+  echo "import type { ReviewEntry } from './alert-review-tray';"
   echo "import type { AppState, ImportBatchInput, LocalCaptureDeclineQualificationMapping, LocalCaptureReviewQualificationCandidate } from './types';"
   echo
   awk '/^export interface CaptureLedgerAdapter \{/,/^\}/' \

@@ -30,9 +30,12 @@ jobs:
               - 'package-lock.json'
               - '.github/workflows/ci.yml'
               - 'modules/wafra-message-history/**'
+              - 'modules/wafra-live-capture/**'
+              - 'scripts/test/native-live-capture-store.*'
               - 'src/app/import-sms.tsx'
               - 'src/lib/historical-import.ts'
               - 'scripts/test/run.sh'
+              - 'scripts/test/ios-history-native-contract.test.js'
               - 'scripts/test/native-history-store.*'
 
   check:
@@ -65,6 +68,12 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # Several contract suites inspect Expo's generated iOS sources and Xcode
+      # membership. The native folder is intentionally gitignored, so a clean
+      # checkout must materialize it before the cross-platform test runner.
+      - name: Generate native iOS contract fixtures
+        run: npx expo prebuild --platform ios --no-install
 
       - name: Test
         run: npm test
@@ -114,22 +123,13 @@ jobs:
       - name: Generate the native iOS project
         run: npx expo prebuild --platform ios --no-install
 
-      - name: Test the protected history bridge and App Intent integration
-        run: bash scripts/test/native-history-store.sh
-
       - name: Install CocoaPods dependencies
         run: npx pod-install
 
-      - name: Compile the iOS app
+      - name: Build and verify the protected history bridge and extracted App Intent metadata
         run: |
-          xcodebuild \
-            -workspace ios/Wafra.xcworkspace \
-            -scheme Wafra \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+          bash scripts/test/native-history-store.sh
+          bash scripts/test/native-live-capture-store.sh
 
   # The browser suites catch what unit tests structurally cannot: a route that
   # resolves to nothing, a screen that renders blank, a total that disagrees

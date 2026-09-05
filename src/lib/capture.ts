@@ -38,7 +38,8 @@ import {
   syncRelay,
 } from '@/lib/relay';
 import { PARSER_VERSION } from '@/lib/sms-parser';
-import type { ReviewAlert } from '@/lib/alert-review-tray';
+import type { ReviewEntry } from '@/lib/alert-review-tray';
+import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
 
 export type CaptureSource = 'sms' | 'relay' | 'none';
@@ -46,7 +47,8 @@ export type CaptureSource = 'sms' | 'relay' | 'none';
 export interface CaptureResult {
   parsed: ScannedSms[];
   /** Sanitized global alerts. They are review evidence, never import rows. */
-  reviewCandidates: ReviewAlert[];
+  reviewCandidates: ReviewEntry[];
+  reviewSourceBindings?: ReviewSourceBinding[];
   /**
    * Timestamps of messages this collection read and refused as declines, so
    * the planner can retire rows an older parser booked from them.
@@ -329,6 +331,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     const {
       parsed,
       reviewCandidates = [],
+      reviewSourceBindings = [],
       declined = [],
       newestTs,
       inboxScannedCount = 0,
@@ -339,6 +342,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     } = await scanInbox(
       sinceMs,
       state.merchantOverrides,
+      undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state) },
     );
     // A parser migration is only complete when Android actually yielded the
     // history it was asked to re-read. Some OEM restricted-access layers keep
@@ -358,6 +362,7 @@ export async function collectNewMessages(state: AppState): Promise<CaptureResult
     return {
       parsed,
       reviewCandidates,
+      reviewSourceBindings,
       declined,
       newestTs,
       inboxScannedCount,

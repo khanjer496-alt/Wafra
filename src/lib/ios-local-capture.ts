@@ -3,6 +3,7 @@ import type { WafraLiveCaptureNativeModule } from '../../modules/wafra-live-capt
 import type { CaptureLedgerAdapter } from '@/lib/capture-executor';
 import { buildImportPlan, type ImportPlan } from '@/lib/import-plan';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
+import { isUniversalReviewAlert } from '@/lib/alert-review-tray';
 import {
   parseLocalMessageRecord,
   preflightLocalMessageRecord,
@@ -326,22 +327,18 @@ export function createIosLocalCaptureCoordinator(
       }
       const markets = new Set(
         completePage.filter((record) => record.preflight.valid)
-          .flatMap((record) => record.preflight.attribution?.market ?? []),
+          .flatMap((record) => record.preflight.market ?? []),
       );
       const ledgerMarket = input.ledger.getState().marketId;
       const currentMarket = ledgerMarket === 'AE' || ledgerMarket === 'SA'
         ? ledgerMarket
         : null;
-      const pageMarket = markets.size === 0
-        ? null
-        : currentMarket && markets.has(currentMarket)
-          ? currentMarket
-          : completePage.find((record) =>
-              record.preflight.valid && record.preflight.attribution?.market)?.preflight
-              .attribution?.market ?? null;
+      const pageMarket = currentMarket && markets.has(currentMarket)
+        ? currentMarket
+        : completePage.find((record) =>
+            record.preflight.valid && record.preflight.market)?.preflight.market ?? null;
       const page = completePage.filter((record) =>
-        !record.preflight.valid || !record.preflight.attribution?.market ||
-          record.preflight.attribution.market === pageMarket);
+        !record.preflight.valid || record.preflight.market === pageMarket || record.preflight.market === null);
       for (const record of completePage) {
         if (page.includes(record)) continue;
         record.serialized = '';
@@ -349,38 +346,21 @@ export function createIosLocalCaptureCoordinator(
       }
       const pageGeneration = readLedgerGeneration(input.ledger);
 
-      if (pageMarket) {
-        const current = input.ledger.getState();
-        if (!current.hydrated) {
-          throw sourceFreePageError('Local capture ledger is not hydrated');
-        }
-        if (current.marketId !== pageMarket) {
-          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
-          if (!input.ledger.setMarket || !input.ledger.setMarket(pageMarket)) {
-            throw sourceFreePageError('Local capture does not match this ledger currency');
-          }
-          if (input.ledger.getState().marketId !== pageMarket) {
-            throw sourceFreePageError('Local capture ledger currency did not change');
-          }
-          requireLedgerGeneration(input.ledger, pageGeneration);
-        }
-      }
-
       const outcomes: LocalMessageParseOutcome[] = [];
-      const session = pageMarket
-        ? createLaunchAlertSession({
+      const session = createLaunchAlertSession({
             overrides: input.ledger.getState().merchantOverrides ?? {},
-            activeMarket: pageMarket,
-            pinnedCurrency: pageMarket === 'AE' ? 'AED' : 'SAR',
-          })
-        : null;
+            ...(pageMarket ? {
+              activeMarket: pageMarket,
+              pinnedCurrency: pageMarket === 'AE' ? 'AED' : 'SAR',
+            } : {}),
+          });
       for (let recordIndex = 0; recordIndex < page.length; recordIndex += 1) {
         const record = page[recordIndex];
         let serialized = record.serialized;
         let outcome: LocalMessageParseOutcome = { kind: 'invalid', milestone: 'none' };
         try {
-          if (session && pageMarket && record.preflight.valid) {
-            outcome = parseLocalMessageRecord(serialized, now, pageMarket, session);
+          if (record.preflight.valid) {
+            outcome = parseLocalMessageRecord(serialized, now, record.preflight.market, session);
           }
         } finally {
           // Clear every JavaScript-owned copy before review/import durability
@@ -397,6 +377,22 @@ export function createIosLocalCaptureCoordinator(
       totals.ignored += outcomes.filter((outcome) => outcome.kind === 'ignored').length;
       const parsed = outcomes.flatMap((outcome) =>
         outcome.kind === 'parsed' ? [outcome.row] : []);
+      // A reviewable fact is not permission to select a ledger currency.
+      // Align only an actual automatic-import page, after source text is gone.
+      if (parsed.length > 0 && pageMarket) {
+        const current = input.ledger.getState();
+        if (!current.hydrated) throw sourceFreePageError('Local capture ledger is not hydrated');
+        if (current.marketId !== pageMarket) {
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          if (!input.ledger.setMarket || !input.ledger.setMarket(pageMarket)) {
+            throw sourceFreePageError('Local capture does not match this ledger currency');
+          }
+          if (input.ledger.getState().marketId !== pageMarket) {
+            throw sourceFreePageError('Local capture ledger currency did not change');
+          }
+          requireLedgerGeneration(input.ledger, pageGeneration);
+        }
+      }
       const declineCandidates = outcomes.flatMap((outcome, index) =>
         outcome.kind === 'declined'
           ? [{
@@ -410,7 +406,7 @@ export function createIosLocalCaptureCoordinator(
           : []);
       const declined = declineCandidates.map((candidate) => candidate.row);
       const reviewCandidates = outcomes.flatMap((outcome, index) =>
-        outcome.kind === 'review'
+        outcome.kind === 'review' && outcome.milestone === 'review-candidate' && !isUniversalReviewAlert(outcome.item)
           ? [{
               item: outcome.item,
               qualification: {
@@ -421,6 +417,9 @@ export function createIosLocalCaptureCoordinator(
             }]
           : []);
       const reviews = reviewCandidates.map((candidate) => candidate.item);
+      const unqualifiedReviews = outcomes.flatMap((outcome) =>
+        outcome.kind === 'review' && (outcome.milestone !== 'review-candidate' || isUniversalReviewAlert(outcome.item))
+          ? [outcome.item] : []);
       const reviewQualifications: LocalCaptureReviewQualificationCandidate[] =
         reviewCandidates.map((candidate) => ({
           reviewId: candidate.item.id,
@@ -454,11 +453,24 @@ export function createIosLocalCaptureCoordinator(
           'review',
         );
       }
+      if (unqualifiedReviews.length > 0) {
+        if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Local capture requires review staging');
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        // Generic review can be useful without proving a known-bank automation.
+        // It receives no qualification mapping and cannot set firstCapturedAt.
+        const receipt = input.ledger.stageReviewAlerts(unqualifiedReviews);
+        await receipt.durable;
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, pageGeneration);
+        if (!Number.isInteger(receipt.admitted) || receipt.admitted < 0 ||
+          receipt.admitted > unqualifiedReviews.length) throw sourceFreePageError('Local capture review receipt was refused');
+        admittedReviews += receipt.admitted;
+      }
 
       // Review staging is the final await before this state read. Planning must
       // always see the latest aligned ledger rather than the alignment snapshot.
       const stateAtPlan = input.ledger.getState();
-      if (!stateAtPlan.hydrated || (pageMarket && stateAtPlan.marketId !== pageMarket)) {
+      if (!stateAtPlan.hydrated || (parsed.length > 0 && pageMarket && stateAtPlan.marketId !== pageMarket)) {
         throw sourceFreePageError('Local capture ledger changed before planning');
       }
       const priorReviewIds = persistedQualificationIds(
@@ -536,7 +548,7 @@ export function createIosLocalCaptureCoordinator(
       totals.imported += imported;
       totals.reviews += admittedReviews;
       totals.declined += plan.declineReconciledCount;
-      totals.ignored += Math.max(0, reviews.length - admittedReviews) +
+      totals.ignored += Math.max(0, reviews.length + unqualifiedReviews.length - admittedReviews) +
         Math.max(0, declined.length - plan.declineReconciledCount);
 
       const qualifyingReviewIds = new Set([...priorReviewIds, ...admittedReviewIds]);

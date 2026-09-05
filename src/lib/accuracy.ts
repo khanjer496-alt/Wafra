@@ -1,6 +1,7 @@
 import { netWorthFils, reliableBalanceFils } from '@/lib/balances';
 import { DORMANT_AFTER_DAYS } from '@/lib/cards';
-import { toISODate } from '@/lib/format';
+import { formatAmount, toISODate } from '@/lib/format';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import {
   isDeliberateOtherTitle,
   overrideFitsDirection,
@@ -85,8 +86,7 @@ function maskLongDigits(s: string): string {
   return s.replace(/\d{5,}/g, (m) => `····${m.slice(-4)}`);
 }
 
-const fmt = (fils: number): string =>
-  (fils / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (fils: number): string => formatAmount(fils, { decimals: true });
 
 /**
  * Everything the ledger believes about this phone's cards, as text to share.
@@ -175,7 +175,7 @@ export function cardDiagnostics(state: {
     );
 
   const netWorth = netWorthFils(state);
-  out.push(`NET WORTH  AED ${fmt(netWorth)}`);
+  out.push(`NET WORTH  ${ledgerCurrencyCode()} ${fmt(netWorth)}`);
   out.push(
     '  Only figures the BANK quoted count. A credit card can only subtract its',
     '  outstanding or count nothing — an available limit is not money you have.',

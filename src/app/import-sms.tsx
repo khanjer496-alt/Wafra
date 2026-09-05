@@ -21,8 +21,17 @@
  * platform that has one.
  */
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Linking, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import * as Crypto from 'expo-crypto';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AppState as RNAppState,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import Animated, {
   Easing,
   FadeInDown,
@@ -36,6 +45,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { SupplementImports } from '@/components/supplement-imports';
+import { HistoryDetailsSheet } from '@/components/ios-message-setup/history-details-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
@@ -58,11 +68,50 @@ import {
 import { categoryLabel } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
 import {
-  parseHistoricalMessageRecords,
-  type HistoricalImportResult,
-} from '@/lib/historical-import';
+  discardIosHistorySession,
+  loadIosHistorySession,
+  persistIosHistoryReviewCandidates,
+  type LoadedIosHistorySession,
+} from '@/lib/ios-history-import';
+import {
+  beginIosHistoryHandoffForOrigin,
+  cancelIosHistoryHandoff,
+  clearIosHistoryHandoff,
+  clearIosHistoryReturnOrigin,
+  confirmIosHistoryShortcutInstalled,
+  createIosHistoryActionGuard,
+  createIosHistoryOperationController,
+  createIosHistorySnapshotGate,
+  historyShortcutInstallUrl,
+  historyShortcutRunUrl,
+  IOS_HISTORY_HANDOFF_TTL_MS,
+  consumeIosHistoryReturnOrigin,
+  iosHistoryCleanupStateAfterFailure,
+  iosHistoryLoadFailureDisposition,
+  iosHistorySetupStorageCoordinator,
+  iosHistorySuccessRoute,
+  iosHistorySourceCounts,
+  loadIosHistorySetup,
+  performIosHistoryAction,
+  recoverIosHistoryHandoff,
+  reconcileIosHistorySetup,
+  resetIosHistorySetup,
+  resolveIosHistoryCardState,
+  validIosHistorySessionId,
+  type IosHistoryCardState,
+} from '@/lib/ios-history-setup';
+import {
+  dispatchIosMessageSetup,
+  loadIosMessageSetupProgress,
+  type IosMessageSetupStatus,
+} from '@/lib/ios-message-onboarding';
 import { isProActive, requiresPro } from '@/lib/purchases';
-import { parseSmsBatch } from '@/lib/sms-parser';
+import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
+import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
+import { PARSER_VERSION } from '@/lib/sms-parser';
+import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
+import { buildTrackedBillBatch, ImportMoneyError } from '@/lib/import-plan';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
 
@@ -83,13 +132,7 @@ Salary of AED 18,500.00 has been credited to your account ending 5678`;
 
 const PREVIEW_LIMIT = 60;
 const PANEL_HEIGHT = 186;
-const HISTORY_SHORTCUT_URL = 'shortcuts://run-shortcut?name=Wafra%20History%20Import';
-const HISTORY_SHORTCUT_INSTALL_URL = process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL;
-const HISTORY_SESSION_RE = /^[A-Za-z0-9_-]{8,128}$/;
-
-function validHistorySession(value: string | undefined): value is string {
-  return typeof value === 'string' && HISTORY_SESSION_RE.test(value);
-}
+const HISTORY_SHORTCUT_INSTALL_URL = historyShortcutInstallUrl();
 
 function withoutExistingBillReminders(plan: ImportPlan, existingTitles: string[]): ImportPlan {
   const existing = new Set(existingTitles.map((title) => title.trim().toLowerCase()));
@@ -114,12 +157,8 @@ function withoutExistingBillReminders(plan: ImportPlan, existingTitles: string[]
   };
 }
 
-function supportsHistoricalShortcut(): boolean {
-  if (Platform.OS !== 'ios') return false;
-  const [major = 0, minor = 0] = String(Platform.Version)
-    .split('.')
-    .map((part) => Number(part));
-  return major > 26 || (major === 26 && minor >= 5);
+function plannedHistoryRows(plan: ImportPlan): number {
+  return plan.txCount + plan.dueCount + plan.healedCount + plan.billDues.length;
 }
 
 async function historyNativeModule() {
@@ -203,31 +242,252 @@ export default function ImportSmsScreen() {
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
   const reducedMotion = useReducedMotion();
-  const { auto, history } = useLocalSearchParams<{ auto?: string; history?: string }>();
-  const { state, importBatch, ensureDurable, stageReviewAlerts, addBill } = useStore();
+  const { auto, manual, history: historyParam } = useLocalSearchParams<{
+    auto?: string;
+    manual?: string;
+    history?: string;
+  }>();
+  // A forged Android deep link must remain the ordinary inbox/paste screen.
+  // The native history session exists only in the Apple module graph.
+  const history = Platform.OS === 'ios' ? historyParam : undefined;
+  const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
 
   const [text, setText] = useState('');
+  const pasteRunning = useRef(false);
+  // Kept only with the user's open paste form, never in ledger storage.
+  const pasteIdentities = useRef({ input: '', ids: new Map<string, { nonce: string; observedAt: number }>() });
+  const [pasteReviewIds, setPasteReviewIds] = useState<string[]>([]);
+  const pasteReviewCount = state.reviewTray.pending.filter((entry) => pasteReviewIds.includes(entry.id) && entry.expiresAt > Date.now()).length;
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [showManual, setShowManual] = useState(() => !isSmsScanningAvailable());
+  const [showManual, setShowManual] = useState(
+    () => (manual === '1' && !history) || (!isSmsScanningAvailable() && Platform.OS !== 'ios'),
+  );
+  useEffect(() => {
+    // The same route can be reused while mounted. An explicit quick-paste
+    // request reveals the form without starting or altering a history import.
+    if (manual === '1' && !history) setShowManual(true);
+  }, [manual, history]);
   const [progress, setProgress] = useState<{ scanned: number; found: number } | null>(null);
   const [trackedBills, setTrackedBills] = useState<Set<number>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
   const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [applying, setApplying] = useState(false);
-  const [historyResult, setHistoryResult] = useState<HistoricalImportResult | null>(null);
+  const [historyResult, setHistoryResult] = useState<LoadedIosHistorySession | null>(null);
+  const [historySourceSummary, setHistorySourceSummary] = useState<{
+    understood: number;
+    unread: number;
+    alreadyFiled: number;
+    notAlreadyFiled: number;
+  } | null>(null);
   const [pendingInboxResult, setPendingInboxResult] = useState<PendingInboxResult | null>(null);
   const [pendingScanCommit, setPendingScanCommit] = useState<(() => Promise<void>) | null>(null);
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [historyCommitState, setHistoryCommitState] = useState<
-    'idle' | 'writing' | 'storage-failed' | 'cleanup-failed'
+    | 'idle'
+    | 'writing'
+    | 'storage-failed'
+    | 'cleanup-failed'
+    | 'source-retained'
+    | 'source-discarded'
+    | 'source-cleanup-failed'
+    | 'cancel-cleanup-failed'
   >('idle');
+  const [historySetup, setHistorySetup] = useState({
+    installed: false,
+    handoffStartedAt: null as number | null,
+  });
+  const [historyHandoffExpired, setHistoryHandoffExpired] = useState(false);
+  const [historyInstallOpened, setHistoryInstallOpened] = useState(false);
+  const [historyActionBusy, setHistoryActionBusy] = useState(false);
+  const [historyDetailsVisible, setHistoryDetailsVisible] = useState(false);
   const started = useRef(false);
   const processedHistory = useRef<string | null>(null);
   // State updates are not synchronous enough to protect a write/cleanup
   // critical section from a second tap. This latch is.
   const historyOperationLocked = useRef(false);
+  const historyOperationController = useRef(createIosHistoryOperationController()).current;
+  const historyActionGuard = useRef(createIosHistoryActionGuard()).current;
+  const historySnapshotGate = useRef(createIosHistorySnapshotGate());
+
+  const historyCardState: IosHistoryCardState = resolveIosHistoryCardState({
+    platform: Platform.OS,
+    version: Platform.Version,
+    installUrl: HISTORY_SHORTCUT_INSTALL_URL,
+    installed: historySetup.installed,
+    handoffStartedAt: historySetup.handoffStartedAt,
+    historySessionId: history,
+  });
+
+  useEffect(() => {
+    const gate = createIosHistorySnapshotGate();
+    historySnapshotGate.current = gate;
+    return () => gate.close();
+  }, []);
+
+  const refreshHistorySetup = useCallback(async () => {
+    if (Platform.OS !== 'ios') return;
+    const applySnapshot = (snapshot: Awaited<ReturnType<typeof loadIosHistorySetup>>) => {
+      setHistorySetup({
+        installed: snapshot.installed,
+        handoffStartedAt: snapshot.handoffStartedAt,
+      });
+      if (snapshot.expired) setHistoryHandoffExpired(true);
+    };
+    try {
+      await iosHistorySetupStorageCoordinator.runLatest(
+        historySnapshotGate.current,
+        async () => {
+          const native = await historyNativeModule();
+          return reconcileIosHistorySetup({
+            historySessionId: history,
+            native,
+          });
+        },
+        ({ snapshot, recoveredSessionId }) => {
+          applySnapshot(snapshot);
+          if (recoveredSessionId) {
+            router.replace({
+              pathname: '/import-sms',
+              params: { history: recoveredSessionId },
+            });
+          }
+        },
+      );
+    } catch {
+      setNotice({ title: t('historyImportFailed'), body: t('historySetupStateFailed') });
+    }
+  }, [history, router]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    void refreshHistorySetup();
+    const subscription = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') void refreshHistorySetup();
+    });
+    return () => {
+      historySnapshotGate.current.invalidate();
+      subscription.remove();
+    };
+  }, [refreshHistorySetup]);
+
+  useEffect(() => {
+    const startedAt = historySetup.handoffStartedAt;
+    if (startedAt === null) return;
+    const remaining = Math.max(0, startedAt + IOS_HISTORY_HANDOFF_TTL_MS - Date.now());
+    const timeout = setTimeout(() => {
+      void refreshHistorySetup();
+    }, remaining);
+    return () => {
+      clearTimeout(timeout);
+      historySnapshotGate.current.invalidate();
+    };
+  }, [historySetup.handoffStartedAt, refreshHistorySetup]);
+
+  const performSetupAction = async (action: () => Promise<void>) => {
+    const outcome = await performIosHistoryAction(historyActionGuard, async () => {
+      setHistoryActionBusy(true);
+      setNotice(null);
+      try {
+        await action();
+      } finally {
+        setHistoryActionBusy(false);
+      }
+    }, () => historySnapshotGate.current.invalidate());
+    if (outcome === 'failed') {
+      setNotice({ title: t('historyImportFailed'), body: t('historySetupStateFailed') });
+    }
+    return outcome;
+  };
+
+  const openHistoryInstall = async (reinstall = false) => {
+    if (!HISTORY_SHORTCUT_INSTALL_URL) return;
+    await performSetupAction(async () => {
+      if (reinstall) {
+        await iosHistorySetupStorageCoordinator.run(() => resetIosHistorySetup());
+        setHistorySetup({ installed: false, handoffStartedAt: null });
+        setHistoryHandoffExpired(false);
+      }
+      setHistoryInstallOpened(true);
+      await Linking.openURL(HISTORY_SHORTCUT_INSTALL_URL);
+    });
+  };
+
+  const confirmHistoryInstall = async () => {
+    await performSetupAction(async () => {
+      await iosHistorySetupStorageCoordinator.run(
+        () => confirmIosHistoryShortcutInstalled(),
+      );
+      setHistorySetup((current) => ({ ...current, installed: true }));
+      setHistoryInstallOpened(false);
+      setHistoryHandoffExpired(false);
+    });
+  };
+
+  const openHistoryRun = async (newHandoff: boolean) => {
+    await performSetupAction(async () => {
+      if (newHandoff) {
+        const startedAt = Date.now();
+        await iosHistorySetupStorageCoordinator.run(
+          () => beginIosHistoryHandoffForOrigin('import', startedAt),
+        );
+        setHistorySetup((current) => ({ ...current, handoffStartedAt: startedAt }));
+        setHistoryHandoffExpired(false);
+      }
+      try {
+        // Continue returns to the pending Shortcuts run; invoking run-shortcut
+        // again would start a second retained-message import.
+        await Linking.openURL(newHandoff ? historyShortcutRunUrl() : 'shortcuts://');
+      } catch (error) {
+        if (newHandoff) {
+          await iosHistorySetupStorageCoordinator.run(
+            () => Promise.all([
+              clearIosHistoryHandoff(),
+              clearIosHistoryReturnOrigin(),
+            ]).then(() => undefined),
+          );
+          setHistorySetup((current) => ({ ...current, handoffStartedAt: null }));
+        }
+        throw error;
+      }
+    });
+  };
+
+  const cancelHistoryHandoff = async () => {
+    await performSetupAction(async () => {
+      const native = await historyNativeModule();
+      await cancelIosHistoryHandoff({
+        recover: () => recoverIosHistoryHandoff(
+          historySetup.handoffStartedAt,
+          native,
+        ),
+        discard: (sessionId) => discardIosHistorySession(native, sessionId),
+        clearHandoff: () => iosHistorySetupStorageCoordinator.run(
+          () => clearIosHistoryHandoff(),
+        ),
+      });
+      setHistorySetup((current) => ({ ...current, handoffStartedAt: null }));
+      setHistoryHandoffExpired(false);
+      await finishHistoryReview('skipped');
+    });
+  };
+
+  const historyCardPrimaryAction = () => {
+    if (historyCardState === 'unsupported') {
+      setShowManual(true);
+      return;
+    }
+    if (historyCardState === 'needs-install') {
+      void (historyInstallOpened ? confirmHistoryInstall() : openHistoryInstall());
+      return;
+    }
+    if (historyCardState === 'ready') {
+      void openHistoryRun(true);
+      return;
+    }
+    if (historyCardState === 'running') void openHistoryRun(false);
+  };
 
   const runScan = async () => {
     // The plan's duplicate checks read state.transactions, so scanning before
@@ -248,6 +508,7 @@ export default function ImportSmsScreen() {
     setPasteVerdict(null);
     setNotice(null);
     setPendingInboxResult(null);
+    setPendingScanCommit(null);
     try {
       const granted = await requestSmsPermission();
       if (!granted) {
@@ -261,19 +522,20 @@ export default function ImportSmsScreen() {
       const {
         parsed,
         reviewCandidates,
+        reviewSourceBindings,
         newestTs,
         declined,
         inboxHistoryComplete,
         commit,
       } = await scanInbox(0, state.merchantOverrides, (scanned, found) =>
-        setProgress({ scanned, found }));
-      const reviewReceipt = stageReviewAlerts(reviewCandidates);
+        setProgress({ scanned, found }), undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()) });
+      const reviewReceipt = stageReviewAlerts(reviewCandidates, undefined, reviewSourceBindings);
       await reviewReceipt.durable;
       // `declined` carried through, exactly as the automatic path does. Without
       // it this screen — the one a user reaches BECAUSE something looks wrong —
       // is the one path that cannot clear a refused transaction the ledger
       // recorded as spending.
-      const p = buildImportPlan(parsed, state, newestTs, new Date(), declined);
+      const p = buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined);
       if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
       p.batch.parserRereadComplete = true;
       const completedInbox: PendingInboxResult = {
@@ -295,6 +557,10 @@ export default function ImportSmsScreen() {
         setPendingInboxResult(completedInbox);
         setPendingScanCommit(() => commit);
       }
+    } catch (error) {
+      if (!(error instanceof ImportMoneyError)) throw error;
+      setPlan(null);
+      setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
     } finally {
       setScanning(false);
     }
@@ -304,55 +570,137 @@ export default function ImportSmsScreen() {
    * Free, on every platform. The user is holding the message; all Wafra does
    * is read it better than they would type it.
    */
-  const runParse = (input: string) => {
+  const runParse = async (input: string) => {
+    if (pasteRunning.current) return;
     if (!state.hydrated) {
       setNotice({ title: t('importOneMoment'), body: t('dataStillLoading') });
       return;
     }
-    setNotice(null);
-    setPendingInboxResult(null);
-    // Deliberately NO isProActive gate here. Pasting is the only ingestion
-    // path an iPhone has without a Shortcut, so paywalling it charged an
-    // iPhone user for the privilege of doing the work by hand that an Android
-    // user gets automatically. Pasting is `manual` capture, and
-    // requiresPro('manual') is false on every platform by design.
-    const parsed: ScannedSms[] = parseSmsBatch(input, state.merchantOverrides);
-    const p = buildImportPlan(parsed, state, state.lastScanTs);
-    const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
-    const skipped = Math.max(0, txLike.length - p.txCount);
-    setSkippedCount(skipped);
-    setTrackedBills(new Set());
-    // A plan with nothing in it is not a plan, and rendering one as if it were
-    // is how an unreadable paste dead-ended: a strip reading "0 matched ·
-    // 0 cards · 0 unread", no preview, no footer button, no explanation — and
-    // <SupplementImports /> gone, because that block is gated on `plan ===
-    // null`. The relay, forwarded-email and PDF routes disappeared at the
-    // exact moment they were the only thing left to offer. The scan path has
-    // said "up to date" on an empty result for a long time; the paste path
-    // needs the same courtesy, and one more verdict than the scan has: a
-    // message the parser could make nothing of is not a message already filed.
-    if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
-      setPlan(null);
-      setPasteVerdict(
-        skipped > 0
-          ? { kind: 'filed', count: skipped }
-          : { kind: 'unreadable', count: messageBlocks(input) },
-      );
-      return;
-    }
+    pasteRunning.current = true;
+    if (pasteIdentities.current.input !== input) pasteIdentities.current = { input, ids: new Map() };
+    setScanning(true);
+    setPlan(null);
     setPasteVerdict(null);
-    setPlan(p);
+    setPasteReviewIds([]);
+    try {
+      setNotice(null);
+      setPendingInboxResult(null);
+      // Pasting starts a separate preview; its later save cannot acknowledge a
+      // previously abandoned inbox scan whose rows were never committed.
+      setPendingScanCommit(null);
+      // Deliberately NO isProActive gate here. Pasting is the only ingestion
+      // path an iPhone has without a Shortcut, so paywalling it charged an
+      // iPhone user for the privilege of doing the work by hand that an Android
+      // user gets automatically. Pasting is `manual` capture, and
+      // requiresPro('manual') is false on every platform by design.
+      const refusedBlocks: string[] = [];
+      const parsed: ScannedSms[] = parsePastedBankAlerts(input, state.merchantOverrides, (source) => refusedBlocks.push(source));
+      let p: ImportPlan;
+      try {
+        p = buildImportPlan(parsed, state, state.lastScanTs);
+      } catch (error) {
+        if (!(error instanceof ImportMoneyError)) throw error;
+        setPlan(null);
+        setPasteVerdict(null);
+        setSkippedCount(0);
+        setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
+        return;
+      }
+      const reviews: ReviewEntry[] = [];
+      const observedAt = Date.now();
+      for (const source of refusedBlocks) {
+        const event = inspectUniversalBankEvent(source);
+        if (event.decision !== 'review') continue;
+        // Pasted text has no provider GUID. This opaque proposal identity is
+        // deliberately not presented as a native Message identity.
+        const identity = pasteIdentities.current.ids.get(source) ?? { nonce: Crypto.randomUUID().replace(/-/g, ''), observedAt };
+        pasteIdentities.current.ids.set(source, identity);
+        const nonce = identity.nonce;
+        const item = prepareUniversalReviewAlert({
+          id: 'paste_review_id_' + nonce, sourceKey: 'paste_review_source_' + nonce,
+          observedAt: identity.observedAt, channel: 'paste', parserVersion: PARSER_VERSION, event,
+        });
+        if (item) reviews.push(item);
+      }
+      if (reviews.length > 0) {
+        const receipt = stageReviewAlerts(reviews);
+        await receipt.durable;
+        setPasteReviewIds(reviews.map((entry) => entry.id));
+      }
+      const txLike = parsed.filter((x) => x.kind === 'transaction' || x.kind === 'cardPayment');
+      const skipped = Math.max(0, txLike.length - p.txCount);
+      setSkippedCount(skipped);
+      setTrackedBills(new Set());
+      // A plan with nothing in it is not a plan, and rendering one as if it were
+      // is how an unreadable paste dead-ended: a strip reading "0 matched ·
+      // 0 cards · 0 unread", no preview, no footer button, no explanation — and
+      // <SupplementImports /> gone, because that block is gated on `plan ===
+      // null`. The relay, forwarded-email and PDF routes disappeared at the
+      // exact moment they were the only thing left to offer. The scan path has
+      // said "up to date" on an empty result for a long time; the paste path
+      // needs the same courtesy, and one more verdict than the scan has: a
+      // message the parser could make nothing of is not a message already filed.
+      if (p.txCount === 0 && p.dueCount === 0 && p.billDues.length === 0 && p.healedCount === 0) {
+        setPlan(null);
+        setPasteVerdict(reviews.length > 0 ? null :
+          skipped > 0
+            ? { kind: 'filed', count: skipped }
+            : { kind: 'unreadable', count: messageBlocks(input) },
+        );
+        return;
+      }
+      setPasteVerdict(null);
+      setPlan(p);
+    } catch {
+      setPlan(null);
+      setNotice({ title: t('genericReviewTitle'), body: t('genericReviewSaveFailed') });
+    } finally {
+      pasteRunning.current = false;
+      setScanning(false);
+    }
   };
 
   const discardHistorySession = async () => {
-    if (!validHistorySession(history) || Platform.OS !== 'ios') return;
+    if (!validIosHistorySessionId(history) || Platform.OS !== 'ios') return;
     const native = await historyNativeModule();
-    await native.discardSession(history);
+    await discardIosHistorySession(native, history);
   };
 
+  const returnToHistoryOrigin = useCallback(async () => {
+    try {
+      const setupProgress = await loadIosMessageSetupProgress();
+      const returnOrigin = await iosHistorySetupStorageCoordinator.run(
+        () => consumeIosHistoryReturnOrigin(),
+      );
+      router.replace(iosHistorySuccessRoute(setupProgress, returnOrigin));
+    } catch {
+      router.replace('/');
+    }
+  }, [router]);
+
+  const finishHistoryReview = useCallback(async (
+    status: Extract<IosMessageSetupStatus, 'complete' | 'skipped'>,
+  ) => {
+    try {
+      await iosHistorySetupStorageCoordinator.run(
+        () => clearIosHistoryHandoff(),
+      );
+      const setupProgress = await dispatchIosMessageSetup({
+        type: 'history-status-changed',
+        status,
+      });
+      const returnOrigin = await iosHistorySetupStorageCoordinator.run(
+        () => consumeIosHistoryReturnOrigin(),
+      );
+      router.replace(iosHistorySuccessRoute(setupProgress, returnOrigin));
+    } catch {
+      setNotice({ title: t('historyImportFailed'), body: t('historySetupStateFailed') });
+    }
+  }, [router]);
+
   const leaveScreen = async () => {
-    if (historyOperationLocked.current) return;
-    if (!history || !validHistorySession(history)) {
+    if (!history || !validIosHistorySessionId(history)) {
+      if (historyOperationLocked.current) return;
       router.back();
       return;
     }
@@ -362,35 +710,65 @@ export default function ImportSmsScreen() {
       setNotice({ title: t('historyStorageFailed'), body: t('historyStorageFailedBody') });
       return;
     }
-    historyOperationLocked.current = true;
-    try {
-      await discardHistorySession();
-      router.back();
-    } catch {
-      historyOperationLocked.current = false;
-      setHistoryCommitState('cleanup-failed');
-      setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+    const result = await historyOperationController.discard(discardHistorySession);
+    if (result === 'busy') return;
+    if (result === 'complete') {
+      await finishHistoryReview('skipped');
+      return;
     }
+    const nextState = iosHistoryCleanupStateAfterFailure(historyCommitState);
+    setHistoryCommitState(nextState);
+    setNotice({
+      title: nextState === 'cleanup-failed' ? t('historyCleanupFailed') : t('historyImportFailed'),
+      body: nextState === 'cleanup-failed'
+        ? t('historyCleanupFailedBody')
+        : nextState === 'source-cleanup-failed'
+          ? t('historySourceCleanupFailed')
+          : t('historyCancelCleanupFailed'),
+    });
   };
 
   const leaveProtectedSessionForExpiry = () => {
     // A native deletion or encrypted-write failure must not trap the user on
     // an uncloseable route. The source remains under complete file protection
     // and the native store will purge it after the documented TTL.
-    historyOperationLocked.current = false;
-    router.back();
+    void returnToHistoryOrigin();
+  };
+
+  const trackReminder = async (reminder: ScannedSms, index: number) => {
+    if (applying || historyOperationLocked.current) return;
+    historyOperationLocked.current = true;
+    setApplying(true);
+    setNotice(null);
+    try {
+      const batch = buildTrackedBillBatch(reminder, state);
+      if (!batch) return;
+      await importBatch(batch).durable;
+      setTrackedBills((current) => new Set(current).add(index));
+    } catch (error) {
+      const mismatch = error instanceof ImportMoneyError;
+      setNotice({
+        title: t(mismatch ? 'importMoneyMismatchTitle' : 'historyStorageFailed'),
+        body: t(mismatch ? 'importMoneyMismatchBody' : 'importStorageFailedBody'),
+      });
+    } finally {
+      historyOperationLocked.current = false;
+      setApplying(false);
+    }
   };
 
   const applyPlan = async () => {
-    if (!plan || applying || historyOperationLocked.current) return;
-    historyOperationLocked.current = true;
+    if (!plan || applying || (!history && historyOperationLocked.current)) return;
+    if (!history) historyOperationLocked.current = true;
     setApplying(true);
     setNotice(null);
     setHistoryCommitState('writing');
     // A live alert may land while this review is open. Rebuild against the
     // latest state at the moment of confirmation so history/live overlap does
     // not become two entries merely because the preview was old.
-    const currentPlan = historyResult
+    let currentPlan: ImportPlan;
+    try {
+      currentPlan = historyResult
       ? withoutExistingBillReminders(
           buildImportPlan(historyResult.parsed, state, 0, new Date(), historyResult.declined),
           state.bills.map((bill) => bill.title),
@@ -404,8 +782,52 @@ export default function ImportSmsScreen() {
             pendingInboxResult.declined,
           )
         : plan;
+    } catch (error) {
+      setApplying(false);
+      historyOperationLocked.current = false;
+      if (!(error instanceof ImportMoneyError)) throw error;
+      setHistoryCommitState(history ? 'source-retained' : 'idle');
+      setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
+      return;
+    }
     if (pendingInboxResult?.parserRereadComplete) {
       currentPlan.batch.parserRereadComplete = true;
+    }
+    if (history) {
+      const emptyPlan = plannedHistoryRows(currentPlan) === 0;
+      const result = await historyOperationController.finalize({
+        save: async () => {
+          setPlan(null);
+          if (emptyPlan) {
+            await ensureDurable();
+            return;
+          }
+          const receipt = importBatch(currentPlan.batch);
+          await receipt.durable;
+        },
+        discard: discardHistorySession,
+      });
+      if (result === 'busy') {
+        setApplying(false);
+        return;
+      }
+      if (result === 'complete') {
+        // A Shortcut deep link can cold-open this route without a previous
+        // Wafra screen in the stack. `back()` then has nowhere to go and
+        // leaves the completed review visible. Replace explicitly so a
+        // durable save always lands on Home.
+        await finishHistoryReview('complete');
+      } else {
+        if (result === 'save-failed') {
+          setHistoryCommitState('storage-failed');
+          setNotice({ title: t('historyStorageFailed'), body: t('historyStorageFailedBody') });
+        } else {
+          setHistoryCommitState('cleanup-failed');
+          setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+        }
+      }
+      setApplying(false);
+      return;
     }
     if (
       currentPlan.txCount === 0 &&
@@ -415,7 +837,7 @@ export default function ImportSmsScreen() {
     ) {
       setPlan(null);
       setHistoryCommitState('idle');
-      if (!history && pendingScanCommit) {
+      if (pendingScanCommit) {
         try {
           if (pendingInboxResult?.parserRereadComplete) {
             await importBatch(currentPlan.batch).durable;
@@ -455,17 +877,18 @@ export default function ImportSmsScreen() {
       // the later source cleanup fails.
       setPlan(null);
       await receipt.durable;
-    } catch {
+    } catch (error) {
       historyOperationLocked.current = false;
-      setHistoryCommitState('storage-failed');
+      setHistoryCommitState(error instanceof ImportMoneyError ? (history ? 'source-retained' : 'idle') : 'storage-failed');
       setNotice({
-        title: t('historyStorageFailed'),
-        body: history ? t('historyStorageFailedBody') : t('importStorageFailedBody'),
+        title: t(error instanceof ImportMoneyError ? 'importMoneyMismatchTitle' : 'historyStorageFailed'),
+        body: error instanceof ImportMoneyError ? t('importMoneyMismatchBody')
+          : history ? t('historyStorageFailedBody') : t('importStorageFailedBody'),
       });
       setApplying(false);
       return;
     }
-    if (!history && pendingScanCommit) {
+    if (pendingScanCommit) {
       try {
         await pendingScanCommit();
         setPendingScanCommit(null);
@@ -491,9 +914,32 @@ export default function ImportSmsScreen() {
   };
 
   const retrySecureSave = async () => {
-    if (applying || historyOperationLocked.current) return;
-    historyOperationLocked.current = true;
+    if (applying || (!history && historyOperationLocked.current)) return;
+    if (!history) historyOperationLocked.current = true;
     setApplying(true);
+    if (history) {
+      const result = await historyOperationController.finalize({
+        save: ensureDurable,
+        discard: discardHistorySession,
+      });
+      if (result === 'busy') {
+        setApplying(false);
+        return;
+      }
+      if (result === 'complete') {
+        await finishHistoryReview('complete');
+      } else {
+        if (result === 'save-failed') {
+          setHistoryCommitState('storage-failed');
+          setNotice({ title: t('historyStorageFailed'), body: t('historyStorageFailedBody') });
+        } else {
+          setHistoryCommitState('cleanup-failed');
+          setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+        }
+      }
+      setApplying(false);
+      return;
+    }
     try {
       await ensureDurable();
     } catch {
@@ -531,7 +977,7 @@ export default function ImportSmsScreen() {
   };
 
   useEffect(() => {
-    if (auto === '1' && isSmsScanningAvailable() && !started.current) {
+    if (auto === '1' && manual !== '1' && isSmsScanningAvailable() && !started.current) {
       started.current = true;
       runScan();
     }
@@ -548,16 +994,18 @@ export default function ImportSmsScreen() {
     processedHistory.current = `${history}:${historyAttempt}`;
     let active = true;
     const load = async () => {
+      let coordinatorLoaded = false;
       setScanning(true);
       setProgress(null);
       setNotice(null);
       setPasteVerdict(null);
       setPlan(null);
       setHistoryResult(null);
+      setHistorySourceSummary(null);
       setShowManual(false);
       setHistoryCommitState('idle');
       try {
-        if (!validHistorySession(history)) {
+        if (!validIosHistorySessionId(history)) {
           setNotice({
             title: t('historyImportInvalid'),
             body: t('historyImportInvalidBody'),
@@ -565,48 +1013,37 @@ export default function ImportSmsScreen() {
           return;
         }
         const native = await historyNativeModule();
-        await native.purgeExpired();
-        const chunks = await native.listSessionChunks(history);
-        const seenIds = new Set<string>();
-        const result: HistoricalImportResult = {
-          parsed: [], declined: [], totalCount: 0, acceptedCount: 0,
-          invalidCount: 0, ignoredCount: 0, duplicateCount: 0, newestTs: 0,
-        };
-        for (const chunkIndex of chunks) {
-          const records = await native.readChunk(history, chunkIndex);
-          if (!active) return;
-          const part = parseHistoricalMessageRecords(
-            records,
-            state.merchantOverrides,
-            new Date(),
-            seenIds,
-          );
-          result.parsed.push(...part.parsed);
-          result.declined.push(...part.declined);
-          result.totalCount += part.totalCount;
-          result.acceptedCount += part.acceptedCount;
-          result.invalidCount += part.invalidCount;
-          result.ignoredCount += part.ignoredCount;
-          result.duplicateCount += part.duplicateCount;
-          result.newestTs = Math.max(result.newestTs, part.newestTs);
-          setProgress({ scanned: result.totalCount, found: result.acceptedCount });
-          // One native chunk is at most 50 records. Yield between chunks so a
-          // multi-year import cannot monopolize the JS thread for one long
-          // unresponsive frame or bridge the whole raw corpus at once.
-          await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        }
-        result.parsed.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
-        result.declined.sort((a, b) => a.smsTs - b.smsTs);
+        const result = await loadIosHistorySession({
+          sessionId: history,
+          native,
+          overrides: state.merchantOverrides,
+          onProgress: ({ scanned, matched }) => {
+            if (active) setProgress({ scanned, found: matched });
+          },
+        });
+        if (!active) return;
+        coordinatorLoaded = true;
+        await persistIosHistoryReviewCandidates(result.reviewCandidates, stageReviewAlerts);
         if (!active) return;
         setHistoryResult(result);
         const nextPlan = withoutExistingBillReminders(
           buildImportPlan(result.parsed, state, 0, new Date(), result.declined),
           state.bills.map((bill) => bill.title),
         );
-        const txLike = result.parsed.filter(
-          (row) => row.kind === 'transaction' || row.kind === 'cardPayment',
+        const counts = iosHistorySourceCounts(
+          {
+            ...result.summary,
+            parsed: result.summary.parsed + result.summary.reviewed,
+          },
+          [...result.parsed, ...result.declined]
+            .map((row) => row.sourceEventId)
+            .filter((value): value is string => typeof value === 'string'),
+          state.transactions
+            .map((transaction) => transaction.smsKey)
+            .filter((value): value is string => typeof value === 'string'),
         );
-        setSkippedCount(Math.max(0, txLike.length - nextPlan.txCount));
+        setHistorySourceSummary(counts);
+        setSkippedCount(counts.alreadyFiled);
         setTrackedBills(new Set());
         if (
           nextPlan.txCount === 0 &&
@@ -614,44 +1051,67 @@ export default function ImportSmsScreen() {
           nextPlan.billDues.length === 0 &&
           nextPlan.healedCount === 0
         ) {
-          const recognizedCount = result.acceptedCount + result.declined.length;
           setPlan(null);
           setNotice({
             title:
-              result.totalCount === 0
+              result.summary.found === 0
                 ? t('historyImportMissing')
-                : recognizedCount === 0
+                : result.summary.parsed + result.summary.reviewed + result.summary.declined === 0
                   ? t('historyImportNoneFound')
+                  : result.summary.reviewed > 0
+                    ? t('historyImportReviewReady')
                   : t('upToDate'),
             body:
-              result.totalCount === 0
+              result.summary.found === 0
                 ? t('historyImportMissingBody')
-                : recognizedCount === 0
-                  ? tf('historyImportNoneFoundBody', {
-                      read: result.totalCount,
-                      skipped: result.invalidCount + result.ignoredCount,
-                    })
-                  : tf('historyImportNoNew', {
-                      read: result.totalCount,
-                      skipped: result.invalidCount + result.ignoredCount + result.duplicateCount,
-                    }),
+                : result.summary.parsed + result.summary.reviewed + result.summary.declined === 0
+                  ? t('historyNoSupportedCompact')
+                  : result.summary.reviewed > 0
+                    ? t('historyReviewCompact')
+                    : t('historyNoNewCompact'),
           });
-          await native.discardSession(history);
+          const finalizeResult = await historyOperationController.finalize({
+            save: ensureDurable,
+            discard: () => discardIosHistorySession(native, history),
+          });
+          if (!active) return;
+          if (finalizeResult === 'busy') return;
+          if (finalizeResult === 'save-failed') {
+            setHistoryCommitState('storage-failed');
+            setNotice({ title: t('historyStorageFailed'), body: t('historyStorageFailedBody') });
+          } else if (finalizeResult === 'cleanup-failed') {
+            setHistoryCommitState('cleanup-failed');
+            setNotice({ title: t('historyCleanupFailed'), body: t('historyCleanupFailedBody') });
+          } else if (finalizeResult === 'complete') {
+            await finishHistoryReview('complete');
+          }
           return;
         }
         setPlan(nextPlan);
-        if (result.invalidCount + result.ignoredCount > 0) {
+        if (counts.unread > 0 || counts.alreadyFiled > 0) {
           setNotice({
             title: t('historyImportReviewReady'),
-            body: tf('historyImportReviewCounts', {
-              matched: result.acceptedCount,
-              skipped: result.invalidCount + result.ignoredCount,
-            }),
+            body: t('historyReviewCompact'),
           });
         }
-      } catch {
+      } catch (error) {
         if (active) {
-          setNotice({ title: t('historyImportFailed'), body: t('historyImportFailedBody') });
+          if (error instanceof ImportMoneyError) {
+            setHistoryCommitState('source-retained');
+            setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
+          } else if (coordinatorLoaded) {
+            setHistoryCommitState('source-retained');
+            setNotice({ title: t('historyImportFailed'), body: t('historyImportFailedBody') });
+          } else if (iosHistoryLoadFailureDisposition(error) === 'cleanup-failed') {
+            setHistoryCommitState('source-cleanup-failed');
+            setNotice({ title: t('historyImportFailed'), body: t('historySourceCleanupFailed') });
+          } else if (iosHistoryLoadFailureDisposition(error) === 'source-discarded') {
+            setHistoryCommitState('source-discarded');
+            setNotice({ title: t('historyImportFailed'), body: t('historySourceDiscarded') });
+          } else {
+            setHistoryCommitState('source-retained');
+            setNotice({ title: t('historyImportFailed'), body: t('historyImportFailedBody') });
+          }
         }
       } finally {
         if (active) setScanning(false);
@@ -662,7 +1122,8 @@ export default function ImportSmsScreen() {
     // The import intentionally uses one hydrated ledger snapshot. Depending on
     // the whole state object would cancel a multi-chunk read after any store
     // update, while processedHistory prevents the replacement effect from
-    // restarting it. A new user retry increments historyAttempt explicitly.
+    // restarting it. A retry is exposed only for a failure before the
+    // coordinator could prove the source was tombstoned.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, historyAttempt, state.hydrated, state.merchantOverrides]);
 
@@ -674,9 +1135,9 @@ export default function ImportSmsScreen() {
   /** Rows the parser had to guess at — the ones worth reporting. */
   const unreadCount = useMemo(
     () => historyResult
-      ? historyResult.invalidCount + historyResult.ignoredCount
+      ? historySourceSummary?.unread ?? 0
       : (plan?.batch.transactions ?? []).filter((tx) => tx.raw).length,
-    [historyResult, plan],
+    [historyResult, historySourceSummary, plan],
   );
 
   const newBills = useMemo(() => {
@@ -692,7 +1153,7 @@ export default function ImportSmsScreen() {
 
   return (
     <ThemedView style={styles.root}>
-      <Stack.Screen options={{ gestureEnabled: !validHistorySession(history) }} />
+      <Stack.Screen options={{ gestureEnabled: !validIosHistorySessionId(history) }} />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerWrap}>
           {/* The title has to describe what this screen can actually do on the
@@ -707,6 +1168,118 @@ export default function ImportSmsScreen() {
           contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
+          {Platform.OS === 'ios' && (
+            <Section index={0}>
+              <View
+                testID="ios-history-card"
+                style={[
+                  styles.historyCard,
+                  { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+                ]}>
+                <View
+                  accessible
+                  accessibilityRole="header"
+                  accessibilityLabel={t('historyCardTitle')}
+                  style={styles.historyCardHeading}>
+                  <Icon name="calendar" size={19} color={theme.primary} />
+                  <View style={styles.rowText}>
+                    <ThemedText type="small">{t('historyCardTitle')}</ThemedText>
+                    <ThemedText type="meta" themeColor="textTertiary">
+                      {historyCardState === 'unsupported'
+                        ? t('historyRequiresIos26')
+                        : historyCardState === 'install-unavailable'
+                          ? t('historyInstallUnavailable')
+                          : historyCardState === 'running'
+                            ? t('historyRunningCompact')
+                            : historyCardState === 'review'
+                              ? t('historyReviewCompact')
+                              : t('historyReadyCompact')}
+                    </ThemedText>
+                  </View>
+                </View>
+                {historySourceSummary && (
+                  <View
+                    accessibilityLiveRegion="polite"
+                    style={styles.historySourceCounts}>
+                    <ThemedText
+                      testID="ios-history-source-count-row"
+                      type="meta"
+                      tabular
+                      themeColor="textSecondary">
+                      {tf('historySourceCountsRead', {
+                        understood: historySourceSummary.understood,
+                        unread: historySourceSummary.unread,
+                      })}
+                    </ThemedText>
+                    <ThemedText
+                      testID="ios-history-source-count-row"
+                      type="meta"
+                      tabular
+                      themeColor="textSecondary">
+                      {tf('historySourceCountsFiled', {
+                        alreadyFiled: historySourceSummary.alreadyFiled,
+                        notAlreadyFiled: historySourceSummary.notAlreadyFiled,
+                      })}
+                    </ThemedText>
+                  </View>
+                )}
+                <Button
+                  label={
+                    historyCardState === 'unsupported'
+                      ? t('historyPasteManually')
+                      : historyCardState === 'install-unavailable'
+                        ? t('historyInstallUnavailableAction')
+                        : historyCardState === 'needs-install'
+                          ? t(historyInstallOpened ? 'historyAddedAction' : 'historyAddAction')
+                          : historyCardState === 'ready'
+                            ? t(historyHandoffExpired ? 'historyTryAgain' : 'historyStartAction')
+                            : historyCardState === 'running'
+                              ? t('historyContinueAction')
+                              : t('historyReviewAction')
+                  }
+                  icon={historyCardState === 'needs-install' ? 'download' : 'calendar'}
+                  disabled={
+                    historyActionBusy ||
+                    historyCardState === 'install-unavailable' ||
+                    historyCardState === 'review'
+                  }
+                  onPress={historyCardPrimaryAction}
+                  wrapLabel
+                />
+                {historyCardState === 'running' && (
+                  <Button
+                    label={t('cancel')}
+                    variant="ghost"
+                    disabled={historyActionBusy}
+                    onPress={() => void cancelHistoryHandoff()}
+                  />
+                )}
+                {historyCardState === 'ready' && historyHandoffExpired && (
+                  <Button
+                    label={t('historyReinstallAction')}
+                    variant="outline"
+                    disabled={historyActionBusy}
+                    onPress={() => void openHistoryInstall(true)}
+                    wrapLabel
+                  />
+                )}
+                {!history && historyCardState !== 'unsupported' && (
+                  <Button
+                    label={showManual ? t('hideManualPaste') : t('historyPasteManually')}
+                    variant="ghost"
+                    disabled={historyActionBusy}
+                    onPress={() => setShowManual((value) => !value)}
+                    wrapLabel
+                  />
+                )}
+                <Button
+                  label={t('historyLearnMore')}
+                  variant="ghost"
+                  onPress={() => setHistoryDetailsVisible(true)}
+                />
+              </View>
+            </Section>
+          )}
           {scanning ? (
             <Section
               index={0}
@@ -735,14 +1308,14 @@ export default function ImportSmsScreen() {
                 </ThemedText>
               </View>
               <ThemedText type="meta" themeColor="textTertiary">
-                {t('importProgressPrivacy')}
+                {history ? t('historyRunningCompact') : t('importProgressPrivacy')}
               </ThemedText>
             </Section>
           ) : (
             <Section index={0} style={styles.intro}>
               <ThemedText type="default" themeColor="textSecondary">
                 {history
-                  ? t('historyReviewPrivacy')
+                  ? t('historyReviewCompact')
                   : isSmsScanningAvailable()
                   ? t('scanBankAlertsPrivacy')
                   : t('pasteHint')}
@@ -759,41 +1332,6 @@ export default function ImportSmsScreen() {
                 <ThemedText type="meta" themeColor="textTertiary">
                   {t('featPasteFreeText')}
                 </ThemedText>
-              )}
-              {supportsHistoricalShortcut() && HISTORY_SHORTCUT_INSTALL_URL && !history && (
-                <>
-                  <Button
-                    label={t('installHistoryShortcut')}
-                    icon="download"
-                    variant="outline"
-                    onPress={() => {
-                      Linking.openURL(HISTORY_SHORTCUT_INSTALL_URL).catch(() => {
-                        setNotice({
-                          title: t('historyShortcutMissing'),
-                          body: t('historyShortcutMissingBody'),
-                        });
-                      });
-                    }}
-                  />
-                  <Button
-                    label={t('importPastMessages')}
-                    icon="calendar"
-                    onPress={async () => {
-                      setNotice(null);
-                      try {
-                        await Linking.openURL(HISTORY_SHORTCUT_URL);
-                      } catch {
-                        setNotice({
-                          title: t('historyShortcutMissing'),
-                          body: t('historyShortcutMissingBody'),
-                        });
-                      }
-                    }}
-                  />
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {t('historyImportPrivacy')}
-                  </ThemedText>
-                </>
               )}
               {!history && isSmsScanningAvailable() && (
                 <>
@@ -865,6 +1403,12 @@ export default function ImportSmsScreen() {
           {/* The answer to a tap that could not do what it offered. It sits
               above the plan because it is the reason the plan is empty, or the
               reason there is no plan at all. */}
+          {pasteReviewCount > 0 && !scanning ? (
+            <Section index={1}>
+              <Button label={tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
+                onPress={() => router.push('/review-alerts')} />
+            </Section>
+          ) : null}
           {notice !== null && !scanning && (
             <Section index={1}>
               <View accessibilityLiveRegion="polite">
@@ -880,14 +1424,19 @@ export default function ImportSmsScreen() {
                   </View>
                 </Block>
               </View>
-              {validHistorySession(history) && historyResult === null && historyCommitState === 'idle' && (
-                <Button
-                  label={t('retryHistoryRead')}
-                  variant="outline"
-                  onPress={() => setHistoryAttempt((attempt) => attempt + 1)}
-                />
-              )}
-              {history && historyCommitState === 'cleanup-failed' && (
+              {validIosHistorySessionId(history) &&
+                historyCommitState === 'source-retained' && (
+                  <Button
+                    label={t('retryHistoryRead')}
+                    variant="outline"
+                    onPress={() => setHistoryAttempt((attempt) => attempt + 1)}
+                  />
+                )}
+              {history && (
+                historyCommitState === 'cleanup-failed' ||
+                historyCommitState === 'source-cleanup-failed' ||
+                historyCommitState === 'cancel-cleanup-failed'
+              ) && (
                 <Button
                   label={t('deleteStagedMessages')}
                   variant="outline"
@@ -904,6 +1453,8 @@ export default function ImportSmsScreen() {
               )}
               {history && (
                 historyCommitState === 'cleanup-failed' ||
+                historyCommitState === 'source-cleanup-failed' ||
+                historyCommitState === 'cancel-cleanup-failed' ||
                 historyCommitState === 'storage-failed'
               ) && (
                 <Button
@@ -981,17 +1532,8 @@ export default function ImportSmsScreen() {
                           <Button
                             variant={tracked ? 'ghost' : 'outline'}
                             label={tracked ? t('tracked') : t('track')}
-                            disabled={tracked}
-                            onPress={() => {
-                              addBill({
-                                title: p.merchant,
-                                category: p.categoryGuess,
-                                amountFils: p.amountFils,
-                                dueDay: p.dueDay ?? (p.date ? Number(p.date.slice(8)) : 1),
-                                autoDetected: true,
-                              });
-                              setTrackedBills(new Set(trackedBills).add(i));
-                            }}
+                            disabled={tracked || applying}
+                            onPress={() => void trackReminder(p, i)}
                             style={styles.trackButton}
                           />
                         )}
@@ -1149,6 +1691,10 @@ export default function ImportSmsScreen() {
             />
           </View>
         )}
+        <HistoryDetailsSheet
+          visible={historyDetailsVisible}
+          onClose={() => setHistoryDetailsVisible(false)}
+        />
       </SafeAreaView>
     </ThemedView>
   );
@@ -1174,6 +1720,20 @@ const styles = StyleSheet.create({
   },
   intro: {
     gap: Spacing.three - 2,
+  },
+  historyCard: {
+    borderWidth: 1,
+    borderRadius: Radius.sheet,
+    padding: Spacing.three,
+    gap: Spacing.three - 2,
+  },
+  historyCardHeading: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.two + 2,
+  },
+  historySourceCounts: {
+    gap: Spacing.half,
   },
   scanning: {
     gap: Spacing.three - 2,

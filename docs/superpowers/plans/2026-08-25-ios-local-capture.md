@@ -1,5 +1,12 @@
 # iOS Local Capture Implementation Plan
 
+> **Superseded setup correction (2026-09-04):** This historical plan's
+> `Any Sender` plus empty `Message Contains` instructions are not active. On
+> iOS 26.6.1 that configuration did not enable **Next**. Apple requires an
+> explicitly selected sender or phrase; Wafra now limits future automatic
+> capture to bank senders the user selects. History import and manual entry
+> remain available.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace relay-backed iPhone SMS capture with one credential-free Shortcut and one local Message automation that stages, parses, saves, and deletes future bank alerts on the iPhone.

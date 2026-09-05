@@ -38,17 +38,17 @@
  */
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Icon } from '@/components/ui/icon';
-import { Row, ScreenHeader, Section } from '@/components/ui/layout';
+import { Row, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { useToast } from '@/components/ui/toast';
-import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
@@ -102,14 +102,17 @@ export default function CategoriseScreen() {
     [merchants, setMerchantOverride, state.language, toast],
   );
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('categoriseMerchants')} onBack={() => router.back()} />
-        </View>
+  const categoriseHeader: ScreenHeaderProps = {
+    title: t('categoriseMerchants'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  return (
+    <>
+      <ScreenScaffold
+        headerMode="native"
+        header={categoriseHeader}
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
           <Section index={0} style={styles.intro}>
             <ThemedText type="default" themeColor="textSecondary">
               {t('categoriseIntro')}
@@ -193,29 +196,12 @@ export default function CategoriseScreen() {
               </ThemedText>
             </Section>
           )}
-        </ScrollView>
-      </SafeAreaView>
-    </ThemedView>
+      </ScreenScaffold>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
-  content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
-  },
   intro: {
     gap: Spacing.two,
     paddingBottom: Spacing.three,

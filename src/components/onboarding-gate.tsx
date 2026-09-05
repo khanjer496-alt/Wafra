@@ -1,6 +1,6 @@
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Linking,
   Platform,
@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StorageRecovery } from '@/components/storage-recovery';
 import { MoneyPreview } from '@/components/onboarding/money-preview';
 import { ThemedText } from '@/components/themed-text';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
@@ -28,11 +29,13 @@ import {
 } from '@/lib/auto-import';
 import { committed, tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
+import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
   BUDGET_PRESETS,
   DEFAULT_ONBOARDING_PLAN,
   GOAL_PRESETS,
+  onboardingResumeDestination,
   type OnboardingBudgetId,
   type OnboardingGoalId,
 } from '@/lib/onboarding';
@@ -77,10 +80,12 @@ function StartOption({
   automatic: boolean;
   onPress: () => void;
 }) {
-  const title = t(automatic ? 'onboardAutomaticChoice' : 'onboardManualChoice');
+  const title = t(automatic
+    ? Platform.OS === 'ios' ? 'onboardAutomaticChoiceIos' : 'onboardAutomaticChoice'
+    : Platform.OS === 'ios' ? 'onboardManualChoiceIos' : 'onboardManualChoice');
   const body = t(automatic
     ? Platform.OS === 'ios' ? 'onboardAutomaticChoiceIosBody' : 'onboardAutomaticChoiceAndroidBody'
-    : 'onboardManualChoiceBody');
+    : Platform.OS === 'ios' ? 'onboardManualChoiceIosBody' : 'onboardManualChoiceBody');
   return (
     <Pressable
       accessibilityRole="button"
@@ -174,7 +179,9 @@ function SelectionRow({
   );
 }
 
-function BackHeader({ step, onBack }: { step: Step; onBack: () => void }) {
+function BackHeader({ step, onBack, showProgress }: {
+  step: Step; onBack: () => void; showProgress: boolean;
+}) {
   const index = QUESTION_STEPS.indexOf(step);
   const visibleIndex = index < 0 ? QUESTION_STEPS.length - 1 : index;
   return (
@@ -192,11 +199,11 @@ function BackHeader({ step, onBack }: { step: Step; onBack: () => void }) {
           <Icon name="chevron-left" size={18} color={night.textSecondary} />
           <ThemedText style={styles.backLabel}>{t('onboardBack')}</ThemedText>
         </Pressable>
-        <ThemedText style={styles.stepLabel}>
+        {showProgress && <ThemedText style={styles.stepLabel}>
           {tf('onboardStepOf', { step: visibleIndex + 1, total: QUESTION_STEPS.length })}
-        </ThemedText>
+        </ThemedText>}
       </View>
-      <View
+      {showProgress && <View
         style={styles.progressTrack}
         accessibilityRole="progressbar"
         accessibilityValue={{ min: 1, max: QUESTION_STEPS.length, now: visibleIndex + 1 }}>
@@ -212,7 +219,7 @@ function BackHeader({ step, onBack }: { step: Step; onBack: () => void }) {
             ]}
           />
         ))}
-      </View>
+      </View>}
     </View>
   );
 }
@@ -241,6 +248,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setCaptureOptOut,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
+  const [personalizing, setPersonalizing] = useState(false);
+  const [resumeReady, setResumeReady] = useState(false);
+  const [resumeFailed, setResumeFailed] = useState(false);
+  const [resumeAttempt, setResumeAttempt] = useState(0);
+  const resumeHandled = useRef(false);
+  const previouslyOnboarded = useRef(false);
   const [plan, setPlan] = useState(() => ({
     ...DEFAULT_ONBOARDING_PLAN,
     goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds],
@@ -251,6 +264,61 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [smsDenied, setSmsDenied] = useState(false);
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
   const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
+  const [learnMoreVisible, setLearnMoreVisible] = useState(false);
+
+  useEffect(() => {
+    if (!state.hydrated || hydrationFailed) return;
+    if (previouslyOnboarded.current && !state.onboarded) {
+      resumeHandled.current = false;
+      setStep('welcome');
+      setPlan({ ...DEFAULT_ONBOARDING_PLAN, goalIds: [...DEFAULT_ONBOARDING_PLAN.goalIds] });
+      setPersonalizing(false);
+      setResumeFailed(false);
+    }
+    previouslyOnboarded.current = state.onboarded;
+    // These routes own their own handoff. Returning normally to the root must
+    // re-read that progress, even when this gate stayed mounted underneath.
+    if (!state.onboarded && Platform.OS === 'ios' &&
+      (pathname === '/ios-setup' || pathname === '/import-sms')) {
+      resumeHandled.current = false;
+      setResumeReady(true);
+      return;
+    }
+    if (resumeHandled.current) return;
+    if (state.onboardingPlan) {
+      setPlan({ ...state.onboardingPlan, goalIds: [...state.onboardingPlan.goalIds] });
+      setPersonalizing(true);
+    }
+    if (state.onboarded) {
+      resumeHandled.current = true;
+      setResumeReady(true);
+      return;
+    }
+    setResumeReady(false);
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const saved = Platform.OS === 'ios' ? await loadIosMessageSetupProgress() : null;
+        if (cancelled) return;
+        const destination = onboardingResumeDestination({
+          platform: Platform.OS,
+          pendingIosSetup: saved?.returnToOnboarding === true,
+          hasSavedPlan: state.onboardingPlan !== null,
+          completedCallback: params.onboarding === 'complete',
+        });
+        resumeHandled.current = true;
+        if (destination === 'ios-setup') router.replace('/ios-setup?fromOnboarding=1');
+        else setStep(destination);
+        setResumeReady(true);
+        setResumeFailed(false);
+      } catch {
+        if (!cancelled) setResumeFailed(true);
+      }
+    };
+    void restore();
+    return () => { cancelled = true; };
+  }, [state.hydrated, state.onboarded, state.onboardingPlan, hydrationFailed, pathname,
+    params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = params.onboarding === 'complete' ? 'complete' : step;
   const capture = captureCopy();
@@ -270,9 +338,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    */
   const showRecovery = hydrationFailed;
 
-  // The guided iOS setup is itself onboarding. Do not paint this gate over it.
+  // The guided iOS setup is itself onboarding. Keep these exemptions scoped
+  // to iPhone so an Android deep link cannot bypass the first-run gate.
+  const isIosSetupRoute = Platform.OS === 'ios' && (
+    pathname === '/ios-setup' ||
+    pathname === '/import-sms'
+  );
   const showOverlay =
-    !showRecovery && state.hydrated && !state.onboarded && pathname !== '/ios-setup';
+    !showRecovery &&
+    state.hydrated &&
+    !state.onboarded &&
+    !isIosSetupRoute;
   const notifAvailable = Platform.OS === 'android' &&
     NotificationReader?.isAvailable?.() === true;
 
@@ -389,6 +465,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             // CaptureExecutor still enforces the durable opt-out.
           }
         }
+        await dispatchIosMessageSetup({ type: 'onboarding-return-cleared' });
       }
       setCompletionOutcome('manual');
       setStep('complete');
@@ -403,6 +480,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     if (activeStep === 'complete') {
       setStep('capture');
       if (params.onboarding) router.setParams({ onboarding: undefined });
+    } else if (activeStep === 'capture' && !personalizing) {
+      setStep('welcome');
     } else if (activeStep === 'scanning') {
       setStep('capture');
     } else if (index > 0) {
@@ -435,14 +514,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // Do not render financial screens against the reducer's blank bootstrap
   // state. Besides flashing false AED 0 figures, mounting every tab here used
   // to start expensive ledger projections before encrypted hydration finished.
-  if (!state.hydrated) {
+  if (!state.hydrated || (!resumeReady && !state.onboarded)) {
     return (
       <View style={styles.loadingRoot} accessibilityLiveRegion="polite">
         <StatusBar style="light" />
         <View style={styles.markHalo}>
           <WafraMark size={44} color={night.primary} />
         </View>
-        <ThemedText style={styles.loadingLabel}>{t('loadingLedger')}</ThemedText>
+        <ThemedText style={styles.loadingLabel}>
+          {t(resumeFailed ? 'onboardResumeError' : 'loadingLedger')}
+        </ThemedText>
+        {resumeFailed && (
+          <Button label={t('storageRecoveryRetry')} onPress={() => {
+            setResumeFailed(false);
+            setResumeAttempt((value) => value + 1);
+          }} />
+        )}
       </View>
     );
   }
@@ -479,7 +566,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   </View>
                   <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
                 </View>
-                <ThemedText style={styles.eyebrow}>{t('onboardEyebrow')}</ThemedText>
                 <ThemedText
                   style={styles.headline}
                   accessibilityRole="header"
@@ -496,10 +582,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               <MoneyPreview reducedMotion={reducedMotion} />
               <View style={styles.welcomeActions}>
                 <Button
-                  label={t('onboardPersonalizeCta')}
-                  onPress={() => setStep('goals')}
+                  label={t('onboardStartNow')}
+                  onPress={() => { setPersonalizing(false); setStep('capture'); }}
                   labelColor={night.onPrimary}
                   style={{ backgroundColor: night.primary }}
+                />
+                <Button
+                  variant="outline"
+                  label={t('onboardPersonalizeOptional')}
+                  onPress={() => { setPersonalizing(true); setStep('goals'); }}
+                  labelColor={night.text}
+                  style={styles.ghost}
                 />
                 <View style={styles.setupTime}>
                   <Icon name="lock" size={14} color={night.textTertiary} />
@@ -509,7 +602,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             </Animated.ScrollView>
           ) : (
             <>
-              {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack} />}
+              {activeStep !== 'scanning' && <BackHeader step={activeStep} onBack={goBack} showProgress={personalizing} />}
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
@@ -554,6 +647,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           labelColor={night.onPrimary}
                           style={styles.primaryButton}
                         />
+                        <Button variant="outline" label={t('onboardSkipPersonalization')}
+                          onPress={() => { setPersonalizing(false); setStep('capture'); }}
+                          labelColor={night.text} style={styles.ghost} />
                       </View>
                     </>
                   )}
@@ -637,6 +733,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                               : 'onboardCapturePrivacyAndroid')}
                           </ThemedText>
                         </View>
+                      )}
+                      {Platform.OS === 'ios' && (
+                        <Button
+                          variant="outline"
+                          label={t('onboardCaptureLearnMoreAction')}
+                          onPress={() => setLearnMoreVisible(true)}
+                          labelColor={night.text}
+                          style={[styles.learnMoreButton, styles.ghost]}
+                        />
                       )}
                       {Platform.OS === 'web' && (
                         <View style={styles.captureActions}>
@@ -795,6 +900,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               </ScrollView>
             </>
           )}
+          <BottomSheet
+            visible={learnMoreVisible}
+            onClose={() => setLearnMoreVisible(false)}
+            title={t('onboardCaptureLearnMoreTitle')}>
+            <View style={styles.learnMoreContent}>
+              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMorePrivacy')}</ThemedText>
+              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreRetention')}</ThemedText>
+              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreLegacy')}</ThemedText>
+              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreLimits')}</ThemedText>
+            </View>
+          </BottomSheet>
         </SafeAreaView>
       </View>
       <ConfirmSheet
@@ -857,9 +973,9 @@ const styles = StyleSheet.create({
   },
   headline: {
     fontFamily: Fonts.sansSemi,
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -1.25,
+    fontSize: 42,
+    lineHeight: 48,
+    letterSpacing: -1.4,
     color: night.text,
     maxWidth: 430,
   },
@@ -944,9 +1060,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   captureActions: { marginTop: 'auto', paddingTop: Spacing.five, gap: Spacing.two },
-  startOptions: { paddingTop: Spacing.four, gap: Spacing.two },
+  startOptions: { paddingTop: Spacing.three, gap: Spacing.two },
   startOption: {
-    minHeight: 92,
+    minHeight: 78,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
@@ -1015,12 +1131,8 @@ const styles = StyleSheet.create({
   resultDivider: { width: StyleSheet.hairlineWidth, backgroundColor: night.primaryBorder },
   capturePrivacy: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: Spacing.two,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: night.cardBorder,
-    borderRadius: Radius.md,
-    padding: Spacing.three,
   },
   capturePrivacyText: {
     flex: 1,
@@ -1028,4 +1140,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  learnMoreButton: { marginTop: Spacing.two },
+  learnMoreContent: { gap: Spacing.three },
+  learnMoreText: { color: night.textSecondary, fontSize: 14, lineHeight: 21 },
 });

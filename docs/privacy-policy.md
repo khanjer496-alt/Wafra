@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 11 August 2026_
+_Last updated: 2 September 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS.
 
@@ -12,24 +12,30 @@ before release.
 
 - **Android:** bank SMS and optional bank-app notifications are parsed on the
   device. They are not sent to Wafra's relay.
-- **iPhone with automatic capture enabled:** a personal Apple Shortcut sends
-  alerts only from bank senders the user selects to Wafra's relay. The relay
-  parses the raw body in memory and discards it immediately. It persists only
-  a structured transaction sealed to that iPhone, until the phone acknowledges
-  it or for at most 30 days.
-- **Private Mode:** automatic iPhone relay capture is off. Imports and parsing
-  stay on the device, and raw text is dropped immediately after processing.
-- **iPhone history import:** on iOS 26.5 or later, a user-run Apple Shortcut can
-  search messages in a date range the user chooses and pass them to Wafra for
-  local parsing and review. Nothing from this history import is sent to Wafra's
-  relay.
+- **iPhone with automatic capture enabled:** a personal Apple automation passes
+  new Messages only from bank senders the user selects to Wafra on that iPhone.
+  A protected local queue holds each one only until Wafra can run the same
+  financial parser used by the Android app.
+  Unsupported content is discarded; successfully processed raw text and sender
+  are deleted after durable local processing. Pending records expire after 30
+  days. This local path uploads no Message content.
+- **Private Mode:** local iPhone automatic capture and history import still
+  work. Private Mode blocks optional relay-backed processing and sharing.
+- **iPhone history import:** on iOS 26 or later, a user-run Apple Shortcut can
+  check up to 1,500 newest and 1,500 oldest retained Messages. It continues only
+  if a stable overlap proves that the two bounded results cover the retained
+  history. It stops and erases partial staging when coverage cannot be proven,
+  including when the phone retains 3,000 or more Messages. The protected import
+  also has a 24 MiB safety limit. Nothing from this history import is sent to
+  Wafra's relay.
 - The ledger, accounts, budgets, bills, goals and settings live in encrypted
   app storage on the device. Wafra has no advertising or third-party analytics.
 - **Zero message access is always available:** leave Android SMS permission off
   or leave iPhone automatic capture unconfigured and use manual entry/imports.
 - Wafra cannot sign in to a bank, reply to a message, approve a transaction or
-  move money. Automatic capture keeps only supported financial activity;
-  other message content is discarded before Wafra storage.
+  move money. Automatic capture may hold raw Message content briefly in the
+  protected local queue described below; only supported structured financial
+  activity can enter the ledger, and no Message content is uploaded.
 
 ## Message-access choices
 
@@ -42,11 +48,14 @@ discarded before app storage and is never uploaded. The no-permission option
 remains available for users who prefer manual entry.
 
 On iPhone, leaving automatic capture unconfigured gives Wafra no Messages
-access. If the user enables Wafra Capture, Apple Shortcuts forwards alerts only
-from bank conversations the user selected. The encrypted relay parses the
-content, discards raw text immediately, and queues only a device-sealed
-structured transaction. Unsupported content is not logged, queued, returned,
-added to the ledger or used for analytics.
+access. If the user enables Wafra Local Capture, Apple's personal automation
+can pass a newly received Message from a bank sender the user selects to Wafra
+on that iPhone. The raw body and sender can therefore remain briefly
+in Wafra's protected local queue until the app classifies the record. They are
+not uploaded, logged, used for analytics or written to the ledger. Unsupported
+content is discarded after classification. A record the app has not yet
+processed expires after 30 days and is physically removed on the next queue
+access; iOS does not promise an exact background cleanup time.
 
 ## Android bank-alert access
 
@@ -74,51 +83,62 @@ classification. This is off until the user enables it.
 Apple does not give third-party apps access to the SMS inbox. Wafra therefore
 uses a personal automation that the user creates in Apple's Shortcuts app:
 
-1. The user selects the bank message senders that may trigger the automation.
-2. The automation sends that alert's raw text over HTTPS to the Wafra relay
-   using a device-specific bearer token.
-3. The relay parses the body in memory. It does not write, log or return the raw
-   message text.
-4. If the body is a supported financial alert, the relay keeps only the parsed
-   fields, encrypted to a public key whose private half stays on that iPhone.
-5. Wafra deletes the queued row after the app acknowledges it. Unacknowledged
-   rows expire after 30 days.
+1. The user chooses **Message**, explicitly selects a bank sender, selects
+   **Run Immediately**, and passes the complete **Received Message** to
+   **Wafra Local Capture**. Apple requires an explicit sender or phrase; Wafra
+   does not use an empty **Any Sender** trigger.
+2. The Shortcut passes the Message's sender, body, Apple identifier and date to
+   Wafra's background App Intent on the same iPhone. The identifier is reduced
+   to a stable opaque value before storage.
+3. Wafra stores the record in an app-private, backup-excluded queue protected
+   by iOS complete-until-first-authentication file protection. No network action
+   exists in this Shortcut.
+4. When iOS next permits Wafra to run, the app uses its local financial parser.
+   Supported transactions enter the encrypted ledger or review flow;
+   promotions, OTPs and unsupported content do not.
+5. After the result is durably handled, Wafra deletes the raw queued record.
+   Records not yet handled expire after 30 days and are removed on a later queue
+   access.
 
-The relay also stores a random device identifier, the device's public key and a
-SHA-256 hash of the bearer token. It stores no name, email address, phone
-number, bank login or raw message archive. An inactive device registration is
-deleted after one year.
+The automation can stage a new Message while Wafra is closed, but Apple controls
+when personal automations and background App Intents run. Wafra therefore does
+not promise that the ledger updates at an exact time. Opening Wafra drains any
+available protected queue.
 
-Shortcuts can send an alert while Wafra is closed. After the first unlock
-following a restart, iOS may wake Wafra silently and stage the sealed,
-structured transaction in a separate encrypted inbox. The protected main
-ledger incorporates it on foreground. APNs background delivery is best-effort,
-and Apple pauses silent wakes after the user force-quits Wafra until the next
-open, so Wafra does not promise a background update at an exact time.
-
-Private Mode disables this relay path. Because iOS has no local SMS-inbox API,
-automatic SMS capture is unavailable on iPhone while Private Mode is on.
+Older TestFlight builds used a separately paired relay-backed Shortcut. During
+migration, that old automation can continue sending previously selected alerts
+until it is deleted or its token is retired. The current local Shortcut contains
+no relay URL or credential. Private Mode blocks the old relay path but does not
+disable local automatic capture.
 
 ## iPhone message-history import
 
-On iOS 26.5 or later, the user can separately run Wafra's message-history
-Shortcut. The Shortcut uses Apple's **Find Messages** action to search the date
-range the user chooses. Apple does not provide Wafra with a direct SMS-inbox
-permission or API. The Shortcut therefore examines messages in that chosen
-range before Wafra's parser can identify which ones are financial alerts.
+On iOS 26 or later, the user can separately run Wafra's message-history
+Shortcut. It uses Apple's **Find Messages** action to request at most 1,500
+newest and 1,500 oldest retained Messages. It verifies both sort extremes and
+requires at least one stable Message-identifier overlap before continuing. If
+the results do not overlap—including when the phone retains 3,000 or more
+Messages—it erases partial staging instead of presenting a knowingly incomplete
+history. It also enforces a 24 MiB protected-import safety limit. Apple does not
+provide Wafra with a direct SMS-inbox permission or API. Large histories can
+take 20–25 minutes or more depending on the phone and retained history, and the
+iPhone must remain unlocked with Shortcuts open until Wafra opens.
 
-The Shortcut passes message text, sender, date and an opaque hash of Apple's
-message identifier to Wafra in bounded batches. Those batches stay on the
-device, use iOS complete file protection, are excluded from device backups and
-are not sent to the relay, analytics or an AI service. Wafra parses each batch
-locally and shows a preview before changing the ledger. Raw message text is not
-written to the ledger.
+The Shortcut passes Message text, sender, date and Apple's Message identifier to
+Wafra one record at a time from each bounded result. The identifier is hashed
+before the first protected disk write. Prepared records stay on the device, use
+iOS complete file protection, are excluded from device backups and are not sent
+to the relay, analytics or an AI service. Wafra parses them locally and shows a
+preview before changing the ledger. Raw Message text and sender are not written
+to the ledger.
 
 When the user confirms, Wafra first saves the structured results to its
 encrypted database and then deletes the staged batches. Cancelling also deletes
 them. If deletion is interrupted, staged batches become eligible for local
 cleanup after one hour and Wafra removes them the next time the history bridge
-runs. iOS does not guarantee that this fallback cleanup happens at an exact
+runs. An unfinished per-Message preparation remains recoverable for up to three
+hours so large runs can finish, then becomes eligible for the same opportunistic
+cleanup. iOS does not guarantee that fallback cleanup happens at an exact
 wall-clock time. Messages already deleted by the user, removed by Messages
 retention settings or unavailable to Apple's search cannot be recovered or
 imported.
@@ -223,7 +243,8 @@ The user can:
 - choose whether to install or run the iPhone history Shortcut, choose its date
   range, review the results and cancel before saving;
 - decline or revoke bank-email forwarding and trusted-device sharing;
-- enable Private Mode to keep new processing local;
+- enable Private Mode to block optional relay-backed processing while keeping
+  local iPhone capture and history import available;
 - edit, export or delete local financial records; and
 - erase the iPhone relay device and queue through **Erase all data** while
   online.
@@ -247,4 +268,5 @@ will be surfaced in the app.
 ## Contact
 
 <!-- Replace with the real support address before publishing. -->
+
 support@example.com

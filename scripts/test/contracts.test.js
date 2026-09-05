@@ -13,6 +13,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 let pass = 0;
 let fail = 0;
@@ -40,19 +41,30 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
 const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
 
-/* ── Icons: a name in the type, a shape on the screen ─────────────────── */
-//
-// Icons render through `{name === 'x' && <Path .../>}`. A name in the union
-// with no branch is not an error — it draws an empty 24x24 box. A category
-// with a missing glyph would just look like a gap in the list.
+/* ── Icons: every name has a native symbol and a portable shape ─── */
 {
   const src = read('src/components/ui/icon.tsx');
-  const declared = quoted(src.match(/export type IconName =([\s\S]*?);/)[1]);
+  const declared = quoted(read('src/components/ui/icon.types.ts').match(/export type IconName =([\s\S]*?);/)[1]);
   const drawn = new Set([...src.matchAll(/name === '([^']+)'/g)].map((m) => m[1]));
-  const undrawn = declared.filter((n) => !drawn.has(n));
-  const undeclared = [...drawn].filter((n) => !declared.includes(n));
-  ok('every icon name has a shape', undrawn.length === 0, undrawn.join(' | '));
+  const mappingBody = src.match(
+    /const SF_SYMBOLS: Record<IconName, SFSymbol> = \{([\s\S]*?)\n\};/,
+  )?.[1] ?? '';
+  const mapped = new Set(
+    [...mappingBody.matchAll(/(?:^|,)\s*(?:'([^']+)'|([A-Za-z][\w]*))\s*:/gm)]
+      .map((m) => m[1] ?? m[2]),
+  );
+  const undrawn = declared.filter((name) => !drawn.has(name));
+  const unmapped = declared.filter((name) => !mapped.has(name));
+  const undeclared = [...drawn].filter((name) => !declared.includes(name));
+  ok('every icon name has an SVG fallback', undrawn.length === 0, undrawn.join(' | '));
+  ok('every icon name has an iOS symbol', unmapped.length === 0, unmapped.join(' | '));
   ok('every icon shape has a name', undeclared.length === 0, undeclared.join(' | '));
+  ok('the native symbol keeps the portable SVG fallback',
+    /const fallback = <SvgIcon/.test(src) && /fallback=\{fallback\}/.test(src));
+  ok('the phone icon uses the minimum-iOS-safe iphone symbol',
+    /(?:^|,)\s*phone\s*:\s*'iphone'/m.test(mappingBody));
+  ok('the receipt icon uses the minimum-iOS-safe doc.text symbol',
+    /(?:^|,)\s*receipt\s*:\s*'doc\.text'/m.test(mappingBody));
 }
 
 /* ── Categories: the type, the table, and the glyph each one asks for ── */
@@ -66,7 +78,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   ok('every category has a label and an icon', missing.length === 0, missing.join(' | '));
   ok('every category row is a real category', extra.length === 0, extra.join(' | '));
 
-  const iconSrc = read('src/components/ui/icon.tsx');
+  const iconSrc = read('src/components/ui/icon.types.ts');
   const icons = new Set(quoted(iconSrc.match(/export type IconName =([\s\S]*?);/)[1]));
   const noGlyph = rows.filter((r) => !icons.has(r[2])).map((r) => `${r[0].slice(0, 20)}→${r[2]}`);
   ok('every category icon exists', noGlyph.length === 0, noGlyph.join(' | '));
@@ -850,23 +862,24 @@ function ktSources(dir) {
   const setup = read('src/app/ios-setup.tsx');
   const setupWorkflow = read('src/lib/ios-capture-setup.ts');
   const copy = read('src/lib/i18n.ts');
-  const shortcutSpec = read('docs/ios-shortcut-spec.md');
+  const shortcutSpec = read('docs/superpowers/specs/2026-08-25-ios-local-capture-design.md');
   const releaseCheck = read('scripts/lib/release-readiness.mjs');
+  const updateCheck = read('scripts/check-update-config.mjs');
+  const historySetup = read('src/lib/ios-history-setup.ts');
   const testflight = read('.github/workflows/ios-testflight.yml');
 
-  ok('iOS setup shows the exact local Shortcut action before the complete Received Message input',
-    setup.indexOf("'iosLocalChoiceRunShortcut'") !== -1 &&
-      setup.indexOf("'iosLocalChoiceCompleteMessage'") >
-        setup.indexOf("'iosLocalChoiceRunShortcut'") &&
-      /Run Shortcut → Wafra Local Capture/.test(copy) &&
-      /Input → complete Received Message/.test(copy));
-  ok('the installed Shortcut copy keeps its plain-text manual test compatible',
-    /Accept \*\*Messages\*\* and \*\*Text\*\*/.test(shortcutSpec) &&
-      /manual setup test/.test(shortcutSpec));
-  ok('iOS setup discloses sender retention while raw Content is discarded',
-    /discards raw Message Content after parsing/.test(copy) &&
-      /when the Shortcut supplies it, the bank Sender label/.test(copy) &&
-      /used to identify its card or account/.test(copy));
+  ok('iOS setup shows the exact local Shortcut action with complete Received Message input',
+    /<AutomationGuide/.test(setup) &&
+      read('src/components/ios-message-setup/automation-guide.tsx').includes("'iosMessageGuideRunShortcut'") &&
+      /Run Wafra Local Capture · full Received Message/.test(copy));
+  ok('the installed Shortcut uses Message input and a separate no-input setup proof',
+    /accepts only Messages/.test(shortcutSpec) &&
+      /run with no input invokes the native setup-proof action/.test(shortcutSpec));
+  ok('iOS setup discloses selected-sender retention and raw Message deletion',
+    /bank sender you select/.test(copy) &&
+      /protected queue on this iPhone/.test(copy) &&
+      /After a durable local result, Wafra deletes the raw Message/.test(copy) &&
+      /uploads no Message data/.test(copy));
   ok('local setup has no relay proof, test-limit, or captured-merchant state',
     !/(?:captured \|\| captureOn|iosTestLimit|refresh-proof|relay)/.test(
       `${setup}\n${setupWorkflow}`) &&
@@ -874,7 +887,7 @@ function ktSources(dir) {
       /setupProofVersion === 1/.test(setupWorkflow));
   ok('callbacks and foreground returns refresh native status without forging proof',
     /AppState\.addEventListener\('change'/.test(setup) &&
-      /next === 'active'[\s\S]{0,160}send\(\{ type: 'refresh-status' \}\)/.test(setup) &&
+      /next !== 'active'\) return;[\s\S]{0,160}send\(\{ type: 'refresh-status' \}\)/.test(setup) &&
       /case 'shortcut-callback':\s*await refreshStatus\(false\);\s*return;/.test(
         setupWorkflow) &&
       !/case 'shortcut-callback':[\s\S]{0,180}setCaptureEnabled/.test(setupWorkflow));
@@ -882,21 +895,62 @@ function ktSources(dir) {
     !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
-    /الإدخال ← «الرسالة المستلمة» كاملة/.test(copy) &&
-      /أضفت الأتمتة/.test(copy) &&
-      /محتوى الرسالة الخام/.test(copy) &&
-      /اسم مرسل البنك/.test(copy));
+    /شغّل Wafra Local Capture · الرسالة المستلمة كاملة/.test(copy) &&
+      /أكملت الإعداد/.test(copy) &&
+      /اختر مرسلي البنوك/.test(copy) &&
+      /مرسل بنك تختاره/.test(copy) &&
+      /صف وفرة المحمي/.test(copy) &&
+      /يحذف وفرة الرسالة الخام/.test(copy));
   ok('the next production build rejects every exact retired Capture Shortcut snapshot',
     /03d2ab22a33f4fef9d503142575a70fb/.test(releaseCheck) &&
     /85bd1e080e5849b591049eccffb9a3a1/.test(releaseCheck) &&
       /broken-capture-shortcut/.test(releaseCheck) &&
       /scripts\/check-release-config\.mjs/.test(testflight));
+  ok('runtime, build, and OTA gates all reject the superseded History Shortcut',
+    /cc85a21db99a4e4698c1a498de670199/.test(releaseCheck) &&
+      /cc85a21db99a4e4698c1a498de670199/.test(updateCheck) &&
+      /cc85a21db99a4e4698c1a498de670199/.test(historySetup) &&
+      /retired-history-shortcut/.test(releaseCheck) &&
+      /retired History artifact/.test(updateCheck) &&
+      /normalizeIosHistoryShortcutUrl/.test(historySetup));
+  const otaEnv = {
+    ...process.env,
+    EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '0',
+    EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: '0',
+    EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '0',
+    WAFRA_SMS_CORPUS_EXPORT: '0',
+    EXPO_PUBLIC_WAFRA_RELAY_URL: 'https://wafra-relay.khanjer496.workers.dev',
+  };
+  const otaStatus = (captureUrl, historyUrl) => spawnSync(
+    process.execPath,
+    ['scripts/check-update-config.mjs', '--environment', 'production'],
+    {
+      cwd: ROOT,
+      env: {
+        ...otaEnv,
+        EXPO_PUBLIC_WAFRA_SHORTCUT_URL: captureUrl,
+        EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: historyUrl,
+      },
+      encoding: 'utf8',
+    },
+  ).status;
+  const captureUrl = 'https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168';
+  const historyUrl = 'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158';
+  ok('OTA accepts distinct canonical current Shortcut artifacts',
+    otaStatus(captureUrl, historyUrl) === 0);
+  ok('OTA rejects a Shortcut URL with an explicit port that runtime refuses',
+    otaStatus(
+      'https://www.icloud.com:8443/shortcuts/96f93402213144e8885db33f48fc6168',
+      historyUrl,
+    ) !== 0);
+  ok('OTA compares canonical Shortcut IDs rather than raw URL casing',
+    otaStatus(
+      captureUrl,
+      'https://www.icloud.com/shortcuts/96F93402213144E8885DB33F48FC6168',
+    ) !== 0);
   ok('the replacement Shortcut contract prohibits file-backed configuration',
-    /no Get File, Save File, Move File or Folder/.test(shortcutSpec) &&
-      /setup import question/.test(shortcutSpec));
-  ok('historical import stays hidden until its tested public Shortcut is configured',
-    /supportsHistoricalShortcut\(\) && HISTORY_SHORTCUT_INSTALL_URL && !history/.test(
-      read('src/app/import-sms.tsx')));
+    /no URL, bearer token, device ID, file action, clipboard action/.test(shortcutSpec) &&
+      /There is no relay pairing, setup JSON, clipboard secret/.test(shortcutSpec));
 }
 
 /* ── Android inbox scans stay off the interaction critical path ─────── */
@@ -960,6 +1014,9 @@ function ktSources(dir) {
   ok('permission denial does not mark the inbox fresh and offers Android settings',
     hook.indexOf("return 'no-permission'") < hook.indexOf('lastScanAt = Date.now()') &&
       /toast\.show\(t\('smsAccessOff'\)[\s\S]*openSmsPermissionSettings/.test(hook));
+  ok('Home rechecks Android permission as soon as onboarding enables capture',
+    /\[\s*entitlementActive,[\s\S]{0,80}refreshCaptureStatus,[\s\S]{0,80}sharedAccessUnavailable,[\s\S]{0,80}state\.captureOptOut,[\s\S]{0,80}state\.hydrated,[\s\S]{0,80}state\.onboarded,[\s\S]{0,80}watchStatus,?\s*\]/
+      .test(hook));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,
@@ -1368,6 +1425,22 @@ function ktSources(dir) {
     `${calls} call sites`);
   ok('the merchant breakdown adds up to the total printed above it',
     /isSpending\(t, liveAccounts, internal\)/.test(sheet));
+  ok('the limit editor uses the shared sheet and field contracts',
+    /<BottomSheet/.test(sheet) && /<TextField/.test(sheet) &&
+      !/<Modal/.test(sheet) && !/useKeyboardHeight/.test(sheet) &&
+      !/<ScrollView/.test(sheet));
+
+  const picker = sheet.indexOf('!category &&');
+  const current = sheet.indexOf('picked && limitFils !== null');
+  const amount = sheet.indexOf('<View style={styles.amountBlock}>');
+  const suggestions = sheet.indexOf('picked && (', amount);
+  const merchants = sheet.indexOf('merchants.length > 0');
+  ok('the limit editor keeps picker, current, amount, suggestions, and merchant blocks in order',
+    picker >= 0 && picker < current && current < amount && amount < suggestions && suggestions < merchants,
+    `${picker}, ${current}, ${amount}, ${suggestions}, ${merchants}`);
+  ok('the limit editor keeps shared footer actions and existing delete behavior',
+    /const removeExisting = \(\) => \{[\s\S]*?deleteBudget\(existing\.category\);[\s\S]*?onClose\(\)/.test(sheet) &&
+      /footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('remove'\)\}[\s\S]*?variant="danger"[\s\S]*?<Button[\s\S]*?label=\{t\('saveLimit'\)\}[\s\S]*?disabled=\{!picked \|\| !limitFils\}/.test(sheet));
 }
 
 /* ── one card's obligation is decided in one place ──────────────────── */
@@ -1621,16 +1694,16 @@ ok('the spoken label agrees with the sign on screen',
   const branch = store.match(/case 'setMerchantOverride': \{[\s\S]*?\n    \}/)[0];
 
   ok('the blast radius is one exported predicate, not three key matches',
-    /export function overrideAppliesTo\(t: Transaction, key: string\): boolean/.test(uncat));
+    /export function overrideAppliesTo\(\s*t: Transaction, key: string, type: TransactionType = 'expense',?\s*\): boolean/.test(uncat));
   ok('the store applies a merchant rule through that predicate',
-    /overrideAppliesTo\(t, key\)/.test(branch) &&
+    /overrideAppliesTo\(transaction, key, direction\)/.test(branch) &&
       !/t\.title\.trim\(\)\.toLowerCase\(\) === key/.test(branch),
     'a bare key match here moves rows nothing counted');
   ok('a bulk merchant rule does not forge a hand edit',
     !/userEdited/.test(code(branch)),
     'userEdited is immutable, and a default must not masquerade as an answer');
   ok('the entry sheet counts the same rows the store will move',
-    /overrideAppliesTo\(t, key\)/.test(sheet),
+    /overrideAppliesTo\(t, key, transaction\.type\)/.test(sheet),
     'the "also update N entries" prompt is the only warning before the rewrite');
 
   // THE DIRECTION RULE ON THE PATH THAT WRITES. `overrideAppliesTo` is
@@ -1643,10 +1716,10 @@ ok('the spoken label agrees with the sign on screen',
   // rewrites the ledger rather than reading it. Neither module is compiled by
   // any suite, so this is the only place it can be asserted.
   ok('a merchant rule is not applied across the direction it was chosen under',
-    /overrideFitsDirection\(action\.category, 'expense'\)/.test(branch),
-    'an income category cannot decide an expense row, and applyToExisting only moves expense rows');
+    /categorySupportsType\(action\.category, direction\)/.test(branch) && /scopedMerchantOverrideKey\(key, direction\)/.test(branch),
+    'a merchant rule must use its explicit direction and preserve the opposite direction');
   ok('the entry sheet asks that same question before printing a count',
-    /overrideFitsDirection\(category, 'expense'\)/.test(sheet),
+    /overrideFitsDirection\(category, transaction\.type\)/.test(sheet),
     'a prompt offering "also update 5 entries" over a rule that moves none of them');
   ok('the count on the categorise list is the override predicate, not candidacy',
     /if \(!overrideAppliesTo\(t, key\)\) continue;/.test(uncat) &&
@@ -2128,12 +2201,14 @@ ok('the spoken label agrees with the sign on screen',
   const launchFallback = read('src/lib/unparsed-launch-alert.ts');
   const parserResearch = read('src/lib/parser-research.ts');
   const parserResearchContract = read('src/lib/parser-research-contract.ts');
-  const aiSuggestion = read('src/lib/alert-ai-suggestion.ts');
   const capture = read('src/lib/auto-import.ts');
-  ok('alert drafts reach only review capture and the isolated research redactor',
-    alertConsumers.length === 2 &&
-      alertConsumers.some((file) => file.endsWith(`${path.sep}unparsed-launch-alert.ts`)) &&
-      alertConsumers.some((file) => file.endsWith(`${path.sep}parser-research.ts`)),
+  const reviewDraftModules = new Set([
+    'unparsed-launch-alert.ts', 'parser-research.ts', 'universal-dates.ts',
+    'universal-fields.ts', 'universal-money.ts', 'universal-types.ts',
+  ]);
+  ok('drafts reach only the reviewed extraction modules and isolated research redactor',
+    alertConsumers.length === reviewDraftModules.size &&
+      alertConsumers.every((file) => reviewDraftModules.has(path.basename(file))),
     alertConsumers.join(' | '));
   ok('the Gulf fallback can reach only the explicit encrypted review path',
     !/(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import)['"]/.test(
@@ -2147,15 +2222,16 @@ ok('the spoken label agrees with the sign on screen',
       parserResearch,
     ) && /rawMessages: false/.test(parserResearchContract) &&
       /timestamps: false/.test(parserResearchContract));
-  ok('ISO draft metadata reaches shipping code only through the isolated inspector',
-    metadataConsumers.length === 0, metadataConsumers.join(' | '));
-  ok('first-wave market review logic has no shipping importer',
-    marketReviewConsumers.length === 0, marketReviewConsumers.join(' | '));
-  ok('optional alert AI can suggest labels but has no network or ledger write capability',
-    !/(?:fetch\s*\(|https?:|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(
-      aiSuggestion,
-    ) && /FORBIDDEN_OUTPUT_KEYS/.test(aiSuggestion) && /constrainAlertAiProposal/.test(aiSuggestion),
-    'AI suggestions must remain local, optional, and outside the money/import boundary');
+  const extraMetadataConsumers = new Set(['launch-alert-parser.ts', 'universal-money.ts']);
+  ok('ISO metadata is confined to currency routing and exact-money extraction',
+    metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
+    metadataConsumers.join(' | '));
+  const globalExtractor = read('src/lib/universal-parser.ts');
+  ok('global review semantics have no direct ledger writer or network transport',
+    marketReviewConsumers.length === 1 && marketReviewConsumers[0].endsWith(`${path.sep}universal-parser.ts`) &&
+    !/(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(globalExtractor) &&
+    /decision: 'review' \| 'ignore'/.test(read('src/lib/universal-types.ts')),
+    marketReviewConsumers.join(' | '));
 }
 
 /* ── a manual workflow run cannot bypass third-party-AI consent ─────────── */

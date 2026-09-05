@@ -17,7 +17,7 @@
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
-const BASE = 'http://localhost:8126';
+const BASE = process.env.BASE ?? 'http://localhost:8126';
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`✓ ${name}`); }
@@ -494,6 +494,31 @@ await goesTo('settings: "Improve accuracy" opens the report screen',
 await goesTo('settings: "Send feedback" opens the feedback screen',
   async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
   'Send feedback', /^\/feedback/);
+
+/* Stable labels, not visible-copy selectors, own the core transaction path. */
+{
+  await home();
+  const searched = await tapKey(page, 'Search merchants or categories', 5000);
+  await page.waitForTimeout(900);
+  ok('transactions: Search label opens the ledger', searched && /^\/transactions/.test(await url(page)));
+
+  const added = await tapKey(page, 'Add transaction', 5000);
+  await page.waitForTimeout(900);
+  ok('transactions: Add Transaction label opens the form',
+    added && /^\/add-transaction/.test(await url(page)));
+
+  await tapKey(page, 'Close', 5000);
+  await page.waitForTimeout(700);
+  const backed = await tapKey(page, 'Back', 5000);
+  await page.waitForTimeout(700);
+  ok('transactions: Back label returns to Home', backed && /^\/$/.test(await url(page)));
+
+  await home();
+  await tapKey(page, 'In', 5000);
+  await page.waitForTimeout(900);
+  ok('transactions: Clear All label removes an applied route filter',
+    await tapKey(page, 'Clear all filters', 5000));
+}
 
 /* ── 4. Back gets you out of every pushed screen ──────────────────────── */
 

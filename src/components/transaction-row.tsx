@@ -77,13 +77,13 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={press}
-      style={({ pressed }) => [styles.row, pressed && { transform: [{ scale: 0.985 }] }]}>
+      style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.backgroundSelected }]}>
       <MerchantAvatar title={transaction.title} category={transaction.category} size={34} />
       <View style={styles.middle}>
-        <ThemedText type="small" numberOfLines={1}>
+        <ThemedText type="small">
           {transaction.title}
         </ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
+        <ThemedText type="meta" themeColor="textTertiary">
           {where}
           {account ? ` · ${account.name}` : ''}
           {/* The clock, when the bank gave one. Two coffees on the same day
@@ -91,7 +91,7 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
           {clock ? ` · ${clock}` : ''}
         </ThemedText>
       </View>
-      <ThemedText type="small" tabular style={{ color: isIncome ? theme.income : theme.text }}>
+      <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
         {arrived ? '+' : '−'}
         {formatAmount(transaction.amountFils, { decimals: false })}
       </ThemedText>
@@ -122,6 +122,8 @@ const styles = StyleSheet.create({
   },
   middle: {
     flex: 1,
+    minWidth: 0,
     gap: 1,
   },
+  amount: { flexShrink: 1, maxWidth: '42%' },
 });

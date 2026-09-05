@@ -27,12 +27,10 @@
  */
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, View } from 'react-native';
 
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { HistoryStrip } from '@/components/ui/charts';
 import { Chip } from '@/components/ui/controls';
@@ -43,7 +41,9 @@ import { Money } from '@/components/ui/money';
 import { PeriodPill } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { RichSentence } from '@/components/ui/rich-sentence';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
   categoryMovers,
@@ -184,25 +184,17 @@ export default function StatsScreen() {
   })();
 
   const empty = summary.expenseFils === 0 && summary.incomeFils === 0;
+  const statsHeader: ScreenHeaderProps = {
+    title: t('statsTitle'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('back')}
-              hitSlop={10}
-              onPress={() => router.back()}>
-              <Icon name="chevron-left" size={20} color={theme.text} />
-            </Pressable>
-            <ThemedText type="title">{t('statsTitle')}</ThemedText>
-          </View>
+    <>
+      <ScreenScaffold headerMode="native" header={statsHeader}>
+        <View style={styles.periodControl}>
           <PeriodPill onPress={() => setPeriodOpen(true)} />
         </View>
-
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {empty ? (
             <View style={[styles.emptyBlock, { borderColor: theme.cardBorderStrong }]}>
               <ThemedText type="small">
@@ -393,28 +385,15 @@ export default function StatsScreen() {
               <Icon name="chevron-right" size={16} color={theme.textTertiary} />
             </Row>
           </Section>
-        </ScrollView>
-      </SafeAreaView>
+      </ScreenScaffold>
 
       <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-    paddingHorizontal: ScreenPadding,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.three,
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 4 },
-  content: { paddingHorizontal: ScreenPadding, paddingBottom: Spacing.six },
+  periodControl: { alignItems: 'flex-start' },
 
   section: { marginBottom: Spacing.five },
   caption: { marginBottom: Spacing.two },

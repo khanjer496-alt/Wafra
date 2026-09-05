@@ -70,12 +70,15 @@ internal import WafraLiveCapture
 @available(iOS 16.0, *)
 private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceConvertible {
   case setupProofFailed
+  case automationInputProbeFailed
   case stageFailed
 
   var localizedStringResource: LocalizedStringResource {
     switch self {
     case .setupProofFailed:
       return WafraLiveCaptureResources.localized("live.setup_proof.error")
+    case .automationInputProbeFailed:
+      return WafraLiveCaptureResources.localized("live.automation_input_probe.error")
     case .stageFailed:
       return WafraLiveCaptureResources.localized("live.stage.error")
     }
@@ -106,6 +109,43 @@ struct RecordWafraCaptureSetupProofIntent: AppIntent {
 extension RecordWafraCaptureSetupProofIntent {
   static var supportedModes: IntentModes { .background }
 }
+
+#if DEBUG
+@available(iOS 16.0, *)
+struct ProbeWafraAutomationInputIntent: AppIntent {
+  static let title = LocalizedStringResource(
+    "live.automation_input_probe.title",
+    table: "WafraIntents",
+    bundle: .main
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  @Parameter(title: LocalizedStringResource(
+    "live.automation_input_probe.message.parameter",
+    table: "WafraIntents",
+    bundle: .main
+  ), inputConnectionBehavior: .connectToPreviousIntentResult)
+  var message: String
+
+  func perform() async throws -> some IntentResult & ReturnsValue<Bool> {
+    do {
+      let matched = try WafraLiveCaptureStore.shared.recordAutomationInputProbe(
+        body: message,
+        at: Date()
+      )
+      return .result(value: matched)
+    } catch {
+      throw WafraLiveCaptureIntentError.automationInputProbeFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension ProbeWafraAutomationInputIntent {
+  static var supportedModes: IntentModes { .background }
+}
+#endif
 
 @available(iOS 16.0, *)
 struct StageWafraLiveMessageIntent: AppIntent {

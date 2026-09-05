@@ -73,7 +73,26 @@ export function ConfirmSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={title ?? confirmLabel}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={title ?? confirmLabel}
+      footer={
+        <View style={styles.actions}>
+          <Button
+            inline
+            variant="outline"
+            label={cancelLabel ?? t('cancel', language)}
+            onPress={onClose}
+          />
+          <Button
+            inline
+            variant={destructive ? 'danger' : 'filled'}
+            label={confirmLabel}
+            onPress={commit}
+          />
+        </View>
+      }>
       <View style={styles.copy}>
         <ThemedText type="subtitle" accessibilityRole="header">
           {question}
@@ -83,20 +102,6 @@ export function ConfirmSheet({
             {body}
           </ThemedText>
         )}
-      </View>
-      <View style={styles.actions}>
-        <Button
-          inline
-          variant="outline"
-          label={cancelLabel ?? t('cancel', language)}
-          onPress={onClose}
-        />
-        <Button
-          inline
-          variant={destructive ? 'danger' : 'filled'}
-          label={confirmLabel}
-          onPress={commit}
-        />
       </View>
     </BottomSheet>
   );

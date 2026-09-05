@@ -29,6 +29,27 @@ export type IosSetupFailure =
   | 'shortcuts-missing'
   | null;
 export type IosShortcutCallbackResult = 'success' | 'cancel' | 'error';
+export type IosFutureSetupStep =
+  | 'add-shortcut'
+  | 'confirm-shortcut'
+  | 'create-automation'
+  | 'prove-shortcut'
+  | 'ready';
+
+export interface IosMessageAutomationTrigger {
+  selectedSenderCount: unknown;
+  messageContains: unknown;
+}
+
+export interface IosMessageOnboardingCompletionInput {
+  retryRequired: boolean;
+  ensureDurable(): Promise<void>;
+  markFinished(): Promise<void>;
+  markStarted(): Promise<void>;
+  setOnboarded(): void;
+}
+
+export type IosMessageOnboardingCompletionResult = 'complete' | 'retry-required';
 
 export interface IosSetupModel {
   loading: boolean;
@@ -95,6 +116,11 @@ const iosVersionMajor = (): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const SENDER_SCOPED_MESSAGE_TRIGGER = {
+  selectedSenderCount: 1,
+  messageContains: null,
+} as const;
+
 const defaultDependencies = (): IosSetupDependencies => ({
   isSupported: () => Platform.OS === 'ios' && iosVersionMajor() >= 16,
   getNativeModule: getIosCaptureNativeModule,
@@ -114,6 +140,51 @@ export function resolveIosSetupReadiness(
   if (status.setupProofVersion === 1) return 'shortcut-proven';
   return 'not-added';
 }
+
+export const isSupportedIosMessageAutomationTrigger = (
+  trigger: IosMessageAutomationTrigger,
+): boolean =>
+  Number.isSafeInteger(trigger.selectedSenderCount) &&
+  Number(trigger.selectedSenderCount) > 0 &&
+  trigger.messageContains === null;
+
+export const resolveIosFutureSetupStep = (
+  progress: {
+    futureShortcutConfirmed: boolean;
+    futureAutomationConfirmed: boolean;
+    futureStatus: string;
+  },
+  readiness: IosSetupReadiness,
+): IosFutureSetupStep => {
+  if (readiness !== 'not-added') return 'ready';
+  if (!progress.futureShortcutConfirmed) {
+    return progress.futureStatus === 'not-started' || progress.futureStatus === 'skipped'
+      ? 'add-shortcut'
+      : 'confirm-shortcut';
+  }
+  if (!progress.futureAutomationConfirmed) return 'create-automation';
+  return 'prove-shortcut';
+};
+
+export const completeIosMessageOnboardingAttempt = async (
+  input: IosMessageOnboardingCompletionInput,
+): Promise<IosMessageOnboardingCompletionResult> => {
+  if (!input.retryRequired) await input.ensureDurable();
+  await input.markFinished();
+  if (!input.retryRequired) input.setOnboarded();
+  try {
+    await input.ensureDurable();
+    return 'complete';
+  } catch {
+    try {
+      await input.markStarted();
+    } catch {
+      // The caller still blocks exit and keeps retry available when the
+      // source-free recovery flag itself cannot be restored immediately.
+    }
+    return 'retry-required';
+  }
+};
 
 export function createIosCaptureSetup({
   fromOnboarding = false,
@@ -185,6 +256,7 @@ export function createIosCaptureSetup({
         loading: false,
         supported: true,
         shortcutAvailable: false,
+        readiness: 'not-added',
         failure: 'load',
       });
     }
@@ -275,6 +347,10 @@ export function createIosCaptureSetup({
   });
 
   const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
+    if (!isSupportedIosMessageAutomationTrigger(SENDER_SCOPED_MESSAGE_TRIGGER)) {
+      publish({ failure: 'shortcut-run' });
+      return;
+    }
     if (!(await canUseShortcuts(generation))) {
       if (!disposed && generation === operationGeneration) {
         publish({ failure: 'shortcuts-missing' });

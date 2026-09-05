@@ -21,6 +21,7 @@ public final class WafraLiveCaptureStore {
   public private(set) var firstCapturedDates: [Date] = []
   public private(set) var localLeaseCalls: [(Date?, Bool)] = []
   public private(set) var storeLeaseCalls: [(Date?, Bool, Date)] = []
+  public var automationInputProbeAtResult: TimeInterval? = 246.75
 
   public var statusResult = WafraLiveCaptureStatus(
     enabled: true,
@@ -80,6 +81,11 @@ public final class WafraLiveCaptureStore {
   public func status() throws -> WafraLiveCaptureStatus {
     calls.append("status")
     return statusResult
+  }
+
+  public func automationInputProbeAt() throws -> TimeInterval? {
+    calls.append("automationInputProbeAt")
+    return automationInputProbeAtResult
   }
 
   public func acknowledgeCaptureWarning(id: String) throws -> Bool {

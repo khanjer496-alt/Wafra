@@ -28,6 +28,19 @@ function ok(name, condition) {
   }
 }
 
+// A normal launch must recover the saved handoff without needing a callback URL.
+const resume = onboarding.onboardingResumeDestination;
+eq('cold iPhone launch resumes its pending setup',
+  resume?.({ platform: 'ios', pendingIosSetup: true, hasSavedPlan: true, completedCallback: false }), 'ios-setup');
+eq('a completed callback takes precedence over a stale setup flag',
+  resume?.({ platform: 'ios', pendingIosSetup: true, hasSavedPlan: true, completedCallback: true }), 'complete');
+eq('Android never follows an iPhone setup flag',
+  resume?.({ platform: 'android', pendingIosSetup: true, hasSavedPlan: true, completedCallback: false }), 'capture');
+eq('saved personalization resumes at capture instead of resetting answers',
+  resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: true, completedCallback: false }), 'capture');
+eq('a new user starts at the interactive welcome',
+  resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: false, completedCallback: false }), 'welcome');
+
 eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAnswers({}), {
   marketId: 'AE',
   goalIds: ['emergency'],
@@ -240,11 +253,12 @@ ok(
     /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
 );
 ok(
-  'first run opens with a visual money story instead of a generic feature list',
+  'first run offers an explicitly labeled interactive example without ledger writes',
   /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
-    /onboardPreviewIncome/.test(moneyPreviewSource) &&
-    /onboardPreviewBill/.test(moneyPreviewSource) &&
-    /onboardPreviewCard/.test(moneyPreviewSource) &&
+    /onboardSampleMessage/.test(moneyPreviewSource) &&
+    /onboardSampleNote/.test(moneyPreviewSource) &&
+    /setRevealed/.test(moneyPreviewSource) &&
+    !/useStore|importBatch|addTransaction/.test(moneyPreviewSource) &&
     !/function points\(/.test(gateSource),
 );
 ok(
@@ -255,13 +269,71 @@ ok(
     /onboardAutomaticChoice/.test(gateSource) &&
     /onboardManualChoice/.test(gateSource),
 );
+ok(
+  'first-run gate exempts guided history routes only on iOS',
+  /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,100}pathname === '\/import-sms'/.test(gateSource) &&
+    /const showOverlay\s*=[\s\S]{0,220}!isIosSetupRoute/.test(gateSource),
+);
+eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Start your way');
+eq('iOS onboarding uses the compact bank-alert subtitle', i18n.t('onboardCaptureBodyIos', 'en'), 'Bank alerts or manual entries.');
+eq('iOS automatic choice describes past and future alerts', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Past and future bank messages.');
+eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'No Messages access. Connect later.');
+eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
+eq(
+  'Learn more distinguishes 30-day logical expiry from later physical cleanup',
+  i18n.t('onboardCaptureLearnMoreRetention', 'en'),
+  'Raw Message Content and Sender expire logically after 30 days. Physical deletion happens on the next capture or queue check, so protected bytes can remain longer.',
+);
+eq(
+  'Learn more warns that the older automation can keep uploading selected alerts',
+  i18n.t('onboardCaptureLearnMoreLegacy', 'en'),
+  'An older Wafra Capture automation may continue uploading selected alerts until you remove or retire it.',
+);
+const universalSenderLabel = ['Any', 'Sender'].join(' ');
+const universalSenderLabelArabic = ['أي', 'مرسل'].join(' ');
+const iosVisibleCopyKeys = [
+  'onboardCaptureTitleIos',
+  'onboardCaptureBodyIos',
+  'onboardAutomaticChoiceIos',
+  'onboardAutomaticChoiceIosBody',
+  'onboardManualChoiceIos',
+  'onboardManualChoiceIosBody',
+  'onboardCapturePrivacyIos',
+  'iosLocalPrivacyBody',
+  'iosMessageGuideSender',
+];
+const iosVisibleCopy = iosVisibleCopyKeys
+  .flatMap((key) => [i18n.t(key, 'en'), i18n.t(key, 'ar')])
+  .join(' ');
+ok(
+  'iOS onboarding keeps title, choice bodies, and privacy summary within the compact copy budget',
+  ['en', 'ar'].every((language) =>
+    i18n.t('onboardCaptureTitleIos', language).length <= 42 &&
+      i18n.t('onboardAutomaticChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardManualChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardCapturePrivacyIos', language).length <= 64),
+);
+ok(
+  'iOS onboarding has exactly two choices and puts full details behind Learn more',
+  (gateSource.match(/<StartOption/g) ?? []).length === 2 &&
+    /Platform\.OS === 'ios' \? 'onboardAutomaticChoiceIos'/.test(gateSource) &&
+    /Platform\.OS === 'ios' \? 'onboardManualChoiceIos'/.test(gateSource) &&
+    /Platform\.OS === 'ios' \? 'onboardManualChoiceIosBody'/.test(gateSource) &&
+    /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
+    /onboardCaptureLearnMoreAction/.test(gateSource) &&
+    !iosVisibleCopy.includes(universalSenderLabel) &&
+    !iosVisibleCopy.includes(universalSenderLabelArabic),
+);
+ok(
+  'forced-dark onboarding gives Learn more an explicit visible label and border',
+  /label=\{t\('onboardCaptureLearnMoreAction'\)\}[\s\S]{0,180}labelColor=\{night\.text\}[\s\S]{0,120}style=\{\[styles\.learnMoreButton, styles\.ghost\]\}/.test(
+    gateSource,
+  ),
+);
 {
-  const automaticBodies = [
-    'onboardAutomaticChoiceAndroidBody',
-    'onboardAutomaticChoiceIosBody',
-  ];
+  const automaticBodies = ['onboardAutomaticChoiceAndroidBody'];
   ok(
-    'automatic capture discloses its three-day Pro boundary before selection',
+    'Android automatic capture keeps its three-day Pro boundary before selection',
     automaticBodies.every((key) => {
       const en = i18n.t(key, 'en');
       const ar = i18n.t(key, 'ar');
@@ -271,41 +343,17 @@ ok(
   );
 }
 ok(
-  'iOS onboarding teaches Any Sender with local filtering instead of bank-conversation selection',
-  /Platform\.OS === 'ios' \? 'onboardAutomaticChoiceIosBody'/.test(gateSource) &&
-    /Any Sender/.test(i18n.t('onboardAutomaticChoiceIosBody', 'en')) &&
-    /filters supported bank alerts locally on this iPhone/.test(i18n.t('onboardAutomaticChoiceIosBody', 'en')) &&
-    /أي مرسل/.test(i18n.t('onboardAutomaticChoiceIosBody', 'ar')) &&
-    /محلياً/.test(i18n.t('onboardAutomaticChoiceIosBody', 'ar')) &&
-    !/bank conversations|محادثات البنوك/.test(
-      `${i18n.t('onboardAutomaticChoiceIosBody', 'en')} ${i18n.t('onboardAutomaticChoiceIosBody', 'ar')}`,
-    ),
-);
-ok(
-  'rendered iOS onboarding privacy copy discloses local processing, bounded pending records, and legacy upload',
-  /Platform\.OS === 'ios'[\s\S]*?'onboardCapturePrivacyIos'/.test(gateSource) &&
-    /does not give Wafra access to your Messages inbox/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
-    /filters supported bank alerts locally/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
-    /does not upload their text/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
-    /expire after 30 days/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
-    /removed the next time capture runs or Wafra checks the queue/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
-    /old Wafra Capture automation may still upload/.test(i18n.t('onboardCapturePrivacyIos', 'en')) &&
-    /صندوق الرسائل/.test(i18n.t('onboardCapturePrivacyIos', 'ar')) &&
-    /محلياً/.test(i18n.t('onboardCapturePrivacyIos', 'ar')) &&
-    /٣٠ يوماً/.test(i18n.t('onboardCapturePrivacyIos', 'ar')) &&
-    /Wafra Capture/.test(i18n.t('onboardCapturePrivacyIos', 'ar')),
-);
-ok(
   'onboarding uses real scan and import results rather than fake personalization delays',
   /progress\.scanned/.test(gateSource) &&
     /progress\.found/.test(gateSource) &&
     /result\.tx/.test(gateSource) &&
     /result\.accounts/.test(gateSource) &&
-    !/setTimeout|personalizing/i.test(gateSource),
+    !/setTimeout/i.test(gateSource),
 );
 ok(
   'first run waits for encrypted hydration and shows truthful three-step progress',
-  /if \(!state\.hydrated\)/.test(gateSource) &&
+  /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
+    /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
     /onboardStepOf|progressbar/.test(gateSource) &&
     /QUESTION_STEPS\.length/.test(gateSource),
@@ -339,37 +387,34 @@ ok(
 );
 ok(
   'iOS manual opt-out revokes a setup that was started before returning to onboarding',
-  /await setCaptureOptOut\(true\)[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?try \{[\s\S]*?await getRelayConfigStrict\(\)[\s\S]*?await unpairDevice\(relay\)[\s\S]*?setShortcutCleanup\('revoked'\)[\s\S]*?catch[\s\S]*?setShortcutCleanup\('uncertain'\)[\s\S]*?finally[\s\S]*?await disableRelayBackgroundSync\(\)[\s\S]*?shortcutCleanupUncertain/.test(gateSource),
+    /await setCaptureOptOut\(true\)[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?try \{[\s\S]*?await getRelayConfigStrict\(\)[\s\S]*?await unpairDevice\(relay\)[\s\S]*?setShortcutCleanup\('revoked'\)[\s\S]*?catch[\s\S]*?setShortcutCleanup\('uncertain'\)[\s\S]*?finally[\s\S]*?await disableRelayBackgroundSync\(\)[\s\S]*?shortcutCleanupUncertain/.test(gateSource),
 );
 ok(
-  'iOS Shortcut setup returns to the personalized completion',
+  'iOS manual completion clears the guided-history return marker',
+  /const continueManually = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?type: 'onboarding-return-cleared'[\s\S]*?setCompletionOutcome\('manual'\)/.test(
+    gateSource,
+  ),
+);
+ok(
+  'iOS checklist completion durably finishes onboarding before returning home',
   gateSource.includes('/ios-setup?fromOnboarding=1') &&
-    iosSource.includes("router.replace('/?onboarding=complete')"),
-);
-const manualExitAt = iosSource.indexOf('const continueManually = useCallback');
-const manualDisableAt = iosSource.indexOf(
-  "await send({ type: 'manual-only' })",
-  manualExitAt,
-);
-const manualOptOutAt = iosSource.indexOf(
-  'await setCaptureOptOut(true)',
-  manualDisableAt,
-);
-const manualRouteAt = iosSource.indexOf(
-  "router.replace('/?onboarding=complete')",
-  manualOptOutAt,
+    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?router\.replace\('\/'\)/.test(iosSource),
 );
 ok(
-  'iOS setup manual-only completion disables local admission before navigation',
-  manualExitAt !== -1 &&
-    manualDisableAt > manualExitAt &&
-    manualOptOutAt > manualDisableAt &&
-    manualRouteAt > manualOptOutAt,
+  'manual exit remains gate-owned while automated setup requires both outcomes',
+  /const continueManually = async \(\) => \{[\s\S]*?await setCaptureOptOut\(true\)[\s\S]*?setCompletionOutcome\('manual'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+    /if \(!setupComplete\) return/.test(iosSource) &&
+    /progress\.historyStatus === 'complete'/.test(iosSource) &&
+    !/skipIncomplete|const finishLater/.test(iosSource) &&
+    !iosSource.includes("type: 'manual-only'"),
 );
 ok(
-  'iOS setup history import remains reachable without becoming an opt-out',
-  /const importPastAlerts = useCallback\(\(\) => \{[\s\S]{0,180}router\.push\('\/import-sms'\);[\s\S]{0,180}\},/.test(iosSource) &&
-    !/const importPastAlerts[\s\S]{0,360}(?:manual-only|setCaptureOptOut)/.test(iosSource),
+  'iOS checklist embeds history handoff without opting out of capture',
+  /const historyInstallUrl = historyShortcutInstallUrl\(\)/.test(iosSource) &&
+    /await confirmIosHistoryShortcutInstalled\(\)/.test(iosSource) &&
+    /await beginIosHistoryHandoffForOrigin\(historyReturnOrigin, startedAt\)/.test(iosSource) &&
+    /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : 'shortcuts:\/\/'\)/.test(iosSource) &&
+    !iosSource.includes('setCaptureOptOut(true)'),
 );
 ok(
   'first run cannot silently pin a worldwide user to the AED sample ledger',
@@ -397,6 +442,10 @@ const walletOverviewSource = fs.readFileSync(
 );
 const walletPresentationSource = `${walletSource}\n${walletOverviewSource}`;
 const importSource = fs.readFileSync(path.join(__dirname, '../../src/app/import-sms.tsx'), 'utf8');
+
+ok('Android ignores forged iOS history deep-link parameters',
+  /history:\s*historyParam/.test(importSource) &&
+    /const history = Platform\.OS === 'ios' \? historyParam : undefined/.test(importSource));
 
 ok('the tab-shell history owner records parser completion in the final page write',
   /parserRereadComplete: page\.inboxHistoryComplete/.test(
@@ -519,6 +568,14 @@ eq('balance-coverage copy resolves every placeholder',
   ok('and the failure block is announced without source data',
     /accessibilityLiveRegion="polite"/.test(iosSource) &&
       /AccessibilityInfo\.announceForAccessibility/.test(iosSource));
+}
+
+try {
+  require('child_process').execFileSync(process.execPath,
+    [path.join(__dirname, 'onboarding-resume.helpers.js')], { stdio: 'inherit' });
+  ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', true);
+} catch {
+  ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', false);
 }
 
 console.log(`\nonboarding: ${pass} passed, ${fail} failed`);

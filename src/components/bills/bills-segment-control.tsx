@@ -1,7 +1,9 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Colors, ScreenPadding } from '@/constants/theme';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 export type BillsSegment = 'subscriptions' | 'cards' | 'utilities';
@@ -13,7 +15,6 @@ type BillsSegmentControlProps = {
   cardCount: number;
   utilityCount: number;
   largeText: boolean;
-  theme: (typeof Colors)[keyof typeof Colors];
 };
 
 export function BillsSegmentControl({
@@ -23,46 +24,77 @@ export function BillsSegmentControl({
   cardCount,
   utilityCount,
   largeText,
-  theme,
 }: BillsSegmentControlProps) {
+  const theme = useTheme();
   const labels: Record<BillsSegment, string> = {
     subscriptions: `${t('subscriptionsSeg')} ${subscriptionCount}`,
     cards: `${t('cardsSeg')} ${cardCount}`,
     utilities: `${t('utilitiesSeg')} ${utilityCount}`,
   };
+  const segments = (Object.keys(labels) as BillsSegment[]).map((value) => ({
+    value,
+    label: labels[value],
+  }));
 
-  return (
-    <View role="tablist" style={[styles.segment, largeText && styles.segmentLarge, { backgroundColor: theme.backgroundSelected }]}>
-      {(Object.keys(labels) as BillsSegment[]).map((item) => (
+  return largeText ? (
+    <View
+      role="tablist"
+      accessibilityLabel={t('billsTitle')}
+      style={[
+        styles.segment,
+        largeText && styles.segmentLarge,
+        { backgroundColor: theme.backgroundSelected },
+      ]}>
+      {segments.map((item) => (
         <Pressable
-          key={item}
+          key={item.value}
           accessibilityRole="tab"
-          accessibilityState={{ selected: segment === item }}
-          aria-selected={segment === item}
-          onPress={() => onChange(item)}
+          accessibilityLabel={item.label}
+          accessibilityState={{ selected: segment === item.value }}
+          aria-selected={segment === item.value}
+          onPress={() => onChange(item.value)}
           style={[
             styles.segmentItem,
-            segment === item && {
+            Platform.OS === 'android' && styles.segmentItemAndroid,
+            segment === item.value && {
               backgroundColor: theme.backgroundElement,
               borderColor: theme.controlBorder,
-              borderWidth: 1,
             },
           ]}>
           <ThemedText
             type="nano"
-            numberOfLines={largeText ? undefined : 1}
             tabular
-            themeColor={segment === item ? 'text' : 'textTertiary'}>
-            {labels[item]}
+            themeColor={segment === item.value ? 'text' : 'textTertiary'}>
+            {item.label}
           </ThemedText>
         </Pressable>
       ))}
     </View>
+  ) : (
+    <SegmentedControl
+      segments={segments}
+      value={segment}
+      onChange={onChange}
+      label={t('billsTitle')}
+    />
   );
 }
 
 const styles = StyleSheet.create({
-  segment: { flexDirection: 'row', marginHorizontal: ScreenPadding, borderRadius: 11, padding: 3, gap: 3 },
+  segment: {
+    padding: Spacing.one,
+    borderRadius: Radius.control,
+    gap: Spacing.one,
+  },
   segmentLarge: { flexDirection: 'column' },
-  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 8 },
+  segmentItem: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.tile,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    paddingHorizontal: Spacing.two,
+  },
+  segmentItemAndroid: { minHeight: 48 },
 });

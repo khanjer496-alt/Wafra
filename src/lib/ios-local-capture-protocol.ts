@@ -1,6 +1,5 @@
 /** Shared constants for the credential-free, device-local iPhone Shortcut. */
 export const IOS_LOCAL_CAPTURE_SHORTCUT_NAME = 'Wafra Local Capture';
-export const IOS_LOCAL_CAPTURE_TEST_SENTINEL = 'WAFRA_LOCAL_CAPTURE_TEST_V1';
 
 const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
   // Retired relay-backed release URL.
@@ -31,7 +30,7 @@ export const IOS_LOCAL_CAPTURE_SHORTCUT_URL = normalizeIosLocalCaptureShortcutUr
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL,
 );
 
-/** Run the installed Shortcut with a non-financial, opaque setup sentinel. */
+/** Run the installed Shortcut without input so its local setup-proof branch executes. */
 export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
   const callback = (result: 'success' | 'cancel' | 'error') =>
     encodeURIComponent(
@@ -43,7 +42,6 @@ export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
     IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
   )}` +
-    `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_TEST_SENTINEL)}` +
     `&x-success=${callback('success')}` +
     `&x-cancel=${callback('cancel')}` +
     `&x-error=${callback('error')}`;

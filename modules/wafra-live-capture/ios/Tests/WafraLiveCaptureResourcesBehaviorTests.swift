@@ -3,6 +3,9 @@ import Foundation
 private let englishValues = [
   "live.setup_proof.title": "Record Wafra capture setup proof",
   "live.setup_proof.error": "Wafra could not record the setup proof.",
+  "live.automation_input_probe.title": "Probe Wafra automation input",
+  "live.automation_input_probe.message.parameter": "Incoming message",
+  "live.automation_input_probe.error": "Wafra could not record the automation input probe.",
   "live.stage.title": "Stage Wafra live message",
   "live.stage.sender.parameter": "Sender",
   "live.stage.message.parameter": "Message",
@@ -14,6 +17,9 @@ private let englishValues = [
 private let arabicValues = [
   "live.setup_proof.title": "تسجيل إثبات إعداد الالتقاط في وفرة",
   "live.setup_proof.error": "تعذّر على وفرة تسجيل إثبات الإعداد.",
+  "live.automation_input_probe.title": "اختبار إدخال أتمتة رسائل وفرة",
+  "live.automation_input_probe.message.parameter": "الرسالة الواردة",
+  "live.automation_input_probe.error": "تعذّر على وفرة تسجيل اختبار إدخال الأتمتة.",
   "live.stage.title": "حفظ رسالة مباشرة في وفرة",
   "live.stage.sender.parameter": "المرسل",
   "live.stage.message.parameter": "الرسالة",

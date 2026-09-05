@@ -1,0 +1,20 @@
+[
+  {
+    "id": "b8a831b4-a9b3-43c3-9197-5f3e4473e3d2",
+    "platform": "IOS",
+    "status": "FINISHED",
+    "version": "1.0.0",
+    "build": "51",
+    "url": "https://expo.dev/accounts/nnnkk/projects/wafra/builds/b8a831b4-a9b3-43c3-9197-5f3e4473e3d2",
+    "artifact": "https://expo.dev/artifacts/eas/odzixHsUsN3cQu9edBfoOsAJPfu86gOkC2u4cRJyqqk.ipa"
+  },
+  {
+    "id": "2a3677e2-3453-4461-8bf1-c48c44f386f9",
+    "platform": "ANDROID",
+    "status": "FINISHED",
+    "version": "1.0.0",
+    "build": "23",
+    "url": "https://expo.dev/accounts/nnnkk/projects/wafra/builds/2a3677e2-3453-4461-8bf1-c48c44f386f9",
+    "artifact": "https://expo.dev/artifacts/eas/C_avmx_QkV7EaL_l0uR5ZAFOLfAUjkYZGqboOydSMPM.apk"
+  }
+]

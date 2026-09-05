@@ -18,7 +18,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
-import type { CategoryId, Transaction } from '@/lib/types';
+import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 interface EntryDetailSheetProps {
@@ -58,6 +58,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   const [ruleAsk, setRuleAsk] = useState<{
     merchant: string;
     category: CategoryId;
+    type: TransactionType;
     count: number;
   } | null>(null);
 
@@ -102,14 +103,10 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     if (!transaction) return 0;
     const key = title.trim().toLowerCase();
     if (key.length < 3) return 0;
-    // 3. An income category moves nothing. `overrideAppliesTo` is expense-only
-    //    and `overrideFitsDirection` says an income category may not decide an
-    //    expense row, so the reducer now declines the bulk rewrite outright.
-    //    Without this the sheet offered "also update 5 entries" over a rule
-    //    that reaches none of them.
-    if (!overrideFitsDirection(category, 'expense')) return 0;
+    // Count the same direction and exclusions the rule will actually update.
+    if (!overrideFitsDirection(category, transaction.type)) return 0;
     return state.transactions.filter(
-      (t) => t.id !== transaction.id && overrideAppliesTo(t, key),
+      (t) => t.id !== transaction.id && overrideAppliesTo(t, key, transaction.type),
     ).length;
   }, [transaction, title, category, state.transactions]);
 
@@ -145,7 +142,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
       // cannot close first the way it did when the question was an OS dialog
       // that outlived it. It closes when the question is answered — or
       // dismissed, which is the "No" the alert used to spell out.
-      setRuleAsk({ merchant, category, count: sameMerchantCount });
+      setRuleAsk({ merchant, category, type: transaction.type, count: sameMerchantCount });
       return;
     }
     onClose();
@@ -456,7 +453,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             { value: 'future', label: t('justFuture') },
             { value: 'all', label: t('yesUpdateAll') },
           ]}
-          onSelect={(scope) => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, scope === 'all')}
+          onSelect={(scope) => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, scope === 'all', ruleAsk.type)}
         />
       )}
       {ruleAsk && ruleAsk.count === 0 && (
@@ -467,7 +464,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           body={tf('merchantRuleOnly', { merchant: ruleAsk.merchant })}
           confirmLabel={t('remember')}
           cancelLabel={t('no')}
-          onConfirm={() => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, false)}
+          onConfirm={() => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, false, ruleAsk.type)}
         />
       )}
     </BottomSheet>

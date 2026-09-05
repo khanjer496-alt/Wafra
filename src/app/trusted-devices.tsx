@@ -5,22 +5,21 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   Share,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Block, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Block, Section, SectionHeader } from '@/components/ui/layout';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { committed, failed, tapped } from '@/lib/haptics';
@@ -432,17 +431,19 @@ export default function TrustedDevicesScreen() {
 
   const removeIsSelf = selected?.isCurrent === true;
   const removedName = selected?.name ?? t('trustedUnnamed', language);
+  const trustedDevicesHeader: ScreenHeaderProps = {
+    title: t('trustedTitle', language),
+    back: { label: t('back', language), onPress: () => router.back() },
+  };
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <ScreenHeader title={t('trustedTitle', language)} onBack={() => router.back()} />
-        </View>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.content}
-          refreshControl={config ? (
+    <>
+      <ScreenScaffold
+        headerMode="native"
+        header={trustedDevicesHeader}
+        contentStyle={styles.content}
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        refreshControl={config ? (
             <RefreshControl
               refreshing={refreshing}
               tintColor={theme.primary}
@@ -660,8 +661,7 @@ export default function TrustedDevicesScreen() {
               />
             </Section>
           )}
-        </ScrollView>
-      </SafeAreaView>
+      </ScreenScaffold>
 
       <BottomSheet
         visible={joinVisible}
@@ -814,15 +814,12 @@ export default function TrustedDevicesScreen() {
           onConfirm={openShortcutsApp}
         />
       )}
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  header: { paddingHorizontal: ScreenPadding },
-  content: { paddingHorizontal: ScreenPadding, paddingBottom: Spacing.six, gap: Spacing.four + 2 },
+  content: { gap: Spacing.four + 2 },
   flex: { flex: 1 },
   hero: { gap: Spacing.three },
   heroTop: { flexDirection: 'row', alignItems: 'center', width: 202, alignSelf: 'center', marginBottom: Spacing.one },

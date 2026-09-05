@@ -1,5 +1,8 @@
 "live.setup_proof.title" = "Record Wafra capture setup proof";
 "live.setup_proof.error" = "Wafra could not record the setup proof.";
+"live.automation_input_probe.title" = "Probe Wafra automation input";
+"live.automation_input_probe.message.parameter" = "Incoming message";
+"live.automation_input_probe.error" = "Wafra could not record the automation input probe.";
 "live.stage.title" = "Stage Wafra live message";
 "live.stage.sender.parameter" = "Sender";
 "live.stage.message.parameter" = "Message";

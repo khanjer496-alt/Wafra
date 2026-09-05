@@ -6,6 +6,9 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const environmentIndex = process.argv.indexOf('--environment');
 const environment = environmentIndex >= 0 ? process.argv[environmentIndex + 1] : null;
 const failures = [];
+const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
+  'cc85a21db99a4e4698c1a498de670199',
+]);
 
 const readJson = async (relative) => JSON.parse(
   await readFile(path.join(root, relative), 'utf8'),
@@ -83,23 +86,27 @@ if (environment) {
     }
   };
   requireHttps('EXPO_PUBLIC_WAFRA_RELAY_URL');
-  const shortcutPath = /^\/shortcuts\/[0-9a-f]{32}$/i;
-  requireHttps('EXPO_PUBLIC_WAFRA_SHORTCUT_URL', 'www.icloud.com', shortcutPath);
-  requireHttps('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', 'www.icloud.com', shortcutPath);
-  let captureId;
-  try {
-    captureId = new URL(process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL).pathname
-      .match(shortcutPath)?.[0]?.split('/').pop()?.toLowerCase();
-  } catch {
-    // The URL-shape finding above is the actionable error.
-  }
+  const canonicalShortcutId = (name) => {
+    const match = /^https:\/\/www\.icloud\.com\/shortcuts\/([0-9A-Fa-f]{32})$/
+      .exec(process.env[name] ?? '');
+    if (!match) {
+      fail(`${name} must use Apple's exact public Shortcut URL shape.`);
+      return null;
+    }
+    return match[1].toLowerCase();
+  };
+  const captureId = canonicalShortcutId('EXPO_PUBLIC_WAFRA_SHORTCUT_URL');
+  const historyId = canonicalShortcutId('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL');
   if (new Set([
     '03d2ab22a33f4fef9d503142575a70fb',
     '85bd1e080e5849b591049eccffb9a3a1',
   ]).has(captureId)) {
     fail('EXPO_PUBLIC_WAFRA_SHORTCUT_URL points to a retired Capture artifact.');
   }
-  if (process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL === process.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL) {
+  if (historyId && RETIRED_HISTORY_SHORTCUT_IDS.has(historyId)) {
+    fail('EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL points to a retired History artifact.');
+  }
+  if (captureId && historyId && captureId === historyId) {
     fail('Capture and History must use distinct published Shortcut artifacts.');
   }
 }

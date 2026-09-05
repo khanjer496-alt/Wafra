@@ -1,0 +1,49 @@
+{
+  "scope": "UI source only; fixed iOS Metro snapshot, not final integrated release",
+  "files": [
+    {
+      "path": "src/screens/ledger-home-screen.tsx",
+      "sha256": "db56bf6216a6301cb763f825b35f7b92190689a332eee60db8f40d864c756d2e"
+    },
+    {
+      "path": "src/app/(tabs)/bills.tsx",
+      "sha256": "ede360b299d6d7731e9055f1ab15aa4cfdc9865abc1e612afa7310a8d4016fac"
+    },
+    {
+      "path": "src/app/(tabs)/flow.tsx",
+      "sha256": "1e421f4acf7a7b5f0132d31d5f5f88ebac4d5f877a1270fcd043687458e69aef"
+    },
+    {
+      "path": "src/app/(tabs)/wallet.tsx",
+      "sha256": "9833e374c6e76084de1e1afd24c20294b4b8c45c31320ae8de2f79cbb004424d"
+    },
+    {
+      "path": "src/components/wallet/balance-overview.tsx",
+      "sha256": "00688d2c1542e3bc43495a8ea6b81ebd282de9ce264392bb9569ffeded759279"
+    },
+    {
+      "path": "src/components/ui/screen-header.tsx",
+      "sha256": "427b0732dc21a31fa3573606ed510892a74f9a00f1300b2026fd2e810152f58b"
+    },
+    {
+      "path": "src/components/ui/screen-scaffold.tsx",
+      "sha256": "f2aefad43b6e9dbf07b12c5a24d8bd4f9f54ec410c01089cfe2c0e1d89ef58b3"
+    },
+    {
+      "path": "src/components/ui/bottom-sheet.tsx",
+      "sha256": "79bb5843fd05c91027cd806cfea2584cc8451d9076d39af0af18182878b456c8"
+    },
+    {
+      "path": "src/components/ui/choice-sheet.tsx",
+      "sha256": "8e8ea6f8e9c1846c628f5413303d120ff27b79dffc683683772e9b57cd85314e"
+    },
+    {
+      "path": "src/app/cards.tsx",
+      "sha256": "0204e7668642d2e8cd8f4a7297b023afa411409760b846d75e8e9d50cd0d61d5"
+    },
+    {
+      "path": "src/app/transactions.tsx",
+      "sha256": "594435bf3918b28b655f848378a813cfa15353488127afc8ccc2bb272ec36c46"
+    }
+  ]
+}

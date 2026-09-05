@@ -27,7 +27,7 @@ const output = ts.transpileModule(source, {
 const load = ({ os, fileSystem = {}, sharing = {}, clipboard = {}, share = {} }) => {
   const loaded = { exports: {} };
   const requireModule = (id) => {
-    if (id === 'expo-file-system/legacy') return fileSystem;
+    if (id === 'expo-file-system/legacy') return { makeDirectoryAsync: async () => {}, deleteAsync: async () => {}, ...fileSystem };
     if (id === 'expo-sharing') return sharing;
     if (id === 'expo-clipboard') return clipboard;
     if (id === 'react-native') return { Platform: { OS: os }, Share: share };
@@ -136,9 +136,9 @@ async function main() {
     dialogTitle: 'Export safe report',
   });
   ok('native writes the exact UTF-8 JSON and shares only its file URI',
-    writes.length === 1 && writes[0][0] === 'file:///cache/wafra-parser-report.json' &&
+    writes.length === 1 && writes[0][0].startsWith('file:///cache/wafra-generated-exports/') && writes[0][0].endsWith('/wafra-parser-report.json') &&
       writes[0][1] === '{"safe":true}' && writes[0][2]?.encoding === 'utf8' &&
-      shares.length === 1 && shares[0][0] === 'file:///cache/wafra-parser-report.json' &&
+      shares.length === 1 && shares[0][0] === writes[0][0] &&
       shares[0][1]?.mimeType === 'application/json' && shares[0][1]?.UTI === 'public.json' &&
       plainTextShares === 0);
   if (typeof nativeModule.copyTextToClipboard === 'function') {
@@ -244,6 +244,68 @@ async function main() {
     shareFailure?.name === 'TextFileShareError' && shareFailure?.code === 'share_failed' &&
       plainTextShares === 0,
     String(shareFailure));
+
+  // A completed iOS sheet no longer needs the app's plaintext temporary file.
+  {
+    const files = new Map();
+    const deleted = [];
+    let finishShare;
+    const pendingShare = new Promise((resolve) => { finishShare = resolve; });
+    const module = load({ os: 'ios', fileSystem: {
+      cacheDirectory: 'file:///cache/', EncodingType: { UTF8: 'utf8' },
+      makeDirectoryAsync: async () => {},
+      writeAsStringAsync: async (uri, body) => { files.set(uri, body); },
+      deleteAsync: async (uri) => { deleted.push(uri); for (const key of files.keys()) if (key === uri || key.startsWith(uri + '/')) files.delete(key); },
+      readDirectoryAsync: async () => [],
+      getInfoAsync: async () => ({ exists: true, modificationTime: Date.now() / 1000 }),
+    }, sharing: { isAvailableAsync: async () => true, shareAsync: () => pendingShare } });
+    const sharing = module.shareTextFile('wafra-backup.json', '{"private":true}');
+    await new Promise((resolve) => setImmediate(resolve));
+    ok('active share keeps its readable attachment', files.size === 1 && deleted.length === 0);
+    finishShare();
+    await sharing;
+    ok('completed or canceled iOS share deletes its plaintext attachment', files.size === 0 && deleted.length > 0);
+  }
+  {
+    const deleted = [];
+    const module = load({ os: 'android', fileSystem: {
+      cacheDirectory: 'file:///cache/',
+      readDirectoryAsync: async (uri) => uri.endsWith('wafra-generated-exports/') ? ['old', 'fresh'] : ['wafra-sms-corpus-2026-09-05.json', 'wafra-sms-corpus-private-copy.json'],
+      getInfoAsync: async (uri) => ({ exists: true,
+        modificationTime: (Date.now() - (uri.endsWith('old') ? 48 * 3600000 : 0)) / 1000 }),
+      deleteAsync: async (uri) => { deleted.push(uri); },
+    } });
+    await module.cleanupGeneratedExports?.();
+    ok('startup cleanup removes stale generated exports but preserves recent Android attachments',
+      deleted.some((uri) => uri.endsWith('/old')) && !deleted.some((uri) => uri.endsWith('/fresh')));
+    deleted.length = 0;
+    await module.cleanupGeneratedExports?.({ eraseAll: true });
+    ok('explicit erase removes generated exports and known legacy backups only',
+      deleted.includes('file:///cache/wafra-generated-exports/fresh') &&
+      deleted.includes('file:///cache/wafra-backup.json') &&
+      deleted.includes('file:///cache/wafra-sms-corpus-2026-09-05.json') &&
+      !deleted.includes('file:///cache/wafra-sms-corpus-private-copy.json') &&
+      !deleted.includes('file:///cache/'));
+  }
+
+  {
+    const deleted = [];
+    const module = load({ os: 'ios', fileSystem: {
+      cacheDirectory: 'file:///cache/',
+      readAsStringAsync: async (uri) => { if (uri.endsWith('broken.json')) throw new Error('read failed'); return 'backup'; },
+      deleteAsync: async (uri) => { deleted.push(uri); },
+    } });
+    const content = await module.readBackupPickerCopy?.('file:///cache/DocumentPicker/backup.json');
+    ok('reading a backup removes its app-owned picker copy before confirmation or cancellation',
+      content === 'backup' && deleted.includes('file:///cache/DocumentPicker/backup.json'));
+    try { await module.readBackupPickerCopy?.('file:///cache/DocumentPicker/broken.json'); } catch {}
+    ok('a failed backup read also removes its app-owned picker copy',
+      deleted.includes('file:///cache/DocumentPicker/broken.json'));
+    for (const uri of ['file:///Documents/original.json', 'content://provider/original.json', 'file:///cache/%2e%2e/Documents/original.json']) {
+      await module.readBackupPickerCopy?.(uri);
+      ok(`backup cleanup preserves external original ${uri}`, !deleted.includes(uri));
+    }
+  }
 
   console.log(`\nshare-text-file: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);

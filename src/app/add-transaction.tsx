@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
+  AccessibilityInfo,
+  findNodeHandle,
   Platform,
   Pressable,
   ScrollView,
@@ -9,25 +10,39 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
-import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { parseAmountToFils, toISODate } from '@/lib/format';
 import { committed } from '@/lib/haptics';
 import { t as tUi } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { reviewTemplateRuleFor } from '@/lib/review-promotion';
-import type { ReviewAlert } from '@/lib/alert-review-tray';
+import { isUniversalReviewAlert, type ReviewAlert } from '@/lib/alert-review-tray';
+import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting } from '@/components/universal-review-fields';
+import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
+import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { CategoryId, TransactionType } from '@/lib/types';
+
+type WebGroupAriaProps = {
+  'aria-labelledby': string;
+  'aria-describedby'?: string;
+  'aria-invalid': boolean;
+};
+
+function validReviewDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
 
 function reviewMajorAmount(item: ReviewAlert): string {
   const { minorUnits, exponent } = item.amount;
@@ -52,7 +67,6 @@ function defaultReviewTitle(item: ReviewAlert): string {
 export default function AddTransactionScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const keyboardHeight = useKeyboardHeight();
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
   const reviewId = Array.isArray(params.reviewId) ? params.reviewId[0] : params.reviewId;
@@ -60,24 +74,45 @@ export default function AddTransactionScreen() {
   const reviewItem = reviewId
     ? state.reviewTray.pending.find((item) => item.id === reviewId) ?? null
     : null;
+  const genericItem = reviewItem && isUniversalReviewAlert(reviewItem) ? reviewItem : null;
+  const registeredItem = reviewItem && !isUniversalReviewAlert(reviewItem) ? reviewItem : null;
+  const event = genericItem?.event;
   const rememberedReview = reviewItem ? reviewTemplateRuleFor(state, reviewItem) : null;
+  const reviewBinding = useRef(reviewItem ? { sourceKey: reviewItem.sourceKey, observedAt: reviewItem.observedAt } : null);
+  const reviewDirection = event?.direction ?? registeredItem?.direction;
+  const reviewFamily = event?.family ?? registeredItem?.family;
+  const reviewInstrument = event?.instrument.evidence === 'explicit' ? event.instrument.value : registeredItem?.instrument;
+  const ordinaryPosting = !event || isOrdinaryUniversalPosting(event);
+
 
   const reviewType: TransactionType = rememberedReview?.type ??
-    (reviewItem?.direction === 'credit' ? 'income' : 'expense');
-  const reviewCategory: CategoryId | null = reviewItem?.family === 'utility'
+    (reviewDirection === 'credit' ? 'income' : 'expense');
+  const categorySuggestion = event ? suggestUniversalCategory(event, { overrides: state.merchantOverrides }) : null;
+  const reviewCategory: CategoryId | null = categorySuggestion && !categorySuggestion.needsReview
+    ? categorySuggestion.category : reviewFamily === 'utility'
       ? 'utilities'
-      : reviewItem?.family === 'cash-withdrawal'
+      : reviewFamily === 'cash-withdrawal'
         ? 'cash-withdrawal'
         : null;
-  const reviewTitle = rememberedReview?.title ?? (reviewItem ? defaultReviewTitle(reviewItem) : '');
-  const matchedAccount = reviewItem?.instrument?.last4
-    ? state.accounts.find((account) => account.last4 === reviewItem.instrument?.last4)
-    : null;
+  const reviewTitle = rememberedReview?.title ?? (event
+    ? event.merchant.evidence === 'explicit' ? event.merchant.value ?? '' : ''
+    : registeredItem ? defaultReviewTitle(registeredItem) : '');
+  const matchingAccounts = reviewInstrument?.last4 ? state.accounts.filter((account) =>
+    account.last4 === reviewInstrument.last4 &&
+    (reviewInstrument.kind === 'card' ? account.kind === 'card'
+      : reviewInstrument.kind === 'account' ? account.kind === 'bank' : account.kind !== 'card')) : [];
+  const matchedAccount = matchingAccounts.length === 1 ? matchingAccounts[0] : null;
+
 
   const [type, setType] = useState<TransactionType>(reviewType);
+  const [directionConfirmed, setDirectionConfirmed] = useState(!event || event.direction === 'debit' || event.direction === 'credit');
+  const [postedConfirmed, setPostedConfirmed] = useState(event?.status === 'posted');
+  const [selectedMoney, setSelectedMoney] = useState<UniversalMoney | null>(event?.amount.evidence === 'explicit' ? event.amount.value : null);
+  const [selectedInstrument, setSelectedInstrument] = useState<UniversalInstrument | null>(reviewInstrument ?? null);
   const [amountText, setAmountText] = useState('');
   const [category, setCategory] = useState<CategoryId | null>(
-    rememberedReview ? rememberedReview.category as CategoryId : reviewItem ? reviewCategory : 'groceries',
+    rememberedReview ? rememberedReview.category as CategoryId : reviewItem
+      ? reviewCategory && categorySupportsType(reviewCategory, reviewType) ? reviewCategory : null : 'groceries',
   );
   const [accountId, setAccountId] = useState(
     reviewItem ? rememberedReview?.accountId ?? matchedAccount?.id ?? '' : state.accounts[0]?.id ?? '',
@@ -85,18 +120,51 @@ export default function AddTransactionScreen() {
   const [title, setTitle] = useState(reviewTitle);
   const [dayOffset, setDayOffset] = useState(0);
   const [reviewDate, setReviewDate] = useState(
-    reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '',
+    event ? event.transactionDate.evidence === 'explicit' ? event.transactionDate.value ?? '' : ''
+      : reviewItem ? toISODate(new Date(reviewItem.observedAt)) : '',
   );
   const [betweenOwnAccounts, setBetweenOwnAccounts] = useState(
     rememberedReview?.betweenOwnAccounts ?? false,
   );
   const [saving, setSaving] = useState(false);
+  const [showValidation, setShowValidation] = useState(false);
+  const amountRef = useRef<TextInput>(null);
+  const categoryRef = useRef<View>(null);
+  const accountRef = useRef<View>(null);
+  const reviewDateRef = useRef<TextInput>(null);
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
   const amountFils = parseAmountToFils(amountText);
-  const reviewRouteInvalid = !!reviewId && !reviewItem;
-  const canSave = !saving && !!accountId && !!category && !reviewRouteInvalid &&
-    (reviewItem ? /^\d{4}-\d{2}-\d{2}$/.test(reviewDate) : !!amountFils);
+  const reviewRouteInvalid = !!reviewId && (!reviewItem || reviewItem.expiresAt <= Date.now());
+  const sourceChanged = !!genericItem && (reviewBinding.current?.sourceKey !== genericItem.sourceKey ||
+    reviewBinding.current?.observedAt !== genericItem.observedAt);
+  const moneyMatchesLedger = !selectedMoney || !state.ledgerMoney ||
+    (state.ledgerMoney.currency === selectedMoney.currency && state.ledgerMoney.exponent === selectedMoney.exponent);
+  const genericReady = !event || (ordinaryPosting && !sourceChanged && !!selectedMoney &&
+    /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed && postedConfirmed &&
+    title.trim().length > 0 && title.trim().length <= 80 &&
+    (event.instrument.evidence !== 'ambiguous' || selectedInstrument !== null));
+  const canSave = !saving && !!accountId && !!category && !reviewRouteInvalid && genericReady &&
+    (reviewItem ? validReviewDate(reviewDate) : !!amountFils);
+  const amountInvalid = showValidation && !reviewItem && !amountFils;
+  const categoryInvalid = showValidation && !category;
+  const accountInvalid = showValidation && !accountId;
+  const reviewDateInvalid = showValidation && !!reviewItem &&
+    !validReviewDate(reviewDate);
+  const categoryLabelId = 'add-transaction-category-label';
+  const categoryErrorId = 'add-transaction-category-error';
+  const accountLabelId = 'add-transaction-account-label';
+  const accountErrorId = 'add-transaction-account-error';
+  const categoryWebAriaProps: WebGroupAriaProps = {
+    'aria-labelledby': categoryLabelId,
+    'aria-describedby': categoryInvalid ? categoryErrorId : undefined,
+    'aria-invalid': categoryInvalid,
+  };
+  const accountWebAriaProps: WebGroupAriaProps = {
+    'aria-labelledby': accountLabelId,
+    'aria-describedby': accountInvalid ? accountErrorId : undefined,
+    'aria-invalid': accountInvalid,
+  };
 
   const date = useMemo(() => {
     if (reviewItem) return reviewDate;
@@ -107,7 +175,10 @@ export default function AddTransactionScreen() {
 
   const switchType = (t: TransactionType) => {
     setType(t);
-    setCategory(t === 'expense' ? 'groceries' : 'salary');
+    setDirectionConfirmed(true);
+    const suggestion = event ? suggestUniversalCategory(event, { type: t, overrides: state.merchantOverrides }) : null;
+    setCategory(reviewItem ? suggestion && !suggestion.needsReview ? suggestion.category : null
+      : t === 'expense' ? 'groceries' : 'salary');
   };
 
   const save = async () => {
@@ -124,6 +195,12 @@ export default function AddTransactionScreen() {
           accountId,
           date: reviewDate,
           betweenOwnAccounts,
+          ...(genericItem && selectedMoney && reviewBinding.current ? { universal: {
+            confirmed: true as const, postingStatus: 'posted' as const, amount: selectedMoney,
+            expectedSourceKey: reviewBinding.current.sourceKey,
+            expectedObservedAt: reviewBinding.current.observedAt,
+            ...(selectedInstrument ? { instrument: selectedInstrument } : {}),
+          } } : {}),
         });
         toast.show(tUi('reviewAlertAdded'), { tone: 'success' });
         router.back();
@@ -147,39 +224,98 @@ export default function AddTransactionScreen() {
     router.back();
   };
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        {/* behavior was undefined on Android, which makes this component a
-            no-op — the platform this app ships to had no keyboard handling at
-            all, and the amount, merchant, date, account and Save button were
-            all under the keys. The measured height below is what actually
-            moves them. */}
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={styles.header}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={tUi('close')}
-              onPress={() => router.back()}
-              style={[styles.closeBtn, { backgroundColor: theme.backgroundSelected }]}>
-              <Icon name="close" size={18} color={theme.text} />
-            </Pressable>
-            <ThemedText type="smallBold" accessibilityRole="header" style={styles.headerTitle}>
-              {tUi(reviewItem ? 'reviewAlertAddTitle' : 'newTransaction')}
-            </ThemedText>
-            <View style={styles.closeBtn} />
-          </View>
+  const focusGroup = (ref: React.RefObject<View | null>) => {
+    const node = findNodeHandle(ref.current);
+    if (node !== null) AccessibilityInfo.setAccessibilityFocus(node);
+  };
 
-          <ScrollView
-            contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}>
-            {/* Type switch */}
-            <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
+  const focusFirstInvalid = () => {
+    if (!reviewItem && !amountFils) {
+      amountRef.current?.focus();
+      return;
+    }
+    if (!category) {
+      focusGroup(categoryRef);
+      return;
+    }
+    if (!accountId) {
+      focusGroup(accountRef);
+      return;
+    }
+    if (reviewItem && !validReviewDate(reviewDate)) {
+      reviewDateRef.current?.focus();
+    }
+  };
+
+  const onSavePress = () => {
+    if (!canSave) {
+      setShowValidation(true);
+      if (genericItem) toast.show(tUi(sourceChanged || reviewRouteInvalid ? 'genericSourceChanged'
+        : !moneyMatchesLedger ? 'genericCurrencyMismatch' : 'genericCompleteFields'), { tone: 'warning' });
+      focusFirstInvalid();
+      return;
+    }
+    void save();
+  };
+
+  if (genericItem && !ordinaryPosting) {
+    const family = genericItem.event.family;
+    const titleKey = family === 'statement' ? 'genericStatement' : family === 'balance' ? 'genericBalanceUpdate'
+      : family === 'card-payment' ? 'genericCardPayment' : 'genericBill';
+    return (
+      <ScreenScaffold headerMode="inline" header={{ title: tUi(titleKey),
+        back: { label: tUi('close'), icon: 'close', onPress: () => router.back() } }} contentStyle={styles.content}>
+        <ThemedText type="small" themeColor="textSecondary">{tUi('genericInformational')}</ThemedText>
+        <UniversalReviewFacts event={genericItem.event} includeAmount />
+        <Pressable accessibilityRole="button" style={[styles.saveBtn, { backgroundColor: theme.primary }]}
+          onPress={() => router.push(family === 'balance' ? '/(tabs)/wallet' : family === 'bill' ? '/(tabs)/bills' : '/cards')}>
+          <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{tUi(family === 'balance'
+            ? 'genericOpenWallet' : family === 'bill' ? 'genericOpenBills' : 'genericOpenCards')}</ThemedText>
+        </Pressable>
+      </ScreenScaffold>
+    );
+  }
+
+  return (
+    <ScreenScaffold
+      keyboardAware
+      headerMode="inline"
+      header={{
+        title: tUi(genericItem ? 'genericReviewTitle' : reviewItem ? 'reviewAlertAddTitle' : 'newTransaction'),
+        back: { label: tUi('close'), icon: 'close', onPress: () => router.back() },
+      }}
+      scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
+      contentStyle={styles.content}
+      footer={(
+        <View
+          style={[
+            styles.footer,
+            { borderTopColor: theme.cardBorder, backgroundColor: theme.background },
+          ]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : 'saveTransaction')}
+            accessibilityState={{ disabled: saving || reviewRouteInvalid, busy: saving }}
+            onPress={onSavePress}
+            disabled={saving || reviewRouteInvalid}
+            style={[
+              styles.saveBtn,
+              {
+                backgroundColor: theme.primary,
+                opacity: saving || reviewRouteInvalid ? 0.4 : 1,
+              },
+            ]}>
+            <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
+            <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
+              {tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
+            </ThemedText>
+          </Pressable>
+        </View>
+      )}>
+      {/* Type switch */}
+      <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
               {(['expense', 'income'] as TransactionType[]).map((t) => {
-                const active = type === t;
+                const active = type === t && directionConfirmed;
                 const color = t === 'expense' ? theme.expense : theme.income;
                 return (
                   <Pressable
@@ -200,33 +336,49 @@ export default function AddTransactionScreen() {
                   </Pressable>
                 );
               })}
-            </View>
+      </View>
 
-            {/* Amount */}
-            <View style={styles.amountWrap}>
+      {event && !directionConfirmed ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericChooseDirection')}</ThemedText> : null}
+      {sourceChanged ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericSourceChanged')}</ThemedText> : null}
+      {!moneyMatchesLedger ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericCurrencyMismatch')}</ThemedText> : null}
+      {/* Amount */}
+      {event && genericItem ? (
+        <UniversalReviewFields event={event} money={selectedMoney} onMoneyChange={setSelectedMoney}
+          instrument={selectedInstrument} onInstrumentChange={(value) => { setSelectedInstrument(value); setAccountId(''); }}
+          postedConfirmed={postedConfirmed} onPostedConfirmed={setPostedConfirmed}
+          date={reviewDate} onDateChange={setReviewDate} observedDate={toISODate(new Date(genericItem.observedAt))}
+          observedDateLabel={tUi(genericItem.channel === 'paste' ? 'genericUsePasteDate' : 'genericUseMessageDate')} />
+      ) : registeredItem ? (
+        <View style={styles.amountWrap}>
               <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
-                {reviewItem?.amount.currency ?? ledgerCurrencyDisplay()}
+            {registeredItem.amount.currency}
               </ThemedText>
-              {reviewItem ? (
-                <ThemedText type="title" tabular style={styles.reviewAmount}>
-                  {reviewMajorAmount(reviewItem)}
-                </ThemedText>
-              ) : (
-                <TextInput
-                  value={amountText}
-                  onChangeText={setAmountText}
-                  keyboardType="decimal-pad"
-                  placeholder="0"
-                  accessibilityLabel={tUi('amountInLedgerCurrency')}
-                  autoFocus
-                  placeholderTextColor={theme.textSecondary}
-                  style={[styles.amountInput, { color: theme.text }]}
-                />
-              )}
-            </View>
+          <ThemedText type="title" tabular style={styles.reviewAmount}>
+            {reviewMajorAmount(registeredItem)}
+          </ThemedText>
+        </View>
+      ) : (
+        <TextField
+          ref={amountRef}
+          label={tUi('amountInLedgerCurrency')}
+          value={amountText}
+          onChangeText={setAmountText}
+          numeric
+          placeholder="0"
+          autoFocus
+          invalid={amountInvalid}
+          errorText={amountInvalid ? tUi('amountInLedgerCurrency') : undefined}
+          leading={(
+            <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
+              {ledgerCurrencyDisplay()}
+            </ThemedText>
+          )}
+          style={styles.amountInput}
+        />
+      )}
 
-            {/* Category grid */}
-            {reviewItem?.family === 'transfer' && (
+      {/* Category grid */}
+      {reviewFamily === 'transfer' && (
               <Pressable
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: betweenOwnAccounts }}
@@ -240,26 +392,57 @@ export default function AddTransactionScreen() {
                 />
                 <ThemedText type="small">{tUi('reviewAlertOwnAccounts')}</ThemedText>
               </Pressable>
-            )}
+      )}
 
-            <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">{tUi('category')}</ThemedText>
+      <View
+        ref={categoryRef}
+        collapsable={false}
+        accessibilityRole="radiogroup"
+        accessibilityLabel={tUi('category')}
+        accessibilityLabelledBy={categoryLabelId}
+        accessibilityHint={tUi('reviewAlertChooseCategory')}
+        {...(Platform.OS === 'web' ? categoryWebAriaProps : {})}
+        style={styles.fieldBlock}>
+              <ThemedText
+          type="small"
+          themeColor="textSecondary"
+          nativeID={categoryLabelId}>
+          {tUi('category')}
+        </ThemedText>
               <CategoryChips
                 categories={categories}
                 selected={category}
                 onToggle={setCategory}
                 layout="wrap"
               />
-              {reviewItem && !category && (
-                <ThemedText type="meta" themeColor="textTertiary">
+        {categoryInvalid && (
+          <ThemedText
+            type="meta"
+            themeColor="expense"
+            nativeID={categoryErrorId}
+            accessibilityLiveRegion="polite"
+            selectable>
                   {tUi('reviewAlertChooseCategory')}
                 </ThemedText>
               )}
-            </View>
+      </View>
 
-            {/* Account */}
-            <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">{tUi('account')}</ThemedText>
+      {/* Account */}
+      <View
+        ref={accountRef}
+        collapsable={false}
+        accessibilityRole="radiogroup"
+        accessibilityLabel={tUi('account')}
+        accessibilityLabelledBy={accountLabelId}
+        accessibilityHint={tUi('reviewAlertChooseAccount')}
+        {...(Platform.OS === 'web' ? accountWebAriaProps : {})}
+        style={styles.fieldBlock}>
+        <ThemedText
+          type="small"
+          themeColor="textSecondary"
+          nativeID={accountLabelId}>
+          {tUi('account')}
+        </ThemedText>
               {/* Bleeds to both screen edges. Inset inside the page padding, a
                   chip that overflowed was sliced 16px short of the edge — it
                   read as a clipped label ("Casl"), not as a row that scrolls.
@@ -291,8 +474,13 @@ export default function AddTransactionScreen() {
                   );
                 })}
               </ScrollView>
-              {reviewItem && !accountId && state.accounts.length > 0 && (
-                <ThemedText type="meta" themeColor="textTertiary">
+        {accountInvalid && (
+          <ThemedText
+            type="meta"
+            themeColor="expense"
+            nativeID={accountErrorId}
+            accessibilityLiveRegion="polite"
+            selectable>
                   {tUi('reviewAlertChooseAccount')}
                 </ThemedText>
               )}
@@ -306,28 +494,25 @@ export default function AddTransactionScreen() {
                   </ThemedText>
                 </Pressable>
               )}
-            </View>
+      </View>
 
-            {/* Date quick-pick */}
-            <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
+      {/* Date quick-pick */}
+      <View style={styles.fieldBlock}>
               {reviewItem ? (
-                <TextInput
+          <TextField
+            ref={reviewDateRef}
+            label={tUi('when')}
                   value={reviewDate}
                   onChangeText={setReviewDate}
                   accessibilityLabel={tUi('reviewAlertDateA11y')}
                   placeholder="YYYY-MM-DD"
-                  placeholderTextColor={theme.textSecondary}
-                  style={[
-                    styles.titleInput,
-                    {
-                      backgroundColor: theme.backgroundElement,
-                      borderColor: theme.controlBorder,
-                      color: theme.text,
-                    },
-                  ]}
+            inputMode="numeric"
+            invalid={reviewDateInvalid}
+            errorText={reviewDateInvalid ? tUi('reviewAlertDateA11y') : undefined}
                 />
               ) : (
+          <>
+            <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
               <View style={styles.dateRow}>
                 {[
                   { label: tUi('today'), offset: 0 },
@@ -355,96 +540,27 @@ export default function AddTransactionScreen() {
                   );
                 })}
               </View>
+          </>
               )}
-            </View>
+      </View>
 
-            {/* Title */}
-            <View style={styles.fieldBlock}>
-              <ThemedText type="small" themeColor="textSecondary">{tUi('descriptionOptional')}</ThemedText>
-              <TextInput
+      {/* Title */}
+      <TextField
+        label={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptional')}
                 value={title}
                 onChangeText={setTitle}
-                accessibilityLabel={tUi('descriptionOptionalA11y')}
+                accessibilityLabel={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptionalA11y')}
+                maxLength={genericItem ? 80 : undefined}
+                invalid={!!genericItem && (title.length > 80 || (showValidation && !title.trim()))}
+                errorText={genericItem && title.length > 80 ? tUi('genericShortenTitle') : undefined}
                 placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
-                placeholderTextColor={theme.textSecondary}
-                style={[
-                  styles.titleInput,
-                  {
-                    backgroundColor: theme.backgroundElement,
-                    borderColor: theme.controlBorder,
-                    color: theme.text,
-                    textAlign: state.language === 'ar' ? 'right' : 'left',
-                  },
-                ]}
               />
-            </View>
-          </ScrollView>
-
-          {/* A docked bar, and it has to read as one. Undivided, the solid
-              green block simply began part-way down the description field and
-              looked like it was sitting on top of it. The rule says where the
-              scroll ends; the content padding above keeps the last field clear
-              of it once you reach the bottom. */}
-          <View
-            style={[
-              styles.footer,
-              { borderTopColor: theme.cardBorder, backgroundColor: theme.background },
-            ]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={tUi(saving ? 'savingSecurely' : 'saveTransaction')}
-              accessibilityState={{ disabled: !canSave, busy: saving }}
-              onPress={() => void save()}
-              disabled={!canSave}
-              style={[
-                styles.saveBtn,
-                { backgroundColor: theme.primary, opacity: canSave ? 1 : 0.4 },
-              ]}>
-              <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
-              <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-                {tUi(saving ? 'savingSecurely' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
-              </ThemedText>
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </ThemedView>
+    </ScreenScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  flex: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  headerTitle: {
-    fontSize: 16,
-  },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   content: {
-    padding: Spacing.three,
-    paddingBottom: Spacing.four,
     gap: Spacing.three + 4,
   },
   segment: {
@@ -490,17 +606,6 @@ const styles = StyleSheet.create({
   fieldBlock: {
     gap: Spacing.two,
   },
-  catGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  catChip: {
-    paddingHorizontal: Spacing.two + 4,
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-  },
   accountScroll: {
     marginHorizontal: -Spacing.three,
   },
@@ -538,17 +643,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 1.5,
   },
-  titleInput: {
-    borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    fontSize: 15,
-    fontWeight: '500',
-  },
   footer: {
-    padding: Spacing.three,
     borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: Spacing.two,
   },
   saveBtn: {
     flexDirection: 'row',

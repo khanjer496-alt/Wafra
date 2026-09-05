@@ -23,20 +23,19 @@ import { useRouter, type Href } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   Platform,
-  ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
-import { Fonts, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Block, Row, Section, SectionHeader } from '@/components/ui/layout';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { TextField } from '@/components/ui/text-field';
+import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildFeedbackPayload,
@@ -169,18 +168,19 @@ export default function FeedbackScreen() {
   };
 
   const chevron = language === 'ar' ? 'chevron-left' : 'chevron-right';
+  const feedbackHeader: ScreenHeaderProps = {
+    title: t('sendFeedback'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('sendFeedback')} onBack={() => router.back()} />
-        </View>
-
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
+    <>
+      <ScreenScaffold
+        keyboardAware
+        headerMode="native"
+        header={feedbackHeader}
+        contentStyle={styles.content}
+        scrollProps={{ keyboardShouldPersistTaps: 'handled', showsVerticalScrollIndicator: false }}>
           <Section index={0}>
             <ThemedText type="default" themeColor="textSecondary">
               {t('feedbackIntro')}
@@ -210,7 +210,8 @@ export default function FeedbackScreen() {
 
           <Section index={2} style={styles.group}>
             <SectionHeader title={t('feedbackWriteHeader')} />
-            <TextInput
+            <TextField
+              label={t('feedbackInputA11y')}
               accessibilityLabel={t('feedbackInputA11y')}
               value={message}
               onChangeText={(next) => {
@@ -222,16 +223,7 @@ export default function FeedbackScreen() {
               multiline
               maxLength={FEEDBACK_MESSAGE_MAX}
               placeholder={t('feedbackPlaceholder')}
-              placeholderTextColor={theme.textTertiary}
-              style={[
-                styles.textarea,
-                {
-                  backgroundColor: theme.backgroundElement,
-                  borderColor: theme.controlBorder,
-                  color: theme.text,
-                  textAlign: language === 'ar' ? 'right' : 'left',
-                },
-              ]}
+              style={styles.textarea}
             />
             <View style={styles.metaRow}>
               <ThemedText type="meta" themeColor="textTertiary" style={styles.metaGrow}>
@@ -281,8 +273,7 @@ export default function FeedbackScreen() {
               </ThemedText>
             </Block>
           </Section>
-        </ScrollView>
-      </SafeAreaView>
+      </ScreenScaffold>
 
       <ConfirmSheet
         visible={confirming}
@@ -292,26 +283,12 @@ export default function FeedbackScreen() {
         confirmLabel={t('feedbackSend')}
         onConfirm={() => void send()}
       />
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
   content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
     gap: Spacing.four + 2,
   },
   group: {
@@ -319,9 +296,6 @@ const styles = StyleSheet.create({
   },
   textarea: {
     minHeight: 120,
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
     fontSize: 15,
     lineHeight: 21,
     textAlignVertical: 'top',

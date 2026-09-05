@@ -98,6 +98,27 @@ const rejects = async (name, run, code) => {
   ), 'utf8');
   const gradle = fs.readFileSync(path.join(root, 'modules/sms-reader/android/build.gradle'), 'utf8');
   const adapter = fs.readFileSync(path.join(root, 'src/lib/sms-corpus-export.ts'), 'utf8');
+  const ts = require('typescript');
+  const shared = [];
+  const loaded = { exports: {} };
+  const compiled = ts.transpileModule(adapter, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+  }).outputText;
+  Function('require', 'module', 'exports', 'process', compiled)((name) => {
+    if (name === 'react-native') return { Platform: { OS: 'android' } };
+    if (name === '../../modules/sms-reader') return {
+      isCorpusExportEnabled: () => true, getInboxCorpusPage: async () => [],
+    };
+    if (name === '@/lib/sms-corpus') return { collectSmsCorpus: async () => [], serializeSmsCorpus: () => '{"fixture":true}' };
+    if (name === '@/lib/share-text') return { shareTextFile: async (...args) => { shared.push(args); } };
+    if (name === 'expo-file-system/legacy') return { cacheDirectory: 'file:///cache/', EncodingType: { UTF8: 'utf8' }, writeAsStringAsync: async () => {} };
+    if (name === 'expo-sharing') return { isAvailableAsync: async () => true, shareAsync: async () => {} };
+    throw new Error(`unexpected dependency ${name}`);
+  }, loaded, loaded.exports, { env: { EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '1' } });
+  await loaded.exports.shareSmsCorpus();
+  ok('raw corpus shares through the same owned temporary-file lifecycle',
+    shared.length === 1 && /^wafra-sms-corpus-\d{4}-\d{2}-\d{2}\.json$/.test(shared[0][0]) &&
+    shared[0][1] === '{"fixture":true}' && shared[0][2].mimeType === 'application/json');
   const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
   const githubBuild = fs.readFileSync(path.join(
     root,
@@ -126,8 +147,8 @@ const rejects = async (name, run, code) => {
     /EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT === '1'/.test(adapter) &&
       /isCorpusExportEnabled\?\.\(\) === true/.test(adapter));
   ok('the exporter has no upload or network transport',
-    /FileSystem\.writeAsStringAsync/.test(adapter) &&
-      /Sharing\.shareAsync/.test(adapter) &&
+    /shareTextFile/.test(adapter) &&
+      /@\/lib\/share-text/.test(adapter) &&
       !/\bfetch\s*\(|XMLHttpRequest|uploadAsync|feedback-transport|relay/i.test(adapter));
   ok('the full corpus never falls back to an Android intent text payload',
     !/Share\.share\s*\(/.test(adapter));

@@ -1,0 +1,115 @@
+{
+  "currency": [
+    {
+      "fixtureId": "enbd-credit-card-purchase",
+      "provenance": "repository-redacted",
+      "ledger": {
+        "schemaVersion": 2,
+        "currency": "USD",
+        "exponent": 2
+      },
+      "channel": "paste",
+      "parsedCurrency": "AED",
+      "planned": [
+        {
+          "type": "expense",
+          "title": "Carrefour",
+          "amountMinor": 8950,
+          "category": "groceries",
+          "rendered": "USD 89.50"
+        }
+      ]
+    },
+    {
+      "fixtureId": "enbd-credit-card-purchase",
+      "provenance": "repository-redacted",
+      "ledger": {
+        "schemaVersion": 2,
+        "currency": "USD",
+        "exponent": 2
+      },
+      "channel": "automatic",
+      "parsedCurrency": "AED",
+      "planned": [
+        {
+          "type": "expense",
+          "title": "Card purchase",
+          "amountMinor": 8950,
+          "category": "other",
+          "rendered": "USD 89.50"
+        }
+      ]
+    },
+    {
+      "fixtureId": "enbd-credit-card-purchase",
+      "provenance": "repository-redacted",
+      "ledger": {
+        "schemaVersion": 2,
+        "currency": "KWD",
+        "exponent": 3
+      },
+      "channel": "paste",
+      "parsedCurrency": "AED",
+      "planned": [
+        {
+          "type": "expense",
+          "title": "Carrefour",
+          "amountMinor": 8950,
+          "category": "groceries",
+          "rendered": "KWD 8.950"
+        }
+      ]
+    },
+    {
+      "fixtureId": "enbd-credit-card-purchase",
+      "provenance": "repository-redacted",
+      "ledger": {
+        "schemaVersion": 2,
+        "currency": "KWD",
+        "exponent": 3
+      },
+      "channel": "automatic",
+      "parsedCurrency": "AED",
+      "planned": [
+        {
+          "type": "expense",
+          "title": "Card purchase",
+          "amountMinor": 8950,
+          "category": "other",
+          "rendered": "KWD 8.950"
+        }
+      ]
+    }
+  ],
+  "pasteSalary": {
+    "provenance": "existing synthetic regression in bank-alert-interpreter.test.js",
+    "paste": [
+      {
+        "type": "expense",
+        "title": "Account debit",
+        "amountMinor": 750000,
+        "category": "other",
+        "rendered": "AED 7,500"
+      }
+    ],
+    "automatic": [
+      {
+        "type": "income",
+        "title": "Salary",
+        "amountMinor": 750000,
+        "category": "salary",
+        "rendered": "AED 7,500"
+      }
+    ]
+  },
+  "oldAndroidReview": {
+    "fixtureId": "us-chase-card-posted",
+    "provenance": "synthetic",
+    "observedAt": "2026-07-01T10:00:00.000Z",
+    "discoveredAt": "2026-09-04T10:00:00.000Z",
+    "expiresAt": "2026-07-31T10:00:00.000Z",
+    "outcome": "refused",
+    "reason": "expired-review-candidate",
+    "pending": 0
+  }
+}

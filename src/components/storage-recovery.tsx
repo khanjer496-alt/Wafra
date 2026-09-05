@@ -37,6 +37,11 @@ import { t } from '@/lib/i18n';
 import { clearBackgroundRelayRows } from '@/lib/background-relay';
 import { eraseIosCaptureStore, setIosCaptureEnabled } from '@/lib/capture';
 import {
+  createIosHistoryPostEraseCleanup,
+  eraseIosHistorySessions,
+} from '@/lib/ios-history-setup';
+import { clearIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import {
   getRelayConfigStrict,
   isLegacyShortcutCaptureActive,
   isRelayPlatform,
@@ -98,10 +103,14 @@ export function StorageRecovery({
       if (relay) await unpairDevice(relay);
       const notificationReader = NotificationReader;
       const cleanupCaptureQueue = isRelayPlatform()
-        ? async () => {
-            await eraseIosCaptureStore();
-            await clearBackgroundRelayRows();
-          }
+        ? createIosHistoryPostEraseCleanup({
+            eraseCapture: eraseIosCaptureStore,
+            eraseHistory: eraseIosHistorySessions,
+            clearMessageSetup: clearIosMessageSetupProgress,
+            clearBackground: async () => {
+              await clearBackgroundRelayRows();
+            },
+          })
         : Platform.OS === 'android'
           ? async () => {
               if (!SmsReader?.clearCaptured || !(await SmsReader.clearCaptured())) {
@@ -142,8 +151,7 @@ export function StorageRecovery({
               </View>
               <ThemedText
                 style={styles.headline}
-                accessibilityRole="header"
-                maxFontSizeMultiplier={1.6}>
+                accessibilityRole="header">
                 {t('storageRecoveryEraseTitle')}
               </ThemedText>
               <ThemedText style={styles.sub}>{t('storageRecoveryEraseBody')}</ThemedText>
@@ -185,8 +193,7 @@ export function StorageRecovery({
             </View>
             <ThemedText
               style={styles.headline}
-              accessibilityRole="header"
-              maxFontSizeMultiplier={1.6}>
+              accessibilityRole="header">
               {t(erased ? 'storageRecoveryInitializeTitle' : 'storageRecoveryTitle')}
             </ThemedText>
             <ThemedText style={styles.sub} accessibilityLiveRegion="polite">

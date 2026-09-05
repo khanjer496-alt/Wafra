@@ -6,38 +6,39 @@
  * of one question: Insights showed the split by category and Budgets showed the
  * same categories against a number — so a limit was always one tab away from
  * the spending it governs, and the app carried two ways of ranking the same
- * list. Here the composition comes first, the limits sit directly under it, and
- * the trend that explains both closes the screen.
+ * list. Here the six-month comparison establishes the shape first, composition
+ * explains the selected month, and limits follow the spending they govern.
  */
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
 } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { InsightCard } from '@/components/insight-card';
 import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
+import { rampColor } from '@/components/ui/data-viz';
 import { Icon } from '@/components/ui/icon';
-import { LinkPill, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { ProgressBar } from '@/components/ui/progress-bar';
+import { Money } from '@/components/ui/money';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { DataViz, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
-import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel, getCategory, rampColor } from '@/lib/categories';
+import { categoryLabel, getCategory } from '@/lib/categories';
 import {
   formatAED,
   formatAmount,
@@ -64,7 +65,7 @@ export default function FlowScreen() {
   const language = useLanguage();
   const router = useRouter();
   const dark = useColorScheme() === 'dark';
-  const clearance = useTabBarClearance();
+  const dataViz = DataViz[dark ? 'dark' : 'light'];
   const { width: screenWidth, fontScale } = useWindowDimensions();
   const { state } = useStore();
   // Every tab that shows money the inbox produces can now go and refresh it.
@@ -80,6 +81,10 @@ export default function FlowScreen() {
   const trendColumnWidth =
     (Math.min(screenWidth, MaxContentWidth) - ScreenPadding * 2 - Spacing.two * 5) / 6;
   const showTrendValues = trendColumnWidth >= 38 * fontScale;
+  // Arabic month names need more space than compact figures. On narrow or
+  // larger-text layouts, label the range ends below the bars instead of
+  // breaking six names mid-word. Every month keeps its complete a11y summary.
+  const showAllTrendLabels = trendColumnWidth >= (language === 'ar' ? 52 : 28) * fontScale;
 
   const [periodOpen, setPeriodOpen] = useState(false);
   const [limitFor, setLimitFor] = useState<CategoryId | null | 'new'>(null);
@@ -136,9 +141,9 @@ export default function FlowScreen() {
         // The pooled remainder is not a category and gets no glyph — see the
         // row below for why that is the honest answer rather than a gap.
         icon: c.category ? getCategory(c.category).icon : null,
-        color: c.category ? rampColor(i, dark) : dark ? '#2A2620' : '#D9D3C6',
+        color: c.category ? rampColor(i, dark) : dataViz.neutral,
       })),
-    [comp, summary.byCategory.length, dark, language],
+    [comp, summary.byCategory.length, dark, language, dataViz.neutral],
   );
 
   /**
@@ -231,44 +236,51 @@ export default function FlowScreen() {
   const trendAvg = Math.round(
     trendMonths.reduce((sum, m) => sum + (m.income - m.expense), 0) / (trendMonths.length || 1),
   );
+  const monthCashflowLabel = (month: (typeof trend)[number]) =>
+    month.income === 0 && month.expense === 0
+      ? tf('monthCashflowNoDataA11y', { month: month.label }, language)
+      : tf('monthCashflowA11y', {
+          month: month.label,
+          income: formatAED(month.income, { decimals: false }),
+          spending: formatAED(month.expense, { decimals: false }),
+        }, language);
+  const selectedTrendMonth = trend.find((month) => month.key === key) ?? trend[trend.length - 1];
+  const compositionA11yLabel = slices
+    .map((slice) => tf('compositionPercent', {
+      label: slice.label,
+      percent: Math.round(slice.share * 100),
+    }, language))
+    .join('. ');
+  const flowHeader: ScreenHeaderProps = {
+    title: t('tabFlow'),
+    leading: <PeriodPill onPress={() => setPeriodOpen(true)} />,
+    actions: [{ label: t('statsTitle'), onPress: () => router.push('/stats') }],
+  };
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
-          }
-          showsVerticalScrollIndicator={false}>
-          <View style={[styles.header, largeText && styles.headerLarge]}>
-            <ThemedText type="title" accessibilityRole="header">{t('tabFlow')}</ThemedText>
-            {/* The one way into /stats, and it has to exist here. The old
-                "ALL STATS" link hung off the six-month chart below and landed
-                on a pixel-identical copy of that chart — the least rewarding
-                tap in the app — so it was removed. Removing it without putting
-                this back left the screen registered, routed and tested, and
-                reachable from nowhere. Labelled rather than a glyph: the only
-                fitting icon is the chart mark, which is the Flow tab's own. */}
-            <View style={styles.headerActions}>
-              <PeriodPill onPress={() => setPeriodOpen(true)} />
-              <LinkPill label={t('statsTitle')} onPress={() => router.push('/stats')} />
-            </View>
-          </View>
+    <>
+      <ScreenScaffold
+        tabbed
+        headerMode="inline"
+        header={flowHeader}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+        }
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
 
           <View
             style={[
               styles.summaryRail,
               largeText && styles.summaryRailLarge,
-              { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+              { borderColor: theme.cardBorder, backgroundColor: 'transparent' },
             ]}>
             <View style={[styles.summaryCell, styles.summaryPrimary]}>
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('totalOut')}
               </ThemedText>
-              <ThemedText type="smallBold" tabular numberOfLines={largeText ? undefined : 1}>
-                {formatAED(comp.totalFils, { decimals: false })}
-              </ThemedText>
+              <View accessible accessibilityLabel={formatAED(comp.totalFils, { decimals: false })}>
+                <Money fils={comp.totalFils} type="amount" style={styles.totalAmount} />
+              </View>
             </View>
             {/* Only while the limits and "Total spent" describe the same span.
                 Limits are monthly; the period pill is not, and this cell was
@@ -292,13 +304,18 @@ export default function FlowScreen() {
               </View>
             )}
             {live && (
-              <View style={[styles.summaryCell, styles.summaryTerse, styles.summaryDivided, largeText && styles.summaryDividedLarge, { borderColor: theme.cardBorder }]}>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('periodProgress')}
-                </ThemedText>
-                <ThemedText type="smallBold" tabular numberOfLines={largeText ? undefined : 1}>
-                  {Math.round(monthShare * 100)}%
-                </ThemedText>
+              <View style={[styles.summaryCell, styles.summaryProgress, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
+                <View style={styles.progressCaption}>
+                  <ThemedText type="meta" themeColor="textSecondary" style={styles.progressLabel}>
+                    {t('periodProgress')}
+                  </ThemedText>
+                  <ThemedText type="smallBold" tabular>
+                    {Math.round(monthShare * 100)}%
+                  </ThemedText>
+                </View>
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <ProgressBar ratio={monthShare} color={theme.primary} height={4} />
+                </View>
               </View>
             )}
           </View>
@@ -316,10 +333,15 @@ export default function FlowScreen() {
               {/* One stacked bar rather than a donut: a donut asks you to
                   compare arcs, and nobody can. A bar is read left to right in
                   the order the list beneath it is already sorted. */}
-              <View style={[styles.compBar, { backgroundColor: theme.track }]}>
+              <View
+                accessible
+                accessibilityRole="image"
+                accessibilityLabel={compositionA11yLabel}
+                style={[styles.compBar, { backgroundColor: theme.track }]}>
                 {slices.map((s, i) => (
                   <View
                     key={s.key}
+                    accessible={false}
                     style={{
                       flex: Math.max(0.02, s.share),
                       backgroundColor: s.color,
@@ -342,6 +364,7 @@ export default function FlowScreen() {
                     key={s.key}
                     accessibilityRole="button"
                     accessibilityLabel={tf('seeCategoryEntriesA11y', { category: s.label }, language)}
+                    accessibilityValue={{ text: `${formatAED(s.totalFils)}, ${Math.round(s.share * 100)}%` }}
                     onPress={() => router.push(`/transactions?category=${s.categories.join(',')}`)}
                     style={({ pressed }) => [
                       styles.compRow,
@@ -463,6 +486,7 @@ export default function FlowScreen() {
                     accessibilityLabel={tf('categoryLimit', {
                       category: categoryLabel(budget.category, language),
                     }, language)}
+                    accessibilityValue={{ text: `${formatAED(spent)} / ${formatAED(budget.limitFils)}` }}
                     onPress={() => setLimitFor(budget.category)}
                     style={styles.limit}>
                     <View style={styles.limitTop}>
@@ -513,11 +537,8 @@ export default function FlowScreen() {
           </Animated.View>
 
           {/* ── Income vs spending ── */}
-          {/* Uncarded for the same reason as the composition above: nothing
-              here is tappable or dismissible, so the border was decoration.
-              No "ALL STATS" link on this header either — it used to land on a
-              pixel-identical copy of this chart. Stats has its own entry
-              point; the promise is made once. */}
+          {/* Uncarded for the same reason as the composition below: nothing
+              here is tappable or dismissible, so the border is decoration. */}
           <Animated.View
             entering={enter(FadeInDown.delay(80).duration(320))}
             style={styles.section}>
@@ -534,18 +555,15 @@ export default function FlowScreen() {
                 const current = m.key === key;
                 const empty = m.income === 0 && m.expense === 0;
                 return (
-                  <View key={m.key} style={styles.trendCol}>
-                    {/* A bar you cannot read a number off is a shape, not a
-                        figure. A 14px bar cannot carry its own label without
-                        colliding with its neighbour, so the pair is stacked
-                        above the column — in first, out second, each in its
-                        bar's colour. Stacking gives both figures the full
-                        column width while preserving an 11px minimum. */}
+                  <View
+                    key={m.key}
+                    accessible
+                    accessibilityRole="image"
+                    accessibilityLabel={monthCashflowLabel(m)}
+                    accessibilityState={{ selected: current }}
+                    style={[styles.trendCol, current && { backgroundColor: theme.backgroundSelected }]}>
                     {showTrendValues && <View style={styles.trendValues}>
                       {empty ? (
-                        // Nothing was recorded that month. Two 2%-floor stubs
-                        // labelled "0 0" claim a month of perfect balance;
-                        // a dash says there is no answer, which is the truth.
                         <ThemedText type="nano" tabular themeColor="textTertiary" style={styles.trendValue}>
                           —
                         </ThemedText>
@@ -559,12 +577,7 @@ export default function FlowScreen() {
                             tabular
                             style={[
                               styles.trendValue,
-                              // Tied to its own bar, as the in figure is. Leaving
-                              // it textTertiary made it the same grey as the month
-                              // label below, so on the current column a red bar
-                              // sat under a grey number and only half the pair
-                              // was legible as a pair.
-                              { color: current ? theme.expense : dark ? '#8A7E76' : '#9B8C84' },
+                              { color: current ? theme.expense : dataViz.axis },
                             ]}>
                             {formatCompactAED(m.expense)}
                           </ThemedText>
@@ -586,25 +599,48 @@ export default function FlowScreen() {
                           styles.trendBar,
                           {
                             height: `${m.expense <= 0 ? 0 : Math.max(2, (m.expense / trendMax) * 100)}%`,
-                            backgroundColor: current
-                              ? theme.expense
-                              : dark
-                                ? '#4A3A34'
-                                : '#DCC9C2',
+                            backgroundColor: current ? theme.expense : dataViz.expenseSoft,
                           },
                         ]}
                       />
                     </View>
-                    <ThemedText
+                    {showAllTrendLabels && <ThemedText
                       type="nano"
                       themeColor={current ? 'text' : 'textTertiary'}
                       style={styles.trendLabel}>
                       {m.label}
-                    </ThemedText>
+                    </ThemedText>}
                   </View>
                 );
               })}
             </View>
+            {!showAllTrendLabels && (
+              <View
+                style={styles.trendSparseAxis}
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants">
+                <ThemedText
+                  type="nano"
+                  themeColor="textTertiary"
+                  style={[styles.trendEndpointLabel, { textAlign: language === 'ar' ? 'right' : 'left' }]}>
+                  {trend[0]?.label}
+                </ThemedText>
+                <ThemedText
+                  type="nano"
+                  style={[styles.trendEndpointLabel, { textAlign: language === 'ar' ? 'left' : 'right' }]}>
+                  {trend[trend.length - 1]?.label}
+                </ThemedText>
+              </View>
+            )}
+            {selectedTrendMonth ? (
+              <ThemedText
+                type="meta"
+                themeColor="textSecondary"
+                accessibilityLiveRegion="polite"
+                style={styles.selectedTrendSummary}>
+                {monthCashflowLabel(selectedTrendMonth)}
+              </ThemedText>
+            ) : null}
             {!showTrendValues && (
               <View style={styles.trendDetails}>
                 {trend.map((m) => (
@@ -618,6 +654,7 @@ export default function FlowScreen() {
                           income: formatAED(m.income, { decimals: false }),
                           spending: formatAED(m.expense, { decimals: false }),
                         }, language)}
+                    accessibilityState={{ selected: m.key === key }}
                     style={[styles.trendDetailRow, { borderBottomColor: theme.cardBorder }]}>
                     <ThemedText type="smallBold" style={styles.trendDetailMonth}>
                       {m.label}
@@ -628,9 +665,6 @@ export default function FlowScreen() {
                       </ThemedText>
                     ) : (
                       <>
-                        {/* Keep translated labels in their language font. Only
-                            the numeric child is monospaced/tabular; Geist Mono
-                            intentionally has no Arabic glyph set. */}
                         <ThemedText
                           type="default"
                           style={[styles.trendDetailFigure, { color: theme.primary }]}>
@@ -672,8 +706,7 @@ export default function FlowScreen() {
               </View>
             </Animated.View>
           )}
-        </ScrollView>
-      </SafeAreaView>
+      </ScreenScaffold>
 
       <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
       <LimitSheet
@@ -682,53 +715,29 @@ export default function FlowScreen() {
         monthKey={key}
         onClose={() => setLimitFor(null)}
       />
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  content: { paddingHorizontal: ScreenPadding, paddingTop: Spacing.three },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two - 2 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  headerLarge: { flexDirection: 'column', alignItems: 'stretch' },
   summaryRail: {
     flexDirection: 'row',
-    marginTop: Spacing.three,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    paddingHorizontal: Spacing.three,
+    flexWrap: 'wrap',
+    marginTop: Spacing.two,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: Spacing.three,
+    gap: Spacing.three,
   },
   summaryRailLarge: { flexDirection: 'column' },
-  /**
-    * Three equal thirds cut the only figure the rail exists for.
-    *
-    * "Total spent" carries a currency prefix and up to six digits — AED
-    * 17,148 — and a third of a phone's width does not hold it, so the number
-    * the section is named after rendered as "AED 17,1…". The pair beside it
-    * loses the same way: "1,177 / 1,800" became "1,177 / …".
-    *
-    * So the cells are weighted by what they have to say. Period progress is
-    * always three characters ("19%") and needs the least; the two money cells
-    * split what it gives back. Weights rather than fixed widths, so this
-    * holds at any font scale and in Arabic.
-    */
+  // Full-width totals and wrapping facts preserve amounts at larger text sizes.
   summaryCell: { minWidth: 0, gap: 3, paddingVertical: Spacing.two + 2 },
-  // Weights derived from measured need, not guessed. At a 390pt viewport the
-  // three cells have 312pt of rail between them, and what each has to hold is:
-  // "AED 17,148" 87pt, "1,177 / 1,800" 113pt, and — for the last one — not its
-  // value but the word "progress" in its label, 48pt. These leave every cell
-  // 8-15pt of headroom, which is one more digit on the total.
-  summaryPrimary: { flex: 1.2 },
+  summaryPrimary: { flexBasis: '100%', flexGrow: 1 },
+  totalAmount: { flexWrap: 'wrap' },
   summaryPaired: { flex: 1.35 },
-  summaryTerse: { flex: 0.65 },
-  summaryDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
+  summaryProgress: { flex: 1, minWidth: 140, gap: Spacing.two },
+  progressCaption: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
+  progressLabel: { flex: 1, minWidth: 0 },
+  summaryDivided: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.three },
   summaryDividedLarge: {
     borderStartWidth: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -802,7 +811,7 @@ const styles = StyleSheet.create({
   trend: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three },
   trendWithValues: { height: 118 + 28 + 14 },
   trendWithoutValues: { height: 118 + 14 },
-  trendCol: { flex: 1, gap: Spacing.one },
+  trendCol: { flex: 1, gap: Spacing.one, borderRadius: Radius.tile, paddingVertical: Spacing.two },
   trendBars: {
     flex: 1,
     flexDirection: 'row',
@@ -831,6 +840,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   trendLabel: { textAlign: 'center' },
+  trendSparseAxis: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+    marginTop: Spacing.one,
+  },
+  trendEndpointLabel: { maxWidth: '45%', flexShrink: 1 },
+  selectedTrendSummary: { marginTop: Spacing.two },
   trendDetails: { marginTop: Spacing.two },
   trendDetailRow: {
     flexDirection: 'row',

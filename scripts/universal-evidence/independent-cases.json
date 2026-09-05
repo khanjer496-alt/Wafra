@@ -1,0 +1,254 @@
+{
+  "parser": [
+    {
+      "id": "ind-en-us-purchase-footer", "country": "US", "language": "en", "kind": "synthetic-independent",
+      "body": "Card purchase completed: USD 24.75 at BRINDLE COFFEE on 2026-08-14. Card ending 4816. Available balance: USD 1250.00. Account holder: Morgan Vale.",
+      "expected": {"amount.value":{"currency":"USD","minorUnits":"2475","exponent":2},"status":"posted","direction":"debit","merchant.value":"BRINDLE COFFEE","balance.value":{"currency":"USD","minorUnits":"125000","exponent":2}},
+      "notes": "Invented seller and holder; neither account holder nor available balance is the purchase seller or amount."
+    },
+    {
+      "id": "ind-en-ca-refund", "country": "CA", "language": "en", "kind": "synthetic-independent",
+      "body": "Refund received: CAD 42.60 from LANTERN BOOKSHOP to card ending 7214 on 2026-08-15. Original purchase reference 913207.",
+      "expected": {"amount.value":{"currency":"CAD","minorUnits":"4260","exponent":2},"status":"posted","direction":"credit","merchant.value":"LANTERN BOOKSHOP"},
+      "notes": "A refund is incoming money; a long reference is not an amount."
+    },
+    {
+      "id": "ind-en-gb-statement", "country": "GB", "language": "en", "kind": "synthetic-independent",
+      "body": "Your card statement dated 2026-08-01 is ready. Statement balance GBP 863.42. Minimum payment GBP 25.00. Payment due date 2026-08-26. Card ending 3189.",
+      "expected": {"amount.value":null,"status":"informational","direction":"none","statementTotal.value":{"currency":"GBP","minorUnits":"86342","exponent":2},"minimumDue.value":{"currency":"GBP","minorUnits":"2500","exponent":2},"dueDate.value":"2026-08-26"},
+      "safety":{"mustNotPost":true},
+      "notes": "Statement obligation is not a new expense; minimum and total must remain distinct."
+    },
+    {
+      "id": "ind-en-au-decline", "country": "AU", "language": "en", "kind": "synthetic-independent",
+      "body": "Payment declined: AUD 87.20 at CEDAR OUTDOOR SHOP on 2026-08-16. No money was debited. Card ending 2963.",
+      "expected": {"amount.value":{"currency":"AUD","minorUnits":"8720","exponent":2},"status":"failed","direction":"debit","merchant.value":"CEDAR OUTDOOR SHOP"},
+      "safety":{"mustNotPost":true},
+      "notes": "Attempted debit failed, so its amount must not enter spending totals."
+    },
+    {
+      "id": "ind-en-nz-renewal-not-charge", "country": "NZ", "language": "en", "kind": "synthetic-independent",
+      "body": "Reminder: your ORBIT AUDIO subscription will renew for NZD 14.99 on 2026-09-20. You have not been charged yet.",
+      "expected": {"amount.value":{"currency":"NZD","minorUnits":"1499","exponent":2},"status":"future","direction":"debit"},
+      "safety":{"mustNotPost":true},
+      "notes": "Scheduled renewal has a stated amount but is not a posted payment."
+    },
+    {
+      "id": "ind-en-ambiguous-dollar", "country": "unknown", "language": "en", "kind": "synthetic-independent",
+      "body": "Purchase completed for $18.50 at RIVER CAFE on 2026-08-17. Card ending 6432.",
+      "expected": {"amount.value":null,"status":"posted","direction":"debit","merchant.value":"RIVER CAFE"},
+      "safety":{"mustNotPost":true},
+      "notes": "Dollar symbol alone does not establish USD versus CAD, AUD, NZD or another dollar currency."
+    },
+    {
+      "id": "ind-en-ie-ambiguous-due", "country": "unknown", "language": "en", "kind": "synthetic-independent",
+      "body": "Card statement: total due EUR 310.00; minimum due EUR 20.00; payment due 09/10/2026. Statement available online.",
+      "expected": {"amount.value":null,"status":"informational","statementTotal.value":{"currency":"EUR","minorUnits":"31000","exponent":2},"minimumDue.value":{"currency":"EUR","minorUnits":"2000","exponent":2},"dueDate.value":null},
+      "safety":{"mustNotPost":true},
+      "notes": "No source locale is supplied: September 10 and October 9 are both plausible. The evaluator must omit date-order context."
+    },
+    {
+      "id": "ind-en-sg-balance-only", "country": "SG", "language": "en", "kind": "synthetic-independent",
+      "body": "Daily account summary for account ending 5814, 2026-08-18: current balance SGD 2048.65. No transactions today.",
+      "expected": {"amount.value":null,"status":"informational","direction":"none","balance.value":{"currency":"SGD","minorUnits":"204865","exponent":2}},
+      "safety":{"mustNotPost":true},
+      "notes": "An account snapshot does not create income or expense."
+    },
+    {
+      "id": "ind-fr-fr-purchase", "country": "FR", "language": "fr", "kind": "synthetic-independent",
+      "body": "Paiement par carte effectué le 2026-08-19 : EUR 12,40 chez BOULANGERIE DES PINS. Carte terminant par 7316. Solde disponible : EUR 908,20.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"1240","exponent":2},"status":"posted","direction":"debit","merchant.value":"BOULANGERIE DES PINS","balance.value":{"currency":"EUR","minorUnits":"90820","exponent":2}},
+      "notes": "French completed purchase with decimal commas and a separate balance."
+    },
+    {
+      "id": "ind-fr-be-utility-bill", "country": "BE", "language": "fr", "kind": "synthetic-independent",
+      "body": "Votre facture d'électricité est disponible. Montant à payer : EUR 76,30. Date limite de paiement : 2026-09-12. Référence client : 608214. Aucun prélèvement effectué.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"7630","exponent":2},"status":"future","direction":"debit","dueDate.value":"2026-09-12"},
+      "safety":{"mustNotPost":true},
+      "notes": "Unpaid electricity obligation includes a deadline, not evidence of payment."
+    },
+    {
+      "id": "ind-fr-ch-refund", "country": "CH", "language": "fr", "kind": "synthetic-independent",
+      "body": "Remboursement reçu de LIBRAIRIE DES NUAGES : CHF 35.90, crédité sur votre carte 4917 le 2026-08-20.",
+      "expected": {"amount.value":{"currency":"CHF","minorUnits":"3590","exponent":2},"status":"posted","direction":"credit","merchant.value":"LIBRAIRIE DES NUAGES"},
+      "notes": "French refund wording with explicit Swiss currency."
+    },
+    {
+      "id": "ind-de-de-purchase", "country": "DE", "language": "de", "kind": "synthetic-independent",
+      "body": "Kartenzahlung erfolgreich: EUR 53,18 bei WALDBLICK SUPERMARKT am 2026-08-21. Karte endet auf 8624. Verfügbarer Kontostand: EUR 1440,02.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"5318","exponent":2},"status":"posted","direction":"debit","merchant.value":"WALDBLICK SUPERMARKT","balance.value":{"currency":"EUR","minorUnits":"144002","exponent":2}},
+      "notes": "German successful payment; balance must not replace principal."
+    },
+    {
+      "id": "ind-de-at-decline", "country": "AT", "language": "de", "kind": "synthetic-independent",
+      "body": "Kartenzahlung über EUR 120,00 bei BERGTAL FAHRRADLADEN abgelehnt. Ihr Konto wurde nicht belastet. Datum: 2026-08-22.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"12000","exponent":2},"status":"failed","direction":"debit","merchant.value":"BERGTAL FAHRRADLADEN"},
+      "safety":{"mustNotPost":true},
+      "notes": "German explicit failed payment must not become spending."
+    },
+    {
+      "id": "ind-de-de-subscription-paid", "country": "DE", "language": "de", "kind": "synthetic-independent",
+      "body": "Ihre monatliche Abonnementzahlung an MONDKLANG AUDIO über EUR 8,99 wurde am 2026-08-23 erfolgreich von Ihrer Karte 3071 abgebucht.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"899","exponent":2},"status":"posted","direction":"debit","merchant.value":"MONDKLANG AUDIO"},
+      "notes": "Actual subscription charge, unlike a reminder to renew."
+    },
+    {
+      "id": "ind-es-es-purchase", "country": "ES", "language": "es", "kind": "synthetic-independent",
+      "body": "Compra realizada con tarjeta terminada en 6712: EUR 19,80 en CAFETERIA LUNA VERDE el 2026-08-24. Saldo disponible: EUR 650,15.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"1980","exponent":2},"status":"posted","direction":"debit","merchant.value":"CAFETERIA LUNA VERDE","balance.value":{"currency":"EUR","minorUnits":"65015","exponent":2}},
+      "notes": "Spanish posted purchase separates merchant from trailing available funds."
+    },
+    {
+      "id": "ind-es-mx-statement", "country": "MX", "language": "es", "kind": "synthetic-independent",
+      "body": "Tu estado de cuenta está listo. Saldo total del estado: MXN 2450.60. Pago mínimo: MXN 180.00. Fecha límite de pago: 2026-09-18. Tarjeta 8261.",
+      "expected": {"amount.value":null,"status":"informational","statementTotal.value":{"currency":"MXN","minorUnits":"245060","exponent":2},"minimumDue.value":{"currency":"MXN","minorUnits":"18000","exponent":2},"dueDate.value":"2026-09-18"},
+      "safety":{"mustNotPost":true},
+      "notes": "Mexican statement in Spanish; payment minimum is not total or a new charge."
+    },
+    {
+      "id": "ind-es-cl-refund-zero-decimal", "country": "CL", "language": "es", "kind": "synthetic-independent",
+      "body": "Reembolso recibido de LIBRERIA RIO AZUL: CLP 12990. Abonado a tu tarjeta 3916 el 2026-08-25.",
+      "expected": {"amount.value":{"currency":"CLP","minorUnits":"12990","exponent":0},"status":"posted","direction":"credit","merchant.value":"LIBRERIA RIO AZUL"},
+      "notes": "Whole-peso amount must retain zero-decimal currency semantics."
+    },
+    {
+      "id": "ind-pt-br-purchase", "country": "BR", "language": "pt", "kind": "synthetic-independent",
+      "body": "Compra aprovada no cartão final 5438: BRL 67,45 em MERCADO JARDIM CLARO, em 2026-08-26. Saldo disponível: BRL 920,10.",
+      "expected": {"amount.value":{"currency":"BRL","minorUnits":"6745","exponent":2},"status":"posted","direction":"debit","merchant.value":"MERCADO JARDIM CLARO","balance.value":{"currency":"BRL","minorUnits":"92010","exponent":2}},
+      "notes": "Portuguese approved purchase with separate balance."
+    },
+    {
+      "id": "ind-pt-pt-renewal", "country": "PT", "language": "pt", "kind": "synthetic-independent",
+      "body": "A sua subscrição de NUVEM MUSICA será renovada em 2026-09-22 por EUR 6,99. Ainda não foi efetuada qualquer cobrança.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"699","exponent":2},"status":"future","direction":"debit"},
+      "safety":{"mustNotPost":true},
+      "notes": "Future Portuguese renewal explicitly states no charge yet."
+    },
+    {
+      "id": "ind-it-it-purchase", "country": "IT", "language": "it", "kind": "synthetic-independent",
+      "body": "Pagamento con carta eseguito: EUR 32,50 presso TRATTORIA DEL CEDRO il 2026-08-27. Carta finale 1684. Saldo disponibile EUR 712,90.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"3250","exponent":2},"status":"posted","direction":"debit","merchant.value":"TRATTORIA DEL CEDRO","balance.value":{"currency":"EUR","minorUnits":"71290","exponent":2}},
+      "notes": "Italian completed payment; merchant is a fictional restaurant."
+    },
+    {
+      "id": "ind-it-it-water-bill", "country": "IT", "language": "it", "kind": "synthetic-independent",
+      "body": "La bolletta dell'acqua è disponibile: importo da pagare EUR 41,70, scadenza 2026-09-16. Nessun pagamento ricevuto. Codice cliente 724108.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"4170","exponent":2},"status":"future","direction":"debit","dueDate.value":"2026-09-16"},
+      "safety":{"mustNotPost":true},
+      "notes": "Water bill remains an unpaid obligation."
+    },
+    {
+      "id": "ind-nl-nl-purchase", "country": "NL", "language": "nl", "kind": "synthetic-independent",
+      "body": "Kaartbetaling voltooid: EUR 28,35 bij GROENE BRUG SUPERMARKT op 2026-08-28. Kaart eindigend op 9361. Beschikbaar saldo: EUR 480,65.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"2835","exponent":2},"status":"posted","direction":"debit","merchant.value":"GROENE BRUG SUPERMARKT","balance.value":{"currency":"EUR","minorUnits":"48065","exponent":2}},
+      "notes": "Dutch completed payment with a recognizable activity noun."
+    },
+    {
+      "id": "ind-nl-be-decline", "country": "BE", "language": "nl", "kind": "synthetic-independent",
+      "body": "Betaling van EUR 74,90 bij FIETSWINKEL BLAUWE REIGER geweigerd op 2026-08-29. Er is geen geld afgeschreven.",
+      "expected": {"amount.value":{"currency":"EUR","minorUnits":"7490","exponent":2},"status":"failed","direction":"debit","merchant.value":"FIETSWINKEL BLAUWE REIGER"},
+      "safety":{"mustNotPost":true},
+      "notes": "Dutch failed payment is not an expense even when amount is readable."
+    },
+    {
+      "id": "ind-tr-tr-purchase", "country": "TR", "language": "tr", "kind": "synthetic-independent",
+      "body": "2026-08-30 tarihinde 4827 ile biten kartınızla MAVI YAPRAK MARKET işyerinde TRY 325,50 tutarında alışveriş gerçekleşmiştir. Kullanılabilir bakiye: TRY 1840,25.",
+      "expected": {"amount.value":{"currency":"TRY","minorUnits":"32550","exponent":2},"status":"posted","direction":"debit","merchant.value":"MAVI YAPRAK MARKET","balance.value":{"currency":"TRY","minorUnits":"184025","exponent":2}},
+      "notes": "Turkish completed purchase, with decimal comma and distinct available balance."
+    },
+    {
+      "id": "ind-tr-tr-decline", "country": "TR", "language": "tr", "kind": "synthetic-independent",
+      "body": "2026-08-31 tarihinde GUNES KITAP EVI işyerindeki TRY 210,00 tutarlı kart ödemeniz reddedildi. Hesabınızdan para çekilmedi.",
+      "expected": {"amount.value":{"currency":"TRY","minorUnits":"21000","exponent":2},"status":"failed","direction":"debit","merchant.value":"GUNES KITAP EVI"},
+      "safety":{"mustNotPost":true},
+      "notes": "Explicit Turkish decline must remain non-postable."
+    },
+    {
+      "id": "ind-hi-in-purchase", "country": "IN", "language": "hi", "kind": "synthetic-independent",
+      "body": "2026-08-14 को कार्ड 5728 से नील कमल किराना पर INR 845.50 का भुगतान सफल हुआ। उपलब्ध शेष राशि INR 12040.25 है।",
+      "expected": {"amount.value":{"currency":"INR","minorUnits":"84550","exponent":2},"status":"posted","direction":"debit","merchant.value":"नील कमल किराना","balance.value":{"currency":"INR","minorUnits":"1204025","exponent":2}},
+      "notes": "Hindi successful payment and separate available balance."
+    },
+    {
+      "id": "ind-hi-in-refund", "country": "IN", "language": "hi", "kind": "synthetic-independent",
+      "body": "नील कमल पुस्तकालय से INR 299.00 की रिफंड राशि 2026-08-15 को आपके कार्ड 3185 में जमा हो गई है।",
+      "expected": {"amount.value":{"currency":"INR","minorUnits":"29900","exponent":2},"status":"posted","direction":"credit","merchant.value":"नील कमल पुस्तकालय"},
+      "notes": "Hindi refund has been credited, not newly spent."
+    },
+    {
+      "id": "ind-hi-in-electricity", "country": "IN", "language": "hi", "kind": "synthetic-independent",
+      "body": "आपका बिजली बिल तैयार है। देय राशि INR 1230.00 है। भुगतान की अंतिम तिथि 2026-09-15 है। भुगतान अभी बाकी है। उपभोक्ता संख्या 601824।",
+      "expected": {"amount.value":{"currency":"INR","minorUnits":"123000","exponent":2},"status":"future","direction":"debit","dueDate.value":"2026-09-15"},
+      "safety":{"mustNotPost":true},
+      "notes": "Hindi unpaid electricity bill, with explicit deadline and reference number."
+    },
+    {
+      "id": "ind-ar-eg-purchase", "country": "EG", "language": "ar", "kind": "synthetic-independent",
+      "body": "تمت عملية شراء بمبلغ EGP 245.75 لدى مكتبة شجرة النور بتاريخ 2026-08-16 باستخدام البطاقة المنتهية برقم 4918. الرصيد المتاح EGP 5300.00.",
+      "expected": {"amount.value":{"currency":"EGP","minorUnits":"24575","exponent":2},"status":"posted","direction":"debit","merchant.value":"مكتبة شجرة النور","balance.value":{"currency":"EGP","minorUnits":"530000","exponent":2}},
+      "notes": "Arabic outside UAE/Saudi; explicit Egyptian currency and fictional bookshop."
+    },
+    {
+      "id": "ind-ar-kw-three-decimal", "country": "KW", "language": "ar", "kind": "synthetic-independent",
+      "body": "تم دفع KWD 3.750 لدى مقهى ورق الليمون بتاريخ 2026-08-17. البطاقة المنتهية برقم 6281. الرصيد المتاح KWD 92.125.",
+      "expected": {"amount.value":{"currency":"KWD","minorUnits":"3750","exponent":3},"status":"posted","direction":"debit","merchant.value":"مقهى ورق الليمون","balance.value":{"currency":"KWD","minorUnits":"92125","exponent":3}},
+      "notes": "Kuwaiti dinar three-decimal principal and balance must remain exact."
+    },
+    {
+      "id": "ind-ar-jo-statement", "country": "JO", "language": "ar", "kind": "synthetic-independent",
+      "body": "كشف حساب بطاقتك جاهز. إجمالي مبلغ الكشف JOD 180.250. الحد الأدنى للسداد JOD 10.000. تاريخ استحقاق الدفع 2026-09-19. البطاقة 8327.",
+      "expected": {"amount.value":null,"status":"informational","statementTotal.value":{"currency":"JOD","minorUnits":"180250","exponent":3},"minimumDue.value":{"currency":"JOD","minorUnits":"10000","exponent":3},"dueDate.value":"2026-09-19"},
+      "safety":{"mustNotPost":true},
+      "notes": "Jordanian statement keeps three-decimal total and minimum separate."
+    },
+    {
+      "id": "ind-ja-jp-purchase", "country": "JP", "language": "ja", "kind": "synthetic-independent",
+      "body": "カード利用が完了しました。利用先：青葉書店。利用金額：JPY 2480。利用日：2026-08-18。カード末尾：7146。利用可能残高：JPY 85000。",
+      "expected": {"amount.value":{"currency":"JPY","minorUnits":"2480","exponent":0},"status":"posted","direction":"debit","merchant.value":"青葉書店","balance.value":{"currency":"JPY","minorUnits":"85000","exponent":0}},
+      "notes": "Japanese labelled fields; yen amount has no fractional minor units."
+    },
+    {
+      "id": "ind-ja-jp-decline", "country": "JP", "language": "ja", "kind": "synthetic-independent",
+      "body": "カード決済が拒否されました。利用先：若葉自転車店。金額：JPY 9800。日時：2026-08-19。口座からの引き落としはありません。",
+      "expected": {"amount.value":{"currency":"JPY","minorUnits":"9800","exponent":0},"status":"failed","direction":"debit","merchant.value":"若葉自転車店"},
+      "safety":{"mustNotPost":true},
+      "notes": "Japanese refusal states no withdrawal occurred."
+    },
+    {
+      "id": "ind-ja-jp-renewal", "country": "JP", "language": "ja", "kind": "synthetic-independent",
+      "body": "月あかり音楽の定期購読は2026-09-21にJPY 780で更新予定です。料金はまだ請求されていません。",
+      "expected": {"amount.value":{"currency":"JPY","minorUnits":"780","exponent":0},"status":"future","direction":"debit"},
+      "safety":{"mustNotPost":true},
+      "notes": "Japanese renewal announcement explicitly says not charged yet."
+    },
+    {
+      "id": "ind-zh-cn-purchase", "country": "CN", "language": "zh", "kind": "synthetic-independent",
+      "body": "您的尾号4826银行卡于2026-08-20在青竹书店消费成功，金额CNY 68.50。可用余额CNY 3020.75。",
+      "expected": {"amount.value":{"currency":"CNY","minorUnits":"6850","exponent":2},"status":"posted","direction":"debit","merchant.value":"青竹书店","balance.value":{"currency":"CNY","minorUnits":"302075","exponent":2}},
+      "notes": "Chinese successful purchase with no whitespace between common field labels."
+    },
+    {
+      "id": "ind-zh-cn-refund", "country": "CN", "language": "zh", "kind": "synthetic-independent",
+      "body": "退款到账通知：青竹文具店退回CNY 25.80，已于2026-08-21存入您尾号7193的银行卡。",
+      "expected": {"amount.value":{"currency":"CNY","minorUnits":"2580","exponent":2},"status":"posted","direction":"credit","merchant.value":"青竹文具店"},
+      "notes": "Chinese refund has already arrived and must not be an expense."
+    }
+  ],
+  "categorization": [
+    {"id":"ind-cat-en-cafe","country":"US","language":"en","kind":"synthetic-independent","input":{"merchant":"BRINDLE COFFEE SHOP","type":"expense","meaning":"purchase"},"expected":{"category":"dining","needsReview":false},"notes":"Explicit coffee-shop activity; invented name, no brand lookup needed."},
+    {"id":"ind-cat-fr-pharmacy","country":"FR","language":"fr","kind":"synthetic-independent","input":{"merchant":"PHARMACIE DES PINS","type":"expense","meaning":"purchase"},"expected":{"category":"health","needsReview":false},"notes":"French pharmacy activity is explicit."},
+    {"id":"ind-cat-de-supermarket","country":"DE","language":"de","kind":"synthetic-independent","input":{"merchant":"WALDBLICK SUPERMARKT","type":"expense","meaning":"purchase"},"expected":{"category":"groceries","needsReview":false},"notes":"German supermarket activity is explicit."},
+    {"id":"ind-cat-es-restaurant","country":"MX","language":"es","kind":"synthetic-independent","input":{"merchant":"RESTAURANTE LUNA VERDE","type":"expense","meaning":"purchase"},"expected":{"category":"dining","needsReview":false},"notes":"Spanish restaurant noun is activity evidence."},
+    {"id":"ind-cat-pt-pharmacy","country":"BR","language":"pt","kind":"synthetic-independent","input":{"merchant":"FARMACIA JARDIM CLARO","type":"expense","meaning":"purchase"},"expected":{"category":"health","needsReview":false},"notes":"Portuguese pharmacy activity; spelling without accent is common in descriptors."},
+    {"id":"ind-cat-it-restaurant","country":"IT","language":"it","kind":"synthetic-independent","input":{"merchant":"RISTORANTE DEL CEDRO","type":"expense","meaning":"purchase"},"expected":{"category":"dining","needsReview":false},"notes":"Italian restaurant activity."},
+    {"id":"ind-cat-nl-supermarket","country":"NL","language":"nl","kind":"synthetic-independent","input":{"merchant":"GROENE BRUG SUPERMARKT","type":"expense","meaning":"purchase"},"expected":{"category":"groceries","needsReview":false},"notes":"Dutch supermarket noun; no country-specific chain knowledge."},
+    {"id":"ind-cat-tr-pharmacy","country":"TR","language":"tr","kind":"synthetic-independent","input":{"merchant":"YESIL YAPRAK ECZANESI","type":"expense","meaning":"purchase"},"expected":{"category":"health","needsReview":false},"notes":"Turkish pharmacy noun is category evidence."},
+    {"id":"ind-cat-hi-grocery","country":"IN","language":"hi","kind":"synthetic-independent","input":{"merchant":"नील कमल किराना","type":"expense","meaning":"purchase"},"expected":{"category":"groceries","needsReview":false},"notes":"Hindi किराना identifies grocery activity."},
+    {"id":"ind-cat-ar-restaurant","country":"EG","language":"ar","kind":"synthetic-independent","input":{"merchant":"مطعم ورق الليمون","type":"expense","meaning":"purchase"},"expected":{"category":"dining","needsReview":false},"notes":"Arabic restaurant noun; outside UAE/Saudi."},
+    {"id":"ind-cat-ja-pharmacy","country":"JP","language":"ja","kind":"synthetic-independent","input":{"merchant":"青葉薬局","type":"expense","meaning":"purchase"},"expected":{"category":"health","needsReview":false},"notes":"Japanese 薬局 explicitly identifies a pharmacy."},
+    {"id":"ind-cat-zh-supermarket","country":"CN","language":"zh","kind":"synthetic-independent","input":{"merchant":"青竹超市","type":"expense","meaning":"purchase"},"expected":{"category":"groceries","needsReview":false},"notes":"Chinese 超市 explicitly identifies a supermarket."},
+    {"id":"ind-cat-opaque-marketplace","country":"unknown","language":"en","kind":"synthetic-independent","input":{"merchant":"OPEN HORIZON MARKETPLACE","type":"expense","meaning":"purchase"},"expected":{"category":"other","needsReview":true},"notes":"Marketplace descriptor alone cannot establish whether purchase was groceries, software, clothing or another service."},
+    {"id":"ind-cat-opaque-processor","country":"unknown","language":"en","kind":"synthetic-independent","input":{"merchant":"CEDAR PAYMENTS LTD","type":"expense","meaning":"purchase"},"expected":{"category":"other","needsReview":true},"notes":"Payment intermediary does not establish underlying seller activity."},
+    {"id":"ind-cat-refund-is-not-salary","country":"CA","language":"en","kind":"synthetic-independent","input":{"merchant":"LANTERN CLOTHING SHOP","type":"income","meaning":"refund"},"expected":{"category":"other","needsReview":false},"notes":"Known refund direction must not turn a shop name into business income or salary; explicit movement can be confidently neutral."}
+  ]
+}

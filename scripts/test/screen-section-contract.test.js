@@ -12,7 +12,6 @@ const path = require('node:path');
 const root = path.join(__dirname, '../..');
 const sections = [
   ['src/components/onboarding/money-preview.tsx', 'MoneyPreview', 'src/components/onboarding-gate.tsx'],
-  ['src/components/settings/status-facts.tsx', 'StatusFacts', 'src/app/settings.tsx'],
   ['src/components/bills/bills-segment-control.tsx', 'BillsSegmentControl', 'src/app/(tabs)/bills.tsx'],
   ['src/components/wallet/balance-overview.tsx', 'BalanceOverview', 'src/app/(tabs)/wallet.tsx'],
 ];

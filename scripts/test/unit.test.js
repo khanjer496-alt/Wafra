@@ -18,17 +18,16 @@ function ok(name, cond, detail = '') {
 // ── format ──
 eq('formatAED with cents', fmt.formatAED(123456), 'AED 1,234.56');
 eq('formatAED whole drops decimals', fmt.formatAED(120000), 'AED 1,200');
-eq('formatAED forced no decimals rounds up', fmt.formatAED(123456, { decimals: false }), 'AED 1,235');
-eq('formatAED forced no decimals rounds down', fmt.formatAED(123449, { decimals: false }), 'AED 1,234');
-eq('formatAED forced no decimals keeps a near-whole figure', fmt.formatAED(7699, { decimals: false }), 'AED 77');
+eq('formatAED legacy false preserves fractional units', fmt.formatAED(123456, { decimals: false }), 'AED 1,234.56');
+eq('formatAED legacy false preserves lower fractional units', fmt.formatAED(123449, { decimals: false }), 'AED 1,234.49');
+eq('formatAED legacy false keeps a near-whole figure exact', fmt.formatAED(7699, { decimals: false }), 'AED 76.99');
 eq('formatAED negative', fmt.formatAED(-50000), 'AED -500');
-// A net of -20 fils rounds to zero; "AED -0" is not a figure.
-eq('formatAED sub-dirham negative is not -0', fmt.formatAED(-20, { decimals: false }), 'AED 0');
+// A net of -20 fils remains a real negative amount, never zero.
+eq('formatAED sub-dirham negative is not erased', fmt.formatAED(-20, { decimals: false }), 'AED -0.20');
 eq('formatAED sub-dirham negative keeps its sign with decimals', fmt.formatAED(-20), 'AED -0.20');
-// Bills prints a total above the rows it totals. Truncating each row made the
-// two disagree by a dirham per row: AED 1,025/mo over rows adding to 1,022.
+// Displayed rows retain all minor units, so their exact sum equals the total.
 {
-  const read = (fils) => Number(fmt.formatAmount(fils, { decimals: false }).replace(/,/g, ''));
+  const read = (fils) => fmt.parseAmountToFils(fmt.formatAmount(fils, { decimals: false }));
   const rows = [77123, 15340, 7399, 2540];
   const shown = rows.reduce((a, r) => a + read(r), 0);
   eq('rows add up to their own total', shown, read(fmt.totalAsShown(rows)));
@@ -321,7 +320,7 @@ const netflix = subsLib.detectSubscriptions([
 ]);
 ok('subscription: monthly cadence detected', netflix.length === 1 && netflix[0].cadence === 'monthly');
 ok('subscription: price increase flagged', netflix[0]?.priceIncreased === true);
-eq('subscription: next expected ~30d later', netflix[0]?.nextExpectedISO, '2026-08-02');
+eq('subscription: next expected on the monthly billing day', netflix[0]?.nextExpectedISO, '2026-08-03');
 
 const weekly = subsLib.detectSubscriptions([
   subTx('Padel Court', '2026-06-05', 8000, 'health'),
@@ -329,6 +328,13 @@ const weekly = subsLib.detectSubscriptions([
   subTx('Padel Court', '2026-06-19', 8000, 'health'),
 ]);
 ok('subscription: weekly cadence detected', weekly.length === 1 && weekly[0].cadence === 'weekly');
+ok('recurring court bookings are commitments without membership evidence',
+  weekly[0]?.group === 'commitment');
+const cinemaRepeats = subsLib.detectSubscriptions(
+  ['2026-05-18', '2026-06-18', '2026-07-18'].map((date) =>
+    subTx('VOX Cinemas', date, 5000, 'entertainment')), [], new Date(2026, 6, 20));
+ok('recurring cinema visits are commitments without subscription evidence',
+  cinemaRepeats.length === 1 && cinemaRepeats[0].group === 'commitment');
 ok('subscription: weekly monthly-equivalent ~4.33x',
   Math.abs(weekly[0].monthlyEquivalentFils - Math.round(8000 * 4.33)) <= 1);
 
@@ -417,7 +423,8 @@ ok('groups: commitments listed under fixedCommitments',
   ], [], new Date(2026, 7, 12));
   ok('registered irregular top-up is visible without a fake due date',
     tank.length === 1 && tank[0].title === 'Tank300' && tank[0].cadence === 'as-needed' &&
-      tank[0].group === 'commitment' && tank[0].status === 'active' && tank[0].paymentHistory === true,
+      tank[0].group === 'commitment' && tank[0].status === 'active' && tank[0].paymentHistory === true &&
+      tank[0].nextExpectedISO === '2026-07-25',
     JSON.stringify(tank));
 
   const ordinaryShop = ['2026-04-30', '2026-05-01', '2026-06-30', '2026-07-01']
@@ -812,7 +819,7 @@ ok('online services detected as subscriptions',
   gpt.length === 3 && gpt.every(s => s.group === 'subscription'));
 ok('ChatGPT cadence and next date known',
   gpt.find(s => s.title === 'ChatGPT')?.cadence === 'monthly' &&
-  gpt.find(s => s.title === 'ChatGPT')?.nextExpectedISO === '2026-08-02');
+  gpt.find(s => s.title === 'ChatGPT')?.nextExpectedISO === '2026-08-03');
 ok('groups: fixedCommitments has rent + DEWA', subsLib.fixedCommitments(rentSubs).length === 2);
 
 // ── bill auto-reconciliation ──
@@ -1598,14 +1605,15 @@ ok('lifecycle: a settled statement never reports below-minimum', l3s.belowMinimu
 ok('lifecycle: a fully-paid statement leaves openDues',
   lifeLib.openDues(l3, new Date(2026, 6, 23)).length === 0);
 
-// 4. settledAt (set by "Mark paid") settles regardless of the arithmetic, and
-//    keeps the statement out of the open list.
+// 4. A legacy marker without numeric payment evidence cannot erase a balance.
+//    Keep its date for matching late payments, but determine status from money.
 const l4due = { ...lifeDue, settledAt: '2026-07-24T09:00:00Z' };
 const l4 = lifeState([], l4due);
-ok('lifecycle: settledAt settles a statement on its own',
-  lifeLib.dueWithStatus(l4, l4due, new Date(2026, 6, 25)).status === 'settled');
-ok('lifecycle: a settledAt statement leaves openDues',
-  lifeLib.openDues(l4, new Date(2026, 6, 25)).length === 0);
+ok('lifecycle: a settlement marker without payment evidence stays unpaid',
+  lifeLib.dueWithStatus(l4, l4due, new Date(2026, 6, 25)).remainingFils === lifeDue.totalDueFils &&
+  lifeLib.dueWithStatus(l4, l4due, new Date(2026, 6, 25)).status !== 'settled');
+ok('lifecycle: a marker-only legacy statement remains in openDues',
+  lifeLib.openDues(l4, new Date(2026, 6, 25)).length === 1);
 
 // Overpaying one statement must still not settle the next — the rule the
 // allocation window exists to protect.
@@ -4665,7 +4673,7 @@ eq('analytics: the category trend follows the split too',
  *
  * Each branch's suite stayed green over the other's defects, so neither one is
  * a superset. What follows is everything the other side proved that this file
- * did not: the printed-total rounding identity, the declared route table
+ * did not: the printed-total precision identity, the declared route table
  * against the files on disk, the weekday chart's exclusions and trendShape, the
  * whole of reminders.ts (which had no coverage here at all), bill due-day
  * placement inside a salary-day month, and the demo seed swept over three years
@@ -4681,12 +4689,10 @@ eq('analytics: the category trend follows the split too',
 
   // ── A total is the sum of the figures printed under it ──
   //
-  // Parts are snapped to the dirham BEFORE they are added, because the total is
-  // a claim about the rows the user can see. Truncating instead put Wallet's
-  // net worth at 96,467 over accounts reading 93,891 and 2,575.
+  // Account balances and their total keep the same exact minor-unit precision.
   {
     const balForTotal = require('./build/balances');
-    eq('net worth agrees with its parts to the dirham',
+    eq('net worth agrees with its exact displayed parts',
       fmt.formatAmount(
         balForTotal.netWorthFils({
           accounts: [
@@ -4697,7 +4703,7 @@ eq('analytics: the category trend follows the split too',
         }),
         { decimals: false },
       ),
-      '96,467');
+      '96,466.44');
   }
 
   // ── The declared route union, against the files on disk ──
@@ -5175,6 +5181,138 @@ eq('analytics: the category trend follows the split too',
   eq('opening card detail cannot reorder cached payments and change the due', after, before);
   ok('a recently settled card remains visible beneath current dues',
     cardsLib.recentlySettledDues(state, today).some((row) => row.due.id === 'jul'));
+}
+
+// Recurrence describes observed payments, while a subscription needs service evidence.
+{
+  const shopping = subsLib.detectSubscriptions(
+    ['2026-05-18', '2026-06-18', '2026-07-18'].map((date) =>
+      subTx('Homebox Tomorrow', date, 31200, 'shopping')),
+    [], new Date(2026, 6, 20),
+  );
+  ok('repeated retail payments remain commitments outside cancellable subscriptions',
+    shopping.length === 1 && shopping[0].group === 'commitment' &&
+      subsLib.trueSubscriptions(shopping).length === 0);
+  const prime = subsLib.detectSubscriptions(
+    ['2026-06-18', '2026-07-18'].map((date) => subTx('Amazon Prime', date, 1999, 'shopping')),
+    [], new Date(2026, 6, 20),
+  );
+  ok('known services retain subscription classification even in shopping',
+    prime.length === 1 && prime[0].group === 'subscription');
+  const next = (dates) => subsLib.detectSubscriptions(
+    dates.map((date) => subTx('Netflix', date, 3900)), [],
+    new Date(`${dates.at(-1)}T12:00:00`),
+  )[0];
+  for (const [label, dates, expected, cadence] of [
+    ['February keeps the regular billing day', ['2026-01-03', '2026-02-03'], '2026-03-03', 'monthly'],
+    ['January 31 clamps in February', ['2025-12-31', '2026-01-31'], '2026-02-28', 'monthly'],
+    ['February clamp retains a prior day 31', ['2026-01-31', '2026-02-28'], '2026-03-31', 'monthly'],
+    ['February clamp retains a prior day 30', ['2026-01-30', '2026-02-28'], '2026-03-30', 'monthly'],
+    ['leap-year February clamp', ['2023-12-31', '2024-01-31'], '2024-02-29', 'monthly'],
+    ['year rollover retains monthly day', ['2026-11-15', '2026-12-15'], '2027-01-15', 'monthly'],
+    ['yearly anniversary spans a leap year', ['2022-03-01', '2023-03-01'], '2024-03-01', 'yearly'],
+    ['yearly leap-day anniversary clamps', ['2020-02-29', '2021-02-28'], '2022-02-28', 'yearly'],
+    ['yearly leap anchor survives three ordinary Februaries', ['2020-02-29', '2021-02-28', '2022-02-28', '2023-02-28'], '2024-02-29', 'yearly'],
+    ['ordinary February 28 anniversary does not become leap day', ['2021-02-28', '2022-02-28', '2023-02-28'], '2024-02-28', 'yearly'],
+    ['weekly remains seven days', ['2026-06-05', '2026-06-12'], '2026-06-19', 'weekly'],
+  ]) {
+    const found = next(dates);
+    eq(`renewal calendar: ${label}`, [found?.cadence, found?.nextExpectedISO], [cadence, expected]);
+  }
+}
+
+// A minimum-only legacy due can later receive the actual statement total.
+// Its marker records payment timing, never evidence that a larger total was paid.
+{
+  const card = { id: 'correction-card', kind: 'card', cardType: 'credit',
+    name: 'Card •8722', last4: '8722', openingFils: 0 };
+  const old = { id: 'minimum-as-total', accountId: card.id, totalDueFils: 15432,
+    minDueFils: 15432, dueDate: '2026-09-06', paidFils: 15432,
+    settledAt: '2026-09-04T10:00:00Z' };
+  const full = { ...old, id: 'actual-total', totalDueFils: 324000,
+    paidFils: 0, settledAt: undefined };
+  const today = new Date(2026, 8, 5);
+  for (const [label, existing, incoming] of [
+    ['correction arrives last', old, full], ['old reminder arrives last', full, old],
+  ]) {
+    const dues = cardsLib.mergeImportedCardDues([existing], [incoming], [card]);
+    const state = { accounts: [card], cardDues: dues, transactions: [] };
+    const status = cardsLib.dueWithStatus(state, dues[0], today);
+    ok(`corrected total: ${label} owes the remaining amount`,
+      status.remainingFils === 308568 && status.status !== 'settled');
+    ok(`corrected total: ${label} agrees across open dues and card detail`,
+      cardsLib.openDues(state, today)[0]?.remainingFils === 308568 &&
+      cardsLib.cardStatementView(state, card.id).outstandingFils === 308568);
+    ok(`corrected total: ${label} preserves prior payment and its timing`,
+      dues[0].paidFils === 15432 && dues[0].settledAt === old.settledAt);
+    const paidState = { ...state, cardDues: [{ ...dues[0], paidFils: 324000 }] };
+    ok(`corrected total: ${label} settles after sufficient numeric manual payment`,
+      cardsLib.dueWithStatus(paidState, paidState.cardDues[0], today).status === 'settled' &&
+      cardsLib.openDues(paidState, today).length === 0);
+  }
+  const paid = { ...full, paidFils: 324000, settledAt: old.settledAt };
+  const repeated = cardsLib.mergeImportedCardDues([paid], [full], [card]);
+  const unchanged = { accounts: [card], cardDues: repeated, transactions: [] };
+  ok('corrected total: an unchanged fully paid reminder stays settled',
+    cardsLib.dueWithStatus(unchanged, repeated[0], today).status === 'settled');
+
+  const early = { ...old, id: 'june', totalDueFils: 100000, paidFils: 0,
+    dueDate: '2026-06-15', settledAt: '2026-06-25T10:00:00Z' };
+  const corrected = { ...early, id: 'june-full', totalDueFils: 150000,
+    settledAt: undefined };
+  const next = { ...full, id: 'july', dueDate: '2026-07-15', totalDueFils: 200000 };
+  const dues = cardsLib.mergeImportedCardDues([early, next], [corrected], [card]);
+  const june = dues.find((d) => d.id === 'june');
+  const july = dues.find((d) => d.id === 'july');
+  const state = { accounts: [card], cardDues: dues, transactions: [{
+    id: 'late-manual-payment', accountId: card.id, type: 'income', isTransfer: true,
+    amountFils: 100000, date: '2026-06-25', category: 'other',
+    title: 'Card payment', source: 'manual',
+  }] };
+  ok('corrected total: the late payment stays on the statement marked paid',
+    cardsLib.duePaidFils(state, june) === 100000 && cardsLib.duePaidFils(state, july) === 0);
+  ok('corrected total: one payment in overlapping windows is counted exactly once',
+    cardsLib.duePaidFils(state, june) + cardsLib.duePaidFils(state, july) === 100000);
+  ok('corrected total: the timestamp cannot settle the unpaid corrected remainder',
+    cardsLib.dueWithStatus(state, june, new Date(2026, 5, 26)).remainingFils === 50000 &&
+    cardsLib.dueWithStatus(state, june, new Date(2026, 5, 26)).status === 'overdue');
+  const paidState = { ...state, transactions: [{ ...state.transactions[0], amountFils: 150000 }] };
+  ok('corrected total: sufficient late manual payment settles only its statement',
+    cardsLib.dueWithStatus(paidState, june, new Date(2026, 5, 26)).status === 'settled' &&
+    cardsLib.duePaidFils(paidState, july) === 0);
+}
+
+// Future-only merchant rules cannot backfill categories through a later rescan.
+{
+  const { healPatch } = require('./build/heal');
+  const prior = { id: 'prior-rule-row', type: 'expense', title: 'Example Merchant',
+    category: 'other', amountFils: 4500, accountId: 'main', date: '2026-08-01', source: 'sms' };
+  const parsed = { kind: 'transaction', type: 'expense', merchant: 'Example Merchant',
+    categoryGuess: 'shopping', categoryDeliberate: true, categoryPinned: true,
+    amountFils: 4500, transferHint: false };
+  for (const category of ['other', 'dining']) {
+    ok(`future-only pin preserves existing ${category} expense on reparse`,
+      healPatch({ ...prior, category }, parsed)?.category === undefined);
+  }
+  ok('an apply-all category already stored remains unchanged on reparse',
+    healPatch({ ...prior, category: 'shopping' }, parsed)?.category === undefined);
+  ok('a future-only income Other pin preserves existing Business income',
+    healPatch({ ...prior, type: 'income', category: 'business' },
+      { ...parsed, type: 'income', categoryGuess: 'other' })?.category === undefined);
+  ok('an incompatible old category repairs to safe Other instead of the future-only pin',
+    healPatch({ ...prior, category: 'salary' }, parsed)?.category === 'other');
+  const changedDirection = healPatch({ ...prior, category: 'shopping' },
+    { ...parsed, type: 'income', categoryGuess: 'business' });
+  ok('a real direction correction never applies a future-only category to old history',
+    changedDirection?.type === 'income' && changedDirection.category === 'other');
+  const oldBusiness = { ...prior, type: 'income', category: 'business' };
+  const refund = { ...parsed, type: 'income', categoryGuess: 'other', categoryPinned: undefined };
+  ok('source-backed deliberate refund Other repairs old Business income',
+    healPatch(oldBusiness, refund)?.category === 'other');
+  ok('uncertain income Other does not erase an existing Business classification',
+    healPatch(oldBusiness, { ...refund, categoryDeliberate: false })?.category === undefined);
+  ok('user-edited refund categories remain untouched',
+    healPatch({ ...oldBusiness, userEdited: true }, refund) === null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

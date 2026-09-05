@@ -1,0 +1,600 @@
+{
+  "parser": [
+    {
+      "id": "r2-holdout-01",
+      "country": "US",
+      "language": "en",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Purchase completed at Harbor Finch Books. USD 46.28 debited from your account. Available balance: USD 912.63.",
+      "expected": {
+        "amount.value": {
+          "currency": "USD",
+          "minorUnits": "4628",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Harbor Finch Books",
+        "balance.value": {
+          "currency": "USD",
+          "minorUnits": "91263",
+          "exponent": 2
+        }
+      },
+      "notes": "Explicit completed purchase. The remaining balance is a separate monetary fact."
+    },
+    {
+      "id": "r2-holdout-02",
+      "country": "US",
+      "language": "en",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Authorization approved: USD 83.17 at Quiet Lantern Supply. This is a temporary hold; the purchase has not completed.",
+      "expected": {
+        "amount.value": {
+          "currency": "USD",
+          "minorUnits": "8317",
+          "exponent": 2
+        },
+        "status": "unknown",
+        "merchant.value": "Quiet Lantern Supply"
+      },
+      "notes": "Approved authorization alone is not a posting. The text explicitly says the purchase has not completed.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-03",
+      "country": "FR",
+      "language": "fr",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Remboursement de EUR 27,64 reçu de Atelier Brume. Votre compte a été crédité.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "2764",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "credit",
+        "merchant.value": "Atelier Brume"
+      },
+      "notes": "A completed refund with a decimal comma and explicit currency."
+    },
+    {
+      "id": "r2-holdout-04",
+      "country": "FR",
+      "language": "fr",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Votre relevé de carte est disponible. Total à payer : EUR 734,82. Paiement minimum : EUR 38,00. Date limite : 14/10.",
+      "expected": {
+        "amount.value": null,
+        "status": "informational",
+        "statementTotal.value": {
+          "currency": "EUR",
+          "minorUnits": "73482",
+          "exponent": 2
+        },
+        "minimumDue.value": {
+          "currency": "EUR",
+          "minorUnits": "3800",
+          "exponent": 2
+        },
+        "dueDate.value": null
+      },
+      "notes": "Statement total and minimum are not a posted transaction amount. A day and month without a year do not determine an ISO date.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-05",
+      "country": "DE",
+      "language": "de",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Überweisung eingegangen: EUR 318,45 von Birkenpfad Werkstatt. Der Betrag wurde Ihrem Konto gutgeschrieben.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "31845",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "credit"
+      },
+      "notes": "Explicit incoming transfer. Sender is a counterparty; no merchant label is asserted."
+    },
+    {
+      "id": "r2-holdout-06",
+      "country": "DE",
+      "language": "de",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Neue Stromrechnung von Funkenhain Energie: EUR 68,93, fällig am 2027-02-18. Die Rechnung ist noch offen; es wurde noch nichts abgebucht.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "6893",
+          "exponent": 2
+        },
+        "status": "future",
+        "merchant.value": "Funkenhain Energie",
+        "dueDate.value": "2027-02-18"
+      },
+      "notes": "An unpaid utility bill with an exact ISO due date is a future obligation, not an actual debit.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-07",
+      "country": "ES",
+      "language": "es",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Factura de agua de Arroyo Violeta pagada. Se han cargado EUR 31,76 en su cuenta. El pago se ha completado.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "3176",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Arroyo Violeta"
+      },
+      "notes": "The bill has already been paid and the debit has completed."
+    },
+    {
+      "id": "r2-holdout-08",
+      "country": "ES",
+      "language": "es",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Pago de EUR 94,52 en Taller Luciérnaga rechazado. No se ha realizado ningún cargo.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "9452",
+          "exponent": 2
+        },
+        "status": "failed",
+        "merchant.value": "Taller Luciérnaga"
+      },
+      "notes": "A rejected payment explicitly made no charge.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-09",
+      "country": "BR",
+      "language": "pt",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Lembrete: a assinatura da Nuvem de Cobre será cobrada em 2027-03-09 no valor de BRL 22,48. A cobrança ainda não foi realizada.",
+      "expected": {
+        "amount.value": {
+          "currency": "BRL",
+          "minorUnits": "2248",
+          "exponent": 2
+        },
+        "status": "future",
+        "merchant.value": "Nuvem de Cobre"
+      },
+      "notes": "A scheduled recurring charge is not a completed payment.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-10",
+      "country": "BR",
+      "language": "pt",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Mensalidade da Trilha Sonora Azul paga: BRL 37,26 debitados da sua conta. Pagamento concluído.",
+      "expected": {
+        "amount.value": {
+          "currency": "BRL",
+          "minorUnits": "3726",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Trilha Sonora Azul"
+      },
+      "notes": "A recurring monthly subscription payment that has actually completed."
+    },
+    {
+      "id": "r2-holdout-11",
+      "country": "IT",
+      "language": "it",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Acquisto completato presso Bottega Gelsomino per EUR 58,34. Importo addebitato sul conto. Assistenza notifiche: Faro Digitale. Non rispondere a questo messaggio.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "5834",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Bottega Gelsomino"
+      },
+      "notes": "The seller is explicitly named before the amount. The notification support footer is not the merchant."
+    },
+    {
+      "id": "r2-holdout-12",
+      "country": "IT",
+      "language": "it",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Riepilogo: acquisto completato di EUR 12,83 presso Caffè Rugiada; rimborso accreditato di EUR 6,47 da Officina Corallo. Sono due operazioni distinte.",
+      "expected": {
+        "amount.value": null,
+        "status": "unknown"
+      },
+      "notes": "Two independent completed transactions with opposite directions cannot be represented as one event. Do not add, net, or choose an amount.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-13",
+      "country": "NL",
+      "language": "nl",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Uw overboeking van EUR 146,29 naar Maansteen Studio is aangevraagd. De aanvraag wordt beoordeeld; er is nog niets van uw rekening afgeschreven.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "14629",
+          "exponent": 2
+        },
+        "status": "unknown"
+      },
+      "notes": "A transfer request under review is not an actual posting.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-14",
+      "country": "NL",
+      "language": "nl",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Overboeking voltooid: EUR 205,18 is van uw rekening afgeschreven en naar Zilverwilg Atelier overgemaakt.",
+      "expected": {
+        "amount.value": {
+          "currency": "EUR",
+          "minorUnits": "20518",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit"
+      },
+      "notes": "Explicit completed outgoing transfer. No merchant inference from beneficiary name."
+    },
+    {
+      "id": "r2-holdout-15",
+      "country": "TR",
+      "language": "tr",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Nar Çiçeği Kırtasiye işyerindeki TRY 184,72 tutarındaki alışveriş tamamlandı. Tutar hesabınızdan düşüldü.",
+      "expected": {
+        "amount.value": {
+          "currency": "TRY",
+          "minorUnits": "18472",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Nar Çiçeği Kırtasiye"
+      },
+      "notes": "Completed purchase with explicit TRY and comma decimal notation."
+    },
+    {
+      "id": "r2-holdout-16",
+      "country": "TR",
+      "language": "tr",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] Sedef Bulut Market alışverişiniz tamamlandı ve hesabınızdan tahsil edildi. Tutar bu bildirimde yer almıyor.",
+      "expected": {
+        "amount.value": null,
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Sedef Bulut Market"
+      },
+      "notes": "Actual completed debit is explicit but the amount is missing. This is not marked mustNotPost: that flag is reserved here for messages that are not a single posting."
+    },
+    {
+      "id": "r2-holdout-17",
+      "country": "IN",
+      "language": "hi",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] नीलकमल पुस्तकालय से INR 249.36 का रिफंड आपके खाते में जमा हो गया है।",
+      "expected": {
+        "amount.value": {
+          "currency": "INR",
+          "minorUnits": "24936",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "credit",
+        "merchant.value": "नीलकमल पुस्तकालय"
+      },
+      "notes": "The refund is explicitly credited; no transaction date or year is invented."
+    },
+    {
+      "id": "r2-holdout-18",
+      "country": "IN",
+      "language": "hi",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] आपका कार्ड स्टेटमेंट तैयार है। कुल देय राशि: INR 6842.19। न्यूनतम देय राशि: INR 342.11। अंतिम तिथि: 04/05।",
+      "expected": {
+        "amount.value": null,
+        "status": "informational",
+        "statementTotal.value": {
+          "currency": "INR",
+          "minorUnits": "684219",
+          "exponent": 2
+        },
+        "minimumDue.value": {
+          "currency": "INR",
+          "minorUnits": "34211",
+          "exponent": 2
+        },
+        "dueDate.value": null
+      },
+      "notes": "Statement obligation rather than actual payment. The due date has no year and does not permit a complete ISO date.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-19",
+      "country": "AE",
+      "language": "ar",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] كشف بطاقتك جاهز. إجمالي المبلغ المستحق: AED 918.54. الحد الأدنى للسداد: AED 45.93. تاريخ الاستحقاق: 2027-04-21.",
+      "expected": {
+        "amount.value": null,
+        "status": "informational",
+        "statementTotal.value": {
+          "currency": "AED",
+          "minorUnits": "91854",
+          "exponent": 2
+        },
+        "minimumDue.value": {
+          "currency": "AED",
+          "minorUnits": "4593",
+          "exponent": 2
+        },
+        "dueDate.value": "2027-04-21"
+      },
+      "notes": "The total and minimum are distinct statement fields and neither is a completed charge.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-20",
+      "country": "SA",
+      "language": "ar",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] تم سداد فاتورة شركة نبع الندى للمياه بنجاح. تم خصم SAR 76.38 من حسابك.",
+      "expected": {
+        "amount.value": {
+          "currency": "SAR",
+          "minorUnits": "7638",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "شركة نبع الندى للمياه"
+      },
+      "notes": "An already paid water bill with an explicit account debit."
+    },
+    {
+      "id": "r2-holdout-21",
+      "country": "JP",
+      "language": "ja",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] こもれび文具での購入が完了しました。口座から JPY 2786 が引き落とされました。",
+      "expected": {
+        "amount.value": {
+          "currency": "JPY",
+          "minorUnits": "2786",
+          "exponent": 0
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "こもれび文具"
+      },
+      "notes": "Completed purchase in explicit zero-exponent JPY; no fractional cents are inferred."
+    },
+    {
+      "id": "r2-holdout-22",
+      "country": "JP",
+      "language": "ja",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] あおぞら灯電力の電気料金の請求です。請求額：JPY 6439。支払期限：2027-06-12。未払いで、引き落としはまだ行われていません。",
+      "expected": {
+        "amount.value": {
+          "currency": "JPY",
+          "minorUnits": "6439",
+          "exponent": 0
+        },
+        "status": "future",
+        "merchant.value": "あおぞら灯電力",
+        "dueDate.value": "2027-06-12"
+      },
+      "notes": "Unpaid electricity bill, explicitly not yet withdrawn.",
+      "safety": {
+        "mustNotPost": true
+      }
+    },
+    {
+      "id": "r2-holdout-23",
+      "country": "CN",
+      "language": "zh",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] 您在青藤纸屋的消费已完成，账户已扣款 CNY 63.82。账户余额：CNY 1458.27。",
+      "expected": {
+        "amount.value": {
+          "currency": "CNY",
+          "minorUnits": "6382",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "青藤纸屋",
+        "balance.value": {
+          "currency": "CNY",
+          "minorUnits": "145827",
+          "exponent": 2
+        }
+      },
+      "notes": "Completed purchase; the account balance must not replace the purchase amount."
+    },
+    {
+      "id": "r2-holdout-24",
+      "country": "CN",
+      "language": "zh",
+      "kind": "synthetic-heldout-round2",
+      "body": "[SYNTHETIC] 云雀工坊的退款 $28.40 已到账。此通知未注明美元、加元或其他币种。",
+      "expected": {
+        "amount.value": null,
+        "status": "posted",
+        "direction": "credit",
+        "merchant.value": "云雀工坊"
+      },
+      "notes": "The credit has completed but the dollar symbol is explicitly ambiguous. Country and language cannot resolve the currency; do not mark this actual posting as mustNotPost."
+    }
+  ],
+  "categorization": [
+    {
+      "id": "r2-holdout-category-01",
+      "country": "US",
+      "language": "en",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Willow Basket Grocery",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "groceries",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a grocery store."
+    },
+    {
+      "id": "r2-holdout-category-02",
+      "country": "FR",
+      "language": "fr",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Restaurant La Lune Cuivrée",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "dining",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a restaurant."
+    },
+    {
+      "id": "r2-holdout-category-03",
+      "country": "DE",
+      "language": "de",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Apotheke Silberfarn",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "health",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a pharmacy."
+    },
+    {
+      "id": "r2-holdout-category-04",
+      "country": "ES",
+      "language": "es",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Vértice Azul",
+        "type": "income",
+        "meaning": "refund"
+      },
+      "expected": {
+        "category": "other",
+        "needsReview": true
+      },
+      "notes": "A refund from a vague invented merchant has no reliable business category; refund direction is not a category."
+    },
+    {
+      "id": "r2-holdout-category-05",
+      "country": "IT",
+      "language": "it",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Taxi Petalo Verde",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "transport",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a taxi service."
+    },
+    {
+      "id": "r2-holdout-category-06",
+      "country": "BR",
+      "language": "pt",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Salão de Beleza Brisa Âmbar",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "personal-care",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a beauty salon."
+    },
+    {
+      "id": "r2-holdout-category-07",
+      "country": "NL",
+      "language": "nl",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Lindebron Waterbedrijf",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "utilities",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a water utility."
+    },
+    {
+      "id": "r2-holdout-category-08",
+      "country": "TR",
+      "language": "tr",
+      "kind": "synthetic-heldout-round2",
+      "input": {
+        "merchant": "Mavi Dalga Telekom",
+        "type": "expense",
+        "meaning": "purchase"
+      },
+      "expected": {
+        "category": "telecom",
+        "needsReview": false
+      },
+      "notes": "Synthetic merchant explicitly identifies a telecommunications provider."
+    }
+  ]
+}

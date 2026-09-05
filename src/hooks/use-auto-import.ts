@@ -649,7 +649,10 @@ export function useAutoImport(
     if (Platform.OS === 'android' && isSmsScanningAvailable()) {
       const granted = await hasSmsPermission().catch(() => false);
       if (!isCurrent()) return;
-      if (!granted) setSharedSmsAccessUnavailable(true);
+      // A status-only read can say the permission is absent through this
+      // hook's local flag. Reserve the process-wide failure flag for an
+      // actual provider/scan failure; otherwise a permission denied behind
+      // onboarding survives the later grant and keeps Home falsely off.
       setNeedsPermission(!granted);
       setCaptureState(granted && !sharedAccessUnavailable ? 'waiting-for-alert' : 'off');
       return;
@@ -726,7 +729,15 @@ export function useAutoImport(
   useEffect(() => {
     if (!watchStatus) return;
     void refreshCaptureStatus().catch(() => {});
-  }, [entitlementActive, refreshCaptureStatus, state.hydrated, watchStatus]);
+  }, [
+    entitlementActive,
+    refreshCaptureStatus,
+    sharedAccessUnavailable,
+    state.captureOptOut,
+    state.hydrated,
+    state.onboarded,
+    watchStatus,
+  ]);
 
   // Returning from Shortcuts does not change navigation focus: Home stays the
   // focused route while the app backgrounds. Refresh status on the lifecycle

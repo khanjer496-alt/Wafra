@@ -44,11 +44,12 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
 
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the ten public functions",
+    check("bridge registers exactly the eleven public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
         "eraseAll",
+        "getAutomationInputProbeAt",
         "getCaptureStatus",
         "listPendingRecords",
         "purgeExpired",
@@ -137,6 +138,12 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
       recordField(status, "setupProofAt", as: Double.self) == 123_250)
     check("status converts first-captured seconds to milliseconds without swapping",
       recordField(status, "firstCapturedAt", as: Double.self) == 987_500)
+
+    let automationInputProbeAt = try invoke("getAutomationInputProbeAt", as: Double.self)
+    check("automation-input probe time converts seconds to milliseconds exactly",
+      automationInputProbeAt == 246_750)
+    check("getAutomationInputProbeAt reaches the store",
+      WafraLiveCaptureStore.shared.calls.last == "automationInputProbeAt")
 
     let warningId = "00000000-0000-0000-0000-000000000009"
     let acknowledged = try invoke("acknowledgeCaptureWarning", [warningId], as: Bool.self)

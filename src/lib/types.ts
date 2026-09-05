@@ -91,6 +91,13 @@ export interface Account {
   renewedFrom?: string;
 }
 
+/** Instrument stated by the source alert, independent of editable account routing. */
+export interface CaptureInstrument {
+  last4: string;
+  kind: 'credit' | 'debit' | 'account' | 'unknown';
+  bankIdentity?: string;
+}
+
 export interface Transaction {
   id: string;
   type: TransactionType;
@@ -140,6 +147,7 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  captureInstrument?: CaptureInstrument;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
    * account and the card acknowledging receipt. Keeping the side lets import
@@ -296,7 +304,7 @@ export interface CardDue {
   dueDate: string;
   /** Fils paid toward this due so far. */
   paidFils: number;
-  /** ISO date settled (paid >= min or total), if settled. */
+  /** User-recorded payment time; allocation evidence, never proof that the current total is paid. */
   settledAt?: string;
 }
 
@@ -414,8 +422,14 @@ export const mergeIosCaptureWarningState = (
   };
 };
 
-const LOCAL_CAPTURE_UUID_RE =
+const LOCAL_CAPTURE_LEGACY_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LOCAL_CAPTURE_SHA256_EVENT_ID_RE = /^[0-9a-f]{64}$/;
+const isLocalCaptureEventId = (value: unknown): value is string =>
+  typeof value === 'string' && (
+    LOCAL_CAPTURE_LEGACY_UUID_RE.test(value) ||
+    LOCAL_CAPTURE_SHA256_EVENT_ID_RE.test(value)
+  );
 const LOCAL_CAPTURE_RECEIPT_KEYS = ['expiresAt', 'id', 'kind', 'observedAt', 'v'];
 
 const compareLocalCaptureReceiptAge = (
@@ -434,7 +448,7 @@ const exactLocalCaptureReceipt = (
   return keys.length === LOCAL_CAPTURE_RECEIPT_KEYS.length &&
     keys.every((key, index) => key === LOCAL_CAPTURE_RECEIPT_KEYS[index]) &&
     candidate.v === LOCAL_CAPTURE_QUALIFICATION_VERSION &&
-    typeof candidate.id === 'string' && LOCAL_CAPTURE_UUID_RE.test(candidate.id) &&
+    isLocalCaptureEventId(candidate.id) &&
     (candidate.kind === 'review' || candidate.kind === 'decline') &&
     Number.isSafeInteger(candidate.observedAt) && (candidate.observedAt as number) >= 0 &&
     Number.isSafeInteger(candidate.expiresAt) &&
@@ -449,8 +463,7 @@ export const isLocalCaptureQualificationCandidate = (
   const candidate = value as Record<string, unknown>;
   const keys = Object.keys(candidate).sort();
   return keys.length === 3 && keys[0] === 'id' && keys[1] === 'kind' &&
-    keys[2] === 'observedAt' && typeof candidate.id === 'string' &&
-    LOCAL_CAPTURE_UUID_RE.test(candidate.id) &&
+    keys[2] === 'observedAt' && isLocalCaptureEventId(candidate.id) &&
     (candidate.kind === 'review' || candidate.kind === 'decline') &&
     Number.isSafeInteger(candidate.observedAt) && (candidate.observedAt as number) >= 0;
 };
@@ -626,6 +639,7 @@ export interface TxHealUpdate {
   ts?: number;
   smsKey?: string;
   viaPush?: boolean;
+  captureInstrument?: CaptureInstrument;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
   billIdentity?: string;
@@ -651,6 +665,8 @@ export interface TxHealUpdate {
  * testable, and store.tsx is a React module the test harness cannot transpile.
  */
 export interface ImportBatchInput {
+  /** Exact currency and minor-unit scale validated when this batch was planned. */
+  importMoney?: LedgerMoneySpec;
   transactions: Omit<Transaction, 'id'>[];
   newAccounts: Omit<Account, 'id'>[];
   /** last4 → index into newAccounts OR existing accountId. */

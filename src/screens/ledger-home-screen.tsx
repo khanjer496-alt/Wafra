@@ -1,55 +1,42 @@
 /**
- * Home — am I ahead or behind, and what is about to leave?
- *
- * Order: period row → hero → in/out split → one written insight → Leaving soon
- * → Today.
- *
- * Two things this screen deliberately no longer does. It does not carry a
- * budget snapshot: that was a third copy of bars that already exist on Flow and
- * inside every limit. And it does not carry a five-card insight carousel —
- * five observations sat side by side is a list nobody reads, so one sentence
- * gets the space and the rest live on Flow.
- *
- * "Leaving soon" is the merge of what used to be three separate sections: card
- * dues, bills, and subscriptions. The user does not think of those as three
- * kinds of thing. They are all money that leaves on a date.
+ * Money overview, capture status and recent activity.
+ * Detailed spending insights live on Flow; upcoming payments remain actionable below.
  */
 import { useRouter } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, AppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { TransactionRow } from '@/components/transaction-row';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { Icon } from '@/components/ui/icon';
-import { CountUpAmount } from '@/components/ui/count-up';
+import { Money } from '@/components/ui/money';
 import { MotionReveal } from '@/components/ui/motion-reveal';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useToast } from '@/components/ui/toast';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
-import { IconButton, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { PeriodPill, SectionHeader } from '@/components/ui/period-pill';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
 import { useTheme } from '@/hooks/use-theme';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
-import { formatAED, formatAmount, formatCompactAED, shortDate, totalAsShown } from '@/lib/format';
+import { formatAED, formatAmount, shortDate } from '@/lib/format';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { tapped } from '@/lib/haptics';
 import { syncPaymentReminders } from '@/lib/notifications';
-import { periodLabel, type Period } from '@/lib/period';
+import { periodLabel } from '@/lib/period';
 import type { PeriodComparison } from '@/lib/analytics';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { ledgerCurrencyCode, ledgerCurrencyDisplay } from '@/lib/markets';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { type Subscription } from '@/lib/subscriptions';
 import type { CardDue, Transaction } from '@/lib/types';
@@ -106,7 +93,7 @@ function AutomaticCapture({
   // detail line is dropped rather than padded, and the render below skips it.
   const detail: string | null = status === 'paused'
     ? t('trialEndedBannerSub')
-    : status === 'unsupported'
+    : status === 'unsupported' || status === 'off' || status === 'waiting-for-alert'
     ? null
     : status === 'checking'
     ? t('capturePhoneOnly')
@@ -147,16 +134,16 @@ function AutomaticCapture({
         styles.capture,
         active && styles.captureHealthy,
         {
-          backgroundColor: active ? 'transparent' : theme.backgroundElement,
-          borderColor: active ? 'transparent' : theme.cardBorder,
+          backgroundColor: 'transparent',
+          borderColor: theme.cardBorder,
         },
       ]}>
       <View
         style={[
           styles.captureIcon,
-          { backgroundColor: active ? theme.primary : theme.backgroundSelected },
+          { backgroundColor: active ? theme.primarySoft : theme.backgroundSelected },
         ]}>
-        <Icon name="spark" size={18} color={active ? theme.onPrimary : theme.textSecondary} />
+        <Icon name="mail" size={18} color={active ? theme.primary : theme.textSecondary} />
       </View>
       <View style={styles.captureText}>
         <View style={styles.captureTitleRow}>
@@ -171,7 +158,7 @@ function AutomaticCapture({
           </ThemedText>
         ) : null}
       </View>
-      {badge ? (
+      {badge && !active ? (
         <ThemedText type="nano" style={{ color: active ? theme.primary : theme.warning }}>
           {badge}
         </ThemedText>
@@ -206,7 +193,7 @@ function HistoryImportNotice({
         borderColor: failed ? theme.cardBorderStrong : theme.primaryBorder,
       }]}>
       <Icon
-        name={failed ? 'alert' : 'spark'}
+        name={failed ? 'alert' : 'download'}
         size={17}
         color={failed ? theme.warning : theme.primary}
       />
@@ -265,14 +252,11 @@ function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => 
           backgroundColor: theme.backgroundElement,
         },
       ]}>
-      <View style={[styles.reviewPromptIcon, { backgroundColor: theme.backgroundSelected }]}>
+      <View style={[styles.reviewPromptIcon, { backgroundColor: theme.goldSoft }]}>
         <Icon name="alert" size={17} color={theme.warning} />
       </View>
       <ThemedText type="small" style={styles.reviewPromptCopy}>
         {label}
-      </ThemedText>
-      <ThemedText type="nano" style={{ color: theme.warning }}>
-        {t('review')}
       </ThemedText>
       <Icon name="chevron-right" size={15} color={theme.textTertiary} />
     </SpringPressable>
@@ -293,7 +277,7 @@ function ReviewAlertsPrompt({ count, onPress }: { count: number; onPress: () => 
 function comparisonSentence(c: PeriodComparison): string {
   const amount = formatAmount(Math.abs(c.deltaFils), { decimals: false });
   const period = c.previousLabel;
-  const same = Math.round(Math.abs(c.deltaFils) / 100) === 0;
+  const same = c.deltaFils === 0;
   if (same) return t(c.partial ? 'homeVsSamePartial' : 'homeVsSameWhole').replace('{period}', period);
   const key = c.deltaFils > 0
     ? (c.partial ? 'homeVsMorePartial' : 'homeVsMoreWhole')
@@ -304,45 +288,41 @@ function comparisonSentence(c: PeriodComparison): string {
 /* ── Hero ─────────────────────────────────────────────────────────────── */
 
 function Hero({
-  period,
-  live,
   netFils,
   incomeFils,
   expenseFils,
   comparison,
-  active,
+  onChangePeriod,
 }: {
-  period: Period;
-  live: boolean;
   netFils: number;
   incomeFils: number;
   expenseFils: number;
   comparison: PeriodComparison | null;
-  active: boolean;
+  onChangePeriod: () => void;
 }) {
   const theme = useTheme();
   const router = useRouter();
   const largeText = useLargeTextLayout();
 
-  const caption =
-    t('netAfterSpending') +
-    ' ' +
-    (live
-      ? t('soFarThisMonth')
-      : period.mode === 'all'
-        ? t('allTime')
-        : `${t('inWord')} ${periodLabel(period)}`);
+  const caption = t('totalOut');
 
   return (
-    // No shell. This carried a bordered card filled with a three-stop
-    // LinearGradient, directly above a comment saying "no card, no background"
-    // and against theme.ts's own doctrine that grouping is done with 1px
-    // dividers rather than boxes. The gradient also hard-coded six hexes that
-    // exist in neither theme, so it did not move with the palette.
-    <View>
-      <ThemedText type="meta" themeColor="textTertiary" style={styles.heroLabel}>
-        {caption}
-      </ThemedText>
+    <View style={styles.heroPanel}>
+      <View style={styles.heroHeading}>
+        <ThemedText type="meta" style={[styles.heroLabel, { color: theme.textSecondary }]}>
+          {caption}
+        </ThemedText>
+        <PeriodPill onPress={onChangePeriod} />
+      </View>
+
+      <SpringPressable
+        accessibilityRole="button"
+        accessibilityLabel={`${caption}, ${formatAED(expenseFils, { decimals: false })}`}
+        onPress={() => { tapped(); router.push('/transactions?type=expense'); }}
+        scaleTo={0.99}
+        style={styles.heroSpendTarget}>
+        <Money fils={expenseFils} type="display" color={theme.text} style={styles.heroAmount} />
+      </SpringPressable>
 
       {/* The same period before this one, over the same number of days.
           Rendered only when there is something honest to compare against —
@@ -356,82 +336,38 @@ function Hero({
           style={[
             styles.heroCompare,
             {
-              color:
-                comparison.deltaFils === 0
-                  ? theme.textSecondary
-                  : comparison.deltaFils > 0
-                    ? theme.expense
-                    : theme.income,
+              color: theme.textSecondary,
             },
           ]}>
           {comparisonSentence(comparison)}
         </ThemedText>
       )}
 
-      {/* No card, no background. The figure IS the top of the screen. */}
-      {Math.abs(netFils) >= 1_000_000_000 ? (
-        <ThemedText type="display" tabular>
-          <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-            {ledgerCurrencyDisplay()}{' '}
-          </ThemedText>
-          {netFils < 0 ? '−' : ''}
-          {formatCompactAED(netFils)}
-        </ThemedText>
-      ) : (
-        <View style={[styles.heroRow, largeText && styles.heroRowLarge]}>
-          <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
-            {ledgerCurrencyDisplay()}
-          </ThemedText>
-          <View style={styles.heroAmount}>
-            {netFils < 0 ? (
-              <ThemedText type="display" tabular>−</ThemedText>
-            ) : null}
-            <CountUpAmount
-              type="display"
-              fils={Math.abs(netFils)}
-              prefix=""
-              durationMs={900}
-              active={active}
-            />
-          </View>
-        </View>
-      )}
-
-      {/* Two cells divided by rules rather than boxed — the split is a
-          continuation of the hero, not a separate component. */}
       <View style={[styles.split, largeText && styles.splitLarge]}>
-        {(
-          [
-            [t('inLabel'), incomeFils, theme.income, '/transactions?type=income'],
-            [t('spentLabel'), expenseFils, theme.expense, '/transactions?type=expense'],
-          ] as const
-        ).map(([label, fils, color, href], i) => (
-          <SpringPressable
-            key={label}
-            accessibilityRole={href ? 'button' : 'text'}
-            accessibilityLabel={`${label}, ${formatAED(fils, { decimals: false })}`}
-            onPress={href ? () => {
-              tapped();
-              router.push(href);
-            } : undefined}
-            scaleTo={0.985}
-            opacityTo={0.94}
-            style={[
-              styles.splitCell,
-              { borderTopColor: theme.cardBorder },
-              i > 0 && !largeText && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder },
-            ]}>
-            <View style={styles.splitTop}>
-              <View style={[styles.dot, { backgroundColor: color }]} />
-              <ThemedText type="nano" themeColor="textTertiary">
-                {label}
-              </ThemedText>
-            </View>
-            <ThemedText type="small" tabular style={styles.splitFigure}>
-              {formatAmount(fils, { decimals: false })}
-            </ThemedText>
-          </SpringPressable>
-        ))}
+        <SpringPressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('inLabel')}, ${formatAED(incomeFils, { decimals: false })}`}
+          onPress={() => { tapped(); router.push('/transactions?type=income'); }}
+          scaleTo={0.985}
+          style={[styles.splitCell, { borderTopColor: theme.cardBorder }]}>
+          <View style={styles.splitTop}>
+            <View style={[styles.dot, { backgroundColor: theme.income }]} />
+            <ThemedText type="nano" style={{ color: theme.textSecondary }}>{t('inLabel')}</ThemedText>
+          </View>
+          <ThemedText type="small" tabular style={[styles.splitFigure, { color: theme.text }]}>
+            {formatAmount(incomeFils, { decimals: false })}
+          </ThemedText>
+        </SpringPressable>
+        <View
+          accessible
+          accessibilityLabel={`${t('netAfterSpending')}, ${formatAED(netFils, { decimals: false })}`}
+          style={[styles.splitCell, { borderTopColor: theme.cardBorder },
+            !largeText && { borderStartWidth: StyleSheet.hairlineWidth, borderStartColor: theme.cardBorder, paddingStart: Spacing.three }]}>
+          <ThemedText type="nano" style={{ color: theme.textSecondary }}>{t('netAfterSpending')}</ThemedText>
+          <ThemedText type="small" tabular style={[styles.splitFigure, { color: theme.text }]}>
+            {formatAmount(netFils, { decimals: false })}
+          </ThemedText>
+        </View>
       </View>
     </View>
   );
@@ -447,43 +383,38 @@ function Hero({
  * screen: "what do I owe on this card" is a question about one statement, and
  * answering it by dropping the user on Wallet made them find it again.
  */
+/** Home prioritises dated obligations; detected recurring charges stay in Bills. */
+export function homePaymentGroups(items: readonly Outgoing[]): { due: Outgoing[]; upcoming: Outgoing[] } {
+  const due: Outgoing[] = [];
+  const upcoming: Outgoing[] = [];
+  for (const item of items) {
+    if (item.kind === 'subscription') continue;
+    (item.overdue || item.urgent ? due : upcoming).push(item);
+  }
+  return { due, upcoming };
+}
+
 function LeavingSoon({
   items,
-  withinDays,
+  title,
   onOpen,
 }: {
   items: Outgoing[];
-  withinDays: number;
+  title: string;
   onOpen: (item: Outgoing) => void;
 }) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   if (items.length === 0) return null;
 
-  // The heading used to say "Leaving in 9 days" over the total of everything
-  // in the list — including statements 28 days overdue, which have not been
-  // leaving in nine days for a month. And only three rows were ever drawn, so
-  // AED 70,976 sat above rows adding to 15,785 with nothing to say where the
-  // rest of it was.
-  //
-  // The total still covers the whole list, because "what is about to leave my
-  // account" is the useful number and truncating it to three rows would be a
-  // different lie. Two things make it legible instead: the heading admits the
-  // overdue items are in there, and the remainder is stated below the rows so
-  // the column reconciles.
+  // Keep individual obligations visible without treating a mixed list as one bill.
   const shown = expanded ? items : items.slice(0, 3);
-  const late = items.filter((x) => x.overdue).length;
   const hidden = items.length - shown.length;
 
   return (
     <View style={styles.section}>
       <SectionHeader
-        title={
-          late > 0
-            ? tf('overdueAndLeaving', { days: withinDays })
-            : tf('leavingInDays', { days: withinDays })
-        }
-        right={formatAED(totalAsShown(items.map((x) => x.amountFils)), { decimals: false })}
+        title={title}
       />
       {shown.map((x, i) => {
         const alarming = x.overdue || x.urgent;
@@ -539,11 +470,7 @@ function LeavingSoon({
               {tf('moreItems', { count: hidden })}
             </ThemedText>
           </View>
-          <ThemedText type="small" tabular themeColor="textSecondary">
-            {formatAmount(totalAsShown(items.slice(3).map((x) => x.amountFils)), {
-              decimals: false,
-            })}
-          </ThemedText>
+
         </SpringPressable>
       )}
     </View>
@@ -675,7 +602,6 @@ export default function LedgerHomeScreen() {
   const theme = useTheme();
   const focused = useIsFocused();
   const privacyGateCleared = usePrivacyGateCleared();
-  const clearance = useTabBarClearance();
   const router = useRouter();
   const toast = useToast();
   const { state, applyFxUpdates, setCaptureOptOut, beginHistoryImport } = useStore();
@@ -713,7 +639,6 @@ export default function LedgerHomeScreen() {
   ).length;
   const [refreshing, setRefreshing] = useState(false);
   const [periodSheetOpen, setPeriodSheetOpen] = useState(false);
-  const [dismissedInsight, setDismissedInsight] = useState<string | null>(null);
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
@@ -742,7 +667,7 @@ export default function LedgerHomeScreen() {
         state,
         period,
         now,
-        dismissedInsightId: dismissedInsight,
+        dismissedInsightId: null,
       }),
     // The projection intentionally depends on ledger slices, not the whole
     // context object. Review-tray, entitlement, and theme updates
@@ -760,10 +685,10 @@ export default function LedgerHomeScreen() {
       state.language,
       period,
       now,
-      dismissedInsight,
     ],
   );
-  const insight = dashboard.insight;
+
+  const { due: duePayments, upcoming: upcomingPayments } = homePaymentGroups(dashboard.upcoming.items);
 
   // Foreign-only alerts arrive with an offline estimate so capture never
   // blocks on a network. Once the ledger is visible, replace only those
@@ -800,34 +725,32 @@ export default function LedgerHomeScreen() {
     }
   }, [runAutoImport, state, toast]);
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
-          }>
-          <MotionReveal distance={10} scaleFrom={0.985}>
-            <View style={styles.topRow}>
-              <PeriodPill onPress={() => setPeriodSheetOpen(true)} />
-              <View style={styles.topActions}>
-                <IconButton
-                  name="search"
-                  label={t('searchMerchants')}
-                  onPress={() => router.push('/transactions')}
-                />
-                <IconButton
-                  name="sliders"
-                  label={t('settingsTitle')}
-                  onPress={() => router.push('/settings')}
-                />
-              </View>
-            </View>
-          </MotionReveal>
+  const homeHeader: ScreenHeaderProps = {
+    title: t('tabHome'),
+    actions: [
+      {
+        label: t('searchMerchants'),
+        icon: 'search',
+        onPress: () => router.push('/transactions'),
+      },
+      {
+        label: t('settingsTitle'),
+        icon: 'sliders',
+        onPress: () => router.push('/settings'),
+      },
+    ],
+  };
 
-          {!state.hydrated ? (
+  return (
+    <>
+      <ScreenScaffold
+        tabbed
+        headerMode="inline"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+        }
+        header={homeHeader}>
+        {!state.hydrated ? (
             <View
               style={styles.homeLoading}
               accessibilityLabel={t('loadingLedger')}
@@ -840,10 +763,8 @@ export default function LedgerHomeScreen() {
           <>
           <MotionReveal delay={45} distance={22} scaleFrom={0.955}>
             <Hero
-              period={period}
-              live={dashboard.live}
               comparison={dashboard.comparison}
-              active={focused}
+              onChangePeriod={() => setPeriodSheetOpen(true)}
               // Income, spending, and saved come from one arithmetic, so the hero equals its
               // own In and Spent cells. It read "63,039 in, 8,815 spent, saved 54,223" —
               // a subtraction that is off by one, in 40px type, at the top of
@@ -893,7 +814,10 @@ export default function LedgerHomeScreen() {
               .then(() => beginHistoryImport())}
           />
 
+
+
           {/* One next action, not four competing notices. */}
+          {(reviewAlertCount > 0 || dashboard.uncategorised.shouldPrompt || dashboard.unreadFormats.shouldPrompt) && (
           <MotionReveal delay={165} distance={16} scaleFrom={0.975}>
             {reviewAlertCount > 0 ? (
               <ReviewAlertsPrompt
@@ -904,55 +828,19 @@ export default function LedgerHomeScreen() {
               <CategorisePrompt summary={dashboard.uncategorised.summary} shouldPrompt />
             ) : dashboard.unreadFormats.shouldPrompt ? (
               <UnreadFormatsPrompt count={dashboard.unreadFormats.count} shouldPrompt />
-            ) : insight ? (
-              <View
-                style={[
-                  styles.insight,
-                  { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-                ]}>
-                <Icon name={insight.icon} size={17} color={theme.warning} />
-                <ThemedText type="small" style={styles.insightTitle}>
-                  {insight.title}
-                </ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {insight.body}
-                </ThemedText>
-                <View style={styles.insightActions}>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => {
-                      tapped();
-                      router.push(insight.href ?? '/flow');
-                    }}
-                    style={[styles.btn, { backgroundColor: theme.primary }]}>
-                    <ThemedText type="nano" style={{ color: theme.onPrimary }}>
-                      {t('seeBreakdown')}
-                    </ThemedText>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => {
-                      tapped();
-                      setDismissedInsight(insight.id);
-                    }}
-                    style={[styles.btn, { borderWidth: 1, borderColor: theme.cardBorder }]}>
-                    <ThemedText type="nano" themeColor="textSecondary">
-                      {t('dismiss')}
-                    </ThemedText>
-                  </Pressable>
-                </View>
-              </View>
             ) : null}
           </MotionReveal>
+          )}
 
+          {duePayments.length > 0 && (
           <MotionReveal delay={215} distance={18} scaleFrom={0.97}>
             <LeavingSoon
-              items={dashboard.upcoming.items}
-              withinDays={dashboard.upcoming.withinDays}
+              items={duePayments}
+              title={t('homeDuePayments')}
               onOpen={openOutgoing}
             />
           </MotionReveal>
-
+          )}
           <MotionReveal delay={265} distance={20} scaleFrom={0.97} style={styles.section}>
             <SectionHeader
               title={dashboard.live ? t('recentActivity') : periodLabel(period)}
@@ -980,46 +868,42 @@ export default function LedgerHomeScreen() {
                 monthName={periodLabel(period)}
                 onReadInbox={() => void runAutoImport(true)}
                 primaryLabel={t('checkBankAlerts')}
-                body={t('emptyMonthCaptureHelp')}
                 onAddManually={() => router.push('/add-transaction')}
               />
             )}
           </MotionReveal>
-          </>
+
+          {upcomingPayments.length > 0 && (
+          <MotionReveal delay={215} distance={18} scaleFrom={0.97}>
+            <LeavingSoon
+              items={upcomingPayments}
+              title={t('homeUpcomingPayments')}
+              onOpen={openOutgoing}
+            />
+          </MotionReveal>
           )}
-        </ScrollView>
-      </SafeAreaView>
+          </>
+        )}
+      </ScreenScaffold>
       <PeriodSheet visible={periodSheetOpen} onClose={() => setPeriodSheetOpen(false)} />
       <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
       <CardPaymentSheet due={cardDue} onClose={() => setCardDue(null)} />
       <BillDetailSheet subscription={recurring} onClose={() => setRecurring(null)} />
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  content: { paddingHorizontal: ScreenPadding, paddingTop: Spacing.three },
-
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: Spacing.three,
-  },
-  topActions: { flexDirection: 'row', gap: Spacing.two },
   homeLoading: { gap: Spacing.four, paddingTop: Spacing.two },
 
   capture: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 3,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    paddingHorizontal: Spacing.three,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 0,
     paddingVertical: 11,
-    marginTop: Spacing.four,
+    marginTop: Spacing.two,
   },
   captureHealthy: {
     borderWidth: 0,
@@ -1030,7 +914,7 @@ const styles = StyleSheet.create({
   captureIcon: {
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: Radius.tile,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1069,17 +953,19 @@ const styles = StyleSheet.create({
   },
   reviewPromptCopy: { flex: 1 },
 
-  heroLabel: { marginBottom: Spacing.two },
-  heroCompare: { marginTop: Spacing.two, marginBottom: Spacing.two },
-  heroRow: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.two },
-  heroRowLarge: { flexWrap: 'wrap', alignItems: 'flex-end' },
-  heroAmount: { flexDirection: 'row', alignItems: 'baseline' },
+  heroSpendTarget: { minHeight: 48, justifyContent: 'center' },
+  heroPanel: { paddingVertical: Spacing.three, marginTop: Spacing.one },
+  heroHeading: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, marginBottom: Spacing.three },
+  heroLabel: { flex: 1, minWidth: 100 },
+  heroCompare: { marginTop: Spacing.three },
+  heroAmount: { flexDirection: 'row', alignItems: 'baseline', flexShrink: 1, minWidth: 0 },
   aed: { fontSize: 15, lineHeight: 20 },
   split: { flexDirection: 'row', marginTop: Spacing.four },
   splitLarge: { flexDirection: 'column' },
   splitCell: {
     flex: 1,
     borderTopWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'space-between',
     paddingTop: 11,
     paddingBottom: Spacing.two,
     paddingEnd: Spacing.three,
@@ -1087,7 +973,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  splitFigure: { fontSize: 17, lineHeight: 22 },
+  splitFigure: { fontSize: 22, lineHeight: 28 },
   dot: { width: 5, height: 5, borderRadius: 3 },
   currencyPreview: {
     marginTop: Spacing.four,
@@ -1106,26 +992,7 @@ const styles = StyleSheet.create({
   currencyRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   currencyOriginal: { flex: 1 },
 
-  section: { marginTop: Spacing.five },
-
-  insight: {
-    marginTop: Spacing.four,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    paddingVertical: Spacing.three,
-    paddingHorizontal: 18,
-    gap: 6,
-  },
-  insightTitle: { marginTop: Spacing.one },
-  insightActions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
-  btn: {
-    borderRadius: Radius.tile,
-    minHeight: 44,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  section: { marginTop: Spacing.four },
 
   notice: {
     flexDirection: 'row',

@@ -124,13 +124,13 @@ const shortMonth = (offset = 0) => {
 
 // 1) Home opens on the current month, live.
 ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
-ok('home: hero reads live', !!(await visibleText(page, /Net after spending.*so far this month/i)));
+ok('home: hero reads live', !!(await visibleText(page, /^Net after spending$/i)));
 
 // 2) The pill opens the sheet; Last month re-scopes the hero.
 await tapLabel(page, /Reporting period/, 1200);
 ok('sheet: reporting period opens', !!(await visibleText(page, 'REPORTING PERIOD')));
 await tapText(page, 'LAST MONTH', 1200);
-ok('home: past month names itself in the hero', !!(await visibleText(page, `in ${shortMonth(-1)}`)));
+ok('home: past month names itself in the hero', !!(await visibleText(page, new RegExp(`Net after spending.*${shortMonth(-1)}`, 'i'))));
 
 // 3) Flow follows the same period.
 await tapTab(page, 'Flow');

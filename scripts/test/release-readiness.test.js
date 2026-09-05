@@ -51,8 +51,8 @@ const validFixture = () => {
       preview: {},
       production: { channel: 'production', environment: 'production', env: {
         EXPO_PUBLIC_WAFRA_RELAY_URL: 'https://relay.wafra.example',
-        EXPO_PUBLIC_WAFRA_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/captureGood1',
-        EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/historyGood2',
+        EXPO_PUBLIC_WAFRA_SHORTCUT_URL: `https://www.icloud.com/shortcuts/${'a'.repeat(32)}`,
+        EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: `https://www.icloud.com/shortcuts/${'b'.repeat(32)}`,
       } },
       'production-candidate': {
         extends: 'production',
@@ -223,6 +223,134 @@ const validFixture = () => {
     ok('one evaluator can approve a complete two-store configuration', report.ready,
       JSON.stringify(report.findings));
     fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    for (const invalidHistoryUrl of [
+      'https://www.icloud.com/shortcuts/too-short',
+      `https://www.icloud.com/shortcuts/${'b'.repeat(32)}/`,
+      `https://www.icloud.com/shortcuts/${'b'.repeat(32)}?source=test`,
+      `https://www.icloud.com/shortcuts/${'b'.repeat(32)}#fragment`,
+      `https://user@www.icloud.com/shortcuts/${'b'.repeat(32)}`,
+    ]) {
+      const root = validFixture();
+      const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+      eas.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL =
+        invalidHistoryUrl;
+      write(root, 'eas.json', eas);
+      const report = await assessReleaseReadiness({
+        root,
+        intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+      });
+      ok(`production iOS rejects malformed History Shortcut ${invalidHistoryUrl}`,
+        report.findings.some(({ code }) => code === 'history-shortcut'),
+        report.findings.map(({ code }) => code).join(','));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL =
+      'https://www.icloud.com/shortcuts/cc85a21db99a4e4698c1a498de670199';
+    write(root, 'eas.json', eas);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+    });
+    ok('production iOS rejects the superseded History Shortcut',
+      report.findings.some(({ code }) => code === 'retired-history-shortcut'),
+      report.findings.map(({ code }) => code).join(','));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL =
+      'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef';
+    write(root, 'eas.json', eas);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+    });
+    ok('production iOS permits a non-retired 32-hex History Shortcut', report.ready,
+      JSON.stringify(report.findings));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build.production.env.EXPO_PUBLIC_WAFRA_SHORTCUT_URL =
+      'https://www.icloud.com/shortcuts/ABCDEF0123456789ABCDEF0123456789';
+    eas.build.production.env.EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL =
+      'https://www.icloud.com/shortcuts/abcdef0123456789abcdef0123456789';
+    write(root, 'eas.json', eas);
+    const report = await assessReleaseReadiness({
+      root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+    });
+    ok('production iOS rejects Capture and History URLs for the same artifact despite casing',
+      report.findings.some(({ code }) => code === 'distinct-shortcuts'),
+      report.findings.map(({ code }) => code).join(','));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  {
+    for (const [name, variable, code] of [
+      ['Capture', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', 'capture-shortcut'],
+      ['History', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', 'history-shortcut'],
+    ]) {
+      const root = validFixture();
+      const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+      eas.build.production.env[variable] =
+        'https://www.icloud.com:443/shortcuts/0123456789abcdef0123456789abcdef';
+      write(root, 'eas.json', eas);
+      const report = await assessReleaseReadiness({
+        root,
+        intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+      });
+      ok(`production iOS rejects an explicit port in the ${name} Shortcut URL`,
+        report.findings.some((finding) => finding.code === code),
+        report.findings.map(({ code: findingCode }) => findingCode).join(','));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  {
+    for (const [name, variable, code, invalidUrl] of [
+      ['Capture', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', 'capture-shortcut',
+        ' https://www.icloud.com:443/shortcuts/0123456789abcdef0123456789abcdef'],
+      ['History', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', 'history-shortcut',
+        'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef '],
+      ['Capture', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', 'capture-shortcut',
+        'https://@www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef'],
+      ['History', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', 'history-shortcut',
+        'https://@www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef'],
+      ['Capture', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', 'capture-shortcut',
+        'HTTPS://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef'],
+      ['History', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', 'history-shortcut',
+        'HTTPS://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef'],
+      ['Capture', 'EXPO_PUBLIC_WAFRA_SHORTCUT_URL', 'capture-shortcut',
+        'https://WWW.ICLOUD.COM/shortcuts/0123456789abcdef0123456789abcdef'],
+      ['History', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', 'history-shortcut',
+        'https://WWW.ICLOUD.COM/shortcuts/0123456789abcdef0123456789abcdef'],
+    ]) {
+      const root = validFixture();
+      const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+      eas.build.production.env[variable] = invalidUrl;
+      write(root, 'eas.json', eas);
+      const report = await assessReleaseReadiness({
+        root,
+        intent: { kind: 'build', platform: 'ios', profile: 'production', submit: true },
+      });
+      ok(`production iOS rejects a noncanonical ${name} Shortcut URL`,
+        report.findings.some((finding) => finding.code === code),
+        report.findings.map(({ code: findingCode }) => findingCode).join(','));
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
 
   {

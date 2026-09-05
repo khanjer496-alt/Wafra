@@ -4,13 +4,14 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef } from 'react';
-import { AppState, Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
 import { OnboardingGate } from '@/components/onboarding-gate';
 import { ToastProvider } from '@/components/ui/toast';
 import { Colors } from '@/constants/theme';
 import { LanguageProvider } from '@/hooks/use-language';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   observeEntitlement,
   refreshEntitlement,
@@ -184,14 +185,14 @@ export default function RootLayout() {
   // Weight is a family here, not a `fontWeight`: Android applies no synthetic
   // weights to a bundled face, so 400/500/600 have to be three separate files.
   const [fontsLoaded, fontError] = useFonts({
-    'Geist-Regular': require('../../assets/fonts/Geist-Regular.ttf'),
-    'Geist-Medium': require('../../assets/fonts/Geist-Medium.ttf'),
-    'Geist-SemiBold': require('../../assets/fonts/Geist-SemiBold.ttf'),
+    'IBMPlexSans': require('../../assets/fonts/IBMPlexSans-Regular.ttf'),
+    'IBMPlexSans-Medm': require('../../assets/fonts/IBMPlexSans-Medium.ttf'),
+    'IBMPlexSans-SmBld': require('../../assets/fonts/IBMPlexSans-SemiBold.ttf'),
     'GeistMono-Regular': require('../../assets/fonts/GeistMono-Regular.ttf'),
     'GeistMono-Medium': require('../../assets/fonts/GeistMono-Medium.ttf'),
     'GeistMono-SemiBold': require('../../assets/fonts/GeistMono-SemiBold.ttf'),
-    'NotoKufiArabic-Regular': require('../../assets/fonts/NotoKufiArabic-Regular.ttf'),
-    'NotoKufiArabic-Bold': require('../../assets/fonts/NotoKufiArabic-Bold.ttf'),
+    'IBMPlexSansArabic': require('../../assets/fonts/IBMPlexSansArabic-Regular.ttf'),
+    'IBMPlexSansArabic-SmBld': require('../../assets/fonts/IBMPlexSansArabic-SemiBold.ttf'),
   });
 
   // A font that fails to decode must not leave the user on the splash forever;

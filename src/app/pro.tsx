@@ -1,22 +1,20 @@
 import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Linking,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Row, ScreenHeader, Section } from '@/components/ui/layout';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Row, Section } from '@/components/ui/layout';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { alignEnd, t, tf } from '@/lib/i18n';
 import {
@@ -34,6 +32,7 @@ import {
   subscriptionManagementUrl,
   type StorePrices,
 } from '@/lib/billing';
+import { configuredPublicUrl } from '@/lib/public-links';
 import { useStore } from '@/lib/store';
 
 type FeatureRow = {
@@ -45,18 +44,6 @@ type FeatureRow = {
 type PriceStatus = 'unavailable' | 'loading' | 'ready' | 'failed';
 type BillingAction = 'buy' | 'restore' | 'manage' | null;
 type Completion = 'purchase' | 'restore' | null;
-
-function configuredUrl(key: 'privacyPolicyUrl' | 'termsOfUseUrl'): string | null {
-  const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
-  const value = extra?.[key];
-  if (typeof value !== 'string') return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' ? url.toString() : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The list is built per platform, because the same feature is delivered two
@@ -102,9 +89,13 @@ export default function ProScreen() {
   const trial = trialDaysLeft(state);
   const entitled = state.pro || state.founderPro;
   const rows = features();
-  const privacyPolicyUrl = configuredUrl('privacyPolicyUrl');
-  const termsOfUseUrl = configuredUrl('termsOfUseUrl');
+  const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
+  const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
   const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;
+  const proHeader: ScreenHeaderProps = {
+    title: t('wafraPro'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
   useEffect(() => {
     if (!billingAvailable) return;
@@ -246,17 +237,169 @@ export default function ProScreen() {
     }
   };
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('wafraPro')} onBack={() => router.back()} />
+  const publicLinkRow = (
+    title: string,
+    url: string | null,
+    last = false,
+  ) => {
+    if (url) return (
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={title}
+        hitSlop={8}
+        onPress={() => void openLegal(url)}
+        style={styles.legalLink}>
+        <ThemedText type="meta" style={{ color: theme.primary }}>
+          {title}
+        </ThemedText>
+      </Pressable>
+    );
+    return (
+      <Row last={last}>
+        <View style={styles.featureText}>
+          <ThemedText type="small">{title}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">
+            {t('publicLinkUnavailable')}
+          </ThemedText>
         </View>
+        <Icon name="alert" size={15} color={theme.warning} />
+      </Row>
+    );
+  };
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}>
+  const purchaseFooter = (
+    <View
+      style={[
+        styles.purchaseBar,
+        { borderColor: theme.cardBorder, backgroundColor: theme.background },
+      ]}>
+      {notice && (
+        <View
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.notice,
+            { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg },
+          ]}>
+          <Icon name="alert" size={18} color={theme.expense} />
+          <View style={styles.noticeCopy}>
+            <ThemedText type="smallBold">{notice.title}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">
+              {notice.body}
+            </ThemedText>
+          </View>
+        </View>
+      )}
+
+      {completion && (
+        <View
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.success,
+            { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft },
+          ]}>
+          <View style={[styles.successIcon, { backgroundColor: theme.primary }]}>
+            <Icon name="check" size={20} color={theme.onPrimary} />
+          </View>
+          <View style={styles.successCopy}>
+            <ThemedText type="smallBold">
+              {t(
+                completion === 'purchase'
+                  ? 'proPurchaseSuccessTitle'
+                  : 'proRestoreSuccessTitle',
+              )}
+            </ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">
+              {t(
+                completion === 'purchase'
+                  ? 'proPurchaseSuccessBody'
+                  : 'proRestoreSuccessBody',
+              )}
+            </ThemedText>
+          </View>
+        </View>
+      )}
+
+      {completion ? (
+        <Button label={t('proContinue')} icon="check" onPress={() => router.back()} />
+      ) : state.founderPro ? (
+        <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
+      ) : state.pro ? (
+        <>
+          {Platform.OS !== 'web' && (
+            <Button
+              variant="outline"
+              label={t('manageSubscription')}
+              disabled={billingAction !== null}
+              onPress={manage}
+            />
+          )}
+          <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
+        </>
+      ) : (
+        <>
+          <View style={styles.purchaseSummary}>
+            <View style={styles.purchaseSummaryCopy}>
+              <ThemedText type="micro" themeColor="textTertiary">
+                {plan === 'yearly' ? t('yearly') : t('monthly')}
+              </ThemedText>
+              <ThemedText type="subtitle" tabular>
+                {displayPrice(plan)}
+              </ThemedText>
+            </View>
+            <ThemedText
+              type="meta"
+              themeColor="textSecondary"
+              style={[styles.chargeTiming, { textAlign: alignEnd() }]}>
+              {selectedStorePrice
+                ? tf(
+                    plan === 'yearly'
+                      ? 'proChargeTimingYear'
+                      : 'proChargeTimingMonth',
+                    { price: selectedStorePrice },
+                  )
+                : t('proStoreConfirmsPrice')}
+            </ThemedText>
+          </View>
+          <Button
+            label={
+              billingAction === 'buy'
+                ? t('purchaseInProgress')
+                : selectedStorePrice
+                  ? tf('startPlanWithPrice', {
+                      plan: plan === 'yearly' ? t('yearly') : t('monthly'),
+                      price: selectedStorePrice,
+                    })
+                  : t('getPro')
+            }
+            onPress={buy}
+            disabled={billingAction !== null || (billingAvailable && !storePrices?.[plan])}
+          />
+          <Button
+            variant="ghost"
+            label={t('restorePurchase')}
+            disabled={billingAction !== null}
+            onPress={restore}
+          />
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.renewalTerms}>
+            {t(
+              Platform.OS === 'ios'
+                ? 'subscriptionRenewalTermsIos'
+                : 'subscriptionRenewalTermsAndroid',
+            )}
+          </ThemedText>
+        </>
+      )}
+    </View>
+  );
+
+  return (
+    <ScreenScaffold
+      headerMode="native"
+      header={proHeader}
+      contentStyle={styles.content}
+      scrollProps={{ showsVerticalScrollIndicator: false }}>
           <Section index={0} style={styles.hero}>
             <View style={[styles.heroMark, { backgroundColor: theme.primarySoft }]}>
               <Icon name="spark" size={24} color={theme.primary} />
@@ -425,180 +568,18 @@ export default function ProScreen() {
             </Section>
           )}
 
-          {(privacyPolicyUrl || termsOfUseUrl) && (
-            <View style={styles.legalLinks}>
-              {privacyPolicyUrl && (
-                <Pressable
-                  accessibilityRole="link"
-                  hitSlop={8}
-                  onPress={() => void openLegal(privacyPolicyUrl)}>
-                  <ThemedText type="meta" style={{ color: theme.primary }}>
-                    {t('privacyPolicy')}
-                  </ThemedText>
-                </Pressable>
-              )}
-              {termsOfUseUrl && (
-                <Pressable
-                  accessibilityRole="link"
-                  hitSlop={8}
-                  onPress={() => void openLegal(termsOfUseUrl)}>
-                  <ThemedText type="meta" style={{ color: theme.primary }}>
-                    {t('termsOfUse')}
-                  </ThemedText>
-                </Pressable>
-              )}
-            </View>
-          )}
-        </ScrollView>
+          {purchaseFooter}
 
-        <View
-          style={[
-            styles.purchaseBar,
-            { borderColor: theme.cardBorder, backgroundColor: theme.background },
-          ]}>
-          {notice && (
-            <View
-              accessibilityRole="alert"
-              accessibilityLiveRegion="polite"
-              style={[
-                styles.notice,
-                { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg },
-              ]}>
-              <Icon name="alert" size={18} color={theme.expense} />
-              <View style={styles.noticeCopy}>
-                <ThemedText type="smallBold">{notice.title}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {notice.body}
-                </ThemedText>
-              </View>
-            </View>
-          )}
-
-          {completion && (
-            <View
-              accessibilityRole="alert"
-              accessibilityLiveRegion="polite"
-              style={[
-                styles.success,
-                { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft },
-              ]}>
-              <View style={[styles.successIcon, { backgroundColor: theme.primary }]}>
-                <Icon name="check" size={20} color={theme.onPrimary} />
-              </View>
-              <View style={styles.successCopy}>
-                <ThemedText type="smallBold">
-                  {t(
-                    completion === 'purchase'
-                      ? 'proPurchaseSuccessTitle'
-                      : 'proRestoreSuccessTitle',
-                  )}
-                </ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {t(
-                    completion === 'purchase'
-                      ? 'proPurchaseSuccessBody'
-                      : 'proRestoreSuccessBody',
-                  )}
-                </ThemedText>
-              </View>
-            </View>
-          )}
-
-          {completion ? (
-            <Button label={t('proContinue')} icon="check" onPress={() => router.back()} />
-          ) : state.founderPro ? (
-            <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
-          ) : state.pro ? (
-            <>
-              {Platform.OS !== 'web' && (
-                <Button
-                  variant="outline"
-                  label={t('manageSubscription')}
-                  disabled={billingAction !== null}
-                  onPress={manage}
-                />
-              )}
-              <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
-            </>
-          ) : (
-            <>
-              <View style={styles.purchaseSummary}>
-                <View style={styles.purchaseSummaryCopy}>
-                  <ThemedText type="micro" themeColor="textTertiary">
-                    {plan === 'yearly' ? t('yearly') : t('monthly')}
-                  </ThemedText>
-                  <ThemedText type="subtitle" tabular>
-                    {displayPrice(plan)}
-                  </ThemedText>
-                </View>
-                <ThemedText
-                  type="meta"
-                  themeColor="textSecondary"
-                  style={[styles.chargeTiming, { textAlign: alignEnd() }]}>
-                  {selectedStorePrice
-                    ? tf(
-                        plan === 'yearly'
-                          ? 'proChargeTimingYear'
-                          : 'proChargeTimingMonth',
-                        { price: selectedStorePrice },
-                      )
-                    : t('proStoreConfirmsPrice')}
-                </ThemedText>
-              </View>
-              <Button
-                label={
-                  billingAction === 'buy'
-                    ? t('purchaseInProgress')
-                    : selectedStorePrice
-                      ? tf('startPlanWithPrice', {
-                          plan: plan === 'yearly' ? t('yearly') : t('monthly'),
-                          price: selectedStorePrice,
-                        })
-                      : t('getPro')
-                }
-                onPress={buy}
-                disabled={billingAction !== null || (billingAvailable && !storePrices?.[plan])}
-              />
-              <Button
-                variant="ghost"
-                label={t('restorePurchase')}
-                disabled={billingAction !== null}
-                onPress={restore}
-              />
-              <ThemedText type="nano" themeColor="textTertiary" style={styles.renewalTerms}>
-                {t(
-                  Platform.OS === 'ios'
-                    ? 'subscriptionRenewalTermsIos'
-                    : 'subscriptionRenewalTermsAndroid',
-                )}
-              </ThemedText>
-            </>
-          )}
-        </View>
-      </SafeAreaView>
-    </ThemedView>
+          <View style={styles.legalLinks}>
+            {publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)}
+            {publicLinkRow(t('termsOfUse'), termsOfUseUrl, true)}
+          </View>
+    </ScreenScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
-  scroll: {
-    flex: 1,
-  },
   content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.four,
     gap: Spacing.four,
   },
   hero: {
@@ -657,9 +638,11 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   legalLinks: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: Spacing.three,
+  },
+  legalLink: {
+    minHeight: 44,
+    justifyContent: 'center',
   },
   planRow: {
     minHeight: 76,
@@ -725,9 +708,7 @@ const styles = StyleSheet.create({
   },
   purchaseBar: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: ScreenPadding,
-    paddingTop: Spacing.three,
-    paddingBottom: Spacing.two,
+    paddingTop: Spacing.two,
     gap: Spacing.two,
   },
   purchaseSummary: {

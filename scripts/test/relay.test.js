@@ -1665,6 +1665,7 @@ async function queueItem(id, row, publicKey) {
     let synced = { parsed: [], ids: [], unreadable: 0, testReceived: 0, testIds: [] };
     let acked = [];
     const captureDep = (id) => {
+      if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
       if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
       if (id === '@/lib/background-relay') {
         return {
@@ -1695,7 +1696,8 @@ async function queueItem(id, row, publicKey) {
     };
 
     const capture = execute('src/lib/capture.ts', captureDep);
-    const state = { parserVersion: 1, lastScanTs: 0, privateMode: false, merchantOverrides: {} };
+    const reviewTray = { pending: [], tombstones: [], templateRules: [] };
+    const state = { parserVersion: 1, lastScanTs: 0, privateMode: false, merchantOverrides: {}, transactions: [], reviewTray };
 
     /* A restricted OEM provider can keep READ_SMS looking granted while
      * yielding no history. That must not stamp a parser migration complete
@@ -1704,6 +1706,7 @@ async function queueItem(id, row, publicKey) {
     {
       let requestedSince = null;
       const historyCapture = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
         if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
         if (id === '@/lib/background-relay') {
           return {
@@ -1739,6 +1742,7 @@ async function queueItem(id, row, publicKey) {
       let code = null;
       try {
         await historyCapture.collectNewMessages({
+          reviewTray,
           hydrated: true,
           parserVersion: 23,
           lastScanTs: 900,
@@ -1755,6 +1759,7 @@ async function queueItem(id, row, publicKey) {
         code, 'ERR_SMS_HISTORY_UNAVAILABLE');
 
       const pushOnly = await historyCapture.collectNewMessages({
+        reviewTray,
         hydrated: true,
         parserVersion: 23,
         lastScanTs: 900,
@@ -2016,6 +2021,33 @@ async function queueItem(id, row, publicKey) {
         ensureDurable: async () => void events.push('flush'),
         markParserVersion: () => void events.push('parser'),
       });
+
+      // Exercise the real planner at the executor boundary: a refused batch
+      // must never be acknowledged as an empty/duplicate relay result.
+      {
+        const realPlanner = require('./build/import-plan.js');
+        const fixture = require('./fixtures/uae-bank-formats')
+          .find((item) => item.id === 'enbd-credit-card-purchase');
+        const parsedRow = require('./build/sms-parser.js').parseSms(fixture.body);
+        const events = [];
+        const pinnedLedger = { hydrated: true, marketId: 'AE', lastScanTs: 0,
+          ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 },
+          accounts: [], transactions: [], budgets: [], bills: [], cardDues: [], goals: [],
+          accountHints: {}, merchantOverrides: {}, captureOptOut: false };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: { ...ledger(Promise.resolve(), events), getState: () => pinnedLedger },
+          dependencies: {
+            collectRoutine: async () => ({ parsed: [parsedRow], declined: [], newestTs: 1,
+              source: 'relay', needsSetup: false, commit: async () => void events.push('ack') }),
+            planRows: realPlanner.buildImportPlan,
+          },
+        });
+        let rejected;
+        try { await executor.execute('routine'); } catch (error) { rejected = error; }
+        ok('capture executor: incompatible real parsed money raises its typed source-free rejection',
+          rejected instanceof realPlanner.ImportMoneyError);
+        eq('capture executor: rejected money neither persists a cursor nor acknowledges its source', events, []);
+      }
 
       {
         const events = [];

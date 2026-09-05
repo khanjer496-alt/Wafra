@@ -151,7 +151,7 @@ export default function MarketingHome() {
           </div>
           <ul className={styles.privacyList}>
             <li><span>01</span><div><strong>Android</strong><p>Supported bank SMS and optional bank-app notifications are processed on the device when you enable access. Availability varies by bank and country.</p></div></li>
-            <li><span>02</span><div><strong>iPhone</strong><p>Wafra cannot read the Messages inbox. Optional automatic capture uses an Any Sender personal automation; Wafra filters supported bank alerts locally on this iPhone, and the new path does not upload their text.</p></div></li>
+            <li><span>02</span><div><strong>iPhone</strong><p>Wafra cannot read the Messages inbox. Optional automatic capture runs only for bank senders the user selects, then processes supported bank alerts locally on this iPhone. This path does not upload their text.</p></div></li>
             <li><span>03</span><div><strong>Manual-only</strong><p>Leave automatic Message capture off and use manual entry or user-initiated imports instead.</p></div></li>
           </ul>
         </section>

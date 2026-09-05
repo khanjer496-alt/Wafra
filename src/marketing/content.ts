@@ -75,7 +75,7 @@ export const FAQ_SCHEMA = {
       name: 'Does Wafra read every message on my phone?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'No. Android message access is optional and used for supported financial alerts when enabled. iPhone does not give Wafra direct Messages inbox access; optional automatic capture uses an Any Sender personal automation, then filters supported bank alerts locally on the iPhone. The new path does not upload Message text.',
+        text: 'No. Android message access is optional and used for supported financial alerts when enabled. iPhone does not give Wafra direct Messages inbox access; optional automatic capture runs only for bank senders the user selects, then processes supported bank alerts locally on the iPhone. This path does not upload Message text.',
       },
     },
     {
@@ -116,7 +116,7 @@ export const faqItems = [
   {
     question: 'Does Wafra read every message on my phone?',
     answer:
-      'No. Android message access is optional and only used after you choose supported alert imports. iPhone does not expose the Messages inbox to Wafra; optional capture uses an Any Sender personal automation, then filters supported bank alerts locally on the iPhone. The new path does not upload Message text.',
+      'No. Android message access is optional and only used after you choose supported alert imports. iPhone does not expose the Messages inbox to Wafra; optional capture runs only for bank senders the user selects, then processes supported bank alerts locally on the iPhone. This path does not upload Message text.',
   },
   {
     question: 'Can I use Wafra anywhere?',
