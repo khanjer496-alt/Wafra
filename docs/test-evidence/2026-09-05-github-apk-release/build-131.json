@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "versionCode": 131,
+  "architecture": "arm64-v8a",
+  "minSdk": 24,
+  "targetSdk": 36,
+  "sourceCommit": "b96b25372e34ce797f449bd621c872561d94bd0b",
+  "githubRun": "https://github.com/khanjer496-alt/Wafra/actions/runs/33987148177",
+  "apkUrl": "https://github.com/khanjer496-alt/Wafra/releases/download/android-test-b96b253/Wafra-android-b96b253.apk",
+  "apkSha256": "f55e101b3bf1cdb97dfc06d14f3412f1814987adbc000ffcd1ebde0e3cc94704",
+  "actionsApkSha256": "14af72c261b5e67c00b05bc6154f109526884116a447319d412ea8b32a028525",
+  "signerSha256": "e6d6575a571bcdb36f521a35b283711497a694c370ceabb0da1501326371b344",
+  "signing": "Actions APK signed locally with existing EAS public-beta key. All ZIP entry bytes verified identical; only APK signing block changed. Temporary private key removed. Production upload credentials unchanged.",
+  "verification": [
+    "APK v2 signature valid",
+    "Package/version/ABI checked",
+    "Matches previous public build15 and EAS build23 beta signer",
+    "adb install-r over23 succeeded; no uninstall",
+    "Four synthetic transactions retained; displayed total132.09 agrees with source amounts89.50+25+5.25+12.34",
+    "App launched with new design; no ReactNativeJS/AndroidRuntime error in checked log window",
+    "Public download returned HTTP200"
+  ],
+  "priorBuildFailure": "Run129 exhausted512MiB JVM metaspace in expo-updates:kspReleaseKotlin, then timed out. Run130 canceled before repeating old cap. Run131 succeeded with3GiB heap/2GiB metaspace/2workers/fail-fast OOM and ARM64 selection.",
+  "limitations": [
+    "Ongoing iOS reliability changes are not in this checkpoint",
+    "Later merchant-logo/subscription-landing additions are separate work",
+    "Future raw Actions artifacts still use existing production upload key unless beta release signing is applied"
+  ]
+}

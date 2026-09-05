@@ -76,7 +76,7 @@ check('static product image URL', index.includes('src="/wafra-app-home.png"'));
 check(
   'public beta download links',
   index.includes('https://testflight.apple.com/join/jbwzCgZ6') &&
-    index.includes('https://github.com/khanjer496-alt/Wafra/releases/download/android-test-9ea4cd8/Wafra-android-9ea4cd8.apk') &&
+    index.includes('https://github.com/khanjer496-alt/Wafra/releases/download/android-test-b96b253/Wafra-android-b96b253.apk') &&
     index.includes('Download APK'),
 );
 check(
