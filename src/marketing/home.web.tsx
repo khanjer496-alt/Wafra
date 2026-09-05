@@ -35,7 +35,7 @@ export default function MarketingHome() {
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={MARKETING_TITLE} />
         <meta name="twitter:description" content={MARKETING_DESCRIPTION} />
-        <meta name="theme-color" content="#07100c" />
+        <meta name="theme-color" content="#F6F8FC" />
         {SITE_URL ? <link rel="canonical" href={SITE_URL} /> : null}
         {SITE_URL ? <meta property="og:url" content={SITE_URL} /> : null}
         {SITE_URL ? <meta property="og:image" content={`${SITE_URL}/wafra-social.png`} /> : null}
@@ -48,7 +48,7 @@ export default function MarketingHome() {
       <main className={styles.page}>
         <nav className={styles.nav} aria-label="Primary navigation">
           <a className={styles.brand} href="#top" aria-label="Wafra home">
-            <WafraMark size={34} color="#61d5a6" />
+            <WafraMark size={32} color="#2855D9" />
             <span>Wafra</span>
             <span className={styles.arabic} lang="ar" dir="rtl">وفرة</span>
           </a>
@@ -62,10 +62,10 @@ export default function MarketingHome() {
 
         <header className={styles.hero} id="top">
           <div className={styles.heroCopy}>
-            <p className={styles.eyebrow}><span /> Private money clarity</p>
-            <h1>Know where your money went. See what comes next.</h1>
+            <p className={styles.eyebrow}>Your everyday money, clearly.</p>
+            <h1>Know your spending.<br />Plan what comes next.</h1>
             <p className={styles.lede}>
-              Use Wafra anywhere to bring spending, budgets, bills and recurring charges into one private ledger—without asking for your bank login.
+              Spending, budgets and bills in one private ledger. No bank login needed.
             </p>
             <div className={styles.heroActions}>
               <a
@@ -92,67 +92,57 @@ export default function MarketingHome() {
               </a>
             </div>
             <p className={styles.betaNote}>Public beta builds · Android installs outside Google Play</p>
-            <dl className={styles.heroFacts}>
-              <div><dt>0</dt><dd>bank logins</dd></div>
-              <div><dt>2</dt><dd>languages</dd></div>
-              <div><dt>1</dt><dd>clear ledger</dd></div>
-            </dl>
+            <p className={styles.languageNote}>Available in English and Arabic.</p>
           </div>
 
           <div className={styles.productStage} aria-label="Wafra app previews">
             <div className={`${styles.phone} ${styles.phoneBack}`}>
               <img
                 src="/wafra-app-bills.png"
-                alt="Wafra statistics screen showing spending categories and period comparisons"
+                alt="Wafra Bills screen with a card statement, remaining balance and payment action"
+                width={1206}
+                height={2622}
               />
             </div>
             <div className={`${styles.phone} ${styles.phoneFront}`}>
               <img
                 src="/wafra-app-home.png"
-                alt="Wafra home screen showing monthly income, spending and money left"
+                alt="Wafra Home screen showing recorded spending, income and recent activity"
+                width={1206}
+                height={2622}
               />
             </div>
-            <div className={styles.stageNote}><span>PRIVATE LEDGER</span><strong>Yours to read.<br />Yours to keep.</strong></div>
           </div>
         </header>
 
-        <section className={styles.signalStrip} aria-label="Wafra principles">
-          <span>Manual-first</span><i />
-          <span>No ads</span><i />
-          <span>Encrypted ledger</span><i />
-          <span>English + العربية</span>
-        </section>
-
         <section className={styles.features} id="how-it-works">
           <div className={styles.sectionIntro}>
-            <p className={styles.kicker}>A clearer money month</p>
-            <h2>Less dashboard.<br />More direction.</h2>
-            <p>Wafra is built around the three questions that matter before you spend again.</p>
+            <p className={styles.kicker}>The daily picture</p>
+            <h2>Make sense of the details.</h2>
+            <p>See what you have spent, what is due and how your categories are tracking.</p>
           </div>
           <div className={styles.featureList}>
             {featureCards.map((feature) => (
               <article className={styles.featureCard} key={feature.number}>
                 <span>{feature.number}</span>
                 <div><h3>{feature.title}</h3><p>{feature.copy}</p></div>
-                <b aria-hidden="true">→</b>
               </article>
             ))}
           </div>
         </section>
 
         <section className={styles.privacy} id="privacy">
-          <div className={styles.privacyMark}><WafraMark size={70} color="#06100c" /></div>
           <div className={styles.privacyCopy}>
             <p className={styles.kicker}>Private by design</p>
-            <h2>Your money picture should not require your bank password.</h2>
+            <h2>Your ledger.<br />No bank login.</h2>
             <p>
               Wafra has no sign-up and no advertising. Your main ledger is encrypted on your device. Manual tracking works wherever you live; supported bank-alert imports are optional and platform-specific.
             </p>
           </div>
           <ul className={styles.privacyList}>
-            <li><span>01</span><div><strong>Android</strong><p>Supported bank SMS and optional bank-app notifications are processed on the device when you enable access. Availability varies by bank and country.</p></div></li>
-            <li><span>02</span><div><strong>iPhone</strong><p>Wafra cannot read the Messages inbox. Optional automatic capture runs only for bank senders the user selects, then processes supported bank alerts locally on this iPhone. This path does not upload their text.</p></div></li>
-            <li><span>03</span><div><strong>Manual-only</strong><p>Leave automatic Message capture off and use manual entry or user-initiated imports instead.</p></div></li>
+            <li><strong>Android</strong><p>Supported bank SMS and optional bank-app notifications are processed on the device when you enable access. Availability varies by bank and country.</p></li>
+            <li><strong>iPhone</strong><p>Wafra cannot read the Messages inbox. Optional automatic capture runs only for bank senders the user selects, then processes supported bank alerts locally on this iPhone. This path does not upload their text.</p></li>
+            <li><strong>Manual-only</strong><p>Leave automatic Message capture off and use manual entry or user-initiated imports instead.</p></li>
           </ul>
         </section>
 
@@ -172,7 +162,7 @@ export default function MarketingHome() {
         </section>
 
         <footer className={styles.footer}>
-          <div className={styles.footerBrand}><WafraMark size={30} color="#61d5a6" /><span>Wafra</span></div>
+          <div className={styles.footerBrand}><WafraMark size={30} color="#2855D9" /><span>Wafra</span></div>
           <p>Private budget and expense tracking anywhere, on iPhone and Android.</p>
           <p className={styles.footnote}>Automatic bank-alert support varies by bank, country and message format. Wafra is not a bank and does not provide financial advice.</p>
         </footer>

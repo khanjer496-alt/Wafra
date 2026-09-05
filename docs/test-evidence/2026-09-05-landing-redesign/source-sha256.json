@@ -1,0 +1,14 @@
+{
+  "src/marketing/home.module.css": "76f36cc8891d1407ecdd0b09733b7385543ec522528828e47f60f2545651191f",
+  "src/marketing/home.web.tsx": "7fa0b04fd1e14d94790ade898bb6bdb46408d504cdc32ef16b37179ed0fba811",
+  "src/marketing/content.ts": "e871817cadaa606a5da224174e9565c03a92376219b0ae8991be495a0eae81d2",
+  "public/wafra-app-home.png": "00afd3bf041bab7360c14a8c90c751dd6703cca0659190f5be7aad6c2fb931fe",
+  "public/wafra-app-bills.png": "8bc7c2af20bc1aff553aacc9c1534b5430d37a71a9e1d464da62aa83d378ba7d",
+  "public/wafra-social.svg": "02e717a895f70136fc4dbf83261a346515f0f022b8ff5aa886f83554c1105b3f",
+  "public/wafra-social.png": "1d60144b00972622325506202160df2fbfe83c16ac85111805b3dfcffd17803c",
+  "public/fonts/IBMPlexSans-Medium.ttf": "331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907",
+  "public/fonts/IBMPlexSans-Regular.ttf": "975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5",
+  "public/fonts/IBMPlexSans-SemiBold.ttf": "a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1",
+  "public/fonts/IBMPlexSansArabic-Regular.ttf": "8e0f1046c736bf939d4939ee3ae0116acf61cbcd6592deae7656761627080981",
+  "public/fonts/LICENSE-IBM-Plex.txt": "d741e57d5f865e294df801f96b7b5161a88b211df65887e4358d271c9fc5fb4f"
+}

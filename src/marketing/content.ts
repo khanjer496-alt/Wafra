@@ -92,8 +92,8 @@ export const FAQ_SCHEMA = {
 export const featureCards = [
   {
     number: '01',
-    title: 'Know what is left',
-    copy: 'See income, spending and the amount left in one calm monthly view—using a calendar month or your salary day.',
+    title: 'See what you spent',
+    copy: 'Review recorded spending with income alongside it. Follow a calendar month or a reporting period that starts on your salary day.',
   },
   {
     number: '02',
