@@ -1,10 +1,11 @@
 from pathlib import Path
-import base64,hashlib,json,subprocess,sys,tempfile,textwrap,shutil
+import base64,hashlib,json,subprocess,sys,tempfile,textwrap,shutil,zlib
 root=Path.cwd();app=root/'app';evidence=root/'recovery-evidence';evidence.mkdir(exist_ok=True)
-# Reuse the earlier immutable 38-file source snapshot and all its SHA256 checks.
+# Reuse the immutable 38-file candidate; production files remain checksum-gated.
 workflow=(root/'.github/workflows/redesign-browser-validation.yml').read_text()
 body=workflow.split("python3 - <<'PY'\n",1)[1].split('\n          PY',1)[0]
 exec(compile(textwrap.dedent(body),'<verified-redesign-snapshot>','exec'))
+evidence=root/'recovery-evidence';evidence.mkdir(exist_ok=True)
 paths=['scripts/test/repair/journal-harness.cjs','scripts/test/repair/journal-ui.test.cjs','scripts/test/repair/reference-harness.cjs','scripts/test/repair/reference-redesign.test.cjs','scripts/test/repair/trend-accessibility.test.cjs','scripts/test/workflows/workflow-harness.cjs','scripts/test/workflows/workflow-source.test.cjs','scripts/test/workflows/workflow-ui.test.cjs']
 base={}
 for path in paths:
@@ -23,6 +24,13 @@ with tempfile.TemporaryDirectory() as tmp:
  tests=json.loads(result);assert list(tests)==paths
  for path,text in tests.items():
   target=app/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(text)
+# The fixture predates the edits. Its 61 immutable function hashes must not be
+# regenerated from the candidate. Repair three transport typos, then verify it.
+fixture=(root/'validation/protected-handlers.zlib.b64').read_text().strip()
+fixture=fixture.replace('LcjxdD14','Lcjxd14').replace('QuI+YVRa','QuI+VRa').replace('W5N5oNA','W5N2oNA')
+fixture=zlib.decompress(base64.b64decode(fixture,validate=True))
+assert digest(fixture)=='770544c5279795fd8be1a92ffcdd85e4d64708ad4ebcb1db8feb2b6a5edfcace','Protected action fixture differs from reviewed original'
+(app/'scripts/test/workflows/protected-handlers.json').write_bytes(fixture)
 subprocess.run([sys.executable,str(root/'validation/recover-source.py'),str(app)],check=True)
 subprocess.run([sys.executable,str(root/'validation/recover-tests.py'),str(app)],check=True)
 shutil.copyfile(root/'validation/redesign-contract-recovery.test.cjs',app/'scripts/test/repair/redesign-contract-recovery.test.cjs')
