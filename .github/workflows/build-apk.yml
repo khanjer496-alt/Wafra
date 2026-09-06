@@ -1,81 +1,73 @@
 name: Build Android APK
-
-# A release build costs ~18 runner minutes; the free tier is 2,000 a month,
-# and building on every push to the working branch burned the whole allowance
-# in a month — after which nothing builds at all until the reset.
-#
-# CI guards every main push. Full APK/AAB builds are explicit requests from
-# main, not a side effect of routine development or repository cleanup.
 on:
   workflow_dispatch:
     inputs:
       bundle:
-        description: 'Also build the Play Store bundle (.aab) — adds ~5 min'
+        description: 'Also build the Play Store AAB (not for previews)'
         type: boolean
         default: false
       corpus:
-        description: 'Internal ARM64 APK with the temporary full-inbox parser corpus exporter'
+        description: 'Internal full-inbox parser corpus exporter'
         type: boolean
         default: false
       architecture:
-        description: 'ARM64 for modern Android phones; universal for all supported CPUs'
+        description: 'Android CPU architectures'
         type: choice
-        options:
-          - arm64
-          - universal
+        options: [arm64, universal]
         default: arm64
-# A push during a build was already cancelling it, but only after the runner
-# had burned 15 minutes on Gradle. Making it explicit kills the superseded run
-# immediately instead.
+      preview:
+        description: 'Separate Wafra Preview installation; no production OTA'
+        type: boolean
+        default: false
+      publish_preview:
+        description: 'Explicitly publish this preview APK as a GitHub prerelease'
+        type: boolean
+        default: false
+      expected_commit:
+        description: 'Expected source commit; fail if the branch changed'
+        type: string
+        default: ''
+permissions:
+  contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+  cancel-in-progress: false
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      # playwright is a devDependency for the e2e scripts; this build never
-      # launches a browser, so skip the browser download during npm ci.
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
-      # Expo INLINES every EXPO_PUBLIC_* value at bundle time, and Metro bundles
-      # inside the Gradle release step below — so a value absent from this
-      # environment is absent from the APK, with no build error to say so.
-      #
-      # eas.json sets this for EAS builds and nothing set it here, so every APK
-      # this workflow has ever produced shipped with DEFAULT_RELAY_URL empty.
-      # `relay.ts` deliberately has no fallback ("a release with no deployed
-      # relay must fail setup visibly, not send financial messages to a domain
-      # that merely looks plausible"), which is right, and the visible failure
-      # is what nobody was looking at: iOS setup could not pair, and the
-      # feedback screen reported that sending was not connected in this build.
-      #
-      # A repository VARIABLE with the eas.json value as the fallback, so a
-      # fork or a renamed Worker overrides it without editing this file. Not a
-      # secret: it is a public URL that ships inside the APK by definition.
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      EXPO_PUBLIC_WAFRA_E2E_DEMO: '0'
       EXPO_PUBLIC_WAFRA_RELAY_URL: ${{ vars.WAFRA_RELAY_URL || 'https://wafra-relay.khanjer496.workers.dev' }}
-      # Both halves are required: Gradle compiles the raw native method closed,
-      # while Expo inlines the public flag into the JavaScript bundle. A normal
-      # push/manual build pins both off. Only an explicit manual corpus run can
-      # enable them together.
-      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
-      WAFRA_SMS_CORPUS_EXPORT: ${{ github.event.inputs.corpus == 'true' && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: ${{ inputs.corpus && '1' || '0' }}
+      WAFRA_SMS_CORPUS_EXPORT: ${{ inputs.corpus && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ inputs.preview && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
-
+        with: {persist-credentials: false}
+      - name: Verify source and requested build scope
+        env:
+          EXPECTED: ${{ inputs.expected_commit }}
+          PREVIEW: ${{ inputs.preview }}
+          CORPUS: ${{ inputs.corpus }}
+          BUNDLE: ${{ inputs.bundle }}
+          PUBLISH: ${{ inputs.publish_preview }}
+        run: |
+          set -euo pipefail
+          test -z "$EXPECTED" || test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test "$GITHUB_REF" = refs/heads/main || test "$PREVIEW" = true
+          if [ "$PREVIEW" = true ]; then test "$CORPUS" = false; test "$BUNDLE" = false; fi
+          test "$PUBLISH" = false || test "$PREVIEW" = true
+          mkdir -p build-evidence
+          git rev-parse HEAD > build-evidence/source-commit.txt
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.3
-          cache: npm
-
+        with: {node-version: '22.22.3', cache: npm}
       - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Cache Gradle
-        uses: actions/cache@v4
+        with: {distribution: temurin, java-version: '17'}
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
@@ -83,211 +75,199 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             gradle-${{ runner.os }}-
-
-      - name: Install dependencies
-        run: npm ci
-
-      # Play rejects a versionCode it has seen before, and app.json pins it at
-      # 1 forever. The run number only ever increases, so every build is
-      # uploadable without anyone remembering to bump a file.
-      - name: Stamp versionCode from the run number
+            gradle-redesign-preview-
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Check application types before native compilation
+        run: npx --no-install tsc --noEmit
+      - name: Configure requested installation and version
+        env:
+          PREVIEW: ${{ inputs.preview }}
         run: |
-          node -e "
-            const fs = require('fs');
-            const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
-            app.expo.android = app.expo.android || {};
-            app.expo.android.versionCode = Number(process.env.GITHUB_RUN_NUMBER);
-            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
-            console.log('versionCode =', app.expo.android.versionCode);
-          "
-
-      - name: Generate native Android project
-        run: npx expo prebuild --platform android --no-install
-
-      # Expo's generated 512 MiB metaspace cap exhausted during
-      # :expo-updates:kspReleaseKotlin. Give class metadata room and fail
-      # immediately on OOM instead of hanging until the job timeout.
-      - name: Configure Android compiler memory
-        run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const file = 'android/gradle.properties';
-          let contents = fs.readFileSync(file, 'utf8');
-          const properties = {
-            'org.gradle.jvmargs': '-Xmx3072m -XX:MaxMetaspaceSize=2048m -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8',
-            'org.gradle.workers.max': '2',
-          };
-          for (const [key, value] of Object.entries(properties)) {
-            contents = contents.split('\n').filter(line => !line.startsWith(key + '=')).join('\n').trimEnd();
-            contents += '\n' + key + '=' + value + '\n';
+          node <<'JS'
+          const fs=require('fs');
+          const c=JSON.parse(fs.readFileSync('app.json','utf8'));
+          c.expo.android.versionCode=Number(process.env.GITHUB_RUN_NUMBER);
+          const preview=process.env.PREVIEW==='true';
+          if(preview){
+            if(c.expo.android.package!=='app.wafra.android') throw new Error('Unexpected source package');
+            c.expo.name='Wafra Preview'; c.expo.scheme='wafra-preview';
+            c.expo.android.package='app.wafra.android.preview';
+            c.expo.updates={...c.expo.updates,enabled:false,checkAutomatically:'NEVER',requestHeaders:{'expo-channel-name':'preview'}};
           }
-          fs.writeFileSync(file, contents);
-          console.log('Android compiler memory: 3 GiB heap, 2 GiB metaspace, 2 workers; OOM exits immediately.');
-          NODE
-
-      # The one build setting that fails SILENTLY and INVISIBLY.
-      #
-      # `PRAGMA key` on a plain SQLite build is an unrecognised pragma, and
-      # SQLite ignores unrecognised pragmas WITHOUT ERROR. So a build without
-      # SQLCipher does not crash, does not warn, and does not fail a single
-      # test — it writes the user's entire bank ledger to disk in plaintext
-      # while every layer above believes it is encrypted. There is nothing at
-      # runtime that would tell us, and nothing in the JS tests that can.
-      #
-      # `android/` is gitignored and regenerated here, so the checked-in tree
-      # has no answer to check; this step runs immediately after prebuild
-      # because that is the first moment the real, generated value exists —
-      # and before Gradle, so a plaintext build is never produced at all.
-      # `expo.sqlite.useSQLCipher` is written by expo-sqlite's config plugin
-      # from the `useSQLCipher` prop in app.json.
-      - name: Verify SQLCipher survived prebuild
+          fs.writeFileSync('app.json',JSON.stringify(c,null,2)+'\n');
+          fs.writeFileSync('build-evidence/config.json',JSON.stringify({preview,name:c.expo.name,package:c.expo.android.package,version:c.expo.version,versionCode:c.expo.android.versionCode,updatesEnabled:c.expo.updates?.enabled!==false,demoData:false},null,2));
+          JS
+      - name: Generate native Android project
+        run: npx --no-install expo prebuild --platform android --no-install
+      - name: Require SQLCipher and configure compiler memory
         run: |
           set -euo pipefail
-          if [ ! -f android/gradle.properties ]; then
-            echo "::error::android/gradle.properties is missing after prebuild."
-            exit 1
-          fi
-          if ! grep -qxE 'expo\.sqlite\.useSQLCipher=true' android/gradle.properties; then
-            echo "::error::expo.sqlite.useSQLCipher=true is not in android/gradle.properties after prebuild. SQLCipher would not be compiled in, PRAGMA key would be silently ignored, and the ledger would be written in PLAINTEXT. Check the expo-sqlite plugin entry in app.json."
-            exit 1
-          fi
-          echo "### 🔐 SQLCipher enabled" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`expo.sqlite.useSQLCipher=true\` present in the generated Gradle properties." >> "$GITHUB_STEP_SUMMARY"
-
-      # Sign releases with the Play upload key. Required repo secrets:
-      #
-      #   WAFRA_KEYSTORE_B64        base64 of wafra-upload.jks (base64 -w0)
-      #   WAFRA_KEYSTORE_PASSWORD   its store password
-      #   WAFRA_KEY_PASSWORD        key password (optional; defaults to store)
-      #   WAFRA_KEY_ALIAS           key alias   (optional; defaults to wafra)
-      #
-      # Credentials reach Gradle as ORG_GRADLE_PROJECT_* properties, so they
-      # are never written into build.gradle or any other file in the
-      # workspace. Without the keystore secret a throwaway key is generated
-      # with a random per-run password so builds stay green; those APKs
-      # cannot update a side-loaded install (uninstall/reinstall) and cannot
-      # be uploaded to Play.
-      - name: Configure release signing
+          grep -qxE 'expo\.sqlite\.useSQLCipher=true' android/gradle.properties
+          echo 'SQLCipher enabled in generated native build' > build-evidence/sqlcipher.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/gradle.properties');s=p.read_text()
+          for k,v in {'org.gradle.jvmargs':'-Xmx3072m -XX:MaxMetaspaceSize=2048m -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8','org.gradle.workers.max':'2','org.gradle.caching':'true'}.items():
+              s='\n'.join(x for x in s.splitlines() if not x.startswith(k+'='))+'\n'+k+'='+v+'\n'
+          p.write_text(s)
+          PY
+      - name: Sign with the existing upload key, never a replacement key
         env:
           KEYSTORE_B64: ${{ secrets.WAFRA_KEYSTORE_B64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.WAFRA_KEYSTORE_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.WAFRA_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.WAFRA_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.WAFRA_KEY_ALIAS }}
         run: |
           set -euo pipefail
+          test -n "$KEYSTORE_B64" && test -n "$STORE_PASSWORD" || { echo '::error::Existing signing key required; refusing to create a non-upgradeable replacement.'; exit 1; }
+          printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > android/app/wafra-upload.jks
           alias_name="${KEY_ALIAS:-wafra}"
-
-          if [ -n "$KEYSTORE_B64" ]; then
-            if [ -z "$KEYSTORE_PASSWORD" ]; then
-              echo "::error::WAFRA_KEYSTORE_B64 is set but WAFRA_KEYSTORE_PASSWORD is not."
-              exit 1
-            fi
-            printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]' | base64 -d > android/app/wafra-upload.jks
-            store_password="$KEYSTORE_PASSWORD"
-            key_password="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
-            # Fail here with something actionable rather than deep inside Gradle.
-            if ! keytool -list -keystore android/app/wafra-upload.jks \
-                 -storepass "$store_password" -alias "$alias_name" >/dev/null 2>&1; then
-              echo "::error::Keystore did not open with WAFRA_KEYSTORE_PASSWORD, or it has no '$alias_name' alias. Check the secrets (WAFRA_KEY_ALIAS overrides the alias)."
-              exit 1
-            fi
-            echo "Signing with the upload keystore from secrets (alias: $alias_name)."
-            # Same fingerprint every run means every APK installs over the last.
-            # "|| true" matters: set -o pipefail turns a grep that matches
-            # nothing into a failed pipeline, which killed the whole build on
-            # a purely cosmetic line. keytool prints "Certificate fingerprint
-            # (SHA-256):", not "SHA256:", so the original grep never matched.
-            fp="$(keytool -list -v -keystore android/app/wafra-upload.jks -storepass "$store_password" -alias "$alias_name" 2>/dev/null | grep -i 'SHA256' | head -1 || true)"
-            echo "### ✅ Signed with the upload key" >> "$GITHUB_STEP_SUMMARY"
-            echo "Installs over the previous build. \`$fp\`" >> "$GITHUB_STEP_SUMMARY"
-          else
-            store_password="$(openssl rand -base64 24)"
-            key_password="$store_password"
-            echo "::add-mask::$store_password"
-            keytool -genkeypair -v -keystore android/app/wafra-upload.jks \
-              -alias "$alias_name" -keyalg RSA -keysize 2048 -validity 10000 \
-              -storepass "$store_password" -keypass "$key_password" \
-              -dname "CN=Wafra, OU=Wafra, O=Wafra, L=Dubai, C=AE"
-            echo "::warning::WAFRA_KEYSTORE_B64 not set - signed with a throwaway key."
-            # A log line is easy to miss, and missing it costs a reinstall on
-            # every single build: Android refuses an update whose signature
-            # changed, and this branch mints a new key each run.
-            {
-              echo "### ⚠️ Signed with a throwaway key"
-              echo
-              echo "\`WAFRA_KEYSTORE_B64\` is not set, so this run generated a new"
-              echo "signing key. **This APK cannot install over a previous one** —"
-              echo "Android will ask you to uninstall first — and it cannot be"
-              echo "uploaded to Play."
-              echo
-              echo "Fix once: set the \`WAFRA_KEYSTORE_B64\` and"
-              echo "\`WAFRA_KEYSTORE_PASSWORD\` repository secrets."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          # Gradle reads ORG_GRADLE_PROJECT_<name> as project property <name>.
+          key_password="${KEY_PASSWORD:-$STORE_PASSWORD}"
+          keytool -list -keystore android/app/wafra-upload.jks -storepass "$STORE_PASSWORD" -alias "$alias_name" >/dev/null 2>&1
           echo "::add-mask::$key_password"
           {
-            echo "ORG_GRADLE_PROJECT_wafraStorePassword=$store_password"
+            echo "ORG_GRADLE_PROJECT_wafraStorePassword=$STORE_PASSWORD"
             echo "ORG_GRADLE_PROJECT_wafraKeyPassword=$key_password"
             echo "ORG_GRADLE_PROJECT_wafraKeyAlias=$alias_name"
           } >> "$GITHUB_ENV"
-
-          cat >> android/app/build.gradle <<'EOG'
-
+          cat >> android/app/build.gradle <<'GRADLE'
           android {
-              signingConfigs {
-                  upload {
-                      storeFile file('wafra-upload.jks')
-                      storePassword project.property('wafraStorePassword')
-                      keyAlias project.property('wafraKeyAlias')
-                      keyPassword project.property('wafraKeyPassword')
-                  }
+            signingConfigs {
+              upload {
+                storeFile file('wafra-upload.jks')
+                storePassword project.property('wafraStorePassword')
+                keyPassword project.property('wafraKeyPassword')
+                keyAlias project.property('wafraKeyAlias')
               }
-              buildTypes {
-                  release {
-                      signingConfig signingConfigs.upload
-                  }
-              }
+            }
+            buildTypes { release { signingConfig signingConfigs.upload } }
           }
-          EOG
-
-      - name: Build release APK
+          GRADLE
+      - name: Compile standalone release APK
         working-directory: android
         env:
-          CORPUS_BUILD: ${{ github.event.inputs.corpus == 'true' && 'true' || 'false' }}
-          APK_ARCHITECTURE: ${{ github.event.inputs.architecture || 'universal' }}
+          PREVIEW: ${{ inputs.preview }}
+          CORPUS: ${{ inputs.corpus }}
+          ARCHITECTURE: ${{ inputs.architecture }}
         run: |
-          if [ "$CORPUS_BUILD" = "true" ] || [ "$APK_ARCHITECTURE" = "arm64" ]; then
-            ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+          set -euo pipefail
+          if [ "$PREVIEW" = true ]; then
+            ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon 2>&1 | tee ../build-evidence/gradle.log
+          elif [ "$CORPUS" = true ] || [ "$ARCHITECTURE" = arm64 ]; then
+            ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon 2>&1 | tee ../build-evidence/gradle.log
           else
-            ./gradlew assembleRelease --no-daemon
+            ./gradlew assembleRelease --no-daemon 2>&1 | tee ../build-evidence/gradle.log
           fi
-
-      # Only needed to upload to Play, which is not what most builds are for.
-      - name: Build Play Store bundle (AAB)
-        if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
+      - name: Optional Play bundle
+        if: inputs.bundle && !inputs.preview && !inputs.corpus
         working-directory: android
         run: ./gradlew bundleRelease --no-daemon
-
-      - name: Rename outputs
+      - name: Verify and prepare installer
+        env:
+          PREVIEW: ${{ inputs.preview }}
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk wafra.apk
-          if [ -f android/app/build/outputs/bundle/release/app-release.aab ]; then
-            cp android/app/build/outputs/bundle/release/app-release.aab wafra.aab
-          fi
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+          set -euo pipefail
+          mkdir -p installer
+          if [ "$PREVIEW" = true ]; then NAME=Wafra-Ledger-Light-Preview.apk; else NAME=wafra.apk; fi
+          cp android/app/build/outputs/apk/release/app-release.apk "installer/$NAME"
+          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$TOOLS/apksigner" verify --verbose --print-certs "installer/$NAME" > installer/signature.txt
+          "$TOOLS/zipalign" -c -P 16 -v 4 "installer/$NAME" > build-evidence/alignment.txt
+          "$TOOLS/aapt" dump badging "installer/$NAME" > installer/badging.txt
+          ! grep -q application-debuggable installer/badging.txt
+          if [ "$PREVIEW" = true ]; then grep -q "package: name='app.wafra.android.preview'" installer/badging.txt; fi
+          unzip -l "installer/$NAME" | grep 'assets/index.android.bundle' > build-evidence/bundle.txt
+          cp build-evidence/config.json build-evidence/source-commit.txt build-evidence/sqlcipher.txt installer/
+          (cd installer && sha256sum "$NAME" > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.corpus == 'true' && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
-          path: wafra.apk
+          name: ${{ inputs.preview && 'wafra-ledger-light-preview' || inputs.corpus && 'wafra-sms-corpus-apk' || 'wafra-apk' }}
+          path: installer/
           retention-days: 30
-
-      - name: Upload Play bundle artifact
-        if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        if: inputs.bundle && !inputs.preview && !inputs.corpus
         with:
           name: wafra-aab
-          path: wafra.aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
           retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: android-build-evidence, path: build-evidence/, retention-days: 7}
+
+  preview-smoke:
+    if: inputs.preview
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: wafra-ledger-light-preview, path: installer}
+      - name: Verify installer checksum
+        run: cd installer && sha256sum -c SHA256SUMS
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and inspect the standalone native app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            mkdir -p native-evidence
+            adb install installer/Wafra-Ledger-Light-Preview.apk > native-evidence/install.txt
+            adb logcat -c
+            adb shell am start -W -n app.wafra.android.preview/.MainActivity > native-evidence/launch.txt
+            sleep 20
+            adb shell uiautomator dump /sdcard/window.xml
+            adb pull /sdcard/window.xml native-evidence/onboarding.xml
+            adb exec-out screencap -p > native-evidence/onboarding.png
+            adb logcat -d > native-evidence/logcat.txt
+            adb shell pidof app.wafra.android.preview > native-evidence/pid.txt
+            grep -q 'Start tracking' native-evidence/onboarding.xml
+            ! grep -E 'FATAL EXCEPTION|Fatal signal|ReactNativeJS:.*(TypeError:|ReferenceError:|Invariant Violation)' native-evidence/logcat.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: ledger-light-native-smoke, path: native-evidence/, retention-days: 7}
+
+  publish-preview:
+    if: inputs.preview && inputs.publish_preview
+    needs: [build, preview-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: wafra-ledger-light-preview, path: installer}
+      - name: Publish the verified installer as a prerelease, not a store release
+        env:
+          REPO: ${{ github.repository }}
+          SOURCE: ${{ github.sha }}
+          NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          (cd installer && sha256sum -c SHA256SUMS)
+          test "$(cat installer/source-commit.txt)" = "$SOURCE"
+          TAG="android-ledger-light-preview-$NUMBER"
+          printf '%s\n' '# Wafra Preview — Ledger & Light' '' 'Original Claude paper/charcoal design, W-arrow logo, monetary typography and clear SMS-import status.' 'Android tab springs removed; inactive tabs frozen; intermediate counters do not write the ledger.' '' 'Installs as Wafra Preview, separately from production Wafra. Existing preview data can update only when the signing certificate matches. Do not uninstall to resolve a signature error.' 'No demo data and no production OTA updates. Native release compilation, signing checks and initial emulator launch passed.' 'Internal preview only. Full physical-phone SMS throughput and extended native interactions are not certified. Existing broader browser and iOS baseline failures are recorded separately; no security check is waived.' '' "Source: $SOURCE" "Build: https://github.com/$REPO/actions/runs/$GITHUB_RUN_ID" > notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$SOURCE" --title "Wafra Preview $NUMBER — Ledger & Light" --notes-file notes.md --prerelease --draft --latest=false
+          gh release upload "$TAG" --repo "$REPO" installer/Wafra-Ledger-Light-Preview.apk installer/SHA256SUMS installer/source-commit.txt installer/config.json installer/signature.txt
+          gh release view "$TAG" --repo "$REPO" --json assets > assets.json
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          p=pathlib.Path('installer/Wafra-Ledger-Light-Preview.apk');d=hashlib.sha256(p.read_bytes()).hexdigest()
+          assets=json.load(open('assets.json'))['assets'];a=next(a for a in assets if a['name']==p.name)
+          assert a['size']==p.stat().st_size
+          print('Verified uploaded installer size; local checksum',d)
+          PY
+          gh release edit "$TAG" --repo "$REPO" --draft=false --prerelease --latest=false
+          echo "https://github.com/$REPO/releases/download/$TAG/Wafra-Ledger-Light-Preview.apk" >> "$GITHUB_STEP_SUMMARY"
