@@ -21,11 +21,8 @@ type HistoryScanPage = ScanResult & HistoryImportPage;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
- *
- * Android can suspend JavaScript after the app leaves the foreground, so this
- * deliberately promises durable resume rather than uninterrupted background
- * execution. Each provider page and its cursor land in the encrypted ledger
- * together; a foreground return continues from that exact boundary.
+ * Provider pages and their cursors are durably committed together. A return
+ * to the foreground resumes at that boundary, never by replaying all history.
  */
 export function useHistoryImport(): void {
   const {
@@ -77,8 +74,21 @@ export function useHistoryImport(): void {
         if (!setMarket(page.detectedLaunchMarket)) throw new Error('market_mismatch');
       }
 
-      const reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
-      await reviewReceipt.durable;
+      // stageReviewAlerts([], ..., []) is NOT free: the store calls
+      // ensureDurable() and encrypts/saves the complete previous ledger. The
+      // importBatch below already saves that state plus this page and cursor.
+      // Skip only the genuinely empty stage. Identity bindings still require
+      // staging even when no candidate is present, and a real review must be
+      // durable before planning against the resulting ledger snapshot.
+      if (page.reviewCandidates.length > 0 || (page.reviewSourceBindings?.length ?? 0) > 0) {
+        const reviewReceipt = stageReviewAlerts(page.reviewCandidates, undefined, page.reviewSourceBindings);
+        await reviewReceipt.durable;
+      }
+
+      // Resolving promises does not give pending UI/input work a macrotask.
+      // Separate parsing/review from the synchronous planning/reducer work.
+      // This is cooperative scheduling, not a claim of off-thread parsing.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (!canCommit()) return false;
       const ledger = page.detectedLaunchMarket
         ? { ...getStateSnapshot(), marketId: page.detectedLaunchMarket }
@@ -90,9 +100,8 @@ export function useHistoryImport(): void {
         historyImport: next,
       }).durable;
       markLaunchPhase('first-history-page');
-      // The page is already durable at this point. If capture was disabled or
-      // the app left foreground during that write, leave transient native rows
-      // unacknowledged so the ordinary scanner can safely replay/dedupe them.
+      // Never acknowledge transient native rows before the ledger write.
+      // A pause during persistence leaves them available for safe replay.
       if (canCommit()) await page.commit();
       return true;
     },
@@ -111,8 +120,8 @@ export function useHistoryImport(): void {
   useEffect(() => {
     if (!runnable || Platform.OS !== 'android') return;
     void coordinator.run().catch(() => {
-      // The coordinator has already persisted the body-free failed state.
-      // Home and Settings own the visible retry action.
+      // The coordinator has persisted a body-free failure. Home and Settings
+      // own recovery; a failed cursor must not be marked complete to unblock UI.
     });
   }, [coordinator, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
 
