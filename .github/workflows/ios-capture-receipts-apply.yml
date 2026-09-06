@@ -21,6 +21,19 @@ jobs:
           node-version: 22.22.3
           cache: npm
       - run: python3 scripts/changes/apply-capture-receipts.py
+      - name: Add the real health module to the explicit test-fixture compile list
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import hashlib
+          p = Path('scripts/test/build.sh')
+          data = p.read_bytes()
+          assert hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest() == 'af07c140a8d67992fdf9c201024a3320bc00af7f'
+          before = 'ios-bank-senders.generated ios-bank-senders local-message-record ios-local-capture; do'
+          text = data.decode()
+          assert text.count(before) == 1
+          p.write_text(text.replace(before, 'ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture; do'))
+          PY
       - run: npm ci
       - run: npm --prefix server ci
       - run: npx expo prebuild --platform ios --no-install
@@ -62,10 +75,8 @@ jobs:
         run: |
           set -euo pipefail
           xcrun simctl list runtimes --json > "$RUNNER_TEMP/runtimes.json"
-          xcrun simctl list devicetypes --json > "$RUNNER_TEMP/device-types.json"
           runtime=$(python3 -c 'import json,os; a=[r for r in json.load(open(os.environ["RUNNER_TEMP"]+"/runtimes.json"))["runtimes"] if r.get("isAvailable") and ".iOS-" in r["identifier"]]; print(sorted(a,key=lambda r:tuple(int(v) for v in r["version"].split(".")))[-1]["identifier"])')
-          device_type=$(python3 -c 'import json,os; a=[d for d in json.load(open(os.environ["RUNNER_TEMP"]+"/device-types.json"))["devicetypes"] if d["name"].startswith("iPhone")]; print(a[-1]["identifier"])')
-          device=$(xcrun simctl create WafraCaptureReceiptTests "$device_type" "$runtime")
+          device=$(xcrun simctl create WafraCaptureReceiptTests com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$runtime")
           trap 'xcrun simctl shutdown "$device" >/dev/null 2>&1 || true; xcrun simctl delete "$device" >/dev/null 2>&1 || true' EXIT
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
@@ -94,8 +105,19 @@ jobs:
           test "$GITHUB_REF_NAME" = 'work/ios-guided-onboarding'
           test "$(git ls-remote origin refs/heads/work/ios-guided-onboarding | cut -f1)" = "$GITHUB_SHA"
           python3 scripts/changes/apply-capture-receipts.py
+          python3 <<'PY'
+          from pathlib import Path
+          import hashlib
+          p = Path('scripts/test/build.sh')
+          data = p.read_bytes()
+          assert hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest() == 'af07c140a8d67992fdf9c201024a3320bc00af7f'
+          before = 'ios-bank-senders.generated ios-bank-senders local-message-record ios-local-capture; do'
+          text = data.decode()
+          assert text.count(before) == 1
+          p.write_text(text.replace(before, 'ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture; do'))
+          PY
           git diff --check
-          git add modules/wafra-live-capture/ios/Tests/WafraLiveCaptureBridgeBehaviorTests.swift modules/wafra-live-capture/ios/Tests/WafraLiveCaptureStoreStub.swift modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift modules/wafra-live-capture/src/WafraLiveCapture.types.ts scripts/test/ios-capture-setup.test.js scripts/test/ios-setup-ux.test.js src/app/ios-setup.tsx src/components/ios-message-setup/setup-journey.tsx src/hooks/use-auto-import.ts src/lib/ios-capture-setup.ts src/lib/ios-local-capture.ts
+          git add modules/wafra-live-capture/ios/Tests/WafraLiveCaptureBridgeBehaviorTests.swift modules/wafra-live-capture/ios/Tests/WafraLiveCaptureStoreStub.swift modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift modules/wafra-live-capture/src/WafraLiveCapture.types.ts scripts/test/build.sh scripts/test/ios-capture-setup.test.js scripts/test/ios-setup-ux.test.js src/app/ios-setup.tsx src/components/ios-message-setup/setup-journey.tsx src/hooks/use-auto-import.ts src/lib/ios-capture-setup.ts src/lib/ios-local-capture.ts
           git rm scripts/changes/apply-capture-receipts.py .github/workflows/ios-capture-receipts-apply.yml .github/workflows/ios-guided-source-evidence.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
