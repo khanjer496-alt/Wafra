@@ -1,0 +1,78 @@
+name: Offline validation environment
+
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/offline-validation-environment.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      npm_config_cache: ${{ runner.temp }}/wafra-npm-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+      - name: Match the pinned npm version
+        run: npm install --global npm@10.9.8 --no-audit --no-fund
+      - name: Install exact application and server dependencies
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+      - name: Generate the existing iOS contract fixtures
+        run: npx --no-install expo prebuild --platform ios --no-install
+      - name: Package a credential-free offline environment
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/wafra-offline"
+          mkdir -p "$OUT"
+          git archive --format=tar HEAD | gzip -1 > "$OUT/source.tar.gz"
+          tar -czf "$OUT/dependencies.tar.gz" node_modules server/node_modules
+          tar -czf "$OUT/generated-ios.tar.gz" ios
+          NODE_ROOT="$(dirname "$(dirname "$(command -v node)")")"
+          tar -czf "$OUT/toolchain.tar.gz" -C "$NODE_ROOT" bin/node bin/npm bin/npx lib/node_modules/npm
+          tar -czf "$OUT/npm-cache.tar.gz" -C "$npm_config_cache" _cacache
+          {
+            echo "source_sha=$(git rev-parse HEAD)"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            sha256sum package-lock.json server/package-lock.json
+          } > "$OUT/manifest.txt"
+          (cd "$OUT" && sha256sum *.tar.gz > SHA256SUMS)
+          du -h "$OUT"/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-offline-source-toolchain
+          path: |
+            ${{ runner.temp }}/wafra-offline/source.tar.gz
+            ${{ runner.temp }}/wafra-offline/generated-ios.tar.gz
+            ${{ runner.temp }}/wafra-offline/toolchain.tar.gz
+            ${{ runner.temp }}/wafra-offline/manifest.txt
+            ${{ runner.temp }}/wafra-offline/SHA256SUMS
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-offline-dependencies
+          path: ${{ runner.temp }}/wafra-offline/dependencies.tar.gz
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-offline-npm-cache
+          path: ${{ runner.temp }}/wafra-offline/npm-cache.tar.gz
+          compression-level: 0
+          retention-days: 1
