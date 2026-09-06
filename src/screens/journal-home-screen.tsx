@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
   period: { minHeight: 48, paddingHorizontal: 12, gap: 8, flexDirection: 'row', alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: 24 },
   spread: { paddingTop: 12, paddingBottom: 14, gap: 10 },
   eyebrow: { letterSpacing: 0.5 },
-  net: { fontSize: 48, lineHeight: 58, letterSpacing: -1.5 },
+  net: { paddingVertical: 2 },
   facts: { flexDirection: 'row', gap: 28, marginTop: 16 },
   factsLarge: { flexDirection: 'column', gap: 16 },
   fact: { flex: 1, minHeight: 56, borderStartWidth: 2, paddingStart: 14, gap: 6 },
