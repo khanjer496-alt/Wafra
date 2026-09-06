@@ -1,0 +1,28 @@
+name: Validation system tools
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/validation-system-tools.yml']
+permissions:
+  contents: read
+jobs:
+  sqlite:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Install and package SQLite tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y sqlite3
+          mkdir -p "$RUNNER_TEMP/tools/bin" "$RUNNER_TEMP/tools/lib"
+          cp "$(command -v sqlite3)" "$RUNNER_TEMP/tools/bin/sqlite3"
+          cp -L /usr/lib/x86_64-linux-gnu/libsqlite3.so.0 "$RUNNER_TEMP/tools/lib/"
+          sqlite3 --version > "$RUNNER_TEMP/tools/sqlite-version.txt"
+          tar -czf "$RUNNER_TEMP/sqlite-tools.tar.gz" -C "$RUNNER_TEMP/tools" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-sqlite-validation-tools
+          path: ${{ runner.temp }}/sqlite-tools.tar.gz
+          retention-days: 1
+          compression-level: 0
