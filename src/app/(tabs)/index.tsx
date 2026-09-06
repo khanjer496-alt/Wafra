@@ -1,1 +1,1 @@
-export { default } from '@/screens/ledger-home-screen';
+export { default } from '@/screens/journal-home-screen';
