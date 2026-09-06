@@ -1,0 +1,205 @@
+name: One-time repair of browser contracts
+
+on:
+  push:
+    branches:
+      - repair/android-journal-redesign
+    paths:
+      - .github/workflows/repair-e2e-contracts-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/android-journal-redesign
+          fetch-depth: 0
+
+      - name: Align browser checks with the journal UI
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+          files = [
+              root / 'scripts/e2e/e2e-smoke.mjs',
+              root / 'scripts/e2e/e2e-navigation.mjs',
+              root / 'scripts/e2e/capture.mjs',
+          ]
+
+          for path in files:
+              text = path.read_text()
+              text = text.replace("tapTab(page, 'Flow')", "tapTab(page, 'Spending')")
+              text = text.replace("tapTab(page, 'Wallet')", "tapTab(page, 'Accounts')")
+              text = text.replace("tapKey(page, 'Flow'", "tapKey(page, 'Spending'")
+              text = text.replace("tapKey(page, 'Wallet'", "tapKey(page, 'Accounts'")
+              text = text.replace("['Home', 'Flow', 'Bills', 'Wallet']", "['Home', 'Spending', 'Bills', 'Accounts']")
+              text = text.replace("['Flow', 'Bills', 'Wallet']", "['Spending', 'Bills', 'Accounts']")
+              text = text.replace(
+                  "['home', 'Home'], ['flow', 'Flow'], ['bills', 'Bills'], ['wallet', 'Wallet']",
+                  "['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']",
+              )
+              text = text.replace("['flow', 'Flow']", "['flow', 'Spending']")
+              text = text.replace("['wallet', 'Wallet']", "['wallet', 'Accounts']")
+              text = text.replace("label: 'Flow'", "label: 'Spending'")
+              text = text.replace("label: 'Wallet'", "label: 'Accounts'")
+              path.write_text(text)
+
+          smoke = root / 'scripts/e2e/e2e-smoke.mjs'
+          text = smoke.read_text()
+          old = r'''ok('home lists what leaves next', !!(await visibleText(page, /LEAVING IN \d+ DAYS/i)));
+          ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
+
+          // "Leaving in N days" prints one total over three rows and a remainder. The
+          // total covers the whole list, so the column only reconciles if the rows plus
+          // the "+N more" figure come back to it — the bug this replaced showed AED
+          // 70,976 over rows adding to 15,785 with nothing to say where the rest was.
+          {
+            // The presence check above scrolls "All activity" into view after checking
+            // this section. Bring the heading back before reading viewport-only painted
+            // text, or a valid section just above the fold is reported as missing.
+            await visibleText(page, /leaving in \d+ days/i);
+            const t = await paintedText(page);
+            const head = t.find((x) => /leaving in \d+ days/i.test(x.t));
+            if (!head) {
+              ok('home: leaving-soon total equals its rows', false);
+            } else {
+              const total = money(t.find((x) => Math.abs(x.y - head.y) < 8 && /^AED/.test(x.t))?.t ?? '');
+              // Between this heading and the next section. Only bare figures count: the
+              // dates beside them ("25 Jul · 1 day late") are not money.
+              const next = t.find((x) => x.y > head.y + 20 && /recent activity/i.test(x.t));
+              const limit = next ? next.y : Infinity;
+              const figures = t
+                .filter((x) => x.y > head.y + 12 && x.y < limit && /^[\d,]+$/.test(x.t))
+                .map((x) => money(x.t));
+              const sum = figures.reduce((a, b) => a + b, 0);
+              ok(`home: leaving-soon total equals its rows plus the remainder (${total} vs ${sum})`,
+                Number.isFinite(total) && total === sum);
+            }
+          }
+          '''
+          new = r'''ok('home lists upcoming obligations', !!(await visibleText(page, /^COMING UP$/i)));
+          ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
+
+          // The journal Home no longer invents one aggregate for unlike obligations.
+          // Every visible payment row states its own date and exact amount. Read those
+          // rows from the accessibility contract and verify that the same amount is
+          // painted in the row, catching clipping or mismatched money without coupling
+          // the check to the retired card composition.
+          {
+            const payments = await page.evaluate(() => {
+              const section = document.querySelector('[data-testid="journal-payments"]');
+              if (!section) return [];
+              return [...section.querySelectorAll('[role="button"][aria-label$=" AED"]')].map((node) => ({
+                label: node.getAttribute('aria-label') || '',
+                text: (node.textContent || '').replace(/\s+/g, ''),
+              }));
+            });
+            const sound = payments.every(({ label, text }) => {
+              const match = label.match(/, ([\d,]+(?:\.\d{1,2})?) AED$/);
+              return !!match && text.includes(match[1].replace(/\s+/g, ''));
+            });
+            ok(`home: every upcoming payment keeps its date and exact amount (${payments.length} rows)`,
+              payments.length > 0 && sound);
+          }
+          '''
+          if old not in text:
+              raise SystemExit('Home obligations block did not match expected source')
+          text = text.replace(old, new)
+
+          old = r'''const firstEntry = await page.evaluate(() => {
+            const heads = [...document.querySelectorAll('*')].filter(
+              (n) => n.children.length === 0 && /^recent activity$/i.test((n.textContent || '').trim()),
+            );
+            if (!heads.length) return null;
+            const y = heads[0].getBoundingClientRect().bottom;
+            const leaves = [...document.querySelectorAll('*')]
+              .filter((n) => n.children.length === 0 && (n.textContent || '').trim())
+              .map((n) => ({ t: n.textContent.trim(), r: n.getBoundingClientRect() }))
+              .filter((x) => x.r.top > y && x.r.width > 0)
+              .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
+            const meta = leaves.find((x) => / · /.test(x.t));
+            if (!meta) return null;
+            // A row's title sits directly above its "Category · Account" meta line IN
+            // THE SAME COLUMN. The column part is not decoration: when a merchant has
+            // no logo the icon tile shows its initials as text ("en" for ENOC Fuel),
+            // and that tile sits lower than the title, so "the leaf directly above the
+            // meta line" returned the monogram. The suite then tapped a two-letter
+            // string that matched eight elements, opened nothing, and died looking for
+            // EDIT ENTRY — a failure that said nothing about the app.
+            const title = leaves
+              .filter((x) => x.r.top < meta.r.top && Math.abs(x.r.left - meta.r.left) < 4)
+              .pop();
+            if (!title) return null;
+            // "Category · Account" and "Category · Account · 14:32" both exist — the
+            // account is always the second field, never the last one.
+            return { title: title.t, account: meta.t.split(' · ')[1] };
+          });
+          ok('home lists an entry to open', !!firstEntry?.title);
+          await tapText(page, firstEntry.title, 1200);
+          '''
+          new = r'''const firstEntry = await page.evaluate(() => {
+            const section = document.querySelector('[data-testid="journal-activity"]');
+            const row = [...(section?.querySelectorAll('[role="button"][aria-label]') ?? [])].find(
+              (node) => /, (?:plus|minus) [\d,.]+ AED$/i.test(node.getAttribute('aria-label') || ''),
+            );
+            if (!row) return null;
+            const label = row.getAttribute('aria-label') || '';
+            const parts = label.split(', ');
+            return { label, title: parts[0] || '', account: parts[2] || '' };
+          });
+          ok('home lists an entry to open', !!firstEntry?.title && !!firstEntry?.label);
+          if (!firstEntry) throw new Error('Home rendered no accessible journal transaction row');
+          await tapLabel(page, firstEntry.label, 1200);
+          '''
+          if old not in text:
+              raise SystemExit('Home first-entry block did not match expected source')
+          text = text.replace(old, new)
+          text = text.replace(
+              "ok('flow titles the screen', !!(await visibleText(page, /^Flow$/)));",
+              "ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));",
+          )
+          text = text.replace('/Subs \\d/i', '/Recurring \\d/i')
+          text = text.replace("bills segments subs, cards and fixed", "bills segments recurring, cards and fixed")
+          smoke.write_text(text)
+
+          navigation = root / 'scripts/e2e/e2e-navigation.mjs'
+          text = navigation.read_text()
+          old = "await pressEverything('bills · fixed', async () => { await bills(); await tapKey(page, 'Fixed 6'); await page.waitForTimeout(700); });"
+          new = """await pressEverything('bills · fixed', async () => {
+            await bills();
+            const fixed = (await visibleControls(page)).find((key) => /^Fixed \\d+$/.test(key));
+            if (!fixed || (await tapKey(page, fixed, 5000)) !== true) throw new Error('Fixed bills segment not found');
+            await page.waitForTimeout(700);
+          });"""
+          if old not in text:
+              raise SystemExit('Fixed-segment entry did not match expected source')
+          text = text.replace(old, new)
+          text = text.replace("['flow', 'التدفق']", "['flow', 'الإنفاق']")
+          text = text.replace("['wallet', 'المحفظة']", "['wallet', 'الحسابات']")
+          navigation.write_text(text)
+          PY
+
+          node --check scripts/e2e/e2e-smoke.mjs
+          node --check scripts/e2e/e2e-period.mjs
+          node --check scripts/e2e/e2e-navigation.mjs
+          node --check scripts/e2e/capture.mjs
+          git diff --check
+
+      - name: Commit the repaired contracts
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo 'No changes were needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/e2e/e2e-smoke.mjs scripts/e2e/e2e-period.mjs scripts/e2e/e2e-navigation.mjs scripts/e2e/capture.mjs
+          git commit -m 'Align browser contracts with journal redesign'
+          git push origin HEAD:repair/android-journal-redesign
