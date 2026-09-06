@@ -228,6 +228,7 @@ export async function reviewCaptureIdentity(
   observedAt: number,
   channel: CaptureChannel,
   databaseKey: string,
+  digestString: (data: string) => Promise<string> = sha256,
 ): Promise<{ id: string; sourceKey: string; templateKey: string } | null> {
   if (!/^[0-9a-f]{64}$/i.test(databaseKey)) return null;
   const material = [
@@ -236,11 +237,11 @@ export async function reviewCaptureIdentity(
     bodyPrint(sender.normalize('NFKC')),
     bodyPrint(source.normalize('NFKC')),
   ].join('\u0000');
-  const identityKey = await sha256(`${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`);
-  const digest = await sha256(`${identityKey}\u0000${material}`);
+  const identityKey = await digestString(`${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`);
+  const digest = await digestString(`${identityKey}\u0000${material}`);
   const template = normalizeUnparsedLaunchTemplate(source);
-  const templateIdentityKey = await sha256(`${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`);
-  const templateDigest = await sha256([
+  const templateIdentityKey = await digestString(`${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`);
+  const templateDigest = await digestString([
     templateIdentityKey,
     bodyPrint(sender.normalize('NFKC')),
     template,
@@ -251,6 +252,34 @@ export async function reviewCaptureIdentity(
     id: `ari1_${digest}`,
     templateKey: `art1_${templateDigest}`,
   };
+}
+
+/**
+ * Reuse only the two key derivations within ONE inbox scan. All source and
+ * template fingerprints still run independently and remain byte-identical.
+ * Nothing is cached at module scope, so a later scan/erase cannot reuse keys.
+ * The cache admits exactly two constant inputs, never SMS bodies or senders.
+ */
+export function createReviewIdentitySession(databaseKey: string) {
+  const permitted = new Set([
+    `${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`,
+    `${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`,
+  ]);
+  const derivations = new Map<string, Promise<string>>();
+  const digestString = (data: string): Promise<string> => {
+    if (!permitted.has(data)) return sha256(data);
+    const cached = derivations.get(data);
+    if (cached) return cached;
+    const pending = sha256(data);
+    derivations.set(data, pending);
+    // Do not poison a scan's retry after a transient native-crypto failure.
+    void pending.catch(() => {
+      if (derivations.get(data) === pending) derivations.delete(data);
+    });
+    return pending;
+  };
+  return (source: string, sender: string, observedAt: number, channel: CaptureChannel) =>
+    reviewCaptureIdentity(source, sender, observedAt, channel, databaseKey, digestString);
 }
 
 type KeyedReviewIdentity = NonNullable<Awaited<ReturnType<typeof reviewCaptureIdentity>>>;
@@ -425,6 +454,16 @@ export async function scanInbox(
     databaseKeyPromise ??= SecureStore.getItemAsync(DATABASE_KEY_NAME);
     return databaseKeyPromise;
   };
+  // Create lazily: a normal parsed/ignored message never requests key access.
+  let identitySession: ReturnType<typeof createReviewIdentitySession> | null = null;
+  const identifyCapture = async (
+    source: string, sender: string, observedAt: number, channel: CaptureChannel,
+  ) => {
+    const key = await databaseKey();
+    if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
+    identitySession ??= createReviewIdentitySession(key);
+    return identitySession(source, sender, observedAt, channel);
+  };
   const declined: DeclinedSms[] = [];
   const notificationIds = new Set<string>();
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
@@ -463,9 +502,7 @@ export async function scanInbox(
       return false;
     }
     if (decision.kind === 'ignored') return false;
-    const key = await databaseKey();
-    if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
-    const legacyIdentity = await reviewCaptureIdentity(body, sender, ts, channel, key);
+    const legacyIdentity = await identifyCapture(body, sender, ts, channel);
     if (!legacyIdentity) throw new ReviewIdentityError('Encrypted review identity is invalid');
     // Keep exact old/new tuples only when the ledger requested that old hash.
     const identity = await bindProviderReviewIdentity(legacyIdentity, sourceEventId);
@@ -579,9 +616,7 @@ export async function scanInbox(
         // row. Attest its old identity before planning, but do no extra source
         // hashing on the ordinary path when there are no old hashes to join.
         if (requestedLegacySources.size > 0) {
-          const key = await databaseKey();
-          if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
-          const legacy = await reviewCaptureIdentity(sms.body, sms.address, sms.date, 'inbox', key);
+          const legacy = await identifyCapture(sms.body, sms.address, sms.date, 'inbox');
           if (!legacy) throw new ReviewIdentityError('Encrypted review identity is invalid');
           if (requestedLegacySources.has(legacy.sourceKey)) {
             noteSourceBinding(legacy, await bindProviderReviewIdentity(legacy, sourceEventId), sms.date);
