@@ -1,0 +1,53 @@
+name: iOS Shortcuts release review
+
+# Owner-requested release review. Only this isolated branch triggers it.
+# No credentials, app content, or beta state is changed by these jobs.
+on:
+  push:
+    branches: [release/ios-shortcuts-review-20260907]
+    paths:
+      - '.github/workflows/ios-shortcuts-release-review.yml'
+      - 'scripts/release/ios-beta-access-check.mjs'
+      - 'scripts/release/ios-file-protection-probe.swift'
+permissions:
+  contents: read
+concurrency:
+  group: ios-shortcuts-release-review
+  cancel-in-progress: false
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Check existing Expo and Apple access without writing
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: node scripts/release/ios-beta-access-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta-access-${{ github.sha }}
+          path: ios-release-evidence/access.json
+          retention-days: 7
+  file-protection:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Isolate macOS file protection from the failing history tests
+        run: |
+          mkdir -p ios-release-evidence
+          swift scripts/release/ios-file-protection-probe.swift | tee ios-release-evidence/file-protection.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-file-protection-${{ github.sha }}
+          path: ios-release-evidence/file-protection.txt
+          retention-days: 7
