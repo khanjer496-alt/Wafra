@@ -1,0 +1,40 @@
+name: Repair web export evidence
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - '.github/workflows/repair-export.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: startsWith(github.head_ref, 'repair/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Export real app with synthetic demo ledger
+        env:
+          EXPO_PUBLIC_WAFRA_E2E_DEMO: '1'
+        run: npx expo export --clear --platform web --output-dir repair-web
+      - name: Package source revision and browser build
+        run: |
+          set -euo pipefail
+          mkdir -p repair-evidence
+          git rev-parse HEAD > repair-evidence/revision.txt
+          git archive --format=tar HEAD src scripts modules package.json package-lock.json app.json tsconfig.json | gzip > repair-evidence/source.tar.gz
+          tar -czf repair-evidence/web.tar.gz -C repair-web .
+          printf '%s\n' 'Real Expo web export, synthetic demo ledger. Not an Android APK or physical-device result.' > repair-evidence/SCOPE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-repair-web-${{ github.sha }}
+          path: repair-evidence/
+          retention-days: 7
