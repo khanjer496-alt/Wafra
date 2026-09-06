@@ -1,0 +1,145 @@
+name: Apply reviewed Ledger and Light restoration
+on:
+  push:
+    branches: ['restore/ledger-light-20260907']
+    paths: ['.github/workflows/apply-ledger-light.yml']
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: apply-ledger-light
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: restore/ledger-light-20260907
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - name: Apply checked plaintext edits to this current worktree
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:src)" = e5e3c18e279a1da5b8a89610f06c9cfc4a710836
+          mkdir -p /tmp/ledger-light-evidence
+          python3 - <<'PY'
+          import hashlib,json,pathlib,subprocess
+          root=pathlib.Path.cwd(); edits=[]
+          for n in range(1,6):
+              edits.extend(json.loads((root/f'scripts/maintenance/ledger-light-edits-{n}.json').read_text()))
+          assert len(edits)==30 and len({e['path'] for e in edits})==30
+          prepared=[]
+          for entry in edits:
+              name=entry['path'];p=root/name
+              assert p.resolve().is_relative_to(root) and not p.is_symlink()
+              assert name.startswith(('src/','scripts/test/repair/','docs/design/')) or name in ['app.json','scripts/render-icons.mjs','scripts/test/perf-config.test.js']
+              before=p.read_bytes() if p.exists() else b''
+              assert (hashlib.sha256(before).hexdigest() if p.exists() else None)==entry['before'], 'Current file differs: '+name
+              lines=before.decode().splitlines(keepends=True)
+              for change in reversed(entry['edits']):
+                  assert 0<=change['from']<=change['to']<=len(lines)
+                  lines[change['from']:change['to']]=[change['text']]
+              after=''.join(lines).encode()
+              assert hashlib.sha256(after).hexdigest()==entry['after'], 'Edit transport mismatch: '+name
+              prepared.append((p,after))
+          for p,data in prepared:
+              p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+          evidence=pathlib.Path('/tmp/ledger-light-evidence')
+          (evidence/'source-manifest.json').write_text(json.dumps({e['path']:e['after'] for e in edits},indent=2))
+          (evidence/'paths.json').write_text(json.dumps([e['path'] for e in edits]))
+          print('30 reviewed files applied to the current source. No parsing/storage code replaced.')
+          PY
+      - name: Install locked dependencies and real Chromium
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+          sudo apt-get update && sudo apt-get install -y sqlite3
+      - name: Generate original mark assets from source
+        run: node scripts/render-icons.mjs
+      - name: Typecheck, lint and focused regression checks
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee /tmp/ledger-light-evidence/typecheck.log
+          npm run lint 2>&1 | tee /tmp/ledger-light-evidence/lint.log
+          node --test scripts/test/repair/*.test.cjs scripts/test/workflows/*.test.cjs 2>&1 | tee /tmp/ledger-light-evidence/focused.log
+          git diff --check
+      - name: Commit normal source paths and remove temporary edit transport
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = restore/ledger-light-20260907
+          test "$(git remote get-url origin)" = https://github.com/khanjer496-alt/Wafra
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python3 - <<'PY'
+          import json,pathlib,subprocess
+          paths=json.loads(pathlib.Path('/tmp/ledger-light-evidence/paths.json').read_text())
+          icons=['icon.png','android-icon-foreground.png','android-icon-background.png','android-icon-monochrome.png','splash-icon.png','splash-icon-dark.png','favicon.png','wafra-mark.svg']
+          paths+=['assets/images/'+name for name in icons]
+          subprocess.run(['git','add','--',*paths],check=True)
+          cleanup=[f'scripts/maintenance/ledger-light-edits-{n}.json' for n in range(1,6)]+['.github/workflows/apply-ledger-light.yml']
+          subprocess.run(['git','rm','--',*cleanup],check=True)
+          # Preserve monetary, parser, storage, native permissions and dependency sources.
+          for path in ['modules','server','package.json','package-lock.json','src/lib/format.ts','src/lib/arabic-sms.ts','src/lib/store.tsx','src/lib/history-import.ts','src/lib/ledger.ts']:
+              subprocess.run(['git','diff','--cached','--exit-code','HEAD','--',path],check=True)
+          subprocess.run(['git','diff','--cached','--check'],check=True)
+          subprocess.run(['git','commit','-m','Restore original Ledger and Light design, W-arrow and truthful SMS status'],check=True)
+          subprocess.run(['git','push','origin','HEAD:refs/heads/restore/ledger-light-20260907'],check=True)
+          pathlib.Path('/tmp/ledger-light-evidence/committed-sha.txt').write_text(subprocess.check_output(['git','rev-parse','HEAD'],text=True))
+          PY
+          gh workflow run ci.yml --repo khanjer496-alt/Wafra --ref restore/ledger-light-20260907
+      - name: Export actual restored app for browser review
+        env:
+          EXPO_PUBLIC_WAFRA_E2E_DEMO: '1'
+        run: |
+          set -o pipefail
+          npx --no-install expo export --platform web --clear 2>&1 | tee /tmp/ledger-light-evidence/export.log
+      - name: Real rendered tabs in both themes
+        run: |
+          set -euo pipefail
+          node scripts/e2e/serve.mjs dist 8126 >/tmp/ledger-light-evidence/server.log 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          node --input-type=module <<'JS'
+          import {chromium} from 'playwright';
+          import fs from 'node:fs';
+          const out='/tmp/ledger-light-evidence';const browser=await chromium.launch();const errors=[];const results=[];
+          try {
+            for(const colorScheme of ['light','dark']){
+              const page=await browser.newPage({viewport:{width:390,height:844},colorScheme});
+              page.on('pageerror',error=>errors.push(String(error)));
+              await page.goto('http://127.0.0.1:8126/',{waitUntil:'networkidle'});
+              await page.waitForTimeout(1200);
+              for(const [name,label] of [['home','Home'],['spending','Spending'],['bills','Bills'],['accounts','Accounts']]){
+                await page.getByRole('tab',{name:label,exact:true}).click();
+                await page.waitForTimeout(700);
+                await page.screenshot({path:`${out}/${name}-${colorScheme}.png`});
+                const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
+                results.push({screen:name,theme:colorScheme,overflow});
+                fs.writeFileSync(`${out}/${name}-${colorScheme}.txt`,await page.locator('body').innerText());
+              }
+              await page.close();
+            }
+          }finally{await browser.close();fs.writeFileSync(out+'/browser-results.json',JSON.stringify({results,errors},null,2));}
+          if(errors.length||results.length!==8||results.some(r=>r.overflow))process.exit(1);
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-ledger-light-restoration-evidence
+          path: /tmp/ledger-light-evidence
+          retention-days: 14
