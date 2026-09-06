@@ -1,14 +1,13 @@
 name: iOS Shortcuts release review
 
-# Owner-requested release review. Only this isolated branch triggers it.
-# No credentials, app content, or beta state is changed by these jobs.
+# Read-only owner-requested checks on an isolated release-review branch.
 on:
   push:
     branches: [release/ios-shortcuts-review-20260907]
     paths:
       - '.github/workflows/ios-shortcuts-release-review.yml'
       - 'scripts/release/ios-beta-access-check.mjs'
-      - 'scripts/release/ios-file-protection-probe.swift'
+      - 'scripts/release/ios-public-shortcut-check.mjs'
 permissions:
   contents: read
 concurrency:
@@ -23,6 +22,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
+          cache: npm
+      - name: Install project config plugins before EAS reads config
+        run: npm ci
       - name: Check existing Expo and Apple access without writing
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -36,18 +38,19 @@ jobs:
           name: ios-beta-access-${{ github.sha }}
           path: ios-release-evidence/access.json
           retention-days: 7
-  file-protection:
-    runs-on: macos-15
+  shortcuts:
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Isolate macOS file protection from the failing history tests
-        run: |
-          mkdir -p ios-release-evidence
-          swift scripts/release/ios-file-protection-probe.swift | tee ios-release-evidence/file-protection.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Validate canonical and published graphs without executing them
+        run: node scripts/release/ios-public-shortcut-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-file-protection-${{ github.sha }}
-          path: ios-release-evidence/file-protection.txt
+          name: ios-public-shortcuts-${{ github.sha }}
+          path: ios-release-evidence/public-shortcuts.json
           retention-days: 7
