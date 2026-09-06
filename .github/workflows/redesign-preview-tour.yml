@@ -1,0 +1,58 @@
+name: Wafra preview native interaction tour
+on:
+  push:
+    branches: ['build/redesign-android-preview-20260907']
+    paths: ['.github/workflows/redesign-preview-tour.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  tour:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Await the exact requested preview artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 120); do
+            FOUND=$(gh api repos/khanjer496-alt/Wafra/actions/runs/34057932889/artifacts --jq '.artifacts[] | select(.name == "wafra-redesign-preview-apk") | .id')
+            if [ -n "$FOUND" ]; then echo "Exact preview artifact is ready: $FOUND"; exit 0; fi
+            STATE=$(gh api repos/khanjer496-alt/Wafra/actions/runs/34057932889 --jq '.status + ":" + (.conclusion // "pending")')
+            if [ "$STATE" = 'completed:failure' ] || [ "$STATE" = 'completed:cancelled' ]; then echo "Build ended without an APK: $STATE"; exit 1; fi
+            sleep 10
+          done
+          echo 'Requested APK was not produced within this job budget'; exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: wafra-redesign-preview-apk
+          run-id: 34057932889
+          github-token: ${{ github.token }}
+          path: apk
+      - name: Verify downloaded APK checksum
+        run: cd apk && sha256sum -c SHA256SUMS
+      - name: Enable emulator hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise exact release artifact without Metro
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: python3 validation/native-preview-tour.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-preview-native-interactions
+          path: native-tour-evidence/
+          retention-days: 7
