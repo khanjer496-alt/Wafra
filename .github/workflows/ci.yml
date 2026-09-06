@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: {node-version: '22.22.3', cache: npm}
-      - name: Apply reviewed plaintext edits to this current checkout, never an old snapshot
+      - name: Apply reviewed plaintext edits to the current checkout
         run: |
           python3 - <<'PY'
           import base64,hashlib,json,os,pathlib,subprocess
@@ -43,7 +43,10 @@ jobs:
           digest=lambda b:hashlib.sha256(b).hexdigest()
           for sha,expected in pairs:
             result=json.loads(subprocess.check_output(['gh','api','repos/khanjer496-alt/Wafra/git/blobs/'+sha]))
-            raw=base64.b64decode(result['content']);assert digest(raw)==expected,'Transport checksum mismatch'
+            raw=base64.b64decode(result['content'])
+            actual=digest(raw)
+            print('TRANSFER',sha,'bytes',len(raw),'expected',expected,'actual',actual,flush=True)
+            assert actual==expected,'Transport checksum mismatch: '+sha
             for change in json.loads(raw):
               path=change['path'];p=root/path
               assert not pathlib.PurePosixPath(path).is_absolute() and '..' not in pathlib.PurePosixPath(path).parts
@@ -61,16 +64,16 @@ jobs:
           assert len(paths)==34
           (tmp/'reviewed-paths.json').write_text(json.dumps(paths))
           (tmp/'reviewed-manifest.json').write_text(json.dumps(manifest,indent=2))
-          print('All 34 reviewed text files written to normal source/test paths; exact before/after checksums verified.')
+          print('All reviewed files written to normal paths with before/after checksums.')
           PY
-      - name: Install locked dependencies and browser for icon rendering
+      - name: Install locked dependencies and browser for icons
         run: |
           npm ci --no-audit --no-fund
           npm --prefix server ci --no-audit --no-fund
           npx --no-install playwright install --with-deps chromium
           sudo apt-get install -y sqlite3
           npx --no-install expo prebuild --platform ios --no-install
-      - name: Verify application, server, full suite and generated original-logo assets
+      - name: Verify types, lint, full tests and original-logo assets
         run: |
           set -euo pipefail
           npm run typecheck
@@ -78,7 +81,7 @@ jobs:
           npm test
           node scripts/render-icons.mjs
           git diff --check
-      - name: Commit normal source and remove this one-time transfer job
+      - name: Commit normal source and remove this temporary transfer job
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -87,7 +90,7 @@ jobs:
           for p,expected in json.loads((tmp/'reviewed-manifest.json').read_text()).items():
             assert hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()==expected,p
           paths += ['assets/images/'+name+'.png' for name in ['icon','android-icon-background','android-icon-foreground','android-icon-monochrome','splash-icon','splash-icon-dark','favicon']]
-          p=pathlib.Path('.github/workflows/ci.yml');s=p.read_text();start=s.index('  # BEGIN ONE-TIME SOURCE TRANSFER');end=s.index('  # END ONE-TIME SOURCE TRANSFER')+len('  # END ONE-TIME SOURCE TRANSFER\n');p.write_text(s[:start]+s[end:]);paths.append(str(p))
+          p=pathlib.Path('.github/workflows/ci.yml');s=p.read_text();a=s.index('  # BEGIN ONE-TIME SOURCE TRANSFER');b=s.index('  # END ONE-TIME SOURCE TRANSFER')+len('  # END ONE-TIME SOURCE TRANSFER\n');p.write_text(s[:a]+s[b:]);paths.append(str(p))
           subprocess.run(['git','add','--',*paths],check=True)
           subprocess.run(['git','diff','--cached','--check'],check=True)
           PY
@@ -97,7 +100,7 @@ jobs:
           git commit -m 'Restore Ledger & Light and isolate responsive SMS import status'
           git push origin HEAD:refs/heads/work/ledger-light-restore
           SOURCE=$(git rev-parse HEAD)
-          echo "Normal source commit: $SOURCE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source commit: $SOURCE" >> "$GITHUB_STEP_SUMMARY"
           gh workflow run build-apk.yml --repo khanjer496-alt/Wafra --ref work/ledger-light-restore -f preview=true -f publish_preview=true -f expected_commit="$SOURCE" -f architecture=arm64 -f bundle=false -f corpus=false
           gh workflow run ci.yml --repo khanjer496-alt/Wafra --ref work/ledger-light-restore
   # END ONE-TIME SOURCE TRANSFER
@@ -128,8 +131,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+    env: {PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -144,7 +146,7 @@ jobs:
       - name: Install relay dependencies
         working-directory: server
         run: npm ci
-      - name: Install the SQLite CLI required by schema tests
+      - name: Install schema-test SQLite CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Typecheck
         run: npm run typecheck
@@ -180,18 +182,17 @@ jobs:
           MAJOR=${VER%%.*}
           MINOR=$(printf '%s' "$VER" | cut -d. -f2)
           if [ "$MAJOR" -lt 26 ] || { [ "$MAJOR" -eq 26 ] && [ "$MINOR" -lt 2 ]; }; then
-            echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"
-            exit 1
+            echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"; exit 1
           fi
       - uses: actions/setup-node@v4
         with: {node-version: 22.22.3, cache: npm}
       - name: Install dependencies
         run: npm ci
-      - name: Generate the native iOS project
+      - name: Generate native iOS project
         run: npx expo prebuild --platform ios --no-install
       - name: Install CocoaPods dependencies
         run: npx pod-install
-      - name: Build and verify the protected history bridge and extracted App Intent metadata
+      - name: Verify protected history bridge and App Intent metadata
         run: |
           bash scripts/test/native-history-store.sh
           bash scripts/test/native-live-capture-store.sh
