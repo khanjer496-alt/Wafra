@@ -16,7 +16,7 @@ jobs:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-      npm_config_cache: ${{ runner.temp }}/wafra-npm-cache
+      npm_config_cache: /tmp/wafra-validation-npm-cache
     steps:
       - uses: actions/checkout@v4
         with:
