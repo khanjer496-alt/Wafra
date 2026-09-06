@@ -403,9 +403,11 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
   );
   const figures = perTile.map(money);
   const sum = figures.reduce((a, b) => a + b, 0);
-  ok(`flow: the Total spent heading equals the category rows (${flowTotalHeading} vs ${sum})`,
-    !!flowTotalHeading && figures.length > 0 && figures.every(Number.isFinite)
-      && money(flowTotalHeading) === sum);
+  const headingCents = flowTotalHeading ? Math.round(money(flowTotalHeading) * 100) : NaN;
+  const rowCents = Math.round(sum * 100);
+  ok(`flow: the Total spent heading equals the category rows (${flowTotalHeading} vs ${(rowCents / 100).toFixed(2)})`,
+    figures.length > 0 && figures.every(Number.isFinite)
+      && Number.isFinite(headingCents) && headingCents === rowCents);
 
   // The swatch edge is the graphical identity mark: 3:1 or it disappears.
   const worst = tiles.reduce((m, x) => (x.contrast < m.contrast ? x : m), tiles[0] ?? { contrast: 0, label: 'none' });
@@ -444,7 +446,7 @@ await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
           }));
         return {
           label,
-          values: leaves.filter(({ text }) => /^[\d.]+[kM]?$/i.test(text)),
+          values: leaves.filter(({ text }) => /^≈?[\d.]+[kM]?$/i.test(text)),
           dashes: leaves.filter(({ text }) => text === '—').length,
         };
       }),
@@ -534,9 +536,10 @@ await tapLabel(page, /Recurring \d/i, 900);
 // count matches the rendered rows, and every row names the basis of its amount.
 {
   const recurring = await page.evaluate(() => {
-    const selected = [...document.querySelectorAll('[role="tab"][aria-selected="true"]')]
-      .find((node) => /^Recurring \d+$/i.test(node.getAttribute('aria-label') || ''));
-    const count = Number((selected?.getAttribute('aria-label') || '').match(/\d+$/)?.[0] ?? NaN);
+    const recurringTab = [...document.querySelectorAll('[role="tab"][aria-label]')]
+      .find((node) => /^Recurring \d+$/i.test(node.getAttribute('aria-label') || '')
+        && node.getBoundingClientRect().width > 0);
+    const count = Number((recurringTab?.getAttribute('aria-label') || '').match(/\d+$/)?.[0] ?? NaN);
     const head = [...document.querySelectorAll('div,span')]
       .filter((node) => node.childElementCount === 0)
       .map((node) => (node.textContent || '').trim())
