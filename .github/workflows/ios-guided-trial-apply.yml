@@ -1,0 +1,72 @@
+name: Apply and validate guided iOS trial
+
+# Owner-requested changes, isolated from the live release. This one-use job
+# applies hash-checked edits to existing large files, validates the actual app,
+# commits normal source, and removes its own bootstrap files. No EAS/Apple access.
+on:
+  push:
+    branches: [work/ios-guided-onboarding]
+    paths:
+      - 'scripts/changes/apply-ios-guided-trial.mjs'
+      - '.github/workflows/ios-guided-trial-apply.yml'
+permissions:
+  contents: write
+concurrency:
+  group: ios-guided-trial-apply
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Apply only exact-source changes
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'work/ios-guided-onboarding'
+          test -z "$(git status --porcelain)"
+          node scripts/changes/apply-ios-guided-trial.mjs
+          git diff --check
+          mkdir -p trial-evidence
+          git diff --stat > trial-evidence/diff-stat.txt
+      - run: npm ci
+      - run: npm --prefix server ci
+      - name: Generate the existing native contract fixtures
+        run: npx expo prebuild --platform ios --no-install
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Focused journey and history prototype checks
+        run: |
+          set -euo pipefail
+          node scripts/test/ios-setup-ux.test.js | tee trial-evidence/setup-tests.txt
+          node --test scripts/test/ios-journey/*.test.cjs | tee trial-evidence/traversal-tests.txt
+      - name: Existing full regression suite
+        run: |
+          set -euo pipefail
+          npm test > trial-evidence/app-tests.txt 2>&1
+          tail -20 trial-evidence/app-tests.txt
+      - name: Save verified normal source without overwriting concurrent work
+        run: |
+          set -euo pipefail
+          remote=$(git ls-remote origin refs/heads/work/ios-guided-onboarding | cut -f1)
+          test "$remote" = "$GITHUB_SHA"
+          git diff --check
+          git add src/app/ios-setup.tsx src/lib/ios-message-onboarding.ts src/lib/ios-capture-setup.ts scripts/test/ios-setup-ux.test.js scripts/test/ios-setup-recovery.helpers.js
+          git rm scripts/changes/apply-ios-guided-trial.mjs .github/workflows/ios-guided-trial-apply.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(ios): guide history-first onboarding and require automation confirmation'
+          git rev-parse HEAD > trial-evidence/revision.txt
+          git push origin HEAD:refs/heads/work/ios-guided-onboarding
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-guided-trial-evidence
+          path: trial-evidence/
+          retention-days: 7
