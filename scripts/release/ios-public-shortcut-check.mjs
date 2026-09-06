@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { buildHistoryShortcut, verifyHistoryShortcutGraph } from '../build-ios-history-shortcut.mjs';
 import { buildLocalCaptureShortcut, verifyLocalCaptureShortcutGraph } from '../build-ios-local-capture-shortcut.mjs';
 
-// Public, read-only iCloud downloads. Never execute or install a Shortcut.
+// Public, read-only downloads. Never execute or install a Shortcut.
 const out = 'ios-release-evidence';
 mkdirSync(out, { recursive: true });
 const checks = [
@@ -27,18 +27,13 @@ for (const check of checks) {
     const record = await response.json();
     item.recordName = record.recordName;
     item.signingStatus = record.fields?.signingStatus?.value ?? null;
-    const asset = record.fields?.shortcut?.value;
-    const assetUrl = asset?.downloadURL;
-    if (typeof assetUrl !== 'string') {
-      item.availableFields = Object.keys(record.fields ?? {});
-      throw new Error('unsigned-graph-download-missing');
-    }
+    const assetUrl = record.fields?.shortcut?.value?.downloadURL;
+    if (typeof assetUrl !== 'string') { item.availableFields = Object.keys(record.fields ?? {}); throw new Error('unsigned-graph-download-missing'); }
     const url = new URL(assetUrl);
     if (url.protocol !== 'https:' || !(url.hostname.endsWith('.icloud-content.com') || url.hostname.endsWith('.apple.com') || url.hostname.endsWith('.icloud.com'))) throw new Error('unexpected-asset-host');
     const download = await fetch(url, { signal: AbortSignal.timeout(30000) });
     if (!download.ok) throw new Error('graph-download-failed');
-    const declared = Number(download.headers.get('content-length') ?? 0);
-    if (declared > 2000000) throw new Error('graph-too-large');
+    if (Number(download.headers.get('content-length') ?? 0) > 2000000) throw new Error('graph-too-large');
     const reader = download.body.getReader();
     const chunks = []; let size = 0;
     for (;;) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.byteLength;
@@ -49,21 +44,25 @@ for (const check of checks) {
     if (decoded.status !== 0) throw new Error('unsigned-plist-decode-failed');
     const graph = JSON.parse(decoded.stdout);
     item.publishedActions = graph.WFWorkflowActions?.length;
-    // Apple share metadata differs across client versions. Never normalize
-    // action parameters, input classes, dataflow, URLs, or permission actions.
-    const metadata = ['WFWorkflowName', 'WFWorkflowMinimumClientVersion', 'WFWorkflowMinimumClientVersionString', 'WFWorkflowClientVersion', 'WFQuickActionSurfaces'];
     const normalized = structuredClone(graph);
     item.shareMetadataDifferences = [];
-    for (const key of metadata) {
+    // These client/share fields never change action parameters or dataflow.
+    for (const key of ['WFWorkflowName', 'WFWorkflowMinimumClientVersion', 'WFWorkflowMinimumClientVersionString', 'WFWorkflowClientVersion', 'WFQuickActionSurfaces']) {
       if (!isDeepStrictEqual(normalized[key], expected[key])) {
         item.shareMetadataDifferences.push(key);
         if (Object.hasOwn(expected, key)) normalized[key] = expected[key]; else delete normalized[key];
       }
     }
+    item.publishedWorkflowTypes = graph.WFWorkflowTypes;
+    // Public records historically add Watch. Do not allow arbitrary new types.
+    if (Array.isArray(normalized.WFWorkflowTypes) && normalized.WFWorkflowTypes.includes('Watch')) {
+      normalized.WFWorkflowTypes = normalized.WFWorkflowTypes.filter((type) => type !== 'Watch');
+      item.shareMetadataDifferences.push('WFWorkflowTypes:Watch');
+    }
     item.actionsIdentical = isDeepStrictEqual(graph.WFWorkflowActions, expected.WFWorkflowActions);
     item.graphIdenticalAfterShareMetadata = isDeepStrictEqual(normalized, expected);
     item.otherDifferentTopLevelKeys = [...new Set([...Object.keys(normalized), ...Object.keys(expected)])].filter((key) => !isDeepStrictEqual(normalized[key], expected[key]));
-    if (item.graphIdenticalAfterShareMetadata) { check.verify(normalized); item.publicValidation = 'passed'; }
+    if (item.graphIdenticalAfterShareMetadata && item.signingStatus === 'APPROVED') { check.verify(normalized); item.publicValidation = 'passed'; }
     else item.publicValidation = 'mismatch';
   } catch (error) {
     const allowed = new Set(['public-record-unavailable', 'unsigned-graph-download-missing', 'unexpected-asset-host', 'graph-download-failed', 'graph-too-large', 'unsigned-plist-decode-failed']);
