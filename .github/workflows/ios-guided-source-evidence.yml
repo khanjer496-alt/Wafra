@@ -1,0 +1,23 @@
+name: Guided iOS source snapshot
+on:
+  push:
+    branches: [work/ios-guided-onboarding]
+    paths: ['.github/workflows/ios-guided-source-evidence.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive only tracked app and test source, never runner state or credentials
+        run: |
+          mkdir -p source-evidence
+          git rev-parse HEAD > source-evidence/revision.txt
+          git archive --format=tar.gz -o source-evidence/source.tar.gz HEAD src scripts modules config assets docs AGENTS.md package.json package-lock.json app.json eas.json tsconfig.json eslint.config.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-guided-source-${{ github.sha }}
+          path: source-evidence/
+          retention-days: 3
