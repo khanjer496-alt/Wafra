@@ -1,0 +1,132 @@
+name: Deliver existing Wafra Preview 2 APK
+on:
+  push:
+    branches: ['build/redesign-android-preview-20260907']
+    paths: ['.github/workflows/deliver-preview-2-apk.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: deliver-wafra-preview-2
+  cancel-in-progress: false
+jobs:
+  deliver:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: khanjer496-alt/Wafra
+      TAG: android-redesign-preview-2
+    steps:
+      - name: Verify the original build and exact artifact
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/actions/runs/34059274731" > run.json
+          gh api "repos/$REPO/actions/runs/34059274731/jobs" > jobs.json
+          gh api "repos/$REPO/actions/artifacts/9997212895" > artifact.json
+          python3 - <<'PY'
+          import json
+          run=json.load(open('run.json')); artifact=json.load(open('artifact.json'))
+          assert run['head_sha']=='a96b233c9f63981e0f3eab93ab3feff0da73db56'
+          assert run['status']=='completed' and run['conclusion']=='success'
+          jobs={j['name']:j for j in json.load(open('jobs.json'))['jobs']}
+          assert jobs['build']['conclusion']=='success'
+          assert jobs['native-smoke']['conclusion']=='success'
+          assert artifact['id']==9997212895 and not artifact['expired']
+          assert artifact['name']=='wafra-redesign-preview-apk'
+          assert artifact['digest']=='sha256:ec2c2f1a83c87839df9b7096226ac1cbd281447833850b78900a3d511c670984'
+          print('Original signed Build 2 and emulator first launch verified.')
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: wafra-redesign-preview-apk
+          run-id: 34059274731
+          github-token: ${{ github.token }}
+          path: apk
+      - name: Verify the unchanged installer and prepare delivery metadata
+        run: |
+          set -euo pipefail
+          (cd apk && sha256sum -c SHA256SUMS)
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('apk'); apk=root/'Wafra-Redesign-Preview.apk'
+          config=json.loads((root/'preview-config.json').read_text())
+          assert config['package']=='app.wafra.android.preview'
+          assert config['versionCode']==2 and config['numericInputRepair'] is True
+          assert config['updatesEnabled'] is False and config['demoData'] is False
+          assert apk.is_file() and apk.stat().st_size>10000000
+          digest=hashlib.sha256(apk.read_bytes()).hexdigest()
+          notes='''# Wafra Preview — Android redesign build 2
+
+          Download **Wafra-Redesign-Preview.apk** from Assets. It is the installer, not a source ZIP.
+
+          This is the exact signed APK from build run 34059274731, now available as a direct download. It has not been rebuilt or re-signed.
+
+          - Installs separately as **Wafra Preview** (app.wafra.android.preview).
+          - Keep the original Wafra installed. Preview records are separate and are not transferred automatically.
+          - No demo transactions are preloaded. Automatic OTA updates are disabled.
+          - Includes the Arabic decimal-input repair.
+          - Original release compilation, APK signature checks and emulator first launch passed.
+
+          **Internal preview, not production-ready.** Extended interaction testing and physical-phone SMS/performance validation are not cleared. Later validation fixes are not included in this already-built binary.
+
+          Original build: https://github.com/khanjer496-alt/Wafra/actions/runs/34059274731
+          Build workflow commit: a96b233c9f63981e0f3eab93ab3feff0da73db56
+
+          The tag is a delivery/provenance anchor. GitHub's automatic Source code ZIP/tar archives are NOT the reconstructed redesign. Use the APK asset; source-manifest.json and the original build describe the candidate.
+          '''
+          notes='\n'.join(line[10:] if line.startswith('          ') else line for line in notes.splitlines())
+          notes+='\nAPK SHA-256: `'+digest+'`\n'
+          pathlib.Path('release-notes.md').write_text(notes)
+          request={'tag_name':'android-redesign-preview-2','target_commitish':'60cfdbb50d9214268c106c836e17f3ac22c6279a','name':'Wafra Preview — Android redesign build 2','body':notes,'draft':True,'prerelease':True,'make_latest':'false'}
+          pathlib.Path('release-request.json').write_text(json.dumps(request))
+          pathlib.Path('expected-apk-sha256.txt').write_text(digest)
+          print('APK verified:',apk.stat().st_size,'bytes; SHA-256',digest)
+          PY
+          TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$TOOLS/apksigner" verify --verbose --print-certs apk/Wafra-Redesign-Preview.apk > signature-reverified.txt
+          "$TOOLS/aapt" dump badging apk/Wafra-Redesign-Preview.apk > badging-reverified.txt
+          grep -q "package: name='app.wafra.android.preview' versionCode='2'" badging-reverified.txt
+          ! grep -q 'application-debuggable' badging-reverified.txt
+      - name: Publish a prerelease with only the verified delivery files
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite any published asset.'
+            exit 1
+          fi
+          gh api --method POST "repos/$REPO/releases" --input release-request.json > release-created.json
+          RID=$(python3 -c "import json;print(json.load(open('release-created.json'))['id'])")
+          gh release upload "$TAG" --repo "$REPO" apk/Wafra-Redesign-Preview.apk apk/SHA256SUMS apk/preview-config.json apk/source-manifest.json signature-reverified.txt
+          gh api "repos/$REPO/releases/$RID/assets" > uploaded-assets.json
+          python3 - <<'PY'
+          import json,pathlib
+          assets=json.load(open('uploaded-assets.json'))
+          rows=[a for a in assets if a['name']=='Wafra-Redesign-Preview.apk']
+          assert len(rows)==1 and rows[0]['state']=='uploaded'
+          assert rows[0]['size']==pathlib.Path('apk/Wafra-Redesign-Preview.apk').stat().st_size
+          assert rows[0]['digest']=='sha256:'+pathlib.Path('expected-apk-sha256.txt').read_text()
+          print('Uploaded APK matches the original byte-for-byte.')
+          PY
+          gh api --method PATCH "repos/$REPO/releases/$RID" -F draft=false -F prerelease=true -f make_latest=false > published-release.json
+          python3 - <<'PY'
+          import json
+          release=json.load(open('published-release.json'))
+          assert not release['draft'] and release['prerelease']
+          for asset in release['assets']:
+              if asset['name']=='Wafra-Redesign-Preview.apk': print('DIRECT_APK_URL='+asset['browser_download_url'])
+          print('RELEASE_URL='+release['html_url'])
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-preview-2-delivery-verification
+          path: |
+            run.json
+            artifact.json
+            badging-reverified.txt
+            signature-reverified.txt
+            expected-apk-sha256.txt
+            uploaded-assets.json
+            published-release.json
+          retention-days: 7
