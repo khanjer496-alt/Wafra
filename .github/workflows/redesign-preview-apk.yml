@@ -69,6 +69,36 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm --prefix server ci --no-audit --no-fund
+      - name: Apply verified numeric repair and prove red then green
+        run: |
+          set -euo pipefail
+          cp validation/numeric-input-regression.cjs app/scripts/test/numeric-input-regression.cjs
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          root=pathlib.Path.cwd(); app=root/'app'; evidence=root/'browser-evidence'
+          hashes={
+            'src/lib/arabic-sms.ts':('1870789c39fc72b22c1f4ec644c37b49be2e6600013ca7cc3602eaf6c1ae9dec','057adea6e6fbbc85c653a7c682685eaf473ef0203966001448ecd0ddb61dad38'),
+            'src/lib/format.ts':('29b65cb19a2fcffe28d28674515377b4a945e0e90eccb57ba169d4caee905e97','2a81107882cbac20618afaacbd55c0495035b8bdd61697419e11bc0135bb546d'),
+            'scripts/test/money-display.test.js':('861825dd72ed11dc269160b2740485a107e08c2a998542ff81cdbc870e36de5b','bbdb19bb90945567722edc968d695fdae90dfceb43927bd4c0ff495456255b94')}
+          for path,(before,after) in hashes.items():
+              assert hashlib.sha256((app/path).read_bytes()).hexdigest()==before, path
+          result=subprocess.run(['node','scripts/test/numeric-input-regression.cjs'],cwd=app,capture_output=True,text=True)
+          output=result.stdout+result.stderr
+          (evidence/'numeric-before.log').write_text(output)
+          assert result.returncode!=0 and 'ERR_ASSERTION' in output and 'AED: 12٫50' in output, 'Expected old decimal-separator defect was not reproduced'
+          subprocess.run(['git','apply','--check','../validation/numeric-input-fix.patch'],cwd=app,check=True)
+          subprocess.run(['git','apply','../validation/numeric-input-fix.patch'],cwd=app,check=True)
+          manifest=json.loads((evidence/'source-manifest.json').read_text())
+          for path,(before,after) in hashes.items():
+              assert hashlib.sha256((app/path).read_bytes()).hexdigest()==after, path
+              if path.startswith('src/'): manifest['files'][path]=after
+          manifest['numeric_input_repair']={p:{'before':a,'after':b} for p,(a,b) in hashes.items()}
+          manifest['final_source_file_count']=len(manifest['files'])
+          manifest['build_commit']='${{ github.sha }}'
+          (evidence/'source-manifest.json').write_text(json.dumps(manifest,indent=2))
+          PY
+          (cd app && node scripts/test/numeric-input-regression.cjs) | tee browser-evidence/numeric-after.log
+          (cd app && node scripts/test/money-display.test.js) | tee browser-evidence/money-display.log
       - name: Application and server typecheck
         working-directory: app
         run: |
@@ -103,7 +133,7 @@ jobs:
           splash[1].backgroundColor = '#FAFAF7';
           splash[1].dark.backgroundColor = '#032521';
           fs.writeFileSync('app.json', JSON.stringify(app, null, 2)+'\n');
-          fs.writeFileSync('../browser-evidence/preview-config.json', JSON.stringify({name: app.expo.name, package: app.expo.android.package, versionName: app.expo.version, versionCode: app.expo.android.versionCode, updatesEnabled: false, demoData: false, buildType: 'release', architectures: ['arm64-v8a','x86_64'], productionChanged: false}, null, 2));
+          fs.writeFileSync('../browser-evidence/preview-config.json', JSON.stringify({name: app.expo.name, package: app.expo.android.package, versionName: app.expo.version, versionCode: app.expo.android.versionCode, updatesEnabled: false, demoData: false, buildType: 'release', architectures: ['arm64-v8a','x86_64'], productionChanged: false, numericInputRepair: true}, null, 2));
           JS
       - name: Generate native Android project
         working-directory: app
@@ -117,7 +147,7 @@ jobs:
           import pathlib
           p = pathlib.Path('android/gradle.properties')
           text = p.read_text()
-          values = {'org.gradle.jvmargs': '-Xmx3072m -XX:MaxMetaspaceSize=2048m -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8', 'org.gradle.workers.max': '2'}
+          values = {'org.gradle.jvmargs': '-Xmx3072m -XX:MaxMetaspaceSize=2048m -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8', 'org.gradle.workers.max': '2', 'org.gradle.caching': 'true'}
           for key,value in values.items():
               text = '\n'.join(line for line in text.splitlines() if not line.startswith(key+'=')) + '\n' + key+'='+value+'\n'
           p.write_text(text)
@@ -155,12 +185,13 @@ jobs:
           BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs apk-evidence/Wafra-Redesign-Preview.apk | tee apk-evidence/signature.txt
           "$BUILD_TOOLS/aapt" dump badging apk-evidence/Wafra-Redesign-Preview.apk | tee apk-evidence/badging.txt
+          "$BUILD_TOOLS/zipalign" -c -P 16 -v 4 apk-evidence/Wafra-Redesign-Preview.apk > apk-evidence/zip-alignment.txt
           grep -q "package: name='app.wafra.android.preview'" apk-evidence/badging.txt
           ! grep -q 'application-debuggable' apk-evidence/badging.txt
           unzip -l apk-evidence/Wafra-Redesign-Preview.apk | grep 'assets/index.android.bundle' > apk-evidence/bundle.txt
           "$BUILD_TOOLS/aapt" dump xmltree apk-evidence/Wafra-Redesign-Preview.apk AndroidManifest.xml > apk-evidence/manifest.txt
           (cd apk-evidence && sha256sum Wafra-Redesign-Preview.apk > SHA256SUMS)
-          printf '%s\n' 'Standalone internal preview. Installs as Wafra Preview beside Wafra.' 'No synthetic data is preloaded. No store submission or OTA deployment.' 'Release compiled; test-suite and device results are separate evidence, not implied by compilation.' > apk-evidence/README.txt
+          printf '%s\n' 'Standalone internal preview. Installs as Wafra Preview beside Wafra.' 'Includes the tested Arabic numeric-input repair; no synthetic data is preloaded.' 'No store submission or OTA deployment. Native and original-suite results remain separate evidence.' > apk-evidence/README.txt
       - uses: actions/upload-artifact@v4
         with:
           name: wafra-redesign-preview-apk
