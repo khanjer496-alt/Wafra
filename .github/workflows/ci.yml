@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - main
+      - work/ledger-light-restore
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +19,28 @@ permissions:
   pull-requests: read
 
 jobs:
+  review-source:
+    if: github.ref == 'refs/heads/work/ledger-light-restore'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Archive only tracked source from this exact checkout
+        run: |
+          mkdir -p review-source
+          git archive --format=tar.gz HEAD -o review-source/source.tar.gz
+          git rev-parse HEAD > review-source/commit.txt
+          git remote get-url origin > review-source/remote.txt
+          sha256sum review-source/source.tar.gz > review-source/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-review-source
+          path: review-source
+          retention-days: 2
+
   native-paths:
     runs-on: ubuntu-latest
     outputs:
@@ -46,12 +69,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # Chromium is pre-installed on the runner image used for the e2e job
-      # below; npm postinstall must not re-fetch it.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
@@ -59,40 +79,27 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             server/package-lock.json
-
       - name: Install dependencies
         run: npm ci
-
       - name: Install relay dependencies
         working-directory: server
         run: npm ci
-
       - name: Install the SQLite CLI required by schema tests
         run: sudo apt-get update && sudo apt-get install -y sqlite3
-
       - name: Typecheck
         run: npm run typecheck
-
       - name: Lint
         run: npm run lint
-
-      # Several contract suites inspect Expo's generated iOS sources and Xcode
-      # membership. The native folder is intentionally gitignored, so a clean
-      # checkout must materialize it before the cross-platform test runner.
       - name: Generate native iOS contract fixtures
         run: npx expo prebuild --platform ios --no-install
-
       - name: Test
         run: npm test
-
       - name: Relay typecheck
         working-directory: server
         run: npm run typecheck
-
       - name: Relay tests
         working-directory: server
         run: npm test
-
       - name: Relay Worker dry run
         working-directory: server
         run: npm run build:check
@@ -104,7 +111,6 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
       - name: Select Xcode 26.2 or newer
         run: |
           set -euo pipefail
@@ -118,47 +124,33 @@ jobs:
             echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"
             exit 1
           fi
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
       - name: Generate the native iOS project
         run: npx expo prebuild --platform ios --no-install
-
       - name: Install CocoaPods dependencies
         run: npx pod-install
-
       - name: Build and verify the protected history bridge and extracted App Intent metadata
         run: |
           bash scripts/test/native-history-store.sh
           bash scripts/test/native-live-capture-store.sh
 
-  # The browser suites catch what unit tests structurally cannot: a route that
-  # resolves to nothing, a screen that renders blank, a total that disagrees
-  # with the rows under it. They existed for weeks and ran only when someone
-  # remembered to — which is the same "nothing checks it" problem the contracts
-  # suite is about, one level up.
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-
       - name: End-to-end
         run: npm run test:e2e
