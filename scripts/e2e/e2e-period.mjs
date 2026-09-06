@@ -132,15 +132,15 @@ ok('sheet: reporting period opens', !!(await visibleText(page, 'REPORTING PERIOD
 await tapText(page, 'LAST MONTH', 1200);
 ok('home: past month names itself in the hero', !!(await visibleText(page, new RegExp(`Net after spending.*${shortMonth(-1)}`, 'i'))));
 
-// 3) Flow follows the same period.
-await tapTab(page, 'Flow');
-ok('flow: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
-ok('flow: summary rail states total spending', !!(await visibleText(page, /^Total spent$/i)));
+// 3) Spending follows the same period.
+await tapTab(page, 'Spending');
+ok('spending: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
+ok('spending: summary rail states total spending', !!(await visibleText(page, /^Total spent$/i)));
 
-// 4) All time from Flow's own pill.
+// 4) All time from Spending's own pill.
 await tapLabel(page, /Reporting period/, 1200);
 await tapText(page, 'ALL TIME', 1200);
-ok('flow: all time applies', !!(await visibleText(page, 'All time')));
+ok('spending: all time applies', !!(await visibleText(page, 'All time')));
 
 // 5) Year mode from Home, and Activity inherits the scope.
 await tapTab(page, 'Home');
