@@ -1,0 +1,61 @@
+name: iOS feature beta candidate
+
+# Explicit owner-requested build. No App Store production deployment.
+# Submission/group distribution is a separate action after evidence review.
+on:
+  push:
+    branches: [release/ios-shortcuts-review-20260907]
+    paths: ['.github/workflows/ios-beta-candidate-build.yml']
+permissions:
+  contents: read
+concurrency:
+  group: wafra-ios-feature-beta-candidate
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Do not accidentally create duplicate builds by rerunning a completed request
+        run: test "$GITHUB_RUN_ATTEMPT" = 1
+      - run: npm ci
+      - run: npm --prefix server ci
+      - name: Check existing feature-beta configuration
+        run: node scripts/check-release-config.mjs --intent build --platform ios --profile history-beta --submit true
+      - name: Typecheck current application and server
+        run: npm run typecheck
+      - name: Validate exact published iOS Shortcuts
+        run: node scripts/release/ios-public-shortcut-check.mjs
+      - name: Generate native contract sources
+        run: npx expo prebuild --platform ios --no-install
+      - name: Run application parser and capture regression suites
+        run: npm test
+      - name: Build a new signed iOS store artifact
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p ios-release-evidence
+          test -n "$EXPO_TOKEN"
+          npx --yes eas-cli@22.4.0 build --platform ios --profile history-beta --non-interactive --freeze-credentials --wait --json --message "Requested iOS Shortcut beta; source ${GITHUB_SHA}" > "$RUNNER_TEMP/wafra-eas-build.json"
+          node - "$RUNNER_TEMP/wafra-eas-build.json" <<'NODE'
+          const fs = require('node:fs');
+          const raw = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          const list = Array.isArray(raw) ? raw : [raw];
+          const builds = list.map(b => ({ id:b.id,status:b.status,version:b.appVersion,buildNumber:b.appBuildVersion,platform:b.platform,distribution:b.distribution,createdAt:b.createdAt,completedAt:b.completedAt }));
+          const report = { sourceCommit:process.env.GITHUB_SHA, profile:'history-beta', submitted:false, builds };
+          fs.writeFileSync('ios-release-evidence/beta-build.json', JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          if (builds.length !== 1 || builds[0].status !== 'FINISHED') process.exitCode=1;
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta-build-${{ github.sha }}
+          path: ios-release-evidence/
+          retention-days: 7
