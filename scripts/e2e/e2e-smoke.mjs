@@ -366,54 +366,48 @@ await tapLabel(page, 'Close', 900);
 await tapTab(page, 'Spending');
 ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));
 // Read the labelled figure before scrolling down to its composition rows.
-// The redesigned hero no longer lives in a fixed 110px band of the viewport.
+// The amount itself is an accessible Money group rather than one leaf text
+// node, so resolve it inside the same summary cell as the label instead of
+// depending on how React Native Web happens to split currency and digits.
 const flowTotalLabel = await visibleText(page, /^Total spent$/i);
 const flowTotalHeading = flowTotalLabel ? await flowTotalLabel.evaluate((label) => {
-  for (const node of label.parentElement?.querySelectorAll('div,span') ?? []) {
-    const text = node.textContent?.trim() ?? '';
-    if (node.childElementCount || !/^AED [\d,]+$/.test(text)) continue;
-    const r = node.getBoundingClientRect();
-    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    if (r.width > 0 && r.height > 0 && top &&
-      (node.contains(top) || top.contains(node)) && node.scrollWidth <= node.clientWidth + 1) {
-      return { t: text };
-    }
+  let scope = label.parentElement;
+  while (scope && scope !== document.body) {
+    const node = [...scope.querySelectorAll('[aria-label^="AED "]')].find((candidate) => {
+      const r = candidate.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    if (node) return node.getAttribute('aria-label');
+    scope = scope.parentElement;
   }
   return null;
 }) : null;
 ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 /**
- * The "Total spent AED X" heading and the composition list beneath it are the same
- * quantity: the list covers 100% of the total, tail pooled into "N more". So
- * the heading has to be totalled the way the rows are SHOWN — rounding once
- * over rows that each round themselves is how three categories of AED 10.50
- * came to read 11 · 11 · 11 under a heading of 32.
+ * The Total spent figure and the composition rows are the same exact money.
+ * Read the rows from their accessibility contract, not viewport coordinates:
+ * the list can extend beyond the fold, and every tab remains mounted.
  */
 {
   const tiles = await compTiles(page);
-  const t = await paintedText(page);
-  const heading = flowTotalHeading;
-  const rows = t.filter((x) => /^[\d,]+$/.test(x.t));
-  // A row's figure is the right-most plain number on the tile's own line.
-  const perTile = (await page.evaluate(() => {
-    const ys = [];
-    for (const el of document.querySelectorAll('div')) {
-      if (el.childElementCount) continue;
-      const r = el.getBoundingClientRect();
-      if (Math.round(r.width) === 8 && Math.round(r.height) === 8) ys.push(Math.round(r.y));
-    }
-    return ys;
-  })).map((y) => {
-    const on = rows.filter((x) => Math.abs(x.y - y) < 20);
-    return on.length ? money(on[on.length - 1].t) : NaN;
-  });
-  const sum = perTile.reduce((a, b) => a + b, 0);
-  ok(`flow: the Total spent heading equals the category rows (${heading?.t} vs ${sum})`,
-    !!heading && perTile.length > 0 && perTile.every(Number.isFinite) && money(heading.t) === sum);
+  const perTile = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="button"][aria-label$="see entries"]')]
+      .filter((row) => row.getBoundingClientRect().width > 0)
+      .map((row) => {
+        const values = [...row.querySelectorAll('div,span')]
+          .filter((node) => node.childElementCount === 0)
+          .map((node) => (node.textContent || '').trim())
+          .filter((value) => /^[\d,]+(?:\.\d{1,2})?$/.test(value));
+        return values.at(-1) ?? '';
+      }),
+  );
+  const figures = perTile.map(money);
+  const sum = figures.reduce((a, b) => a + b, 0);
+  ok(`flow: the Total spent heading equals the category rows (${flowTotalHeading} vs ${sum})`,
+    !!flowTotalHeading && figures.length > 0 && figures.every(Number.isFinite)
+      && money(flowTotalHeading) === sum);
 
-  // The glyph on a ramp tile is a graphical object: 3:1 or it is decoration.
-  // `onRampColor` flips the ink by luminance, and the threshold has to land
-  // where the two inks actually cross over, not where they look like they do.
+  // The swatch edge is the graphical identity mark: 3:1 or it disappears.
   const worst = tiles.reduce((m, x) => (x.contrast < m.contrast ? x : m), tiles[0] ?? { contrast: 0, label: 'none' });
   ok(`flow: every category swatch is visible against the page (worst ${worst.contrast}:1 on "${worst.label}")`,
     tiles.length > 0 && tiles.every((x) => x.contrast >= 3));
@@ -421,31 +415,50 @@ ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
 
 ok('flow shows the six-month pair chart', !!(await visibleText(page, /INCOME VS SPENT · 6 MONTHS/i)));
 
-// Bring the chart body itself into view. Finding the section heading is not
-// enough on a phone viewport: the header can sit just above the floating tab
-// bar while every month/value remains below it, and `paintedText` correctly
-// reports only pixels that are actually visible.
+// Bring the chart body itself into view once, then inspect every semantic
+// month column rather than only the fraction still inside the viewport.
 await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
 
 /**
- * A bar you cannot read a number off is a shape, not a figure. Six columns,
- * two figures each, an average in the header — and nothing truncated: `nano`
- * at column width used to cut "13.5k" down to "1…".
+ * Each of the six month columns carries a complete accessibility sentence.
+ * On this phone width it also paints either two compact figures or one em dash;
+ * inspect the whole column subtree so scrolling cannot turn six columns into
+ * an apparent one-and-a-half.
  */
 {
+  const cols = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="img"][aria-label]')]
+      .filter((node) => {
+        const label = node.getAttribute('aria-label') || '';
+        const r = node.getBoundingClientRect();
+        return r.width > 0 && r.height > 0
+          && /, (?:income .*spending .*|no activity recorded)$/i.test(label);
+      })
+      .map((node) => {
+        const label = node.getAttribute('aria-label') || '';
+        const leaves = [...node.querySelectorAll('div,span')]
+          .filter((child) => child.childElementCount === 0)
+          .map((child) => ({
+            text: (child.textContent || '').trim(),
+            clipped: child.scrollWidth > child.clientWidth + 1 || /…/.test(child.textContent || ''),
+          }));
+        return {
+          label,
+          values: leaves.filter(({ text }) => /^[\d.]+[kM]?$/i.test(text)),
+          dashes: leaves.filter(({ text }) => text === '—').length,
+        };
+      }),
+  );
+  const accounted = cols.every((col) =>
+    /no activity recorded/i.test(col.label)
+      ? col.values.length === 0 && col.dashes === 1
+      : col.values.length === 2 && col.dashes === 0,
+  );
+  ok(`flow: every column is accounted for — ${cols.length} semantic month columns`,
+    cols.length === 6 && accounted);
+  const figures = cols.flatMap((col) => col.values);
+  ok('flow: no chart figure is truncated', figures.length > 0 && figures.every((x) => !x.clipped));
   const t = await paintedText(page);
-  const months = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i;
-  const cols = t.filter((x) => months.test(x.t)).sort((a, b) => a.x - b.x);
-  // The pair is stacked above its column; the month sits under the bars.
-  const above = (x) => cols.length && x.y < cols[0].y && x.y > cols[0].y - 200;
-  const values = t.filter((x) => /^[\d.]+[kM]?$/.test(x.t) && above(x));
-  // A month with no ledger at all writes one em dash, not two zeros: two
-  // 2%-floor stubs labelled "0 0" claim a month of perfect balance, which is
-  // a different statement from "nothing was recorded".
-  const dashes = t.filter((x) => x.t.trim() === '—' && above(x));
-  ok(`flow: every column is accounted for — ${values.length / 2} with figures, ${dashes.length} empty, over ${cols.length} columns`,
-    cols.length === 6 && values.length % 2 === 0 && values.length / 2 + dashes.length === cols.length);
-  ok('flow: no chart figure is truncated', values.length > 0 && values.every((x) => !x.clipped));
   const header = t.find((x) => /avg$/i.test(x.t));
   ok(`flow: the chart header states the average (${header?.t})`, !!header && /^[+−-]/.test(header.t));
 }
@@ -504,25 +517,43 @@ await tapLabel(page, 'Close', 900);
 // ── Bills ─────────────────────────────────────────────────────────────
 await tapTab(page, 'Bills');
 ok('bills segments recurring, cards and fixed', !!(await visibleText(page, /Recurring \d/i)));
-await tapText(page, /Cards \d/i, 1000);
-ok('bills cards segment renders', !!(await visibleText(page, /Pay by|No card payments due/i)));
-await tapText(page, /Fixed \d/i, 1000);
+await tapLabel(page, /Cards \d/i, 1000);
+ok('bills cards segment renders', !!(await visibleText(page, /Outstanding|No card payments due/i)));
+await tapLabel(page, /Fixed \d/i, 1000);
 ok('bills fixed segment renders',
   !!(await visibleText(page, /Utilities & fixed bills|No utilities yet|Loans/i)));
 
 // The shipped UAE demo now deliberately includes stable subscription, card
 // due, utility and other-recurring histories. Exercise that public first-run
 // state directly instead of mutating private persistence internals here.
-await tapText(page, /Recurring \d/i, 900);
+await tapLabel(page, /Recurring \d/i, 900);
 
-// The natural-language monthly heading sits directly above the rows it totals.
+// The heading is a cadence-normalised monthly estimate, while each row
+// deliberately shows its last or next charge. Those are not arithmetically
+// comparable for weekly/yearly plans. Verify the total is finite, the segment
+// count matches the rendered rows, and every row names the basis of its amount.
 {
+  const recurring = await page.evaluate(() => {
+    const selected = [...document.querySelectorAll('[role="tab"][aria-selected="true"]')]
+      .find((node) => /^Recurring \d+$/i.test(node.getAttribute('aria-label') || ''));
+    const count = Number((selected?.getAttribute('aria-label') || '').match(/\d+$/)?.[0] ?? NaN);
+    const head = [...document.querySelectorAll('div,span')]
+      .filter((node) => node.childElementCount === 0)
+      .map((node) => (node.textContent || '').trim())
+      .find((value) => /^AED [\d,]+(?:\.\d{1,2})? \/ month$/.test(value)) || '';
+    const rows = [...document.querySelectorAll('[role="button"][aria-label]')]
+      .filter((node) => {
+        const label = node.getAttribute('aria-label') || '';
+        return node.getBoundingClientRect().width > 0
+          && /(?:Last charge|Estimated charge): AED [\d,]+(?:\.\d{1,2})?$/i.test(label);
+      })
+      .map((node) => node.getAttribute('aria-label') || '');
+    return { count, head, rows };
+  });
+  ok(`bills: monthly estimate and ${recurring.rows.length}/${recurring.count} recurring charge bases render (${recurring.head})`,
+    Number.isFinite(recurring.count) && recurring.count > 0
+      && recurring.rows.length === recurring.count && Number.isFinite(money(recurring.head)));
   const t = await paintedText(page);
-  const head = t.find((x) => /\/(?:mo| month)$/.test(x.t));
-  const rows = t.filter((x) => /^AED [\d,]+$/.test(x.t) && head && x.y > head.y + 12).map((x) => money(x.t));
-  const sum = rows.reduce((a, b) => a + b, 0);
-  ok(`bills: the monthly total equals the subscription rows (${head?.t} vs ${sum})`,
-    !!head && rows.length > 0 && money(head.t) === sum);
   ok('bills: no recurring row label is ellipsised',
     t.filter((x) => x.clipped).length === 0);
 }
