@@ -1,0 +1,216 @@
+name: Wafra redesign Android preview
+on:
+  push:
+    branches: ['build/redesign-android-preview-20260907']
+    paths: ['.github/workflows/redesign-preview-apk.yml']
+permissions:
+  contents: read
+concurrency:
+  group: wafra-redesign-preview-apk
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      EXPO_PUBLIC_WAFRA_E2E_DEMO: '0'
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'
+      EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: '0'
+      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '0'
+      WAFRA_SMS_CORPUS_EXPORT: '0'
+      EXPO_PUBLIC_WAFRA_RELAY_URL: 'https://wafra-relay.khanjer496.workers.dev'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-redesign-preview-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+            gradle-shots-
+      - name: Reconstruct checksum-verified approved redesign
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, subprocess
+          text = pathlib.Path('.github/workflows/redesign-browser-validation.yml').read_text()
+          marker = '      - name: Reconstruct and verify the exact local redesign\n'
+          assert text.count(marker) == 1
+          block = text.split(marker, 1)[1].split('\n      - name:', 1)[0]
+          body = block.split('        run: |\n', 1)[1]
+          lines = body.splitlines()
+          assert all(not line.strip() or line.startswith('          ') for line in lines)
+          script = '\n'.join(line[10:] for line in lines)
+          subprocess.run(['bash', '-euo', 'pipefail', '-c', script], check=True)
+          PY
+      - name: Install exact locked dependencies
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+      - name: Application and server typecheck
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee ../browser-evidence/android-typecheck.log
+      - name: Lint
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ../browser-evidence/android-lint.log
+      - name: Configure side-by-side internal preview only
+        working-directory: app
+        run: |
+          node <<'JS'
+          const fs = require('fs');
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          if (app.expo.android.package !== 'app.wafra.android') throw new Error('Unexpected base application ID');
+          app.expo.name = 'Wafra Preview';
+          app.expo.scheme = 'wafra-preview';
+          app.expo.android.package = 'app.wafra.android.preview';
+          app.expo.android.versionCode = Number(process.env.GITHUB_RUN_NUMBER);
+          app.expo.updates.enabled = false;
+          app.expo.updates.checkAutomatically = 'NEVER';
+          app.expo.updates.requestHeaders = {'expo-channel-name': 'preview'};
+          app.expo.android.adaptiveIcon.backgroundColor = '#032521';
+          const fontPlugin = app.expo.plugins.find(p => Array.isArray(p) && p[0] === 'expo-font');
+          for (const font of ['Geist-Regular','Geist-Medium','Geist-SemiBold']) {
+            const path = './assets/fonts/' + font + '.ttf';
+            if (!fontPlugin[1].fonts.includes(path)) fontPlugin[1].fonts.push(path);
+          }
+          const splash = app.expo.plugins.find(p => Array.isArray(p) && p[0] === 'expo-splash-screen');
+          splash[1].backgroundColor = '#FAFAF7';
+          splash[1].dark.backgroundColor = '#032521';
+          fs.writeFileSync('app.json', JSON.stringify(app, null, 2)+'\n');
+          fs.writeFileSync('../browser-evidence/preview-config.json', JSON.stringify({name: app.expo.name, package: app.expo.android.package, versionName: app.expo.version, versionCode: app.expo.android.versionCode, updatesEnabled: false, demoData: false, buildType: 'release', architectures: ['arm64-v8a','x86_64'], productionChanged: false}, null, 2));
+          JS
+      - name: Generate native Android project
+        working-directory: app
+        run: npx --no-install expo prebuild --platform android --no-install
+      - name: Verify encryption and configure compiler memory
+        working-directory: app
+        run: |
+          set -euo pipefail
+          grep -qxE 'expo\.sqlite\.useSQLCipher=true' android/gradle.properties
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('android/gradle.properties')
+          text = p.read_text()
+          values = {'org.gradle.jvmargs': '-Xmx3072m -XX:MaxMetaspaceSize=2048m -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8', 'org.gradle.workers.max': '2'}
+          for key,value in values.items():
+              text = '\n'.join(line for line in text.splitlines() if not line.startswith(key+'=')) + '\n' + key+'='+value+'\n'
+          p.write_text(text)
+          pathlib.Path('../browser-evidence/sqlcipher.txt').write_text('expo.sqlite.useSQLCipher=true verified after Android prebuild\n')
+          PY
+      - name: Sign preview using existing signing procedure
+        env:
+          KEYSTORE_B64: ${{ secrets.WAFRA_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.WAFRA_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.WAFRA_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.WAFRA_KEY_ALIAS }}
+        run: |
+          python3 - <<'PY'
+          import pathlib, subprocess
+          text = pathlib.Path('app/.github/workflows/build-apk.yml').read_text()
+          marker = '      - name: Configure release signing\n'
+          assert text.count(marker) == 1
+          block = text.split(marker, 1)[1].split('\n      - name:', 1)[0]
+          body = block.split('        run: |\n', 1)[1]
+          lines = body.splitlines()
+          assert all(not line.strip() or line.startswith('          ') for line in lines)
+          subprocess.run(['bash','-euo','pipefail','-c','\n'.join(line[10:] for line in lines)],cwd='app',check=True)
+          PY
+      - name: Compile standalone release APK for phone and emulator
+        working-directory: app/android
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon 2>&1 | tee ../../browser-evidence/gradle.log
+      - name: Verify signed APK identity and bundle
+        run: |
+          set -euo pipefail
+          mkdir -p apk-evidence
+          cp app/android/app/build/outputs/apk/release/app-release.apk apk-evidence/Wafra-Redesign-Preview.apk
+          cp browser-evidence/source-manifest.json browser-evidence/preview-config.json browser-evidence/sqlcipher.txt apk-evidence/
+          BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs apk-evidence/Wafra-Redesign-Preview.apk | tee apk-evidence/signature.txt
+          "$BUILD_TOOLS/aapt" dump badging apk-evidence/Wafra-Redesign-Preview.apk | tee apk-evidence/badging.txt
+          grep -q "package: name='app.wafra.android.preview'" apk-evidence/badging.txt
+          ! grep -q 'application-debuggable' apk-evidence/badging.txt
+          unzip -l apk-evidence/Wafra-Redesign-Preview.apk | grep 'assets/index.android.bundle' > apk-evidence/bundle.txt
+          "$BUILD_TOOLS/aapt" dump xmltree apk-evidence/Wafra-Redesign-Preview.apk AndroidManifest.xml > apk-evidence/manifest.txt
+          (cd apk-evidence && sha256sum Wafra-Redesign-Preview.apk > SHA256SUMS)
+          printf '%s\n' 'Standalone internal preview. Installs as Wafra Preview beside Wafra.' 'No synthetic data is preloaded. No store submission or OTA deployment.' 'Release compiled; test-suite and device results are separate evidence, not implied by compilation.' > apk-evidence/README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wafra-redesign-preview-apk
+          path: apk-evidence/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-redesign-native-build-logs
+          path: browser-evidence/
+          retention-days: 7
+  native-smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wafra-redesign-preview-apk
+          path: apk
+      - name: Enable emulator hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Native install and first-launch check
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            mkdir -p native-evidence
+            adb install apk/Wafra-Redesign-Preview.apk > native-evidence/install.txt
+            adb logcat -c
+            adb shell am start -W -n app.wafra.android.preview/.MainActivity > native-evidence/launch.txt
+            sleep 25
+            adb shell uiautomator dump /sdcard/window.xml
+            adb pull /sdcard/window.xml native-evidence/onboarding.xml
+            adb exec-out screencap -p > native-evidence/onboarding.png
+            adb logcat -d > native-evidence/logcat.txt
+            adb shell pidof app.wafra.android.preview > native-evidence/pid.txt
+            grep -q 'Start tracking' native-evidence/onboarding.xml
+            ! grep -E 'FATAL EXCEPTION|Fatal signal|ReactNativeJS:.*(Error:|Invariant Violation)' native-evidence/logcat.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-redesign-native-smoke
+          path: native-evidence/
+          retention-days: 7
