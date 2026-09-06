@@ -262,7 +262,7 @@ async function pressEverything(name, enter, { skip = [] } = {}) {
   const stuck = [];
   let pressed = 0, disabled = 0;
   for (const key of controls) {
-    if (skip.includes(key) || ['Home', 'Flow', 'Bills', 'Wallet'].includes(key)) continue;
+    if (skip.includes(key) || ['Home', 'Spending', 'Bills', 'Accounts'].includes(key)) continue;
     errors.length = 0;
     let clicked = false;
     try { clicked = await tapKey(page, key, 1200); } catch { clicked = false; }
@@ -346,15 +346,20 @@ async function backToScreen(base, enter) {
 }
 
 const home = async () => { await reload(); };
-const flow = async () => { await reload(); await tapTab(page, 'Flow'); };
+const flow = async () => { await reload(); await tapTab(page, 'Spending'); };
 const bills = async () => { await reload(); await tapTab(page, 'Bills'); };
-const wallet = async () => { await reload(); await tapTab(page, 'Wallet'); };
+const wallet = async () => { await reload(); await tapTab(page, 'Accounts'); };
 
 await pressEverything('home', home);
 await pressEverything('flow', flow);
 await pressEverything('bills · subs', bills);
 await pressEverything('bills · cards', async () => { await bills(); await tapKey(page, 'Cards 1'); await page.waitForTimeout(700); });
-await pressEverything('bills · fixed', async () => { await bills(); await tapKey(page, 'Fixed 6'); await page.waitForTimeout(700); });
+await pressEverything('bills · fixed', async () => {
+  await bills();
+  const fixed = (await visibleControls(page)).find((key) => /^Fixed \d+$/.test(key));
+  if (!fixed || (await tapKey(page, fixed, 5000)) !== true) throw new Error('Fixed bills segment not found');
+  await page.waitForTimeout(700);
+});
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForTimeout(1200); });
 await pressEverything('settings', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1300); },
@@ -670,7 +675,7 @@ for (const [name, enter] of [
   });
   ok(`home: the layout is mirrored without a restart (${dir})`, dir === 'rtl');
 
-  for (const [name, tab] of [['home', null], ['flow', 'التدفق'], ['bills', 'الفواتير'], ['wallet', 'المحفظة']]) {
+  for (const [name, tab] of [['home', null], ['flow', 'الإنفاق'], ['bills', 'الفواتير'], ['wallet', 'الحسابات']]) {
     if (tab) {
       await tapKey(page, tab, 8000);
       await page.waitForTimeout(1300);
@@ -704,7 +709,7 @@ for (const [name, enter] of [
  */
 {
   const overflow = [];
-  for (const [name, key] of [['home', 'Home'], ['flow', 'Flow'], ['bills', 'Bills'], ['wallet', 'Wallet']]) {
+  for (const [name, key] of [['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']]) {
     await tapKey(page, key, 5000);
     await page.waitForTimeout(700);
     overflow.push(...(await clippedText(page, name)));
@@ -757,7 +762,7 @@ for (const [name, enter] of [
   });
 
   await reload();
-  await tapTab(page, 'Flow');
+  await tapTab(page, 'Spending');
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForTimeout(900);
   const dark = await sample();

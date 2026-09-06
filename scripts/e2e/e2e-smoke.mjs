@@ -274,35 +274,29 @@ await page.waitForTimeout(2200);
 // ── Home ──────────────────────────────────────────────────────────────
 ok('home hero states the net result', !!(await visibleText(page, /Net after spending/i)));
 ok('home splits income and spending', !!(await visibleText(page, /^SPENT$/i)));
-ok('home lists what leaves next', !!(await visibleText(page, /LEAVING IN \d+ DAYS/i)));
+ok('home lists upcoming obligations', !!(await visibleText(page, /^COMING UP$/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 
-// "Leaving in N days" prints one total over three rows and a remainder. The
-// total covers the whole list, so the column only reconciles if the rows plus
-// the "+N more" figure come back to it — the bug this replaced showed AED
-// 70,976 over rows adding to 15,785 with nothing to say where the rest was.
+// The journal Home no longer invents one aggregate for unlike obligations.
+// Every visible payment row states its own date and exact amount. Read those
+// rows from the accessibility contract and verify that the same amount is
+// painted in the row, catching clipping or mismatched money without coupling
+// the check to the retired card composition.
 {
-  // The presence check above scrolls "All activity" into view after checking
-  // this section. Bring the heading back before reading viewport-only painted
-  // text, or a valid section just above the fold is reported as missing.
-  await visibleText(page, /leaving in \d+ days/i);
-  const t = await paintedText(page);
-  const head = t.find((x) => /leaving in \d+ days/i.test(x.t));
-  if (!head) {
-    ok('home: leaving-soon total equals its rows', false);
-  } else {
-    const total = money(t.find((x) => Math.abs(x.y - head.y) < 8 && /^AED/.test(x.t))?.t ?? '');
-    // Between this heading and the next section. Only bare figures count: the
-    // dates beside them ("25 Jul · 1 day late") are not money.
-    const next = t.find((x) => x.y > head.y + 20 && /recent activity/i.test(x.t));
-    const limit = next ? next.y : Infinity;
-    const figures = t
-      .filter((x) => x.y > head.y + 12 && x.y < limit && /^[\d,]+$/.test(x.t))
-      .map((x) => money(x.t));
-    const sum = figures.reduce((a, b) => a + b, 0);
-    ok(`home: leaving-soon total equals its rows plus the remainder (${total} vs ${sum})`,
-      Number.isFinite(total) && total === sum);
-  }
+  const payments = await page.evaluate(() => {
+    const section = document.querySelector('[data-testid="journal-payments"]');
+    if (!section) return [];
+    return [...section.querySelectorAll('[role="button"][aria-label$=" AED"]')].map((node) => ({
+      label: node.getAttribute('aria-label') || '',
+      text: (node.textContent || '').replace(/\s+/g, ''),
+    }));
+  });
+  const sound = payments.every(({ label, text }) => {
+    const match = label.match(/, ([\d,]+(?:\.\d{1,2})?) AED$/);
+    return !!match && text.includes(match[1].replace(/\s+/g, ''));
+  });
+  ok(`home: every upcoming payment keeps its date and exact amount (${payments.length} rows)`,
+    payments.length > 0 && sound);
 }
 
 // Entry detail sheet.
@@ -312,35 +306,18 @@ ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 // rolls and the top six rows shift — a suite failure that says nothing about
 // the app. Read the first row and its account off the screen instead.
 const firstEntry = await page.evaluate(() => {
-  const heads = [...document.querySelectorAll('*')].filter(
-    (n) => n.children.length === 0 && /^recent activity$/i.test((n.textContent || '').trim()),
+  const section = document.querySelector('[data-testid="journal-activity"]');
+  const row = [...(section?.querySelectorAll('[role="button"][aria-label]') ?? [])].find(
+    (node) => /, (?:plus|minus) [\d,.]+ AED$/i.test(node.getAttribute('aria-label') || ''),
   );
-  if (!heads.length) return null;
-  const y = heads[0].getBoundingClientRect().bottom;
-  const leaves = [...document.querySelectorAll('*')]
-    .filter((n) => n.children.length === 0 && (n.textContent || '').trim())
-    .map((n) => ({ t: n.textContent.trim(), r: n.getBoundingClientRect() }))
-    .filter((x) => x.r.top > y && x.r.width > 0)
-    .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
-  const meta = leaves.find((x) => / · /.test(x.t));
-  if (!meta) return null;
-  // A row's title sits directly above its "Category · Account" meta line IN
-  // THE SAME COLUMN. The column part is not decoration: when a merchant has
-  // no logo the icon tile shows its initials as text ("en" for ENOC Fuel),
-  // and that tile sits lower than the title, so "the leaf directly above the
-  // meta line" returned the monogram. The suite then tapped a two-letter
-  // string that matched eight elements, opened nothing, and died looking for
-  // EDIT ENTRY — a failure that said nothing about the app.
-  const title = leaves
-    .filter((x) => x.r.top < meta.r.top && Math.abs(x.r.left - meta.r.left) < 4)
-    .pop();
-  if (!title) return null;
-  // "Category · Account" and "Category · Account · 14:32" both exist — the
-  // account is always the second field, never the last one.
-  return { title: title.t, account: meta.t.split(' · ')[1] };
+  if (!row) return null;
+  const label = row.getAttribute('aria-label') || '';
+  const parts = label.split(', ');
+  return { label, title: parts[0] || '', account: parts[2] || '' };
 });
-ok('home lists an entry to open', !!firstEntry?.title);
-await tapText(page, firstEntry.title, 1200);
+ok('home lists an entry to open', !!firstEntry?.title && !!firstEntry?.label);
+if (!firstEntry) throw new Error('Home rendered no accessible journal transaction row');
+await tapLabel(page, firstEntry.label, 1200);
 ok('entry sheet opens on a row', !!(await visibleText(page, /ENTRY DETAIL/i)));
 ok(`entry sheet names the account (${firstEntry.account})`,
   !!(await visibleText(page, firstEntry.account)));
@@ -386,8 +363,8 @@ ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)
 await tapLabel(page, 'Close', 900);
 
 // ── Flow ──────────────────────────────────────────────────────────────
-await tapTab(page, 'Flow');
-ok('flow titles the screen', !!(await visibleText(page, /^Flow$/)));
+await tapTab(page, 'Spending');
+ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));
 // Read the labelled figure before scrolling down to its composition rows.
 // The redesigned hero no longer lives in a fixed 110px band of the viewport.
 const flowTotalLabel = await visibleText(page, /^Total spent$/i);
@@ -510,7 +487,7 @@ await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
     ok(`flow: and that list totals what the row said (row ${want}, list ${got})`,
       Number.isFinite(got) && got === want);
     await tapLabel(page, 'Back', 1400);
-    await tapTab(page, 'Flow');
+    await tapTab(page, 'Spending');
   }
 }
 
@@ -526,7 +503,7 @@ await tapLabel(page, 'Close', 900);
 
 // ── Bills ─────────────────────────────────────────────────────────────
 await tapTab(page, 'Bills');
-ok('bills segments subs, cards and fixed', !!(await visibleText(page, /Subs \d/i)));
+ok('bills segments recurring, cards and fixed', !!(await visibleText(page, /Recurring \d/i)));
 await tapText(page, /Cards \d/i, 1000);
 ok('bills cards segment renders', !!(await visibleText(page, /Pay by|No card payments due/i)));
 await tapText(page, /Fixed \d/i, 1000);
@@ -536,7 +513,7 @@ ok('bills fixed segment renders',
 // The shipped UAE demo now deliberately includes stable subscription, card
 // due, utility and other-recurring histories. Exercise that public first-run
 // state directly instead of mutating private persistence internals here.
-await tapText(page, /Subs \d/i, 900);
+await tapText(page, /Recurring \d/i, 900);
 
 // The natural-language monthly heading sits directly above the rows it totals.
 {
@@ -597,7 +574,7 @@ await tapText(page, /Fixed \d/i, 1200);
 }
 
 // ── Wallet ────────────────────────────────────────────────────────────
-await tapTab(page, 'Wallet');
+await tapTab(page, 'Accounts');
 ok('wallet shows the available-balance snapshot', !!(await visibleText(page, /AVAILABLE ACROSS ACCOUNTS/i)));
 ok('wallet groups accounts and cards as money sources', !!(await visibleText(page, /MONEY SOURCES/i)));
 ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
@@ -639,7 +616,7 @@ ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
     const seen = [await paintedScheme(page)];
     await tapLabel(page, 'Back', 1300);
     seen.push(await paintedScheme(page));
-    for (const t of ['Flow', 'Bills', 'Wallet']) {
+    for (const t of ['Spending', 'Bills', 'Accounts']) {
       await tapTab(page, t);
       seen.push(await paintedScheme(page));
     }
@@ -665,7 +642,7 @@ await tapLabel(page, 'Back', 1200);
 // Reached in-app from Wallet: a cold load of an exported route hits the
 // known expo-router hydration bailout (see scripts/e2e/README.md).
 await tapLabel(page, 'Back', 1200);
-await tapTab(page, 'Wallet');
+await tapTab(page, 'Accounts');
 await tapText(page, /Paste a bank message|Inbox scanned/, 1600);
 ok('import page loads', !!(await visibleText(page, 'PARSE PASTED TEXT')));
 await tapText(page, 'TRY SAMPLE', 1200);
