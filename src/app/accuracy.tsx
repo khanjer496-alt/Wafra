@@ -1,17 +1,18 @@
 import { useRouter } from 'expo-router';
 import React, { useMemo } from 'react';
-import { ScrollView, Share, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Share, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Row, ScreenHeader, Section } from '@/components/ui/layout';
+import { Row, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
-import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { cardDiagnostics, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { isCaptureAvailable } from '@/lib/capture';
 import { shareText } from '@/lib/share-text';
 import { categoryLabel } from '@/lib/categories';
 import { isRelayPlatform } from '@/lib/relay';
@@ -46,6 +47,7 @@ export default function AccuracyScreen() {
   // the same green check for both — see noFormatsReason() in lib/accuracy.ts.
   const noFormats = noFormatsReason({
     relayPlatform: isRelayPlatform(),
+    localCaptureAvailable: isCaptureAvailable(),
     privateMode: state.privateMode,
   });
 
@@ -97,14 +99,17 @@ export default function AccuracyScreen() {
     shareText('wafra-card-diagnostic.txt', cardDiagnostics(state)).catch(() => {});
   };
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('improveAccuracy')} onBack={() => router.back()} />
-        </View>
+  const accuracyHeader: ScreenHeaderProps = {
+    title: t('improveAccuracy'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  return (
+    <>
+      <ScreenScaffold
+        headerMode="native"
+        header={accuracyHeader}
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
           {/* Counts, never a percentage. "492 of 505" is something a person can
               check and act on; "97% accurate" is a claim they can only take or
               leave. Every figure names its own denominator, and the last line
@@ -176,6 +181,8 @@ export default function AccuracyScreen() {
               {t(
                 noFormats === 'relay'
                   ? 'formatsNotKeptRelay'
+                  : noFormats === 'ios-local'
+                    ? 'formatsNotKeptIosLocal'
                   : noFormats === 'private'
                     ? 'formatsNotKeptPrivate'
                     : 'improveAccuracyHint',
@@ -255,29 +262,12 @@ export default function AccuracyScreen() {
               </ThemedText>
             </Section>
           )}
-        </ScrollView>
-      </SafeAreaView>
-    </ThemedView>
+      </ScreenScaffold>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
-  content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
-  },
   coverage: {
     gap: Spacing.two,
     paddingBottom: Spacing.four,

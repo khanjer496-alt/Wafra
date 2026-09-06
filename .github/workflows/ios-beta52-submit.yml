@@ -1,0 +1,113 @@
+name: Submit Wafra iOS beta 52
+
+# Explicit owner-requested TestFlight beta only. No new build and no App Store release.
+# Fixed EAS ID/source/version prevent accidentally submitting a stale latest build.
+on:
+  push:
+    branches: [release/ios-shortcuts-review-20260907]
+    paths: ['.github/workflows/ios-beta52-submit.yml']
+permissions:
+  contents: read
+concurrency:
+  group: wafra-ios-beta52-submit
+  cancel-in-progress: false
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      WAFRA_BETA_VERSION: '1.0.0'
+      WAFRA_BETA_BUILD_NUMBER: '52'
+      WAFRA_BETA_SOURCE_SHA: d67e71fa78c2abadb4feab8553478d128b026d20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Check release script syntax
+        run: node --check scripts/release/ios-public-beta-publish.mjs
+      - name: Verify the exact completed EAS build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPO_TOKEN"
+          mkdir -p ios-release-evidence
+          npx --yes eas-cli@22.4.0 build:view 06ce4237-ca3b-43e8-8ffc-eb4950cf1ae8 --json > "$RUNNER_TEMP/wafra-beta52-build.json"
+          node - "$RUNNER_TEMP/wafra-beta52-build.json" <<'NODE'
+          const fs = require('node:fs');
+          const b = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (b.id !== '06ce4237-ca3b-43e8-8ffc-eb4950cf1ae8' || b.status !== 'FINISHED' ||
+              b.platform !== 'IOS' || b.distribution !== 'STORE' ||
+              String(b.appBuildVersion) !== '52' || b.appVersion !== '1.0.0' ||
+              (b.gitCommitHash && b.gitCommitHash !== process.env.WAFRA_BETA_SOURCE_SHA)) {
+            throw new Error('Expected completed store build 52 from the verified candidate source');
+          }
+          const report = { id:b.id, status:b.status, distribution:b.distribution,
+            version:b.appVersion, buildNumber:b.appBuildVersion,
+            sourceCommit:process.env.WAFRA_BETA_SOURCE_SHA,
+            reportedGitCommit:b.gitCommitHash ?? null,
+            originalBuildWorkflow:34058388749 };
+          fs.writeFileSync('ios-release-evidence/submission-source.json', JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          NODE
+      - name: Inspect Apple state before uploading to avoid duplicate submissions
+        id: apple
+        env:
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          node scripts/release/ios-public-beta-publish.mjs
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('ios-release-evidence/public-beta.json','utf8'));
+          if (report.outcome === 'blocked') throw new Error('Apple preflight failed');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, 'upload=' + String(!report.build) + '\n');
+          NODE
+      - name: Prepare existing Apple API key outside the source checkout
+        if: steps.apple.outputs.upload == 'true'
+        env:
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const crypto = require('node:crypto');
+          const raw = process.env.EXPO_ASC_API_KEY_P8 || '';
+          const pem = raw.includes('BEGIN PRIVATE KEY') ? raw : Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8');
+          crypto.createPrivateKey(pem);
+          if (!/^[A-Z0-9]{10}$/.test(process.env.EXPO_ASC_KEY_ID || '') ||
+              !/^[0-9a-f-]{36}$/i.test(process.env.EXPO_ASC_ISSUER_ID || '')) throw new Error('Invalid Apple key identifiers');
+          const file = path.join(process.env.RUNNER_TEMP, 'wafra-beta52-asc.p8');
+          fs.writeFileSync(file, pem, { mode:0o600 });
+          fs.appendFileSync(process.env.GITHUB_ENV,
+            'EXPO_ASC_API_KEY_PATH=' + file + '\n' +
+            'EXPO_ASC_KEY_ID=' + process.env.EXPO_ASC_KEY_ID + '\n' +
+            'EXPO_ASC_ISSUER_ID=' + process.env.EXPO_ASC_ISSUER_ID + '\n');
+          NODE
+      - name: Upload completed build 52 to App Store Connect
+        if: steps.apple.outputs.upload == 'true'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: npx --yes eas-cli@22.4.0 submit --platform ios --profile history-beta --id 06ce4237-ca3b-43e8-8ffc-eb4950cf1ae8 --wait --non-interactive
+      - name: Add accurate test notes and distribute to the existing public Beta group
+        env:
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+      - name: Remove temporary credentials and raw EAS response
+        if: always()
+        run: rm -f "$RUNNER_TEMP/wafra-beta52-asc.p8" "$RUNNER_TEMP/wafra-beta52-build.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta52-publication-${{ github.sha }}
+          path: ios-release-evidence/
+          retention-days: 7

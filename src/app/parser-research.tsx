@@ -1,28 +1,35 @@
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Keyboard, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Keyboard,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Block, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { Fonts, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { requestSmsPermission } from '@/lib/auto-import';
-import {
-  FeedbackSendError,
-  submitParserResearchFeedback,
-} from '@/lib/feedback-transport';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import {
-  buildParserResearchSubmission,
+  buildManualParserResearchExport,
+  buildParserResearchSubmissionCooperatively,
+  hasManualParserResearchSamples,
   PARSER_RESEARCH_PASTE_MAX,
   parsePastedParserMessages,
+  serializeManualParserResearchExportCooperatively,
+  type ParserResearchProgress,
   type ParserResearchSubmission,
 } from '@/lib/parser-research';
 import {
@@ -30,28 +37,10 @@ import {
   collectParserResearchInbox,
   isParserResearchBuild,
 } from '@/lib/parser-research-source';
+import { copyTextToClipboard, shareTextFile, TextClipboardError } from '@/lib/share-text';
 import { useStore } from '@/lib/store';
 
-const researchSendFailure = (error: unknown): { title: string; body: string } => {
-  if (error instanceof FeedbackSendError) {
-    if (error.code === 'network') {
-      return { title: t('feedbackOfflineTitle'), body: t('feedbackOfflineBody') };
-    }
-    if (error.code === 'too_large' || error.code === 'diagnostic_too_large') {
-      return { title: t('feedbackTooLargeTitle'), body: t('feedbackTooLargeBody') };
-    }
-    if (error.code === 'rate_limited' || error.status === 429) {
-      return { title: t('feedbackBusyTitle'), body: t('feedbackBusyBody') };
-    }
-    if (error.status !== null) {
-      return {
-        title: t('feedbackRefusedTitle'),
-        body: tf('feedbackRefusedBody', { code: error.code ?? String(error.status) }),
-      };
-    }
-  }
-  return { title: t('feedbackFailedTitle'), body: t('feedbackFailedBody') };
-};
+const REPORT_PREVIEW_PAGE_CHARS = 2_000;
 
 export default function ParserResearchScreen() {
   const router = useRouter();
@@ -63,16 +52,31 @@ export default function ParserResearchScreen() {
   const [pasted, setPasted] = useState('');
   const [submission, setSubmission] = useState<ParserResearchSubmission | null>(null);
   const [preparing, setPreparing] = useState(false);
+  const [preparingStage, setPreparingStage] = useState<'reading' | 'checking' | 'finalizing'>('reading');
   const [checked, setChecked] = useState(0);
-  const [confirming, setConfirming] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [checkingTotal, setCheckingTotal] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [manualJson, setManualJson] = useState('');
+  const [previewPage, setPreviewPage] = useState(0);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  const pasteInputRef = useRef<TextInput>(null);
   const blocked = state.privateMode || !enabled;
+  const prepareGeneration = useRef(0);
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
+
+  useEffect(() => () => {
+    prepareGeneration.current += 1;
+  }, []);
 
   useEffect(() => {
     if (!blocked) return;
+    prepareGeneration.current += 1;
+    setPreparing(false);
     setSubmission(null);
-    setConfirming(false);
+    setManualJson('');
+    setPreviewPage(0);
   }, [blocked]);
 
   const build = useMemo(() => ({
@@ -83,44 +87,110 @@ export default function ParserResearchScreen() {
     currency: ledgerCurrencyDisplay(),
   }), [language, state.marketId]);
 
+  const manualReport = useMemo(() => {
+    if (!submission) return null;
+    return buildManualParserResearchExport(submission);
+  }, [submission]);
+  const previewPageCount = Math.max(
+    1,
+    Math.ceil(manualJson.length / REPORT_PREVIEW_PAGE_CHARS),
+  );
+  const previewStart = previewPage * REPORT_PREVIEW_PAGE_CHARS;
+  const previewEnd = Math.min(manualJson.length, previewStart + REPORT_PREVIEW_PAGE_CHARS);
+
   const prepare = async () => {
+    if (blocked) return;
+    if (!automaticInbox && !pasted.trim()) {
+      const body = t('parserResearchPasteRequired');
+      setNotice({
+        title: t('parserResearchPasteRequiredTitle'),
+        body,
+      });
+      pasteInputRef.current?.focus();
+      AccessibilityInfo.announceForAccessibility(body);
+      return;
+    }
     Keyboard.dismiss();
     setPreparing(true);
+    setPreparingStage('reading');
     setChecked(0);
+    setCheckingTotal(0);
     setNotice(null);
     setSubmission(null);
+    setManualJson('');
+    setPreviewPage(0);
+    const generation = ++prepareGeneration.current;
+    const isCurrent = () =>
+      prepareGeneration.current === generation && !blockedRef.current;
     try {
       const messages = automaticInbox
         ? await (async () => {
             const granted = await requestSmsPermission();
             if (!granted) throw new Error('parser_research_permission');
-            return collectParserResearchInbox(setChecked);
+            if (!isCurrent()) throw new Error('parser_research_cancelled');
+            return collectParserResearchInbox((count) => {
+              if (isCurrent()) setChecked(count);
+            }, { shouldContinue: isCurrent });
           })()
         : parsePastedParserMessages(pasted);
-      const next = buildParserResearchSubmission(messages, build);
+      if (!isCurrent()) throw new Error('parser_research_cancelled');
+      setPreparingStage('checking');
+      setChecked(0);
+      setCheckingTotal(messages.length);
+      const next = await buildParserResearchSubmissionCooperatively(
+        messages,
+        build,
+        (progress: ParserResearchProgress) => {
+          if (!isCurrent()) return;
+          setPreparingStage(progress.stage);
+          setChecked(progress.completed);
+          setCheckingTotal(progress.total);
+        },
+        { shouldContinue: isCurrent },
+      );
+      if (!isCurrent()) throw new Error('parser_research_cancelled');
       // Do not retain the tester's pasted plaintext once the safe report exists.
       setPasted('');
-      if (next.counts.attachedTemplates === 0) {
+      if (!hasManualParserResearchSamples(next)) {
         setNotice({
           title: t('parserResearchNoneTitle'),
           body: t('parserResearchNoneBody'),
         });
       } else {
+        const report = buildManualParserResearchExport(next);
+        const json = await serializeManualParserResearchExportCooperatively(
+          report,
+          (progress) => {
+            if (!isCurrent()) return;
+            setPreparingStage('finalizing');
+            setChecked(progress.completed);
+            setCheckingTotal(progress.total);
+          },
+          { shouldContinue: isCurrent },
+        );
+        if (!isCurrent()) throw new Error('parser_research_cancelled');
+        setManualJson(json);
         setSubmission(next);
       }
     } catch (error) {
+      if (
+        !isCurrent() ||
+        (error instanceof Error && (
+          error.message === 'parser_research_cancelled' ||
+          error.message === 'sms_corpus_cancelled'
+        ))
+      ) return;
       setNotice(error instanceof Error && error.message === 'parser_research_permission'
         ? { title: t('smsCorpusPermissionTitle'), body: t('smsCorpusPermissionBody') }
         : { title: t('parserResearchFailedTitle'), body: t('parserResearchFailedBody') });
     } finally {
-      setPreparing(false);
+      if (isCurrent()) setPreparing(false);
     }
   };
 
-  const send = async () => {
+  const copyReport = async () => {
     if (!submission || state.privateMode || !enabled) {
       setSubmission(null);
-      setConfirming(false);
       setNotice({
         title: t('parserResearchFailedTitle'),
         body: state.privateMode
@@ -129,25 +199,57 @@ export default function ParserResearchScreen() {
       });
       return;
     }
-    setSending(true);
+    setCopying(true);
     setNotice(null);
     try {
-      const receipt = await submitParserResearchFeedback(submission.wire);
-      setSubmission(null);
-      setNotice({
-        title: t('parserResearchSentTitle'),
-        body: receipt.dispatched
-          ? tf('parserResearchSentDispatched', { id: receipt.id })
-          : tf('parserResearchSentStored', { id: receipt.id }),
-      });
+      await copyTextToClipboard(manualJson);
+      const body = t('parserResearchCopiedBody');
+      setNotice({ title: t('parserResearchCopiedTitle'), body });
+      AccessibilityInfo.announceForAccessibility(body);
     } catch (error) {
-      setNotice(researchSendFailure(error));
+      setNotice(error instanceof TextClipboardError && error.code === 'too_large'
+        ? {
+            title: t('parserResearchCopyTooLargeTitle'),
+            body: t('parserResearchCopyTooLargeBody'),
+          }
+        : {
+            title: t('parserResearchCopyFailedTitle'),
+            body: t('parserResearchCopyFailedBody'),
+          });
     } finally {
-      setSending(false);
+      setCopying(false);
     }
   };
 
-  const canPrepare = !blocked && !preparing && (automaticInbox || pasted.trim().length > 0);
+  const exportReport = async () => {
+    if (!submission || state.privateMode || !enabled) {
+      setSubmission(null);
+      setNotice({
+        title: t('parserResearchFailedTitle'),
+        body: state.privateMode
+          ? t('parserResearchPrivateBlocked')
+          : t('parserResearchUnavailable'),
+      });
+      return;
+    }
+    setExporting(true);
+    setNotice(null);
+    try {
+      await shareTextFile('wafra-parser-report.json', manualJson, {
+        mimeType: 'application/json',
+        dialogTitle: t('parserResearchExport'),
+      });
+    } catch {
+      setNotice({
+        title: t('parserResearchExportFailedTitle'),
+        body: t('parserResearchExportFailedBody'),
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const canPrepare = !blocked && !preparing;
 
   return (
     <ThemedView style={styles.root}>
@@ -184,6 +286,7 @@ export default function ParserResearchScreen() {
                 {t('parserResearchPasteHelp')}
               </ThemedText>
               <TextInput
+                ref={pasteInputRef}
                 accessibilityLabel={t('parserResearchPasteA11y')}
                 value={pasted}
                 onChangeText={(value) => {
@@ -199,7 +302,7 @@ export default function ParserResearchScreen() {
                   styles.textarea,
                   {
                     backgroundColor: theme.backgroundElement,
-                    borderColor: theme.cardBorder,
+                    borderColor: theme.controlBorder,
                     color: theme.text,
                     textAlign: language === 'ar' ? 'right' : 'left',
                   },
@@ -216,7 +319,11 @@ export default function ParserResearchScreen() {
             )}
             <Button
               label={preparing
-                ? tf('parserResearchPreparing', { count: checked })
+                ? preparingStage === 'reading'
+                  ? tf('parserResearchReading', { count: checked })
+                  : preparingStage === 'checking'
+                    ? tf('parserResearchPreparing', { count: checked, total: checkingTotal })
+                    : t('parserResearchFinalizing')
                 : t(automaticInbox ? 'parserResearchPrepareInbox' : 'parserResearchPreparePaste')}
               icon="code"
               disabled={!canPrepare}
@@ -231,26 +338,65 @@ export default function ParserResearchScreen() {
                 {t('parserResearchPreviewNote')}
               </ThemedText>
               <Block>
-                <ScrollView
-                  nestedScrollEnabled
-                  showsVerticalScrollIndicator
-                  style={styles.previewScroll}>
-                  <ThemedText type="nano" themeColor="textSecondary" style={styles.preview}>
-                    {submission.preview}
+                <ThemedText type="small">
+                  {tf('parserResearchReadySummary', {
+                    checked: manualReport?.counts.checked ?? 0,
+                    parsed: manualReport?.counts.uniqueParsedTemplates ?? 0,
+                    unparsed: manualReport?.counts.uniqueUnparsedTemplates ?? 0,
+                  })}
+                </ThemedText>
+                <ThemedText
+                  selectable
+                  type="nano"
+                  themeColor="textSecondary"
+                  style={styles.preview}>
+                  {manualJson.slice(previewStart, previewEnd)}
+                </ThemedText>
+                <View style={styles.previewActions}>
+                  <Button
+                    inline
+                    variant="outline"
+                    label={t('parserResearchPreviewPrevious')}
+                    disabled={previewPage === 0}
+                    onPress={() => setPreviewPage((page) => Math.max(0, page - 1))}
+                  />
+                  <ThemedText type="nano" themeColor="textTertiary">
+                    {tf('parserResearchPreviewPage', {
+                      current: previewPage + 1,
+                      total: previewPageCount,
+                    })}
                   </ThemedText>
-                </ScrollView>
+                  <Button
+                    inline
+                    variant="outline"
+                    label={t('parserResearchPreviewNext')}
+                    disabled={previewPage >= previewPageCount - 1}
+                    onPress={() => setPreviewPage((page) =>
+                      Math.min(previewPageCount - 1, page + 1))}
+                  />
+                </View>
               </Block>
               <Button
-                label={sending ? t('feedbackSending') : t('parserResearchSend')}
-                icon="upload"
-                disabled={sending || blocked}
-                onPress={() => setConfirming(true)}
+                label={copying ? t('parserResearchCopying') : t('parserResearchCopy')}
+                icon="code"
+                disabled={copying || blocked}
+                onPress={() => void copyReport()}
               />
+              <Button
+                label={exporting ? t('parserResearchExporting') : t('parserResearchExport')}
+                icon="download"
+                variant="outline"
+                disabled={exporting || blocked}
+                onPress={() => void exportReport()}
+              />
+              <ThemedText type="meta" themeColor="textTertiary">
+                {t('parserResearchExportHelp')}
+              </ThemedText>
             </Section>
           )}
 
           {notice && (
-            <Section index={4}>
+            <Section index={4} accessibilityLiveRegion="polite">
               <Block>
                 <ThemedText type="small">{notice.title}</ThemedText>
                 <ThemedText type="meta" themeColor="textSecondary">{notice.body}</ThemedText>
@@ -259,14 +405,6 @@ export default function ParserResearchScreen() {
           )}
         </ScrollView>
       </SafeAreaView>
-      <ConfirmSheet
-        visible={confirming && !blocked}
-        onClose={() => setConfirming(false)}
-        question={t('parserResearchSendQ')}
-        body={t('parserResearchSendBody')}
-        confirmLabel={t('parserResearchSend')}
-        onConfirm={() => void send()}
-      />
     </ThemedView>
   );
 }
@@ -278,7 +416,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: ScreenPadding,
     // A 280-character template plus the full provider disclosure is tall. Keep
-    // enough trailing scroll range for the final consent button to clear the
+    // enough trailing scroll range for the final export button to clear the
     // home indicator on smaller iPhones and large Dynamic Type.
     paddingBottom: Spacing.six + 96,
     gap: Spacing.four + 2,
@@ -301,7 +439,10 @@ const styles = StyleSheet.create({
     textAlign: 'left',
     writingDirection: 'ltr',
   },
-  previewScroll: {
-    maxHeight: 180,
+  previewActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
   },
 });

@@ -1,0 +1,233 @@
+{
+  "parser": [
+    {
+      "id": "public-hk-icici-debit",
+      "country": "HK",
+      "language": "en",
+      "kind": "public-template",
+      "body": "Dear Customer, Your Account XXXXX101 has been debited by HKD200.00 on 31 Oct. Info:BIL*000001901069*test. Total Available balance: HKD10,000.00",
+      "expected": {
+        "amount.value": {
+          "currency": "HKD",
+          "minorUnits": "20000",
+          "exponent": 2
+        },
+        "balance.value": {
+          "currency": "HKD",
+          "minorUnits": "1000000",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "transactionDate.value": null
+      },
+      "source": {
+        "url": "https://www.icicibank.hk/en/personal_banking/sms-alerts-learn-more",
+        "title": "ICICI Hong Kong: sample debit alert",
+        "accessed": "2026-09-05",
+        "verification": "direct-page",
+        "notes": "Published body, transport From telephone omitted. Yearless date must remain unresolved. No merchant expectation from opaque Info reference."
+      }
+    },
+    {
+      "id": "public-pl-millennium-auth",
+      "country": "PL",
+      "language": "en",
+      "kind": "public-template",
+      "body": "Operation No. 4 from 2010-03-26. Domestic transfer from acc.: 0055667788 to acc.: 0011223344 Amount: 500.00 PLN Password: 112233.",
+      "expected": {
+        "status": "informational",
+        "family": "authentication"
+      },
+      "safety": {
+        "mustNotPost": true
+      },
+      "source": {
+        "url": "https://www.bankmillennium.pl/en/corporate/e-banking/internet-banking/smspasswords",
+        "title": "Bank Millennium: sample SMS authorization",
+        "accessed": "2026-09-05",
+        "verification": "direct-page",
+        "notes": "Bank explicitly states this message authorizes a future operation. Numbers and password are the bank's published dummy example, never user credentials."
+      }
+    },
+    {
+      "id": "public-au-commbank-spend",
+      "country": "AU",
+      "language": "en",
+      "kind": "public-template",
+      "body": "$15 spend at Sandwich Co. So far this month you've spent $40 on Food.",
+      "context": {
+        "currencyAliases": {
+          "$": [
+            "AUD"
+          ]
+        }
+      },
+      "expected": {
+        "amount.value": {
+          "currency": "AUD",
+          "minorUnits": "1500",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "Sandwich Co.",
+        "transactionDate.value": null
+      },
+      "source": {
+        "url": "https://www.commbank.com.au/digital-banking/transaction-notifications.html",
+        "title": "CommBank: transaction notification screenshot",
+        "accessed": "2026-09-05",
+        "verification": "direct-image-transcription",
+        "notes": "Verified official screen6_transaction-notifications.png. Benchmark supplies AUD alias from this identified Australian-bank example; does not test automatic source identification. Monthly spend40 is not the transaction15."
+      }
+    },
+    {
+      "id": "public-th-kbank-purchase",
+      "country": "TH",
+      "language": "en",
+      "kind": "public-template",
+      "body": "Paid THB 2,500.00 by card no. x-1234 @ COMPANY NAME 15:15 Balance THB 450,000.00",
+      "expected": {
+        "amount.value": {
+          "currency": "THB",
+          "minorUnits": "250000",
+          "exponent": 2
+        },
+        "balance.value": {
+          "currency": "THB",
+          "minorUnits": "45000000",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": "COMPANY NAME",
+        "transactionDate.value": null,
+        "instrument.value": {
+          "kind": "card",
+          "last4": "1234"
+        }
+      },
+      "source": {
+        "url": "https://www.kasikornbank.com/en/personal/digital-banking/sms/pages/k-malert-debit.aspx",
+        "title": "KASIKORNBANK: debit card SMS alert",
+        "accessed": "2026-09-05",
+        "verification": "researcher-direct-page",
+        "notes": "Full published purchase example. A time without a date cannot supply a calendar date."
+      }
+    },
+    {
+      "id": "public-th-bangkok-credit",
+      "country": "TH",
+      "language": "en",
+      "kind": "public-template",
+      "body": "Deposit/transfer to your account X1234 of Bt 5,000.00 via ATM; the available balance is Bt 15,000.00.",
+      "context": {
+        "currencyAliases": {
+          "Bt": [
+            "THB"
+          ]
+        }
+      },
+      "expected": {
+        "amount.value": {
+          "currency": "THB",
+          "minorUnits": "500000",
+          "exponent": 2
+        },
+        "balance.value": {
+          "currency": "THB",
+          "minorUnits": "1500000",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "credit",
+        "instrument.value": {
+          "kind": "account",
+          "last4": "1234"
+        }
+      },
+      "source": {
+        "url": "https://www.bangkokbank.com/en/Personal/Digital-Banking/SMS-Services/SMS-Account-Alert",
+        "title": "Bangkok Bank: incoming funds example",
+        "accessed": "2026-09-05",
+        "verification": "direct-page",
+        "notes": "Benchmark supplies documented Bt=THB alias; this is not automatic issuer detection. Incoming deposit/transfer, not cash withdrawal just because ATM appears."
+      }
+    },
+    {
+      "id": "public-bd-upay-purchase",
+      "country": "BD",
+      "language": "en",
+      "kind": "public-template",
+      "body": "Upay: This is a notification of your recent purchase of 150 BDT, invoice # 123456 transaction # XXXXXXXXXXXXXXXX.",
+      "expected": {
+        "amount.value": {
+          "currency": "BDT",
+          "minorUnits": "15000",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "merchant.value": null,
+        "transactionDate.value": null
+      },
+      "source": {
+        "url": "https://www.ucb.com.bd/reports/downloads/Upay/UPay_Customer_User_Manual.pdf",
+        "title": "UCB Upay customer manual, page 8",
+        "accessed": "2026-09-05",
+        "verification": "researcher-direct-pdf",
+        "notes": "Explicitly labelled Sample SMS. Merchant not supplied; invoice identifier is not money."
+      }
+    },
+    {
+      "id": "public-hk-dbs-chats",
+      "country": "HK",
+      "language": "en",
+      "kind": "public-template-excerpt",
+      "body": "An Outward CHATS of HKD 0.01 has been debited from XXXXX3618X on 20 Mar 2017.",
+      "expected": {
+        "amount.value": {
+          "currency": "HKD",
+          "minorUnits": "1",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "transactionDate.value": "2017-03-20"
+      },
+      "source": {
+        "url": "https://www.dbs.com.hk/documents/1023593/15361763/ideal-ereport-maintenance-form.pdf/b735d026-b24b-b1c9-93cb-8cfc0f14885c?t=1587442364567",
+        "title": "DBS IDEAL eReports samples, page 2",
+        "accessed": "2026-09-05",
+        "verification": "direct-pdf-indexed-image-text",
+        "notes": "Published SMS excerpt. Mask ends with X, so no last-four assertion; historical template is not proof of current delivery wording."
+      }
+    },
+    {
+      "id": "public-ke-safaricom-bundle",
+      "country": "KE",
+      "language": "en",
+      "kind": "public-indexed-excerpt",
+      "body": "250Ksh sent to 958300 – Safaricom Data Bundles for account on 27/3/15 at 2:56PM",
+      "expected": {
+        "amount.value": {
+          "currency": "KES",
+          "minorUnits": "25000",
+          "exponent": 2
+        },
+        "status": "posted",
+        "direction": "debit",
+        "transactionDate.value": null
+      },
+      "source": {
+        "url": "https://www.safaricom.co.ke/media-center-landing/terms-and-conditions/terms-and-conditions-for-safaricom-prepay-and-postpay-data-bundles?tmpl=component",
+        "title": "Safaricom: data bundle terms",
+        "accessed": "2026-09-05",
+        "verification": "official-search-index-only",
+        "notes": "Lower-confidence retrieval: direct fetch failed. Historical excerpt, not full SMS; no balance or complete date expected. Must stay separate from directly verified templates."
+      }
+    }
+  ],
+  "categorization": []
+}

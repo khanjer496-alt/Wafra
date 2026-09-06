@@ -1,0 +1,40 @@
+name: Distribute uploaded Wafra beta 52
+
+# The binary already exists in App Store Connect. This job does not build or
+# upload another binary. It targets only version 1.0.0 (52) and the existing
+# external Beta group using the documented Apple group->builds endpoint.
+on:
+  push:
+    branches: [release/ios-shortcuts-review-20260907]
+    paths: ['.github/workflows/ios-beta52-distribute.yml']
+permissions:
+  contents: read
+concurrency:
+  group: wafra-ios-beta52-submit
+  cancel-in-progress: false
+jobs:
+  distribute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Validate release script syntax
+        run: node --check scripts/release/ios-public-beta-publish.mjs
+      - name: Verify build and distribute to the existing public group
+        env:
+          WAFRA_BETA_VERSION: '1.0.0'
+          WAFRA_BETA_BUILD_NUMBER: '52'
+          WAFRA_BETA_SOURCE_SHA: d67e71fa78c2abadb4feab8553478d128b026d20
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: node scripts/release/ios-public-beta-publish.mjs --publish
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta52-distribution-${{ github.sha }}
+          path: ios-release-evidence/public-beta.json
+          retention-days: 7

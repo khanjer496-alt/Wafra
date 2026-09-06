@@ -101,6 +101,37 @@ const tapTab = async (page, label) => {
   await page.waitForTimeout(1300);
 };
 
+/** Escape a visible period label for a role-name regular expression. */
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Home's redesigned period control is labelled with the period itself, while
+ * the other tabs use the longer "Reporting period: … Tap to change" label.
+ * Match both accessible contracts exactly and let Playwright perform the real
+ * pointer-actionability checks instead of duplicating them with a brittle
+ * centre-point hit test.
+ */
+async function tapPeriod(page, periodText, settle = 1200) {
+  const name = new RegExp(
+    `^(?:Reporting period:\\s*)?${escapeRegex(periodText)}(?:\\.\\s*Tap to change\\.)?$`,
+    'i',
+  );
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    for (const button of (await page.getByRole('button', { name }).all()).reverse()) {
+      if (!(await button.isVisible().catch(() => false))) continue;
+      await button.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+      try {
+        await button.click({ timeout: 3000 });
+        await page.waitForTimeout(settle);
+        return;
+      } catch {}
+    }
+    await page.waitForTimeout(200);
+  }
+  throw new Error(`no active reporting-period control for: ${periodText}`);
+}
+
 // The dev container ships Chromium at a fixed path; a CI runner installs it
 // where Playwright expects. Use the pinned path only when it is really there,
 // or the suite fails to launch on whichever of the two it was not written on.
@@ -121,31 +152,38 @@ const shortMonth = (offset = 0) => {
   d.setMonth(d.getMonth() + offset);
   return d.toLocaleString('en', { month: 'short' });
 };
+const monthPeriod = (offset = 0) => {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + offset);
+  return d.toLocaleString('en', { month: 'short', year: 'numeric' });
+};
 
 // 1) Home opens on the current month, live.
 ok('home: period pill shows the current month', !!(await visibleText(page, shortMonth())));
-ok('home: hero reads live', !!(await visibleText(page, /Net after spending.*so far this month/i)));
+ok('home: hero reads live', !!(await visibleText(page, /^Net after spending$/i)));
 
 // 2) The pill opens the sheet; Last month re-scopes the hero.
-await tapLabel(page, /Reporting period/, 1200);
-ok('sheet: reporting period opens', !!(await visibleText(page, 'REPORTING PERIOD')));
-await tapText(page, 'LAST MONTH', 1200);
-ok('home: past month names itself in the hero', !!(await visibleText(page, `in ${shortMonth(-1)}`)));
+await tapPeriod(page, monthPeriod(), 1200);
+ok('sheet: reporting period opens', !!(await visibleText(page, /^Reporting period$/i)));
+await tapText(page, /^Last month$/i, 1200);
+ok('home: past month applies beside the hero',
+  !!(await visibleText(page, monthPeriod(-1))) && !!(await visibleText(page, /^Net after spending$/i)));
 
-// 3) Flow follows the same period.
-await tapTab(page, 'Flow');
-ok('flow: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
-ok('flow: summary rail states total spending', !!(await visibleText(page, /^Total spent$/i)));
+// 3) Spending follows the same period.
+await tapTab(page, 'Spending');
+ok('spending: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
+ok('spending: summary rail states total spending', !!(await visibleText(page, /^Total spent$/i)));
 
-// 4) All time from Flow's own pill.
-await tapLabel(page, /Reporting period/, 1200);
-await tapText(page, 'ALL TIME', 1200);
-ok('flow: all time applies', !!(await visibleText(page, 'All time')));
+// 4) All time from Spending's own pill.
+await tapPeriod(page, monthPeriod(-1), 1200);
+await tapText(page, /^All time$/i, 1200);
+ok('spending: all time applies', !!(await visibleText(page, 'All time')));
 
 // 5) Year mode from Home, and Activity inherits the scope.
 await tapTab(page, 'Home');
-await tapLabel(page, /Reporting period/, 1200);
-await tapText(page, 'THIS YEAR', 1200);
+await tapPeriod(page, 'All time', 1200);
+await tapText(page, /^This year$/i, 1200);
 const yr = String(new Date().getFullYear());
 ok('home: year mode applies', !!(await visibleText(page, yr)));
 

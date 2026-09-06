@@ -1,4 +1,5 @@
-import type { Transaction, TransactionType } from '@/lib/types';
+import { canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
+import type { CaptureInstrument, Transaction, TransactionType } from '@/lib/types';
 
 /**
  * Deciding whether a parsed message is one the ledger already has.
@@ -117,6 +118,8 @@ export interface DuplicateCandidate {
   amountFils: number;
   title: string;
   type: TransactionType;
+  /** Ephemeral retained source evidence for an evidenced parser correction. */
+  raw?: string;
   /** `s{timestamp}-{amount}`, when the message carried a timestamp. */
   smsKey?: string;
   /** Capture time, independent of the channel-specific SMS fingerprint. */
@@ -124,6 +127,7 @@ export interface DuplicateCandidate {
   channel?: CaptureChannel;
   /** Resolved account/card. Required for high-confidence settlement pairing. */
   accountId?: string;
+  captureInstrument?: CaptureInstrument;
   eventKind?: 'transaction' | 'cardPayment';
   /** Which bank alert described the card settlement. Opposite sides are one event. */
   cardPaymentSide?: 'debit' | 'receipt';
@@ -198,6 +202,7 @@ interface SeenEvent {
   id?: string;
   /** What this capture called the merchant, for the compatibility test above. */
   title: string;
+  captureInstrument?: CaptureInstrument;
   /** A title the user typed says nothing about the merchant; skip the test. */
   userEdited?: boolean;
   /** One capture explains one event on the other channel, not every one. */
@@ -223,6 +228,32 @@ interface SeenOccurrence {
   historyIdentity: boolean;
   /** A row with no event clock explains one later capture, not all of them. */
   consumed: boolean;
+  captureInstrument?: CaptureInstrument;
+  type: TransactionType;
+}
+
+/** Only facts from the alerts can prove two captures describe different instruments. */
+export function compatibleCaptureInstrument(a?: CaptureInstrument, b?: CaptureInstrument): boolean {
+  if (!a || !b) return true;
+  if (a.last4 !== b.last4) return false;
+  if (a.bankIdentity && b.bankIdentity && a.bankIdentity !== b.bankIdentity) return false;
+  return a.kind === 'unknown' || b.kind === 'unknown' || a.kind === b.kind;
+}
+
+/** Keep every compatible fact when a fuller message omits bank or card kind. */
+export function mergeCaptureInstrument(
+  preferred?: CaptureInstrument,
+  secondary?: CaptureInstrument,
+): CaptureInstrument | undefined {
+  if (!preferred) return secondary;
+  if (!secondary || !compatibleCaptureInstrument(preferred, secondary)) return preferred;
+  return {
+    ...secondary,
+    ...preferred,
+    kind: preferred.kind === 'unknown' ? secondary.kind : preferred.kind,
+    ...(preferred.bankIdentity || secondary.bankIdentity
+      ? { bankIdentity: preferred.bankIdentity || secondary.bankIdentity } : {}),
+  };
 }
 
 interface SeenCardPayment {
@@ -256,14 +287,15 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
 }
 
 export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
+  existing = existing.filter((row) => isUsableCaptureSourceIdentity(row.smsKey, row.ts));
   let lastMatchedId: string | null = null;
   /** dedupeKey → the capture times filed under it. */
   const seen = new Map<string, SeenOccurrence[]>();
   /** The same stored row can appear in title and cross-channel indexes. */
   const seenById = new Map<string, SeenOccurrence>();
-  const note = (key: string, ts: number | null, smsKey?: string, id?: string) => {
+  const note = (key: string, ts: number | null, type: TransactionType, smsKey?: string, id?: string, captureInstrument?: CaptureInstrument) => {
     const at = seen.get(key);
-    const occurrence = { ts, id, historyIdentity: smsKey?.startsWith('h') === true, consumed: false };
+    const occurrence = { ts, id, type, captureInstrument, historyIdentity: smsKey?.startsWith('h') === true, consumed: false };
     if (at) at.push(occurrence);
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
@@ -272,12 +304,25 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
     // identical purchase later that day look like the same event.
-    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.smsKey, t.id);
+    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.smsKey, t.id, t.captureInstrument);
   }
-  const seenSms = new Set(existing.map((t) => t.smsKey).filter(Boolean) as string[]);
-  const seenSmsIds = new Map(
-    existing.filter((t) => t.smsKey).map((t) => [t.smsKey as string, t.id]),
-  );
+  // Delivery clocks can collide across cards; retain every candidate per key.
+  const exactRows = new Map<string, DuplicateCandidate[]>();
+  const noteExact = (c: DuplicateCandidate) => {
+    if (!c.smsKey) return;
+    const key = canonicalCaptureSourceKey(c.smsKey, c.ts);
+    if (isUnboundAndroidSourceKey(key)) return;
+    const rows = exactRows.get(key) ?? [];
+    rows.push(c);
+    exactRows.set(key, rows);
+  };
+  for (const t of existing) noteExact(t);
+  const exactMatch = (key: string, c: DuplicateCandidate) =>
+    (exactRows.get(canonicalCaptureSourceKey(key, c.ts)) ?? []).find((row) => key.startsWith('h') || (
+      (row.type === c.type || c.eventKind === 'cardPayment' ||
+        (row.raw !== undefined && c.raw !== undefined && bodyPrint(row.raw) === bodyPrint(c.raw))) &&
+      compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)
+    ));
   /** A day/amount/direction key still needs a capture time to identify an event. */
   const crossChannel = new Map<string, SeenEvent[]>();
   /** Ledger rows by id, so `consume` does not have to scan every bucket. */
@@ -310,6 +355,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
         channel: t.viaPush ? 'push' : 'inbox',
         id: t.id,
         title: t.title,
+        captureInstrument: t.captureInstrument,
         userEdited: t.userEdited,
       });
     }
@@ -331,9 +377,11 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
 
   return {
     has(c) {
+      if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) { lastMatchedId = null; return false; }
       lastMatchedId = null;
-      if (c.smsKey && seenSms.has(c.smsKey)) {
-        lastMatchedId = seenSmsIds.get(c.smsKey) ?? null;
+      const exact = c.smsKey ? exactMatch(c.smsKey, c) : undefined;
+      if (exact) {
+        lastMatchedId = exact.id ?? null;
         return true;
       }
       // The live Shortcut/Android identity predates history GUID hashing, but
@@ -342,7 +390,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       // corrected title) cannot leave the same Message counted twice. Consume
       // it one-to-one: another history GUID at the same second is a real row.
       if (c.smsKey?.startsWith('h') && Number.isFinite(c.ts)) {
-        const legacyId = seenSmsIds.get(`s${c.ts}-${c.amountFils}`);
+        const legacyId = exactMatch(`s${c.ts}-${c.amountFils}`, c)?.id;
         const occurrence = legacyId ? seenById.get(legacyId) : undefined;
         if (legacyId && occurrence && !occurrence.consumed) {
           occurrence.consumed = true;
@@ -411,9 +459,10 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           // second. Exact re-imports were already caught by seenSms above.
           // Continue comparing against Android/live captures so importing
           // history after enabling live capture still removes overlap.
-          const comparable = c.smsKey?.startsWith('h')
-            ? at.filter((row) => !row.historyIdentity)
-            : at;
+          const comparable = at.filter((row) =>
+            row.type === c.type &&
+            compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
+            !(c.smsKey?.startsWith('h') && row.historyIdentity));
           // Same day, same amount, same name. That is one event captured twice
           // UNLESS both sides carry a timestamp and those are far enough apart
           // to be two separate visits. Without this the second identical charge
@@ -458,6 +507,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           (row) =>
             row.channel !== 'push' &&
             !row.consumed &&
+            compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
             crossChannelPair(row, c.title) &&
             closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
         );
@@ -478,6 +528,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       return id;
     },
     supersedes(c) {
+      if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return null;
       if (c.channel === 'push') return null;
       const mine = candidateTime(c);
       const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
@@ -487,6 +538,7 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
           row.channel !== 'push' ||
           !row.id ||
           row.consumed ||
+          !compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) ||
           !crossChannelPair(row, c.title) ||
           !closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS)
         ) {
@@ -515,14 +567,16 @@ export function duplicateGuard(existing: Transaction[]): DuplicateGuard {
       if (occurrence) occurrence.consumed = true;
     },
     add(c) {
+      if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
       const ts = candidateTime(c);
-      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.smsKey, c.id);
-      if (c.smsKey) seenSms.add(c.smsKey);
+      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.smsKey, c.id, c.captureInstrument);
+      noteExact(c);
       noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
         ts,
         channel: c.channel ?? 'inbox',
         id: c.id,
         title: c.title,
+        captureInstrument: c.captureInstrument,
       });
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
         noteCardPayment(`${c.amountFils}|${c.accountId}`, {
@@ -571,7 +625,7 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
   };
   const bucket = (ts: number, width: number) => Math.floor(ts / width);
   const noteAt = (row: Transaction, index: number) => {
-    if (row.smsKey) pushIndex(bySmsKey, row.smsKey, index);
+    if (row.smsKey) pushIndex(bySmsKey, canonicalCaptureSourceKey(row.smsKey, row.ts), index);
     const ts = timeOf(row);
     if (ts === null || row.source !== 'sms') return;
     const cross = crossChannelKey(row.date, row.amountFils, row.type);
@@ -599,6 +653,10 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     closeEnough(rowTime, timeOf(prior), CARD_PAYMENT_PAIR_MS);
 
   for (const row of transactions) {
+    if (!isUsableCaptureSourceIdentity(row.smsKey, row.ts)) {
+      kept.push(row);
+      continue;
+    }
     if (row.source !== 'sms') {
       kept.push(row);
       noteAt(row, kept.length - 1);
@@ -606,7 +664,7 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     }
     const rowTime = timeOf(row);
     const candidates = new Set<number>();
-    if (row.smsKey) for (const index of bySmsKey.get(row.smsKey) ?? []) candidates.add(index);
+    if (row.smsKey) for (const index of bySmsKey.get(canonicalCaptureSourceKey(row.smsKey, row.ts)) ?? []) candidates.add(index);
     if (rowTime !== null) {
       const cross = crossChannelKey(row.date, row.amountFils, row.type);
       const title = dedupeKey(row.date, row.amountFils, row.title);
@@ -632,7 +690,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       const prior = kept[index];
       if (prior.source !== 'sms') return false;
       const bothEdited = Boolean(row.userEdited && prior.userEdited);
-      if (row.smsKey && prior.smsKey === row.smsKey) return !bothEdited;
+      const rowSource = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
+      const priorSource = prior.smsKey ? canonicalCaptureSourceKey(prior.smsKey, prior.ts) : undefined;
+      if (row.smsKey && rowSource && !isUnboundAndroidSourceKey(rowSource) && rowSource === priorSource &&
+        (row.smsKey.startsWith('h') || (row.type === prior.type &&
+          compatibleCaptureInstrument(row.captureInstrument, prior.captureInstrument)))) return !bothEdited;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&
@@ -645,12 +707,13 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       if (
         row.smsKey?.startsWith('h') &&
         prior.smsKey?.startsWith('h') &&
-        row.smsKey !== prior.smsKey
+        rowSource !== priorSource
       ) return false;
       if (
         row.date !== prior.date ||
         row.amountFils !== prior.amountFils ||
-        row.type !== prior.type
+        row.type !== prior.type ||
+        !compatibleCaptureInstrument(row.captureInstrument, prior.captureInstrument)
       ) return false;
       const priorTime = timeOf(prior);
       if (row.viaPush !== prior.viaPush && (row.viaPush || prior.viaPush)) {
@@ -712,6 +775,7 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // cross-channel branch above on the NEXT hydrate, and ate another
       // genuine charge. Every launch, compounding.
       viaPush: preferred.viaPush,
+      captureInstrument: mergeCaptureInstrument(preferred.captureInstrument, secondary.captureInstrument),
       // A live/history merge must retain the stable Message identity. If the
       // live `s...` key wins, the next distinct history GUID can merge into
       // the same row too and vanish. The opaque h-key also makes re-imports

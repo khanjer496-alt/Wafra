@@ -16,6 +16,10 @@ import Purchases, {
   type PurchasesPackage,
 } from 'react-native-purchases';
 
+import {
+  publishIosCaptureStatusRefresh,
+  setIosStoreCaptureEntitlementLease,
+} from '@/lib/capture';
 import { ENTITLEMENT_ID, PRO_SKUS, type ProPlan } from '@/lib/purchases';
 
 /** The public SDK key for this platform, or null when none is configured. */
@@ -59,16 +63,13 @@ async function ready(): Promise<boolean> {
   }
 }
 
-/** Whether this customer holds the Pro entitlement right now. */
-function entitled(info: CustomerInfo): boolean {
-  return info.entitlements.active[ENTITLEMENT_ID] !== undefined;
-}
-
 const MAX_INACTIVE_CACHE_AGE_MS = 25 * 60 * 60 * 1000;
 
 export interface EntitlementSnapshot {
   active: boolean;
   requestDateMs: number;
+  /** Exact storefront deadline; null is lifetime only when `active` is true. */
+  expirationDateMs: number | null;
 }
 
 /**
@@ -80,9 +81,29 @@ export interface EntitlementSnapshot {
 function entitlementSnapshot(info: CustomerInfo): EntitlementSnapshot | null {
   const requestDateMs = Date.parse(info.requestDate);
   if (!Number.isFinite(requestDateMs)) return null;
-  const active = entitled(info);
+  const entitlement = info.entitlements.active[ENTITLEMENT_ID];
+  const active = entitlement !== undefined;
   if (!active && Date.now() - requestDateMs > MAX_INACTIVE_CACHE_AGE_MS) return null;
-  return { active, requestDateMs };
+  const expirationDateMs = active ? entitlement.expirationDateMillis : null;
+  if (
+    expirationDateMs !== null &&
+    (!Number.isFinite(expirationDateMs) || expirationDateMs < 0)
+  ) return null;
+  return { active, requestDateMs, expirationDateMs };
+}
+
+/** Mirror a confirmed store answer into the out-of-process App Intent gate. */
+export async function syncStoreCaptureEntitlement(
+  snapshot: EntitlementSnapshot,
+): Promise<boolean> {
+  if (Platform.OS !== 'ios') return true;
+  const applied = await setIosStoreCaptureEntitlementLease(
+    snapshot.active ? snapshot.expirationDateMs : null,
+    snapshot.active && snapshot.expirationDateMs === null,
+    snapshot.requestDateMs,
+  );
+  if (applied) publishIosCaptureStatusRefresh();
+  return applied;
 }
 
 /**
@@ -231,7 +252,15 @@ export async function purchasePro(plan: ProPlan): Promise<PurchaseOutcome> {
     // A completed flow that did not grant the entitlement is a failure, not a
     // purchase: RevenueCat and the store disagree, and silently returning
     // would leave a charged customer locked out.
-    return entitled(customerInfo) ? 'granted' : 'failed';
+    const snapshot = entitlementSnapshot(customerInfo);
+    if (!snapshot?.active) return 'failed';
+    try {
+      await syncStoreCaptureEntitlement(snapshot);
+    } catch {
+      // The purchase is still real. Native capture remains fail-closed and the
+      // entitlement observer retries the same verified snapshot in-process.
+    }
+    return 'granted';
   } catch (error) {
     // The one case that is not an error: the user simply closed the sheet.
     // The SDK flags it rather than making callers match on a message.
@@ -253,7 +282,15 @@ export async function purchasePro(plan: ProPlan): Promise<PurchaseOutcome> {
 export async function restorePro(): Promise<boolean | null> {
   if (!(await ready())) return null;
   try {
-    return entitled(await Purchases.restorePurchases());
+    const customerInfo = await Purchases.restorePurchases();
+    const snapshot = entitlementSnapshot(customerInfo);
+    if (!snapshot) return null;
+    try {
+      await syncStoreCaptureEntitlement(snapshot);
+    } catch {
+      // Restoration succeeded; capture still denies until a later sync.
+    }
+    return snapshot.active;
   } catch {
     return null;
   }

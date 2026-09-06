@@ -6,6 +6,24 @@ Expo SDK version.
 
 # Repository workflow
 
+`main` is the only ongoing development branch. The canonical checkout is
+`/Users/naserkhanjar/Documents/Wafra`, tracking `origin/main`. Start every task
+by checking the branch, status, remote and current upstream revision. Do not
+resume an old repair, build, validation or release branch as a competing main.
+
+All shipping source and executable tests belong in their normal source paths.
+Never keep newer app code only in encoded validation bundles or reconstruct an
+older checkout inside CI. The historical `validation/` files and dated branch
+workflows are recovery records, not the current implementation or build route.
+Use `.github/workflows/ci.yml`, `build-apk.yml`, and `ios-testflight.yml` for
+current validation and builds. Publishing and deployment remain separate,
+explicitly authorized actions, never a side effect of branch consolidation.
+
+Use a short-lived branch or isolated worktree only when needed for a specific
+review or concurrent task. Integrate verified work back into `main`; do not
+leave a permanent second development line. Never retire a branch that still
+has an active writer or unreviewed work. See `docs/repository-workflow.md`.
+
 Codex is the only active repository session by default. Work directly in the
 current tree; do not use `scripts/coord.mjs`, wait for Claude, or require path
 claims merely to inspect or edit files.

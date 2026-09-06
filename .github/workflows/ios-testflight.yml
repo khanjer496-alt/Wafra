@@ -43,14 +43,15 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: 'production = App Store signing, the only kind TestFlight accepts. preview = ad-hoc, installs only on UDIDs registered with eas device:create (see docs/ios-device-install.md).'
+        description: 'production = public runtime. production-candidate = production-equivalent OTA verification through TestFlight. preview = ad-hoc and installs only on registered UDIDs.'
         type: choice
         options:
           - production
+          - production-candidate
           - preview
         default: production
       submit:
-        description: 'Also send the finished build to TestFlight. Requires profile = production.'
+        description: 'Also send the finished store-signed build to TestFlight. Supported by production and production-candidate; preview is ad-hoc only.'
         type: boolean
         default: false
       wait:
@@ -97,7 +98,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.3
           cache: npm
 
       # -----------------------------------------------------------------
@@ -136,7 +137,7 @@ jobs:
       #      Two independent reasons, both of which surface as a confusing
       #      failure thirty minutes in. Stop now instead.
       - name: Refuse a combination that cannot reach TestFlight
-        if: inputs.submit_build_id == '' && inputs.submit && inputs.profile != 'production'
+        if: inputs.submit_build_id == '' && inputs.submit && inputs.profile == 'preview'
         run: |
           {
             echo "# Not started — \`preview\` builds cannot go to TestFlight"
@@ -153,6 +154,7 @@ jobs:
             echo "| Goal | profile | submit |"
             echo "| --- | --- | --- |"
             echo "| Get it on your iPhone via TestFlight | \`production\` | on |"
+            echo "| Verify a production-equivalent OTA candidate | \`production-candidate\` | on |"
             echo "| Check that it compiles, send nothing to Apple | \`production\` | off |"
             echo "| Side-load onto one registered device without Apple review | \`preview\` | off — see \`docs/ios-device-install.md\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -177,13 +179,21 @@ jobs:
           PROFILE: ${{ inputs.profile }}
           WANT_SUBMIT: ${{ inputs.submit }}
         run: |
-          node scripts/check-release-config.mjs \
-            --intent build \
-            --platform ios \
-            --profile "$PROFILE" \
-            --submit "$WANT_SUBMIT" \
-            --github-output "$GITHUB_OUTPUT" \
+          args=(
+            scripts/check-release-config.mjs
+            --intent build
+            --platform ios
+            --profile "$PROFILE"
+            --submit "$WANT_SUBMIT"
+            --github-output "$GITHUB_OUTPUT"
             --github-summary "$GITHUB_STEP_SUMMARY"
+          )
+          if [ "$PROFILE" = "preview" ]; then
+            node "${args[@]}"
+          else
+            printf -v check_command '%q ' node "${args[@]}"
+            npx --yes eas-cli@22.4.0 env:exec production "$check_command" --non-interactive
+          fi
 
       # ---- The Apple credentials.
       #
@@ -360,17 +370,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # eas-cli is not a dependency of this project and should not become one —
-      # it is a tool, not a library, and pinning it in package.json would mean
-      # a Dependabot PR every week for something only CI runs.
-      #
-      # 19.1.0 is the floor: --refresh-ad-hoc-provisioning-profile arrived
-      # there, and it is the version Expo's internal-distribution docs name for
-      # non-interactive iOS. Latest is used so that Apple-side changes (which
-      # Apple ships without notice) arrive without a commit here.
+      - name: Validate OTA-enabled store build configuration
+        if: inputs.submit_build_id == '' && inputs.profile != 'preview'
+        run: npm run update:check
+
+      # Keep the CI binary aligned with eas.json's cli.version contract. Bumping
+      # EAS is deliberate: validate the workflow with the new CLI before moving
+      # both pins together.
       - name: Install EAS CLI
         run: |
-          npm install -g eas-cli@latest
+          npm install -g eas-cli@22.4.0
           eas --version
 
       # ---- Prove the token before the build, not during it. `eas whoami` is
@@ -639,7 +648,7 @@ jobs:
               echo "tab and it works on a phone. In it:"
               echo
               echo '```'
-              echo "npm install -g eas-cli"
+              echo "npm install -g eas-cli@22.4.0"
               echo "eas login"
               echo "npx testflight"
               echo '```'
@@ -778,9 +787,17 @@ jobs:
             echo "## What will not work in this build"
             echo
             echo "Read docs/testflight.md, \"What this build cannot do yet\", before concluding something is broken."
-            echo "In short: automatic bank capture on iOS needs the relay deployed *and* the Wafra Capture Shortcut"
-            echo "published, and \`EXPO_PUBLIC_WAFRA_SHORTCUT_URL\` is not set in \`eas.json\`, so the setup flow has no"
-            echo "Shortcut to install. In-app purchases are also inert until a RevenueCat Apple key exists."
+            echo "In short: automatic bank capture on iOS needs the relay deployed and one locked-phone bank alert"
+            echo "verified on a physical iPhone."
+            if [ "$PROFILE" = "preview" ]; then
+              echo "This ad-hoc preview profile intentionally omits the Shortcut; use the capture-beta profile for the"
+              echo "physical capture test."
+            else
+              echo "The production profile references the structurally verified Wafra Capture candidate"
+              echo "\`03d2ab22a33f4fef9d503142575a70fb\`; physical end-to-end proof is still required."
+            fi
+            echo "In-app purchases"
+            echo "are also inert until a RevenueCat Apple key exists."
             echo "Manual entry, import, and the whole ledger work normally."
           } >> "$GITHUB_STEP_SUMMARY"
 

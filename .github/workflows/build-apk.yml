@@ -4,10 +4,8 @@ name: Build Android APK
 # and building on every push to the working branch burned the whole allowance
 # in a month — after which nothing builds at all until the reset.
 #
-# So: CI (typecheck, lint, tests, ~2 min) still runs on every push and is what
-# actually guards the code. A full APK is built when someone asks for one, or
-# on main. That is also how it gets used — an installable build matters when
-# you are about to install it, not on every intermediate commit.
+# CI guards every main push. Full APK/AAB builds are explicit requests from
+# main, not a side effect of routine development or repository cleanup.
 on:
   workflow_dispatch:
     inputs:
@@ -19,13 +17,13 @@ on:
         description: 'Internal ARM64 APK with the temporary full-inbox parser corpus exporter'
         type: boolean
         default: false
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '**.md'
-      - 'scripts/test/**'
-
+      architecture:
+        description: 'ARM64 for modern Android phones; universal for all supported CPUs'
+        type: choice
+        options:
+          - arm64
+          - universal
+        default: arm64
 # A push during a build was already cancelling it, but only after the runner
 # had burned 15 minutes on Gradle. Making it explicit kills the superseded run
 # immediately instead.
@@ -68,7 +66,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.3
           cache: npm
 
       - uses: actions/setup-java@v4
@@ -105,6 +103,27 @@ jobs:
 
       - name: Generate native Android project
         run: npx expo prebuild --platform android --no-install
+
+      # Expo's generated 512 MiB metaspace cap exhausted during
+      # :expo-updates:kspReleaseKotlin. Give class metadata room and fail
+      # immediately on OOM instead of hanging until the job timeout.
+      - name: Configure Android compiler memory
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const file = 'android/gradle.properties';
+          let contents = fs.readFileSync(file, 'utf8');
+          const properties = {
+            'org.gradle.jvmargs': '-Xmx3072m -XX:MaxMetaspaceSize=2048m -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8',
+            'org.gradle.workers.max': '2',
+          };
+          for (const [key, value] of Object.entries(properties)) {
+            contents = contents.split('\n').filter(line => !line.startsWith(key + '=')).join('\n').trimEnd();
+            contents += '\n' + key + '=' + value + '\n';
+          }
+          fs.writeFileSync(file, contents);
+          console.log('Android compiler memory: 3 GiB heap, 2 GiB metaspace, 2 workers; OOM exits immediately.');
+          NODE
 
       # The one build setting that fails SILENTLY and INVISIBLY.
       #
@@ -237,8 +256,9 @@ jobs:
         working-directory: android
         env:
           CORPUS_BUILD: ${{ github.event.inputs.corpus == 'true' && 'true' || 'false' }}
+          APK_ARCHITECTURE: ${{ github.event.inputs.architecture || 'universal' }}
         run: |
-          if [ "$CORPUS_BUILD" = "true" ]; then
+          if [ "$CORPUS_BUILD" = "true" ] || [ "$APK_ARCHITECTURE" = "arm64" ]; then
             ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
           else
             ./gradlew assembleRelease --no-daemon
@@ -246,7 +266,7 @@ jobs:
 
       # Only needed to upload to Play, which is not what most builds are for.
       - name: Build Play Store bundle (AAB)
-        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true'
+        if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
         working-directory: android
         run: ./gradlew bundleRelease --no-daemon
 
@@ -265,7 +285,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Play bundle artifact
-        if: (github.event_name == 'push' || github.event.inputs.bundle == 'true') && github.event.inputs.corpus != 'true'
+        if: github.event.inputs.bundle == 'true' && github.event.inputs.corpus != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: wafra-aab

@@ -54,6 +54,19 @@ ok('the route table was read off disk', available.size >= 8, [...available].join
 ok('the tab routes are there', ['/', '/flow', '/bills', '/wallet'].every((r) => available.has(r)),
   [...available].join(' '));
 
+ok('card and review routes retain their serializable IDs',
+  /useLocalSearchParams<\{ card\?: string \}>/.test(
+    fs.readFileSync(path.join(SRC, 'app/cards.tsx'), 'utf8'),
+  ) &&
+  /pathname: '\/add-transaction', params: \{ reviewId: item\.id \}/.test(
+    fs.readFileSync(path.join(SRC, 'app/review-alerts.tsx'), 'utf8'),
+  ));
+
+ok('Wallet opens cards by serializable account ID on a normal row press',
+  /const openAccount = \(account: Account\)[\s\S]{0,240}router\.push\(`\/cards\?card=\$\{account\.id\}`\)/.test(
+    fs.readFileSync(path.join(SRC, 'app/(tabs)/wallet.tsx'), 'utf8'),
+  ));
+
 {
   // Improve Accuracy has two different jobs. A truly unread bank format is
   // useful parser evidence and may be shared after masking. A private merchant
@@ -67,6 +80,16 @@ ok('the tab routes are there', ['/', '/flow', '/bills', '/wallet'].every((r) => 
   ok('Improve Accuracy shares only genuinely unread formats',
     /section\(t\('accuracyShareUnread'\), unread\)/.test(accuracy) &&
       !/accuracyShareUncategorized/.test(accuracy));
+
+  const feedback = fs.readFileSync(path.join(APP, 'feedback.tsx'), 'utf8');
+  ok('Parser Research remains gated to internal and test builds',
+    /isParserResearchBuild\(\)[\s\S]{0,500}router\.push\('\/parser-research'/.test(feedback));
+
+  const settings = fs.readFileSync(path.join(APP, 'settings.tsx'), 'utf8');
+  ok('last-owner recovery can still reach Trusted Devices',
+    /last_owner[\s\S]{0,800}router\.push\('\/trusted-devices'/.test(settings));
+  ok('Trusted Devices remains absent from the ordinary Settings rows',
+    !/linkRow\(\s*t\('trustedSettingsRow'\)/.test(settings));
 }
 
 /** Every file under src/, so nothing is missed by only checking screens. */
@@ -157,11 +180,42 @@ function sources(dir = SRC) {
   const settings = fs.readFileSync(path.join(SRC, 'app/settings.tsx'), 'utf8');
   const at = (needle) => settings.indexOf(needle);
 
+  const settingsInventory = [
+    ['Pro summary', /<Block onPress=\{\(\) => router\.push\('\/pro'\)\}>/],
+    ['daily notifications', /toggleDailySummary\(next\)/],
+    ['per-charge notifications', /toggleInstantAlerts\(next\)[\s\S]*toggleChargeAlerts\(next\)/],
+    ['SMS capture', /toggleSms/],
+    ['iPhone local capture', /setIosAutomaticCapture/],
+    ['history recovery', /beginHistoryImport\(\)[\s\S]*confirmIosCaptureRecovery/],
+    ['bank notification import', /gated\(onNotificationAccess\)/],
+    ['Private Mode', /togglePrivateMode/],
+    ['App Lock', /toggleAppLock/],
+    ['retention and security', /privacyRetentionExact[\s\S]*privacySecurityExact/],
+    ['Review Alerts', /router\.push\('\/review-alerts'\)/],
+    ['Sort Shops', /router\.push\('\/categorise'\)/],
+    ['Improve Accuracy', /router\.push\('\/accuracy'\)/],
+    ['backup and restore', /backupJson[\s\S]*restoreFromFile/],
+    ['CSV and PDF exports', /exportCsv[\s\S]*setReportScopeSheet\(true\)/],
+    ['internal launch export', /isInternalLaunchDiagnosticsEnabled\(\)[\s\S]*exportLaunchMetrics/],
+    ['theme', /<SegmentedControl[\s\S]*onChange=\{setThemePreference\}/],
+    ['market', /setRegionSheet\('country'\)/],
+    ['language', /setRegionSheet\('language'\)/],
+    ['feedback', /router\.push\('\/feedback'\)/],
+    ['public links', /configuredPublicUrl\('privacyPolicyUrl'\)[\s\S]*configuredPublicUrl\('termsOfUseUrl'\)[\s\S]*configuredPublicUrl\('supportUrl'\)/],
+    ['founder brand gate', /isFounderUnlockBuild\(\)[\s\S]*onFounderLogoTap\(\)[\s\S]*<WafraMark/],
+    ['destructive erase', /<Button\s+label=\{t\('eraseAll'\)\}\s+variant="danger"/],
+  ];
+  const missingSettingsInventory = settingsInventory
+    .filter(([, pattern]) => !pattern.test(settings))
+    .map(([name]) => name);
+  ok(`Settings retains its complete capability inventory (${settingsInventory.length})`,
+    missingSettingsInventory.length === 0, missingSettingsInventory.join(' | '));
+
   ok('region rows never mutate settings directly, and worldwide money has no dead parser picker',
     !/cycleMarket|cycleLanguage/.test(settings) &&
       /<ChoiceSheet[\s\S]{0,400}title=\{t\('parserPack'\)\}/.test(settings) &&
       /<ChoiceSheet[\s\S]{0,400}title=\{t\('language'\)\}/.test(settings) &&
-      /hasGlobalLedger \? \([\s\S]{0,500}<Row>[\s\S]{0,500}globalParserPackDetail/.test(settings));
+      /hasGlobalLedger \? \([\s\S]{0,500}<Row(?: last)?>[\s\S]{0,500}globalParserPackDetail/.test(settings));
 
   /**
    * And the picker may not be an alert.
@@ -216,23 +270,23 @@ function sources(dir = SRC) {
       /linkRow\(t\('restoreBackup'\), null, restoreFromFile\)/.test(settings));
 
   const cards = fs.readFileSync(path.join(SRC, 'app/cards.tsx'), 'utf8');
-  ok('Payment cards explains its purpose and does not imply a bank connection',
-    /title=\{t\('cardsTitle'\)\}/.test(cards) && /t\('cardsPurpose'\)/.test(cards));
+  ok('Payment cards names stored instruments and keeps their details accessible',
+    /const cardsHeader: ScreenHeaderProps = \{[\s\S]{0,180}title: t\('cardsTitle'\)/.test(cards) &&
+      /activeCards\.map/.test(cards) && /setDetail\(card\)/.test(cards) &&
+      /<CardDetailSheet[\s\S]*?account=\{detail\}/.test(cards));
 
-  const flow = fs.readFileSync(path.join(SRC, 'app/(tabs)/flow.tsx'), 'utf8');
+  const flow=fs.readFileSync(path.join(SRC,'app/(tabs)/flow.tsx'),'utf8');
+  const trends=fs.readFileSync(path.join(SRC,'components/spending/spending-trends.tsx'),'utf8');
   ok('large text moves six-month figures into a wrapping readable list',
-    /useWindowDimensions\(\)/.test(flow) &&
-      /const showTrendValues = trendColumnWidth >= 38 \* fontScale/.test(flow) &&
-      /!showTrendValues && \(/.test(flow) &&
-      /tf\('monthCashflowA11y'/.test(flow) &&
-      /flexWrap: 'wrap'/.test(flow));
-  ok('large-text Arabic labels keep their language font while figures stay tabular',
-    /\{t\('incomeLabel'\)\}\{' '\}\s*<ThemedText type="default" tabular/.test(flow) &&
-      /\{t\('spentLabel'\)\}\{' '\}\s*<ThemedText\s+type="default"\s+tabular/.test(flow) &&
-      !/<ThemedText\s+type="default"\s+tabular\s+style=\{\[styles\.trendDetailFigure/.test(flow));
-  ok('empty large-text months remain no-data rather than two zero balances',
-    /m\.income === 0 && m\.expense === 0\s*\? tf\('monthCashflowNoDataA11y'/.test(flow) &&
-      /m\.income === 0 && m\.expense === 0 \? \([\s\S]{0,250}>\s*—\s*</.test(flow));
+    /<SpendingTrends/.test(flow) && /useWindowDimensions\(\)/.test(trends) &&
+    /!showAllTrendLabels &&/.test(trends) && /cashflow-month-details/.test(trends) &&
+    /p\.months\.map/.test(trends) && /flexWrap: 'wrap'/.test(trends));
+  ok('Arabic labels retain their language face and amounts stay tabular',
+    /<ThemedText[^>]*>\{w\.income\}<\/ThemedText>[\s\S]*?<Money/.test(trends) &&
+    /<ThemedText[^>]*>\{w\.spending\}<\/ThemedText>[\s\S]*?<Money/.test(trends) &&
+    !/<ThemedText[^>]*tabular[^>]*>\{w\.(?:income|spending)\}/.test(trends));
+  ok('empty large-text months are no-data rather than zero balances',
+    /month\.incomeFils !== 0 \|\| month\.expenseFils !== 0/.test(trends) && /— \{w\.noData\}/.test(trends));
 
   ok('erase is a destructive button, not a chevron row',
     !/linkRow\(t\('eraseAll'\)/.test(settings) &&

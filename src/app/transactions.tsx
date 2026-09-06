@@ -10,26 +10,27 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { TransactionRow } from '@/components/transaction-row';
+import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Icon } from '@/components/ui/icon';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Button, Chip } from '@/components/ui/controls';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
+import { TextField } from '@/components/ui/text-field';
+import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { categoryLabel, CATEGORIES, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
 import { formatAED, friendlyDate, monthKey, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
 import { inPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { countsInTotals, internalTransferIds, liveAccountIds } from '@/lib/ledger';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
-import { tapped } from '@/lib/haptics';
 import { useStore } from '@/lib/store';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
@@ -70,6 +71,7 @@ const transactionKey = (transaction: Transaction) => transaction.id;
 
 export default function TransactionsScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const language = useLanguage();
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback(
@@ -84,11 +86,13 @@ export default function TransactionsScreen() {
     type: typeParam,
     category: categoryParam,
     merchant: merchantParam,
+    q: queryParam,
   } = useLocalSearchParams<{
     source?: string;
     type?: string;
     category?: string;
     merchant?: string;
+    q?: string;
   }>();
   // One category, or several — Flow's pooled "N more" slice hands over every
   // category behind it, so the drill-down covers exactly what the row totalled.
@@ -97,7 +101,8 @@ export default function TransactionsScreen() {
     .map((c) => CATEGORIES.find((x) => x.id === c.trim())?.id)
     .filter((c): c is CategoryId => !!c);
 
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(typeof queryParam === 'string' ? queryParam : '');
+  useEffect(() => { if (typeof queryParam === 'string') setQuery(queryParam); }, [queryParam]);
   /**
    * The field updates on every keystroke; the FILTER lags it by a beat.
    *
@@ -168,6 +173,7 @@ export default function TransactionsScreen() {
    */
   const [rangeDraft, setRangeDraft] = useState({ dateFrom: '', dateTo: '' });
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const listInsets = useScreenContentInsets({ hasFooter: false });
 
   const todayISO = toISODate(new Date());
   const currentKey = monthKey(new Date());
@@ -387,120 +393,106 @@ export default function TransactionsScreen() {
   };
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={tr('back')}
-            hitSlop={6}
-            onPress={() => router.back()}
-            style={[styles.backBtn, { backgroundColor: theme.backgroundSelected }]}>
-            <Icon name="chevron-left" size={18} color={theme.text} />
-          </Pressable>
-          <ThemedText type="heading" accessibilityRole="header" style={styles.headerTitle}>
-            {tr('transactionsTitle')}
-          </ThemedText>
-          <View style={styles.headerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={tr('addCashEntry')}
-              hitSlop={6}
-              onPress={() => {
-                tapped();
-                router.push('/add-transaction');
-              }}
-              style={[styles.backBtn, { backgroundColor: theme.backgroundElement }]}>
-              <Icon name="plus" size={17} color={theme.textSecondary} />
-            </Pressable>
-            {/* Filters, and it has to LOOK like filters. This button wore the
-                `chart` glyph — pixel-for-pixel the Flow tab's own icon — so the
-                one control on the screen that opens a filter sheet advertised
-                Stats instead. A funnel, not `sliders`: that one already means
-                Settings from Home and from Wallet, and one glyph cannot mean
-                two things. */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={tr('filtersButton')}
-              accessibilityState={{ selected: activeFilterCount > 0 }}
-              hitSlop={6}
-              onPress={() => setSheetVisible(true)}
-              style={[
-                styles.backBtn,
-                { backgroundColor: activeFilterCount > 0 ? theme.primary : theme.backgroundSelected },
-              ]}>
-              <Icon
-                name="filter"
-                size={17}
-                color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-              />
-            </Pressable>
-          </View>
-        </View>
+    <>
+      <ScreenScaffold
+        scroll={false}
+        virtualized
+        headerMode="native"
+        header={{
+          title: tr('transactionsTitle'),
+          back: { label: tr('back'), onPress: () => router.back() },
+          actions: [{
+            label: tr('addTransactionTitle'),
+            icon: 'plus',
+            onPress: () => router.push('/add-transaction'),
+          }],
+        }}>
+        <SectionList
+          sections={sections}
+          keyExtractor={transactionKey}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={listInsets.contentContainerStyle}
+          contentInset={listInsets.contentInset}
+          scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
+          contentInsetAdjustmentBehavior="automatic"
+          ListHeaderComponent={(
+            <View style={styles.controls}>
+              <View style={[styles.searchToolbar, largeText && styles.searchToolbarLarge]}>
+                <View style={largeText ? styles.searchFieldLarge : styles.searchField}>
+                  <TextField
+                    label={tr('searchMerchants')}
+                    value={query}
+                    onChangeText={setQuery}
+                    inputMode="search"
+                    returnKeyType="search"
+                    placeholder={tr('searchMerchants')}
+                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+                    trailing={query.length > 0 ? (
+                      <ActionIconButton
+                        icon="close"
+                        label={tr('clearSearch')}
+                        variant="plain"
+                        onPress={() => setQuery('')}
+                      />
+                    ) : undefined}
+                  />
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={tr('filtersButton')}
+                  accessibilityState={{ selected: activeFilterCount > 0 }}
+                  hitSlop={6}
+                  onPress={() => setSheetVisible(true)}
+                  style={({ pressed }) => [
+                    styles.filterBtn,
+                    {
+                      backgroundColor: activeFilterCount > 0
+                        ? theme.primary
+                        : theme.backgroundSelected,
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}>
+                  <Icon
+                    name="filter"
+                    size={17}
+                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
+                  />
+                </Pressable>
+              </View>
 
-        <View style={styles.controls}>
-          <View
-            style={[
-              styles.searchBox,
-              { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-            ]}>
-            <Icon name="search" size={17} color={theme.textSecondary} />
-            <TextInput
-              accessibilityLabel={tr('searchMerchants')}
-              value={query}
-              onChangeText={setQuery}
-              returnKeyType="search"
-              placeholder={tr('searchMerchants')}
-              placeholderTextColor={theme.textSecondary}
-              style={[
-                styles.searchInput,
-                { color: theme.text, textAlign: language === 'ar' ? 'right' : 'left' },
-              ]}
-            />
-            {query.length > 0 && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={tr('clearSearch')}
-                hitSlop={12}
-                onPress={() => setQuery('')}>
-                <Icon name="close" size={16} color={theme.textSecondary} />
-              </Pressable>
-            )}
-          </View>
-
-          {/* The restrictions that came from the link that opened this screen.
+              {/* The restrictions that came from the link that opened this screen.
               Both are removable here, which is the only thing that explains an
               otherwise inexplicably short list. */}
-          {(merchantFilter || smsOnly) && (
-            <View style={styles.chipRow}>
-              {merchantFilter && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
-                  onPress={() => setMerchantFilter(null)}
-                  style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                    {merchantFilter}
-                  </ThemedText>
-                  <Icon name="close" size={13} color={theme.primary} />
-                </Pressable>
+              {(merchantFilter || smsOnly) && (
+                <View style={styles.chipRow}>
+                  {merchantFilter && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
+                      onPress={() => setMerchantFilter(null)}
+                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                        {merchantFilter}
+                      </ThemedText>
+                      <Icon name="close" size={13} color={theme.primary} />
+                    </Pressable>
+                  )}
+                  {smsOnly && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
+                      onPress={() => setSmsOnly(false)}
+                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
+                        {tr('smsImportsOnly')}
+                      </ThemedText>
+                      <Icon name="close" size={13} color={theme.primary} />
+                    </Pressable>
+                  )}
+                </View>
               )}
-              {smsOnly && (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
-                  onPress={() => setSmsOnly(false)}
-                  style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                  <ThemedText type="small" style={{ color: theme.primary, fontWeight: '700' }}>
-                    {tr('smsImportsOnly')}
-                  </ThemedText>
-                  <Icon name="close" size={13} color={theme.primary} />
-                </Pressable>
-              )}
-            </View>
-          )}
 
-          <View style={styles.summaryRow}>
+              <View style={styles.summaryRow}>
             {/* Takes the space that is left, and no more. Without a flex
                 constraint this line expanded to whatever it needed, wrapped
                 to two lines, and shoved the total clean off the right edge of
@@ -554,14 +546,9 @@ export default function TransactionsScreen() {
                 </Pressable>
               )}
             </View>
-          </View>
-        </View>
-
-        <SectionList
-          sections={sections}
-          keyExtractor={transactionKey}
-          stickySectionHeadersEnabled={false}
-          contentContainerStyle={styles.listContent}
+              </View>
+            </View>
+          )}
           initialNumToRender={14}
           maxToRenderPerBatch={10}
           updateCellsBatchingPeriod={32}
@@ -595,7 +582,7 @@ export default function TransactionsScreen() {
             </View>
           }
         />
-      </SafeAreaView>
+      </ScreenScaffold>
 
       {/* Filter sheet */}
       <BottomSheet
@@ -840,55 +827,26 @@ export default function TransactionsScreen() {
       </BottomSheet>
 
       <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  headerTitle: { flex: 1 },
-  headerActions: { flexDirection: 'row', gap: Spacing.one },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  filterBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: Radius.control,
     alignItems: 'center',
     justifyContent: 'center',
   },
   controls: {
-    paddingHorizontal: Spacing.three,
     gap: Spacing.two,
+    paddingBottom: Spacing.one,
   },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderRadius: Radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Spacing.three,
-  },
-  searchInput: {
-    flex: 1,
-    minHeight: 44,
-    paddingVertical: Spacing.two + 4,
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  searchToolbar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.two },
+  searchToolbarLarge: { flexDirection: 'column', alignItems: 'stretch' },
+  searchField: { flex: 1, minWidth: 0 },
+  searchFieldLarge: { width: '100%' },
   summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -913,10 +871,6 @@ const styles = StyleSheet.create({
     gap: Spacing.two + 2,
     // The figure is the point of the row; it never gives up space.
     flexShrink: 0,
-  },
-  listContent: {
-    paddingHorizontal: Spacing.three,
-    paddingBottom: Spacing.four,
   },
   sectionHeader: {
     flexDirection: 'row',

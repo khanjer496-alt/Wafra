@@ -1,0 +1,310 @@
+{
+  "description": "AST fingerprints from the prior continuation snapshot. These guard retained handler bodies; they do not test native or service behavior.",
+  "records": [
+    {
+      "file": "src/app/settings.tsx",
+      "name": "toggleAppLock",
+      "sha256": "a22163a3fe124754ba71d689ea2d2291a60fd6bd048e25b6c45c773d89297d6b"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "enablePrivateMode",
+      "sha256": "e9fab9adea4f9d6ded6752d9b522b4f5d57f3843adc3017698b6714999cf85c5"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "togglePrivateMode",
+      "sha256": "b090f4e6b073f9b038ad6894856ae2e9dd31b6126d3093ecd12486e6cbc6ce68"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "toggleSms",
+      "sha256": "15ed4b3a8cda3004712ba0a2c32c1b6c501e45fba88d3920e021149b00c2285c"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "setIosAutomaticCapture",
+      "sha256": "c576e0716517d2e88d8e5c05622279b7a4f7ad63b44040395fe54a900a801b34"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "confirmIosCaptureRecovery",
+      "sha256": "b3a3b5f586f048afc5e8fbf284a7ad431267280b5024fd685f40fc06839e1b83"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "toggleInstantAlerts",
+      "sha256": "3178e8a203513b51aeab4e83d405698fce2af19becfa5d1df854b03fcd553efa"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "toggleDailySummary",
+      "sha256": "059f9a966d21092bc7257a0df809eb495f11bb77023c2b6b2e2a0e97e3d36fa6"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "toggleChargeAlerts",
+      "sha256": "84d159a502a975ca143a028e2de65c093ae6bad535080b5abafdd7e3125dcce7"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "exportCsv",
+      "sha256": "b4876961a2edbe7070f4eac3c1a9a5ae8f9aee5a756d477fb74b64349ed728cf"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "backupJson",
+      "sha256": "d3b0a8584e09575fc6b7458035438dbcb2798fff870bb4bae8a68cf59e0b0f37"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "restoreFromFile",
+      "sha256": "a3b2472edccb72ea39f1688c81283e0c23c45760ee96cf20d19f1f2cae772886"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "eraseAllData",
+      "sha256": "e38709acfd8da916cdc00f40fba6d7ca77b7b4a2bc6cf637e177df34dd11eba1"
+    },
+    {
+      "file": "src/app/settings.tsx",
+      "name": "confirmErase",
+      "sha256": "c73f5a749df0fdd159223cbe7016ad3179dffe7144d828ad82ab0339d60f320c"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "runScan",
+      "sha256": "e09cded1cdb1ad9ff029141cafcff03acadbdfd30416a139d3d548ef6610efed"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "runParse",
+      "sha256": "9c56d293937622031e88cf5d15d33f5c4cf3a44e9650d415430b55258fdc7d7a"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "discardHistorySession",
+      "sha256": "93e0e347400b6afd92e4451b73008b0b83a55e9272f3d1db3016e548796e3621"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "returnToHistoryOrigin",
+      "sha256": "a8d7d2159ba3c1960aae7e211e67c685709edc3627346f47ff7d4623c2b47958"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "finishHistoryReview",
+      "sha256": "ba4608911840cfec64feb381554e35605a576fd10975b2b4842457f20115a362"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "leaveScreen",
+      "sha256": "d402a49ae512386ada51d958fa23d3cd6ab48de46e2f66a0c959c71d1651ff47"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "trackReminder",
+      "sha256": "98238453b16c4d174b1d4dfe3f0f3c98edf98b88b3047d74c567f0dd51d3b0ef"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "applyPlan",
+      "sha256": "4e1dbe3b99228d56690d923e0c2eb5d1fd0ab12f691c3925929a6a99934ccb3b"
+    },
+    {
+      "file": "src/app/import-sms.tsx",
+      "name": "retrySecureSave",
+      "sha256": "a4f4b761384902cfa67df41c2b13db50a2e7a361ba1e61220cb9023d4a144bf7"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "refreshSetup",
+      "sha256": "f08c77395f94446714851721bebcfa58d8b11fb06c209e62e6033d0399c2aaab"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "runOperation",
+      "sha256": "66a54de7ae78f00c512bb732cee20071d91102f3a71025a4996f3281f338b06f"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "installFutureShortcut",
+      "sha256": "af0a8b10525b2c36cccc1d441e79ebe9313aa9887d65482ab1fc8e81a374cbbf"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "confirmFutureShortcut",
+      "sha256": "43c387b54b6e6652a6d1525f8a21a7f7d1c7a8d94b4595e8cc30bcfc01fcddd8"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "openAutomation",
+      "sha256": "19a15ea42bcbbd31694c6b20c9bb501dba5281d9134a684f5dd9d3afc15f6c31"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "confirmAutomation",
+      "sha256": "0fadcb14ad1442f0a2ba23cebbd8e78ff02ee52fec0facaf90246ee8f5d92509"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "openHistoryInstall",
+      "sha256": "a7a9bb49c5cbe4502549ae715db90c728082ea600389ce8b2abf6e4f58206247"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "openHistoryRun",
+      "sha256": "26551be9086aec669fc5b699eb5167882087e76c376e7190cd97f3d058004edb"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "resetStoppedHistory",
+      "sha256": "b855734f2edd87d60d3b0a9b4edb704e43640489f92db13613ed6cb858df9012"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "finish",
+      "sha256": "dbe6e1f4545b8d345cf55692bddb443cd139deb2ee40a8844fe601bcc57ae02c"
+    },
+    {
+      "file": "src/app/ios-setup.tsx",
+      "name": "leave",
+      "sha256": "fe52d456cdcfd8e2c728f8ae408b671f5509ee722fa321b12e6343870680d83c"
+    },
+    {
+      "file": "src/app/feedback.tsx",
+      "name": "send",
+      "sha256": "e967d8cffbbd0dad5ca088f46f62f0885fbdff53a613f2a576f92bc2e473efc2"
+    },
+    {
+      "file": "src/app/pro.tsx",
+      "name": "buy",
+      "sha256": "861faafd89a0fd6b16f7f9d1ff2f737d292103b8cd3e76fadf7e6754d2de54e3"
+    },
+    {
+      "file": "src/app/pro.tsx",
+      "name": "restore",
+      "sha256": "2b9be76d6bd074cdc60fac1fa60269ffbf58b717dc667b8bfc4316f229f32b7e"
+    },
+    {
+      "file": "src/app/pro.tsx",
+      "name": "manage",
+      "sha256": "b1c05b539f86db1fa11d69873a0f49972229944b0a41bc70a1a412ee94a798d9"
+    },
+    {
+      "file": "src/app/pro.tsx",
+      "name": "openLegal",
+      "sha256": "7674d415dedbbc3386c9e30f14586870a3b0ac04f670c846b9a475758be943f3"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "createVault",
+      "sha256": "df49997783e118d4be0f58f443b1171da3ad2ac35e4bdecb79af904655479444"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "join",
+      "sha256": "0e5376b0a2aea1ac4bfa728c974bf7796c2c9ca81ba1cf154c6b44efc1bddaf5"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "makeInvite",
+      "sha256": "9e31e0bd5c184ee5128a44d63d7d10c4eb95b1a3068a5bd11af47a5d2e8d596f"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "shareInvite",
+      "sha256": "8fbc6c8ae15c28c9414ed6858c84550d96d150416865c0721a71a5ff8b77f6e0"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "saveName",
+      "sha256": "9e699db7992311c81d816d59347d026c70250d88fe1314f9b92edcb720d5eb00"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "removeSelected",
+      "sha256": "65fbe0409b9fba384967a929b9cc08268db7e17071e6ab2d5b57dbba7dc7a380"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "performRemove",
+      "sha256": "86b0f10490dcf6b030b22d2442e92895b28364e68bf8a35a642e6739a5076d8c"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "confirmDeleteVault",
+      "sha256": "a083f3ef2e2a9cdcabfe00a0b97eb02f591f5649f2a62be0f5d031ff51395e06"
+    },
+    {
+      "file": "src/app/trusted-devices.tsx",
+      "name": "performDeleteVault",
+      "sha256": "d94adf42d8cb7603572ca0dd9fd9d7b0e60e657fc0d515647f0d9d49d5aae2db"
+    },
+    {
+      "file": "src/app/add-transaction.tsx",
+      "name": "switchType",
+      "sha256": "7073dff86bdcdf7459fd22a05b2ab857c12203d5205944991dbdafad1940a0b0"
+    },
+    {
+      "file": "src/app/add-transaction.tsx",
+      "name": "save",
+      "sha256": "b4b33811f25af6daa970cfed9abc1c76172f4a00ec1b5092eb73c283971e67f2"
+    },
+    {
+      "file": "src/app/add-transaction.tsx",
+      "name": "focusFirstInvalid",
+      "sha256": "ffea82084210043811a4f9b20b5f6befacd960c7e6ced09ce1668b2b438d7ff9"
+    },
+    {
+      "file": "src/app/add-transaction.tsx",
+      "name": "onSavePress",
+      "sha256": "f5dce5c2487504b1ccafa0c9890d7c91ed26c951549a8b6e2bc3e92e0a9649a1"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "chooseGoal",
+      "sha256": "e0e3f6cffff976b2655ce07af82998778f6a7e483586a8f7027fb05dbcaa5738"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "finishPreferences",
+      "sha256": "8f00ddfb00da010f33bd4f694ae32788b5a55221f5208ae5a8883347a901d5c9"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "startScan",
+      "sha256": "72d72498dea6dd94ab7f6614571f15f9f8dc691a115b9de2863be75cf9892a03"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "beginCapture",
+      "sha256": "f801f607fdfb2f08c3aa802e14f18a2ca12ecbb33c4d778eca8674fe421d24f2"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "continueManually",
+      "sha256": "81af95ef1380c7efe915c8c475e71c53cd179b31f445a9b555269630e2ce489e"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "goBack",
+      "sha256": "5822e937d709ed47f8b46adb48d4b8cffffc3069fe382b16a6a01dfb78cb2b39"
+    },
+    {
+      "file": "src/components/onboarding-gate.tsx",
+      "name": "openWafra",
+      "sha256": "82819d715ac3509cfc95f4031333b97d1b7fd5539e99b8779daabf8bf20ed173"
+    },
+    {
+      "file": "src/app/review-alerts.tsx",
+      "name": "dismiss",
+      "sha256": "11cd2ceb54f884a2802b947fb0989df03caf1e1f1f6fa76f076d5d6f42a4195b"
+    },
+    {
+      "file": "src/app/categorise.tsx",
+      "name": "assign",
+      "sha256": "27854dc489fdd2c5bac062f90b4f385a64a2fd80a2442434a779dc4e1042b4b9"
+    }
+  ]
+}

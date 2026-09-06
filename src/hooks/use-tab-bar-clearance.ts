@@ -1,5 +1,6 @@
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
 
 /** Visual height of the four-destination bar above the safe-area inset. */
@@ -15,5 +16,7 @@ export const TAB_BAR_HEIGHT = 58;
  */
 export function useTabBarClearance() {
   const insets = useSafeAreaInsets();
-  return TAB_BAR_HEIGHT + Math.max(insets.bottom, Spacing.two) + Spacing.three;
+  const { measuredHeight } = useTabBarMetrics();
+  const fallbackHeight = TAB_BAR_HEIGHT + Math.max(insets.bottom, Spacing.two);
+  return (measuredHeight ?? fallbackHeight) + Spacing.three;
 }

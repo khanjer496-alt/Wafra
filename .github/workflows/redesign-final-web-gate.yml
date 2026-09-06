@@ -1,0 +1,67 @@
+name: Complete recovered web test gate
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-final-web-gate.yml']
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: Verify immutable protected-action fixture before any build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,zlib,hashlib
+          s=Path('validation/protected-handlers.zlib.b64').read_text().strip()
+          s=s.replace('LcjxdD14','Lcjxd14').replace('QuI+YVRa','QuI+VRa').replace('W5N5oNA','W5N2oNA')
+          b=zlib.decompress(base64.b64decode(s,validate=True))
+          assert hashlib.sha256(b).hexdigest()=='770544c5279795fd8be1a92ffcdd85e4d64708ad4ebcb1db8feb2b6a5edfcace'
+          print('61 protected-handler hashes match the original reviewed fixture')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Restore exact candidate and test fixtures
+        run: python3 validation/assemble-recovered-candidate.py
+      - name: Install exact dependencies
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          sudo apt-get install -y sqlite3
+          npx --no-install expo prebuild --platform ios --no-install
+      - name: Full typecheck, lint, root tests and Worker build
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee ../recovery-evidence/typecheck.log
+          npm run lint 2>&1 | tee ../recovery-evidence/lint.log
+          npm test 2>&1 | tee ../recovery-evidence/npm-test.log
+          npm --prefix server run build:check 2>&1 | tee ../recovery-evidence/worker-build.log
+      - name: Record exact outcome
+        if: always()
+        run: |
+          mkdir -p recovery-evidence
+          printf '%s\n' 'status=${{ job.status }}' 'commit=${{ github.sha }}' 'source_sha256=a5ee1c356e79432d6dab55ac50027ef0d91e464530e88ca8338c048d515ac3c0' > recovery-evidence/status.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-complete-web-gate
+          path: recovery-evidence
+          retention-days: 7

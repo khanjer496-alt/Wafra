@@ -1,6 +1,6 @@
 import { categoryLabel, getCategory, isFixedCommitment } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { daysInMonth, formatAED, shortDate, totalAsShown } from '@/lib/format';
+import { daysInMonth, formatAED, shortDate } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
@@ -30,15 +30,9 @@ export interface MonthSummary {
 export const MAX_COMPOSITION_SLICES = 5;
 
 /**
- * The month's spending broken into the slices Flow draws, and the total of
- * those slices AS THEY ARE SHOWN.
- *
- * Both parts live here because they have to agree with each other and with
- * Home. Flow's heading is printed above the slices, so it has to total them
- * at the precision they are drawn at; Home's "Out" cell is the same quantity
- * one tap away, and was rounding the raw sum once. The two came out a dirham
- * apart — each correct by its own rule, and plainly contradictory to anyone
- * who looked at both. One rule, one place.
+ * The month's spending broken into the slices Flow draws. Slices and their
+ * total retain exact minor units so grouping categories cannot change the
+ * amount reported as spending. Any abbreviated chart label is a display concern.
  */
 export interface CompositionSlice {
   key: string;
@@ -76,7 +70,7 @@ export function composition(
       share: summary.expenseFils > 0 ? totalFils / summary.expenseFils : 0,
     });
   }
-  return { slices: head, totalFils: totalAsShown(head.map((h) => h.totalFils)) };
+  return { slices: head, totalFils: head.reduce((sum, slice) => sum + slice.totalFils, 0) };
 }
 
 export function summarizeMonth(

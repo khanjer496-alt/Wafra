@@ -26,10 +26,18 @@ export function shortcutSetupCode(ingestUrl: string, token: string): string {
 }
 
 /** Open and manually run the installed Shortcut with a non-financial test. */
-export function shortcutTestUrl(): string {
+export function shortcutTestUrl(options: { fromOnboarding?: boolean } = {}): string {
   const name = encodeURIComponent(RELAY_SHORTCUT_NAME);
   const text = encodeURIComponent(RELAY_TEST_MESSAGE);
-  return `shortcuts://run-shortcut?name=${name}&input=text&text=${text}`;
+  const callback = (result: 'success' | 'cancel' | 'error') => {
+    const onboarding = options.fromOnboarding ? '&fromOnboarding=1' : '';
+    return encodeURIComponent(`wafra://ios-setup?shortcutResult=${result}${onboarding}`);
+  };
+  return 'shortcuts://x-callback-url/run-shortcut' +
+    `?name=${name}&input=text&text=${text}` +
+    `&x-success=${callback('success')}` +
+    `&x-cancel=${callback('cancel')}` +
+    `&x-error=${callback('error')}`;
 }
 
 export function isRelayTestPayload(value: unknown): value is { relayTest: true } {

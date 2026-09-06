@@ -91,19 +91,23 @@ function stripComments(text) {
 }
 
 const GATED_LAYOUT_ENTRY_TAB_SCREENS = [
-  'src/app/(tabs)/flow.tsx',
   'src/app/(tabs)/bills.tsx',
 ];
 
+// New Spending components do not run a delayed entering sequence.
+for (const rel of ['src/app/(tabs)/flow.tsx', 'src/components/spending/spending-overview.tsx', 'src/components/spending/spending-trends.tsx']) {
+ const src=stripComments(read(rel));
+ ok(`${rel}: no hidden entrance work reintroduced`, !/entering=|useScreenEntering|FadeIn/.test(src));
+}
 const PERSISTENT_REVEAL_TAB_SCREENS = [
-  'src/app/(tabs)/index.tsx',
+  'src/screens/ledger-home-screen.tsx',
 ];
 
 // ---------------------------------------------------------------------------
 // The navigator: the failed fix must stay gone.
 // ---------------------------------------------------------------------------
 
-const layout = stripComments(read('src/app/(tabs)/_layout.tsx'));
+const layout = stripComments(read('src/components/app-tabs-layout.tsx'));
 
 ok('the tabs navigator leaves detachInactiveScreens at its default',
   !/detachInactiveScreens/.test(layout),

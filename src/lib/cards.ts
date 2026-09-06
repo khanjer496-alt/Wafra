@@ -1022,7 +1022,10 @@ export function dueWithStatus(
   );
 
   let status: DueStatus;
-  if (due.settledAt || remainingFils === 0) status = 'settled';
+  // A mark-paid timestamp preserves late-payment attribution in the allocator,
+  // but cannot prove a total subsequently corrected upward was paid. Legacy
+  // timestamp-only rows remain open until numeric payment evidence covers them.
+  if (remainingFils === 0) status = 'settled';
   else if (daysLeft < 0) status = 'overdue';
   else if (daysLeft <= 3) status = 'urgent';
   else status = 'upcoming';
@@ -1249,7 +1252,7 @@ export function cardStatementView(state: AppState, accountId: string): CardState
   const open = statements
     .filter(
       (d) =>
-        d.dueDate === newestDueDate && !d.settledAt && (paidByDueId.get(d.id) ?? 0) < d.totalDueFils,
+        d.dueDate === newestDueDate && (paidByDueId.get(d.id) ?? 0) < d.totalDueFils,
     )
     // Two records agreeing on the card and the date are one statement stored
     // twice; the copy still owing more is the one quoting the fuller total.

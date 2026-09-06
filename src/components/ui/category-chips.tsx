@@ -83,7 +83,7 @@ export function CategoryChips({
           styles.chip,
           {
             backgroundColor: on ? theme.text : 'transparent',
-            borderColor: on ? theme.text : theme.cardBorder,
+            borderColor: on ? theme.text : theme.controlBorder,
           },
         ]}>
         <Icon name={c.icon} size={13} color={on ? theme.background : theme.textSecondary} />

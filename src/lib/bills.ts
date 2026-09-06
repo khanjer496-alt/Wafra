@@ -80,7 +80,7 @@ export interface BillWithStatus {
 }
 
 function normalize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return s.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
 /** Unicode-safe identity for imported billers; Arabic titles must not all collapse to "". */
@@ -155,6 +155,11 @@ const GENERIC_BILL_WORDS = new Set([
   'bill', 'bills', 'payment', 'monthly', 'subscription', 'internet', 'mobile',
   'phone', 'home', 'card', 'account', 'service', 'fee', 'fees', 'charge',
   'charges', 'plan', 'postpaid', 'prepaid', 'renewal', 'auto', 'my', 'the',
+  // Arabic service/type words are no more specific than "bill" or "phone".
+  'فاتورة', 'فواتير', 'الفاتورة', 'الفواتير', 'دفع', 'سداد', 'شهري', 'شهريا',
+  'اشتراك', 'الاشتراك', 'خدمة', 'خدمات', 'الخدمة', 'الخدمات', 'رسوم', 'الرسوم',
+  'مبلغ', 'المبلغ', 'مستحق', 'المستحق', 'كهرباء', 'الكهرباء', 'مياه', 'المياه',
+  'هاتف', 'الهاتف', 'انترنت', 'الانترنت', 'الإنترنت', 'جوال', 'الجوال',
 ]);
 
 /** Tokens that could name a payee: 4+ characters and not a kind-word. */
@@ -170,6 +175,11 @@ function payeeTokens(title: string): Set<string> {
 function billIdentityTail(identity: string | undefined): string | null {
   const match = identity?.match(/^(?:account|consumer|party|customer|contract|service):([A-Z0-9]{4})$/i);
   return match?.[1].toUpperCase() ?? null;
+}
+
+function exactBillAccount(bill: Bill, transaction: Transaction): boolean {
+  const tail = billIdentityTail(bill.importIdentity);
+  return tail !== null && tail === billIdentityTail(transaction.billIdentity);
 }
 
 /**
@@ -213,7 +223,10 @@ function candidatePayments(
     // payee receipt calls it "consumer number 1849". The tail is accepted
     // only alongside same-month spending and the amount band above. The
     // claims pass below then refuses it if two obligations want the same row.
-    if (billTail && billIdentityTail(t.billIdentity) === billTail) {
+    const paymentTail = billIdentityTail(t.billIdentity);
+    // Matching provider names cannot override an explicitly different account.
+    if (billTail && paymentTail && billTail !== paymentTail) continue;
+    if (billTail && paymentTail === billTail) {
       out.push(t);
       continue;
     }
@@ -285,19 +298,28 @@ export function billsForMonth(
    * household with two bills from the same company — an Etisalat internet
    * line and an Etisalat mobile line both share "etisalat", and if their
    * amounts are close enough to both clear the ±15% band, one charge would
-   * mark both paid. So a claim on a transaction that more than one bill wants
-   * is not evidence for either of them, and only the exact nesting rule
-   * survives that. Better an unreconciled bill the user marks by hand than a
+   * mark both paid. An explicit account match outranks a provider-name guess.
+   * Multiple claims of the same strength are not evidence for any one bill.
+   * Better an unreconciled bill the user marks by hand than a
    * bill that says paid while the money is still owed.
    */
+  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, transactions, key, live, internal));
+  const explicitlyClaimed = new Set<string>();
+  candidates.forEach((rows, index) => {
+    for (const transaction of rows) {
+      if (exactBillAccount(scheduled[index].bill, transaction)) explicitlyClaimed.add(transaction.id);
+    }
+  });
+  const eligible = candidates.map((rows, index) => rows.filter((transaction) =>
+    !explicitlyClaimed.has(transaction.id) || exactBillAccount(scheduled[index].bill, transaction)));
   const claims = new Map<string, number>();
-  for (const { bill } of scheduled) {
-    for (const t of candidatePayments(bill, transactions, key, live, internal)) {
+  for (const rows of eligible) {
+    for (const t of rows) {
       claims.set(t.id, (claims.get(t.id) ?? 0) + 1);
     }
   }
 
-  const rows = scheduled.map(({ bill, dueISO }) => {
+  const rows = scheduled.map(({ bill, dueISO }, index) => {
     // The paid flag is keyed to the MONEY month, so the date has to be found
     // inside that same month. It was calendar arithmetic — `bill.dueDay -
     // today.getDate()` — which describes a different month entirely once the
@@ -312,8 +334,8 @@ export function billsForMonth(
     const manuallyPaid = bill.paidMonths.includes(key);
     const autoReconciled =
       !manuallyPaid &&
-      candidatePayments(bill, transactions, key, live, internal).some(
-        (t) => nests(bill, t) || (claims.get(t.id) ?? 0) === 1,
+      eligible[index].some(
+        (t) => (claims.get(t.id) ?? 0) === 1,
       );
     let status: BillStatus;
     if (manuallyPaid || autoReconciled) status = 'paid';

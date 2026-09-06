@@ -27,10 +27,8 @@ export type ThemedTextProps = TextProps & {
   type?: TextType;
   themeColor?: ThemeColor;
   /**
-   * Marks this as a money figure. Beyond tabular numerals it swaps the family
-   * to Geist Mono at the same weight — the design rule is that the mono face
-   * carries every figure in the app, and routing it through the prop that
-   * already flags a figure means no call site has to be touched twice.
+   * Marks this as a money figure. Beyond tabular numerals it uses proportional Geist at the same weight. Stable-width digits keep money
+   * columns aligned without giving every amount the appearance of code.
    */
   tabular?: boolean;
 };
@@ -45,12 +43,11 @@ export function ThemedText({
   const theme = useTheme();
   const language = useLanguage();
   const color = themeColor ?? (type === 'linkPrimary' ? 'primary' : 'text');
-  const arabic = language === 'ar' && !tabular;
+  const arabic = holdsArabic(rest.children) || (language === 'ar' && !tabular);
 
   return (
     <Text
       allowFontScaling
-      maxFontSizeMultiplier={rest.maxFontSizeMultiplier ?? MAX_SCALE[type]}
       style={[
         { color: theme[color] },
         styles[type],
@@ -60,12 +57,13 @@ export function ThemedText({
           letterSpacing: 0,
           textTransform: 'none',
           writingDirection: 'rtl',
+          lineHeight: Math.max(styles[type].lineHeight ?? 0, Math.ceil((styles[type].fontSize ?? 15) * 1.5)),
         },
         tabular && styles.tabular,
-        tabular && { fontFamily: MONO_FOR_WEIGHT[WEIGHT_OF[type]] },
+        tabular && !arabic && { fontFamily: TABULAR_FOR_WEIGHT[WEIGHT_OF[type]] },
         style,
         // LAST, because the caller's `style` is the thing it is answering.
-        language === 'ar' && arabicRescue(style, rest.children, type),
+        arabic && arabicRescue(style, rest.children, type),
       ]}
       {...rest}
     />
@@ -100,11 +98,14 @@ function arabicRescue(
   const pinned = StyleSheet.flatten(style) as TextStyle | undefined;
   if (!pinned) return false;
   const family = typeof pinned.fontFamily === 'string' ? pinned.fontFamily : undefined;
-  const latinFace = family !== undefined && family.startsWith('Geist');
-  const tracked = typeof pinned.letterSpacing === 'number' && pinned.letterSpacing !== 0;
-  if (!latinFace && !tracked) return false;
+  const latinFace = family !== undefined &&
+    (family.startsWith('Geist') || Object.prototype.hasOwnProperty.call(ARABIC_FOR_FACE, family));
   if (!holdsArabic(children)) return false;
-  const fix: TextStyle = { letterSpacing: 0 };
+  const fix: TextStyle = {
+    letterSpacing: 0,
+    lineHeight: Math.max(pinned.lineHeight ?? styles[type].lineHeight ?? 0,
+      Math.ceil((pinned.fontSize ?? styles[type].fontSize ?? 15) * 1.5)),
+  };
   if (latinFace) fix.fontFamily = ARABIC_FOR_FACE[family] ?? ARABIC_FOR_WEIGHT[WEIGHT_OF[type]];
   return fix;
 }
@@ -142,10 +143,10 @@ const WEIGHT_OF: Record<TextType, 'regular' | 'medium' | 'semi'> = {
   code: 'regular',
 };
 
-const MONO_FOR_WEIGHT = {
-  regular: Fonts.mono,
-  medium: Fonts.monoMedium,
-  semi: Fonts.monoSemi,
+const TABULAR_FOR_WEIGHT = {
+  regular: Fonts.sans,
+  medium: Fonts.sansMedium,
+  semi: Fonts.sansSemi,
 } as const;
 
 const ARABIC_FOR_WEIGHT = {
@@ -167,50 +168,26 @@ const ARABIC_FOR_FACE: Record<string, string> = {
   [Fonts.monoSemi]: Fonts.arabicBold,
 };
 
-/**
- * Dynamic Type stays on everywhere. Large money figures and dense utility
- * labels get a generous cap so they remain a single, legible unit rather than
- * clipping the ledger; body and row copy can grow to the platform's full
- * accessibility sizes.
- */
-const MAX_SCALE: Record<TextType, number | undefined> = {
-  display: 1.5,
-  amount: 1.5,
-  sheetAmount: 1.5,
-  title: 2,
-  heading: 2,
-  subtitle: 2,
-  default: undefined,
-  small: undefined,
-  smallBold: undefined,
-  meta: 2,
-  micro: 1.7,
-  nano: 1.7,
-  link: undefined,
-  linkPrimary: undefined,
-  code: 2,
-};
-
 // Tracking is given in ems by the design; at these sizes that lands on the
 // pixel values below.
 const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
   /** Hero amount — the one figure a screen exists to show. */
   display: {
-    fontFamily: Fonts.monoSemi,
-    fontSize: 46,
-    lineHeight: 46,
-    letterSpacing: -1.4,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 36,
+    lineHeight: 44,
+    letterSpacing: -0.6,
   },
   /** Screen amount: Wallet net worth, a card's outstanding. */
   amount: {
-    fontFamily: Fonts.monoSemi,
-    fontSize: 40,
+    fontFamily: Fonts.sansSemi,
+    fontSize: 32,
     lineHeight: 40,
-    letterSpacing: -1.2,
+    letterSpacing: -0.5,
   },
   /** The figure inside a bottom sheet. */
   sheetAmount: {
-    fontFamily: Fonts.monoSemi,
+    fontFamily: Fonts.sansSemi,
     fontSize: 34,
     lineHeight: 38,
     letterSpacing: -0.7,
@@ -218,9 +195,9 @@ const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
   /** Screen title. */
   title: {
     fontFamily: Fonts.sansSemi,
-    fontSize: 27,
-    lineHeight: 27,
-    letterSpacing: -0.86,
+    fontSize: 28,
+    lineHeight: 36,
+    letterSpacing: -0.4,
   },
   /** Sheet title, and any heading that sits above a divided list. */
   subtitle: {
@@ -238,42 +215,42 @@ const styles = StyleSheet.create<Record<TextType | 'tabular', TextStyle>>({
   /** Body copy. */
   default: {
     fontFamily: Fonts.sans,
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 16,
+    lineHeight: 24,
   },
   /** Row title. */
   small: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 14.5,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 22,
   },
   /** Row title that carries weight, and — with `tabular` — the row figure. */
   smallBold: {
     fontFamily: Fonts.sansSemi,
-    fontSize: 14.5,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 22,
   },
   /** The second line of a row: category, account, date. */
   meta: {
     fontFamily: Fonts.sans,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 13,
+    lineHeight: 20,
   },
   /** Caps section label. */
   micro: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 11.5,
+    fontSize: 12.5,
     lineHeight: 15,
-    letterSpacing: 0.72,
-    textTransform: 'uppercase',
+    letterSpacing: 0,
+    textTransform: 'none',
   },
   /** The smallest caps label — chart axes, tab labels, urgency tags. */
   nano: {
     fontFamily: Fonts.sansMedium,
-    fontSize: 11,
+    fontSize: 12,
     lineHeight: 14,
-    letterSpacing: 0.55,
-    textTransform: 'uppercase',
+    letterSpacing: 0,
+    textTransform: 'none',
   },
   link: {
     fontFamily: Fonts.sansMedium,

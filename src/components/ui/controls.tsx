@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -8,7 +8,12 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
+import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { Icon, type IconName } from '@/components/ui/icon';
+import {
+  SegmentedControl,
+  type Segment as CanonicalSegment,
+} from '@/components/ui/segmented-control';
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
@@ -30,6 +35,8 @@ interface ButtonProps {
   inline?: boolean;
   /** Overrides the label colour on surfaces that ignore the OS theme. */
   labelColor?: string;
+  /** Let long/localized labels grow the control instead of clipping to one line. */
+  wrapLabel?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -42,6 +49,7 @@ export function Button({
   disabled,
   inline,
   labelColor: labelColorOverride,
+  wrapLabel = false,
   style,
 }: ButtonProps) {
   const theme = useTheme();
@@ -50,7 +58,7 @@ export function Button({
     variant === 'filled'
       ? { backgroundColor: theme.primary }
       : variant === 'outline'
-        ? { borderWidth: 1, borderColor: theme.cardBorderStrong }
+        ? { borderWidth: 1, borderColor: theme.controlBorder }
         : variant === 'danger'
           ? { borderWidth: 1, borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg }
           : {};
@@ -81,7 +89,10 @@ export function Button({
         style,
       ]}>
       {icon && <Icon name={icon} size={15} color={labelColor} />}
-      <ThemedText type="smallBold" numberOfLines={1} style={{ color: labelColor }}>
+      <ThemedText
+        type="smallBold"
+        numberOfLines={wrapLabel ? undefined : 1}
+        style={[styles.buttonLabel, { color: labelColor }]}>
         {label}
       </ThemedText>
     </Pressable>
@@ -127,7 +138,7 @@ export function Toggle({
         styles.track,
         {
           backgroundColor: value ? theme.primary : theme.track,
-          borderColor: value ? theme.primary : theme.cardBorderStrong,
+          borderColor: value ? theme.primary : theme.controlBorder,
         },
       ]}>
       <Animated.View style={[styles.thumb, { backgroundColor: value ? '#FFFFFF' : theme.backgroundElement }, thumb]} />
@@ -178,13 +189,13 @@ export function Chip({
             ? theme.text
             : highlighted
               ? theme.primaryBorder
-              : theme.cardBorder,
+              : theme.controlBorder,
           transform: [{ scale: pressed ? 0.985 : 1 }],
         },
       ]}>
       {leading}
       <ThemedText
-        type="nano"
+        type="meta"
         style={{ color: active ? theme.background : theme.text }}>
         {label}
       </ThemedText>
@@ -194,97 +205,36 @@ export function Chip({
 
 /* ── Segmented control ───────────────────────────────────────────────── */
 
-export interface Segment<T extends string> {
-  value: T;
-  label: string;
-}
+export type { Segment } from '@/components/ui/segmented-control';
 
+/** @deprecated Import SegmentedControl from ui/segmented-control. */
 export function Segmented<T extends string>({
   segments,
   value,
   onChange,
+  label,
 }: {
-  segments: Segment<T>[];
+  segments: CanonicalSegment<T>[];
   value: T;
   onChange: (next: T) => void;
+  label: string;
 }) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.segTrack, { backgroundColor: theme.backgroundSelected }]}>
-      {segments.map((s) => {
-        const active = s.value === value;
-        return (
-          <Pressable
-            key={s.value}
-            accessibilityRole="tab"
-            accessibilityLabel={s.label}
-            accessibilityState={{ selected: active }}
-            onPress={() => {
-              if (s.value !== value) tapped();
-              onChange(s.value);
-            }}
-            style={[
-              styles.segment,
-              active && {
-                backgroundColor: theme.backgroundElement,
-                shadowColor: '#16130F',
-                shadowOpacity: 0.08,
-                shadowRadius: 2,
-                shadowOffset: { width: 0, height: 1 },
-                elevation: 1,
-              },
-            ]}>
-            <ThemedText
-              type="nano"
-              style={{ fontSize: 11.5, color: active ? theme.text : theme.textTertiary }}>
-              {s.label}
-            </ThemedText>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
+  return <SegmentedControl segments={segments} value={value} onChange={onChange} label={label} />;
 }
 
 /* ── Icon button ─────────────────────────────────────────────────────── */
 
+/** @deprecated Import ActionIconButton from ui/action-icon-button. */
 export function IconButton({
   icon,
   onPress,
   label,
-  size = 34,
 }: {
   icon: IconName;
-  onPress?: () => void;
+  onPress: () => void;
   label: string;
-  size?: number;
 }) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={8}
-      onPress={
-        onPress
-          ? () => {
-              tapped();
-              onPress();
-            }
-          : undefined
-      }
-      style={({ pressed }) => [
-        styles.iconButton,
-        {
-          width: size,
-          height: size,
-          borderColor: theme.cardBorder,
-          backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-        },
-      ]}>
-      <Icon name={icon} size={16} color={theme.text} />
-    </Pressable>
-  );
+  return <ActionIconButton icon={icon} label={label} onPress={onPress} />;
 }
 
 const styles = StyleSheet.create({
@@ -305,6 +255,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
   },
+  buttonLabel: { flexShrink: 1, textAlign: 'center' },
   track: {
     width: 44,
     height: 26,
@@ -325,26 +276,6 @@ const styles = StyleSheet.create({
     minHeight: 44,
     paddingHorizontal: Spacing.three - 2,
     borderRadius: Radius.full,
-    borderWidth: 1,
-  },
-  segTrack: {
-    flexDirection: 'row',
-    padding: 3,
-    borderRadius: 11,
-    gap: 3,
-  },
-  segment: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingVertical: Spacing.two + 2,
-    borderRadius: 9,
-  },
-  iconButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.tile,
     borderWidth: 1,
   },
 });

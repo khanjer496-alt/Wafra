@@ -36,19 +36,21 @@
  * tally at the end) reads `count`/`rowCount`, which are computed with
  * `overrideAppliesTo` — the same predicate `setMerchantOverride` applies.
  */
+import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
+import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Icon } from '@/components/ui/icon';
-import { Row, ScreenHeader, Section } from '@/components/ui/layout';
+import { Row, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { useToast } from '@/components/ui/toast';
-import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
@@ -63,6 +65,7 @@ export default function CategoriseScreen() {
   const router = useRouter();
   const toast = useToast();
   const { state, setMerchantOverride } = useStore();
+  const words = workflowCopy(state.language);
 
   const summary = useMemo(() => uncategorisedMerchants(state), [state]);
   const { merchants } = summary;
@@ -102,34 +105,27 @@ export default function CategoriseScreen() {
     [merchants, setMerchantOverride, state.language, toast],
   );
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('categoriseMerchants')} onBack={() => router.back()} />
-        </View>
+  const categoriseHeader: ScreenHeaderProps = {
+    title: t('categoriseMerchants'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+  return (
+    <>
+      <ScreenScaffold
+        headerMode="native"
+        header={categoriseHeader}
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
           <Section index={0} style={styles.intro}>
-            <ThemedText type="default" themeColor="textSecondary">
-              {t('categoriseIntro')}
-            </ThemedText>
-            {merchants.length > 0 && (
-              <ThemedText type="meta" themeColor="textTertiary">
-                {tf('categoriseRemaining', {
-                  count: merchants.length,
-                  s: merchants.length === 1 ? '' : 's',
-                  rows: summary.rowCount,
-                  ending: summary.rowCount === 1 ? 'y' : 'ies',
-                })}
-              </ThemedText>
-            )}
+            <WorkflowHero title={words.sortTitle} body={words.sortBody} icon="cart"
+              facts={merchants.length > 0 ? [{ label: words.merchants, value: String(merchants.length) },
+                { label: words.entries, value: String(summary.rowCount) }] : []} />
           </Section>
 
           {merchants.map((m, i) => {
             const open = openKey === m.key;
             return (
-              <View key={m.key}>
+              <View key={m.key} style={[styles.merchantCard, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
                 <Row
                   last={i === merchants.length - 1 && !open}
                   onPress={() => {
@@ -139,7 +135,7 @@ export default function CategoriseScreen() {
                   accessibilityLabel={tf('categoriseChooseA11y', { merchant: m.merchant })}
                   style={styles.merchantRow}>
                   <View style={styles.merchantText}>
-                    <ThemedText type="small" numberOfLines={1}>
+                    <ThemedText type="smallBold">
                       {m.merchant}
                     </ThemedText>
                     <ThemedText type="meta" themeColor="textTertiary">
@@ -193,29 +189,13 @@ export default function CategoriseScreen() {
               </ThemedText>
             </Section>
           )}
-        </ScrollView>
-      </SafeAreaView>
-    </ThemedView>
+      </ScreenScaffold>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
-  content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
-  },
+  merchantCard: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 16, marginBottom: 12, overflow: 'hidden' },
   intro: {
     gap: Spacing.two,
     paddingBottom: Spacing.three,

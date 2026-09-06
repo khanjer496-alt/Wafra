@@ -1,84 +1,78 @@
-import * as Clipboard from 'expo-clipboard';
-import * as Haptics from 'expo-haptics';
 import { Linking, Platform } from 'react-native';
 
+import type {
+  WafraLiveCaptureNativeModule,
+  WafraLiveCaptureStatus,
+} from '../../modules/wafra-live-capture';
 import {
-  disableRelayBackgroundSync,
-  enableRelayBackgroundSync,
-} from '@/lib/background-relay';
+  getIosCaptureNativeModule,
+  subscribeIosCaptureStatusRefresh,
+} from '@/lib/capture';
 import {
-  createCaptureExecutor,
-  type CaptureExecutor,
-  type CaptureLedgerAdapter,
-} from '@/lib/capture-executor';
-import { requestSilentCapturePermission } from '@/lib/notifications';
-import {
-  DEFAULT_RELAY_URL,
-  DEFAULT_SHORTCUT_URL,
-  getRelayConfig,
-  markRelayConfigured,
-  pairDevice,
-  RelayError,
-  unpairDevice,
-  type RelayConfig,
-} from '@/lib/relay';
-import { shortcutSetupCode, shortcutTestUrl } from '@/lib/relay-protocol';
+  IOS_LOCAL_CAPTURE_SHORTCUT_URL,
+  iosLocalCaptureTestUrl,
+  normalizeIosLocalCaptureShortcutUrl,
+} from '@/lib/ios-local-capture-protocol';
 
-export type IosSetupStep = 0 | 1 | 2 | 3;
-export type IosSetupRecovery = 'settings' | 'shortcut' | null;
-export type IosSetupCopyTarget = 'setup' | 'url' | 'token';
+export const SHORTCUTS_APP_STORE_URL =
+  'https://apps.apple.com/app/shortcuts/id1462947752';
+
+export type IosSetupStage = 'shortcut' | 'automation';
+export type IosSetupReadiness =
+  | 'not-added'
+  | 'shortcut-proven'
+  | 'first-alert-captured';
 export type IosSetupFailure =
   | 'load'
-  | 'relay-unavailable'
-  | 'connect'
-  | 'connect-rate-limited'
-  | 'connect-unauthorized'
-  | 'connect-device-limit'
-  | 'disconnect'
   | 'shortcut-install'
-  | 'shortcuts-open'
   | 'shortcut-run'
-  | 'push-permission'
-  | 'push-registration'
-  | 'configure'
-  | 'not-hydrated';
+  | 'shortcuts-missing'
+  | null;
+export type IosShortcutCallbackResult = 'success' | 'cancel' | 'error';
+export type IosFutureSetupStep =
+  | 'add-shortcut'
+  | 'confirm-shortcut'
+  | 'create-automation'
+  | 'prove-shortcut'
+  | 'ready';
+
+export interface IosMessageAutomationTrigger {
+  selectedSenderCount: unknown;
+  messageContains: unknown;
+}
+
+export interface IosMessageOnboardingCompletionInput {
+  retryRequired: boolean;
+  ensureDurable(): Promise<void>;
+  markFinished(): Promise<void>;
+  markStarted(): Promise<void>;
+  setOnboarded(): void;
+}
+
+export type IosMessageOnboardingCompletionResult = 'complete' | 'retry-required';
 
 export interface IosSetupModel {
   loading: boolean;
-  relayAvailable: boolean;
+  supported: boolean;
   shortcutAvailable: boolean;
-  step: IosSetupStep;
-  paired: boolean;
-  captureOn: boolean;
-  pairing: boolean;
-  disconnecting: boolean;
-  preparing: boolean;
-  listening: boolean;
-  timedOut: boolean;
-  askPrivateMode: boolean;
-  copied: IosSetupCopyTarget | null;
-  ingestUrl: string | null;
-  tokenPreview: string | null;
-  captured: { merchant: string; isTest: boolean } | null;
-  failure: IosSetupFailure | null;
-  recovery: IosSetupRecovery;
+  stage: IosSetupStage;
+  readiness: IosSetupReadiness;
+  opening: boolean;
+  failure: IosSetupFailure;
 }
 
 export type IosSetupIntent =
   | { type: 'load' }
-  | { type: 'connect' }
-  | { type: 'confirm-private-mode' }
-  | { type: 'cancel-private-mode' }
-  | { type: 'disconnect' }
-  | { type: 'copy'; target: IosSetupCopyTarget }
+  | { type: 'refresh-status' }
   | { type: 'install-shortcut' }
-  | { type: 'shortcut-installed' }
+  | { type: 'shortcut-added' }
   | { type: 'open-automation' }
-  | { type: 'automation-ready' }
-  | { type: 'start-test' }
-  | { type: 'go-to-step'; step: IosSetupStep }
-  | { type: 'clear-failure' }
-  | { type: 'open-settings' };
+  | { type: 'automation-added' }
+  | { type: 'shortcut-callback'; result: IosShortcutCallbackResult }
+  | { type: 'go-to-stage'; stage: IosSetupStage }
+  | { type: 'manual-only' }
+  | { type: 'open-shortcuts-store' }
+  | { type: 'clear-failure' };
 
 export interface IosCaptureSetupController {
   getModel(): IosSetupModel;
@@ -87,125 +81,125 @@ export interface IosCaptureSetupController {
   dispose(): void;
 }
 
-interface Clock {
-  now(): number;
-  set(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
-  clear(timer: ReturnType<typeof setTimeout>): void;
-}
-
-interface IosSetupDependencies {
-  isWeb: boolean;
-  relayUrl: string | null;
+export interface IosSetupDependencies {
+  isSupported(): boolean;
+  getNativeModule(): Pick<
+    WafraLiveCaptureNativeModule,
+    'getCaptureStatus' | 'setCaptureEnabled'
+  > | null;
   shortcutUrl: string | null;
-  getConfig(): Promise<RelayConfig | null>;
-  pair(baseUrl: string): Promise<RelayConfig>;
-  markConfigured(config: RelayConfig): Promise<RelayConfig>;
-  unpair(config: RelayConfig): Promise<void>;
-  requestSilentPermission(): Promise<boolean>;
-  enableBackground(config: RelayConfig): Promise<boolean>;
-  disableBackground(): Promise<void>;
-  writeClipboard(value: string): Promise<void>;
+  canOpenUrl(url: string): Promise<boolean>;
   openUrl(url: string): Promise<void>;
-  openSettings(): Promise<void>;
-  successHaptic(): Promise<void>;
-  selectionHaptic(): Promise<void>;
-  clock: Clock;
+  subscribeCaptureStatus?(listener: () => void): () => void;
 }
 
 export interface IosCaptureSetupOptions {
-  ledger: CaptureLedgerAdapter;
-  leavePrivateMode: () => Promise<void>;
-  captureExecutor?: CaptureExecutor;
+  fromOnboarding?: boolean;
   /** Internal seams for deterministic interface tests. Production omits this. */
   dependencies?: Partial<IosSetupDependencies>;
-  pollMs?: number;
-  timeoutMs?: number;
 }
 
 export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
   loading: true,
-  relayAvailable: false,
+  supported: false,
   shortcutAvailable: false,
-  step: 0,
-  paired: false,
-  captureOn: false,
-  pairing: false,
-  disconnecting: false,
-  preparing: false,
-  listening: false,
-  timedOut: false,
-  askPrivateMode: false,
-  copied: null,
-  ingestUrl: null,
-  tokenPreview: null,
-  captured: null,
+  stage: 'shortcut',
+  readiness: 'not-added',
+  opening: false,
   failure: null,
-  recovery: null,
 };
 
-const defaultClock: Clock = {
-  now: () => Date.now(),
-  set: (callback, delayMs) => setTimeout(callback, delayMs),
-  clear: (timer) => clearTimeout(timer),
+const iosVersionMajor = (): number => {
+  const value = Platform.Version;
+  if (typeof value === 'number') return Math.trunc(value);
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const SENDER_SCOPED_MESSAGE_TRIGGER = {
+  selectedSenderCount: 1,
+  messageContains: null,
+} as const;
 
 const defaultDependencies = (): IosSetupDependencies => ({
-  isWeb: Platform.OS === 'web',
-  relayUrl: DEFAULT_RELAY_URL,
-  shortcutUrl: DEFAULT_SHORTCUT_URL,
-  getConfig: getRelayConfig,
-  pair: pairDevice,
-  markConfigured: markRelayConfigured,
-  unpair: unpairDevice,
-  requestSilentPermission: requestSilentCapturePermission,
-  enableBackground: enableRelayBackgroundSync,
-  disableBackground: disableRelayBackgroundSync,
-  writeClipboard: async (value) => {
-    await Clipboard.setStringAsync(value);
+  isSupported: () => Platform.OS === 'ios' && iosVersionMajor() >= 16,
+  getNativeModule: getIosCaptureNativeModule,
+  shortcutUrl: IOS_LOCAL_CAPTURE_SHORTCUT_URL,
+  canOpenUrl: async (url) => Linking.canOpenURL(url),
+  openUrl: async (url) => {
+    await Linking.openURL(url);
   },
-  openUrl: Linking.openURL,
-  openSettings: Linking.openSettings,
-  successHaptic: async () => {
-    if (Platform.OS !== 'web') {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  },
-  selectionHaptic: async () => {
-    if (Platform.OS !== 'web') await Haptics.selectionAsync();
-  },
-  clock: defaultClock,
+  subscribeCaptureStatus: subscribeIosCaptureStatusRefresh,
 });
 
-const connectFailure = (error: unknown): IosSetupFailure => {
-  if (!(error instanceof RelayError)) return 'connect';
-  if (error.code === 'rate_limited') return 'connect-rate-limited';
-  if (error.code === 'unauthorized') return 'connect-unauthorized';
-  if (error.code === 'device_limit') return 'connect-device-limit';
-  return 'connect';
+export function resolveIosSetupReadiness(
+  status: Pick<WafraLiveCaptureStatus, 'enabled' | 'setupProofVersion' | 'firstCapturedAt'>,
+): IosSetupReadiness {
+  if (!status.enabled) return 'not-added';
+  if (status.firstCapturedAt !== null) return 'first-alert-captured';
+  if (status.setupProofVersion === 1) return 'shortcut-proven';
+  return 'not-added';
+}
+
+export const isSupportedIosMessageAutomationTrigger = (
+  trigger: IosMessageAutomationTrigger,
+): boolean =>
+  Number.isSafeInteger(trigger.selectedSenderCount) &&
+  Number(trigger.selectedSenderCount) > 0 &&
+  trigger.messageContains === null;
+
+export const resolveIosFutureSetupStep = (
+  progress: {
+    futureShortcutConfirmed: boolean;
+    futureAutomationConfirmed: boolean;
+    futureStatus: string;
+  },
+  readiness: IosSetupReadiness,
+): IosFutureSetupStep => {
+  if (readiness !== 'not-added') return 'ready';
+  if (!progress.futureShortcutConfirmed) {
+    return progress.futureStatus === 'not-started' || progress.futureStatus === 'skipped'
+      ? 'add-shortcut'
+      : 'confirm-shortcut';
+  }
+  if (!progress.futureAutomationConfirmed) return 'create-automation';
+  return 'prove-shortcut';
 };
 
-export const createIosCaptureSetup = ({
-  ledger,
-  leavePrivateMode,
-  captureExecutor = createCaptureExecutor({ ledger }),
+export const completeIosMessageOnboardingAttempt = async (
+  input: IosMessageOnboardingCompletionInput,
+): Promise<IosMessageOnboardingCompletionResult> => {
+  if (!input.retryRequired) await input.ensureDurable();
+  await input.markFinished();
+  if (!input.retryRequired) input.setOnboarded();
+  try {
+    await input.ensureDurable();
+    return 'complete';
+  } catch {
+    try {
+      await input.markStarted();
+    } catch {
+      // The caller still blocks exit and keeps retry available when the
+      // source-free recovery flag itself cannot be restored immediately.
+    }
+    return 'retry-required';
+  }
+};
+
+export function createIosCaptureSetup({
+  fromOnboarding = false,
   dependencies: overrides,
-  pollMs = 2_500,
-  timeoutMs = 120_000,
-}: IosCaptureSetupOptions): IosCaptureSetupController => {
+}: IosCaptureSetupOptions = {}): IosCaptureSetupController {
   const dependencies = { ...defaultDependencies(), ...overrides };
+  const shortcutUrl = normalizeIosLocalCaptureShortcutUrl(dependencies.shortcutUrl);
   const listeners = new Set<(model: IosSetupModel) => void>();
-  let model = {
-    ...INITIAL_IOS_SETUP_MODEL,
-    relayAvailable: Boolean(dependencies.relayUrl),
-    shortcutAvailable: Boolean(dependencies.shortcutUrl),
-  };
-  let config: RelayConfig | null = null;
-  let sensitiveCopyPending = false;
+  let model = { ...INITIAL_IOS_SETUP_MODEL };
   let disposed = false;
-  let attempt = 0;
-  let startedAt = 0;
-  let pollTimer: ReturnType<typeof setTimeout> | null = null;
-  let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+  let operationGeneration = 0;
+  let statusInFlight: Promise<void> | null = null;
+  let statusRefreshPending = false;
+  let openingInFlight: Promise<void> | null = null;
+  let manualOnlyInFlight: Promise<void> | null = null;
 
   const publish = (patch: Partial<IosSetupModel>): void => {
     if (disposed) return;
@@ -213,315 +207,275 @@ export const createIosCaptureSetup = ({
     for (const listener of listeners) listener(model);
   };
 
-  const safeConfig = (active: RelayConfig | null): Partial<IosSetupModel> => ({
-    paired: active !== null,
-    captureOn: active?.setupState === 'verified',
-    ingestUrl: active?.ingestUrl ?? null,
-    tokenPreview: active
-      ? `${active.ingestToken.slice(0, 10)}···${active.ingestToken.slice(-6)}`
-      : null,
-  });
-
-  const clearPoll = (): void => {
-    attempt += 1;
-    if (pollTimer) dependencies.clock.clear(pollTimer);
-    pollTimer = null;
-  };
-
-  const clearFailure = (): void => publish({ failure: null, recovery: null });
-
-  const fail = (failure: IosSetupFailure, recovery: IosSetupRecovery = null): void => {
-    publish({ failure, recovery, preparing: false });
-  };
-
-  const clearSensitiveClipboard = async (): Promise<void> => {
-    if (!sensitiveCopyPending) return;
-    try {
-      await dependencies.writeClipboard('');
-      sensitiveCopyPending = false;
-    } catch {
-      // Best effort. The same credential remains in the installed Shortcut.
-    }
-  };
-
-  const setCopied = (target: IosSetupCopyTarget): void => {
-    if (copiedTimer) dependencies.clock.clear(copiedTimer);
-    publish({ copied: target });
-    copiedTimer = dependencies.clock.set(() => {
-      copiedTimer = null;
-      if (model.copied === target) publish({ copied: null });
-    }, 2_000);
-  };
-
-  const copy = async (target: IosSetupCopyTarget): Promise<void> => {
-    if (!config) return;
-    const value = target === 'setup'
-      ? shortcutSetupCode(config.ingestUrl, config.ingestToken)
-      : target === 'url'
-        ? config.ingestUrl
-        : config.ingestToken;
-    const sensitive = target === 'setup' || target === 'token';
-    if (sensitive) sensitiveCopyPending = true;
-    await dependencies.writeClipboard(value);
-    if (disposed) {
-      if (sensitive) {
-        await dependencies.writeClipboard('').catch(() => {});
-        sensitiveCopyPending = false;
-      }
-      return;
-    }
-    setCopied(target);
-    dependencies.selectionHaptic().catch(() => {});
-  };
-
-  const ensureSilentDelivery = async (): Promise<boolean> => {
-    if (!config) return false;
-    if (!(await dependencies.requestSilentPermission())) {
-      fail('push-permission', 'settings');
-      return false;
-    }
-    if (!(await dependencies.enableBackground(config))) {
-      fail('push-registration');
-      return false;
-    }
-    clearFailure();
-    return true;
-  };
-
-  const stopVerification = (patch: Partial<IosSetupModel> = {}): void => {
-    clearPoll();
-    publish({ listening: false, timedOut: false, captured: null, preparing: false, ...patch });
-  };
-
-  const schedulePoll = (generation: number): void => {
-    if (generation !== attempt || disposed) return;
-    if (dependencies.clock.now() - startedAt > timeoutMs) {
-      publish({ listening: false, timedOut: true });
-      return;
-    }
-    pollTimer = dependencies.clock.set(() => void poll(generation), pollMs);
-  };
-
-  const poll = async (generation: number): Promise<void> => {
-    try {
-      const outcome = await captureExecutor.execute('setup-verification');
-      if (generation !== attempt || disposed) return;
-      if (outcome.kind === 'setup-observed') {
-        if (config) {
-          config = { ...config, setupState: 'verified', verifiedAt: outcome.verifiedAt };
-        }
-        publish({
-          listening: false,
-          timedOut: false,
-          captured: { merchant: outcome.merchant, isTest: outcome.isTest },
-          captureOn: true,
-        });
-        dependencies.successHaptic().catch(() => {});
-        return;
-      }
-      if (outcome.kind === 'needs-setup') {
-        config = null;
-        stopVerification({ step: 0, ...safeConfig(null) });
-        return;
-      }
-      if (outcome.kind === 'not-hydrated') {
-        stopVerification();
-        fail('not-hydrated');
-        return;
-      }
-    } catch {
-      // A flaky minute on mobile data does not end verification.
-    }
-    schedulePoll(generation);
-  };
-
-  const startTest = async (): Promise<void> => {
-    if (!config || model.listening) return;
-    clearPoll();
-    const generation = attempt;
-    clearFailure();
-    startedAt = dependencies.clock.now();
-    publish({ step: 3, captured: null, timedOut: false, listening: true });
-    if (!dependencies.isWeb) {
-      try {
-        await dependencies.openUrl(shortcutTestUrl());
-      } catch {
-        if (generation !== attempt || disposed) return;
-        stopVerification();
-        fail('shortcut-run', 'shortcut');
-        return;
-      }
-    }
-    void poll(generation);
-  };
-
-  const load = async (): Promise<void> => {
-    publish({ loading: true, failure: null, recovery: null });
-    try {
-      const existing = await dependencies.getConfig();
-      if (disposed) return;
-      config = existing;
+  const readStatusOnce = async (initial: boolean): Promise<void> => {
+    const supported = dependencies.isSupported();
+    if (!supported) {
       publish({
         loading: false,
-        step: existing ? existing.setupState === 'paired' ? 1 : 3 : 0,
-        ...safeConfig(existing),
+        supported: false,
+        shortcutAvailable: false,
+        readiness: 'not-added',
+        stage: 'shortcut',
+        opening: false,
+        failure: null,
+      });
+      return;
+    }
+
+    const native = dependencies.getNativeModule();
+    if (!native) {
+      publish({
+        loading: false,
+        supported: true,
+        shortcutAvailable: false,
+        readiness: 'not-added',
+        stage: 'shortcut',
+        opening: false,
+        failure: 'load',
+      });
+      return;
+    }
+
+    try {
+      const status = await native.getCaptureStatus();
+      if (disposed) return;
+      const readiness = resolveIosSetupReadiness(status);
+      publish({
+        loading: false,
+        supported: true,
+        shortcutAvailable: shortcutUrl !== null,
+        readiness,
+        stage:
+          readiness !== 'not-added' || (!initial && model.stage === 'automation')
+            ? 'automation'
+            : model.stage,
+        failure: null,
       });
     } catch {
-      fail('load');
-      publish({ loading: false });
+      publish({
+        loading: false,
+        supported: true,
+        shortcutAvailable: false,
+        readiness: 'not-added',
+        failure: 'load',
+      });
     }
   };
 
-  const connect = async (ignorePrivateMode = false): Promise<void> => {
-    if (model.loading || model.pairing || config) return;
-    if (!ignorePrivateMode && ledger.getState().privateMode) {
-      publish({ askPrivateMode: true });
-      return;
+  const refreshStatus = (initial = false): Promise<void> => {
+    if (disposed) return Promise.resolve();
+    if (statusInFlight) {
+      statusRefreshPending = true;
+      return statusInFlight;
     }
-    if (!dependencies.relayUrl) {
-      fail('relay-unavailable');
-      return;
-    }
-    publish({ pairing: true, failure: null, recovery: null });
-    try {
-      const paired = await dependencies.pair(dependencies.relayUrl);
-      if (disposed) {
-        // pair() has already persisted the identity. Best-effort cleanup keeps
-        // a screen dismissal from leaving a hidden device behind.
-        await dependencies.unpair(paired).catch(() => {});
-        return;
-      }
-      config = paired;
-      publish({ pairing: false, step: 1, ...safeConfig(paired) });
-      dependencies.successHaptic().catch(() => {});
-    } catch (error) {
-      publish({ pairing: false });
-      fail(connectFailure(error));
-    }
+
+    statusInFlight = (async () => {
+      let firstRead = initial;
+      do {
+        statusRefreshPending = false;
+        await readStatusOnce(firstRead);
+        firstRead = false;
+      } while (statusRefreshPending && !disposed);
+    })().finally(() => {
+      statusInFlight = null;
+    });
+    return statusInFlight;
   };
 
-  const disconnect = async (): Promise<void> => {
-    if (!config || model.disconnecting) return;
-    const active = config;
-    stopVerification();
-    publish({ disconnecting: true, failure: null, recovery: null });
+  const canUseShortcuts = async (generation: number): Promise<boolean> => {
     try {
-      await dependencies.disableBackground();
-      await dependencies.unpair(active);
-      config = null;
-      publish({ disconnecting: false, step: 0, copied: null, ...safeConfig(null) });
-      dependencies.successHaptic().catch(() => {});
+      const canOpen = await dependencies.canOpenUrl('shortcuts://');
+      return !disposed && generation === operationGeneration && canOpen;
     } catch {
-      publish({ disconnecting: false });
-      fail('disconnect');
+      return false;
     }
   };
 
-  const send = async (intent: IosSetupIntent): Promise<void> => {
-    if (disposed) return;
-    if (intent.type === 'load') return load();
-    if (intent.type === 'connect') return connect();
-    if (intent.type === 'cancel-private-mode') {
-      publish({ askPrivateMode: false });
-      return;
-    }
-    if (intent.type === 'confirm-private-mode') {
-      publish({ askPrivateMode: false });
-      try {
-        await leavePrivateMode();
-        await connect(true);
-      } catch {
-        fail('connect');
+  const joinOpening = (operation: (generation: number) => Promise<void>): Promise<void> => {
+    if (manualOnlyInFlight) return manualOnlyInFlight;
+    if (openingInFlight) return openingInFlight;
+    const generation = ++operationGeneration;
+    publish({ opening: true, failure: null });
+
+    openingInFlight = operation(generation).finally(() => {
+      if (!disposed && generation === operationGeneration) {
+        publish({ opening: false });
       }
+      openingInFlight = null;
+    });
+    return openingInFlight;
+  };
+
+  const installShortcut = (): Promise<void> => joinOpening(async (generation) => {
+    const url = shortcutUrl;
+    if (!url) {
+      publish({ failure: 'shortcut-install' });
       return;
     }
-    if (intent.type === 'disconnect') return disconnect();
-    if (intent.type === 'copy') {
-      try {
-        await copy(intent.target);
-      } catch {
-        fail('shortcut-install');
+    if (!(await canUseShortcuts(generation))) {
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcuts-missing' });
       }
-      return;
-    }
-    if (intent.type === 'install-shortcut') {
-      if (!config) return;
-      try {
-        await copy('setup');
-        if (disposed) return;
-        await dependencies.openUrl(dependencies.shortcutUrl ?? 'shortcuts://');
-        clearFailure();
-      } catch {
-        fail('shortcut-install');
-      }
-      return;
-    }
-    if (intent.type === 'shortcut-installed') {
-      await clearSensitiveClipboard();
-      stopVerification({ step: 2, copied: null });
-      clearFailure();
-      return;
-    }
-    if (intent.type === 'open-automation') {
-      if (!(await ensureSilentDelivery())) return;
-      try {
-        await dependencies.openUrl('shortcuts://');
-      } catch {
-        fail('shortcuts-open');
-      }
-      return;
-    }
-    if (intent.type === 'automation-ready') {
-      if (!config || model.preparing) return;
-      const generation = attempt;
-      publish({ preparing: true });
-      if (!(await ensureSilentDelivery())) return;
-      if (generation !== attempt || disposed) return;
-      await clearSensitiveClipboard();
-      try {
-        const configured = await dependencies.markConfigured(config);
-        if (generation !== attempt || disposed) return;
-        config = configured;
-        publish({ preparing: false, step: 3, ...safeConfig(config) });
-        await startTest();
-      } catch {
-        fail('configure');
-      }
-      return;
-    }
-    if (intent.type === 'start-test') return startTest();
-    if (intent.type === 'go-to-step') {
-      stopVerification({ step: intent.step, failure: null, recovery: null });
-      return;
-    }
-    if (intent.type === 'clear-failure') {
-      clearFailure();
       return;
     }
     try {
-      await dependencies.openSettings();
+      await dependencies.openUrl(url);
+      if (!disposed && generation === operationGeneration) {
+        publish({ stage: 'automation', failure: null });
+      }
     } catch {
-      // The existing settings button is best effort.
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcut-install' });
+      }
     }
+  });
+
+  const openAutomation = (): Promise<void> => joinOpening(async (generation) => {
+    if (!(await canUseShortcuts(generation))) {
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcuts-missing' });
+      }
+      return;
+    }
+    try {
+      await dependencies.openUrl('shortcuts://');
+    } catch {
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcut-run' });
+      }
+    }
+  });
+
+  const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
+    if (!isSupportedIosMessageAutomationTrigger(SENDER_SCOPED_MESSAGE_TRIGGER)) {
+      publish({ failure: 'shortcut-run' });
+      return;
+    }
+    if (!(await canUseShortcuts(generation))) {
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcuts-missing' });
+      }
+      return;
+    }
+
+    const native = dependencies.getNativeModule();
+    if (!native) {
+      publish({ shortcutAvailable: false, failure: 'load' });
+      return;
+    }
+
+    try {
+      await native.setCaptureEnabled(true);
+      if (disposed || generation !== operationGeneration) return;
+      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding));
+    } catch {
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcut-run' });
+      }
+    }
+  });
+
+  const openShortcutsStore = (): Promise<void> => joinOpening(async (generation) => {
+    try {
+      await dependencies.openUrl(SHORTCUTS_APP_STORE_URL);
+    } catch {
+      if (!disposed && generation === operationGeneration) {
+        publish({ failure: 'shortcut-install' });
+      }
+    }
+  });
+
+  const disableForManualOnly = (): Promise<void> => {
+    if (manualOnlyInFlight) return manualOnlyInFlight;
+    const openingToSettle = openingInFlight;
+    const generation = ++operationGeneration;
+    publish({ opening: true, failure: null });
+
+    manualOnlyInFlight = (async () => {
+      if (openingToSettle) {
+        try {
+          await openingToSettle;
+        } catch {
+          // The safety disable still runs after any failed handoff.
+        }
+      }
+      if (!dependencies.isSupported()) return;
+      const native = dependencies.getNativeModule();
+      if (!native) return;
+      try {
+        await native.setCaptureEnabled(false);
+      } catch {
+        publish({ failure: 'load' });
+        throw new Error('ios_capture_disable_failed');
+      }
+    })().finally(() => {
+      if (!disposed && generation === operationGeneration) {
+        publish({ opening: false });
+      }
+      manualOnlyInFlight = null;
+    });
+    return manualOnlyInFlight;
   };
+
+  const unsubscribeStatus =
+    dependencies.subscribeCaptureStatus?.(() => {
+      void refreshStatus(false);
+    }) ?? (() => {});
 
   return {
     getModel: () => model,
-    subscribe: (listener) => {
+    subscribe(listener) {
+      if (disposed) return () => {};
       listeners.add(listener);
       listener(model);
       return () => listeners.delete(listener);
     },
-    send,
-    dispose: () => {
+    async send(intent) {
+      if (disposed) return;
+      switch (intent.type) {
+        case 'load':
+          await refreshStatus(true);
+          return;
+        case 'refresh-status':
+          await refreshStatus(false);
+          return;
+        case 'install-shortcut':
+          await installShortcut();
+          return;
+        case 'shortcut-added':
+          publish({ stage: 'automation', failure: null });
+          return;
+        case 'open-automation':
+          await openAutomation();
+          return;
+        case 'automation-added':
+          await confirmAutomation();
+          return;
+        case 'shortcut-callback':
+          await refreshStatus(false);
+          return;
+        case 'go-to-stage':
+          ++operationGeneration;
+          publish({ stage: intent.stage, opening: false, failure: null });
+          return;
+        case 'manual-only':
+          await disableForManualOnly();
+          return;
+        case 'open-shortcuts-store':
+          await openShortcutsStore();
+          return;
+        case 'clear-failure':
+          publish({ failure: null });
+          return;
+      }
+    },
+    dispose() {
+      if (disposed) return;
       disposed = true;
-      clearPoll();
-      if (copiedTimer) dependencies.clock.clear(copiedTimer);
-      copiedTimer = null;
+      operationGeneration += 1;
+      statusRefreshPending = false;
       listeners.clear();
-      // Header-back is as much a setup exit as the explicit Continue button.
-      // Never leave an ingest credential on the pasteboard deliberately.
-      void clearSensitiveClipboard();
+      unsubscribeStatus();
     },
   };
-};
+}

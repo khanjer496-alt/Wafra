@@ -1,838 +1,157 @@
-/**
- * Flow — where the month's money went, and whether that is within the limits
- * you set.
- *
- * This is the merge of the old Insights and Budgets tabs. They were two views
- * of one question: Insights showed the split by category and Budgets showed the
- * same categories against a number — so a limit was always one tab away from
- * the spending it governs, and the app carried two ways of ranking the same
- * list. Here the composition comes first, the limits sit directly under it, and
- * the trend that explains both closes the screen.
- */
-import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
-import {
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-} from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { InsightCard } from '@/components/insight-card';
+/** Spending owns categories, their limits, transactions and the former Stats insights. */
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { ThemedText } from '@/components/themed-text';
+import { TransactionRow } from '@/components/transaction-row';
+import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Icon } from '@/components/ui/icon';
-import { LinkPill, PeriodPill, SectionHeader } from '@/components/ui/period-pill';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useLanguage } from '@/hooks/use-language';
+import { SpendingOverview, spendingCopy, type CategoryFilter } from '@/components/spending/spending-overview';
+import { SpendingTrends } from '@/components/spending/spending-trends';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { Button } from '@/components/ui/controls';
+import { Money } from '@/components/ui/money';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import { TextField } from '@/components/ui/text-field';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
-import { useScreenEntering } from '@/hooks/use-screen-entering';
-import { useTabBarClearance } from '@/hooks/use-tab-bar-clearance';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryLabel, getCategory, rampColor } from '@/lib/categories';
-import {
-  formatAED,
-  formatAmount,
-  formatCompactAED,
-  monthKey,
-  monthLabel,
-  shiftMonthKey,
-} from '@/lib/format';
+import { categoryMovers, categoryTrend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
+import { categoryLabel } from '@/lib/categories';
+import { formatAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { summarizeMonth } from '@/lib/insights';
 import { internalTransferIds, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
-import { buildInsights, composition, summarizeMonth } from '@/lib/insights';
-import { daysInPeriod, elapsedDays, isCurrentMonth } from '@/lib/period';
+import { comparablePreviousPeriod, inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
+import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStore } from '@/lib/store';
-import type { CategoryId } from '@/lib/types';
-import { alignEnd, t, tf } from '@/lib/i18n';
+import { t } from '@/lib/i18n';
+import type { CategoryId, Transaction } from '@/lib/types';
 
-/** Beyond five slices the ramp stops being readable, so the tail is pooled. */
-const MAX_SLICES = 5;
+type ViewMode = 'categories' | 'activity' | 'trends';
+const validView = (value: unknown): value is ViewMode => ['categories', 'activity', 'trends'].includes(String(value));
+const ACTIVITY_PREVIEW_LIMIT = 30;
 
 export default function FlowScreen() {
-  const theme = useTheme();
-  const enter = useScreenEntering();
-  const language = useLanguage();
-  const router = useRouter();
-  const dark = useColorScheme() === 'dark';
-  const clearance = useTabBarClearance();
-  const { width: screenWidth, fontScale } = useWindowDimensions();
-  const { state } = useStore();
-  // Every tab that shows money the inbox produces can now go and refresh it.
+  const theme = useTheme(); const language = useLanguage(); const router = useRouter();
+  const params = useLocalSearchParams<{ view?: string }>();
+  const { state } = useStore(); const { period, setPeriod } = usePeriod();
   const { refreshing, onRefresh } = usePullToRefresh();
-  const { period } = usePeriod();
-  const now = useMemo(() => new Date(), []);
-
-  // Five-character compact figures (for example 13.5k) need more width than
-  // one of six columns can provide on a narrow screen at large Dynamic Type.
-  // Keep figures beside the bars only while a conservative monospace estimate
-  // fits. Otherwise the bars stay comparable and a wrapping detail list below
-  // carries the readable values without shrinking or clipping them.
-  const trendColumnWidth =
-    (Math.min(screenWidth, MaxContentWidth) - ScreenPadding * 2 - Spacing.two * 5) / 6;
-  const showTrendValues = trendColumnWidth >= 38 * fontScale;
-
+  const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
+  const [view, setView] = useState<ViewMode>(validView(params.view) ? params.view : 'categories');
+  const [filter, setFilter] = useState<CategoryFilter>('all');
+  const [query, setQuery] = useState('');
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [limitFor, setLimitFor] = useState<CategoryId | null | 'new'>(null);
+  const [limitFor, setLimitFor] = useState<CategoryId | 'new' | null>(null);
+  const [category, setCategory] = useState<CategoryId | null>(null);
+  const [entry, setEntry] = useState<Transaction | null>(null);
+  useEffect(() => { if (validView(params.view)) setView(params.view); }, [params.view]);
+  useEffect(() => { setFilter('all'); }, [period]);
 
-  // Limits are monthly, so they follow the global period only when it IS a
-  // month; a year or a custom range falls back to the current month.
-  const key = period.mode === 'month' ? period.key : monthKey(now);
-  // Whether the limits below are measuring the period the rest of the screen
-  // is about. When they are not, they say which month they ARE measuring and
-  // they leave the summary rail — see `monthScoped` at both use sites.
-  const monthScoped = period.mode === 'month';
-  const live = isCurrentMonth(period, now);
+  const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  const internal = useMemo(() => internalTransferIds(state.transactions, live), [state.transactions, live]);
+  const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
+  const rows = useMemo(() => spendingCategoryRows(summary, state.budgets, period.mode === 'month'), [summary, state.budgets, period.mode]);
+  const accountById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts]);
+  const key = period.mode === 'month' ? period.key : monthKey(new Date());
+  const selectedCategory = category === null ? null : rows.find((r) => r.category === category) ?? null;
+  // The former Stats category history remains available in the relevant category detail.
+  const categoryHistory = useMemo(() => category ? categoryTrend(state.transactions, category, 6, key, live, internal) : [],
+    [category, state.transactions, key, live, internal]);
+  const categoryHistoryMax = Math.max(1, ...categoryHistory.map((month) => month.fils));
 
-  const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  // Both halves of a move between the user's own accounts. Without this the
-  // arriving half reads exactly like being paid.
-  const internal = useMemo(
-    () => internalTransferIds(state.transactions, liveAccounts),
-    [state.transactions, liveAccounts],
-  );
-
-  const summary = useMemo(
-    () => summarizeMonth(state.transactions, period, liveAccounts, internal),
-    [state.transactions, period, liveAccounts, internal],
-  );
-
-  const insights = useMemo(
-    () =>
-      buildInsights(
-        state.transactions,
-        state.budgets,
-        period,
-        now,
-        state.notSubscriptions,
-        liveAccounts,
-        internal,
-      ),
-    [state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal],
-  );
-
-  /**
-   * Top five categories plus an "everything else" slice. The split and its
-   * total live in `insights.ts` so Home's "Out" cell reports the same figure —
-   * they were a dirham apart, one tap from each other.
-   */
-  const comp = useMemo(() => composition(summary), [summary]);
-  const slices = useMemo(
-    () =>
-      comp.slices.map((c, i) => ({
-        ...c,
-        label: c.category
-          ? categoryLabel(c.category, language)
-          : tf('moreCategories', { count: summary.byCategory.length - MAX_SLICES }, language),
-        // The pooled remainder is not a category and gets no glyph — see the
-        // row below for why that is the honest answer rather than a gap.
-        icon: c.category ? getCategory(c.category).icon : null,
-        color: c.category ? rampColor(i, dark) : dark ? '#2A2620' : '#D9D3C6',
-      })),
-    [comp, summary.byCategory.length, dark, language],
-  );
-
-  /**
-   * The month the limits are measured over, summarised ONCE.
-   *
-   * When the selected period is a month, `key === period.key` and this is
-   * `summary` itself — the same rows, the same predicates, the same period, so
-   * the per-category totals are identical by construction. This screen used to
-   * call `spentInMonthForCategory` once per budget instead, and each of those
-   * is a full walk of the ledger allocating an `Allocation[]` per row for a
-   * number `summarizeMonth` had already accumulated thirty lines above.
-   * insights.ts deleted exactly this pattern for exactly this reason: "at
-   * 10,000 rows and eight budgets that redundant work was most of the time
-   * buildInsights took."
-   *
-   * In a year/range/all view the limits fall back to the current month, which
-   * `summary` does not cover — so that month is summarised, once, rather than
-   * once per budget.
-   */
-  const limitBasis = useMemo(
-    () =>
-      monthScoped
-        ? summary
-        : summarizeMonth(state.transactions, key, liveAccounts, internal),
-    [monthScoped, summary, state.transactions, key, liveAccounts, internal],
-  );
-
-  const limits = useMemo(() => {
-    const spentByCategory = new Map(
-      limitBasis.byCategory.map((c) => [c.category, c.totalFils] as const),
-    );
-    return state.budgets
-      .map((b) => ({ budget: b, spent: spentByCategory.get(b.category) ?? 0 }))
-      .sort((a, b) => b.spent / b.budget.limitFils - a.spent / a.budget.limitFils);
-  }, [state.budgets, limitBasis]);
-
-  const totalLimit = limits.reduce((s, r) => s + r.budget.limitFils, 0);
-  // Only the categories that actually have a limit. Comparing the whole
-  // month's spending against a partial set of limits produced sentences like
-  // "out 11,375 of 5,400 in limits", which reads as a catastrophic overrun
-  // when the truth is that rent simply has no limit set.
-  const limitedSpend = limits.reduce((s, r) => s + r.spent, 0);
-  // How far through the MONEY month we are, not the calendar one. `getDate()`
-  // is the calendar day, so with a salary-day start of the 25th, 26 July —
-  // day two of a month running 25 Jul to 24 Aug — reported "84% of the month
-  // gone" and "5 days left". insights.ts already had this right via
-  // elapsedDays, so the same screen was carrying both answers, and the "faster
-  // than the month" verdict on every limit was driven off the wrong one.
-  const monthDays = live ? Math.max(1, daysInPeriod(period, now)) : 1;
-  const elapsed = live ? Math.max(1, elapsedDays(period, now, state.transactions)) : monthDays;
-  const monthShare = live ? Math.min(1, elapsed / monthDays) : 1;
-
-  /**
-   * In and out for the six months ending at the selected one, in ONE pass.
-   *
-   * Six calls to `summarizeMonth` is six full walks of the ledger, and five
-   * sixths of each is spent on rows belonging to one of the other five months.
-   * A month key is what `summarizeMonth` matches on anyway — `inPeriod` for a
-   * month period is `monthKey(t.date) === key` — so asking which of the six a
-   * row falls in is the same question asked once instead of six times, over
-   * the same `isIncome`/`isSpending` predicates.
-   */
-  const trend = useMemo(() => {
-    const keys: string[] = [];
-    for (let i = 5; i >= 0; i--) keys.push(shiftMonthKey(key, -i));
-    const slot = new Map(keys.map((k, i) => [k, i] as const));
-    const totals = keys.map(() => ({ income: 0, expense: 0 }));
+  // Detailed analysis and activity sorting run only in the view that needs them.
+  const sortedActivity = useMemo(() => view !== 'activity' ? [] : state.transactions
+    .filter((tx) => isSpending(tx, live, internal) && inPeriod(tx.date, period))
+    .sort((a, b) => b.date.localeCompare(a.date)), [view, state.transactions, live, internal, period]);
+  const activity = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return !needle ? sortedActivity : sortedActivity.filter((tx) =>
+      `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase().includes(needle));
+  }, [sortedActivity, query, accountById]);
+  const analysis = useMemo(() => {
+    if (view !== 'trends') return null;
+    const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(key, i - 5));
+    const buckets = new Map(keys.map((key) => [key, { key, incomeFils: 0, expenseFils: 0 }]));
     for (const tx of state.transactions) {
-      const i = slot.get(monthKey(tx.date));
-      if (i === undefined) continue;
-      if (isIncome(tx, liveAccounts, internal)) totals[i].income += tx.amountFils;
-      else if (isSpending(tx, liveAccounts, internal)) totals[i].expense += tx.amountFils;
+      const bucket = buckets.get(monthKey(tx.date)); if (!bucket) continue;
+      if (isIncome(tx, live, internal)) bucket.incomeFils += tx.amountFils;
+      else if (isSpending(tx, live, internal)) bucket.expenseFils += tx.amountFils;
     }
-    return keys.map((k, i) => ({
-      key: k,
-      label: monthLabel(k, true).split(' ')[0],
-      income: totals[i].income,
-      expense: totals[i].expense,
-    }));
-  }, [state.transactions, key, liveAccounts, internal]);
+    const comparable = comparablePreviousPeriod(period, new Date(), state.transactions);
+    return { months: [...buckets.values()],
+      merchants: topMerchants(state.transactions, period, 8, live, internal),
+      movers: categoryMovers(state.transactions, period, 5, live, internal),
+      weekdays: dayOfWeekSpend(state.transactions, period, live, internal),
+      comparisonLabel: comparable ? periodLabel(comparable) : null };
+  }, [view, key, state.transactions, period, live, internal]);
 
-  const trendMax = Math.max(1, ...trend.flatMap((m) => [m.income, m.expense]));
-  // What the six months averaged, in minus out. The header figure the chart is
-  // there to support: six pairs of bars answer "which month", this answers
-  // "and overall?".
-  // Over the months that HAVE a ledger. Dividing by six when two of them
-  // predate the user's first entry reported an average nobody lived: four
-  // months averaging +7.4k came out as "+5k avg".
-  const trendMonths = trend.filter((m) => m.income > 0 || m.expense > 0);
-  const trendAvg = Math.round(
-    trendMonths.reduce((sum, m) => sum + (m.income - m.expense), 0) / (trendMonths.length || 1),
-  );
+  const flowHeader: ScreenHeaderProps = { title: t('tabFlow'), actions: [{ icon: 'search', label: w.search, onPress: () => setView('activity') }] };
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top']}>
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: clearance }]}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
-          }
-          showsVerticalScrollIndicator={false}>
-          <View style={styles.header}>
-            <ThemedText type="title">{t('tabFlow')}</ThemedText>
-            {/* The one way into /stats, and it has to exist here. The old
-                "ALL STATS" link hung off the six-month chart below and landed
-                on a pixel-identical copy of that chart — the least rewarding
-                tap in the app — so it was removed. Removing it without putting
-                this back left the screen registered, routed and tested, and
-                reachable from nowhere. Labelled rather than a glyph: the only
-                fitting icon is the chart mark, which is the Flow tab's own. */}
-            <View style={styles.headerActions}>
-              <PeriodPill onPress={() => setPeriodOpen(true)} />
-              <LinkPill label={t('statsTitle')} onPress={() => router.push('/stats')} />
-            </View>
+  return <>
+    <ScreenScaffold tabbed headerMode="inline" testID="reference-spending-screen"
+      header={flowHeader}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}>
+      <SegmentedControl value={view} onChange={setView} label={t('tabFlow')} segments={[
+        { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
+      ]} />
+      {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
+        rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
+        onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
+      {view === 'activity' && <View style={styles.activity} testID="spending-activity">
+        <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
+        <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
+        <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+          {activity.slice(0, ACTIVITY_PREVIEW_LIMIT).map((tx) => <TransactionRow key={tx.id} transaction={tx}
+            account={accountById.get(tx.accountId)} onPress={() => setEntry(tx)} />)}
+          {activity.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noResults}</ThemedText>}
+        </View>
+        <Button label={w.allActivity} variant="outline" onPress={() => router.push(`/transactions?type=expense${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`)} />
+      </View>}
+      {view === 'trends' && analysis && <>
+        <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
+        <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
+          onMonth={(key) => setPeriod({ mode: 'month', key })}
+          onMerchant={(merchant) => router.push(`/transactions?type=expense&merchant=${encodeURIComponent(merchant)}`)}
+          onCategory={setCategory} />
+      </>}
+    </ScreenScaffold>
+    <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
+    <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
+    <BottomSheet visible={category !== null} onClose={() => setCategory(null)} title={category ? categoryLabel(category, language) : ''}>
+      {category && <View style={styles.categoryDetail}>
+        <CategoryAvatar category={category} size={56} />
+        <ThemedText type="meta" themeColor="textSecondary">{periodLabel(period)}</ThemedText>
+        <Money fils={selectedCategory?.spentFils ?? 0} type="amount" />
+        <ThemedText type="meta" themeColor="textSecondary">{selectedCategory?.limitFils != null
+          ? `${w.withLimits}: ${formatAED(selectedCategory.limitFils)}` : w.noLimit}</ThemedText>
+        <View style={styles.categoryHistory} testID="category-history">
+          <ThemedText type="smallBold">{t('refCategoryHistory')}</ThemedText>
+          <View style={styles.categoryBars}>
+            {categoryHistory.map((month) => <Pressable key={month.key} accessibilityRole="button"
+              accessibilityLabel={`${monthLabel(month.key)}. ${formatAED(month.fils)}`}
+              onPress={() => setPeriod({ mode: 'month', key: month.key })}
+              style={styles.categoryBarColumn}>
+              <View style={{ width: '65%', height: `${month.fils / categoryHistoryMax * 100}%`, borderRadius: 5, backgroundColor: theme.primary, opacity: month.key === key ? 1 : 0.45 }} />
+            </Pressable>)}
           </View>
-
-          <View
-            style={[
-              styles.summaryRail,
-              { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
-            ]}>
-            <View style={[styles.summaryCell, styles.summaryPrimary]}>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {t('totalOut')}
-              </ThemedText>
-              <ThemedText type="smallBold" tabular numberOfLines={1}>
-                {formatAED(comp.totalFils, { decimals: false })}
-              </ThemedText>
-            </View>
-            {/* Only while the limits and "Total spent" describe the same span.
-                Limits are monthly; the period pill is not, and this cell was
-                printed unqualified beside a period-scoped total whatever the
-                pill said. On "This year" the rail read `Total spent AED 210,000`
-                next to `With limits 1,177 / 1,800` — August's spending under a
-                2026 heading, two figures a reader is invited to compare and
-                cannot. Out of the rail in those views; the section below still
-                shows the limits, under the month it is actually measuring. */}
-            {totalLimit > 0 && monthScoped && (
-              <View style={[styles.summaryCell, styles.summaryPaired, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('limitedSpend')}
-                </ThemedText>
-                <ThemedText type="smallBold" tabular numberOfLines={1}>
-                  {formatAmount(limitedSpend, { decimals: false })}
-                  <ThemedText type="meta" tabular themeColor="textTertiary">
-                    {' / '}{formatAmount(totalLimit, { decimals: false })}
-                  </ThemedText>
-                </ThemedText>
-              </View>
-            )}
-            {live && (
-              <View style={[styles.summaryCell, styles.summaryTerse, styles.summaryDivided, { borderColor: theme.cardBorder }]}>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('periodProgress')}
-                </ThemedText>
-                <ThemedText type="smallBold" tabular numberOfLines={1}>
-                  {Math.round(monthShare * 100)}%
-                </ThemedText>
-              </View>
-            )}
-          </View>
-
-          {/* ── Composition ── */}
-          {slices.length > 0 ? (
-            // No card. theme.ts: "grouping is done with 1px dividers, not
-            // cards. A card only earns its border when the whole thing is
-            // tappable or dismissible." This section is neither — each ROW is
-            // tappable — and boxing it put a bordered, filled panel directly
-            // under the bordered summary rail above, so the screen opened on
-            // two nested frames before a single figure.
-            <Animated.View entering={enter(FadeInDown.duration(320))} style={styles.section}>
-              <SectionHeader title={t('whereItWent')} />
-              {/* One stacked bar rather than a donut: a donut asks you to
-                  compare arcs, and nobody can. A bar is read left to right in
-                  the order the list beneath it is already sorted. */}
-              <View style={[styles.compBar, { backgroundColor: theme.track }]}>
-                {slices.map((s, i) => (
-                  <View
-                    key={s.key}
-                    style={{
-                      flex: Math.max(0.02, s.share),
-                      backgroundColor: s.color,
-                      // A hairline of background between segments, so adjacent
-                      // steps of one hue still read as two slices.
-                      marginStart: i === 0 ? 0 : 1,
-                    }}
-                  />
-                ))}
-              </View>
-
-              <View style={styles.compRows}>
-                {/* Every row opens the entries behind it, scoped to the period
-                    it was read in — the figure on the row and the list it
-                    leads to are the same set of money. The pooled slice hands
-                    over every category it stands for, so "5 more · 1,849"
-                    opens exactly those five. */}
-                {slices.map((s, i) => (
-                  <Pressable
-                    key={s.key}
-                    accessibilityRole="button"
-                    accessibilityLabel={tf('seeCategoryEntriesA11y', { category: s.label }, language)}
-                    onPress={() => router.push(`/transactions?category=${s.categories.join(',')}`)}
-                    style={({ pressed }) => [
-                      styles.compRow,
-                      // A hairline, not a gap: this is the divider grouping the
-                      // theme file asks for, and it is what lets the card
-                      // around this whole section go away.
-                      i > 0 && {
-                        borderTopWidth: StyleSheet.hairlineWidth,
-                        borderTopColor: theme.cardBorder,
-                      },
-                      pressed && { opacity: 0.6 },
-                    ]}>
-                    {/* The swatch keys the row to the bar; the glyph says
-                        what the row IS.
-                        
-                        Both, deliberately, and neither in the other's colour.
-                        This was a 26px filled glyph tile once and that was
-                        wrong — five saturated avatars competed with the single
-                        stacked bar they are meant to key into — so it became
-                        an 8px swatch, which fixed the competition and left the
-                        rows identified by their word alone.
-                        
-                        Drawing the glyph in the ramp colour instead would have
-                        been one mark rather than two, and it is the first
-                        thing to try. It cannot work here: the ramp descends to
-                        lightnesses at 2.0-2.8:1 against the page, which is why
-                        the swatch carries a border — the FILL is identity, the
-                        EDGE is visibility. A stroked glyph has no edge to
-                        borrow, so the tail categories would have been drawn in
-                        a colour that is not reliably visible, and the last two
-                        rows would simply have looked empty.
-                        
-                        So the glyph takes a readable ink and adds no colour to
-                        the row. It competes with nothing, because the thing
-                        that competed was saturation, not presence. */}
-                    <View
-                      style={[
-                        styles.swatch,
-                        { backgroundColor: s.color, borderColor: theme.textTertiary },
-                      ]}
-                    />
-                    <View style={styles.glyph}>
-                      {/* The pooled row stands for several categories at once,
-                          so no single glyph is true of it. It keeps its swatch
-                          and leaves this box empty rather than borrowing a
-                          meaning it does not have — the box still reserves the
-                          width, so the labels stay on one x. */}
-                      {s.icon && <Icon name={s.icon} size={15} color={theme.textSecondary} />}
-                    </View>
-                    <ThemedText type="small" style={styles.compLabel} numberOfLines={1}>
-                      {s.label}
-                    </ThemedText>
-                    <ThemedText
-                      type="meta"
-                      themeColor="textTertiary"
-                      tabular
-                      style={[styles.compShare, { textAlign: alignEnd() }]}>
-                      {Math.round(s.share * 100)}%
-                    </ThemedText>
-                    <ThemedText type="smallBold" tabular style={[styles.compFigure, { textAlign: alignEnd() }]}>
-                      {formatAmount(s.totalFils, { decimals: false })}
-                    </ThemedText>
-                    <Icon name="chevron-right" size={14} color={theme.textTertiary} />
-                  </Pressable>
-                ))}
-              </View>
-            </Animated.View>
-          ) : (
-            <ThemedText type="default" themeColor="textSecondary" style={styles.section}>
-              {t('nothingOutYet')}
-            </ThemedText>
-          )}
-
-          {/* ── Limits ── */}
-          <Animated.View entering={enter(FadeInDown.delay(40).duration(320))} style={styles.section}>
-            {/* The month is named whenever it is not the period the rest of
-                the screen is about, so "AED 623 left" cannot be read as the
-                year's remaining allowance. Composed from the existing label
-                rather than a new phrase, so it needs no new translation and
-                stays true in Arabic. */}
-            <SectionHeader
-              title={
-                monthScoped ? t('limitsHeader') : `${t('limitsHeader')} · ${monthLabel(key, true)}`
-              }
-              right={limits.length > 0 ? t('newLimit') : undefined}
-              onPressRight={limits.length > 0 ? () => setLimitFor('new') : undefined}
-            />
-
-            {limits.length === 0 ? (
-              <Pressable
-                onPress={() => setLimitFor('new')}
-                style={[styles.emptyLimits, { borderColor: theme.cardBorderStrong }]}>
-                <ThemedText type="small">{t('setLimitCategory')}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.emptyBody}>
-                  {t('setLimitBody')}
-                </ThemedText>
-              </Pressable>
-            ) : (
-              limits.map(({ budget, spent }) => {
-                const ratio = budget.limitFils > 0 ? spent / budget.limitFils : 0;
-                const over = ratio >= 1;
-                const nearly = !over && ratio >= 0.85;
-                // Ink for the figure, graphic for the bar — see Colors in
-                // constants/theme.ts for why the two differ in light mode.
-                const health = over ? theme.expense : nearly ? theme.warning : theme.text;
-                const barColor = over
-                  ? theme.expenseGraphic
-                  : nearly
-                    ? theme.warningGraphic
-                    : theme.primary;
-                // Spending faster than the month is running is a warning even
-                // when there is money left — "ahead" would read as praise.
-                const fast = !over && ratio > monthShare + 0.1;
-
-                return (
-                  <Pressable
-                    key={budget.category}
-                    accessibilityRole="button"
-                    accessibilityLabel={tf('categoryLimit', {
-                      category: categoryLabel(budget.category, language),
-                    }, language)}
-                    onPress={() => setLimitFor(budget.category)}
-                    style={styles.limit}>
-                    <View style={styles.limitTop}>
-                      <ThemedText type="small" numberOfLines={1} style={styles.limitLabel}>
-                        {categoryLabel(budget.category, language)}
-                      </ThemedText>
-                      <ThemedText type="smallBold" tabular style={[styles.limitFigure, { color: health }]}>
-                        {formatAmount(spent, { decimals: false })}
-                        <ThemedText type="meta" themeColor="textTertiary" tabular>
-                          {'  / '}
-                          {formatAmount(budget.limitFils, { decimals: false })}
-                        </ThemedText>
-                      </ThemedText>
-                    </View>
-
-                    {/* Health, never category identity: painting this bar in a
-                        category hue made Shopping at 70% render red while
-                        Groceries at 99% rendered amber. */}
-                    <View style={[styles.limitTrack, { backgroundColor: theme.track }]}>
-                      <View
-                        style={{
-                          width: `${ratio <= 0 ? 0 : Math.max(2, Math.min(100, ratio * 100))}%`,
-                          height: '100%',
-                          backgroundColor: barColor,
-                          borderRadius: 3,
-                        }}
-                      />
-                    </View>
-
-                    <View style={styles.limitStatus}>
-                      <ThemedText type="meta" themeColor="textTertiary">
-                        {over
-                          ? tf('overByAmount', { amount: formatAED(spent - budget.limitFils, { decimals: false }) }, language)
-                          : tf('amountLeft', { amount: formatAED(budget.limitFils - spent, { decimals: false }) }, language)}
-                      </ThemedText>
-                      {fast && (
-                        <View style={[styles.paceBadge, { backgroundColor: `${theme.warning}18` }]}>
-                          <ThemedText type="nano" style={{ color: theme.warning }}>
-                            {t('fasterThanMonth')}
-                          </ThemedText>
-                        </View>
-                      )}
-                    </View>
-                  </Pressable>
-                );
-              })
-            )}
-          </Animated.View>
-
-          {/* ── Income vs spending ── */}
-          {/* Uncarded for the same reason as the composition above: nothing
-              here is tappable or dismissible, so the border was decoration.
-              No "ALL STATS" link on this header either — it used to land on a
-              pixel-identical copy of this chart. Stats has its own entry
-              point; the promise is made once. */}
-          <Animated.View
-            entering={enter(FadeInDown.delay(80).duration(320))}
-            style={styles.section}>
-            <SectionHeader
-              title={t('inVsOut6')}
-              right={`${trendAvg >= 0 ? '+' : '−'}${formatCompactAED(trendAvg)} ${t('averageSuffix')}`}
-            />
-            <View
-              style={[
-                styles.trend,
-                showTrendValues ? styles.trendWithValues : styles.trendWithoutValues,
-              ]}>
-              {trend.map((m) => {
-                const current = m.key === key;
-                const empty = m.income === 0 && m.expense === 0;
-                return (
-                  <View key={m.key} style={styles.trendCol}>
-                    {/* A bar you cannot read a number off is a shape, not a
-                        figure. A 14px bar cannot carry its own label without
-                        colliding with its neighbour, so the pair is stacked
-                        above the column — in first, out second, each in its
-                        bar's colour. Stacking gives both figures the full
-                        column width while preserving an 11px minimum. */}
-                    {showTrendValues && <View style={styles.trendValues}>
-                      {empty ? (
-                        // Nothing was recorded that month. Two 2%-floor stubs
-                        // labelled "0 0" claim a month of perfect balance;
-                        // a dash says there is no answer, which is the truth.
-                        <ThemedText type="nano" tabular themeColor="textTertiary" style={styles.trendValue}>
-                          —
-                        </ThemedText>
-                      ) : (
-                        <>
-                          <ThemedText type="nano" tabular style={[styles.trendValue, { color: theme.primary }]}>
-                            {formatCompactAED(m.income)}
-                          </ThemedText>
-                          <ThemedText
-                            type="nano"
-                            tabular
-                            style={[
-                              styles.trendValue,
-                              // Tied to its own bar, as the in figure is. Leaving
-                              // it textTertiary made it the same grey as the month
-                              // label below, so on the current column a red bar
-                              // sat under a grey number and only half the pair
-                              // was legible as a pair.
-                              { color: current ? theme.expense : dark ? '#8A7E76' : '#9B8C84' },
-                            ]}>
-                            {formatCompactAED(m.expense)}
-                          </ThemedText>
-                        </>
-                      )}
-                    </View>}
-                    <View style={styles.trendBars}>
-                      <View
-                        style={[
-                          styles.trendBar,
-                          {
-                            height: `${m.income <= 0 ? 0 : Math.max(2, (m.income / trendMax) * 100)}%`,
-                            backgroundColor: theme.primary,
-                          },
-                        ]}
-                      />
-                      <View
-                        style={[
-                          styles.trendBar,
-                          {
-                            height: `${m.expense <= 0 ? 0 : Math.max(2, (m.expense / trendMax) * 100)}%`,
-                            backgroundColor: current
-                              ? theme.expense
-                              : dark
-                                ? '#4A3A34'
-                                : '#DCC9C2',
-                          },
-                        ]}
-                      />
-                    </View>
-                    <ThemedText
-                      type="nano"
-                      themeColor={current ? 'text' : 'textTertiary'}
-                      style={styles.trendLabel}>
-                      {m.label}
-                    </ThemedText>
-                  </View>
-                );
-              })}
-            </View>
-            {!showTrendValues && (
-              <View style={styles.trendDetails}>
-                {trend.map((m) => (
-                  <View
-                    key={m.key}
-                    accessible
-                    accessibilityLabel={m.income === 0 && m.expense === 0
-                      ? tf('monthCashflowNoDataA11y', { month: m.label }, language)
-                      : tf('monthCashflowA11y', {
-                          month: m.label,
-                          income: formatAED(m.income, { decimals: false }),
-                          spending: formatAED(m.expense, { decimals: false }),
-                        }, language)}
-                    style={[styles.trendDetailRow, { borderBottomColor: theme.cardBorder }]}>
-                    <ThemedText type="smallBold" style={styles.trendDetailMonth}>
-                      {m.label}
-                    </ThemedText>
-                    {m.income === 0 && m.expense === 0 ? (
-                      <ThemedText type="default" themeColor="textTertiary" style={styles.trendDetailEmpty}>
-                        —
-                      </ThemedText>
-                    ) : (
-                      <>
-                        {/* Keep translated labels in their language font. Only
-                            the numeric child is monospaced/tabular; Geist Mono
-                            intentionally has no Arabic glyph set. */}
-                        <ThemedText
-                          type="default"
-                          style={[styles.trendDetailFigure, { color: theme.primary }]}>
-                          {t('incomeLabel')}{' '}
-                          <ThemedText type="default" tabular style={{ color: theme.primary }}>
-                            {formatCompactAED(m.income)}
-                          </ThemedText>
-                        </ThemedText>
-                        <ThemedText
-                          type="default"
-                          style={[
-                            styles.trendDetailFigure,
-                            { color: m.key === key ? theme.expense : theme.textSecondary },
-                          ]}>
-                          {t('spentLabel')}{' '}
-                          <ThemedText
-                            type="default"
-                            tabular
-                            style={{ color: m.key === key ? theme.expense : theme.textSecondary }}>
-                            {formatCompactAED(m.expense)}
-                          </ThemedText>
-                        </ThemedText>
-                      </>
-                    )}
-                  </View>
-                ))}
-              </View>
-            )}
-          </Animated.View>
-
-          {/* ── What that adds up to ── */}
-          {insights.length > 0 && (
-            <Animated.View entering={enter(FadeInDown.delay(120).duration(320))} style={styles.section}>
-              <SectionHeader title={t('worthKnowing')} />
-              <View style={styles.insights}>
-                {insights.map((insight) => (
-                  <InsightCard key={insight.id} insight={insight} />
-                ))}
-              </View>
-            </Animated.View>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-
-      <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
-      <LimitSheet
-        category={limitFor === 'new' ? null : limitFor}
-        open={limitFor !== null}
-        monthKey={key}
-        onClose={() => setLimitFor(null)}
-      />
-    </ThemedView>
-  );
+          <ThemedText type="meta" themeColor="textSecondary">{categoryHistory[0] ? monthLabel(categoryHistory[0].key, true) : ''} — {monthLabel(key, true)}</ThemedText>
+        </View>
+        <Button label={w.details} onPress={() => { const id = category; setCategory(null); router.push(`/transactions?type=expense&category=${id}`); }} />
+        {period.mode === 'month' && <Button label={selectedCategory?.limitFils != null ? w.manage : w.setLimit} variant="outline"
+          onPress={() => { setLimitFor(category); setCategory(null); }} />}
+      </View>}
+    </BottomSheet>
+    <LimitSheet category={limitFor === 'new' ? null : limitFor} open={limitFor !== null} monthKey={key} onClose={() => setLimitFor(null)} />
+  </>;
 }
-
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  content: { paddingHorizontal: ScreenPadding, paddingTop: Spacing.three },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two - 2 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  summaryRail: {
-    flexDirection: 'row',
-    marginTop: Spacing.three,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
-    paddingHorizontal: Spacing.three,
-  },
-  /**
-    * Three equal thirds cut the only figure the rail exists for.
-    *
-    * "Total spent" carries a currency prefix and up to six digits — AED
-    * 17,148 — and a third of a phone's width does not hold it, so the number
-    * the section is named after rendered as "AED 17,1…". The pair beside it
-    * loses the same way: "1,177 / 1,800" became "1,177 / …".
-    *
-    * So the cells are weighted by what they have to say. Period progress is
-    * always three characters ("19%") and needs the least; the two money cells
-    * split what it gives back. Weights rather than fixed widths, so this
-    * holds at any font scale and in Arabic.
-    */
-  summaryCell: { minWidth: 0, gap: 3, paddingVertical: Spacing.two + 2 },
-  // Weights derived from measured need, not guessed. At a 390pt viewport the
-  // three cells have 312pt of rail between them, and what each has to hold is:
-  // "AED 17,148" 87pt, "1,177 / 1,800" 113pt, and — for the last one — not its
-  // value but the word "progress" in its label, 48pt. These leave every cell
-  // 8-15pt of headroom, which is one more digit on the total.
-  summaryPrimary: { flex: 1.2 },
-  summaryPaired: { flex: 1.35 },
-  summaryTerse: { flex: 0.65 },
-  summaryDivided: { borderStartWidth: StyleSheet.hairlineWidth, paddingStart: Spacing.three },
-  section: { marginTop: Spacing.five },
-
-  compBar: {
-    flexDirection: 'row',
-    height: 12,
-    borderRadius: Radius.full,
-    overflow: 'hidden',
-  },
-  // No `gap` here: the rows are separated by their own hairline, and a gap on
-  // top of that leaves the divider floating between two bands of air.
-  compRows: { marginTop: Spacing.three },
-  compRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    paddingVertical: 11,
-  },
-  // The FILL matches this row's segment in the bar above — that link is the
-  // swatch's whole job — but the ramp descends into lightnesses that sit at
-  // 2.0-2.8:1 against the page, so the faint tail steps were invisible on their
-  // own. The ramp cannot be lifted to fix it: forcing five descending steps all
-  // above 3:1 collapses the last three into the same colour, and five
-  // categories then look like three. So the EDGE carries visibility and the
-  // fill carries identity.
-  swatch: { width: 8, height: 8, borderRadius: 2, borderWidth: StyleSheet.hairlineWidth },
-  // Fixed box so the labels start at one x whether the row drew a 15px glyph
-  // or the 8px pooled swatch. Without it the list steps sideways on the last
-  // row, which reads as a rendering fault rather than a different kind of row.
-  glyph: { width: 18, alignItems: 'center', justifyContent: 'center' },
-  compLabel: { flex: 1 },
-  compShare: { width: 38 },
-  compFigure: { width: 72 },
-
-  emptyLimits: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
-    gap: Spacing.one,
-  },
-  emptyBody: { maxWidth: 320 },
-  limit: { paddingVertical: Spacing.two + 2, gap: Spacing.two },
-  limitTop: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  limitLabel: { flex: 1, minWidth: 0 },
-  limitFigure: { flexShrink: 0 },
-  limitTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
-  limitStatus: {
-    minHeight: 22,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  paceBadge: {
-    flexShrink: 0,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 3,
-  },
-
-  trend: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.three },
-  trendWithValues: { height: 118 + 28 + 14 },
-  trendWithoutValues: { height: 118 + 14 },
-  trendCol: { flex: 1, gap: Spacing.one },
-  trendBars: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    gap: 3,
-  },
-  trendBar: {
-    flex: 1,
-    maxWidth: 14,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-  },
-  trendValues: {
-    minHeight: 28,
-    alignItems: 'stretch',
-  },
-  // `nano` is a compact caps label with tracking — right for a section label,
-  // far too wide here. Each value receives the full column width so a readable
-  // 11px figure does not regress to the former clipped "1…" rendering.
-  trendValue: {
-    fontSize: 11,
-    lineHeight: 14,
-    letterSpacing: 0,
-    textTransform: 'none',
-    textAlign: 'center',
-  },
-  trendLabel: { textAlign: 'center' },
-  trendDetails: { marginTop: Spacing.two },
-  trendDetailRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-    paddingVertical: Spacing.two,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  trendDetailMonth: { flexBasis: '100%' },
-  trendDetailFigure: { flexGrow: 1, flexBasis: 112 },
-  trendDetailEmpty: { flexBasis: '100%' },
-
-  insights: { gap: Spacing.two },
+  activity: { gap: 16 }, group: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, overflow: 'hidden' },
+  empty: { paddingVertical: 24 }, categoryDetail: { gap: 16 },
+  categoryHistory: { gap: 10 }, categoryBars: { height: 90, flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  categoryBarColumn: { height: '100%', flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'flex-end' },
 });

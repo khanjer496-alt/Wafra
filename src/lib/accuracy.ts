@@ -1,6 +1,7 @@
 import { netWorthFils, reliableBalanceFils } from '@/lib/balances';
 import { DORMANT_AFTER_DAYS } from '@/lib/cards';
-import { toISODate } from '@/lib/format';
+import { formatAmount, toISODate } from '@/lib/format';
+import { ledgerCurrencyCode } from '@/lib/markets';
 import {
   isDeliberateOtherTitle,
   overrideFitsDirection,
@@ -85,8 +86,7 @@ function maskLongDigits(s: string): string {
   return s.replace(/\d{5,}/g, (m) => `····${m.slice(-4)}`);
 }
 
-const fmt = (fils: number): string =>
-  (fils / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (fils: number): string => formatAmount(fils, { decimals: true });
 
 /**
  * Everything the ledger believes about this phone's cards, as text to share.
@@ -175,7 +175,7 @@ export function cardDiagnostics(state: {
     );
 
   const netWorth = netWorthFils(state);
-  out.push(`NET WORTH  AED ${fmt(netWorth)}`);
+  out.push(`NET WORTH  ${ledgerCurrencyCode()} ${fmt(netWorth)}`);
   out.push(
     '  Only figures the BANK quoted count. A credit card can only subtract its',
     '  outstanding or count nothing — an available limit is not money you have.',
@@ -323,12 +323,13 @@ export const REPORT_PROMPT_THRESHOLD = 3;
  * device where raw is absent for reasons that have nothing to do with how well
  * the parser did:
  *
- *  - **The iOS relay never delivers it.** The Worker drops Message Content
- *    before sealing the row, which is why `ParsedRelayRow` in relay.ts is
- *    typed `raw?: never`. Every row on an iPhone therefore carries no source
- *    text, `unreadFormatCount` is structurally 0, and Settings answered
- *    "Everything reads clean" — a clean bill of health for a check that never
- *    ran, on the one platform whose parser feedback never reaches anyone.
+ *  - **Legacy iOS relay rows never include it.** The Worker drops Message
+ *    Content before sealing the row, which is why `ParsedRelayRow` in relay.ts
+ *    is typed `raw?: never`. The current local iOS path is different because it
+ *    parses on the phone, but it also source-clears every live-capture outcome
+ *    before ledger or review durability. Separate manual/history imports can
+ *    still leave diagnostic text. A ledger can contain all of these kinds
+ *    during migration, so the UI must qualify what its list can and cannot audit.
  *  - **Private mode strips it.** store.tsx keeps `raw: base.privateMode ?
  *    undefined : t.raw`, so an Android user who chose local-only retention is
  *    told the same thing for the same wrong reason.
@@ -341,18 +342,21 @@ export const REPORT_PROMPT_THRESHOLD = 3;
  * compiled and exercised in the Node test build, which has no react-native,
  * and `isRelayPlatform()` in relay.ts is already the single definition of it.
  *
- * iOS is checked FIRST on purpose. Turning private mode off on an iPhone does
- * not bring the text back — nothing does — so naming private mode there would
- * point the user at a switch that cannot fix it.
+ * Private Mode is checked first because it governs the current local path on
+ * every platform. Local-capable iOS is then distinct from a legacy-only relay
+ * runtime: it can inspect retained local misses, while old relay rows remain
+ * structurally source-free.
  */
-export type NoFormatsReason = 'none-found' | 'relay' | 'private';
+export type NoFormatsReason = 'none-found' | 'ios-local' | 'relay' | 'private';
 
 export function noFormatsReason(opts: {
   relayPlatform: boolean;
+  localCaptureAvailable: boolean;
   privateMode: boolean;
 }): NoFormatsReason {
-  if (opts.relayPlatform) return 'relay';
   if (opts.privateMode) return 'private';
+  if (opts.relayPlatform && opts.localCaptureAvailable) return 'ios-local';
+  if (opts.relayPlatform) return 'relay';
   return 'none-found';
 }
 

@@ -28,6 +28,19 @@ function ok(name, condition) {
   }
 }
 
+// A normal launch must recover the saved handoff without needing a callback URL.
+const resume = onboarding.onboardingResumeDestination;
+eq('cold iPhone launch resumes its pending setup',
+  resume?.({ platform: 'ios', pendingIosSetup: true, hasSavedPlan: true, completedCallback: false }), 'ios-setup');
+eq('a completed callback takes precedence over a stale setup flag',
+  resume?.({ platform: 'ios', pendingIosSetup: true, hasSavedPlan: true, completedCallback: true }), 'complete');
+eq('Android never follows an iPhone setup flag',
+  resume?.({ platform: 'android', pendingIosSetup: true, hasSavedPlan: true, completedCallback: false }), 'capture');
+eq('saved personalization resumes at capture instead of resetting answers',
+  resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: true, completedCallback: false }), 'capture');
+eq('a new user starts at the interactive welcome',
+  resume?.({ platform: 'ios', pendingIosSetup: false, hasSavedPlan: false, completedCallback: false }), 'welcome');
+
 eq('onboarding defaults are complete and safe', onboarding.normalizeOnboardingAnswers({}), {
   marketId: 'AE',
   goalIds: ['emergency'],
@@ -93,12 +106,63 @@ eq(
   ),
   null,
 );
+{
+  const incomeBasis = typeof onboarding.onboardingIncomeBasis === 'function'
+      ? onboarding.onboardingIncomeBasis([
+        { id: 'refund', type: 'income', amountFils: 2_000_00, isTransfer: false, category: 'other', date: '2026-08-01' },
+        { id: 'salary-a', type: 'income', amountFils: 500_00, isTransfer: false, category: 'salary', date: '2026-07-28' },
+        { id: 'salary-b', type: 'income', amountFils: 480_00, isTransfer: false, category: 'salary', date: '2026-06-28' },
+        { id: 'own-transfer', type: 'income', amountFils: 900_00, isTransfer: true, category: 'salary', date: '2026-08-02' },
+        { id: 'expense', type: 'expense', amountFils: 1_000_00, isTransfer: false, category: 'salary', date: '2026-08-02' },
+      ])
+    : null;
+  eq('starter plans use median confirmed salary and ignore transfers or windfalls', incomeBasis, 490_00);
+}
 eq(
-  'unsupported ledger currencies stay pending instead of becoming AED',
+  'one arbitrary credit cannot create a recurring starter budget',
+  onboarding.onboardingIncomeBasis([
+    { type: 'income', amountFils: 9_000_00, isTransfer: false, category: 'other', date: '2026-08-02' },
+  ]),
+  0,
+);
+{
+  const usdPlan = onboarding.buildDeferredOnboardingPlan(
+    { goalIds: ['travel'], budgetId: 'flexible' },
+    'USD',
+    500_00,
+    1,
+    'en',
+  );
+  eq('a proven worldwide ledger activates five income-relative limits',
+    usdPlan?.budgets.map((budget) => [budget.category, budget.limitFils]),
+    [
+      ['groceries', 100_00],
+      ['dining', 75_00],
+      ['transport', 50_00],
+      ['shopping', 60_00],
+      ['entertainment', 40_00],
+    ]);
+  eq('worldwide goal templates scale in the real ledger currency',
+    usdPlan?.goals.map((goal) => [goal.title, goal.targetFils, goal.savedFils]),
+    [['A proper holiday', 500_00, 0]]);
+}
+eq(
+  'a currency without income stays pending instead of inventing an amount',
   onboarding.buildDeferredOnboardingPlan(
     { goalIds: ['travel'], budgetId: 'flexible' },
     'USD',
-    null,
+    0,
+    1,
+    'en',
+  ),
+  null,
+);
+eq(
+  'unsafe goal multiplication leaves the plan pending',
+  onboarding.buildDeferredOnboardingPlan(
+    { goalIds: ['home'], budgetId: 'balanced' },
+    'USD',
+    Number.MAX_SAFE_INTEGER,
     1,
     'en',
   ),
@@ -109,18 +173,18 @@ eq(
   onboarding.buildDeferredOnboardingPlan(
     { goalIds: ['home'], budgetId: 'essentials' },
     'SAR',
-    'SAR',
+    2_500_00,
     25,
     'en',
   )?.answers,
-  { marketId: 'SA', goalIds: ['home'], budgetId: 'essentials', monthStartDay: 25 },
+  { currency: 'SAR', goalIds: ['home'], budgetId: 'essentials', monthStartDay: 25 },
 );
 eq(
   'locale-derived SAR money does not activate a plan without bank-alert proof',
   onboarding.buildDeferredOnboardingPlan(
     { goalIds: ['home'], budgetId: 'essentials' },
     'SAR',
-    null,
+    0,
     25,
     'en',
   ),
@@ -158,9 +222,15 @@ const gateSource = fs.readFileSync(
   path.join(__dirname, '../../src/components/onboarding-gate.tsx'),
   'utf8',
 );
+const storeSource = fs.readFileSync(path.join(__dirname, '../../src/lib/store.tsx'), 'utf8');
+const i18nSource = fs.readFileSync(path.join(__dirname, '../../src/lib/i18n.ts'), 'utf8');
 const iosSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
 const iosControllerSource = fs.readFileSync(
   path.join(__dirname, '../../src/lib/ios-capture-setup.ts'),
+  'utf8',
+);
+const moneyPreviewSource = fs.readFileSync(
+  path.join(__dirname, '../../src/components/onboarding/money-preview.tsx'),
   'utf8',
 );
 
@@ -173,11 +243,22 @@ ok(
     !gateSource.includes('plan.goals.forEach(addGoal)'),
 );
 ok(
-  'first run opens with a visual money story instead of a generic feature list',
+  'starter-plan copy waits for real income instead of implying country support',
+  !/supported ledger currency/.test(i18nSource) &&
+    /real income/i.test(i18nSource),
+);
+ok(
+  'the store activates a deferred plan from real non-transfer income in any ledger currency',
+  /onboardingIncomeBasis\(state\.transactions\)/.test(storeSource) &&
+    /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
+);
+ok(
+  'first run offers an explicitly labeled interactive example without ledger writes',
   /<MoneyPreview reducedMotion=\{reducedMotion\}/.test(gateSource) &&
-    /onboardPreviewIncome/.test(gateSource) &&
-    /onboardPreviewBill/.test(gateSource) &&
-    /onboardPreviewCard/.test(gateSource) &&
+    /onboardSampleMessage/.test(moneyPreviewSource) &&
+    /onboardSampleNote/.test(moneyPreviewSource) &&
+    /setRevealed/.test(moneyPreviewSource) &&
+    !/useStore|importBatch|addTransaction/.test(moneyPreviewSource) &&
     !/function points\(/.test(gateSource),
 );
 ok(
@@ -188,13 +269,71 @@ ok(
     /onboardAutomaticChoice/.test(gateSource) &&
     /onboardManualChoice/.test(gateSource),
 );
+ok(
+  'first-run gate exempts guided history routes only on iOS',
+  /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,100}pathname === '\/import-sms'/.test(gateSource) &&
+    /const showOverlay\s*=[\s\S]{0,220}!isIosSetupRoute/.test(gateSource),
+);
+eq('iOS onboarding uses the compact bank-alert heading', i18n.t('onboardCaptureTitleIos', 'en'), 'Start your way');
+eq('iOS onboarding uses the compact bank-alert subtitle', i18n.t('onboardCaptureBodyIos', 'en'), 'Bank alerts or manual entries.');
+eq('iOS automatic choice describes past and future alerts', i18n.t('onboardAutomaticChoiceIosBody', 'en'), 'Past and future bank messages.');
+eq('iOS manual choice promises no Messages access', i18n.t('onboardManualChoiceIosBody', 'en'), 'No Messages access. Connect later.');
+eq('iOS onboarding keeps the privacy summary to one line', i18n.t('onboardCapturePrivacyIos', 'en'), 'Processed on this iPhone. Nothing uploaded.');
+eq(
+  'Learn more distinguishes 30-day logical expiry from later physical cleanup',
+  i18n.t('onboardCaptureLearnMoreRetention', 'en'),
+  'Raw Message Content and Sender expire logically after 30 days. Physical deletion happens on the next capture or queue check, so protected bytes can remain longer.',
+);
+eq(
+  'Learn more warns that the older automation can keep uploading selected alerts',
+  i18n.t('onboardCaptureLearnMoreLegacy', 'en'),
+  'An older Wafra Capture automation may continue uploading selected alerts until you remove or retire it.',
+);
+const universalSenderLabel = ['Any', 'Sender'].join(' ');
+const universalSenderLabelArabic = ['أي', 'مرسل'].join(' ');
+const iosVisibleCopyKeys = [
+  'onboardCaptureTitleIos',
+  'onboardCaptureBodyIos',
+  'onboardAutomaticChoiceIos',
+  'onboardAutomaticChoiceIosBody',
+  'onboardManualChoiceIos',
+  'onboardManualChoiceIosBody',
+  'onboardCapturePrivacyIos',
+  'iosLocalPrivacyBody',
+  'iosMessageGuideSender',
+];
+const iosVisibleCopy = iosVisibleCopyKeys
+  .flatMap((key) => [i18n.t(key, 'en'), i18n.t(key, 'ar')])
+  .join(' ');
+ok(
+  'iOS onboarding keeps title, choice bodies, and privacy summary within the compact copy budget',
+  ['en', 'ar'].every((language) =>
+    i18n.t('onboardCaptureTitleIos', language).length <= 42 &&
+      i18n.t('onboardAutomaticChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardManualChoiceIosBody', language).length <= 92 &&
+      i18n.t('onboardCapturePrivacyIos', language).length <= 64),
+);
+ok(
+  'iOS onboarding has exactly two choices and puts full details behind Learn more',
+  (gateSource.match(/<StartOption/g) ?? []).length === 2 &&
+    /Platform\.OS === 'ios' \? 'onboardAutomaticChoiceIos'/.test(gateSource) &&
+    /Platform\.OS === 'ios' \? 'onboardManualChoiceIos'/.test(gateSource) &&
+    /Platform\.OS === 'ios' \? 'onboardManualChoiceIosBody'/.test(gateSource) &&
+    /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
+    /onboardCaptureLearnMoreAction/.test(gateSource) &&
+    !iosVisibleCopy.includes(universalSenderLabel) &&
+    !iosVisibleCopy.includes(universalSenderLabelArabic),
+);
+ok(
+  'forced-dark onboarding gives Learn more an explicit visible label and border',
+  /label=\{t\('onboardCaptureLearnMoreAction'\)\}[\s\S]{0,180}labelColor=\{night\.text\}[\s\S]{0,120}style=\{\[styles\.learnMoreButton, styles\.ghost\]\}/.test(
+    gateSource,
+  ),
+);
 {
-  const automaticBodies = [
-    'onboardAutomaticChoiceAndroidBody',
-    'onboardAutomaticChoiceIosBody',
-  ];
+  const automaticBodies = ['onboardAutomaticChoiceAndroidBody'];
   ok(
-    'automatic capture discloses its three-day Pro boundary before selection',
+    'Android automatic capture keeps its three-day Pro boundary before selection',
     automaticBodies.every((key) => {
       const en = i18n.t(key, 'en');
       const ar = i18n.t(key, 'ar');
@@ -209,11 +348,12 @@ ok(
     /progress\.found/.test(gateSource) &&
     /result\.tx/.test(gateSource) &&
     /result\.accounts/.test(gateSource) &&
-    !/setTimeout|personalizing/i.test(gateSource),
+    !/setTimeout/i.test(gateSource),
 );
 ok(
   'first run waits for encrypted hydration and shows truthful three-step progress',
-  /if \(!state\.hydrated\)/.test(gateSource) &&
+  /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
+    /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
     /onboardStepOf|progressbar/.test(gateSource) &&
     /QUESTION_STEPS\.length/.test(gateSource),
@@ -233,8 +373,13 @@ ok(
 );
 ok(
   'choosing automatic capture clears a prior durable opt-out before either platform starts',
-  /const startScan = async \(\) => \{[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?await scanInbox/.test(gateSource) &&
+  /const startScan = async \(\) => \{[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?await beginHistoryImport\(\)/.test(gateSource) &&
     /const beginCapture = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?await setCaptureOptOut\(false\)[\s\S]*?router\.push\('\/ios-setup\?fromOnboarding=1'\)/.test(gateSource),
+);
+ok(
+  'Android opens Home after durable setup instead of blocking on inbox parsing',
+  /const startScan = async \(\) => \{[\s\S]*?await beginHistoryImport\(\)[\s\S]*?setOnboarded\(\)/.test(gateSource) &&
+    !/const startScan = async \(\) => \{[\s\S]*?await scanInbox/.test(gateSource),
 );
 ok(
   'denied SMS onboarding can retry or open the exact app settings',
@@ -242,12 +387,34 @@ ok(
 );
 ok(
   'iOS manual opt-out revokes a setup that was started before returning to onboarding',
-  /await setCaptureOptOut\(true\)[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?try \{[\s\S]*?await getRelayConfigStrict\(\)[\s\S]*?await unpairDevice\(relay\)[\s\S]*?setShortcutCleanup\('revoked'\)[\s\S]*?catch[\s\S]*?setShortcutCleanup\('uncertain'\)[\s\S]*?finally[\s\S]*?await disableRelayBackgroundSync\(\)[\s\S]*?shortcutCleanupUncertain/.test(gateSource),
+    /await setCaptureOptOut\(true\)[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?try \{[\s\S]*?await getRelayConfigStrict\(\)[\s\S]*?await unpairDevice\(relay\)[\s\S]*?setShortcutCleanup\('revoked'\)[\s\S]*?catch[\s\S]*?setShortcutCleanup\('uncertain'\)[\s\S]*?finally[\s\S]*?await disableRelayBackgroundSync\(\)[\s\S]*?shortcutCleanupUncertain/.test(gateSource),
 );
 ok(
-  'iOS Shortcut setup returns to the personalized completion',
+  'iOS manual completion clears the guided-history return marker',
+  /const continueManually = async \(\) => \{[\s\S]*?if \(Platform\.OS === 'ios'\)[\s\S]*?type: 'onboarding-return-cleared'[\s\S]*?setCompletionOutcome\('manual'\)/.test(
+    gateSource,
+  ),
+);
+ok(
+  'iOS checklist completion durably finishes onboarding before returning home',
   gateSource.includes('/ios-setup?fromOnboarding=1') &&
-    iosSource.includes("router.replace('/?onboarding=complete')"),
+    /completeIosMessageOnboardingAttempt\(\{[\s\S]*?ensureDurable,[\s\S]*?type: 'onboarding-finished'[\s\S]*?router\.replace\('\/'\)/.test(iosSource),
+);
+ok(
+  'manual exit remains gate-owned while automated setup requires both outcomes',
+  /const continueManually = async \(\) => \{[\s\S]*?await setCaptureOptOut\(true\)[\s\S]*?setCompletionOutcome\('manual'\)[\s\S]*?setStep\('complete'\)/.test(gateSource) &&
+    /if \(!setupComplete\) return/.test(iosSource) &&
+    /progress\.historyStatus === 'complete'/.test(iosSource) &&
+    !/skipIncomplete|const finishLater/.test(iosSource) &&
+    !iosSource.includes("type: 'manual-only'"),
+);
+ok(
+  'iOS checklist embeds history handoff without opting out of capture',
+  /const historyInstallUrl = historyShortcutInstallUrl\(\)/.test(iosSource) &&
+    /await confirmIosHistoryShortcutInstalled\(\)/.test(iosSource) &&
+    /await beginIosHistoryHandoffForOrigin\(historyReturnOrigin, startedAt\)/.test(iosSource) &&
+    /Linking\.openURL\(newHandoff \? historyShortcutRunUrl\(\) : 'shortcuts:\/\/'\)/.test(iosSource) &&
+    !iosSource.includes('setCaptureOptOut(true)'),
 );
 ok(
   'first run cannot silently pin a worldwide user to the AED sample ledger',
@@ -269,10 +436,21 @@ const walletSource = fs.readFileSync(
   path.join(__dirname, '../../src/app/(tabs)/wallet.tsx'),
   'utf8',
 );
+const walletOverviewSource = fs.readFileSync(
+  path.join(__dirname, '../../src/components/wallet/balance-overview.tsx'),
+  'utf8',
+);
+const walletPresentationSource = `${walletSource}\n${walletOverviewSource}`;
 const importSource = fs.readFileSync(path.join(__dirname, '../../src/app/import-sms.tsx'), 'utf8');
 
-ok('a completed onboarding inbox read records the parser migration in its ledger write',
-  /inboxHistoryComplete[\s\S]*?parserRereadComplete: true/.test(gateSource));
+ok('Android ignores forged iOS history deep-link parameters',
+  /history:\s*historyParam/.test(importSource) &&
+    /const history = Platform\.OS === 'ios' \? historyParam : undefined/.test(importSource));
+
+ok('the tab-shell history owner records parser completion in the final page write',
+  /parserRereadComplete: page\.inboxHistoryComplete/.test(
+    fs.readFileSync(path.join(__dirname, '../../src/hooks/use-history-import.ts'), 'utf8'),
+  ));
 ok('a completed Settings history scan records the migration even when nothing changed',
   /inboxHistoryComplete[\s\S]*?p\.batch\.parserRereadComplete = true[\s\S]*?await importBatch\(p\.batch\)\.durable/.test(
     importSource,
@@ -296,7 +474,7 @@ const emptyLedger = {
 i18n.setLanguage('en');
 eq('balance-coverage copy resolves every placeholder',
   i18n.tf('balanceCoverage', { known: 2, total: 4 }),
-  'Reliable balances for 2 of 4 active accounts');
+  'Balances recorded for 2 of 4 active accounts');
 
 /* Net worth: a sum of nothing is not an answer.
  *
@@ -334,15 +512,15 @@ eq('balance-coverage copy resolves every placeholder',
     /netWorthBreakdown\(state\)/.test(walletSource) &&
       /balances\.balanceByAccountId/.test(walletSource));
   ok('Wallet prints a dash, not AED 0, when nothing is knowable',
-    /balanceAccountCoverage\.known > 0[\s\S]*?formatAmount\(balances\.balanceFils, \{ decimals: false \}\)[\s\S]*?: '—'/.test(
-      walletSource,
+    /p\.knownBalanceCount > 0\s*\? formatAmount\(p\.balanceFils\) : '—'/.test(
+      walletOverviewSource,
     ));
   ok('Wallet replaces net worth with balances, card dues and paid-from-account facts',
-    /availableBalances/.test(walletSource) &&
-      /balanceCoverage/.test(walletSource) &&
-      /paidFromAccounts/.test(walletSource) &&
-      /cashOutBreakdown/.test(walletSource) &&
-      !/estimatedNetWorth/.test(walletSource));
+    /availableBalances/.test(walletPresentationSource) &&
+      /balanceCoverage/.test(walletPresentationSource) &&
+      /paidFromAccounts/.test(walletPresentationSource) &&
+      /cashOutBreakdown/.test(walletPresentationSource) &&
+      !/estimatedNetWorth/.test(walletPresentationSource));
 }
 
 /* A paste the parser cannot read.
@@ -376,21 +554,28 @@ eq('balance-coverage copy resolves every placeholder',
       /<SupplementImports \/>/.test(importSource));
 }
 
-/* The relay's own words are not copy.
- *
- * `RelayError.message` is English written for a developer — "Pairing failed
- * (503)." — and it was rendered verbatim on the screen the whole iPhone
- * product rests on, in an app that ships in Arabic. */
+/* Native failures stay source-free and translated. A thrown storage or
+ * Linking exception must never become user-facing text. */
 {
-  ok('iOS setup never renders a relay exception message',
+  ok('iOS setup never renders a native or Linking exception message',
     !/\b(?:e|err|error)\.message\b/.test(iosSource) &&
       !/\b(?:e|err|error)\.message\b/.test(iosControllerSource));
-  ok('it maps the relay error to translated copy instead',
-    /error instanceof RelayError/.test(iosControllerSource) &&
-      /error\.code === 'rate_limited'/.test(iosControllerSource) &&
-      /case 'connect-rate-limited':/.test(iosSource));
-  ok('and the failure block has room for what to do next',
-    /errorDetail && \(/.test(iosSource));
+  ok('it maps each bounded controller failure to translated copy instead',
+    /case 'shortcut-install':/.test(iosSource) &&
+      /case 'shortcut-run':/.test(iosSource) &&
+      /case 'shortcuts-missing':/.test(iosSource) &&
+      /case 'load':/.test(iosSource));
+  ok('and the failure block is announced without source data',
+    /accessibilityLiveRegion="polite"/.test(iosSource) &&
+      /AccessibilityInfo\.announceForAccessibility/.test(iosSource));
+}
+
+try {
+  require('child_process').execFileSync(process.execPath,
+    [path.join(__dirname, 'onboarding-resume.helpers.js')], { stdio: 'inherit' });
+  ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', true);
+} catch {
+  ok('shipping resume effect preserves cold-launch, return, retry and erase behavior', false);
 }
 
 console.log(`\nonboarding: ${pass} passed, ${fail} failed`);

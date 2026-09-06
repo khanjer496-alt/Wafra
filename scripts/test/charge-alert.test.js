@@ -173,7 +173,7 @@ eq(
   );
   eq('several charges are one banner', typeof many.title, 'string');
   eq('the grouped banner speaks for every charge', many.count, 3);
-  eq('the grouped total and count are the spending', many.title, 'AED 2,458 spent · 3 charges');
+  eq('the grouped total and count preserve exact spending', many.title, 'AED 2,457.50 spent · 3 charges');
   // Largest first: a banner on a lock screen gets four seconds and the
   // AED 2,400 row is the one worth them.
   eq(

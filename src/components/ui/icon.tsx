@@ -1,58 +1,12 @@
 import React from 'react';
+import type { SFSymbol } from 'expo-symbols';
 import Svg, { Circle, Line, Path, Rect } from 'react-native-svg';
 
 import { useLanguage } from '@/hooks/use-language';
+import { PlatformSymbol } from '@/components/ui/platform-symbol';
 
-export type IconName =
-  | 'home'
-  | 'chart'
-  | 'target'
-  | 'wallet'
-  | 'plus'
-  | 'search'
-  | 'trash'
-  | 'close'
-  | 'chevron-right'
-  | 'chevron-left'
-  | 'chevron-down'
-  | 'sliders'
-  | 'filter'
-  | 'arrow-up'
-  | 'arrow-down'
-  | 'arrow-up-right'
-  | 'arrow-down-right'
-  | 'spark'
-  | 'check'
-  | 'cart'
-  | 'dining'
-  | 'car'
-  | 'bolt'
-  | 'phone'
-  | 'bag'
-  | 'heart'
-  | 'cap'
-  | 'plane'
-  | 'play'
-  | 'gift'
-  | 'briefcase'
-  | 'receipt'
-  | 'bank'
-  | 'cash'
-  | 'mail'
-  | 'lock'
-  | 'calendar'
-  | 'repeat'
-  | 'alert'
-  | 'diamond'
-  | 'sun'
-  | 'leaf'
-  | 'scissors'
-  | 'tools'
-  | 'code'
-  | 'trend'
-  | 'download'
-  | 'upload'
-  | 'fingerprint';
+import type { IconName } from './icon.types';
+export type { IconName } from './icon.types';
 
 interface IconProps {
   name: IconName;
@@ -87,7 +41,22 @@ interface IconProps {
  */
 const DIRECTIONAL = new Set<IconName>(['chevron-right', 'chevron-left', 'arrow-up-right', 'arrow-down-right']);
 
-function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
+const SF_SYMBOLS: Record<IconName, SFSymbol> = {
+  home: 'house', chart: 'chart.bar.xaxis', target: 'target', wallet: 'wallet.pass',
+  plus: 'plus', search: 'magnifyingglass', trash: 'trash', close: 'xmark',
+  'chevron-right': 'chevron.right', 'chevron-left': 'chevron.left', 'chevron-down': 'chevron.down',
+  sliders: 'slider.horizontal.3', filter: 'line.3.horizontal.decrease',
+  'arrow-up': 'arrow.up', 'arrow-down': 'arrow.down', 'arrow-up-right': 'arrow.up.right', 'arrow-down-right': 'arrow.down.right',
+  spark: 'sparkles', check: 'checkmark', cart: 'cart', dining: 'fork.knife', car: 'car', bolt: 'bolt',
+  phone: 'iphone', bag: 'bag', heart: 'heart', cap: 'graduationcap', plane: 'airplane',
+  play: 'play.circle', gift: 'gift', briefcase: 'briefcase', receipt: 'doc.text', bank: 'building.columns',
+  cash: 'banknote', mail: 'envelope', lock: 'lock', calendar: 'calendar', repeat: 'repeat',
+  alert: 'exclamationmark.triangle', diamond: 'diamond', sun: 'sun.max', leaf: 'leaf', scissors: 'scissors',
+  tools: 'wrench.and.screwdriver', code: 'chevron.left.forwardslash.chevron.right',
+  trend: 'chart.line.uptrend.xyaxis', download: 'arrow.down.to.line', upload: 'arrow.up.to.line', fingerprint: 'touchid',
+};
+
+function SvgIcon({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconProps) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' } as const;
   const language = useLanguage();
   const flip = language === 'ar' && DIRECTIONAL.has(name);
@@ -427,6 +396,22 @@ function IconInner({ name, size = 24, color = '#fff', strokeWidth = 1.8 }: IconP
         </>
       )}
     </Svg>
+  );
+}
+
+function IconInner(props: IconProps) {
+  const language = useLanguage();
+  const flip = language === 'ar' && DIRECTIONAL.has(props.name);
+  const fallback = <SvgIcon {...props} />;
+  return (
+    <PlatformSymbol
+      name={SF_SYMBOLS[props.name]}
+      fallback={fallback}
+      size={props.size ?? 24}
+      tintColor={props.color ?? '#fff'}
+      weight={props.strokeWidth && props.strokeWidth >= 2 ? 'semibold' : 'regular'}
+      style={flip ? { transform: [{ scaleX: -1 }] } : undefined}
+    />
   );
 }
 

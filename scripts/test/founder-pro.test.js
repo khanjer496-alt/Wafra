@@ -50,13 +50,18 @@ ok('founder unlock is enabled in both distributed test profiles and closed in pr
 ok('only the Wafra logo in an enabled native test build advances the gesture',
   /Platform\.OS !== 'web' && isFounderUnlockBuild\(\)/.test(settings) &&
     /<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings));
+ok('founder unlock stays on the Support brand mark and never becomes a setting row',
+  (settings.match(/onPress=\{\(\) => void onFounderLogoTap\(\)\}/g) ?? []).length === 1 &&
+    /supportHeader[\s\S]*<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings) &&
+    !/linkRow\([\s\S]{0,180}onFounderLogoTap|<Row[^>]*onPress=\{[^}]*onFounderLogoTap/.test(settings));
 ok('Settings grants the dedicated founder entitlement instead of forging store Pro',
   /await unlockFounderPro\(\)/.test(settings) && !/setPro\(/.test(settings));
 ok('the founder grant is durable, excluded from backups, and preserved by ledger erase',
   /case 'unlockFounderPro':[\s\S]{0,100}founderPro: true/.test(store) &&
     /founderPro: _founderPro/.test(store) &&
     /founderPro: state\.founderPro/.test(store) &&
-    /case 'clearAll':[\s\S]{0,500}founderPro: state\.founderPro/.test(store));
+    /case 'clearAll':[\s\S]{0,800}founderPro: state\.founderPro/.test(store) &&
+    /case 'clearAll':[\s\S]{0,800}trialStartTs: state\.trialStartTs/.test(store));
 ok('RevenueCat status cannot revoke founder access',
   /state\.pro \|\| state\.founderPro === true \|\|/.test(purchases));
 

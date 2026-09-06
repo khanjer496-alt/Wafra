@@ -13,10 +13,9 @@ import Animated, {
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { EASE, Fonts, Motion, Radius, Spacing } from '@/constants/theme';
+import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
@@ -126,27 +125,16 @@ export function EmptyMonth({
   onReadInbox,
   onAddManually,
   primaryLabel,
-  body,
 }: {
   monthName: string;
   onReadInbox?: () => void;
   onAddManually: () => void;
   primaryLabel?: string;
-  body?: string;
 }) {
   const theme = useTheme();
   return (
-    <View style={[styles.dashed, { borderColor: theme.cardBorderStrong }]}>
-      <View style={styles.zero}>
-        <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-          {ledgerCurrencyDisplay()}
-        </ThemedText>
-        <ThemedText type="amount">0</ThemedText>
-      </View>
+    <View style={[styles.empty, { borderColor: theme.cardBorderStrong }]}>
       <ThemedText type="small">{tf('noEntriesInMonth', { month: monthName })}</ThemedText>
-      <ThemedText type="default" themeColor="textSecondary">
-        {body ?? t('emptyMonthHelp')}
-      </ThemedText>
       <View style={styles.actions}>
         {onReadInbox && <Button inline label={primaryLabel ?? t('readInbox')} onPress={onReadInbox} />}
         <Button inline variant="outline" label={t('addManually')} onPress={onAddManually} />
@@ -195,23 +183,10 @@ const styles = StyleSheet.create({
   skeleton: {
     borderRadius: 8,
   },
-  dashed: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderRadius: Radius.sheet + 2,
-    padding: Spacing.four,
+  empty: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.four,
     gap: Spacing.two + 2,
-  },
-  currencyPrefix: {
-    fontFamily: Fonts.monoMedium,
-    fontSize: 15,
-    lineHeight: 19,
-  },
-  zero: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: Spacing.two - 2,
-    opacity: 0.35,
   },
   actions: {
     flexDirection: 'row',

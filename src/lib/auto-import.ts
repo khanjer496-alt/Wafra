@@ -8,12 +8,27 @@ import type { UniversalAlertReview } from '@/lib/alert-market-detection';
 import {
   prepareLaunchReviewAlert,
   prepareReviewAlert,
+  prepareUniversalReviewAlert,
+  isUniversalReviewAlert,
+  REVIEW_ALERT_TTL_MS,
+  type ReviewEntry,
   type ReviewAlert,
+  type UniversalReviewAlert,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { nonPostingReason, type ParsedSms } from '@/lib/sms-parser';
-import { createLaunchAlertSession, hasBankAlertMoneyHint } from '@/lib/launch-alert-parser';
+import {
+  nonPostingReason,
+  type NonPostingReason,
+  type ParsedSms,
+} from '@/lib/sms-parser';
+import {
+  createLaunchAlertSession,
+  hasBankAlertMoneyHint,
+  hasGenericBankAlertContext,
+  inspectGenericBankEventForReview,
+  type LaunchAlertSession,
+} from '@/lib/launch-alert-parser';
 import {
   inspectUnparsedLaunchAlert,
   normalizeUnparsedLaunchTemplate,
@@ -23,6 +38,7 @@ import {
   trustedBankNotificationSender,
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
+import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 
 const PAGE_SIZE = 1000;
 const MAX_REVIEW_CANDIDATES = 50;
@@ -112,6 +128,20 @@ export type { CaptureChannel } from '@/lib/dedupe';
 export type { ScannedSms, DeclinedSms, ImportPlan } from '@/lib/import-plan';
 export { buildImportPlan } from '@/lib/import-plan';
 
+export interface InboxScanCursor {
+  beforeDateMs: number;
+  beforeId: number;
+}
+
+export interface ScanInboxOptions {
+  /** Resume strictly before this lossless Android provider date/id pair. */
+  cursor?: InboxScanCursor | null;
+  /** Omit for the existing complete scan; history import uses one page. */
+  maxInboxPages?: number;
+  /** Exact old source hashes currently retained by the authoritative ledger/tray. */
+  legacyReviewSourceKeys?: readonly string[];
+}
+
 export interface ScanResult {
   parsed: ScannedSms[];
   /**
@@ -119,7 +149,9 @@ export interface ScanResult {
    * inspector can ground strongly enough for review. These never enter
    * `parsed`, so this scanner cannot auto-import them.
    */
-  reviewCandidates: ReviewAlert[];
+  reviewCandidates: ReviewEntry[];
+  /** Transient, source-attested identity migrations; never a persisted payload. */
+  reviewSourceBindings?: ReviewSourceBinding[];
   /**
    * Body-free identities of non-posting alerts and proven provider duplicates.
    *
@@ -138,6 +170,8 @@ export interface ScanResult {
   inboxScannedCount: number;
   /** The inbox provider reached a real end-of-history page. */
   inboxHistoryComplete: boolean;
+  /** Cursor for the next bounded page, null only at the real history end. */
+  nextCursor: InboxScanCursor | null;
   scannedCount: number;
   /** Strong launch-pack evidence observed while parsing this scan. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
@@ -188,12 +222,13 @@ const sha256 = (data: string): Promise<string> => {
  * local fingerprint, so a copied tombstone cannot be tested against guessed
  * bank messages offline. No second key or erase path is introduced.
  */
-async function reviewCaptureIdentity(
+export async function reviewCaptureIdentity(
   source: string,
   sender: string,
   observedAt: number,
   channel: CaptureChannel,
   databaseKey: string,
+  digestString: (data: string) => Promise<string> = sha256,
 ): Promise<{ id: string; sourceKey: string; templateKey: string } | null> {
   if (!/^[0-9a-f]{64}$/i.test(databaseKey)) return null;
   const material = [
@@ -202,11 +237,11 @@ async function reviewCaptureIdentity(
     bodyPrint(sender.normalize('NFKC')),
     bodyPrint(source.normalize('NFKC')),
   ].join('\u0000');
-  const identityKey = await sha256(`${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`);
-  const digest = await sha256(`${identityKey}\u0000${material}`);
+  const identityKey = await digestString(`${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`);
+  const digest = await digestString(`${identityKey}\u0000${material}`);
   const template = normalizeUnparsedLaunchTemplate(source);
-  const templateIdentityKey = await sha256(`${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`);
-  const templateDigest = await sha256([
+  const templateIdentityKey = await digestString(`${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`);
+  const templateDigest = await digestString([
     templateIdentityKey,
     bodyPrint(sender.normalize('NFKC')),
     template,
@@ -220,6 +255,153 @@ async function reviewCaptureIdentity(
 }
 
 /**
+ * Reuse only the two key derivations within ONE inbox scan. All source and
+ * template fingerprints still run independently and remain byte-identical.
+ * Nothing is cached at module scope, so a later scan/erase cannot reuse keys.
+ * The cache admits exactly two constant inputs, never SMS bodies or senders.
+ */
+export function createReviewIdentitySession(databaseKey: string) {
+  const permitted = new Set([
+    `${REVIEW_IDENTITY_DOMAIN}\u0000${databaseKey}`,
+    `${REVIEW_TEMPLATE_DOMAIN}\u0000${databaseKey}`,
+  ]);
+  const derivations = new Map<string, Promise<string>>();
+  const digestString = (data: string): Promise<string> => {
+    if (!permitted.has(data)) return sha256(data);
+    const cached = derivations.get(data);
+    if (cached) return cached;
+    const pending = sha256(data);
+    derivations.set(data, pending);
+    // Do not poison a scan's retry after a transient native-crypto failure.
+    void pending.catch(() => {
+      if (derivations.get(data) === pending) derivations.delete(data);
+    });
+    return pending;
+  };
+  return (source: string, sender: string, observedAt: number, channel: CaptureChannel) =>
+    reviewCaptureIdentity(source, sender, observedAt, channel, databaseKey, digestString);
+}
+
+type KeyedReviewIdentity = NonNullable<Awaited<ReturnType<typeof reviewCaptureIdentity>>>;
+const ANDROID_PROVIDER_ID_RE = /^a(?:0|[1-9]\d{0,39})$/;
+
+async function bindProviderReviewIdentity(
+  legacy: KeyedReviewIdentity,
+  sourceEventId?: string,
+): Promise<KeyedReviewIdentity> {
+  if (!sourceEventId || !ANDROID_PROVIDER_ID_RE.test(sourceEventId)) return legacy;
+  const providerDigest = await sha256([
+    REVIEW_IDENTITY_DOMAIN, 'provider', legacy.id, sourceEventId,
+  ].join('\u0000'));
+  if (!/^[0-9a-f]{64}$/i.test(providerDigest)) throw new ReviewIdentityError('Encrypted review identity is invalid');
+  return {
+    ...legacy,
+    id: `ari1_${providerDigest}`,
+    sourceKey: `android_message_review_source_${sourceEventId}`,
+  };
+}
+
+export type SourceFreeReviewCandidate =
+  | Omit<ReviewAlert, 'id' | 'sourceKey' | 'templateKey'>
+  | Omit<UniversalReviewAlert, 'id' | 'sourceKey'>;
+
+export interface SourceFreeReviewIdentity {
+  id: string;
+  sourceKey: string;
+  templateKey?: string;
+}
+
+export type SourceFreeRefusedAlertDecision =
+  | { kind: 'declined'; reason: NonPostingReason }
+  | { kind: 'review'; candidate: SourceFreeReviewCandidate }
+  | { kind: 'ignored' };
+
+/**
+ * One source-free refusal policy shared by Android inbox capture and iOS local
+ * capture. Source and sender are consumed only while inspecting; neither can
+ * appear in the returned decision.
+ */
+export function inspectSourceFreeRefusedAlert(input: {
+  source: string;
+  sender: string;
+  observedAt: number;
+  channel: CaptureChannel;
+  session: Pick<LaunchAlertSession, 'inspect'>;
+  existingInspection?: UniversalAlertReview | null;
+}): SourceFreeRefusedAlertDecision {
+  const reason = nonPostingReason(input.source);
+  if (reason) return { kind: 'declined', reason };
+  if (!hasBankAlertMoneyHint(input.source) &&
+    !hasGenericBankAlertContext(input.source, input.sender)) return { kind: 'ignored' };
+
+  const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
+  const prepared = inspection
+    ? prepareReviewAlert({
+        id: 'capture_probe_id_0001',
+        sourceKey: 'capture_probe_key_001',
+        observedAt: input.observedAt,
+        channel: input.channel,
+        inspection,
+      })
+    : null;
+  // A globally routed or ambiguous result has already been judged by the
+  // global inspector. The launch fallback is only for alerts with no route.
+  const launchReview = inspection === null
+    ? inspectUnparsedLaunchAlert(input.source, input.sender)
+    : null;
+  const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
+    ? prepareLaunchReviewAlert({
+        id: 'capture_probe_id_0001',
+        sourceKey: 'capture_probe_key_001',
+        observedAt: input.observedAt,
+        channel: input.channel,
+        review: launchReview.review,
+      })
+    : null);
+  if (!reviewPrepared) {
+    const event = inspectGenericBankEventForReview(input.source, input.sender);
+    const universal = event ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001',
+      sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt,
+      channel: input.channel,
+      event,
+    }) : null;
+    if (!universal) return { kind: 'ignored' };
+    const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
+    return { kind: 'review', candidate };
+  }
+  const {
+    id: _id,
+    sourceKey: _sourceKey,
+    templateKey: _templateKey,
+    ...candidate
+  } = reviewPrepared;
+  return { kind: 'review', candidate };
+}
+
+/** Attach an opaque identity only after review admission has removed source. */
+export function identifySourceFreeReviewAlert(
+  candidate: SourceFreeReviewCandidate,
+  identity: SourceFreeReviewIdentity,
+): ReviewEntry | null {
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(identity.id) ||
+    !/^[A-Za-z0-9_-]{16,128}$/.test(identity.sourceKey) ||
+    (identity.templateKey !== undefined &&
+      !/^[A-Za-z0-9_-]{16,128}$/.test(identity.templateKey))) {
+    return null;
+  }
+  if ('kind' in candidate && candidate.kind === 'universal') {
+    return { ...candidate, id: identity.id, sourceKey: identity.sourceKey };
+  }
+  return { ...candidate, ...identity };
+}
+
+export const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
+  parsedAlert.type === 'income' && !parsedAlert.transferHint &&
+  parsedAlert.categoryGuess === 'other' && !parsedAlert.categoryDeliberate;
+
+/**
  * Reads the inbox from `sinceMs` to now in pages (full history when sinceMs = 0)
  * and parses every message. onProgress fires per page for UI feedback.
  */
@@ -228,11 +410,13 @@ export async function scanInbox(
   overrides: Record<string, import('@/lib/types').CategoryId>,
   onProgress?: (scanned: number, found: number) => void,
   regionHint: string | null = deviceRegionHint(),
+  options: ScanInboxOptions = {},
 ): Promise<ScanResult> {
   if (!isSmsScanningAvailable() || !SmsReader) {
     return {
       parsed: [], reviewCandidates: [], declined: [], newestTs: sinceMs,
       inboxScannedCount: 0, inboxHistoryComplete: false, scannedCount: 0,
+      nextCursor: null,
       detectedLaunchMarket: null,
       commit: NOOP_SCAN_COMMIT,
     };
@@ -244,12 +428,41 @@ export async function scanInbox(
     channel: CaptureChannel;
     sourceEventId?: string;
   })[] = [];
-  const reviewCandidates: ReviewAlert[] = [];
+  const reviewCandidates: ReviewEntry[] = [];
+  const reviewSourceBindings: ReviewSourceBinding[] = [];
+  const requestedLegacySources = new Set((options.legacyReviewSourceKeys ?? [])
+    .filter((value) => /^arc1_[0-9a-f]{64}$/.test(value)));
+  const bindingPairs = new Set<string>();
+  const noteSourceBinding = (
+    legacy: KeyedReviewIdentity,
+    identity: KeyedReviewIdentity,
+    observedAt: number,
+  ) => {
+    if (!requestedLegacySources.has(legacy.sourceKey) || identity.sourceKey === legacy.sourceKey) return;
+    const pair = `${legacy.sourceKey}\u0000${identity.sourceKey}`;
+    if (bindingPairs.has(pair)) return;
+    bindingPairs.add(pair);
+    reviewSourceBindings.push({
+      legacyId: legacy.id, legacySourceKey: legacy.sourceKey,
+      id: identity.id, sourceKey: identity.sourceKey, observedAt,
+    });
+  };
   const reviewSourceKeys = new Set<string>();
+  const reviewDiscoveredAt = Date.now();
   let databaseKeyPromise: Promise<string | null> | null = null;
   const databaseKey = (): Promise<string | null> => {
     databaseKeyPromise ??= SecureStore.getItemAsync(DATABASE_KEY_NAME);
     return databaseKeyPromise;
+  };
+  // Create lazily: a normal parsed/ignored message never requests key access.
+  let identitySession: ReturnType<typeof createReviewIdentitySession> | null = null;
+  const identifyCapture = async (
+    source: string, sender: string, observedAt: number, channel: CaptureChannel,
+  ) => {
+    const key = await databaseKey();
+    if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
+    identitySession ??= createReviewIdentitySession(key);
+    return identitySession(source, sender, observedAt, channel);
   };
   const declined: DeclinedSms[] = [];
   const notificationIds = new Set<string>();
@@ -270,50 +483,49 @@ export async function scanInbox(
     existingInspection: UniversalAlertReview | null = null,
     sourceEventId?: string,
   ): Promise<boolean> => {
-    // A refusal, code challenge, hold or returned instrument is affirmative
-    // proof that no settled money movement happened. It belongs only in the
-    // guarded healing channel and must never become a reviewable charge.
-    const reason = nonPostingReason(body);
-    if (reason) {
-      declined.push({ smsTs: ts, sender, channel, reason, sourceEventId });
+    const decision = inspectSourceFreeRefusedAlert({
+      source: body,
+      sender,
+      observedAt: ts,
+      channel,
+      session: launchSession,
+      existingInspection,
+    });
+    if (decision.kind === 'declined') {
+      declined.push({
+        smsTs: ts,
+        sender,
+        channel,
+        reason: decision.reason,
+        sourceEventId,
+      });
       return false;
     }
-    if (!hasBankAlertMoneyHint(body)) return false;
-    const inspection = existingInspection ?? inspectWorldwide(body, sender);
-    // Refuse unsafe/global-ambiguous evidence before touching Keychain or
-    // hashing source-derived material.
-    const prepared = inspection
-      ? prepareReviewAlert({
-          id: 'capture_probe_id_0001',
-          sourceKey: 'capture_probe_key_001',
-          observedAt: ts,
-          channel,
-          inspection,
-        })
-      : null;
-    // A globally routed/ambiguous alert has already been judged by the global
-    // inspector. Never let a Gulf sender alias bypass that refusal. The launch
-    // fallback is reserved for alerts that have no global route at all.
-    const launchReview = inspection === null
-      ? inspectUnparsedLaunchAlert(body, sender)
-      : null;
-    const reviewPrepared = prepared ?? (launchReview?.outcome === 'review'
-      ? prepareLaunchReviewAlert({
-          id: 'capture_probe_id_0001',
-          sourceKey: 'capture_probe_key_001',
-          observedAt: ts,
-          channel,
-          review: launchReview.review,
-        })
-      : null);
-    if (!reviewPrepared) return false;
-    const key = await databaseKey();
-    if (!key) throw new ReviewIdentityError('Encrypted review identity is unavailable');
-    const identity = await reviewCaptureIdentity(body, sender, ts, channel, key);
-    if (!identity) throw new ReviewIdentityError('Encrypted review identity is invalid');
-    if (reviewSourceKeys.has(identity.sourceKey)) return true;
-    reviewSourceKeys.add(identity.sourceKey);
-    reviewCandidates.push({ ...reviewPrepared, ...identity });
+    if (decision.kind === 'ignored') return false;
+    const legacyIdentity = await identifyCapture(body, sender, ts, channel);
+    if (!legacyIdentity) throw new ReviewIdentityError('Encrypted review identity is invalid');
+    // Keep exact old/new tuples only when the ledger requested that old hash.
+    const identity = await bindProviderReviewIdentity(legacyIdentity, sourceEventId);
+    noteSourceBinding(legacyIdentity, identity, ts);
+    const identified = identifySourceFreeReviewAlert(decision.candidate, identity);
+    if (!identified) throw new ReviewIdentityError('Encrypted review identity is invalid');
+    const universal = isUniversalReviewAlert(identified);
+    const sourceIdentity = universal
+      ? { id: identity.id, sourceKey: identity.sourceKey }
+      : identity;
+    const reviewPrepared = {
+      ...identified,
+      ...sourceIdentity,
+      // Discovery is now even when this full scan finds an old Message.
+      // Keep event time and its stable identity; only review retention moves.
+      expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
+    };
+    if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return true;
+    reviewSourceKeys.add(sourceIdentity.sourceKey);
+    // Keep the explicit encrypted-identity merge visible to the repository's
+    // static safety contract even though the shared helper validated it too.
+    if (universal) reviewCandidates.push(reviewPrepared);
+    else reviewCandidates.push({ ...reviewPrepared, ...identity });
     // Inbox, delivery and push are collected in different phases. Keep the
     // newest bounded set by event time—not whichever channel happened to run
     // first—so a full inbox cannot crowd out a fresh bank-app alert.
@@ -323,18 +535,20 @@ export async function scanInbox(
     }
     return true;
   };
-  const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
-    parsedAlert.type === 'income' && !parsedAlert.transferHint &&
-    parsedAlert.categoryGuess === 'other' && !parsedAlert.categoryDeliberate;
   /** Bodies already taken from the inbox, so the delivery buffer cannot re-add them. */
   const inboxBodies = new Set<string>();
   let newestTs = sinceMs;
-  let beforeDateMs = Date.now() + 60_000;
-  let beforeId = Number.MAX_SAFE_INTEGER;
+  let beforeDateMs = options.cursor?.beforeDateMs ?? Date.now() + 60_000;
+  let beforeId = options.cursor?.beforeId ?? Number.MAX_SAFE_INTEGER;
   let inboxScannedCount = 0;
   let inboxHistoryComplete = false;
+  let nextCursor: InboxScanCursor | null = null;
   let scannedCount = 0;
   let previousInboxSms: InboxSms | null = null;
+  let pagesRead = 0;
+  const maxInboxPages = options.maxInboxPages === undefined
+    ? Number.POSITIVE_INFINITY
+    : Math.max(1, Math.floor(options.maxInboxPages));
 
   for (;;) {
     const batch: InboxSms[] = await SmsReader.getInboxSms(
@@ -345,8 +559,10 @@ export async function scanInbox(
     );
     if (batch.length === 0) {
       inboxHistoryComplete = true;
+      nextCursor = null;
       break;
     }
+    pagesRead += 1;
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
@@ -396,9 +612,19 @@ export async function scanInbox(
           )
         : false;
       if (p && !reviewed) {
+        // A parser improvement can turn an old review into a normal parsed
+        // row. Attest its old identity before planning, but do no extra source
+        // hashing on the ordinary path when there are no old hashes to join.
+        if (requestedLegacySources.size > 0) {
+          const legacy = await identifyCapture(sms.body, sms.address, sms.date, 'inbox');
+          if (!legacy) throw new ReviewIdentityError('Encrypted review identity is invalid');
+          if (requestedLegacySources.has(legacy.sourceKey)) {
+            noteSourceBinding(legacy, await bindProviderReviewIdentity(legacy, sourceEventId), sms.date);
+          }
+        }
         parsed.push({
           ...p,
-          date: p.date ?? toISODate(new Date(sms.date)),
+          date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(sms.date)),
           smsTs: sms.date,
           sender: sms.address,
           channel: 'inbox',
@@ -428,19 +654,32 @@ export async function scanInbox(
     if (nextBeforeDateMs === beforeDateMs && nextBeforeId === beforeId) {
       throw new Error('SMS inbox pagination did not advance');
     }
-    beforeDateMs = nextBeforeDateMs;
-    beforeId = nextBeforeId;
     if (batch.length < PAGE_SIZE) {
       inboxHistoryComplete = true;
+      nextCursor = null;
       break;
     }
+    if (pagesRead >= maxInboxPages) {
+      // Repeat the last row on the next page by placing its cursor at the row
+      // immediately before it. That one-row overlap preserves the adjacency
+      // needed to detect a byte-identical OEM provider duplicate split across
+      // a process boundary, without persisting raw SMS or a message hash.
+      const overlapBoundary = batch[batch.length - 2];
+      nextCursor = {
+        beforeDateMs: overlapBoundary.date,
+        beforeId: overlapBoundary.id,
+      };
+      break;
+    }
+    beforeDateMs = nextBeforeDateMs;
+    beforeId = nextBeforeId;
   }
 
   // Alerts the delivery receiver caught as they arrived. Usually the inbox
   // query above already found them; this covers the case where a message
   // never reached the SMS provider, and is the hook a live alert hangs off.
   // Duplicates collapse on the date/amount/title fingerprint in the plan.
-  if (SmsReader.getReceived) {
+  if (inboxHistoryComplete && SmsReader.getReceived) {
     try {
       const received = await SmsReader.getReceived(sinceMs);
       const deliveryYield = createParseYieldState();
@@ -462,7 +701,7 @@ export async function scanInbox(
           if (p && !reviewed) {
             parsed.push({
               ...p,
-              date: p.date ?? toISODate(new Date(sms.date)),
+              date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(sms.date)),
               smsTs: sms.date,
               sender: sms.address,
               channel: 'delivery',
@@ -486,7 +725,7 @@ export async function scanInbox(
   // Bank-app push notifications captured by the notification listener (banks
   // are shifting from SMS to push). Same parser, same dedupe fingerprints.
   const notificationReader = NotificationReader;
-  if (notificationReader?.isEnabled?.()) {
+  if (inboxHistoryComplete && notificationReader?.isEnabled?.()) {
     try {
       // This queue has its own explicit acknowledgement. Always read every
       // retained row: using the ledger watermark here could strand an older
@@ -519,7 +758,7 @@ export async function scanInbox(
         if (p && !reviewed) {
           parsed.push({
             ...p,
-            date: p.date ?? toISODate(new Date(n.ts)),
+            date: p.kind === 'cardStatement' ? p.date : p.date ?? toISODate(new Date(n.ts)),
             smsTs: n.ts,
             // Package names usually contain the bank ("com.enbd...", "adcb...").
             sender: `${n.pkg} ${n.title}`,
@@ -555,10 +794,12 @@ export async function scanInbox(
   return {
     parsed,
     reviewCandidates,
+    reviewSourceBindings,
     declined,
     newestTs,
     inboxScannedCount,
     inboxHistoryComplete,
+    nextCursor,
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
     commit: notificationIds.size > 0 && notificationReader

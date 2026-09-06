@@ -1,10 +1,34 @@
-# Wafra — UAE Money Manager 🇦🇪
+# Wafra — Private Money Manager
 
-**Wafra** (وفرة — “abundance”) is an automatic personal-finance tracker for the UAE, built with Expo SDK 55 and React Native. Android reads supported bank SMS and bank-app money notifications on-device. iOS uses a user-created Shortcuts automation to send selected bank alerts to a privacy-minimizing relay that parses in memory, discards the source body, and seals only structured rows to the user's devices.
+## Working copy
+
+Develop from **`main`**, tracking **`origin/main`**, in
+`/Users/naserkhanjar/Documents/Wafra`. Android, iOS, the web preview and tests
+use this same checked-in source. The old repair/release/validation branches
+are not alternative versions to continue developing.
+
+See [repository workflow](docs/repository-workflow.md) for verification,
+release entry points and recovery of older work.
+
+**Wafra** (وفرة — “abundance”) is a private personal-finance tracker for users anywhere, built with Expo SDK 55 and React Native. Manual budgeting and expense tracking work independently of country or bank support. Where supported, Android reads bank SMS and bank-app money notifications on-device. On iOS, a user-created Shortcuts automation passes selected bank Messages to a protected local queue; Wafra parses them on the iPhone and deletes its queued message copies after a durable local result. Optional cloud imports and trusted-device delivery use a separate relay.
+
+The normal web export is Wafra's public SEO/GEO landing page. Production builds
+require the owned HTTPS origin so canonical, social and sitemap URLs cannot be
+published with a placeholder. The finalized public root is static HTML/CSS and
+ships no JavaScript; non-root QA routes retain asynchronously split app bundles
+and are marked `noindex` but are not access-controlled:
+
+```sh
+EXPO_PUBLIC_WAFRA_SITE_URL="$WAFRA_SITE_ORIGIN" npm run web:export
+EXPO_PUBLIC_WAFRA_SITE_URL="$WAFRA_SITE_ORIGIN" npm run check:web-seo
+```
+
+See [the SEO/GEO audit](docs/seo-geo-audit.md) for verified coverage and the
+remaining deployment and legal blockers.
 
 ## Features
 
-- **Automatic capture** — native Android SMS/notification readers and an iOS Shortcuts relay with wake-only background notifications containing no financial data.
+- **Automatic capture** — native Android SMS/notification readers and an iOS Shortcuts automation feeding the local ledger. iPhone history import is a separate, user-started Shortcut operation.
 - **UAE parser corpus** — executable public-example ENBD, ADCB, FAB, Mashreq,
   ADIB, Liv, and Wio formats, plus a clearly labelled synthetic RAKBANK grammar
   probe pending an attributable message body; includes Arabic, cards, transfers,
@@ -31,24 +55,25 @@ npm run check
 npm run release:check  # intentionally fails until production ids, URLs and legal fields exist
 ```
 
-iOS automatic capture additionally needs a deployed relay and EAS push project:
+iOS local capture needs a native build and the published Wafra Local Capture
+Shortcut configured through `EXPO_PUBLIC_WAFRA_SHORTCUT_URL`. History import
+uses its own artifact and `EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL`. Follow the
+in-app setup to install the Shortcuts and create the selected-sender automation.
+Local capture does not require a relay or an EAS push project.
 
-```bash
-EXPO_PUBLIC_WAFRA_RELAY_URL=https://relay.example.com
-EXPO_PUBLIC_WAFRA_SHORTCUT_URL=https://www.icloud.com/shortcuts/...
-EXPO_PUBLIC_WAFRA_PROJECT_ID=00000000-0000-0000-0000-000000000000
-```
-
-See `server/README.md` for D1, Cloudflare Email Routing, retention, and secret configuration. These values are intentionally not given fake production defaults.
+For optional cloud imports and trusted-device delivery, see `server/README.md`
+for relay, D1, push, Cloudflare Email Routing, retention, and secret configuration.
+Use actual published artifacts and deployment values; placeholder configuration
+does not establish release readiness.
 Platform submission gates are documented in `docs/play-release.md` and
 `docs/app-store-release.md`.
 
 ## Stack
 
 - Expo SDK 55 / React Native 0.83 / React 19.2
-- Expo Router, Reanimated 4, native Expo modules, local Android Expo modules
+- Expo Router, Reanimated 4, local iOS and Android Expo modules
 - SQLCipher on native; AsyncStorage only for the web QA/demo surface
-- Cloudflare Worker + D1 relay for iOS/email/statement imports and trusted-device delivery
+- Cloudflare Worker + D1 relay for optional email/statement imports, trusted-device delivery, and legacy capture compatibility
 - TypeScript throughout
 
 ## Structure
@@ -59,6 +84,6 @@ src/
   components/     # tab bar, rows, sheets, and UI primitives
   constants/      # theme tokens (colors, spacing, radius)
   lib/            # parser, capture, encrypted store, relay, analytics, and seed data
-modules/          # Android SMS and bank-notification native modules
-server/           # privacy-minimizing iOS/email/statement relay
+modules/          # Android readers and iOS local capture/history modules
+server/           # optional cloud import and trusted-device relay
 ```

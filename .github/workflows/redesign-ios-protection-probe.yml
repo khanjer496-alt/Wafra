@@ -1,0 +1,115 @@
+name: Redesign iOS protection and full-build probe
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-ios-protection-probe.yml']
+permissions:
+  contents: read
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Select toolchain and boot an available iPhone simulator
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          mkdir -p ios-evidence
+          xcodebuild -version | tee ios-evidence/xcode.txt
+          command -v zstd || brew install zstd
+          xcrun simctl list devices available -j > ios-evidence/simulators.json
+          UDID=$(python3 - <<'PY'
+          import json
+          d=json.load(open('ios-evidence/simulators.json'))['devices']
+          phones=[p for runtime,rows in d.items() if '.iOS-' in runtime for p in rows if 'iPhone' in p['name'] and p.get('isAvailable',True)]
+          assert phones, 'No available iPhone simulator'
+          print(phones[0]['udid'])
+          PY
+          )
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+      - name: Compare real host and simulator protection attributes
+        run: |
+          cat > /tmp/wafra-protection-probe.swift <<'SWIFT'
+          import Foundation
+          let fm = FileManager.default
+          let root = fm.temporaryDirectory.appendingPathComponent("wafra-protection-probe-" + UUID().uuidString, isDirectory: true)
+          defer { try? fm.removeItem(at: root) }
+          do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.protectionKey: FileProtectionType.complete, .posixPermissions: 0o700])
+            try fm.setAttributes([.protectionKey: FileProtectionType.complete, .posixPermissions: 0o700], ofItemAtPath: root.path)
+            let attrs = try fm.attributesOfItem(atPath: root.path)
+            print("directory type:", String(describing: attrs[.type]))
+            print("directory permissions:", String(describing: attrs[.posixPermissions]))
+            print("directory protection:", String(describing: attrs[.protectionKey]))
+            print("directory meets complete:", attrs[.protectionKey] as? FileProtectionType == .complete)
+            let file = root.appendingPathComponent("probe.bin")
+            try Data("synthetic fixture".utf8).write(to: file, options: [.atomic, .completeFileProtection])
+            try fm.setAttributes([.protectionKey: FileProtectionType.complete], ofItemAtPath: file.path)
+            let fattrs = try fm.attributesOfItem(atPath: file.path)
+            print("file protection:", String(describing: fattrs[.protectionKey]))
+            print("file reference count:", String(describing: fattrs[.referenceCount]))
+            print("file meets complete:", fattrs[.protectionKey] as? FileProtectionType == .complete)
+          } catch { print("probe error:", String(describing: error)); exit(1) }
+          SWIFT
+          swift /tmp/wafra-protection-probe.swift 2>&1 | tee ios-evidence/host-protection.txt
+          ARCH=$(uname -m)
+          xcrun --sdk iphonesimulator swiftc -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -target "$ARCH-apple-ios17.0-simulator" /tmp/wafra-protection-probe.swift -o /tmp/wafra-protection-probe
+          xcrun simctl spawn "$SIM_UDID" /tmp/wafra-protection-probe 2>&1 | tee ios-evidence/simulator-protection.txt
+      - name: Reconstruct recorded redesign source
+        run: |
+          python3 - <<'PY'
+          import pathlib,textwrap,json
+          source=pathlib.Path('.github/workflows/redesign-browser-validation.yml').read_text()
+          body=source.split("python3 - <<'PY'\n",1)[1].split('\n          PY',1)[0]
+          exec(compile(textwrap.dedent(body),'<candidate-reconstruction>','exec'))
+          pathlib.Path('ios-evidence/source-manifest.json').write_bytes(pathlib.Path('browser-evidence/source-manifest.json').read_bytes())
+          p=pathlib.Path('app/app.json'); c=json.loads(p.read_text()); c['expo']['updates']['enabled']=False; p.write_text(json.dumps(c,indent=2))
+          PY
+      - name: Install and generate iOS
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm ci --no-audit --no-fund
+          npx --no-install expo prebuild --platform ios --no-install
+          npx --no-install pod-install 2>&1 | tee ../ios-evidence/pods.log
+      - name: Build complete release simulator application
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Wafra.xcworkspace -scheme Wafra -configuration Release -sdk iphonesimulator -destination "id=$SIM_UDID" -derivedDataPath ../ios-derived CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ../ios-evidence/build.log
+      - name: Install and launch the built application
+        run: |
+          set -euo pipefail
+          APP=$(find ios-derived/Build/Products -path '*/Wafra.app' -type d | head -1)
+          test -n "$APP"
+          BID=$(node -p "require('./app/app.json').expo.ios.bundleIdentifier")
+          xcrun simctl install "$SIM_UDID" "$APP"
+          xcrun simctl launch "$SIM_UDID" "$BID" | tee ios-evidence/launch.txt
+          sleep 12
+          xcrun simctl io "$SIM_UDID" screenshot ios-evidence/ios-first-launch.png
+          find "$APP" -name WafraHistoryIntents.strings -o -name WafraIntents.strings > ios-evidence/localization-files.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-ios-protection-probe
+          path: ios-evidence
+          retention-days: 7

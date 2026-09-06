@@ -401,5 +401,27 @@ eq(
   eq('the screen still lists a single merchant', names(one), ['Lonely Shop']);
 }
 
+// Entry-sheet counts and apply-all share an explicitly selected rule direction.
+{
+  const expense = tx({ title: 'Example Merchant', type: 'expense' });
+  const income = tx({ title: 'Example Merchant', type: 'income', category: 'other' });
+  ok('the default merchant-rule predicate preserves expense-only compatibility',
+    overrideAppliesTo(expense, 'example merchant') && !overrideAppliesTo(income, 'example merchant'));
+  ok('an income rule matches income only when that direction is explicit',
+    overrideAppliesTo(income, 'example merchant', 'income') &&
+    !overrideAppliesTo(expense, 'example merchant', 'income'));
+  for (const excluded of [
+    { ...income, userEdited: true }, { ...income, isTransfer: true },
+    { ...income, cardPaymentSide: 'receipt' },
+    { ...income, splits: [{ category: 'other', amountFils: income.amountFils }] },
+  ]) ok('income bulk scope preserves prior user decisions and transfer exclusions',
+    !overrideAppliesTo(excluded, 'example merchant', 'income'));
+  const base = { accounts: ACCOUNTS, transactions: [expense], merchantOverrides: {} };
+  ok('income-only scoped rules do not hide unresolved expense merchants',
+    uncategorisedMerchants({ ...base, merchantOverrides: { 'income:example merchant': 'other' } }).merchants.length === 1);
+  ok('a scoped expense Other rule records an already-answered expense merchant',
+    uncategorisedMerchants({ ...base, merchantOverrides: { 'expense:example merchant': 'other' } }).merchants.length === 0);
+}
+
 console.log(`\nuncategorised: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

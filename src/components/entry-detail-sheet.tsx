@@ -8,8 +8,9 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Chip, Toggle } from '@/components/ui/controls';
 import { Block, LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
-import { CategoryTile } from '@/components/ui/tile';
-import { Radius, Spacing } from '@/constants/theme';
+import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
@@ -18,7 +19,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
-import type { CategoryId, Transaction } from '@/lib/types';
+import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 interface EntryDetailSheetProps {
@@ -36,6 +37,7 @@ interface EntryDetailSheetProps {
  */
 export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps) {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const { state, editTransaction, deleteTransaction, setMerchantOverride } = useStore();
   const [editing, setEditing] = useState(false);
 
@@ -58,6 +60,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   const [ruleAsk, setRuleAsk] = useState<{
     merchant: string;
     category: CategoryId;
+    type: TransactionType;
     count: number;
   } | null>(null);
 
@@ -102,14 +105,10 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
     if (!transaction) return 0;
     const key = title.trim().toLowerCase();
     if (key.length < 3) return 0;
-    // 3. An income category moves nothing. `overrideAppliesTo` is expense-only
-    //    and `overrideFitsDirection` says an income category may not decide an
-    //    expense row, so the reducer now declines the bulk rewrite outright.
-    //    Without this the sheet offered "also update 5 entries" over a rule
-    //    that reaches none of them.
-    if (!overrideFitsDirection(category, 'expense')) return 0;
+    // Count the same direction and exclusions the rule will actually update.
+    if (!overrideFitsDirection(category, transaction.type)) return 0;
     return state.transactions.filter(
-      (t) => t.id !== transaction.id && overrideAppliesTo(t, key),
+      (t) => t.id !== transaction.id && overrideAppliesTo(t, key, transaction.type),
     ).length;
   }, [transaction, title, category, state.transactions]);
 
@@ -145,7 +144,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
       // cannot close first the way it did when the question was an OS dialog
       // that outlived it. It closes when the question is answered — or
       // dismissed, which is the "No" the alert used to spell out.
-      setRuleAsk({ merchant, category, count: sameMerchantCount });
+      setRuleAsk({ merchant, category, type: transaction.type, count: sameMerchantCount });
       return;
     }
     onClose();
@@ -175,9 +174,9 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   return (
     <BottomSheet visible onClose={onClose} title={editing ? t('editEntry') : t('entryDetail')}>
       <View style={styles.head}>
-        <CategoryTile category={transaction.category} size={46} />
+        <CategoryAvatar category={transaction.category} size={64} />
         <View style={styles.headText}>
-          <ThemedText type="subtitle" numberOfLines={1}>
+          <ThemedText type="heading" style={{ textAlign: 'center' }}>
             {transaction.title}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
@@ -191,7 +190,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           fils={transaction.amountFils}
           type="sheetAmount"
           sign={income ? 'plus' : 'minus'}
-          prefix={false}
+          prefix
           decimals
           color={income ? theme.income : theme.text}
           style={styles.headAmount}
@@ -201,7 +200,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
       {editing ? (
         <>
           <View style={styles.field}>
-            <ThemedText type="micro" themeColor="textTertiary">
+            <ThemedText type="meta" themeColor="textTertiary">
               {t('description')}
             </ThemedText>
             <TextInput
@@ -210,13 +209,13 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
               onChangeText={setTitle}
               placeholderTextColor={theme.textTertiary}
               selectionColor={theme.primary}
-              style={[styles.input, { borderColor: theme.cardBorder, color: theme.text, textAlign: state.language === 'ar' ? 'right' : 'left' }]}
+              style={[styles.input, { borderColor: theme.cardBorderStrong, backgroundColor: theme.card, color: theme.text, fontFamily: state.language === 'ar' ? Fonts.arabic : Fonts.sans, textAlign: state.language === 'ar' ? 'right' : 'left' }]}
             />
           </View>
 
-          <View style={styles.pairRow}>
+          <View style={[styles.pairRow, largeText && { flexDirection: 'column' }]}>
             <View style={[styles.field, styles.flex]}>
-              <ThemedText type="micro" themeColor="textTertiary">
+              <ThemedText type="meta" themeColor="textTertiary">
                 {t('amount')}
               </ThemedText>
               <TextInput
@@ -228,12 +227,12 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
                 style={[
                   styles.input,
                   styles.mono,
-                  { borderColor: theme.cardBorder, color: amountFils ? theme.text : theme.expense },
+                  { borderColor: theme.cardBorderStrong, backgroundColor: theme.card, fontFamily: state.language === 'ar' ? Fonts.arabic : Fonts.sans, color: amountFils ? theme.text : theme.expense },
                 ]}
               />
             </View>
             <View style={[styles.field, styles.flex]}>
-              <ThemedText type="micro" themeColor="textTertiary">
+              <ThemedText type="meta" themeColor="textTertiary">
                 {/* The field edits the DAY, so it stays YYYY-MM-DD. The label
                     carries the full stamp — year included, and the clock the
                     bank sent — because that is the part the row cannot show
@@ -250,7 +249,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
                 style={[
                   styles.input,
                   styles.mono,
-                  { borderColor: theme.cardBorder, color: dateValid ? theme.text : theme.expense },
+                  { borderColor: theme.cardBorderStrong, backgroundColor: theme.card, color: dateValid ? theme.text : theme.expense },
                 ]}
               />
             </View>
@@ -264,7 +263,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             </ThemedText>
           ) : (
             <View style={styles.field}>
-              <ThemedText type="micro" themeColor="textTertiary">
+              <ThemedText type="meta" themeColor="textTertiary">
                 {t('category')}
               </ThemedText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
@@ -281,7 +280,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           )}
 
           <View style={styles.field}>
-            <ThemedText type="micro" themeColor="textTertiary">
+            <ThemedText type="meta" themeColor="textTertiary">
               {t('account')}
             </ThemedText>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
@@ -456,7 +455,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
             { value: 'future', label: t('justFuture') },
             { value: 'all', label: t('yesUpdateAll') },
           ]}
-          onSelect={(scope) => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, scope === 'all')}
+          onSelect={(scope) => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, scope === 'all', ruleAsk.type)}
         />
       )}
       {ruleAsk && ruleAsk.count === 0 && (
@@ -467,7 +466,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           body={tf('merchantRuleOnly', { merchant: ruleAsk.merchant })}
           confirmLabel={t('remember')}
           cancelLabel={t('no')}
-          onConfirm={() => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, false)}
+          onConfirm={() => setMerchantOverride(ruleAsk.merchant, ruleAsk.category, false, ruleAsk.type)}
         />
       )}
     </BottomSheet>
@@ -476,12 +475,13 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
 
 const styles = StyleSheet.create({
   head: {
-    flexDirection: 'row',
+    flexDirection: 'column',
+    paddingVertical: 16,
     alignItems: 'center',
     gap: Spacing.three - 2,
   },
   headText: {
-    flex: 1,
+    alignItems: 'center',
     gap: Spacing.half,
   },
   headAmount: {
@@ -502,7 +502,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.control,
     paddingHorizontal: Spacing.three - 4,
     paddingVertical: Spacing.three - 5,
-    fontSize: 15,
+    fontFamily: Fonts.sans,
+    fontSize: 16,
+    minHeight: 52,
   },
   mono: {
     fontVariant: ['tabular-nums'],

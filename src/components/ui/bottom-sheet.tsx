@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import {
   Gesture,
   GestureDetector,
@@ -38,13 +46,19 @@ const OPEN_SPRING = {
 
 const CLOSE_DURATION = 240;
 
-interface BottomSheetProps {
+type BottomSheetCommonProps = {
   visible: boolean;
   onClose: () => void;
   /** Caps label in the sheet header. */
   title: string;
   children: React.ReactNode;
-}
+  testID?: string;
+};
+
+export type BottomSheetProps = BottomSheetCommonProps & (
+  | { dismissible?: true; footer?: React.ReactNode }
+  | { dismissible: false; footer: React.ReactElement }
+);
 
 /**
  * The one bottom sheet. It follows the finger from its grabber, settles with a
@@ -52,7 +66,15 @@ interface BottomSheetProps {
  * clears the selected item. The content scrolls independently so a tall sheet
  * never traps a button under the keyboard.
  */
-export function BottomSheet({ visible, onClose, title, children }: BottomSheetProps) {
+export function BottomSheet({
+  visible,
+  onClose,
+  title,
+  children,
+  dismissible = true,
+  footer,
+  testID,
+}: BottomSheetProps) {
   const theme = useTheme();
   const language = useLanguage();
   const insets = useSafeAreaInsets();
@@ -83,6 +105,10 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
       },
     );
   }, [finishDismiss, reducedMotion, screenHeight, y]);
+
+  const requestImplicitDismiss = useCallback(() => {
+    if (dismissible) requestDismiss();
+  }, [dismissible, requestDismiss]);
 
   useEffect(() => {
     if (visible && !mounted) {
@@ -128,7 +154,7 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
   const drag = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(!reducedMotion)
+        .enabled(dismissible && !reducedMotion)
         .activeOffsetY(8)
         .failOffsetX([-24, 24])
         .onStart(() => {
@@ -168,20 +194,22 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
             y.value = 0;
           }
         }),
-    [dragStartY, dragging, finishDismiss, reducedMotion, screenHeight, y],
+    [dismissible, dragStartY, dragging, finishDismiss, reducedMotion, screenHeight, y],
   );
 
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: y.value }] }));
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: interpolate(y.value, [0, screenHeight], [1, 0], Extrapolation.CLAMP),
   }));
+  const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom);
+  const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
 
   return (
     <Modal
       visible={mounted}
       transparent
       animationType="none"
-      onRequestClose={requestDismiss}
+      onRequestClose={requestImplicitDismiss}
       statusBarTranslucent>
       {/*
         `accessible` must stay false on both wrappers. An accessibilityLabel —
@@ -195,13 +223,19 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
       <GestureHandlerRootView style={styles.root}>
         <Animated.View
           pointerEvents="none"
-          style={[styles.scrim, { backgroundColor: 'rgba(22, 19, 15, 0.42)' }, backdropStyle]}
+          style={[styles.scrim, { backgroundColor: theme.scrim }, backdropStyle]}
         />
-        <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={requestDismiss} />
+        <Pressable
+          accessible={false}
+          disabled={!dismissible}
+          style={StyleSheet.absoluteFill}
+          onPress={requestImplicitDismiss}
+        />
         <View accessible={false} style={styles.backdrop} pointerEvents="box-none">
           <Animated.View
             accessibilityViewIsModal
-            onAccessibilityEscape={requestDismiss}
+            onAccessibilityEscape={dismissible ? requestDismiss : undefined}
+            testID={testID}
             style={[
               styles.sheet,
               {
@@ -211,36 +245,46 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
                 // never resizes for it on Android, so a sheet with inputs at
                 // the bottom — the period picker's custom range — had its
                 // fields buried under the keys with no way to scroll to them.
-                paddingBottom: Spacing.five - 2 + (keyboardHeight > 0 ? 0 : insets.bottom),
+                paddingBottom: hasFooter ? 0 : bottomClearance,
                 marginBottom: keyboardHeight,
+                maxHeight: Math.max(0, Math.min(screenHeight * 0.88, screenHeight - keyboardHeight - insets.top)),
               },
               Elevation,
               sheetStyle,
             ]}>
             {/* Swallows taps so a press inside the sheet never dismisses it. */}
-            <Pressable accessible={false} onPress={() => {}}>
+            <Pressable accessible={false} onPress={() => {}} style={styles.sheetBody}>
               <GestureDetector gesture={drag}>
                 <Animated.View style={styles.dragRegion}>
-                  <View
-                    accessible={false}
-                    style={[styles.grabber, { backgroundColor: theme.cardBorderStrong }]}
-                  />
+                  {dismissible ? (
+                    <View
+                      accessible={false}
+                      style={[styles.grabber, { backgroundColor: theme.cardBorderStrong }]}
+                    />
+                  ) : null}
                   <View style={styles.header}>
                     <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
                       {title}
                     </ThemedText>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t('close', language)}
-                      hitSlop={8}
-                      onPress={requestDismiss}
-                      style={[styles.close, { borderColor: theme.cardBorder }]}>
-                      <Icon name="close" size={15} color={theme.textSecondary} />
-                    </Pressable>
+                    {dismissible ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={t('close', language)}
+                        hitSlop={8}
+                        onPress={requestDismiss}
+                        style={[
+                          styles.close,
+                          Platform.OS === 'android' && styles.androidClose,
+                          { borderColor: theme.controlBorder },
+                        ]}>
+                        <Icon name="close" size={15} color={theme.textSecondary} />
+                      </Pressable>
+                    ) : null}
                   </View>
                 </Animated.View>
               </GestureDetector>
               <ScrollView
+                style={styles.scroll}
                 showsVerticalScrollIndicator={false}
                 bounces={false}
                 // Or a tap on a chip while the keyboard is up only dismisses it.
@@ -248,6 +292,9 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
                 contentContainerStyle={styles.content}>
                 {children}
               </ScrollView>
+              {hasFooter ? (
+                <View style={[styles.footer, { paddingBottom: bottomClearance }]}>{footer}</View>
+              ) : null}
             </Pressable>
           </Animated.View>
         </View>
@@ -267,8 +314,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: Radius.bottomSheet,
     borderTopRightRadius: Radius.bottomSheet,
     borderTopWidth: StyleSheet.hairlineWidth,
-    maxHeight: '88%',
   },
+  sheetBody: { flexShrink: 1, minHeight: 0 },
   dragRegion: {
     paddingTop: Spacing.two,
     paddingHorizontal: ScreenPadding,
@@ -294,9 +341,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  androidClose: { width: 48, height: 48 },
+  scroll: { flexShrink: 1, minHeight: 0 },
   content: {
     gap: Spacing.four - 4,
     paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.two,
+  },
+  footer: {
+    paddingTop: Spacing.four - 4,
+    paddingHorizontal: ScreenPadding,
   },
 });

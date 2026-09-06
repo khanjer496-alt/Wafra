@@ -1,0 +1,4557 @@
+{
+  "evaluatedAt": "2026-09-05T15:14:04.368Z",
+  "phase": "after",
+  "sourceHashes": {
+    "src/lib/accounts.ts": "c6ae8402c404584c7ec30ad351cfd57d7844d3a18a47062a7c63fcf0e1e13c49",
+    "src/lib/accuracy.ts": "313a615df824a5b037052c9696167a55caca7212abc4c65ff7673f5d352114a1",
+    "src/lib/alert-draft.ts": "56c37c4c189e2f5e4b0b9688bf1090c875f2738c46debbeae4e5d7623b7361a6",
+    "src/lib/alert-event-evidence.ts": "c61bb2573f9d62658b025f3756c704b64b96205cf1a0249155bef72657034e67",
+    "src/lib/alert-institution-grammars.ts": "6e8355c4f6ab3b607b3b239073f2b2ea2ba3a3313ffea2bd224a44ee2773c9cf",
+    "src/lib/alert-market-detection.ts": "35872178d4aaa52db7709643d867462be39a9821c9d2b26426e66d0f15806594",
+    "src/lib/alert-market-pack-types.ts": "1b25c776f42d64455fe93be974e51f53f59ba63e7b3059d6e3193909af1b21d0",
+    "src/lib/alert-market-packs.india-me.ts": "56e7553e5ab2d3320910579a1319c5f1a5ef4764785e6c59b8081dcad12cbccd",
+    "src/lib/alert-market-packs.ts": "131d40ad366ff09843739c65b41016d134384c639a085f3cfd87667f709a5877",
+    "src/lib/alert-market-packs.us-eu.ts": "0c1db806762a429b5bf3f02beb74ad6129275e5c4d921eeb1b7d57276fbbbb3f",
+    "src/lib/alert-review-tray.ts": "bc3fb9deae37fc8042c4c9eb9272c84047ecd04c3243e7688bc9938a37bf3b1b",
+    "src/lib/alert-rollout.ts": "3fb4a559763d94556e03230a90f4b3321d58e1d1c44fc86a208172fbbc51163f",
+    "src/lib/alert-semantics.ts": "273eb5f51436df4b1832ea4f69c18ad24202f0863a214e1aae19ce3468efa5f8",
+    "src/lib/analytics.ts": "30aa9051cf800794728e0d2765aa7c6e0f4e74ba68d4ad302d8e52fd6677bd4f",
+    "src/lib/arabic-sms.ts": "1870789c39fc72b22c1f4ec644c37b49be2e6600013ca7cc3602eaf6c1ae9dec",
+    "src/lib/auto-import.ts": "c1b02fd138bb211aa4cbc3148580dbe7f5f5f47204a133d7a2b1033f9de74242",
+    "src/lib/background-relay-storage.native.ts": "17039fa91515e46e62d3011b14ad4e18a0bad742e63570dd5156142d634980a9",
+    "src/lib/background-relay-storage.ts": "ee12013f3aa9c1b598290c2dc9da6b6656f011238fc6f616186f453552c5c086",
+    "src/lib/background-relay.ts": "aff058f607fa18a82a5226feeb928c58b231664b5edb896164b0fa087d4ea4d5",
+    "src/lib/backup-validation.ts": "2737b2ebd9961f846e8b4d68cecf6902d3f42c9493a9b8de11a8e6f5b6448717",
+    "src/lib/balances.ts": "e14cb5599278105ba7c2ad8fe975146287c8423ded558a7a7bfab15516e01425",
+    "src/lib/bank-alert-interpreter.ts": "de1240b182960089c47628c564664c665f19603c216aab02efc89dd1ce9df12d",
+    "src/lib/bank-alert-semantic-output.ts": "f153d246ffc529c67e8201dfae4f54adc242ae9587a9b6a312f9385980a4cc67",
+    "src/lib/bank-alert-semantic-rules.ts": "0fc548b99fec9c1670a97aa4b60072f544712c7109b5d4626da7d825edd23d58",
+    "src/lib/bank-alert-semantic-types.ts": "25e11e63d695c1ad55611685860c35a1b39ef9425f592d791ecfb2d9554543a2",
+    "src/lib/bank-amount-tokens.ts": "10631aad80fb2fd3e037f472caa64fa6ce30aff3183c8a2b9544e5d44bf2fecd",
+    "src/lib/billing.ts": "35dd9bb832f18deddb559e4a96edd6db3980b188b92ece6887700421570ac915",
+    "src/lib/bills.ts": "43185b6541083fc8a92e2e9d634acd957e3452eb983d7e4912de4c2dd7bf7d77",
+    "src/lib/brand-marks.ts": "84bffee09a0b2f9b37118b91a82509a0dd05cc7241cdaae7bb335d9f1e85977b",
+    "src/lib/capture-executor.ts": "b5cd14cfced5aea8bf0a3967c399f1770b455f79fe3611e657a5dc416a66f44b",
+    "src/lib/capture-source-identity.ts": "86394f99a4de41086ed02799fb295ff9695ba5130158f639937ce294eba6d9f2",
+    "src/lib/capture.ts": "35b6ff083756148f9c8f05a2fca510f8bef162df1b164c7424c6112b79411b16",
+    "src/lib/cards.ts": "b8a6b3f4e4f0cddb504d2b6b9ace0121004b23e05b680d5523b0e88c13aa3c13",
+    "src/lib/cash-flow.ts": "a9f9a234c9e72315669496861cadb7b69e5d75bed52d754ef0d08a1baa2131da",
+    "src/lib/categories.ts": "485a39b0f7aa471f5bb674b027fa31df9ae608f18f4d0be0ad2d2a6a2585551a",
+    "src/lib/charge-alert.ts": "8d6f273c7c4349e227a2e39c7cb4c0d9ed2f7cbe4983b97e912fe68cd0c79104",
+    "src/lib/cloud-import-contract.ts": "1c365147ac66b7aaa5e0254ae2f131377679360f597f5bce1fbe803a6115da6c",
+    "src/lib/cloud-import.ts": "e7a50cebbf350e18c7b9d0d0c9920d33a77cfa32cd28126153425e6e2fda3ce5",
+    "src/lib/currency-metadata.ts": "02c57fa50e9882e399a1ef8461b6d477df2cb3562158058958048160fa7deb76",
+    "src/lib/daily-summary.ts": "7dcbc07d5fc1e3775088d3529c3eae900d661e3e26bbc315381ff4811ff048f4",
+    "src/lib/dashboard-projection.ts": "761234de8d2ce722237ffe06f1110072cf2821b2c7323d70d12174f549ac689b",
+    "src/lib/dedupe.ts": "608bbe031787d2d75386fbf3480b9d88dd796a7ec030124d87a5e1f3ce045ebf",
+    "src/lib/feedback-transport.ts": "926dcf9db51ff6429335a02298ba5ad5cb042c527ddedb18f0f594496f7d1275",
+    "src/lib/feedback-wire.ts": "aadfa26b69bc5cc60772e48b85156903f0d01764ecebd9b5a0193e6394d237c8",
+    "src/lib/feedback.ts": "f03102eddafe7d5c43fc163730579683e140e4bbf7651422d088e1a7c8bc65c7",
+    "src/lib/format.ts": "7fb4acab0a35e3a04a558b9726f4b6b47e38b63a024b77137a233c6cd299bccc",
+    "src/lib/founder-pro.ts": "a445e371646d701a452457a117659f7ba8148f173be7199b0c51b947212e53e7",
+    "src/lib/fx-summary.ts": "0ffc8e3f177165c04b0f03023f79268be2e1dfb0dc27c69e92a27add83be2066",
+    "src/lib/fx.ts": "fc80c7589fa4312fdab4f100eac000029b8df5df04ee055b409d3591ba05c9d4",
+    "src/lib/generic-review-entry.ts": "21bf83fbec7f68c4562ed035c0746b9042af3c7910b3d1f57f99fe2fbc492bb6",
+    "src/lib/haptics.ts": "4fee7ffdc10c5345de5a7fed3035c2f33cbdc71ca6918c6fc52fb3f385507457",
+    "src/lib/heal.ts": "4c63f68c1da4c9bddcb6b518adcc602357ad927e2be4b3fe2814c323fb21f348",
+    "src/lib/historical-import.ts": "79284b5315639e401994b420b4c251096ebd0b9b5adbac52a51dae1e6a1c18cd",
+    "src/lib/history-import.ts": "244feb5445a1a7c87b1ffb2a5f15ba98061f97fd3c01f71bfd5f260a23c0b450",
+    "src/lib/i18n.ts": "a51e0dda7ceba79a9f489f90523aa303287c1e3c2d1ac1d8742b08ae6ef41c45",
+    "src/lib/import-plan.ts": "7e845b6068bb0cf5f8238e188fad464785c7b2ce830f41834c194cbd92bb40c8",
+    "src/lib/insights.ts": "d74ee0e66e7a2791668f363fcb82acf7328d1453b464c7fd1b78b497f3a7f96c",
+    "src/lib/ios-bank-senders.generated.ts": "263c6e5fa8d4b5116a05a1350a49195d08643cf562c13a482ea0646fbdea5bda",
+    "src/lib/ios-bank-senders.ts": "a5eb2daed6bfc3f028370d41c080fbda6f115cce393ecbd37718f979a8688950",
+    "src/lib/ios-capture-setup.ts": "21854122d71b8da7a2ff090efcb3b99095d1f44a8cf02ff00d0f857f0682df63",
+    "src/lib/ios-history-import.ts": "38b7ef1d975028424a658990c65d876d1888b2b155d7ea5e6725a3f985bcc824",
+    "src/lib/ios-history-setup.ts": "4c25071c862b0d3d3aa0c833f39adf7a413e9832f2813e0c98f90397f868578c",
+    "src/lib/ios-local-capture-protocol.ts": "c559d650d52c101e33cbfb07462d88c1a8ebd7f0d8e5874fc3f4af332ddb1f4c",
+    "src/lib/ios-local-capture.ts": "02394952cfbc60820ced575398e3a556321d1f0f86f131029662c268b13a091e",
+    "src/lib/ios-message-onboarding.ts": "ff3b383ba87d206491d56f7cd4323c65240d9d33dfafa087c53ca57dfb5533a2",
+    "src/lib/launch-alert-parser.ts": "a5103e1c5d167dbc8a9afdf9851020238ef51beeb59bcaaa72e8171b72e50e6a",
+    "src/lib/launch-benchmark.ts": "fd6f46a3770de6553bde9d46155bba117431e47605719d587a3b0e11665d0562",
+    "src/lib/launch-performance.ts": "9b1877121223ed3a22bf633bca2973af1edbab30e76ea5a8e3fb654d11d964a9",
+    "src/lib/launch-review-rollout.ts": "1daedd64773326dd9b54228fd5cc6207526f04d9d79f77cbe9e3eb33d7d4d420",
+    "src/lib/leaving-soon.ts": "eeec65518a66910e933c4c67565e52ac1b1e4c530e45b2a808cb4b3ccc624eeb",
+    "src/lib/ledger-export.ts": "b4018023fd2fcc050d6132114e1c82966f433514deb8d15b75523f0d60d0abd2",
+    "src/lib/ledger-import.ts": "8d41b17ab91b407c73b741fe48f61a9562be013ff7d4f7ca80e3e5cbfd3e2a13",
+    "src/lib/ledger-money.ts": "31535231156464ebf333027e7afb964fecc56d0c0a2ad020068eb7576587d19d",
+    "src/lib/ledger-persistence.ts": "b083b5c8b53478f5296ec3009657e24154d820c20366546eda6dbc84f34349cc",
+    "src/lib/ledger.ts": "36be48072d5d78fc6d73f63bcf804d885c76c585185d2f42776d0991f30c816e",
+    "src/lib/local-message-record.ts": "52f16dd89c09fd357a07ce9cd398e7107cfc6457a33bc67f6e6b4408caad566a",
+    "src/lib/markets.ts": "863f77f1efe4a5855a029622e9dc3c604a6695eb9639ef0391a8b880fec3a7a9",
+    "src/lib/notifications.ts": "3b41a7dac3299e77a828b80995b8058c7f8c3c126d2bea193756e3ee0be0484a",
+    "src/lib/onboarding.ts": "6956d8919627076503597250bcaecb93d8974af1236cbd6d2955c609b45f83df",
+    "src/lib/parser-research-contract.ts": "4988321d02ca57b17605e0f629ba4fe519350234412b9322bdd256e0e36c1a8e",
+    "src/lib/parser-research-source.ts": "a5b386fb41c181b9f6836e735cef2babc82c46a8886d7fe77dd2db8b1308dea4",
+    "src/lib/parser-research.ts": "8fa3e73b3a53744153112236c4f3b10bbd8e9f56e5b63278e69a26ec801e7331",
+    "src/lib/payment-flow.ts": "3139b89b64108024a355cf1087e48cfb621254f72992551f90d9ebba14acdb83",
+    "src/lib/period-context.tsx": "0b79d31574be53d04d25d3e9600f7aec4d912eb0904a4246900dce4c4e1468c5",
+    "src/lib/period.ts": "7d2c5e3562692de7c43bbc0d69bb74f74603a0b1a6a46931ebd6b2b735942bf4",
+    "src/lib/public-links.ts": "20cada07817ac0ef868030c8079a8d60bb1dede78ad197a0d3e4f2c4fb75d00c",
+    "src/lib/purchases.ts": "b0f6115eb79fb373f51931af3cad6486798cd6754e64c18f13693a356396ba8e",
+    "src/lib/reimbursement-report.ts": "787635949a404b0378d0e7b98f54ef5c31aa0ce10c3da836720152c0c379d490",
+    "src/lib/relay-crypto.ts": "a2cd7bf5a113a68752ae534443d8cbe32cfe6fe25352b49a89cfaff8fa80dd8d",
+    "src/lib/relay-protocol.ts": "8f31fabb9dd0301390781284b699d94a237439433e9e5e1737c6d28456235937",
+    "src/lib/relay.ts": "de19212e62a5924a0ed431449ffcfd1aa66619fde6c0b44e40a9c1c47c9ece2a",
+    "src/lib/reminders.ts": "d323bfd23b7081ee67fafa4320b1a77286fd907b45e8c690aabe253440bc65c0",
+    "src/lib/review-promotion.ts": "6def1bb9a25d6627c6d79ac37f428af3544b8e2fa867448aff5e1be2396ed196",
+    "src/lib/review-source-bindings.ts": "f4c09715230473e11d5fd58ec466a3307dda09309c604107857b06e4e059ea62",
+    "src/lib/routes.ts": "3b42560b7bc08ce8dca28aabf820edce43b2eb40c5a0409d5535bc628e4eab6f",
+    "src/lib/seed.ts": "35c540944d8f74f0b502a6ec2489e8151fb7c51ef380df6ba8ddc85d9601e6ae",
+    "src/lib/share-text.ts": "7f21eb239c96538b02fccff0ad46d13c654d2b08847ea9eb578096d62c11b3a5",
+    "src/lib/shortcut-cleanup.ts": "62bba6b13239e5b465786892b09dfd482a8941c00b70b755af8dd1257bba1490",
+    "src/lib/sms-corpus-export.ts": "baad958bb2404766099a1f2b0e298debf69e117136b70a51e995e9e9817592cb",
+    "src/lib/sms-corpus.ts": "78701bc9891c98e1c42764adbccd25387442c18e4c0277354c9de22e794603af",
+    "src/lib/sms-parser.ts": "0e69a977b860661298926a7fc39d34283be08299e59e4e38ad33abc357bec9a5",
+    "src/lib/splits.ts": "595937c90a908f7ece45a6c06598830db5384e4bf681731ea4009f49ba06f9f1",
+    "src/lib/state-storage.native.ts": "1e825ff3df8bfebec6dcbcb8a6b0be1879583e60a9d59ef02232fd93f962f215",
+    "src/lib/state-storage.ts": "b013e1483f8c8e70f7579c28e343f8ba06667bca93164660ba4d860377239562",
+    "src/lib/storage-diagnostics.ts": "2eedb0a2ace221afb9b953fa46d4e672eabf3b0c5106f0fde9cffae91fc50e66",
+    "src/lib/store.tsx": "d3eafd4d363eab7228b2c68ab410553903948ba6109bde6ea8d99269d631cdcd",
+    "src/lib/subscriptions.ts": "4fc24f06e72da34e84a6efcc28c8621930d60f3c370f70d93dac66235e7d26d7",
+    "src/lib/supplement-copy.ts": "4428419ff7ea4fba36377409e9be08c87ee68056954c1935200a495141e29806",
+    "src/lib/system-language.ts": "6c97e6e50aebcf723b52cfb841e51e0793692040ae526b5c1b4e635484416901",
+    "src/lib/theme-preference.ts": "03bc98679b21a2bc48d9febd4755ae9f98fadc353a4c15d7320622e71acdd480",
+    "src/lib/trusted-bank-notification-packages.ts": "01d445a76617be20682ce0b75d9c150f10c9a0c3aa0055f04eaae2ab0c954968",
+    "src/lib/trusted-device-contract.ts": "9b86e0d9dc9ee8b7e8e3f25c2906a442d5a9d67098a2d0315d796addb9319a19",
+    "src/lib/types.ts": "05789c1f398d1888b55426683d7e3953566c50313e0ea09a8349fb59692ebe1c",
+    "src/lib/uncategorised.ts": "5a678c9faeb31ac40842c7e0d4da3355928f03759bc6506fcb279481061ad85b",
+    "src/lib/universal-categorization.ts": "bd43bf0dcc0fe60167c94297744a2cae35c13e60d177abb372a945f05371abaf",
+    "src/lib/universal-dates.ts": "bd2bb871d32a6b25486a104afbfe77efbbdceafbc744b5829d87764bed295860",
+    "src/lib/universal-fields.ts": "a37c48e2070b790d1f717ae8077adf5879f292b2b839da35bf27d26a4b046968",
+    "src/lib/universal-import.ts": "6344f8777fc645a87b89c7af3e81a2445d41f3e3f8bed9f0c3084748bc22a5b3",
+    "src/lib/universal-money.ts": "972572597b2e776a046571b5ef91e290453c58ab59a8c59d4e3315673a75ff08",
+    "src/lib/universal-parser.ts": "cb8871c959bdb80b0d2e496c7c29650a1fbbf9a6e877b8e3eebe358d020e61ab",
+    "src/lib/universal-types.ts": "feb298128e3f5e0c1b7558843d9732fb757574a8a177ef40751cf8a9bea25088",
+    "src/lib/unparsed-launch-alert.ts": "6ddc3a64331eb690b3556861c66f5332c30f259e9133a7ec78d6d1b8e0ef1d6e"
+  },
+  "corpusSha256": "8ea029e618d67596370076a89c677300a587ec8b259df6d2867a3e0988b82539",
+  "evaluatorSha256": "5d1060f622be396f438dfc3d0093cadb701ad0651a818162978d14beb0002c0a",
+  "adjudicationsSha256": "e98276bc1be8805b1b799cb212b4dbe115b4bb9dec859b1188f83d10f208c97e",
+  "summary": {
+    "cases": 32,
+    "exactCases": 32,
+    "assertedFields": 108,
+    "matchedFields": 108,
+    "abstainedFields": 0,
+    "incorrectFields": 0,
+    "nonPostingChallenges": 10,
+    "falsePostedStatus": 0,
+    "nonPostingConfirmable": 0,
+    "nonPostingRecognized": 10,
+    "sourceGuardRefusals": 10,
+    "safetyWithoutGroundedAmount": 3,
+    "categoryAbstentions": 0,
+    "incorrectResolvedCategories": 0
+  },
+  "grouped": {
+    "parser": {
+      "cases": 24,
+      "exactCases": 24,
+      "assertedFields": 92,
+      "matchedFields": 92,
+      "abstainedFields": 0,
+      "incorrectFields": 0,
+      "nonPostingChallenges": 10,
+      "falsePostedStatus": 0,
+      "nonPostingConfirmable": 0,
+      "nonPostingRecognized": 10,
+      "sourceGuardRefusals": 10,
+      "safetyWithoutGroundedAmount": 3,
+      "categoryAbstentions": 0,
+      "incorrectResolvedCategories": 0
+    },
+    "categorization": {
+      "cases": 8,
+      "exactCases": 8,
+      "assertedFields": 16,
+      "matchedFields": 16,
+      "abstainedFields": 0,
+      "incorrectFields": 0,
+      "nonPostingChallenges": 0,
+      "falsePostedStatus": 0,
+      "nonPostingConfirmable": 0,
+      "nonPostingRecognized": 0,
+      "sourceGuardRefusals": 0,
+      "safetyWithoutGroundedAmount": 0,
+      "categoryAbstentions": 0,
+      "incorrectResolvedCategories": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "r2-holdout-01",
+      "surface": "parser",
+      "language": "en",
+      "country": "US",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "USD",
+            "minorUnits": "4628",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "USD",
+            "minorUnits": "4628",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Harbor Finch Books",
+          "actual": "Harbor Finch Books",
+          "outcome": "match"
+        },
+        {
+          "field": "balance.value",
+          "expected": {
+            "currency": "USD",
+            "minorUnits": "91263",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "USD",
+            "minorUnits": "91263",
+            "exponent": 2
+          },
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "unknown",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "USD",
+            "minorUnits": "4628",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 54,
+              "end": 63
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": {
+            "currency": "USD",
+            "minorUnits": "91263",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 110,
+              "end": 120
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Harbor Finch Books",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 34,
+              "end": 52
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "USD",
+                "minorUnits": "4628",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 54,
+                  "end": 63
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          },
+          {
+            "role": "balance",
+            "field": {
+              "value": {
+                "currency": "USD",
+                "minorUnits": "91263",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 110,
+                  "end": 120
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-02",
+      "surface": "parser",
+      "language": "en",
+      "country": "US",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "USD",
+            "minorUnits": "8317",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "USD",
+            "minorUnits": "8317",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "informational",
+          "actual": "informational",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Quiet Lantern Supply",
+          "actual": "Quiet Lantern Supply",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "not-posted",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [
+        "Independent oracle author review: a temporary authorization explicitly not completed is known non-posting information, not unknown execution."
+      ],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": {
+            "currency": "USD",
+            "minorUnits": "8317",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 36,
+              "end": 45
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Quiet Lantern Supply",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 49,
+              "end": 69
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "unknown",
+            "field": {
+              "value": {
+                "currency": "USD",
+                "minorUnits": "8317",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 36,
+                  "end": 45
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "amount-role-unresolved",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-03",
+      "surface": "parser",
+      "language": "fr",
+      "country": "FR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "2764",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "2764",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "credit",
+          "actual": "credit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Atelier Brume",
+          "actual": "Atelier Brume",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "refund",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "2764",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 29,
+              "end": 38
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Atelier Brume",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 47,
+              "end": 60
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "2764",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 29,
+                  "end": 38
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-04",
+      "surface": "parser",
+      "language": "fr",
+      "country": "FR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "informational",
+          "actual": "informational",
+          "outcome": "match"
+        },
+        {
+          "field": "statementTotal.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "73482",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "73482",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "minimumDue.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "3800",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "3800",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "dueDate.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "unsupported-event",
+        "hasGroundedAmount": false,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "statement",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "73482",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 66,
+              "end": 76
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "3800",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 97,
+              "end": 106
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "alternatives": [],
+          "spans": [
+            {
+              "start": 122,
+              "end": 127
+            }
+          ],
+          "issues": [
+            "missing-four-digit-year"
+          ]
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "statement-total",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "73482",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 66,
+                  "end": 76
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          },
+          {
+            "role": "minimum-due",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "3800",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 97,
+                  "end": 106
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "missing-four-digit-year",
+          "merchant-unresolved",
+          "due-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-05",
+      "surface": "parser",
+      "language": "de",
+      "country": "DE",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "31845",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "31845",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "credit",
+          "actual": "credit",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "transfer",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "31845",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 37,
+              "end": 47
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "31845",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 37,
+                  "end": 47
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-06",
+      "surface": "parser",
+      "language": "de",
+      "country": "DE",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "6893",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "6893",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "future",
+          "actual": "future",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Funkenhain Energie",
+          "actual": "Funkenhain Energie",
+          "outcome": "match"
+        },
+        {
+          "field": "dueDate.value",
+          "expected": "2027-02-18",
+          "actual": "2027-02-18",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "not-posted",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "unknown",
+        "status": "future",
+        "direction": "none",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "6893",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 55,
+              "end": 64
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Funkenhain Energie",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 35,
+              "end": 53
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": "2027-02-18",
+          "evidence": "explicit",
+          "alternatives": [],
+          "spans": [
+            {
+              "start": 76,
+              "end": 86
+            }
+          ],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "unknown",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "6893",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 55,
+                  "end": 64
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "amount-role-unresolved",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-07",
+      "surface": "parser",
+      "language": "es",
+      "country": "ES",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "3176",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "3176",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Arroyo Violeta",
+          "actual": "Arroyo Violeta",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "3176",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 69,
+              "end": 78
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Arroyo Violeta",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 31,
+              "end": 45
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "3176",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 69,
+                  "end": 78
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-08",
+      "surface": "parser",
+      "language": "es",
+      "country": "ES",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "9452",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "9452",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "failed",
+          "actual": "failed",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Taller Luciérnaga",
+          "actual": "Taller Luciérnaga",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "ignored-event",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "ignore",
+        "family": "unknown",
+        "status": "failed",
+        "direction": "none",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "9452",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 20,
+              "end": 29
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Taller Luciérnaga",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 33,
+              "end": 50
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "unknown",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "9452",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 20,
+                  "end": 29
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "amount-role-unresolved",
+          "transaction-date-unresolved",
+          "failed-not-posting"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-09",
+      "surface": "parser",
+      "language": "pt",
+      "country": "BR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "BRL",
+            "minorUnits": "2248",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "BRL",
+            "minorUnits": "2248",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "future",
+          "actual": "future",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Nuvem de Cobre",
+          "actual": "Nuvem de Cobre",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "not-posted",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "unknown",
+        "status": "future",
+        "direction": "none",
+        "amount": {
+          "value": {
+            "currency": "BRL",
+            "minorUnits": "2248",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 92,
+              "end": 101
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Nuvem de Cobre",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 38,
+              "end": 52
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": "2027-03-09",
+          "evidence": "explicit",
+          "alternatives": [],
+          "spans": [
+            {
+              "start": 69,
+              "end": 79
+            }
+          ],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "unknown",
+            "field": {
+              "value": {
+                "currency": "BRL",
+                "minorUnits": "2248",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 92,
+                  "end": 101
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "amount-role-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-10",
+      "surface": "parser",
+      "language": "pt",
+      "country": "BR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "BRL",
+            "minorUnits": "3726",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "BRL",
+            "minorUnits": "3726",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Trilha Sonora Azul",
+          "actual": "Trilha Sonora Azul",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "BRL",
+            "minorUnits": "3726",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 52,
+              "end": 61
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Trilha Sonora Azul",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 27,
+              "end": 45
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "BRL",
+                "minorUnits": "3726",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 52,
+                  "end": 61
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-11",
+      "surface": "parser",
+      "language": "it",
+      "country": "IT",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "5834",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "5834",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Bottega Gelsomino",
+          "actual": "Bottega Gelsomino",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "5834",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 61,
+              "end": 70
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Bottega Gelsomino",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 39,
+              "end": 56
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "5834",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 61,
+                  "end": 70
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-12",
+      "surface": "parser",
+      "language": "it",
+      "country": "IT",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "informational",
+          "actual": "informational",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "not-posted",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [
+        "Independent oracle author review: this aggregate describes two distinct movements and needs splitting; it must not become one confirmed transaction."
+      ],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "unknown",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": null,
+          "evidence": "ambiguous",
+          "spans": [
+            {
+              "start": 46,
+              "end": 55
+            },
+            {
+              "start": 102,
+              "end": 110
+            }
+          ],
+          "alternatives": [
+            {
+              "currency": "EUR",
+              "minorUnits": "1283",
+              "exponent": 2
+            },
+            {
+              "currency": "EUR",
+              "minorUnits": "647",
+              "exponent": 2
+            }
+          ],
+          "issues": [
+            "multiple-money-fields"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Caffè Rugiada",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 63,
+              "end": 76
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "1283",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 46,
+                  "end": 55
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          },
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "647",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 102,
+                  "end": 110
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "multiple-money-fields",
+          "multiple-event-adapter-required",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-13",
+      "surface": "parser",
+      "language": "nl",
+      "country": "NL",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "14629",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "14629",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "informational",
+          "actual": "informational",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "not-posted",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [
+        "Independent oracle author review: request under review with no debit is explicitly non-posting."
+      ],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "unknown",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "14629",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 31,
+              "end": 41
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "14629",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 31,
+                  "end": 41
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "merchant-unresolved",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-14",
+      "surface": "parser",
+      "language": "nl",
+      "country": "NL",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "EUR",
+            "minorUnits": "20518",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "EUR",
+            "minorUnits": "20518",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "transfer",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "EUR",
+            "minorUnits": "20518",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 34,
+              "end": 44
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "naar Zilverwilg Atelier overgemaakt",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 80,
+              "end": 115
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "EUR",
+                "minorUnits": "20518",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 34,
+                  "end": 44
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-15",
+      "surface": "parser",
+      "language": "tr",
+      "country": "TR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "TRY",
+            "minorUnits": "18472",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "TRY",
+            "minorUnits": "18472",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Nar Çiçeği Kırtasiye",
+          "actual": "Nar Çiçeği Kırtasiye",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "TRY",
+            "minorUnits": "18472",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 45,
+              "end": 55
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Nar Çiçeği Kırtasiye",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 32
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "TRY",
+                "minorUnits": "18472",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 45,
+                  "end": 55
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-16",
+      "surface": "parser",
+      "language": "tr",
+      "country": "TR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "Sedef Bulut Market",
+          "actual": "Sedef Bulut Market",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "ignore",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "Sedef Bulut Market",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 30
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [],
+        "issues": []
+      }
+    },
+    {
+      "id": "r2-holdout-17",
+      "surface": "parser",
+      "language": "hi",
+      "country": "IN",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "INR",
+            "minorUnits": "24936",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "INR",
+            "minorUnits": "24936",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "credit",
+          "actual": "credit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "नीलकमल पुस्तकालय",
+          "actual": "नीलकमल पुस्तकालय",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "refund",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": {
+            "currency": "INR",
+            "minorUnits": "24936",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 32,
+              "end": 42
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "नीलकमल पुस्तकालय",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 28
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "INR",
+                "minorUnits": "24936",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 32,
+                  "end": 42
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-18",
+      "surface": "parser",
+      "language": "hi",
+      "country": "IN",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "informational",
+          "actual": "informational",
+          "outcome": "match"
+        },
+        {
+          "field": "statementTotal.value",
+          "expected": {
+            "currency": "INR",
+            "minorUnits": "684219",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "INR",
+            "minorUnits": "684219",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "minimumDue.value",
+          "expected": {
+            "currency": "INR",
+            "minorUnits": "34211",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "INR",
+            "minorUnits": "34211",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "dueDate.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "unsupported-event",
+        "hasGroundedAmount": false,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "statement",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": {
+            "currency": "INR",
+            "minorUnits": "684219",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 57,
+              "end": 68
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": {
+            "currency": "INR",
+            "minorUnits": "34211",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 88,
+              "end": 98
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "alternatives": [],
+          "spans": [
+            {
+              "start": 112,
+              "end": 117
+            }
+          ],
+          "issues": [
+            "missing-four-digit-year"
+          ]
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "statement-total",
+            "field": {
+              "value": {
+                "currency": "INR",
+                "minorUnits": "684219",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 57,
+                  "end": 68
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          },
+          {
+            "role": "minimum-due",
+            "field": {
+              "value": {
+                "currency": "INR",
+                "minorUnits": "34211",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 88,
+                  "end": 98
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "missing-four-digit-year",
+          "merchant-unresolved",
+          "due-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-19",
+      "surface": "parser",
+      "language": "ar",
+      "country": "AE",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "informational",
+          "actual": "informational",
+          "outcome": "match"
+        },
+        {
+          "field": "statementTotal.value",
+          "expected": {
+            "currency": "AED",
+            "minorUnits": "91854",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "AED",
+            "minorUnits": "91854",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "minimumDue.value",
+          "expected": {
+            "currency": "AED",
+            "minorUnits": "4593",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "AED",
+            "minorUnits": "4593",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "dueDate.value",
+          "expected": "2027-04-21",
+          "actual": "2027-04-21",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "unsupported-event",
+        "hasGroundedAmount": false,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "statement",
+        "status": "informational",
+        "direction": "none",
+        "amount": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "91854",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 52,
+              "end": 62
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": {
+            "currency": "AED",
+            "minorUnits": "4593",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 84,
+              "end": 93
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": "2027-04-21",
+          "evidence": "explicit",
+          "alternatives": [],
+          "spans": [
+            {
+              "start": 112,
+              "end": 122
+            }
+          ],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "statement-total",
+            "field": {
+              "value": {
+                "currency": "AED",
+                "minorUnits": "91854",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 52,
+                  "end": 62
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          },
+          {
+            "role": "minimum-due",
+            "field": {
+              "value": {
+                "currency": "AED",
+                "minorUnits": "4593",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 84,
+                  "end": 93
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "merchant-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-20",
+      "surface": "parser",
+      "language": "ar",
+      "country": "SA",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "SAR",
+            "minorUnits": "7638",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "SAR",
+            "minorUnits": "7638",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "شركة نبع الندى للمياه",
+          "actual": "شركة نبع الندى للمياه",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "SAR",
+            "minorUnits": "7638",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 63,
+              "end": 72
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "شركة نبع الندى للمياه",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 27,
+              "end": 48
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "SAR",
+                "minorUnits": "7638",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 63,
+                  "end": 72
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-21",
+      "surface": "parser",
+      "language": "ja",
+      "country": "JP",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "JPY",
+            "minorUnits": "2786",
+            "exponent": 0
+          },
+          "actual": {
+            "currency": "JPY",
+            "minorUnits": "2786",
+            "exponent": 0
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "こもれび文具",
+          "actual": "こもれび文具",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "JPY",
+            "minorUnits": "2786",
+            "exponent": 0
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 35,
+              "end": 43
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "こもれび文具",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 18
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "JPY",
+                "minorUnits": "2786",
+                "exponent": 0
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 35,
+                  "end": 43
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-22",
+      "surface": "parser",
+      "language": "ja",
+      "country": "JP",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "JPY",
+            "minorUnits": "6439",
+            "exponent": 0
+          },
+          "actual": {
+            "currency": "JPY",
+            "minorUnits": "6439",
+            "exponent": 0
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "future",
+          "actual": "future",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "あおぞら灯電力",
+          "actual": "あおぞら灯電力",
+          "outcome": "match"
+        },
+        {
+          "field": "dueDate.value",
+          "expected": "2027-06-12",
+          "actual": "2027-06-12",
+          "outcome": "match"
+        }
+      ],
+      "safety": {
+        "posted": false,
+        "importOutcome": "refused",
+        "refusal": "unsupported-event",
+        "hasGroundedAmount": true,
+        "recognized": true,
+        "refusalClass": "source-status"
+      },
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "bill",
+        "status": "future",
+        "direction": "none",
+        "amount": {
+          "value": {
+            "currency": "JPY",
+            "minorUnits": "6439",
+            "exponent": 0
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 34,
+              "end": 42
+            }
+          ],
+          "alternatives": [],
+          "issues": [
+            "amount-role-unresolved"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "あおぞら灯電力",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 19
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": "2027-06-12",
+          "evidence": "explicit",
+          "alternatives": [],
+          "spans": [
+            {
+              "start": 48,
+              "end": 58
+            }
+          ],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "unknown",
+            "field": {
+              "value": {
+                "currency": "JPY",
+                "minorUnits": "6439",
+                "exponent": 0
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 34,
+                  "end": 42
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "amount-role-unresolved",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-23",
+      "surface": "parser",
+      "language": "zh",
+      "country": "CN",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": {
+            "currency": "CNY",
+            "minorUnits": "6382",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "CNY",
+            "minorUnits": "6382",
+            "exponent": 2
+          },
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "debit",
+          "actual": "debit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "青藤纸屋",
+          "actual": "青藤纸屋",
+          "outcome": "match"
+        },
+        {
+          "field": "balance.value",
+          "expected": {
+            "currency": "CNY",
+            "minorUnits": "145827",
+            "exponent": 2
+          },
+          "actual": {
+            "currency": "CNY",
+            "minorUnits": "145827",
+            "exponent": 2
+          },
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "purchase",
+        "status": "posted",
+        "direction": "debit",
+        "amount": {
+          "value": {
+            "currency": "CNY",
+            "minorUnits": "6382",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 31,
+              "end": 40
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": {
+            "currency": "CNY",
+            "minorUnits": "145827",
+            "exponent": 2
+          },
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 46,
+              "end": 57
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "青藤纸屋",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 14,
+              "end": 18
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": {
+                "currency": "CNY",
+                "minorUnits": "6382",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 31,
+                  "end": 40
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          },
+          {
+            "role": "balance",
+            "field": {
+              "value": {
+                "currency": "CNY",
+                "minorUnits": "145827",
+                "exponent": 2
+              },
+              "evidence": "explicit",
+              "spans": [
+                {
+                  "start": 46,
+                  "end": 57
+                }
+              ],
+              "alternatives": [],
+              "issues": []
+            }
+          }
+        ],
+        "issues": [
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-24",
+      "surface": "parser",
+      "language": "zh",
+      "country": "CN",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "amount.value",
+          "expected": null,
+          "actual": null,
+          "outcome": "match"
+        },
+        {
+          "field": "status",
+          "expected": "posted",
+          "actual": "posted",
+          "outcome": "match"
+        },
+        {
+          "field": "direction",
+          "expected": "credit",
+          "actual": "credit",
+          "outcome": "match"
+        },
+        {
+          "field": "merchant.value",
+          "expected": "云雀工坊",
+          "actual": "云雀工坊",
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "version": 1,
+        "decision": "review",
+        "family": "refund",
+        "status": "posted",
+        "direction": "credit",
+        "amount": {
+          "value": null,
+          "evidence": "ambiguous",
+          "spans": [
+            {
+              "start": 20,
+              "end": 26
+            }
+          ],
+          "alternatives": [
+            {
+              "currency": "USD",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "AUD",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "CAD",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "NZD",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "SGD",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "HKD",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "MXN",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "ARS",
+              "minorUnits": "2840",
+              "exponent": 2
+            },
+            {
+              "currency": "COP",
+              "minorUnits": "2840",
+              "exponent": 2
+            }
+          ],
+          "issues": [
+            "currency-symbol"
+          ]
+        },
+        "statementTotal": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "minimumDue": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "balance": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "creditLimit": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "merchant": {
+          "value": "云雀工坊",
+          "evidence": "explicit",
+          "spans": [
+            {
+              "start": 12,
+              "end": 16
+            }
+          ],
+          "alternatives": [],
+          "issues": []
+        },
+        "transactionDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "dueDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "statementDate": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "instrument": {
+          "value": null,
+          "evidence": "missing",
+          "spans": [],
+          "alternatives": [],
+          "issues": []
+        },
+        "observations": [
+          {
+            "role": "transaction",
+            "field": {
+              "value": null,
+              "evidence": "ambiguous",
+              "spans": [
+                {
+                  "start": 20,
+                  "end": 26
+                }
+              ],
+              "alternatives": [
+                {
+                  "currency": "USD",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "AUD",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "CAD",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "NZD",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "SGD",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "HKD",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "MXN",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "ARS",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                },
+                {
+                  "currency": "COP",
+                  "minorUnits": "2840",
+                  "exponent": 2
+                }
+              ],
+              "issues": [
+                "currency-symbol"
+              ]
+            }
+          }
+        ],
+        "issues": [
+          "currency-symbol",
+          "transaction-date-unresolved"
+        ]
+      }
+    },
+    {
+      "id": "r2-holdout-category-01",
+      "surface": "categorization",
+      "language": "en",
+      "country": "US",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "groceries",
+          "actual": "groceries",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Willow Basket Grocery",
+        "category": "groceries",
+        "source": "merchant-activity",
+        "reason": "explicit-merchant-activity",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-02",
+      "surface": "categorization",
+      "language": "fr",
+      "country": "FR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "dining",
+          "actual": "dining",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Restaurant La Lune Cuivrée",
+        "category": "dining",
+        "source": "merchant-activity",
+        "reason": "explicit-merchant-activity",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-03",
+      "surface": "categorization",
+      "language": "de",
+      "country": "DE",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "health",
+          "actual": "health",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Apotheke Silberfarn",
+        "category": "health",
+        "source": "merchant-activity",
+        "reason": "explicit-merchant-activity",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-04",
+      "surface": "categorization",
+      "language": "es",
+      "country": "ES",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "other",
+          "actual": "other",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [
+        "Independent oracle author review: a known refund uses deliberate neutral Other under the category contract; merchant-business uncertainty does not make that financial-meaning choice uncertain."
+      ],
+      "pass": true,
+      "actual": {
+        "merchant": "Vértice Azul",
+        "category": "other",
+        "source": "movement",
+        "reason": "refund",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-05",
+      "surface": "categorization",
+      "language": "it",
+      "country": "IT",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "transport",
+          "actual": "transport",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Taxi Petalo Verde",
+        "category": "transport",
+        "source": "merchant-vocabulary",
+        "reason": "existing-merchant-vocabulary",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-06",
+      "surface": "categorization",
+      "language": "pt",
+      "country": "BR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "personal-care",
+          "actual": "personal-care",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Salão de Beleza Brisa Âmbar",
+        "category": "personal-care",
+        "source": "merchant-activity",
+        "reason": "explicit-merchant-activity",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-07",
+      "surface": "categorization",
+      "language": "nl",
+      "country": "NL",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "utilities",
+          "actual": "utilities",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Lindebron Waterbedrijf",
+        "category": "utilities",
+        "source": "merchant-activity",
+        "reason": "explicit-merchant-activity",
+        "needsReview": false
+      }
+    },
+    {
+      "id": "r2-holdout-category-08",
+      "surface": "categorization",
+      "language": "tr",
+      "country": "TR",
+      "kind": "synthetic-heldout-round2",
+      "checks": [
+        {
+          "field": "category",
+          "expected": "telecom",
+          "actual": "telecom",
+          "outcome": "match"
+        },
+        {
+          "field": "needsReview",
+          "expected": false,
+          "actual": false,
+          "outcome": "match"
+        }
+      ],
+      "adjudications": [],
+      "pass": true,
+      "actual": {
+        "merchant": "Mavi Dalga Telekom",
+        "category": "telecom",
+        "source": "merchant-activity",
+        "reason": "explicit-merchant-activity",
+        "needsReview": false
+      }
+    }
+  ]
+}

@@ -16,6 +16,12 @@ import { mergeImportedBills } from '@/lib/bills';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { applyHealUpdates } from '@/lib/heal';
+import { ImportMoneyError } from '@/lib/import-plan';
+import {
+  isLedgerMoneySpec,
+  ledgerMoneyMatchesCurrentMetadata,
+  migrateLegacyLedgerMoney,
+} from '@/lib/ledger-money';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
 import { PARSER_VERSION } from '@/lib/sms-parser';
 import type {
@@ -29,6 +35,7 @@ import type {
 } from '@/lib/types';
 
 export interface MaterializedImportBatch {
+  importMoney?: ImportBatchInput['importMoney'];
   transactions: Transaction[];
   newAccounts: Account[];
   newHints: Record<string, string>;
@@ -39,6 +46,7 @@ export interface MaterializedImportBatch {
   cardTypes: NonNullable<ImportBatchInput['cardTypes']>;
   confirmedLedgerCurrency?: 'AED' | 'SAR';
   parserRereadComplete: boolean;
+  historyImport: ImportBatchInput['historyImport'];
   lastScanTs: number;
   updates: TxHealUpdate[];
 }
@@ -60,6 +68,7 @@ export const materializeImportBatch = (
     Object.fromEntries(Object.entries(values ?? {}).map(([ref, value]) => [resolve(ref), value]));
 
   return {
+    ...(input.importMoney ? { importMoney: input.importMoney } : {}),
     transactions: input.transactions.map((transaction) => ({
       ...transaction,
       raw: state.privateMode ? undefined : transaction.raw,
@@ -85,6 +94,7 @@ export const materializeImportBatch = (
     cardTypes: mapRefs(input.cardTypes),
     confirmedLedgerCurrency: input.confirmedLedgerCurrency,
     parserRereadComplete: input.parserRereadComplete === true,
+    historyImport: input.historyImport,
     lastScanTs: input.lastScanTs,
     updates: (input.updates ?? []).map((update) => ({
       ...update,
@@ -96,10 +106,36 @@ export const materializeImportBatch = (
 const sortTransactions = (transactions: Transaction[]): Transaction[] =>
   [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 
+type MoneyBearingImport = Pick<ImportBatchInput,
+  'importMoney' | 'transactions' | 'newAccounts' | 'newDues' | 'newBills' | 'snapshots' | 'updates'>;
+
+const changesImportMoney = (batch: MoneyBearingImport): boolean =>
+  batch.transactions.length > 0 || batch.newDues.length > 0 ||
+    (batch.newBills?.length ?? 0) > 0 || Object.keys(batch.snapshots).length > 0 ||
+    (batch.updates?.length ?? 0) > 0 || batch.newAccounts.some((account) =>
+      account.openingFils !== 0 || (account.snapshotFils ?? 0) !== 0 ||
+      (account.creditLimitFils ?? 0) !== 0);
+
+/** A preview is not authority to write into a restored or reconfigured ledger. */
+export const assertImportBatchMoney = (
+  state: AppState,
+  batch: MoneyBearingImport,
+): void => {
+  // Cursor-only commits must remain possible without manufacturing a currency.
+  if (!changesImportMoney(batch)) return;
+  const money = batch.importMoney;
+  const current = migrateLegacyLedgerMoney(state);
+  if (!isLedgerMoneySpec(money) || !ledgerMoneyMatchesCurrentMetadata(money) ||
+    (current && (current.currency !== money.currency || current.exponent !== money.exponent))) {
+    throw new ImportMoneyError();
+  }
+};
+
 export const applyMaterializedImportBatch = (
   state: AppState,
   batch: MaterializedImportBatch,
 ): AppState => {
+  assertImportBatchMoney(state, batch);
   const accounts = [...state.accounts, ...batch.newAccounts].map((account) => {
     const snapshot = batch.snapshots[account.id];
     const bankName = !account.bankName ? batch.bankNames[account.id] : undefined;
@@ -131,6 +167,8 @@ export const applyMaterializedImportBatch = (
   const existing = applyHealUpdates(state.transactions, batch.updates);
   const merged = repairCardPaymentAccounts(mergeDuplicateAccounts({
     ...state,
+    ...(batch.importMoney && !state.ledgerMoney && changesImportMoney(batch)
+      ? { ledgerMoney: batch.importMoney } : {}),
     onboardingCurrencyEvidence:
       batch.confirmedLedgerCurrency ?? state.onboardingCurrencyEvidence,
     transactions: [...batch.transactions, ...existing],
@@ -139,6 +177,7 @@ export const applyMaterializedImportBatch = (
     cardDues: dues,
     bills,
     lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
+    historyImport: batch.historyImport ?? state.historyImport,
     // Parser version is proof of a completed full-history reread, not merely
     // proof that one new alert was imported. This distinction matters when a
     // backup is restored while an incremental capture is already in flight.

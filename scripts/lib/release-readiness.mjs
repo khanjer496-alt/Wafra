@@ -4,8 +4,16 @@ import path from 'node:path';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APPLE_KEY = /^appl_[A-Za-z0-9]+$/;
 const GOOGLE_KEY = /^goog_[A-Za-z0-9]+$/;
-const SHORTCUT_PATH = /^\/shortcuts\/[A-Za-z0-9_-]+\/?$/;
-const BROKEN_CAPTURE_SHORTCUT_ID = '85bd1e080e5849b591049eccffb9a3a1';
+const SHORTCUT_PATH = /^\/shortcuts\/[0-9a-f]{32}$/i;
+// A structurally valid iCloud URL can still identify a retired artifact, which
+// must not be included in a new production build.
+const RETIRED_CAPTURE_SHORTCUT_IDS = new Set([
+  '03d2ab22a33f4fef9d503142575a70fb',
+  '85bd1e080e5849b591049eccffb9a3a1',
+]);
+const RETIRED_HISTORY_SHORTCUT_IDS = new Set([
+  'cc85a21db99a4e4698c1a498de670199',
+]);
 
 const finding = (code, title, detail, remediation) => ({ code, title, detail, remediation });
 
@@ -48,9 +56,19 @@ const requireValue = (value, code, label, findings) => {
 const requireHttps = (value, code, label, findings, { host, pathPattern } = {}) => {
   if (!requireValue(value, code, label, findings)) return;
   try {
+    const hasSurroundingWhitespace = value !== value.trim();
+    const rawAuthority = pathPattern
+      ? value.match(/^https:\/\/([^/?#]*)/i)?.[1] ?? ''
+      : '';
+    const hasRawUserInfo = pathPattern && rawAuthority.includes('@');
+    const hasExplicitPort = pathPattern && /:\d*$/.test(rawAuthority);
     const url = new URL(value);
+    const hasExactHostedPath = !pathPattern ||
+      value === `https://${host}${url.pathname}`;
     if (url.protocol !== 'https:' || (host && url.hostname !== host) ||
-      (pathPattern && !pathPattern.test(url.pathname))) {
+      (pathPattern && (!pathPattern.test(url.pathname) || url.username ||
+        url.password || url.port || hasRawUserInfo || hasExplicitPort ||
+        hasSurroundingWhitespace || !hasExactHostedPath || url.search || url.hash))) {
       throw new Error('unexpected URL');
     }
   } catch {
@@ -110,6 +128,60 @@ const checkStoreSubmitProfiles = (eas, findings) => {
   }
 };
 
+const checkUpdateDelivery = (expo, eas, findings) => {
+  const projectId = expo?.extra?.eas?.projectId ?? '';
+  const updates = expo?.updates ?? {};
+  if (expo?.runtimeVersion?.policy !== 'fingerprint') {
+    findings.push(finding(
+      'update-runtime',
+      'The OTA runtime policy does not protect Wafra native compatibility',
+      'Custom capture modules, SQLCipher, and config plugins can change while the marketing version stays the same.',
+      'Set expo.runtimeVersion.policy to fingerprint.',
+    ));
+  }
+  if (updates.url !== `https://u.expo.dev/${projectId}` || updates.enabled !== true) {
+    findings.push(finding(
+      'update-url',
+      'EAS Update is not linked to this EAS project',
+      'A store binary without the exact update URL and enabled client cannot receive reviewed hotfixes.',
+      'Configure expo.updates.url from expo.extra.eas.projectId and set expo.updates.enabled to true.',
+    ));
+  }
+  if (updates.checkAutomatically !== 'ON_LOAD' ||
+      !Number.isInteger(updates.fallbackToCacheTimeout) ||
+      updates.fallbackToCacheTimeout < 0 ||
+      updates.fallbackToCacheTimeout > 2000) {
+    findings.push(finding(
+      'update-startup',
+      'The OTA startup policy is missing or can block ledger launch too long',
+      'Wafra should check on cold start without adopting the ten-second launch stall suggested by generic OTA guidance.',
+      'Use checkAutomatically ON_LOAD and a fallbackToCacheTimeout between 0 and 2000ms.',
+    ));
+  }
+  for (const [profile, channel, environment] of [
+    ['production-candidate', 'production-candidate', 'production'],
+    ['production', 'production', 'production'],
+  ]) {
+    const config = eas?.build?.[profile];
+    if (config?.channel !== channel || config?.environment !== environment) {
+      findings.push(finding(
+        `update-channel:${profile}`,
+        `${profile} does not have an isolated production OTA channel`,
+        'Candidate and public binaries must use the same production environment but different channels.',
+        `Set build.${profile}.channel to ${channel} and environment to production.`,
+      ));
+    }
+  }
+  if (eas?.build?.['production-candidate']?.extends !== 'production') {
+    findings.push(finding(
+      'update-candidate-runtime',
+      'The OTA candidate does not inherit the production native build',
+      'A candidate built from different native settings cannot prove that an update is safe for production.',
+      'Set build.production-candidate.extends to production.',
+    ));
+  }
+};
+
 const checkBuildProfile = (eas, profile, submit, findings) => {
   if (!eas?.build?.[profile]) {
     findings.push(finding('build-profile', `Build profile ${profile} is missing`, 'The selected EAS build profile does not exist.', `Add eas.json build.${profile} or choose an existing profile.`));
@@ -159,10 +231,19 @@ const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
     requireHttps(historyUrl, 'history-shortcut', 'EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL', findings, {
       host: 'www.icloud.com', pathPattern: SHORTCUT_PATH,
     });
-    if (captureUrl?.includes(BROKEN_CAPTURE_SHORTCUT_ID)) {
-      findings.push(finding('broken-capture-shortcut', 'The production Capture link is retired', 'That Shortcut is file-path based and sender-blind.', 'Publish and physically test the current Wafra Capture graph, then replace the URL.'));
+    const captureShortcutId = typeof captureUrl === 'string'
+      ? captureUrl.match(/\/shortcuts\/([0-9a-f]{32})$/i)?.[1]?.toLowerCase()
+      : undefined;
+    if (captureShortcutId && RETIRED_CAPTURE_SHORTCUT_IDS.has(captureShortcutId)) {
+      findings.push(finding('broken-capture-shortcut', 'The production Capture link is retired', 'That URL is a known retired artifact and the local setup rejects it at runtime.', 'Publish and physically test Wafra Local Capture, then replace the URL.'));
     }
-    if (captureUrl && historyUrl && captureUrl === historyUrl) {
+    const historyShortcutId = typeof historyUrl === 'string'
+      ? historyUrl.match(/\/shortcuts\/([0-9a-f]{32})$/i)?.[1]?.toLowerCase()
+      : undefined;
+    if (historyShortcutId && RETIRED_HISTORY_SHORTCUT_IDS.has(historyShortcutId)) {
+      findings.push(finding('retired-history-shortcut', 'The production History Shortcut link is retired', 'This shortcut has been superseded and must not be included in a new production build.', 'Publish and physically validate a replacement History Shortcut, then replace the URL.'));
+    }
+    if (captureShortcutId && historyShortcutId && captureShortcutId === historyShortcutId) {
       findings.push(finding('distinct-shortcuts', 'Capture and History links are identical', 'The two Shortcuts have different permissions and data paths.', 'Publish distinct iCloud links for Capture and History Import.'));
     }
     if (!APPLE_KEY.test(extra.revenueCatIosKey ?? '')) {
@@ -215,11 +296,13 @@ export const assessReleaseReadiness = async ({ root, intent, publicEnv = {} }) =
     if (intent.kind === 'store-release' && eas?.build?.development?.developmentClient !== true) {
       findings.push(finding('development-client', 'The development profile is not a development client', 'Device debugging would no longer use the expected client profile.', 'Set eas.json build.development.developmentClient to true.'));
     }
+    const usesProductionUpdates = profile === 'production' || profile === 'production-candidate';
     if (intent.kind === 'store-release') {
       checkStoreLocalization(expo, findings);
       checkStoreSubmitProfiles(eas, findings);
     }
-    if (profile === 'production' || intent.kind === 'store-release') {
+    if (usesProductionUpdates || intent.kind === 'store-release') {
+      checkUpdateDelivery(expo, eas, findings);
       checkProductionRuntime(expo, eas, platform, publicEnv, findings);
     }
   }

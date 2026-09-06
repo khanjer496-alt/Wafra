@@ -1,63 +1,196 @@
+import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { Platform, Share } from 'react-native';
+import { Platform } from 'react-native';
+
+export type TextFileShareErrorCode =
+  | 'download_unavailable'
+  | 'cache_unavailable'
+  | 'share_unavailable'
+  | 'write_failed'
+  | 'share_failed';
+
+/** Named so the screen can answer a failed file export without platform detail. */
+export class TextFileShareError extends Error {
+  readonly code: TextFileShareErrorCode;
+
+  constructor(code: TextFileShareErrorCode) {
+    super(`Could not export a text file (${code}).`);
+    this.name = 'TextFileShareError';
+    this.code = code;
+  }
+}
+
+export class TextClipboardError extends Error {
+  readonly code: 'too_large';
+
+  constructor(code: 'too_large') {
+    super(`Could not copy text (${code}).`);
+    this.name = 'TextClipboardError';
+    this.code = code;
+  }
+}
+
+const CLIPBOARD_TEXT_MAX_BYTES = 128 * 1024;
+
+/** Copy only text a caller has already made safe for the system clipboard. */
+export async function copyTextToClipboard(text: string): Promise<void> {
+  if (text.length > CLIPBOARD_TEXT_MAX_BYTES ||
+    new TextEncoder().encode(text).byteLength > CLIPBOARD_TEXT_MAX_BYTES) {
+    throw new TextClipboardError('too_large');
+  }
+  await Clipboard.setStringAsync(text);
+}
+
+/** The picker may return a copied cache file or an external URI. Only the
+ * former belongs to Wafra; consume it before showing the restore confirmation.
+ */
+export async function readBackupPickerCopy(uri: string): Promise<string> {
+  let ownedCopy = false;
+  try {
+    const cache = FileSystem.cacheDirectory ? new URL(FileSystem.cacheDirectory) : null;
+    const file = new URL(uri);
+    const path = decodeURIComponent(file.pathname);
+    const root = cache ? decodeURIComponent(cache.pathname).replace(/\/?$/, '/') : null;
+    ownedCopy = cache?.protocol === 'file:' && file.protocol === 'file:' &&
+      file.host === cache.host && root !== null && path.startsWith(root) && path !== root &&
+      !path.split('/').includes('..');
+  } catch {
+    // An unrecognized external URI never grants deletion authority.
+  }
+  try {
+    return await FileSystem.readAsStringAsync(uri);
+  } finally {
+    if (ownedCopy) await FileSystem.deleteAsync(uri, { idempotent: true });
+  }
+}
+
+const EXPORT_DIRECTORY = 'wafra-generated-exports/';
+const EXPORT_GRACE_MS = 24 * 60 * 60 * 1000;
+const LEGACY_EXPORTS = [
+  'wafra-backup.json', 'wafra-export.csv', 'wafra-card-diagnostic.txt',
+  'wafra-parser-report.json', 'wafra-launch-metrics.json',
+];
+const activeExports = new Set<string>();
+let exportSequence = 0;
+
+/** Only app-generated files are eligible. Android recipients can read after
+ * the chooser resolves, so retain their attachments for a bounded grace period.
+ * Called at startup/foreground and during explicit ledger erase.
+ */
+export async function cleanupGeneratedExports(options: { eraseAll?: boolean } = {}): Promise<void> {
+  const cache = FileSystem.cacheDirectory;
+  if (Platform.OS === 'web' || !cache) return;
+  if (options.eraseAll && activeExports.size) throw new Error('An export is still being shared');
+  const root = `${cache}${EXPORT_DIRECTORY}`;
+  const info = await FileSystem.getInfoAsync(root);
+  const children = info.exists ? await FileSystem.readDirectoryAsync(root) : [];
+  const legacyCorpus = (await FileSystem.readDirectoryAsync(cache)).filter((name) =>
+    /^wafra-sms-corpus-\d{4}-\d{2}-\d{2}\.json$/.test(name));
+  const candidates = [
+    ...children.filter((name) => !name.includes('/') && name !== '..').map((name) => `${root}${name}`),
+    ...[...LEGACY_EXPORTS, ...legacyCorpus].map((name) => `${cache}${name}`),
+  ];
+  for (const uri of candidates) {
+    if (activeExports.has(uri)) continue;
+    const item = await FileSystem.getInfoAsync(uri);
+    if (!item.exists) continue;
+    if (options.eraseAll || ('modificationTime' in item &&
+      item.modificationTime * 1000 <= Date.now() - EXPORT_GRACE_MS)) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    }
+  }
+}
 
 /**
- * Share a block of text as a FILE rather than as an intent payload.
+ * Export text as an actual file, or reject. Never degrades to a message share.
  *
- * `Share.share({ message })` hands the whole string to the OS share sheet, and
- * on Android that crosses a Binder transaction with a hard ceiling around 512KB
- * — over it the process is killed with TransactionTooLargeException, which
- * surfaces to the user as the app simply disappearing. Nothing in JS can catch
- * it: the `.catch()` on Share.share never runs, because the failure is native
- * and terminal.
- *
- * Every caller here can exceed that. The card diagnostic prints every
- * card-related row WITH its raw bank message; a CSV export and a JSON backup are
- * the entire ledger. A few hundred transactions is enough. The user who reported
- * this had 174 in one month.
- *
- * So: write to the cache directory and share the file's URI, which is a few
- * dozen bytes whatever the content weighs. The file lands in the cache, so the
- * OS reclaims it without the app having to track it.
- *
- * Web has no cache directory and no share sheet worth the name, so it keeps the
- * message path — payloads there are not crossing a Binder transaction.
+ * Reports and backups must produce one attachable file. A swallowed Web Share
+ * failure or a plain-text intent must not claim that an export succeeded.
  */
+export async function shareTextFile(
+  filename: string,
+  text: string,
+  options: { mimeType?: string; dialogTitle?: string } = {},
+): Promise<void> {
+  const mimeType = options.mimeType ?? 'text/plain';
+  if (Platform.OS === 'web') {
+    if (typeof document === 'undefined' || typeof Blob === 'undefined' ||
+      !document.body || typeof URL === 'undefined' ||
+      typeof URL.createObjectURL !== 'function') {
+      throw new TextFileShareError('download_unavailable');
+    }
+    try {
+      const uri = URL.createObjectURL(new Blob([text], { type: mimeType }));
+      const anchor = document.createElement('a');
+      anchor.href = uri;
+      anchor.download = filename;
+      anchor.rel = 'noopener';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      // Some browsers consume Blob downloads asynchronously after click().
+      // Revoking on the next tick can cancel the file before it is claimed.
+      setTimeout(() => URL.revokeObjectURL(uri), 1_000);
+      return;
+    } catch {
+      throw new TextFileShareError('download_unavailable');
+    }
+  }
+
+  const dir = FileSystem.cacheDirectory;
+  if (!dir) throw new TextFileShareError('cache_unavailable');
+  let sharingAvailable = false;
+  try {
+    sharingAvailable = await Sharing.isAvailableAsync();
+  } catch {
+    throw new TextFileShareError('share_unavailable');
+  }
+  if (!sharingAvailable) {
+    throw new TextFileShareError('share_unavailable');
+  }
+
+  if (!filename || filename.includes('/') || filename.includes('\\') || filename === '..') {
+    throw new TextFileShareError('write_failed');
+  }
+  const folder = `${dir}${EXPORT_DIRECTORY}${Date.now()}-${++exportSequence}`;
+  const uri = `${folder}/${filename}`;
+  activeExports.add(folder);
+  try {
+    await FileSystem.makeDirectoryAsync(folder, { intermediates: true });
+    await FileSystem.writeAsStringAsync(uri, text, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+  } catch {
+    activeExports.delete(folder);
+    await FileSystem.deleteAsync(folder, { idempotent: true }).catch(() => {});
+    throw new TextFileShareError('write_failed');
+  }
+  let completed = false;
+  try {
+    await Sharing.shareAsync(uri, {
+      mimeType,
+      dialogTitle: options.dialogTitle ?? filename,
+      UTI: mimeType === 'application/json' ? 'public.json' : 'public.plain-text',
+    });
+    completed = true;
+  } catch {
+    throw new TextFileShareError('share_failed');
+  } finally {
+    activeExports.delete(folder);
+    // iOS resolves after the activity completes/cancels. Android resolves at
+    // chooser return, before some receiving apps have consumed the file.
+    if (Platform.OS === 'ios' || !completed) {
+      await FileSystem.deleteAsync(folder, { idempotent: true }).catch(() => {});
+    }
+  }
+}
+
+/** Convenience name; exports always remain files, including large ledgers. */
 export async function shareText(
   filename: string,
   text: string,
   options: { mimeType?: string; dialogTitle?: string } = {},
 ): Promise<void> {
-  if (Platform.OS === 'web') {
-    await Share.share({ title: filename, message: text }).catch(() => {});
-    return;
-  }
-
-  const dir = FileSystem.cacheDirectory;
-  // No cache directory means no file to share; the message path is still better
-  // than nothing, and a short payload will survive it.
-  if (!dir) {
-    await Share.share({ title: filename, message: text }).catch(() => {});
-    return;
-  }
-
-  const uri = `${dir}${filename}`;
-  try {
-    await FileSystem.writeAsStringAsync(uri, text, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri, {
-        mimeType: options.mimeType ?? 'text/plain',
-        dialogTitle: options.dialogTitle ?? filename,
-        UTI: options.mimeType === 'application/json' ? 'public.json' : 'public.plain-text',
-      });
-      return;
-    }
-  } catch {
-    // Fall through — a failed write or an unavailable share sheet should not
-    // take the screen down with it.
-  }
-  await Share.share({ title: filename, message: text }).catch(() => {});
+  await shareTextFile(filename, text, options);
 }

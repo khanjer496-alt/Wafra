@@ -17,6 +17,10 @@ const root = path.join(__dirname, '..');
 const d1 = fs.readFileSync(path.join(root, 'scripts/d1.mjs'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const toml = fs.readFileSync(path.join(root, 'wrangler.toml'), 'utf8');
+const deployWorkflow = fs.readFileSync(
+  path.join(root, '..', '.github', 'workflows', 'deploy-relay.yml'),
+  'utf8',
+);
 
 let passed = 0;
 let failed = 0;
@@ -52,9 +56,22 @@ if (!isRealId) {
 }
 
 // npm runs `predeploy` before `deploy` and aborts the whole thing when it
-// fails. That is the only reason `wrangler deploy` cannot run unconfigured.
-ok('deploy is gated by a predeploy that runs the guard', /d1\.mjs check/.test(pkg.scripts.predeploy));
+// fails. It must apply additive schema as well as validate the binding: the
+// Worker authentication query cannot run without every current table.
+ok('deploy is gated by a predeploy that runs the schema migration',
+  /npm run migrate/.test(pkg.scripts.predeploy));
 ok('migrate is gated by the same guard', /d1\.mjs check/.test(pkg.scripts.migrate));
+ok('migrate applies schema.sql remotely without an interactive prompt',
+  /d1 execute wafra --remote --file=\.\/schema\.sql/.test(pkg.scripts.migrate) &&
+    /--yes/.test(pkg.scripts.migrate));
+ok('migrate applies tracked D1 migrations before Worker publication',
+  /d1 migrations apply wafra --remote/.test(pkg.scripts.migrate) &&
+    /--yes/.test(pkg.scripts.migrate));
+ok('the GitHub deploy has no schema opt-out',
+  !/apply_schema/.test(deployWorkflow));
+ok('the GitHub post-deploy schema check is fatal',
+  /- name: Check the schema really landed/.test(deployWorkflow) &&
+    !/- name: Check the schema really landed\s+[\s\S]{0,120}continue-on-error:\s*true/.test(deployWorkflow));
 
 // `wrangler d1 create` accepts no --json (checked against wrangler 4.116.0's
 // own command definition) and wrangler rejects unknown arguments outright, so

@@ -12,8 +12,12 @@ import type {
   BankAlertInterpretation,
   InterpretBankAlertInput,
 } from '@/lib/bank-alert-semantic-types';
-import { withMarketPackForParsing } from '@/lib/markets';
-import { normalizeArabic, parseSms, type ParsedSms } from '@/lib/sms-parser';
+import {
+  ledgerCurrencyExponent,
+  pinnedLedgerCurrencyCode,
+  withMarketPackForParsing,
+} from '@/lib/markets';
+import { hasMalformedBankAmount, normalizeArabic, parseSms, type ParsedSms } from '@/lib/sms-parser';
 import {
   hasAffirmativeSettledMovement,
   inspectUnparsedLaunchAlert,
@@ -219,6 +223,17 @@ export const interpretBankAlert = ({
   market,
   overrides = {},
 }: InterpretBankAlertInput): BankAlertInterpretation => {
+  // A refused legacy parse is not permission to reconstruct the same money
+  // through semantic fallback. Every launch result is a two-decimal AED/SAR
+  // amount, including results created without a legacy row.
+  const pinnedCurrency = pinnedLedgerCurrencyCode();
+  if (pinnedCurrency && (pinnedCurrency !== (market === 'AE' ? 'AED' : 'SAR') ||
+    ledgerCurrencyExponent() !== 2)) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'unsupported-currency', evidence: [] };
+  }
+  if (withMarketPackForParsing(market, () => hasMalformedBankAmount(source))) {
+    return { outcome: 'refuse', meaning: 'unknown', reason: 'unclear-amount', evidence: [] };
+  }
   const legacy = withMarketPackForParsing(market, () =>
     parseSms(source, overrides, { sender }));
   // In a compact field list, "A/C 1234 AED 7,500" contains a currency-suffix

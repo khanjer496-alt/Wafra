@@ -161,6 +161,25 @@ const plan = buildImportPlan(parsed, BASE, newestTs, NOW);
   ok('only a completed full-history batch advances the durable parser version',
     afterReread.parserVersion === PARSER_VERSION,
     afterReread.parserVersion);
+
+  const pageProgress = {
+    status: 'running',
+    cursor: { beforeDateMs: 1_700_000_000_000, beforeId: 900 },
+    scanned: 1000,
+    found: 9,
+    startedAt: 10,
+    updatedAt: 20,
+    error: null,
+  };
+  const pageBatch = materializeImportBatch(
+    { ...plan.batch, historyImport: pageProgress },
+    restoredState,
+    (prefix) => `history-page-${prefix}-${++rereadId}`,
+  );
+  const afterPage = applyMaterializedImportBatch(restoredState, pageBatch);
+  ok('one ledger batch applies page rows and the next history cursor atomically',
+    isDeepStrictEqual(afterPage.historyImport, pageProgress),
+    JSON.stringify(afterPage.historyImport));
 }
 {
   let proofId = 0;
@@ -444,5 +463,101 @@ ok('compact bank shorthand replay is idempotent',
     applyMaterializedImportBatch(compactState, compactReplayBatch),
     compactState,
   ));
+
+// A preview can outlive a restore or currency selection. Validate the same
+// parsed-money proof again where the actual ledger mutation happens.
+{
+  const materialized = materializeImportBatch(plan.batch, BASE, (prefix) => `money-${prefix}`);
+  ok('materialization preserves the parser-validated batch currency and exponent',
+    materialized.importMoney?.currency === 'AED' && materialized.importMoney?.exponent === 2);
+  for (const [currency, exponent] of [['USD', 2], ['KWD', 3], ['JPY', 0], ['SAR', 2], ['AED', 3]]) {
+    const target = { ...BASE, ledgerMoney: { schemaVersion: 2, currency, exponent } };
+    assert.throws(() => applyMaterializedImportBatch(target, materialized), /currency|money/i);
+    ok(`${currency}/${exponent}: a stale import preview cannot mutate a differently denominated ledger`,
+      target.transactions.length === 0);
+  }
+  const unproven = { ...materialized }; delete unproven.importMoney;
+  assert.throws(() => applyMaterializedImportBatch(BASE, unproven), /currency|money/i);
+  ok('monetary batches without denomination evidence fail closed', BASE.transactions.length === 0);
+  const fresh = applyMaterializedImportBatch({ ...BASE, ledgerMoney: null }, materialized);
+  ok('first accepted batch pins its explicit currency rather than a display preference',
+    fresh.ledgerMoney?.currency === 'AED' && fresh.ledgerMoney?.exponent === 2);
+}
+
+// Empty progress writes are not evidence of a money system, even if a
+// caller accidentally retains a previous preview's metadata.
+{
+  for (const importMoney of [undefined,
+    { schemaVersion: 2, currency: 'AED', exponent: 2 },
+    { schemaVersion: 2, currency: 'USD', exponent: 2 },
+    { schemaVersion: 2, currency: 'AED', exponent: 3 },
+    { schemaVersion: 2, currency: 'UNKNOWN', exponent: 8 }]) {
+    const input = { transactions: [], newAccounts: [], newHints: {}, newDues: [],
+      newBills: [], snapshots: {}, bankNames: {}, cardTypes: {}, updates: [],
+      lastScanTs: 1234, importMoney };
+    const materialized = materializeImportBatch(input, BASE, (prefix) => `cursor-${prefix}`);
+    const empty = { ...BASE, ledgerMoney: null };
+    const result = applyMaterializedImportBatch(empty, materialized);
+    ok('cursor-only metadata never pins a new ledger currency',
+      result.ledgerMoney === null && result.lastScanTs === 1234 && result.transactions.length === 0,
+      JSON.stringify({ importMoney, ledgerMoney: result.ledgerMoney }));
+    const pinned = { ...BASE, ledgerMoney: { schemaVersion: 2, currency: 'SAR', exponent: 2 } };
+    const sameLedger = applyMaterializedImportBatch(pinned, materialized);
+    ok('cursor-only metadata never replaces a pinned ledger currency',
+      sameLedger.ledgerMoney === pinned.ledgerMoney && sameLedger.lastScanTs === 1234);
+  }
+}
+
+// Tracking a reminder is a monetary import too. Reuse the existing golden
+// bill row; the body-free SAR variant exercises transport denomination only,
+// not a claim of a new Saudi bank format.
+{
+  const { buildTrackedBillBatch } = require('./build/import-plan.js');
+  ok('independent bill tracking has a currency-validated import boundary', typeof buildTrackedBillBatch === 'function');
+  const reminder = parsed.find((row) => row.kind === 'billDue');
+  const sarReminder = { ...reminder, raw: undefined, currency: 'SAR' };
+  const blank = { ...BASE, ledgerMoney: null, lastScanTs: 445 };
+  const tracked = buildTrackedBillBatch(sarReminder, blank, NOW);
+  ok('tracking only adds the selected bill and preserves its currency without moving the scan cursor',
+    tracked.importMoney.currency === 'SAR' && tracked.importMoney.exponent === 2 &&
+      tracked.newBills.length === 1 && tracked.newBills[0].amountFils === reminder.amountFils &&
+      tracked.transactions.length === 0 && tracked.updates.length === 0 &&
+      tracked.newAccounts.length === 0 && Object.keys(tracked.snapshots).length === 0 &&
+      tracked.lastScanTs === 445);
+  const materialized = materializeImportBatch(tracked, blank, (prefix) => `tracked-${prefix}`);
+  const result = applyMaterializedImportBatch(blank, materialized);
+  ok('the first tracked reminder pins its explicit currency rather than default AED',
+    result.ledgerMoney.currency === 'SAR' && result.bills[0].amountFils === reminder.amountFils);
+  const restored = { ...BASE, ledgerMoney: { schemaVersion: 2, currency: 'KWD', exponent: 3 } };
+  assert.throws(() => buildTrackedBillBatch(reminder, restored, NOW), /currency|money/i);
+  assert.throws(() => applyMaterializedImportBatch(restored, materialized), /currency|money/i);
+  ok('a stale tracked reminder cannot be relabelled into a restored KWD ledger', restored.bills.length === 0);
+}
+
+// A yearless statement must not acquire its deadline from Message receipt
+// time. Exercise both real source-free capture wrappers and the reducer.
+{
+  const { parseHistoricalMessageRecords } = require('./build/historical-import.js');
+  const { parseLocalMessageRecord } = require('./build/local-message-record.js');
+  const body = 'Your Credit Card ending 4821 statement is generated. Total due AED 3,240.00, minimum due AED 162.00. Payment due on 25 Aug.';
+  const observedAt = '2026-08-10T10:00:00.000Z';
+  const now = new Date(observedAt);
+  const history = parseHistoricalMessageRecords([JSON.stringify({
+    v: 1, id: 'e'.repeat(64), text: body, sender: 'ENBD', receivedAt: observedAt,
+  })], {}, now);
+  const local = parseLocalMessageRecord(JSON.stringify({
+    v: 1, id: 'f'.repeat(64), text: body, sender: 'ENBD', observedAt, source: 'message',
+  }), now, 'AE', createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'AED' }));
+  for (const [channel, row] of [['historical', history.parsed[0]], ['local live', local.row]]) {
+    ok(`${channel}: a yearless statement retains an unknown full deadline`,
+      row?.kind === 'cardStatement' && row.date === null, JSON.stringify(row));
+    const plan = buildImportPlan([row], BASE, now.getTime(), now);
+    let nextId = 0;
+    const batch = materializeImportBatch(plan.batch, BASE, (prefix) => `deadline-${prefix}-${nextId++}`);
+    const result = applyMaterializedImportBatch(BASE, batch);
+    ok(`${channel}: Message receipt cannot create a fabricated card payment deadline`,
+      result.cardDues.length === BASE.cardDues.length && plan.txCount === 0);
+  }
+}
 
 console.log(`\naccounting-pipeline: ${pass} passed, 0 failed`);

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { SpringPressable } from '@/components/ui/spring-pressable';
+import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
@@ -23,7 +24,7 @@ import { useTheme } from '@/hooks/use-theme';
 const TAB_ICONS: Record<string, IconName> = {
   index: 'home',
   flow: 'chart',
-  bills: 'repeat',
+  bills: 'receipt',
   wallet: 'wallet',
 };
 
@@ -82,6 +83,8 @@ const AnimatedTabButton = ({
 
   return (
     <SpringPressable
+      role="tab"
+      aria-selected={focused}
       accessibilityRole="tab"
       accessibilityLabel={label}
       accessibilityState={{ selected: focused }}
@@ -93,7 +96,7 @@ const AnimatedTabButton = ({
         <Animated.View
           style={[
             styles.activePill,
-            { backgroundColor: theme.backgroundSelected },
+            { backgroundColor: theme.primarySoft },
             pillStyle,
           ]}
         />
@@ -123,6 +126,7 @@ const AnimatedTabButton = ({
 export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const { measuredHeight, setMeasuredHeight } = useTabBarMetrics();
   /**
    * The language, read off the store and passed into every `t()` below.
    *
@@ -168,11 +172,15 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
 
   return (
     <View
+      onLayout={({ nativeEvent: { layout } }) => {
+        const height = Math.round(layout.height);
+        if (height !== measuredHeight) setMeasuredHeight(height);
+      }}
       style={[
         styles.wrap,
         { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
       ]}>
-      <View style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
+      <View role="tablist" style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
         {routes.map(renderTab)}
       </View>
     </View>
@@ -198,7 +206,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 3,
@@ -211,11 +219,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   activePill: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 14,
+    position: 'absolute',
+    top: -3,
+    width: 42,
+    height: 32,
+    borderRadius: 12,
   },
   tabLabel: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center',
+    flexShrink: 1,
   },
 });

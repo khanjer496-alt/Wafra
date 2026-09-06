@@ -43,6 +43,9 @@ const { DatabaseSync } = require('node:sqlite');
 const { readFileSync } = require('node:fs');
 
 const SCHEMA_PATH = require.resolve('../../server/schema.sql');
+const SHORTCUT_RETIREMENT_MIGRATION_PATH = require.resolve(
+  '../../server/migrations/2026-08-25-shortcut-ingest-retirement.sql',
+);
 
 // Read at module load by relay.ts, exactly as Expo inlines it into a build. Set
 // before the require below, deliberately: a build with no relay configured must
@@ -68,11 +71,26 @@ function eq(name, actual, expected) {
   const a = JSON.stringify(actual), e = JSON.stringify(expected);
   ok(name, a === e, `\n    got ${a}\n    want ${e}`);
 }
+const controlledPromise = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+};
+const nextMicrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const KEY = 'wafra.relay.v1';
 const BACKGROUND_KEY = 'wafra.relay.background.v1';
 const PROOF_KEY = 'wafra.relay.automation-proof.v1';
 const BASE = 'https://relay.test';
+const AUTOMATION_GENERATION_A = 'a'.repeat(43);
+const AUTOMATION_GENERATION_B = 'b'.repeat(43);
+const automationMarker = (deviceId, generation) => ({
+  kind: 'message', sourceDeviceId: deviceId, generation,
+});
 
 /* ───────────────────────── The fake transport ─────────────────────────
  *
@@ -209,6 +227,10 @@ async function queueItem(id, row, publicKey) {
 
     eq('shortcut URL: public iCloud links remain the production format',
       relay.normalizeShortcutInstallUrl(icloud), icloud);
+    eq('shortcut URL: the retired broken iCloud snapshot is disabled at runtime',
+      relay.normalizeShortcutInstallUrl(
+        'https://www.icloud.com/shortcuts/85bd1e080e5849b591049eccffb9a3a1',
+      ), null);
     eq('shortcut URL: a signed beta file is rejected by default',
       relay.normalizeShortcutInstallUrl(betaFile), null);
     eq('shortcut URL: the explicit beta gate accepts only the Wafra release asset',
@@ -218,6 +240,17 @@ async function queueItem(id, row, publicKey) {
         'https://raw.githubusercontent.com/other/repo/3f43134e280bfe7b0cd82aabe55a664139debf1a/assets/shortcuts/Wafra%20Capture.shortcut',
         true,
       ), null);
+    ok('legacy charge alerts are unavailable without a relay pairing',
+      relay.isLegacyShortcutCaptureActive(null) === false);
+    ok('generic pairing is not proof that the old Shortcut automation exists',
+      relay.isLegacyShortcutCaptureActive({}) === false);
+    ok('legacy charge alerts require automation provenance before scoped retirement',
+      relay.isLegacyShortcutCaptureActive({
+        automationGeneration: AUTOMATION_GENERATION_A,
+      }) === true && relay.isLegacyShortcutCaptureActive({
+        automationGeneration: AUTOMATION_GENERATION_A,
+        shortcutCaptureRetiredAt: 1,
+      }) === false);
   }
 
   /* ═════════════════════════ Pairing ═════════════════════════ */
@@ -462,6 +495,113 @@ async function queueItem(id, row, publicKey) {
     return { net, cfg };
   }
 
+  /* ═════════════ Retiring copied Shortcut capture authority ═════════════ */
+
+  ok('shortcut retirement client: exports the scoped retirement operation',
+    typeof relay.retireRelayShortcutCapture === 'function');
+  if (typeof relay.retireRelayShortcutCapture === 'function') {
+    {
+      const { net, cfg } = await paired();
+      net.on('POST /v1/device/retire-shortcut-capture', () => json(204));
+      const before = Date.now();
+      await relay.retireRelayShortcutCapture(cfg);
+      const foreground = storedConfig(KEY);
+      const background = storedConfig(BACKGROUND_KEY);
+      const req = net.last('POST /v1/device/retire-shortcut-capture');
+      ok('shortcut retirement client: authenticates the idempotent POST with foreground admin scope',
+        req?.auth === `Bearer ${cfg.adminToken}` && req.body === null);
+      ok('shortcut retirement client: stores a finite encrypted completion timestamp after 204',
+        typeof foreground?.shortcutCaptureRetiredAt === 'number' &&
+          foreground.shortcutCaptureRetiredAt >= before &&
+          foreground.shortcutCaptureRetiredAt <= Date.now());
+      ok('shortcut retirement client: the locked-phone sync subset never gains retirement metadata',
+        !('shortcutCaptureRetiredAt' in background) &&
+          Object.keys(background).sort().join(',') ===
+            ['baseUrl', 'deviceId', 'privateKey', 'setupState', 'syncToken'].sort().join(','));
+
+      await relay.retireRelayShortcutCapture(await relay.getRelayConfig());
+      ok('shortcut retirement client: repeating a completed retirement remains safe',
+        net.count('POST /v1/device/retire-shortcut-capture') === 2 &&
+          Number.isFinite(storedConfig(KEY).shortcutCaptureRetiredAt));
+
+      secure.__keychain.items.set(KEY, JSON.stringify({
+        ...storedConfig(KEY), shortcutCaptureRetiredAt: 'not-a-clock',
+      }));
+      ok('shortcut retirement client: malformed stored retirement metadata is discarded',
+        (await relay.getRelayConfig())?.shortcutCaptureRetiredAt === undefined);
+    }
+
+    {
+      const { net, cfg } = await paired();
+      net.on('POST /v1/device/retire-shortcut-capture', () => json(503, { error: 'unavailable' }));
+      let error = null;
+      try {
+        await relay.retireRelayShortcutCapture(cfg);
+      } catch (caught) {
+        error = caught;
+      }
+      ok('shortcut retirement client: a remote failure leaves local completion unstamped',
+        error?.retryable === true && storedConfig(KEY).shortcutCaptureRetiredAt === undefined);
+    }
+
+    {
+      const { net, cfg } = await paired();
+      net.on('POST /v1/device/retire-shortcut-capture', () => json(204));
+      const originalSetItem = secure.setItemAsync;
+      let failForegroundOnce = true;
+      secure.setItemAsync = async (key, value, options) => {
+        if (key === KEY && failForegroundOnce) {
+          failForegroundOnce = false;
+          throw new Error('keychain write unavailable');
+        }
+        return originalSetItem(key, value, options);
+      };
+      let rejected = false;
+      try {
+        await relay.retireRelayShortcutCapture(cfg);
+      } catch {
+        rejected = true;
+      } finally {
+        secure.setItemAsync = originalSetItem;
+      }
+      ok('shortcut retirement client: a failed Keychain write remains visibly retryable',
+        rejected && storedConfig(KEY).shortcutCaptureRetiredAt === undefined);
+      await relay.retireRelayShortcutCapture(await relay.getRelayConfig());
+      ok('shortcut retirement client: retry repairs local state after remote success',
+        net.count('POST /v1/device/retire-shortcut-capture') === 2 &&
+          Number.isFinite(storedConfig(KEY).shortcutCaptureRetiredAt));
+    }
+
+    {
+      freshDevice();
+      const originalIssued = credentials();
+      const replacementIssued = credentials();
+      const issued = [originalIssued, replacementIssued];
+      let finishRetirement;
+      let retirementStarted;
+      const started = new Promise((resolve) => { retirementStarted = resolve; });
+      const net = transport().install()
+        .on('POST /v1/pair', () => json(200, issued.shift()))
+        .on('POST /v1/device/retire-shortcut-capture', () => new Promise((resolve) => {
+          finishRetirement = resolve;
+          retirementStarted();
+        }));
+      const original = await relay.pairDevice(BASE, 'Original', 'AE');
+      const pending = relay.retireRelayShortcutCapture(original);
+      await started;
+      const replacement = await relay.pairDevice(BASE, 'Replacement', 'AE');
+      finishRetirement(json(204));
+      await pending;
+      const current = storedConfig(KEY);
+      ok('shortcut retirement client: a late success cannot stamp a replacement pairing',
+        current.deviceId === replacement.deviceId &&
+          current.syncToken === replacement.syncToken &&
+          current.shortcutCaptureRetiredAt === undefined &&
+          net.count('POST /v1/device/retire-shortcut-capture') === 1,
+        JSON.stringify({ current: current.deviceId, replacement: replacement.deviceId }));
+    }
+  }
+
   /* ═════════════════════ Changing country ═════════════════════ */
 
   {
@@ -645,6 +785,10 @@ async function queueItem(id, row, publicKey) {
   {
     const { net, cfg } = await paired();
     const before = storedConfig();
+    let statusSignals = 0;
+    const unsubscribeStatus = relay.subscribeRelayAutomationProof(() => {
+      statusSignals += 1;
+    });
     net.on('GET /v1/sync', () => json(401, { error: 'unauthorized' }));
     let thrown = null;
     try {
@@ -667,6 +811,8 @@ async function queueItem(id, row, publicKey) {
       await relay.getBackgroundRelayConfig(), null);
     ok('lost pairing: a cut-off device is still distinguishable from one never set up',
       (await relay.getRelayRevokedAt()) > 0);
+    eq('lost pairing: mounted status surfaces are notified immediately', statusSignals, 1);
+    unsubscribeStatus();
 
     // MARKED, NOT DESTROYED. A 401 is also what a captive portal or an
     // authenticating proxy answers. The X25519 private key is the only thing
@@ -805,15 +951,158 @@ async function queueItem(id, row, publicKey) {
     const { cfg } = await paired();
     eq('proof: a fresh pairing has never seen a real bank row',
       await relay.getRelayAutomationProof(cfg.deviceId), null);
-    await relay.recordRelayAutomationProof(cfg, 1_800_000_000_000);
-    eq('proof: the headless task can record one',
-      await relay.getRelayAutomationProof(cfg.deviceId), 1_800_000_000_000);
-    const write = [...secure.__keychain.writes].reverse().find((w) => w.key === PROOF_KEY);
-    eq('proof: written where a locked-phone wake can write it',
-      write.options.keychainAccessible, secure.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
+    secure.__keychain.items.set(
+      PROOF_KEY,
+      JSON.stringify({ deviceId: cfg.deviceId, at: 1_800_000_000_000 }),
+    );
+    eq('proof: a legacy processing-time marker is not strong Message automation evidence',
+      await relay.getRelayAutomationProof(cfg.deviceId), null);
+    await relay.recordRelayAutomationProof(
+      cfg,
+      automationMarker(cfg.deviceId, AUTOMATION_GENERATION_A),
+    );
+    eq('proof: a row cannot prove automation before a server generation exists',
+      await relay.getRelayAutomationProof(cfg.deviceId), null);
     const marked = await relay.markRelayVerified(cfg);
     eq('proof: the synthetic pipe test stays a separate, weaker claim',
       marked.setupState, 'verified');
+  }
+
+  {
+    const { net, cfg } = await paired();
+    const generations = [AUTOMATION_GENERATION_A, AUTOMATION_GENERATION_B];
+    net.on('POST /v1/automation-generation', () =>
+      json(200, { generation: generations.shift() }));
+    const verified = await relay.markRelayVerified(cfg);
+    const preparedAt = 1_900_000_000_000;
+    const prepared = await relay.markRelayAutomationPrepared(verified, preparedAt);
+    eq('proof: automation preparation is durable on the device pairing',
+      [
+        (await relay.getRelayConfig()).automationPreparedAt,
+        (await relay.getRelayConfig()).automationGeneration,
+      ],
+      [preparedAt, AUTOMATION_GENERATION_A]);
+    eq('proof: rotating the generation uses the foreground admin credential',
+      net.last('POST /v1/automation-generation').auth, `Bearer ${cfg.adminToken}`);
+    eq('proof: the locked-phone config receives only the opaque generation',
+      storedConfig(BACKGROUND_KEY).automationGeneration, AUTOMATION_GENERATION_A);
+    await relay.recordRelayAutomationProof(
+      prepared,
+      automationMarker(prepared.deviceId, AUTOMATION_GENERATION_A),
+    );
+    eq('proof: the headless task records the exact server generation',
+      await relay.getRelayAutomationProof(cfg.deviceId), AUTOMATION_GENERATION_A);
+    const write = [...secure.__keychain.writes].reverse().find((w) => w.key === PROOF_KEY);
+    eq('proof: written where a locked-phone wake can write it',
+      write.options.keychainAccessible, secure.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
+    ok('proof: only evidence from the current verification and preparation generation is active',
+      !relay.isRelayAutomationProofCurrent(null, AUTOMATION_GENERATION_A) &&
+        !relay.isRelayAutomationProofCurrent(
+          { ...prepared, setupState: 'configured' }, AUTOMATION_GENERATION_A,
+        ) &&
+        !relay.isRelayAutomationProofCurrent(prepared, AUTOMATION_GENERATION_B) &&
+        relay.isRelayAutomationProofCurrent(prepared, AUTOMATION_GENERATION_A));
+
+    const rotated = await relay.markRelayAutomationPrepared(prepared, preparedAt + 1);
+    await relay.recordRelayAutomationProof(
+      rotated,
+      automationMarker(rotated.deviceId, AUTOMATION_GENERATION_A),
+    );
+    ok('proof: a delayed row from the previous generation cannot become fresh on processing',
+      await relay.getRelayAutomationProof(rotated.deviceId) === AUTOMATION_GENERATION_A &&
+        !relay.isRelayAutomationProofCurrent(rotated, AUTOMATION_GENERATION_A));
+    await relay.recordRelayAutomationProof(
+      rotated,
+      automationMarker(rotated.deviceId, AUTOMATION_GENERATION_B),
+    );
+    ok('proof: only a row stamped after the same-device rotation activates the new setup',
+      await relay.getRelayAutomationProof(rotated.deviceId) === AUTOMATION_GENERATION_B &&
+        relay.isRelayAutomationProofCurrent(rotated, AUTOMATION_GENERATION_B));
+  }
+
+  {
+    const { net, cfg } = await paired();
+    const verified = await relay.markRelayVerified(cfg);
+    const pendingResponses = [];
+    const serverGenerations = [AUTOMATION_GENERATION_A, AUTOMATION_GENERATION_B];
+    let serverGeneration = null;
+    net.on('POST /v1/automation-generation', () => {
+      const generation = serverGenerations.shift();
+      serverGeneration = generation;
+      return new Promise((resolve) => pendingResponses.push({ generation, resolve }));
+    });
+
+    const firstPending = relay.markRelayAutomationPrepared(verified, 1_900_000_000_100);
+    const secondPending = relay.markRelayAutomationPrepared(verified, 1_900_000_000_200);
+    for (let i = 0; i < 10 && pendingResponses.length < 2; i += 1) {
+      await Promise.resolve();
+    }
+    const requestsOverlapped = pendingResponses.length === 2;
+
+    if (requestsOverlapped) {
+      // Reproduce a mobile-network inversion: request two reaches the server
+      // second but its response reaches the app first.
+      pendingResponses[1].resolve(json(200, { generation: pendingResponses[1].generation }));
+      await secondPending;
+      pendingResponses[0].resolve(json(200, { generation: pendingResponses[0].generation }));
+    } else {
+      pendingResponses[0].resolve(json(200, { generation: pendingResponses[0].generation }));
+      await firstPending;
+      for (let i = 0; i < 10 && pendingResponses.length < 2; i += 1) {
+        await Promise.resolve();
+      }
+      pendingResponses[1].resolve(json(200, { generation: pendingResponses[1].generation }));
+    }
+    const [first, second] = await Promise.all([firstPending, secondPending]);
+
+    ok('proof: concurrent preparation serializes each server rotation through local persistence',
+      !requestsOverlapped, `requests started together: ${requestsOverlapped}`);
+    eq('proof: concurrent preparation returns each server generation in request order',
+      [first.automationGeneration, second.automationGeneration],
+      [AUTOMATION_GENERATION_A, AUTOMATION_GENERATION_B]);
+    eq('proof: reverse network timing cannot leave server and Keychain generations mismatched',
+      [
+        serverGeneration,
+        storedConfig(KEY).automationGeneration,
+        storedConfig(BACKGROUND_KEY).automationGeneration,
+      ],
+      [AUTOMATION_GENERATION_B, AUTOMATION_GENERATION_B, AUTOMATION_GENERATION_B]);
+  }
+
+  for (const failedKey of [BACKGROUND_KEY, KEY]) {
+    const { net, cfg } = await paired();
+    const generations = [AUTOMATION_GENERATION_A, AUTOMATION_GENERATION_B];
+    net.on('POST /v1/automation-generation', () =>
+      json(200, { generation: generations.shift() }));
+    const verified = await relay.markRelayVerified(cfg);
+    const originalSetItem = secure.setItemAsync;
+    let failed = false;
+    secure.setItemAsync = async (key, value, options) => {
+      if (!failed && key === failedKey) {
+        failed = true;
+        throw new Error('keychain write unavailable');
+      }
+      return originalSetItem(key, value, options);
+    };
+    let rejected = false;
+    try {
+      await relay.markRelayAutomationPrepared(verified);
+    } catch {
+      rejected = true;
+    } finally {
+      secure.setItemAsync = originalSetItem;
+    }
+    const afterFailure = await relay.getRelayConfig();
+    ok(`proof: a failed ${failedKey === KEY ? 'foreground' : 'background'} generation write stays retryable`,
+      rejected && afterFailure?.automationPreparedAt === undefined &&
+        afterFailure?.automationGeneration === undefined,
+      JSON.stringify(afterFailure));
+
+    const retried = await relay.markRelayAutomationPrepared(afterFailure);
+    ok(`proof: retry repairs both Keychain surfaces after ${failedKey === KEY ? 'foreground' : 'background'} failure`,
+      retried.automationGeneration === AUTOMATION_GENERATION_B &&
+        storedConfig(KEY).automationGeneration === AUTOMATION_GENERATION_B &&
+        storedConfig(BACKGROUND_KEY).automationGeneration === AUTOMATION_GENERATION_B);
   }
 
   {
@@ -821,20 +1110,47 @@ async function queueItem(id, row, publicKey) {
     const firstIssued = credentials();
     const replacementIssued = credentials();
     const issued = [firstIssued, replacementIssued];
-    transport().install()
+    const generations = [AUTOMATION_GENERATION_A, AUTOMATION_GENERATION_B];
+    const net = transport().install()
       .on('POST /v1/pair', () => json(200, issued.shift()))
+      .on('POST /v1/automation-generation', () =>
+        json(200, { generation: generations.shift() }))
       .on('DELETE /v1/device', () => json(204));
-    const first = await relay.pairDevice(BASE, 'First pairing', 'AE');
-    await relay.recordRelayAutomationProof(first, 1_800_000_000_000);
+    const firstPaired = await relay.pairDevice(BASE, 'First pairing', 'AE');
+    const first = await relay.markRelayAutomationPrepared(
+      await relay.markRelayVerified(firstPaired),
+    );
+    await relay.recordRelayAutomationProof(
+      first,
+      automationMarker(first.deviceId, AUTOMATION_GENERATION_A),
+    );
     const replacement = await relay.pairDevice(BASE, 'Replacement pairing', 'AE');
     eq('proof: an old device marker cannot activate its replacement',
       await relay.getRelayAutomationProof(replacement.deviceId), null);
-    await relay.recordRelayAutomationProof(first, 1_800_000_000_001);
+    await relay.recordRelayAutomationProof(
+      first,
+      automationMarker(first.deviceId, AUTOMATION_GENERATION_A),
+    );
     eq('proof: a late old headless wake cannot stamp the replacement',
       await relay.getRelayAutomationProof(replacement.deviceId), null);
-    await relay.recordRelayAutomationProof(replacement, 1_800_000_000_002);
+    let stalePreparation = null;
+    try {
+      await relay.markRelayAutomationPrepared(first);
+    } catch (error) {
+      stalePreparation = error;
+    }
+    ok('proof: stale automation preparation cannot rotate or overwrite a replacement pairing',
+      stalePreparation?.code === 'stale_pairing' &&
+        net.count('POST /v1/automation-generation') === 1);
+    const preparedReplacement = await relay.markRelayAutomationPrepared(
+      await relay.markRelayVerified(replacement),
+    );
+    await relay.recordRelayAutomationProof(
+      preparedReplacement,
+      automationMarker(preparedReplacement.deviceId, AUTOMATION_GENERATION_B),
+    );
     eq('proof: the replacement becomes active only after its own wake',
-      await relay.getRelayAutomationProof(replacement.deviceId), 1_800_000_000_002);
+      await relay.getRelayAutomationProof(replacement.deviceId), AUTOMATION_GENERATION_B);
   }
 
   /* ═════════════════ The sealed row's own contract ═════════════════
@@ -897,6 +1213,62 @@ async function queueItem(id, row, publicKey) {
     !relay.isParsedRelayRow({ ...row, sender: 'ENBD\nforged' }));
   ok('row: a legitimate rawless structured row is accepted',
     !('raw' in row) && relay.isParsedRelayRow(row));
+  ok('row: only the exact Messages-automation marker can prove setup',
+    relay.isParsedRelayRow({
+      ...row,
+      captureAutomation: automationMarker(
+        'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        AUTOMATION_GENERATION_A,
+      ),
+    }) &&
+      relay.relayRowToScannedSms({
+        ...row,
+        captureAutomation: automationMarker(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          AUTOMATION_GENERATION_A,
+        ),
+      }).captureAutomation?.generation === AUTOMATION_GENERATION_A &&
+      relay.isParsedRelayRow({ ...row, captureAutomation: { kind: 'manual' } }) &&
+      relay.relayRowToScannedSms({ ...row, captureAutomation: { kind: 'manual' } })
+        .captureAutomation === undefined &&
+      relay.isParsedRelayRow({
+        ...row,
+        captureAutomation: automationMarker('not-a-device', AUTOMATION_GENERATION_A),
+      }) &&
+      relay.relayRowToScannedSms({
+        ...row,
+        captureAutomation: automationMarker('not-a-device', AUTOMATION_GENERATION_A),
+      }).captureAutomation === undefined &&
+      relay.isParsedRelayRow({
+        ...row,
+        captureAutomation: automationMarker(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          'too-short',
+        ),
+      }) &&
+      relay.relayRowToScannedSms({
+        ...row,
+        captureAutomation: automationMarker(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          'too-short',
+        ),
+      }).captureAutomation === undefined &&
+      relay.isParsedRelayRow({
+        ...row,
+        captureSource: 'email',
+        captureAutomation: automationMarker(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          AUTOMATION_GENERATION_A,
+        ),
+      }) &&
+      relay.relayRowToScannedSms({
+        ...row,
+        captureSource: 'email',
+        captureAutomation: automationMarker(
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          AUTOMATION_GENERATION_A,
+        ),
+      }).captureAutomation === undefined);
   ok('row: the cash-withdrawal category crosses the sealed iOS relay',
     relay.isParsedRelayRow({
       ...row,
@@ -988,6 +1360,7 @@ async function queueItem(id, row, publicKey) {
     freshDevice();
     const db = new DatabaseSync(':memory:');
     db.exec(readFileSync(SCHEMA_PATH, 'utf8'));
+    db.exec(readFileSync(SHORTCUT_RETIREMENT_MIGRATION_PATH, 'utf8'));
     // D1 is SQLite. The adapter renames methods and reports `changes`, which is
     // what the Worker reads to tell a queued row from one a replay receipt
     // refused — get that wrong and the duplicate assertions below go green for
@@ -1005,9 +1378,16 @@ async function queueItem(id, row, publicKey) {
       DB: {
         prepare: (sql) => statement(sql),
         batch: async (statements) => {
-          const out = [];
-          for (const s of statements) out.push(await s.run());
-          return out;
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const out = [];
+            for (const s of statements) out.push(await s.run());
+            db.exec('COMMIT');
+            return out;
+          } catch (error) {
+            db.exec('ROLLBACK');
+            throw error;
+          }
         },
       },
       // 32 bytes, standard base64 — the Worker secret that encrypts push tokens
@@ -1051,11 +1431,23 @@ async function queueItem(id, row, publicKey) {
      * retries; omitting it falls back to the body as the identity, which is why
      * posting the same text twice below collapses without one.
      */
-    const shortcutPost = (text, sender, receivedAt = '2026-07-17T09:00:00.000Z', eventId) =>
+    const shortcutPost = (
+      text,
+      sender,
+      receivedAt = '2026-07-17T09:00:00.000Z',
+      eventId,
+      automation,
+    ) =>
       fetch(cfg.ingestUrl, {
         method: 'POST',
         headers: { authorization: `Bearer ${cfg.ingestToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ text, sender, receivedAt, ...(eventId ? { eventId } : {}) }),
+        body: JSON.stringify({
+          text,
+          sender,
+          receivedAt,
+          ...(eventId ? { eventId } : {}),
+          ...(automation ? { automation } : {}),
+        }),
       });
 
     const accepted = await shortcutPost(ADIB_CARD, 'ADIB');
@@ -1117,6 +1509,8 @@ async function queueItem(id, row, publicKey) {
     eq('e2e: the bank label survives for card attribution', captured.sender, 'ADIB');
     eq("e2e: the timestamp is the message's, not the relay's receipt time",
       captured.smsTs, Date.parse('2026-07-17T09:00:00.000Z'));
+    eq('e2e: a manual Shortcut request carries no Messages-automation proof',
+      captured.captureAutomation, undefined);
     ok('e2e: no message text came back with it', captured.raw === undefined);
 
     eq('e2e: collecting does not delete', db.prepare('SELECT COUNT(*) n FROM queue').get().n, 1);
@@ -1125,11 +1519,15 @@ async function queueItem(id, row, publicKey) {
     const again = await relay.syncRelay(cfg);
     eq('e2e: and nothing is left to collect twice', again.parsed.length, 0);
 
+    const preparedCfg = await relay.markRelayAutomationPrepared(
+      await relay.markRelayVerified(cfg),
+    );
     const reviewAccepted = await shortcutPost(
       FALLBACK_SALARY,
       'FAB',
       '2026-07-17T10:00:00.000Z',
       'fallback-salary-01',
+      'message',
     );
     eq('semantic salary e2e: a proven launch-parser miss is accepted', reviewAccepted.status, 202);
     const reviewCollected = await relay.syncRelay(cfg);
@@ -1138,9 +1536,13 @@ async function queueItem(id, row, publicKey) {
     eq('semantic salary e2e: it no longer produces a review item',
       reviewCollected.reviewCandidates.length, 0);
     ok('semantic salary e2e: direction, money and category survive without raw text',
-      reviewCollected.parsed[0]?.type === 'income' &&
+        reviewCollected.parsed[0]?.type === 'income' &&
         reviewCollected.parsed[0]?.amountFils === 850000 &&
         reviewCollected.parsed[0]?.categoryGuess === 'salary' &&
+        reviewCollected.parsed[0]?.captureAutomation?.kind === 'message' &&
+        reviewCollected.parsed[0]?.captureAutomation?.sourceDeviceId === cfg.deviceId &&
+        reviewCollected.parsed[0]?.captureAutomation?.generation ===
+          preparedCfg.automationGeneration &&
       !dumpAll().includes('FAB payroll') && !dumpAll().includes('WPS credit') &&
         !JSON.stringify(reviewCollected.parsed).includes('WPS'));
     await relay.ackRelay(cfg, reviewCollected.ids);
@@ -1263,6 +1665,7 @@ async function queueItem(id, row, publicKey) {
     let synced = { parsed: [], ids: [], unreadable: 0, testReceived: 0, testIds: [] };
     let acked = [];
     const captureDep = (id) => {
+      if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
       if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
       if (id === '@/lib/background-relay') {
         return {
@@ -1293,7 +1696,8 @@ async function queueItem(id, row, publicKey) {
     };
 
     const capture = execute('src/lib/capture.ts', captureDep);
-    const state = { parserVersion: 1, lastScanTs: 0, privateMode: false, merchantOverrides: {} };
+    const reviewTray = { pending: [], tombstones: [], templateRules: [] };
+    const state = { parserVersion: 1, lastScanTs: 0, privateMode: false, merchantOverrides: {}, transactions: [], reviewTray };
 
     /* A restricted OEM provider can keep READ_SMS looking granted while
      * yielding no history. That must not stamp a parser migration complete
@@ -1302,6 +1706,7 @@ async function queueItem(id, row, publicKey) {
     {
       let requestedSince = null;
       const historyCapture = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
         if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
         if (id === '@/lib/background-relay') {
           return {
@@ -1337,6 +1742,7 @@ async function queueItem(id, row, publicKey) {
       let code = null;
       try {
         await historyCapture.collectNewMessages({
+          reviewTray,
           hydrated: true,
           parserVersion: 23,
           lastScanTs: 900,
@@ -1353,6 +1759,7 @@ async function queueItem(id, row, publicKey) {
         code, 'ERR_SMS_HISTORY_UNAVAILABLE');
 
       const pushOnly = await historyCapture.collectNewMessages({
+        reviewTray,
         hydrated: true,
         parserVersion: 23,
         lastScanTs: 900,
@@ -1595,6 +2002,7 @@ async function queueItem(id, row, publicKey) {
             getBackgroundRelayConfig: async () => null,
             getRelayConfig: async () => null,
             markRelayVerified: async (cfg) => ({ ...cfg, setupState: 'verified', verifiedAt: 1 }),
+            recordRelayAutomationProof: async () => {},
             syncRelay: async () => ({
               parsed: [], ids: [], testIds: [], unreadable: 0, testReceived: 0,
               shortcutRows: 0, shortcutRowsWithBank: 0,
@@ -1613,6 +2021,33 @@ async function queueItem(id, row, publicKey) {
         ensureDurable: async () => void events.push('flush'),
         markParserVersion: () => void events.push('parser'),
       });
+
+      // Exercise the real planner at the executor boundary: a refused batch
+      // must never be acknowledged as an empty/duplicate relay result.
+      {
+        const realPlanner = require('./build/import-plan.js');
+        const fixture = require('./fixtures/uae-bank-formats')
+          .find((item) => item.id === 'enbd-credit-card-purchase');
+        const parsedRow = require('./build/sms-parser.js').parseSms(fixture.body);
+        const events = [];
+        const pinnedLedger = { hydrated: true, marketId: 'AE', lastScanTs: 0,
+          ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 },
+          accounts: [], transactions: [], budgets: [], bills: [], cardDues: [], goals: [],
+          accountHints: {}, merchantOverrides: {}, captureOptOut: false };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: { ...ledger(Promise.resolve(), events), getState: () => pinnedLedger },
+          dependencies: {
+            collectRoutine: async () => ({ parsed: [parsedRow], declined: [], newestTs: 1,
+              source: 'relay', needsSetup: false, commit: async () => void events.push('ack') }),
+            planRows: realPlanner.buildImportPlan,
+          },
+        });
+        let rejected;
+        try { await executor.execute('routine'); } catch (error) { rejected = error; }
+        ok('capture executor: incompatible real parsed money raises its typed source-free rejection',
+          rejected instanceof realPlanner.ImportMoneyError);
+        eq('capture executor: rejected money neither persists a cursor nor acknowledges its source', events, []);
+      }
 
       {
         const events = [];
@@ -1668,6 +2103,63 @@ async function queueItem(id, row, publicKey) {
 
       {
         const events = [];
+        const cfg = {
+          deviceId: 'device', syncToken: 'sync', setupState: 'verified',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [{
+                ...row(2, 'MESSAGE'),
+                captureSource: 'shortcut',
+                captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+              }],
+              declined: [], newestTs: 2, source: 'relay', needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+            getRelay: async () => cfg,
+            recordAutomationProof: async () => void events.push('proof'),
+            planRows: () => changedPlan,
+          },
+        });
+        await executor.execute('routine');
+        eq('capture executor: foreground recovery records real automation only after durability',
+          events, ['persist', 'proof', 'ack']);
+      }
+
+      for (const [label, marker] of [
+        ['another device', automationMarker('other-device', AUTOMATION_GENERATION_A)],
+        ['an old generation', automationMarker('device', AUTOMATION_GENERATION_B)],
+      ]) {
+        const events = [];
+        const cfg = {
+          deviceId: 'device', syncToken: 'sync', setupState: 'verified',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [{
+                ...row(2, 'MESSAGE'), captureSource: 'shortcut', captureAutomation: marker,
+              }],
+              declined: [], newestTs: 2, source: 'relay', needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+            getRelay: async () => cfg,
+            recordAutomationProof: async () => void events.push('proof'),
+            planRows: () => changedPlan,
+          },
+        });
+        await executor.execute('routine');
+        eq(`capture executor: a staged marker from ${label} cannot prove on replay`,
+          events, ['persist', 'ack']);
+      }
+
+      {
+        const events = [];
         const executor = executorModule.createCaptureExecutor({
           ledger: ledger(Promise.resolve(), events),
           dependencies: {
@@ -1682,6 +2174,76 @@ async function queueItem(id, row, publicKey) {
         await executor.execute('routine');
         eq('capture executor: a deduplicated relay row flushes the ledger before acknowledgement',
           events, ['flush', 'ack']);
+      }
+
+      {
+        const events = [];
+        let releaseReview;
+        const reviewDurable = new Promise((resolve) => { releaseReview = resolve; });
+        let releaseLedger;
+        const ledgerDurable = new Promise((resolve) => { releaseLedger = resolve; });
+        let current = {
+          hydrated: true, lastScanTs: 1, ledgerId: 'before-review', captureOptOut: false,
+        };
+        const cfg = {
+          deviceId: 'device', syncToken: 'sync', setupState: 'verified',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => {
+              events.push('persist');
+              return { ids: [], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => {
+              events.push(`flush:${current.ledgerId}`);
+              await ledgerDurable;
+            },
+            stageReviewAlerts: () => {
+              events.push('review-stage');
+              return { admitted: 1, durable: reviewDurable };
+            },
+          },
+          dependencies: {
+            collectRoutine: async () => ({
+              parsed: [{
+                ...row(1, 'SHOP'),
+                captureSource: 'shortcut',
+                captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+              }],
+              declined: [], newestTs: 1,
+              reviewCandidates: [{ id: 'structured-review' }],
+              source: 'relay', needsSetup: false,
+              commit: async () => void events.push('ack'),
+            }),
+            getRelay: async () => cfg,
+            recordAutomationProof: async () => void events.push('proof'),
+            planRows: (_rows, stateAtPlan) => {
+              events.push(`plan:${stateAtPlan.ledgerId}`);
+              return emptyPlan;
+            },
+          },
+        });
+
+        const running = executor.execute('routine');
+        await Promise.resolve();
+        current = {
+          hydrated: true, lastScanTs: 1,
+          ledgerId: 'changed-during-review', captureOptOut: false,
+        };
+        releaseReview();
+        for (let i = 0; i < 10 && events.length < 3; i += 1) await Promise.resolve();
+        eq('capture executor: a mixed review and deduplicated relay page flushes the current ledger',
+          events, ['review-stage', 'plan:changed-during-review', 'flush:changed-during-review']);
+        releaseLedger();
+        await running;
+        eq('capture executor: mixed-page automation proof and acknowledgement follow ledger durability',
+          events,
+          [
+            'review-stage', 'plan:changed-during-review', 'flush:changed-during-review',
+            'proof', 'ack',
+          ]);
       }
 
       {
@@ -2007,6 +2569,170 @@ async function queueItem(id, row, publicKey) {
       }
 
       {
+        const network = controlledPromise();
+        const events = [];
+        let current = {
+          ...hydrated, captureOptOut: false, privateMode: false, marketId: 'AE',
+        };
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', market: 'AE',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            setMarket: (market) => { events.push(`market:${market}`); return true; },
+            stageReviewAlerts: () => {
+              events.push('stage-review');
+              return { admitted: 1, durable: Promise.resolve() };
+            },
+            importBatch: () => {
+              events.push('persist');
+              return { ids: ['tx'], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => void events.push('flush'),
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => {
+              events.push('sync');
+              return network.promise;
+            },
+            planRows: () => changedPlan,
+            recordAutomationProof: async () => void events.push('proof'),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        const running = executor.execute('supplemental');
+        await nextMicrotask();
+        current = { ...current, captureOptOut: true };
+        network.resolve({
+          parsed: [{
+            ...row(20, 'PANDA'), market: 'SA', captureSource: 'shortcut',
+            captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+          }],
+          reviewCandidates: [{ id: 'review' }],
+          ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+          shortcutRows: 1, shortcutRowsWithBank: 1,
+        });
+        const outcome = await running;
+        ok('capture executor: opt-out during relay sync blocks market, stage, import, proof, and ACK',
+          outcome.kind === 'up-to-date' && outcome.source === 'none' &&
+            JSON.stringify(events) === JSON.stringify(['sync']),
+          JSON.stringify({ outcome, events }));
+      }
+
+      {
+        const reviewDurability = controlledPromise();
+        const events = [];
+        let current = { ...hydrated, captureOptOut: false, privateMode: false };
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            stageReviewAlerts: () => {
+              events.push('stage-review');
+              return {
+                admitted: 1,
+                durable: reviewDurability.promise.then(() => void events.push('review-durable')),
+              };
+            },
+            importBatch: () => {
+              events.push('persist');
+              return { ids: ['tx'], durable: Promise.resolve() };
+            },
+            ensureDurable: async () => void events.push('flush'),
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => {
+              events.push('sync');
+              return {
+                parsed: [{
+                  ...row(21, 'LULU'), captureSource: 'shortcut',
+                  captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+                }],
+                reviewCandidates: [{ id: 'review' }],
+                ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+                shortcutRows: 1, shortcutRowsWithBank: 1,
+              };
+            },
+            planRows: () => changedPlan,
+            recordAutomationProof: async () => void events.push('proof'),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        const running = executor.execute('supplemental');
+        for (let attempt = 0; attempt < 5 && !events.includes('stage-review'); attempt += 1) {
+          await nextMicrotask();
+        }
+        current = { ...current, privateMode: true };
+        reviewDurability.resolve();
+        const outcome = await running;
+        ok('capture executor: Private Mode during review durability blocks relay import, proof, and ACK',
+          outcome.kind === 'up-to-date' && outcome.source === 'none' &&
+            JSON.stringify(events) === JSON.stringify(['sync', 'stage-review', 'review-durable']),
+          JSON.stringify({ outcome, events }));
+      }
+
+      {
+        const importDurability = controlledPromise();
+        const events = [];
+        let current = { ...hydrated, captureOptOut: false, privateMode: false };
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: {
+            getState: () => current,
+            importBatch: () => {
+              events.push('persist');
+              return {
+                ids: ['tx'],
+                durable: importDurability.promise.then(() => void events.push('persist-durable')),
+              };
+            },
+            ensureDurable: async () => void events.push('flush'),
+          },
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => {
+              events.push('sync');
+              return {
+                parsed: [{
+                  ...row(22, 'NOON'), captureSource: 'shortcut',
+                  captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+                }],
+                ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+                shortcutRows: 1, shortcutRowsWithBank: 1,
+              };
+            },
+            planRows: () => changedPlan,
+            recordAutomationProof: async () => void events.push('proof'),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        const running = executor.execute('supplemental');
+        for (let attempt = 0; attempt < 5 && !events.includes('persist'); attempt += 1) {
+          await nextMicrotask();
+        }
+        current = { ...current, captureOptOut: true };
+        importDurability.resolve();
+        const outcome = await running;
+        ok('capture executor: opt-out during import durability keeps relay proof and rows unacknowledged',
+          outcome.kind === 'up-to-date' && outcome.source === 'none' &&
+            JSON.stringify(events) === JSON.stringify(['sync', 'persist', 'persist-durable']),
+          JSON.stringify({ outcome, events }));
+      }
+
+      {
         const events = [];
         const cfg = { baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k' };
         const executor = executorModule.createCaptureExecutor({
@@ -2122,6 +2848,7 @@ async function queueItem(id, row, publicKey) {
         const events = [];
         const cfg = {
           baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'configured',
+          deviceId: 'device', automationGeneration: AUTOMATION_GENERATION_A,
         };
         const executor = executorModule.createCaptureExecutor({
           ledger: ledger(Promise.resolve(), events),
@@ -2177,32 +2904,78 @@ async function queueItem(id, row, publicKey) {
         ok('capture executor: a PDF-only page keeps setup waiting', outcome.kind === 'setup-waiting');
       }
 
-      {
+      for (const [label, marker] of [
+        ['without automation attestation', undefined],
+        ['attested for another device', automationMarker('other-device', AUTOMATION_GENERATION_A)],
+        ['attested for an old generation', automationMarker('device', AUTOMATION_GENERATION_B)],
+      ]) {
+        const events = [];
         const cfg = {
           baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'configured',
+          deviceId: 'device', automationGeneration: AUTOMATION_GENERATION_A,
         };
         const executor = executorModule.createCaptureExecutor({
-          ledger: ledger(Promise.resolve(), []),
+          ledger: ledger(Promise.resolve(), events),
           dependencies: {
             getRelay: async () => cfg,
             sync: async () => ({
               parsed: [
                 { ...row(20, 'OLDER EMAIL'), captureSource: 'email' },
-                { ...row(21, 'SHORTCUT MERCHANT'), captureSource: 'shortcut' },
+                {
+                  ...row(21, 'SHORTCUT MERCHANT'),
+                  captureSource: 'shortcut',
+                  ...(marker ? { captureAutomation: marker } : {}),
+                },
               ],
               ids: ['email-row', 'shortcut-row'], testIds: [], unreadable: 0, testReceived: 0,
               shortcutRows: 1, shortcutRowsWithBank: 1,
             }),
             planRows: () => changedPlan,
-            acknowledge: async () => {},
-            markVerified: async (active) => ({ ...active, setupState: 'verified', verifiedAt: 88 }),
+            acknowledge: async (_active, ids) => void events.push(`ack:${ids.join(',')}`),
+            markVerified: async (active) => {
+              events.push('verified');
+              return { ...active, setupState: 'verified', verifiedAt: 88 };
+            },
           },
         });
         const outcome = await executor.execute('setup-verification');
-        ok('capture executor: setup proof names the Shortcut row rather than an older shared-queue row',
-          outcome.kind === 'setup-observed' && outcome.merchant === 'SHORTCUT MERCHANT' &&
-            outcome.isTest === false && outcome.verifiedAt === 88,
-          JSON.stringify(outcome));
+        eq(`capture executor: a Shortcut financial row ${label} cannot prove setup`,
+          [outcome.kind, events],
+          ['setup-waiting', ['persist', 'ack:email-row,shortcut-row']]);
+      }
+
+      {
+        const events = [];
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'configured',
+          deviceId: 'device', automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          ledger: ledger(Promise.resolve(), events),
+          dependencies: {
+            getRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [{
+                ...row(21, 'SHORTCUT MERCHANT'),
+                captureSource: 'shortcut',
+                captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+              }],
+              ids: ['shortcut-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            planRows: () => changedPlan,
+            acknowledge: async () => void events.push('ack'),
+            markVerified: async (active) => {
+              events.push('verified');
+              return { ...active, setupState: 'verified', verifiedAt: 88 };
+            },
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+        });
+        const outcome = await executor.execute('setup-verification');
+        eq('capture executor: only this device current generation can prove setup with a bank row',
+          [outcome.kind, outcome.kind === 'setup-observed' ? outcome.merchant : null, events],
+          ['setup-observed', 'SHORTCUT MERCHANT', ['persist', 'verified', 'proof', 'ack']]);
       }
 
       {
@@ -2330,9 +3103,14 @@ async function queueItem(id, row, publicKey) {
         const events = [];
         const cfg = {
           baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
+          deviceId: 'device', automationGeneration: AUTOMATION_GENERATION_A,
         };
         const queued = {
-          parsed: [{ ...row(30, 'LULU'), captureSource: 'shortcut' }],
+          parsed: [{
+            ...row(30, 'LULU'),
+            captureSource: 'shortcut',
+            captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
+          }],
           ids: ['bank-row', 'setup-probe'],
           testIds: ['setup-probe'],
           unreadable: 0, testReceived: 1, shortcutRows: 1, shortcutRowsWithBank: 1,
@@ -2355,6 +3133,64 @@ async function queueItem(id, row, publicKey) {
         await executor.execute('background');
         eq('capture executor: background staging and proof precede ack while probes remain reserved',
           events, ['stage', 'announce', 'proof', 'ack:bank-row']);
+      }
+
+      for (const [label, marker] of [
+        ['another source device', automationMarker('owner-device', AUTOMATION_GENERATION_A)],
+        ['the prior generation', automationMarker('device', AUTOMATION_GENERATION_B)],
+      ]) {
+        const events = [];
+        const cfg = {
+          baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k',
+          setupState: 'verified', deviceId: 'device',
+          automationGeneration: AUTOMATION_GENERATION_A,
+        };
+        const executor = executorModule.createCaptureExecutor({
+          background: {
+            stage: async (rows) => { events.push('stage'); return rows; },
+            announce: async () => void events.push('announce'),
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+          dependencies: {
+            getBackgroundRelay: async () => cfg,
+            sync: async () => ({
+              parsed: [{
+                ...row(30, 'LULU'), captureSource: 'shortcut', captureAutomation: marker,
+              }],
+              ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        await executor.execute('background');
+        eq(`capture executor: a queued marker from ${label} cannot prove before ack`,
+          events, ['stage', 'announce', 'ack']);
+      }
+
+      {
+        const events = [];
+        const executor = executorModule.createCaptureExecutor({
+          background: {
+            stage: async (rows) => { events.push('stage'); return rows; },
+            announce: async () => void events.push('announce'),
+            recordAutomationProof: async () => void events.push('proof'),
+          },
+          dependencies: {
+            getBackgroundRelay: async () => ({
+              baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
+            }),
+            sync: async () => ({
+              parsed: [{ ...row(31, 'MANUAL'), captureSource: 'shortcut' }],
+              ids: ['manual-row'], testIds: [], unreadable: 0, testReceived: 0,
+              shortcutRows: 1, shortcutRowsWithBank: 1,
+            }),
+            acknowledge: async () => void events.push('ack'),
+          },
+        });
+        await executor.execute('background');
+        eq('capture executor: a manual Shortcut row cannot prove Messages automation',
+          events, ['stage', 'announce', 'ack']);
       }
 
       {

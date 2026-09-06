@@ -17,7 +17,7 @@
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
 
-const BASE = 'http://localhost:8126';
+const BASE = process.env.BASE ?? 'http://localhost:8126';
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
   if (cond) { pass++; console.log(`✓ ${name}`); }
@@ -80,8 +80,28 @@ async function tapKey(page, key, timeout = 4000) {
 }
 
 const tapTab = async (page, name) => {
-  await page.getByRole('tab', { name }).click({ timeout: 8000 });
-  await page.waitForTimeout(1200);
+  const tapped = await tapKey(page, name, 8000);
+  if (tapped !== true) throw new Error(`Could not hit-test tab: ${name}`);
+  await page.waitForFunction((want) => {
+    for (const tab of document.querySelectorAll('[role="tab"]')) {
+      const label = tab.getAttribute('aria-label') ?? (tab.textContent || '').trim();
+      if (label === want && tab.getAttribute('aria-selected') === 'true') return true;
+    }
+    return false;
+  }, name, { timeout: 8000 });
+  await page.waitForFunction((want) => {
+    const headings = document.querySelectorAll('[role="heading"],h1,h2,h3,h4,h5,h6');
+    for (const heading of headings) {
+      if ((heading.textContent || '').trim() !== want) continue;
+      const rect = heading.getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4) continue;
+      const x = Math.min(Math.max(rect.x + rect.width / 2, 1), window.innerWidth - 2);
+      const y = Math.min(Math.max(rect.y + rect.height / 2, 1), window.innerHeight - 2);
+      const top = document.elementFromPoint(x, y);
+      if (top && (heading.contains(top) || top.contains(heading))) return true;
+    }
+    return false;
+  }, name, { timeout: 8000 });
 };
 
 /**
@@ -148,7 +168,7 @@ const money = (s) => {
 const paintedText = (page) => page.evaluate(() => {
   const out = [];
   const seen = new Set();
-  for (const el of document.querySelectorAll('div,span')) {
+  for (const el of document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')) {
     if (el.children.length) continue;
     const s = (el.textContent || '').trim();
     if (!s) continue;
@@ -242,7 +262,7 @@ async function pressEverything(name, enter, { skip = [] } = {}) {
   const stuck = [];
   let pressed = 0, disabled = 0;
   for (const key of controls) {
-    if (skip.includes(key) || ['Home', 'Flow', 'Bills', 'Wallet'].includes(key)) continue;
+    if (skip.includes(key) || ['Home', 'Spending', 'Bills', 'Accounts'].includes(key)) continue;
     errors.length = 0;
     let clicked = false;
     try { clicked = await tapKey(page, key, 1200); } catch { clicked = false; }
@@ -326,15 +346,20 @@ async function backToScreen(base, enter) {
 }
 
 const home = async () => { await reload(); };
-const flow = async () => { await reload(); await tapTab(page, 'Flow'); };
+const flow = async () => { await reload(); await tapTab(page, 'Spending'); };
 const bills = async () => { await reload(); await tapTab(page, 'Bills'); };
-const wallet = async () => { await reload(); await tapTab(page, 'Wallet'); };
+const wallet = async () => { await reload(); await tapTab(page, 'Accounts'); };
 
 await pressEverything('home', home);
 await pressEverything('flow', flow);
 await pressEverything('bills · subs', bills);
 await pressEverything('bills · cards', async () => { await bills(); await tapKey(page, 'Cards 1'); await page.waitForTimeout(700); });
-await pressEverything('bills · fixed', async () => { await bills(); await tapKey(page, 'Fixed 6'); await page.waitForTimeout(700); });
+await pressEverything('bills · fixed', async () => {
+  await bills();
+  const fixed = (await visibleControls(page)).find((key) => /^Fixed \d+$/.test(key));
+  if (!fixed || (await tapKey(page, fixed, 5000)) !== true) throw new Error('Fixed bills segment not found');
+  await page.waitForTimeout(700);
+});
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForTimeout(1200); });
 await pressEverything('settings', async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1300); },
@@ -397,7 +422,7 @@ await resetPreferences();
 {
   await flow();
   const cards = await page.evaluate(() => {
-    let head = [...document.querySelectorAll('div,span')].find(
+    let head = [...document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
       (e) => !e.children.length && /^worth knowing$/i.test((e.textContent || '').trim()),
     );
     // Up to the section that holds the header AND the list under it.
@@ -475,6 +500,31 @@ await goesTo('settings: "Send feedback" opens the feedback screen',
   async () => { await home(); await tapKey(page, 'Settings'); await page.waitForTimeout(1200); },
   'Send feedback', /^\/feedback/);
 
+/* Stable labels, not visible-copy selectors, own the core transaction path. */
+{
+  await home();
+  const searched = await tapKey(page, 'Search merchants or categories', 5000);
+  await page.waitForTimeout(900);
+  ok('transactions: Search label opens the ledger', searched && /^\/transactions/.test(await url(page)));
+
+  const added = await tapKey(page, 'Add transaction', 5000);
+  await page.waitForTimeout(900);
+  ok('transactions: Add Transaction label opens the form',
+    added && /^\/add-transaction/.test(await url(page)));
+
+  await tapKey(page, 'Close', 5000);
+  await page.waitForTimeout(700);
+  const backed = await tapKey(page, 'Back', 5000);
+  await page.waitForTimeout(700);
+  ok('transactions: Back label returns to Home', backed && /^\/$/.test(await url(page)));
+
+  await home();
+  await tapKey(page, 'In', 5000);
+  await page.waitForTimeout(900);
+  ok('transactions: Clear All label removes an applied route filter',
+    await tapKey(page, 'Clear all filters', 5000));
+}
+
 /* ── 4. Back gets you out of every pushed screen ──────────────────────── */
 
 for (const [name, enter] of [
@@ -539,7 +589,7 @@ for (const [name, enter] of [
    * it was the largest thing on the sheet.
    */
   const spent = await page.evaluate(() => {
-    const label = [...document.querySelectorAll('div,span')].find(
+    const label = [...document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
       (e) => !e.children.length && /^spent this month$/i.test((e.textContent || '').trim()),
     );
     const row = label?.parentElement;
@@ -625,7 +675,7 @@ for (const [name, enter] of [
   });
   ok(`home: the layout is mirrored without a restart (${dir})`, dir === 'rtl');
 
-  for (const [name, tab] of [['home', null], ['flow', 'التدفق'], ['bills', 'الفواتير'], ['wallet', 'المحفظة']]) {
+  for (const [name, tab] of [['home', null], ['flow', 'الإنفاق'], ['bills', 'الفواتير'], ['wallet', 'الحسابات']]) {
     if (tab) {
       await tapKey(page, tab, 8000);
       await page.waitForTimeout(1300);
@@ -659,7 +709,7 @@ for (const [name, enter] of [
  */
 {
   const overflow = [];
-  for (const [name, key] of [['home', 'Home'], ['flow', 'Flow'], ['bills', 'Bills'], ['wallet', 'Wallet']]) {
+  for (const [name, key] of [['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']]) {
     await tapKey(page, key, 5000);
     await page.waitForTimeout(700);
     overflow.push(...(await clippedText(page, name)));
@@ -712,7 +762,7 @@ for (const [name, enter] of [
   });
 
   await reload();
-  await tapTab(page, 'Flow');
+  await tapTab(page, 'Spending');
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForTimeout(900);
   const dark = await sample();

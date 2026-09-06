@@ -277,12 +277,26 @@ eq(
     .readFileSync(path.join(__dirname, '../../src/app/(tabs)/bills.tsx'), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^[ \t]*\/\/.*$/gm, '');
+  const e2e = fs.readFileSync(
+    path.join(__dirname, '../../scripts/e2e/e2e-smoke.mjs'),
+    'utf8',
+  );
   const addBillCalls = src.match(/addBill\(/g) ?? [];
-  eq('bills.tsx: three addBill call sites (row, sheet, adder)', addBillCalls.length, 3);
+  ok('Bills agenda retains recurring, card and manual bill sources',
+    /<PaymentAgenda/.test(src) && /kind: 'card'/.test(src) && /kind: 'bill'/.test(src) && /kind: 'recurring'/.test(src));
+  ok('Subscriptions still come from true active detected subscriptions',
+    /detectSubscriptions\(/.test(src) &&
+      /activeSubscriptions\(trueSubscriptions\(detected\)\)/.test(src));
+  ok('Cards still use open and recently settled dues',
+    /openDues\(state, now\)/.test(src) && /recentlySettledDues\(state, now\)/.test(src));
+  ok('Utilities retains reminders, loans, fixed commitments, and other repeats',
+    /billsForMonth\(/.test(src) && /const loans =/.test(src) &&
+      /const commitments =/.test(src) && /const otherRepeats =/.test(src));
+  eq('bills.tsx: two addBill call sites (sheet and adder)', addBillCalls.length, 2);
   eq(
-    'bills.tsx: both subscription call sites go through billFromSubscription',
+    'bills.tsx: the subscription call site goes through billFromSubscription',
     (src.match(/addBill\(billFromSubscription\(/g) ?? []).length,
-    2,
+    1,
   );
   // The raw charge is read in ONE place — the helper, where the cadence that
   // qualifies it is read too. A second reading is a second call site that has
@@ -295,7 +309,17 @@ eq(
   );
   ok(
     'bills.tsx: the remind affordance is gated on a representable cadence',
-    (src.match(/remindable\((sub|detail)\)/g) ?? []).length === 2,
+    (src.match(/remindable\(detail\)/g) ?? []).length === 1 &&
+      !/remindable\(sub\)/.test(src),
+  );
+  const manualRows = fs.readFileSync(path.join(__dirname, '../../src/components/bills/payment-agenda.tsx'), 'utf8');
+  ok('manual reminders keep one detail target without a nested payment/deletion action',
+    /onPress=\{\(\) => onOpen\(item\)\}/.test(manualRows) &&
+    /setSelectedReminderId\(item\.id\.slice\(5\)\)/.test(src) &&
+    !/onLongPress|t\('markPaid'\)|<Button/.test(manualRows));
+  ok(
+    'manual reminder detail owns visible payment and delete footer actions',
+    /\{selectedReminder && \([\s\S]*?<BottomSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/.test(src),
   );
   // Save was enabled for "45", "0" and "12.5" — values saveBill rejects — so
   // the tap silently did nothing with the sheet still open.
@@ -309,6 +333,54 @@ eq(
     'bills.tsx: marking a bill paid prefers an account still in play',
     /state\.accounts\.find\(\(a\) => !a\.archived\)\?\.id/.test(src),
   );
+  ok(
+    'subscription history E2E is scoped to the sheet instead of a mounted page scroller',
+    /testID="subscription-history-scroll"/.test(src) &&
+      /\[data-testid="subscription-history-scroll"\]/.test(e2e) &&
+      !/while \(block\)/.test(e2e),
+  );
+}
+
+// Same-provider obligations retain their own payment evidence.
+{
+  fmt.setMonthStartDay(1);
+  const today = new Date(2026, 7, 12);
+  const reminder = (id, tail, title = 'SEWA') => ({
+    id, title, category: 'utilities', amountFils: 20000, dueDay: 10,
+    autoDetected: true, importIdentity: `account:${tail}`, paidMonths: [],
+  });
+  const receipt = {
+    id: 'sewa-receipt', type: 'expense', amountFils: 20000, category: 'utilities',
+    accountId: 'card', title: 'SEWA', date: '2026-08-05', source: 'sms',
+    paymentFlowSide: 'receipt', billIdentity: 'consumer:7118',
+  };
+  const pair = [reminder('home', '7118'), reminder('office', '2442')];
+  const paidIds = (rows) => rows.filter((row) => row.status === 'paid').map((row) => row.bill.id).sort();
+  eq('utility payment cannot settle another explicitly identified account',
+    paidIds(bills.billsForMonth(pair, [receipt], today)), ['home']);
+  eq('one unidentified provider receipt cannot mark two obligations paid',
+    paidIds(bills.billsForMonth(pair, [{ ...receipt, billIdentity: undefined }], today)), []);
+  eq('separate identified receipts settle both obligations independently',
+    paidIds(bills.billsForMonth(pair, [receipt, {
+      ...receipt, id: 'office-receipt', billIdentity: 'consumer:2442',
+    }], today)), ['home', 'office']);
+  eq('Arabic provider identity can settle its exact structured account',
+    paidIds(bills.billsForMonth([reminder('arabic', '7118', 'كهرباء الشارقة')], [receipt], today)), ['arabic']);
+  eq('Arabic title equality works without a structured account identifier',
+    paidIds(bills.billsForMonth([reminder('arabic-title', '7118', 'كهرباء الشارقة')], [{
+      ...receipt, title: 'كهرباء الشارقة', billIdentity: undefined,
+    }], today)), ['arabic-title']);
+  eq('Arabic generic bill words cannot join unrelated providers',
+    paidIds(bills.billsForMonth([reminder('electricity', '7118', 'فاتورة الكهرباء')], [{
+      ...receipt, title: 'فاتورة الهاتف', billIdentity: undefined,
+    }], today)), []);
+  const legacy = { ...reminder('legacy', '7118'), importIdentity: undefined };
+  eq('an exact identified receipt beats a weak legacy provider-title claim',
+    paidIds(bills.billsForMonth([pair[0], legacy], [receipt], today)), ['home']);
+  eq('two exact identity claims remain ambiguous rather than sharing a payment',
+    paidIds(bills.billsForMonth([pair[0], reminder('duplicate', '7118')], [receipt], today)), []);
+  eq('a refund alone never proves a utility obligation paid',
+    paidIds(bills.billsForMonth(pair, [{ ...receipt, type: 'income' }], today)), []);
 }
 
 console.log(`\nbills.test.js: ${pass} passed, ${fail} failed`);

@@ -1,5 +1,16 @@
 # Getting Wafra onto your iPhone via TestFlight, from a phone
 
+> **CURRENT STATUS — LEGACY RELAY SHORTCUT RETIRED / DO NOT USE FOR NEW SETUP**
+>
+> The general EAS/TestFlight account and build instructions remain reference
+> material. Any section that tells you to deploy the Message relay, install the
+> old **Wafra Capture** Shortcut, or use its iCloud URL is historical and must
+> not be followed for a new setup. The current local-capture implementation and
+> its still-blocked physical-iPhone release gates are defined in
+> [`2026-08-25-ios-local-capture.md`](./superpowers/plans/2026-08-25-ios-local-capture.md).
+> This page is not evidence of a new build, submission, signed replacement
+> Shortcut, published iCloud URL, or physical-device test.
+
 You have an Android phone and no Mac. That is fine: **EAS Build compiles iOS on
 Expo's own macOS machines**, so nothing on this page needs a Mac. What it needs
 is a terminal — exactly once, and there is a way to get one in a browser tab.
@@ -237,7 +248,7 @@ Rotate the phone to landscape. It is cramped but it is a real shell.
 In the Codespace terminal:
 
 ```bash
-npm install -g eas-cli
+npm install -g eas-cli@22.4.0
 eas login
 npx testflight
 ```
@@ -253,14 +264,14 @@ The 2FA code arrives on the same iPhone. Have it in your hand.
 If you would rather do it in pieces, the equivalent is:
 
 ```bash
-eas init                 # creates the project, writes extra.eas.projectId
-eas credentials --platform ios     # sign in to Apple; also where you store the ASC key
-eas build --platform ios --profile production   # answer any remaining prompts
+npx eas-cli@22.4.0 init                 # creates the project, writes extra.eas.projectId
+npx eas-cli@22.4.0 credentials --platform ios     # sign in to Apple; also where you store the ASC key
+npx eas-cli@22.4.0 build --platform ios --profile production   # answer any remaining prompts
 ```
 
 ### Then commit one line
 
-`eas init` writes the EAS project UUID into `app.json`:
+`npx eas-cli@22.4.0 init` writes the EAS project UUID into `app.json`:
 
 ```json
   "extra": {
@@ -423,11 +434,18 @@ A TestFlight build of Wafra today is a real, working ledger. Several things
 that the App Store version will do are **inert**, and none of them is a bug.
 Read this before concluding something is broken.
 
-### Automatic bank capture does not work yet
+### Legacy relay automatic capture — retired historical notes
+
+> **RETIRED / DO NOT USE FOR NEW SETUP.** The numbered procedure and URL below
+> are preserved only to explain the previous architecture. They are not a
+> current release checklist. Use the local-capture plan linked at the top of
+> this page instead.
 
 iOS does not let an app read Messages, and Wafra does not claim to. Automatic
-capture on iOS is a chain of three things, and **two of them are external state
-that does not exist yet**:
+capture on iOS is a chain of three things. The repository contains the app and
+relay pieces, and the `capture-beta` and `production` profiles point at the
+published, structurally verified Shortcut candidate. Deployment and physical
+end-to-end proof remain:
 
 1. **The relay must be deployed.** The Cloudflare Worker in `server/` is what
    receives a forwarded bank alert, parses it in memory and stores only the
@@ -436,21 +454,20 @@ that does not exist yet**:
    the same as that URL answering. Deploy it first:
    [`deploy-from-github.md`](./deploy-from-github.md), which is the same
    phone-only shape as this page.
-2. **The Wafra Capture Shortcut must be built and published** to iCloud, from
-   [`ios-shortcut-spec.md`](./ios-shortcut-spec.md), and its public URL put in
-   `EXPO_PUBLIC_WAFRA_SHORTCUT_URL`.
-
-   **That variable is not in `eas.json`.** Only `EXPO_PUBLIC_WAFRA_RELAY_URL`
-   is. Expo inlines these at build time, so in this build the Shortcut URL is
-   **empty** and the setup flow has no Shortcut to offer you. `src/lib/relay.ts`
-   deliberately provides no fallback: "a release with no deployed relay must
-   fail setup visibly, not send financial messages to a domain that merely
-   looks plausible."
+2. **Verify the published Wafra Capture candidate on a physical iPhone.** The
+   `capture-beta` and `production` profiles use
+   `https://www.icloud.com/shortcuts/03d2ab22a33f4fef9d503142575a70fb`.
+   Its downloaded action graph passes `check-ios-shortcut-artifact.sh`; this
+   proves the public link and graph, not iOS execution. Install that exact
+   Shortcut, create the Message automation, lock the phone, and receive one
+   real bank alert before treating automatic capture as release-verified. See
+   [`ios-shortcut-spec.md`](./ios-shortcut-spec.md).
 3. **You must create the personal Message automation** in Shortcuts yourself,
    pointed at the bank conversations you choose. That part is yours and works
    fine — once 1 and 2 exist.
 
-Until then, the iOS setup flow will not complete. Expect that.
+Until then, production automatic capture must be treated as unverified, even
+though the public Shortcut can be imported and its graph is valid.
 
 ### Push wakes probably do not arrive
 
@@ -558,7 +575,9 @@ thing a submission cannot work out from the bundle identifier alone if you ever
 end up with two app records. It is found at **App Store Connect → Apps → Wafra
 → App Store → App Information → General Information → Apple ID**.
 
-The other thing worth adding, when the Shortcut is published, is
-`EXPO_PUBLIC_WAFRA_SHORTCUT_URL` alongside `EXPO_PUBLIC_WAFRA_RELAY_URL` in the
-`production` and `preview` build profiles' `env` blocks. Until then, see "What
-this build cannot do yet".
+Historical note: the retired relay Shortcut was once described as published
+and configured in `capture-beta` and `production`, while ad-hoc `preview`
+omitted it. That statement does not qualify the old URL or establish a current
+replacement. Do not restore or promote it. Follow the local-capture plan and
+record its separate physical-iPhone gates before making any new automatic-
+capture release claim.

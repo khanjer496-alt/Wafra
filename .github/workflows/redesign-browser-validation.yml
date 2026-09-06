@@ -1,0 +1,128 @@
+name: Isolated redesign full validation
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-browser-validation.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Reconstruct and verify the exact local redesign
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, pathlib, subprocess
+          root = pathlib.Path.cwd()
+          app = root / 'app'
+          paths = ['src/app/(tabs)/bills.tsx','src/app/(tabs)/flow.tsx','src/app/(tabs)/wallet.tsx','src/app/add-transaction.tsx','src/app/categorise.tsx','src/app/feedback.tsx','src/app/import-sms.tsx','src/app/ios-setup.tsx','src/app/pro.tsx','src/app/review-alerts.tsx','src/app/settings.tsx','src/app/stats.tsx','src/app/transactions.tsx','src/app/trusted-devices.tsx','src/components/app-root-layout.tsx','src/components/bills/payment-agenda.tsx','src/components/entry-detail-sheet.tsx','src/components/ios-message-setup/checklist-row.tsx','src/components/onboarding-gate.tsx','src/components/reference-home-summary.tsx','src/components/spending/spending-overview.tsx','src/components/spending/spending-trends.tsx','src/components/tab-bar.tsx','src/components/themed-text.tsx','src/components/ui/category-avatar.tsx','src/components/ui/controls.tsx','src/components/ui/layout.tsx','src/components/ui/segmented-control.tsx','src/components/ui/text-field.tsx','src/components/wafra-logo.tsx','src/components/wallet/account-groups.tsx','src/components/wallet/balance-overview.tsx','src/components/workflows/workflow-copy.ts','src/components/workflows/workflow-surfaces.tsx','src/constants/theme.ts','src/lib/i18n.ts','src/lib/reference-presentation.ts','src/screens/journal-home-screen.tsx']
+          baseline = {}
+          for path in paths:
+              result = subprocess.run(['git','show','HEAD:'+path],cwd=app,capture_output=True)
+              baseline[path] = result.stdout.decode() if result.returncode == 0 else ''
+          data = json.dumps(baseline,separators=(',',':'),ensure_ascii=False).encode()
+          assert hashlib.sha256(data).hexdigest() == '0671ded6259f02c3ab2a672153323faa20e33c103086f208f65992826b3293d3', 'Baseline mismatch'
+          pathlib.Path('/tmp/wafra-base.json').write_bytes(data)
+          encoded = ''.join((root/'validation'/f'redesign-source-{part}.b64').read_text().strip() for part in ('a','b'))
+          compressed = base64.b64decode(encoded,validate=True)
+          assert hashlib.sha256(compressed).hexdigest() == '55983b1211daf5096a75f33298e3201eff9ce34fa2df1f577d16459e168fdf01', 'Delta mismatch'
+          pathlib.Path('/tmp/wafra-source.zst').write_bytes(compressed)
+          subprocess.run(['zstd','-d','--patch-from=/tmp/wafra-base.json','/tmp/wafra-source.zst','-o','/tmp/wafra-new.json'],check=True)
+          content = pathlib.Path('/tmp/wafra-new.json').read_bytes()
+          assert hashlib.sha256(content).hexdigest() == '7a5fc8f8438e0b18d618288dcb056014c922ac22b441221c7123455c58a09fc3', 'Redesign mismatch'
+          replacement = json.loads(content)
+          assert list(replacement) == paths
+          for path, text in replacement.items():
+              target = app / path
+              target.parent.mkdir(parents=True,exist_ok=True)
+              target.write_text(text)
+          evidence = root/'browser-evidence'
+          evidence.mkdir(exist_ok=True)
+          (evidence/'source-manifest.json').write_text(json.dumps({'base':'bcdf4f8b2d244801c3fb291454abaa293082dcd3','source_payload_sha256':hashlib.sha256(content).hexdigest(),'files':{p:hashlib.sha256((app/p).read_bytes()).hexdigest() for p in paths}},indent=2))
+          print('Verified all 38 production source files. No app files committed or deployed.')
+          PY
+      - name: Install locked dependencies and real browser
+        working-directory: app
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+          sudo apt-get install -y sqlite3
+          npx --no-install expo prebuild --platform ios --no-install
+      - name: Full application and server typecheck
+        id: types
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee ../browser-evidence/typecheck.log
+      - name: Full lint
+        id: lint
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ../browser-evidence/lint.log
+      - name: Existing full test suite without weakened checks
+        id: unit
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee ../browser-evidence/npm-test.log
+      - name: Real Expo web export
+        id: export
+        working-directory: app
+        env:
+          EXPO_PUBLIC_WAFRA_E2E_DEMO: '1'
+        run: |
+          set -o pipefail
+          npx --no-install expo export --clear --platform web --output-dir dist 2>&1 | tee ../browser-evidence/expo-export.log
+      - name: Real browser navigation and interaction checks
+        id: browser
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          node app/scripts/e2e/serve.mjs app/dist 8126 > browser-evidence/server.log 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for n in $(seq 1 40); do curl -fsS http://127.0.0.1:8126/ >/dev/null && break || sleep 1; done
+          node validation/redesign-browser-probe.mjs 2>&1 | tee browser-evidence/browser.log
+      - name: Record gate outcomes
+        if: always()
+        run: |
+          mkdir -p browser-evidence
+          printf '%s\n' 'typecheck=${{ steps.types.outcome }}' 'lint=${{ steps.lint.outcome }}' 'full_tests=${{ steps.unit.outcome }}' 'expo_export=${{ steps.export.outcome }}' 'browser=${{ steps.browser.outcome }}' > browser-evidence/gates.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-redesign-real-validation
+          path: browser-evidence
+          retention-days: 7
+      - name: Do not mask any failed gate
+        if: always()
+        run: |
+          test '${{ steps.types.outcome }}' = success
+          test '${{ steps.lint.outcome }}' = success
+          test '${{ steps.unit.outcome }}' = success
+          test '${{ steps.export.outcome }}' = success
+          test '${{ steps.browser.outcome }}' = success

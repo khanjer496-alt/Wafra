@@ -91,6 +91,20 @@ export function healPatch(
   ) {
     patch.category = p.categoryGuess;
   }
+  // Explicit refund/offset income belongs in Other, not Business. This is
+  // source evidence about income, unlike an uncertain expense fallback.
+  if (p.kind === 'transaction' && p.type === 'income' && p.categoryGuess === 'other' &&
+    p.categoryDeliberate && !p.categoryPinned && !p.transferHint && prior.category !== 'other') {
+    patch.category = 'other';
+  }
+  // Remember-for-future rules are defaults for NEW rows. Apply-all changes
+  // existing rows in the store immediately; a rescan cannot widen that choice.
+  // Only an incompatible old category needs a neutral repair after a genuine
+  // parser direction correction, never the future-only pinned category.
+  if (p.categoryPinned) {
+    if (!overrideFitsDirection(prior.category, patch.type ?? prior.type)) patch.category = 'other';
+    else delete patch.category;
+  }
   if (p.transferHint && !prior.isTransfer) patch.isTransfer = true;
   if (p.paymentFlowSide && prior.paymentFlowSide !== p.paymentFlowSide) {
     patch.paymentFlowSide = p.paymentFlowSide;
@@ -192,6 +206,8 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     if (
       (patch.ts === undefined || patch.ts === tx.ts) &&
       (patch.smsKey === undefined || patch.smsKey === tx.smsKey) &&
+      (patch.captureInstrument === undefined ||
+        JSON.stringify(patch.captureInstrument) === JSON.stringify(tx.captureInstrument)) &&
       nextViaPush === tx.viaPush
     ) {
       return tx;
@@ -199,6 +215,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     const identified: Transaction = { ...tx };
     if (patch.ts !== undefined) identified.ts = patch.ts;
     if (patch.smsKey !== undefined) identified.smsKey = patch.smsKey;
+    if (patch.captureInstrument !== undefined) identified.captureInstrument = patch.captureInstrument;
     if (patch.viaPush !== undefined) identified.viaPush = nextViaPush;
     return identified;
   }
@@ -210,6 +227,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.accountId !== undefined) next.accountId = patch.accountId;
   if (patch.ts !== undefined) next.ts = patch.ts;
   if (patch.smsKey !== undefined) next.smsKey = patch.smsKey;
+  if (patch.captureInstrument !== undefined) next.captureInstrument = patch.captureInstrument;
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;

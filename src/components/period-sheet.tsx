@@ -125,7 +125,7 @@ export function PeriodSheet({ visible, onClose }: PeriodSheetProps) {
                 styles.input,
                 {
                   backgroundColor: theme.backgroundElement,
-                  borderColor: theme.cardBorder,
+                  borderColor: theme.controlBorder,
                   color: value && !dateValid(value) ? theme.expense : theme.text,
                   textAlign: language === 'ar' ? 'right' : 'left',
                 },

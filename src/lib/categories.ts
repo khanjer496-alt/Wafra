@@ -1,4 +1,4 @@
-import type { IconName } from '@/components/ui/icon';
+import type { IconName } from '@/components/ui/icon.types';
 import { getLanguage, type Lang } from '@/lib/i18n';
 import type { CategoryId, TransactionType } from '@/lib/types';
 
@@ -64,6 +64,38 @@ export function getCategory(id: CategoryId): CategoryMeta {
   return byId.get(id) ?? byId.get('other')!;
 }
 
+/** Validate a category without turning an unknown id into the display fallback. */
+export function categorySupportsType(id: unknown, type: unknown): id is CategoryId {
+  if (typeof id !== 'string' || (type !== 'income' && type !== 'expense')) return false;
+  const category = byId.get(id as CategoryId);
+  return Boolean(category && (category.id === 'other' || category.type === type));
+}
+
+/** Reserved rule namespace; keep the historical trim/lower merchant normalization. */
+export function scopedMerchantOverrideKey(merchant: string, type: TransactionType): string {
+  return `${type}:${merchant.trim().toLowerCase()}`;
+}
+
+export function readMerchantCategoryOverride(
+  overrides: Readonly<Record<string, CategoryId>> | undefined,
+  merchant: string,
+  type: TransactionType,
+): CategoryId | undefined {
+  if (!overrides || (type !== 'income' && type !== 'expense')) return undefined;
+  const scoped = scopedMerchantOverrideKey(merchant, type);
+  if (Object.prototype.hasOwnProperty.call(overrides, scoped)) {
+    const category = overrides[scoped];
+    return categorySupportsType(category, type) ? category : undefined;
+  }
+  const legacy = merchant.trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(overrides, legacy)) return undefined;
+  const category = overrides[legacy];
+  // Before directional rules, Other was an expense rule. Reading it as an
+  // income rule would silently widen an existing user's original choice.
+  if (category === 'other' && type === 'income') return undefined;
+  return categorySupportsType(category, type) ? category : undefined;
+}
+
 /** Localized category name without duplicating category dictionaries in UI. */
 export function categoryLabel(category: CategoryMeta | CategoryId, language: Lang = getLanguage()): string {
   const meta = typeof category === 'string' ? getCategory(category) : category;
@@ -71,7 +103,12 @@ export function categoryLabel(category: CategoryMeta | CategoryId, language: Lan
 }
 
 export const EXPENSE_CATEGORIES = CATEGORIES.filter((c) => c.type === 'expense');
-export const INCOME_CATEGORIES = CATEGORIES.filter((c) => c.type === 'income');
+// Unknown credits, refunds and reimbursements are not automatically Salary or
+// Business. Keep one persisted Other id while presenting it in either direction.
+export const INCOME_CATEGORIES: CategoryMeta[] = [
+  ...CATEGORIES.filter((c) => c.type === 'income'),
+  { ...byId.get('other')!, type: 'income' },
+];
 
 /**
  * Money that leaves on a contract, not on a decision.
@@ -93,42 +130,4 @@ export const FIXED_COMMITMENT_CATEGORIES: readonly CategoryId[] = ['rent', 'busi
 
 export function isFixedCommitment(id: CategoryId): boolean {
   return FIXED_COMMITMENT_CATEGORIES.includes(id);
-}
-
-/**
- * The one place several categories have to be told apart at a glance: the
- * composition bar and its legend. One hue at five lightnesses, so the ramp
- * still reads as a single quantity being divided rather than as a set of
- * unrelated things. Anything past the fifth slice is "everything else".
- */
-export const CATEGORY_RAMP = {
-  light: ['#1F6B52', '#3D8A72', '#63A791', '#8CBFAE', '#B2D4C7'],
-  dark: ['#57B894', '#48A07F', '#3B826A', '#2F6754', '#264F41'],
-} as const;
-
-export function rampColor(index: number, dark: boolean): string {
-  const ramp = CATEGORY_RAMP[dark ? 'dark' : 'light'];
-  return ramp[Math.min(index, ramp.length - 1)];
-}
-
-/**
- * Ink that stays readable on a ramp step.
- *
- * The ramp spans from a deep green to a pale mint, so a single fixed ink works
- * at one end and disappears at the other. Relative luminance picks the side:
- * the same two inks the rest of the system uses, never a third colour.
- */
-export function onRampColor(hex: string): string {
-  const h = hex.replace('#', '');
-  const to = (i: number) => parseInt(h.slice(i, i + 2), 16) / 255;
-  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const luminance = 0.2126 * lin(to(0)) + 0.7152 * lin(to(2)) + 0.0722 * lin(to(4));
-  // 0.18, not 0.4. The two inks cross over where their contrasts are equal:
-  //   (L + 0.05) / (Link + 0.05) = (Lpaper + 0.05) / (L + 0.05)
-  // which with these two colours solves to L ≈ 0.177. Picking 0.4 by eye left
-  // every step between the two — the middle of the ramp, where most categories
-  // land — with the wrong ink: the mint #57B894 carried pale ink at 2.10:1,
-  // under the 3:1 a glyph needs. At 0.18 the worst step on either ramp is
-  // 3.99:1.
-  return luminance > 0.18 ? '#16130F' : '#F2EFE8';
 }

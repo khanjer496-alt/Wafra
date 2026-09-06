@@ -1,18 +1,20 @@
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { TransactionRow } from '@/components/transaction-row';
+import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { Icon } from '@/components/ui/icon';
-import { ScreenHeader, SectionHeader } from '@/components/ui/layout';
+import { SectionHeader } from '@/components/ui/layout';
 import { PeriodPill } from '@/components/ui/period-pill';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { TextField } from '@/components/ui/text-field';
+import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
@@ -88,39 +90,43 @@ export default function CurrencyScreen() {
     language,
   );
 
+  const currencyHeader: ScreenHeaderProps = {
+    title: t('foreignSpending', language),
+    back: { label: t('back', language), onPress: () => router.back() },
+  };
+
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.content}>
-          <ScreenHeader title={t('foreignSpending', language)} onBack={() => router.back()} />
+    <>
+      <ScreenScaffold
+        headerMode="native"
+        header={currencyHeader}
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
+          <View style={styles.periodRow}>
+            <PeriodPill onPress={() => setPeriodOpen(true)} />
+          </View>
 
           <ThemedText type="small" themeColor="textSecondary" style={styles.intro}>
             {t('foreignSpendingSubtitle', language)}
           </ThemedText>
 
-          <View style={styles.periodRow}>
-            <PeriodPill onPress={() => setPeriodOpen(true)} />
-          </View>
-
-          <View style={[styles.search, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-            <Icon name="search" size={16} color={theme.textTertiary} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder={t('searchForeignSpending', language)}
-              placeholderTextColor={theme.textTertiary}
-              accessibilityLabel={t('searchForeignSpending', language)}
-              autoCorrect={false}
-              style={[styles.searchInput, { color: theme.text }]}
-            />
-            {query.length > 0 && (
-              <Pressable accessibilityRole="button" accessibilityLabel={t('clearSearch', language)} onPress={() => setQuery('')} hitSlop={10}>
-                <Icon name="close" size={15} color={theme.textSecondary} />
-              </Pressable>
-            )}
-          </View>
+          <TextField
+            label={t('searchForeignSpending', language)}
+            value={query}
+            onChangeText={setQuery}
+            inputMode="search"
+            returnKeyType="search"
+            placeholder={t('searchForeignSpending', language)}
+            autoCorrect={false}
+            leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+            trailing={query.length > 0 ? (
+              <ActionIconButton
+                icon="close"
+                label={t('clearSearch', language)}
+                variant="plain"
+                onPress={() => setQuery('')}
+              />
+            ) : undefined}
+          />
 
           <Animated.View entering={reducedMotion ? undefined : FadeInDown.duration(320)}>
             <ThemedText type="micro" themeColor="textTertiary" style={styles.heroLabel}>
@@ -242,37 +248,20 @@ export default function CurrencyScreen() {
               </ThemedText>
             </View>
           )}
-        </ScrollView>
-      </SafeAreaView>
+      </ScreenScaffold>
 
       <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
       <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  content: { paddingHorizontal: ScreenPadding, paddingBottom: Spacing.five },
-  intro: { marginTop: -Spacing.one, maxWidth: 330 },
+  intro: { maxWidth: 330 },
   periodRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: Spacing.three,
-    marginBottom: Spacing.three,
   },
-  search: {
-    minHeight: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.control,
-    paddingHorizontal: Spacing.three,
-    marginBottom: Spacing.five,
-  },
-  searchInput: { flex: 1, minWidth: 0, paddingVertical: Spacing.two, fontSize: 15 },
   heroLabel: { marginBottom: Spacing.two },
   caption: { marginTop: Spacing.three, marginBottom: Spacing.one },
   section: { marginTop: Spacing.five },

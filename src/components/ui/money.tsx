@@ -1,9 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText, type TextType } from '@/components/themed-text';
-import { Fonts, Motion, Spacing } from '@/constants/theme';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAmount } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
@@ -44,7 +42,7 @@ function CurrencyPrefix() {
 }
 
 /**
- * A money figure with its currency demoted: 15px mono in `textSecondary`,
+ * A money figure with its currency demoted in `textSecondary`,
  * sitting on the amount's baseline, so the digits carry the line.
  */
 export function Money({
@@ -52,7 +50,7 @@ export function Money({
   type = 'small',
   color,
   sign = 'none',
-  decimals = false,
+  decimals,
   prefix = true,
   style,
 }: MoneyProps) {
@@ -61,62 +59,12 @@ export function Money({
       {prefix && (
         <CurrencyPrefix />
       )}
-      <ThemedText type={type} tabular style={color ? { color } : undefined}>
+      <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
         {signGlyph(fils, sign)}
         {formatAmount(Math.abs(fils), { decimals })}
       </ThemedText>
     </View>
   );
-}
-
-/**
- * Hero figure that counts from its previous value on a period change.
- * 900ms, once — a figure that re-animates on every render reads as a glitch.
- */
-export function CountUpMoney({
-  fils,
-  type = 'display',
-  color,
-  durationMs = Motion.countUp,
-}: {
-  fils: number;
-  type?: TextType;
-  color?: string;
-  durationMs?: number;
-}) {
-  const [display, setDisplay] = useState(fils);
-  const fromRef = useRef(fils);
-  const frame = useRef<number | null>(null);
-  const reduced = useReducedMotion();
-
-  useEffect(() => {
-    const from = fromRef.current;
-    if (from === fils) return;
-    // Reduce Motion, or a screen reader that would announce every frame.
-    if (reduced) {
-      setDisplay(fils);
-      fromRef.current = fils;
-      return;
-    }
-    const start = Date.now();
-    const tick = () => {
-      const t = Math.min(1, (Date.now() - start) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 4); // ease-out-quart
-      setDisplay(Math.round(from + (fils - from) * eased));
-      if (t < 1) {
-        frame.current = requestAnimationFrame(tick);
-      } else {
-        fromRef.current = fils;
-      }
-    };
-    frame.current = requestAnimationFrame(tick);
-    return () => {
-      if (frame.current !== null) cancelAnimationFrame(frame.current);
-      fromRef.current = fils;
-    };
-  }, [fils, durationMs, reduced]);
-
-  return <Money fils={display} type={type} color={color} />;
 }
 
 interface AmountFieldProps {
@@ -182,15 +130,17 @@ export function AmountField({
 const styles = StyleSheet.create({
   // The demoted currency: 15px mono in textSecondary, on the amount's baseline.
   currencyPrefix: {
-    fontFamily: Fonts.monoMedium,
+    fontFamily: Fonts.sansMedium,
     fontSize: 15,
     lineHeight: 19,
   },
   inline: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'baseline',
     gap: Spacing.two - 2,
   },
+  value: { flexShrink: 1, minWidth: 0 },
   field: {
     gap: Spacing.two,
   },

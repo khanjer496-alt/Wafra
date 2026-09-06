@@ -1,0 +1,56 @@
+name: iOS Shortcuts release review
+
+# Read-only owner-requested checks on an isolated release-review branch.
+on:
+  push:
+    branches: [release/ios-shortcuts-review-20260907]
+    paths:
+      - '.github/workflows/ios-shortcuts-release-review.yml'
+      - 'scripts/release/ios-beta-access-check.mjs'
+      - 'scripts/release/ios-public-shortcut-check.mjs'
+permissions:
+  contents: read
+concurrency:
+  group: ios-shortcuts-release-review
+  cancel-in-progress: false
+jobs:
+  access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install project config plugins before EAS reads config
+        run: npm ci
+      - name: Check existing Expo and Apple access without writing
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: node scripts/release/ios-beta-access-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta-access-${{ github.sha }}
+          path: ios-release-evidence/access.json
+          retention-days: 7
+  shortcuts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+      - name: Validate canonical and published graphs without executing them
+        run: node scripts/release/ios-public-shortcut-check.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-public-shortcuts-${{ github.sha }}
+          path: ios-release-evidence/public-shortcuts.json
+          retention-days: 7

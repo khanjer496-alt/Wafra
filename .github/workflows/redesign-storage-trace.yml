@@ -1,0 +1,61 @@
+name: Native storage invariant trace
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-storage-trace.yml']
+permissions:
+  contents: read
+jobs:
+  trace:
+    runs-on: macos-15
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          persist-credentials: false
+      - name: Trace the unchanged guard on an instrumented disposable copy
+        run: |
+          set -euo pipefail
+          mkdir -p trace-evidence
+          python3 - <<'PY'
+          from pathlib import Path
+          source=Path('modules/wafra-message-history/ios/WafraMessageHistoryStore.swift').read_text()
+          traced=[]
+          for i,line in enumerate(source.splitlines(),1):
+            line=line.replace('throw StoreError.storageFailure', f'print("DIAGNOSTIC storageFailure at original line {i}"); throw StoreError.storageFailure')
+            traced.append(line)
+          Path('/tmp/WafraMessageHistoryStore.swift').write_text('\n'.join(traced)+'\n')
+          PY
+          cat > /tmp/probe.swift <<'SWIFT'
+          import Foundation
+          @main struct Probe {
+            static func main() {
+              let fm=FileManager.default
+              let root=fm.temporaryDirectory.appendingPathComponent("wafra-synthetic-probe-"+UUID().uuidString,isDirectory:true)
+              defer {try? fm.removeItem(at:root)}
+              do {
+                let store=WafraMessageHistoryStore(root:root)
+                _=try store.beginSession(sessionId:"fixture-session")
+                print("BEGIN succeeded")
+              } catch { print("BEGIN failed:",String(describing:error)) }
+              for url in [root,root.appendingPathComponent(".store.lock")] {
+                do {
+                  let a=try fm.attributesOfItem(atPath:url.path)
+                  print("attributes",url.lastPathComponent,"type",String(describing:a[.type]),"mode",String(describing:a[.posixPermissions]),"links",String(describing:a[.referenceCount]),"protection",String(describing:a[.protectionKey]))
+                  print("complete protection recognized:",a[.protectionKey] as? FileProtectionType == .complete)
+                } catch { print("attributes failed:",url.lastPathComponent,String(describing:error)) }
+              }
+            }
+          }
+          SWIFT
+          swiftc -parse-as-library /tmp/WafraMessageHistoryStore.swift /tmp/probe.swift -o /tmp/wafra-storage-probe
+          /tmp/wafra-storage-probe 2>&1 | tee trace-evidence/host-store-trace.txt
+          # This diagnostic does not modify the repository store or waive a test.
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-storage-invariant-trace
+          path: trace-evidence
+          retention-days: 7

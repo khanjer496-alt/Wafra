@@ -69,6 +69,7 @@ const root = path.join(__dirname, '../..');
 const relaySource = fs.readFileSync(path.join(root, 'src/lib/relay.ts'), 'utf8');
 const screenSource = fs.readFileSync(path.join(root, 'src/app/trusted-devices.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
+const copySource = fs.readFileSync(path.join(root, 'src/lib/i18n.ts'), 'utf8');
 ok('client covers every trusted-device management endpoint',
   ['/v1/device-invites', '/v1/join', '/v1/devices', '/v1/vault']
     .every((endpoint) => relaySource.includes(endpoint)) &&
@@ -81,6 +82,16 @@ ok('joined credentials use device-only SecureStore persistence',
 ok('Settings links the real route and the screen exposes explicit vault deletion',
   /router\.push\('\/trusted-devices'\)/.test(settingsSource) &&
   /deleteTrustedVault\(config\)/.test(screenSource));
+const iosTruth = copySource.match(
+  /trustedIosTruth:\s*\{[\s\S]*?\n\s*\},\n\s*trustedPreview:/,
+)?.[0] || '';
+ok('iPhone trusted-device truth excludes local Message capture and qualifies relay imports',
+  /Platform\.OS === 'android'[\s\S]*?trustedIosTruth/.test(screenSource) &&
+  /Local iPhone Message captures stay on this iPhone/.test(iosTruth) &&
+  /separately relay-delivered supplemental imports/.test(iosTruth) &&
+  /can reach trusted devices/.test(iosTruth) &&
+  /التقاطات الرسائل المحلية/.test(iosTruth) &&
+  /الواردات الإضافية/.test(iosTruth));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

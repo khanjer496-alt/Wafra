@@ -33,6 +33,8 @@ Module._resolveFilename = function resolveWafraAlias(request, parent, isMain, op
 };
 
 const { projectDashboard } = require('../../src/lib/dashboard-projection.ts');
+const { composition, summarizeMonth } = require('../../src/lib/insights.ts');
+const { netWorthBreakdown } = require('../../src/lib/balances.ts');
 const { setActiveMarket, setLedgerCurrency } = require('../../src/lib/markets.ts');
 
 Module._resolveFilename = originalResolveFilename;
@@ -210,14 +212,19 @@ setActiveMarket('AE');
   const before = JSON.stringify(ledger);
   const projected = projectDashboard(request(ledger));
 
-  eq('hero figures share live-account, transfer, and display-rounding rules', projected.hero, {
-    incomeFils: 10100,
+  eq('hero figures preserve exact amounts and live-account/transfer exclusions', projected.hero, {
+    incomeFils: 10055,
     expenseFils: 6100,
     cashOutFils: 6100,
     cardPaymentsFils: 0,
     accountOutflowFils: 6100,
-    netFils: 4000,
+    netFils: 3955,
   });
+  eq(
+    'hero net remains shown income less shown spending',
+    projected.hero.netFils,
+    projected.hero.incomeFils - projected.hero.expenseFils,
+  );
   eq('the comparison uses the same eligible current rows',
     [projected.comparison?.currentFils, projected.comparison?.previousFils], [6100, 5000]);
   eq('period activity excludes archived and both internal-transfer halves',
@@ -260,6 +267,40 @@ setActiveMarket('AE');
   eq('the interface owns Home activity ordering and its six-row cap',
     projected.activityRows.map((row) => row.id), rows.slice(0, 6).map((row) => row.id));
 }
+
+for (const [currency, exponent, amounts] of [
+  ['AED', 2, [49, 49]],
+  ['AED', 2, [51, 51]],
+  ['KWD', 3, [1, 2]],
+  ['JPY', 0, [1, 2]],
+]) {
+  setLedgerCurrency(currency, exponent);
+  const rows = amounts.map((amountFils, index) => tx(`precision-${index}`, {
+    amountFils, category: index ? 'dining' : 'groceries',
+  }));
+  const income = tx('precision-income', { type: 'income', category: 'other', amountFils: 7 });
+  const exact = amounts.reduce((sum, amount) => sum + amount, 0);
+  const projected = projectDashboard(request(state([...rows, income])));
+  const slices = composition(summarizeMonth(rows, period), 1);
+  eq(`${currency} ${amounts} keeps Home spending exact`, projected.hero.expenseFils, exact);
+  eq(`${currency} ${amounts} keeps income and net exact`,
+    [projected.hero.incomeFils, projected.hero.netFils], [7, 7 - exact]);
+  eq(`${currency} ${amounts} keeps pooled Flow total equal to raw slices`,
+    [slices.totalFils, slices.slices.reduce((sum, slice) => sum + slice.totalFils, 0)], [exact, exact]);
+  const wallet = netWorthBreakdown({
+    accounts: [
+      { id: 'cash', kind: 'bank', openingFils: exact },
+      { id: 'credit', kind: 'card', cardType: 'credit', snapshotKind: 'outstanding', snapshotFils: 1 },
+      { id: 'unknown', kind: 'card', cardType: 'credit' },
+      { id: 'hidden', kind: 'bank', openingFils: 99999, archived: true },
+    ],
+    transactions: [],
+  });
+  eq(`${currency} Wallet preserves small balances and debts without rounding`,
+    [wallet.balanceFils, wallet.debtFils, wallet.totalFils, wallet.balanceByAccountId],
+    [exact, 1, exact - 1, { cash: exact, credit: -1, unknown: null }]);
+}
+setLedgerCurrency(null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

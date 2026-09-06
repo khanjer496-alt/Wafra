@@ -1,8 +1,19 @@
 import { toISODate } from '@/lib/format';
-import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import {
-  nonPostingReason,
-} from '@/lib/sms-parser';
+  identifySourceFreeReviewAlert,
+  inspectSourceFreeRefusedAlert,
+  shouldReviewParsedIncome,
+} from '@/lib/auto-import';
+import {
+  REVIEW_ALERT_TTL_MS,
+  appleMessageReviewIdentity,
+  type ReviewEntry,
+} from '@/lib/alert-review-tray';
+import {
+  createLaunchAlertSession,
+  type LaunchAlertSession,
+} from '@/lib/launch-alert-parser';
+import { bankFromSender } from '@/lib/markets';
 import type { CategoryId } from '@/lib/types';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 
@@ -11,13 +22,14 @@ export const HISTORICAL_MESSAGE_VERSION = 1 as const;
 export const MAX_HISTORICAL_RECORDS = 10_000;
 export const MAX_HISTORICAL_TEXT_BYTES = 16 * 1024;
 
-const ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+const ID_RE = /^[0-9a-f]{64}$/;
 const UTC_INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 const UNSAFE_SENDER_RE = /[\u0000-\u001F\u007F-\u009F\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+const MAX_JSON_CONTAINER_DEPTH = 64;
 
 export interface HistoricalMessageRecord {
   v: typeof HISTORICAL_MESSAGE_VERSION;
-  /** SHA-256/base64url identity produced from the Apple Message GUID. */
+  /** Lowercase hexadecimal SHA-256 identity produced from the Apple Message GUID. */
   id: string;
   text: string;
   sender?: string;
@@ -27,6 +39,7 @@ export interface HistoricalMessageRecord {
 
 export interface HistoricalImportResult {
   parsed: ScannedSms[];
+  reviewCandidates: ReviewEntry[];
   declined: DeclinedSms[];
   totalCount: number;
   acceptedCount: number;
@@ -35,6 +48,58 @@ export interface HistoricalImportResult {
   duplicateCount: number;
   newestTs: number;
 }
+
+type HistoricalRefusal =
+  | { kind: 'declined'; row: DeclinedSms }
+  | { kind: 'review'; item: ReviewEntry }
+  | { kind: 'ignored' };
+
+const inspectHistoricalRefusal = (input: {
+  record: HistoricalMessageRecord;
+  timestamp: number;
+  nowMs: number;
+  session: LaunchAlertSession;
+  inspection: ReturnType<LaunchAlertSession['inspect']>;
+}): HistoricalRefusal => {
+  const decision = inspectSourceFreeRefusedAlert({
+    source: input.record.text,
+    sender: input.record.sender?.trim() ?? '',
+    observedAt: input.timestamp,
+    channel: 'inbox',
+    session: input.session,
+    existingInspection: input.inspection,
+  });
+  if (decision.kind === 'declined') {
+    return {
+      kind: 'declined',
+      row: {
+        smsTs: input.timestamp,
+        channel: 'inbox',
+        sourceEventId: input.record.id,
+        reason: decision.reason,
+      },
+    };
+  }
+  if (decision.kind === 'ignored') return decision;
+  const identity = appleMessageReviewIdentity(input.record.id);
+  if (!identity) return { kind: 'ignored' };
+  const identified = identifySourceFreeReviewAlert(
+    decision.candidate,
+    identity,
+  );
+  if (!identified) return { kind: 'ignored' };
+  return {
+    kind: 'review',
+    item: {
+      ...identified,
+      channel: 'shortcut',
+      // An old Message is newly discovered now. Keep its real event timestamp,
+      // but give the user the ordinary review window from this import rather
+      // than immediately expiring years of otherwise reviewable history.
+      expiresAt: Math.max(identified.expiresAt, input.nowMs + REVIEW_ALERT_TTL_MS),
+    },
+  };
+};
 
 /** UTF-8 byte count without relying on TextEncoder being present in Hermes. */
 function utf8Bytes(value: string): number | null {
@@ -64,6 +129,92 @@ function ownKeysOnly(record: Record<string, unknown>): boolean {
   return Object.keys(record).every((key) => allowed.has(key));
 }
 
+function hasUniqueJsonMembers(input: string): boolean {
+  let index = 0;
+  const isWhitespace = (code: number): boolean =>
+    code === 0x09 || code === 0x0a || code === 0x0d || code === 0x20;
+  const skipWhitespace = (): void => {
+    while (index < input.length && isWhitespace(input.charCodeAt(index))) index += 1;
+  };
+  const consume = (character: string): boolean => {
+    if (input[index] !== character) return false;
+    index += 1;
+    return true;
+  };
+  const parseString = (): string | null => {
+    if (input[index] !== '"') return null;
+    const start = index;
+    index += 1;
+    while (index < input.length) {
+      if (input[index] === '"') {
+        index += 1;
+        try {
+          const value: unknown = JSON.parse(input.slice(start, index));
+          return typeof value === 'string' ? value : null;
+        } catch {
+          return null;
+        }
+      }
+      index += input[index] === '\\' ? 2 : 1;
+    }
+    return null;
+  };
+  const parseValue = (containerDepth: number): boolean => {
+    skipWhitespace();
+    if (index >= input.length) return false;
+    if (input[index] === '{') {
+      if (containerDepth >= MAX_JSON_CONTAINER_DEPTH) return false;
+      return parseObject(containerDepth + 1);
+    }
+    if (input[index] === '[') {
+      if (containerDepth >= MAX_JSON_CONTAINER_DEPTH) return false;
+      return parseArray(containerDepth + 1);
+    }
+    if (input[index] === '"') return parseString() !== null;
+    const start = index;
+    while (
+      index < input.length &&
+      !isWhitespace(input.charCodeAt(index)) &&
+      ![',', ']', '}'].includes(input[index])
+    ) index += 1;
+    return index > start;
+  };
+  const parseObject = (containerDepth: number): boolean => {
+    if (!consume('{')) return false;
+    skipWhitespace();
+    if (consume('}')) return true;
+    const names = new Set<string>();
+    while (index < input.length) {
+      skipWhitespace();
+      const name = parseString();
+      if (name === null || names.has(name)) return false;
+      names.add(name);
+      skipWhitespace();
+      if (!consume(':') || !parseValue(containerDepth)) return false;
+      skipWhitespace();
+      if (consume('}')) return true;
+      if (!consume(',')) return false;
+    }
+    return false;
+  };
+  const parseArray = (containerDepth: number): boolean => {
+    if (!consume('[')) return false;
+    skipWhitespace();
+    if (consume(']')) return true;
+    while (index < input.length) {
+      if (!parseValue(containerDepth)) return false;
+      skipWhitespace();
+      if (consume(']')) return true;
+      if (!consume(',')) return false;
+    }
+    return false;
+  };
+
+  if (!parseValue(0)) return false;
+  skipWhitespace();
+  return index === input.length;
+}
+
 function parseInstant(value: unknown, nowMs: number): number | null {
   if (typeof value !== 'string' || !UTC_INSTANT_RE.test(value)) return null;
   const canonical = value.length === 20 ? value.replace(/Z$/, '.000Z') : value;
@@ -82,6 +233,7 @@ function decodeRecord(input: string, nowMs: number): {
   record: HistoricalMessageRecord;
   timestamp: number;
 } | null {
+  if (!hasUniqueJsonMembers(input)) return null;
   let value: unknown;
   try {
     value = JSON.parse(input);
@@ -133,6 +285,7 @@ export function parseHistoricalMessageRecords(
   overrides?: Record<string, CategoryId>,
   now: Date = new Date(),
   seen: Set<string> = new Set(),
+  launchSession: LaunchAlertSession = createLaunchAlertSession({ overrides: overrides ?? {} }),
 ): HistoricalImportResult {
   const limited = inputs.slice(0, MAX_HISTORICAL_RECORDS);
   let invalidCount = Math.max(0, inputs.length - limited.length);
@@ -140,9 +293,8 @@ export function parseHistoricalMessageRecords(
   let duplicateCount = 0;
   let newestTs = 0;
   const parsed: ScannedSms[] = [];
+  const reviewCandidates: ReviewEntry[] = [];
   const declined: DeclinedSms[] = [];
-  const launchSession = createLaunchAlertSession({ overrides: overrides ?? {} });
-
   for (const input of limited) {
     const decoded = typeof input === 'string' ? decodeRecord(input, now.getTime()) : null;
     if (!decoded) {
@@ -158,23 +310,35 @@ export function parseHistoricalMessageRecords(
     newestTs = Math.max(newestTs, timestamp);
 
     const sender = record.sender?.trim();
-    const senderLabel = sender ?? '';
-    const inspection = launchSession.inspect(record.text, senderLabel);
-    const result = launchSession.parse(record.text, senderLabel, inspection);
+    const senderBank = sender ? bankFromSender(sender)?.name : undefined;
+    const inspection = launchSession.inspect(record.text, sender ?? '');
+    const result = launchSession.parse(record.text, sender ?? '', inspection);
     if (!result) {
-      const reason = nonPostingReason(record.text);
-      if (reason) {
-        declined.push({
-          smsTs: timestamp,
-          sender,
-          channel: 'inbox',
-          sourceEventId: record.id,
-          reason,
-        });
-      } else {
-        ignoredCount += 1;
-      }
+      const refusal = inspectHistoricalRefusal({
+        record,
+        timestamp,
+        nowMs: now.getTime(),
+        session: launchSession,
+        inspection,
+      });
+      if (refusal.kind === 'declined') declined.push(refusal.row);
+      else if (refusal.kind === 'review') reviewCandidates.push(refusal.item);
+      else ignoredCount += 1;
       continue;
+    }
+    if (shouldReviewParsedIncome(result)) {
+      const refusal = inspectHistoricalRefusal({
+        record,
+        timestamp,
+        nowMs: now.getTime(),
+        session: launchSession,
+        inspection,
+      });
+      if (refusal.kind === 'declined') declined.push(refusal.row);
+      if (refusal.kind === 'review') {
+        reviewCandidates.push(refusal.item);
+        continue;
+      }
     }
 
     // Never spread `raw` across this boundary: historical source text is more
@@ -182,9 +346,10 @@ export function parseHistoricalMessageRecords(
     const { raw: _raw, ...structured } = result;
     parsed.push({
       ...structured,
-      date: structured.date ?? toISODate(new Date(timestamp)),
+      bankHint: structured.bankHint ?? senderBank,
+      // Receipt time dates a transaction, never an unstated card deadline.
+      date: structured.kind === 'cardStatement' ? structured.date : structured.date ?? toISODate(new Date(timestamp)),
       smsTs: timestamp,
-      sender,
       channel: 'inbox',
       sourceEventId: record.id,
     });
@@ -193,10 +358,12 @@ export function parseHistoricalMessageRecords(
   // Stable chronological order makes plans deterministic across Shortcut
   // chunking and interrupted/resumed runs.
   parsed.sort((a, b) => (a.smsTs ?? 0) - (b.smsTs ?? 0));
+  reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
   declined.sort((a, b) => a.smsTs - b.smsTs);
 
   return {
     parsed,
+    reviewCandidates,
     declined,
     totalCount: inputs.length,
     acceptedCount: parsed.length,

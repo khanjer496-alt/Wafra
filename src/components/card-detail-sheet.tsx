@@ -19,6 +19,7 @@ interface CardDetailSheetProps {
   /** The card to show, or null to keep the sheet closed. */
   account: Account | null;
   onClose: () => void;
+  footer?: React.ReactNode;
 }
 
 /**
@@ -27,7 +28,7 @@ interface CardDetailSheetProps {
  * Shared rather than owned by the Cards screen: a due is a question about one
  * card, not a reason to change screens.
  */
-export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
+export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetProps) {
   const theme = useTheme();
   const { state } = useStore();
 
@@ -48,46 +49,7 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
       : 0;
 
   return (
-    <BottomSheet visible onClose={onClose} title={t('cardDetail')}>
-      <View style={styles.head}>
-        <AccountTile account={account} size={46} />
-        <View style={styles.headText}>
-          <ThemedText type="subtitle" numberOfLines={1}>
-            {account.bankName ?? account.name}
-          </ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">
-            {account.cardType === 'credit' ? t('credit') : t('debit')}
-            {account.last4 ? ` ·· ${account.last4}` : ''}
-          </ThemedText>
-        </View>
-      </View>
-
-      {/* The one figure the user opened this for, before any list. */}
-      {data.open.length > 0 && (
-        <View style={styles.summary}>
-          <View style={styles.summaryRow}>
-            <ThemedText type="micro" themeColor="textTertiary">
-              {t('stillOwed')}
-            </ThemedText>
-            <ThemedText type="nano" themeColor="textTertiary">
-              {tf('openStatements', {
-                count: data.open.length,
-                s: data.open.length === 1 ? '' : 's',
-              })}
-            </ThemedText>
-          </View>
-          <Money
-            fils={data.outstandingFils}
-            type="sheetAmount"
-            prefix={false}
-            color={theme.expense}
-          />
-          {/* Progress is only honest once something has been paid; a
-              full-width empty track reads as a bug. */}
-          {settledShare > 0 && <ProgressBar ratio={settledShare} color={theme.income} height={5} />}
-        </View>
-      )}
-
+    <BottomSheet visible onClose={onClose} title={t('cardDetail')} footer={footer}>
       {/*
         Both lists below are about a BILL, and a debit card does not have one.
         Drawn unconditionally, this sheet told a user their Liv debit card had
@@ -98,69 +60,127 @@ export function CardDetailSheet({ account, onClose }: CardDetailSheetProps) {
         real credit card still shows that card's bill.
       */}
       {!data.billable && (
-        <ThemedText type="default" themeColor="textSecondary">
-          {t('debitHasNoStatement')}
-        </ThemedText>
-      )}
-
-      {data.billable && (
-      <View>
-        <SectionHeader title={t('statements')} />
-        {data.statements.length === 0 ? (
-          <ThemedText type="default" themeColor="textSecondary">
-            {t('noStatementYet')}
-          </ThemedText>
-        ) : (
-          data.statements.map((d, i) => {
-            const paid = data.paidByDueId.get(d.id) ?? 0;
-            const settled = !!d.settledAt || paid >= d.totalDueFils;
-            return (
-              <Row key={d.id} last={i === data.statements.length - 1}>
-                <View
-                  style={[styles.dot, { backgroundColor: settled ? theme.income : theme.expense }]}
-                />
-                <View style={styles.rowText}>
-                  <ThemedText type="small">
-                    {tf('dueDate', { date: shortDate(d.dueDate) })}
-                  </ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary" tabular>
-                    {settled
-                      ? t('settled')
-                      : tf('percentPaid', {
-                          percent: Math.round((paid / d.totalDueFils) * 100),
-                        })}
-                  </ThemedText>
-                </View>
-                <Money fils={d.totalDueFils} prefix={false} />
-              </Row>
-            );
-          })
-        )}
-      </View>
-      )}
-
-      {data.billable && (
-      <View>
-        <SectionHeader
-          title={t('paymentsMade')}
-          trailing={<Money fils={data.paidTotalFils} prefix={false} type="nano" />}
-        />
-        {data.payments.length === 0 ? (
-          <ThemedText type="default" themeColor="textSecondary">
-            {t('noCardPaymentYet')}
-          </ThemedText>
-        ) : (
-          data.payments.slice(0, 24).map((p, i) => (
-            <Row key={p.id} last={i === Math.min(data.payments.length, 24) - 1}>
-              <View style={[styles.dot, { backgroundColor: theme.income }]} />
-              <ThemedText type="small" style={styles.rowText}>
-                {shortDate(p.date)}
+        <>
+          <View style={styles.head}>
+            <AccountTile account={account} size={46} />
+            <View style={styles.headText}>
+              <ThemedText type="subtitle">
+                {account.bankName ?? account.name}
               </ThemedText>
-              <Money fils={p.amountFils} prefix={false} color={theme.income} />
-            </Row>
-          ))
-        )}
-      </View>
+              <ThemedText type="meta" themeColor="textTertiary">
+                {account.cardType === 'credit' ? t('credit') : t('debit')}
+                {account.last4 ? ` ·· ${account.last4}` : ''}
+              </ThemedText>
+            </View>
+          </View>
+          <ThemedText type="default" themeColor="textSecondary">
+            {t('debitHasNoStatement')}
+          </ThemedText>
+        </>
+      )}
+
+      {data.billable && (
+        <>
+          {/* The one figure the user opened this for, before any list. */}
+          {data.open.length > 0 && (
+            <View style={styles.summary}>
+              <View style={styles.summaryRow}>
+                <ThemedText type="micro" themeColor="textTertiary">
+                  {t('stillOwed')}
+                </ThemedText>
+                <ThemedText type="nano" themeColor="textTertiary">
+                  {tf('openStatements', {
+                    count: data.open.length,
+                    s: data.open.length === 1 ? '' : 's',
+                  })}
+                </ThemedText>
+              </View>
+              <Money
+                fils={data.outstandingFils}
+                type="sheetAmount"
+                prefix={false}
+                color={theme.expense}
+              />
+              {/* Progress is only honest once something has been paid; a
+                  full-width empty track reads as a bug. */}
+              {settledShare > 0 && (
+                <ProgressBar ratio={settledShare} color={theme.income} height={5} />
+              )}
+            </View>
+          )}
+
+          <View>
+            <SectionHeader title={t('statements')} />
+            {data.statements.length === 0 ? (
+              <ThemedText type="default" themeColor="textSecondary">
+                {t('noStatementYet')}
+              </ThemedText>
+            ) : (
+              data.statements.map((d, i) => {
+                const paid = data.paidByDueId.get(d.id) ?? 0;
+                const settled = paid >= d.totalDueFils;
+                return (
+                  <Row key={d.id} last={i === data.statements.length - 1}>
+                    <View
+                      style={[
+                        styles.dot,
+                        { backgroundColor: settled ? theme.income : theme.expense },
+                      ]}
+                    />
+                    <View style={styles.rowText}>
+                      <ThemedText type="small">
+                        {tf('dueDate', { date: shortDate(d.dueDate) })}
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textTertiary" tabular>
+                        {settled
+                          ? t('settled')
+                          : tf('percentPaid', {
+                              percent: Math.round((paid / d.totalDueFils) * 100),
+                            })}
+                      </ThemedText>
+                    </View>
+                    <Money fils={d.totalDueFils} prefix={false} />
+                  </Row>
+                );
+              })
+            )}
+          </View>
+
+          <View style={styles.head}>
+            <AccountTile account={account} size={46} />
+            <View style={styles.headText}>
+              <ThemedText type="subtitle">
+                {account.bankName ?? account.name}
+              </ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">
+                {account.cardType === 'credit' ? t('credit') : t('debit')}
+                {account.last4 ? ` ·· ${account.last4}` : ''}
+              </ThemedText>
+            </View>
+          </View>
+
+          <View>
+            <SectionHeader
+              title={t('paymentsMade')}
+              trailing={<Money fils={data.paidTotalFils} prefix={false} type="nano" />}
+            />
+            {data.payments.length === 0 ? (
+              <ThemedText type="default" themeColor="textSecondary">
+                {t('noCardPaymentYet')}
+              </ThemedText>
+            ) : (
+              data.payments.slice(0, 24).map((p, i) => (
+                <Row key={p.id} last={i === Math.min(data.payments.length, 24) - 1}>
+                  <View style={[styles.dot, { backgroundColor: theme.income }]} />
+                  <ThemedText type="small" style={styles.rowText}>
+                    {shortDate(p.date)}
+                  </ThemedText>
+                  <Money fils={p.amountFils} prefix={false} color={theme.income} />
+                </Row>
+              ))
+            )}
+          </View>
+        </>
       )}
     </BottomSheet>
   );

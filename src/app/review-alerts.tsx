@@ -1,20 +1,23 @@
+import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
+import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Block, ScreenHeader } from '@/components/ui/layout';
+import { Block } from '@/components/ui/layout';
+import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { useToast } from '@/components/ui/toast';
-import { MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { shortDate, toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
-import type { ReviewAlert } from '@/lib/alert-review-tray';
+import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
+import { universalMoneyLabel } from '@/components/universal-review-fields';
 import { useStore } from '@/lib/store';
 
 const FAMILY_COPY: Record<ReviewAlert['family'], { label: StringKey; icon: IconName }> = {
@@ -63,18 +66,53 @@ function instrumentLabel(item: ReviewAlert): string | null {
   return tf(key, { last4: instrument.last4 });
 }
 
+function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
+  item: UniversalReviewAlert; busy: boolean; onAdd: () => void; onDismiss: () => void;
+}) {
+  const theme = useTheme();
+  const event = item.event;
+  const key = event.family === 'statement' ? 'genericStatement'
+    : event.family === 'balance' ? 'genericBalanceUpdate'
+    : event.family === 'card-payment' ? 'genericCardPayment'
+    : event.family === 'bill' ? 'genericBill' : 'genericReviewTitle';
+  const fact = [event.amount, event.statementTotal, event.balance, event.creditLimit]
+    .find((field) => field.evidence === 'explicit' && field.value !== null);
+  return (
+    <View style={[styles.alertRow, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+      <View style={styles.alertCopy}>
+        <ThemedText type="smallBold">{t(key)}</ThemedText>
+        {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
+        <ThemedText type="title" tabular>{fact?.value ? universalMoneyLabel(fact.value) : event.family === 'statement' && event.minimumDue.value
+          ? t('genericMinimumDue') + ' · ' + universalMoneyLabel(event.minimumDue.value) : t('genericAmountNeedsReview')}</ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
+        <View style={{ flexDirection: 'row', gap: Spacing.three, marginTop: Spacing.two }}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('genericReviewDetails')}
+            disabled={busy} onPress={onAdd} style={{ minHeight: 48, justifyContent: 'center', flex: 1 }}>
+            <ThemedText type="smallBold" style={{ color: theme.primary }}>{t('genericReviewDetails')}</ThemedText>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('dismiss')}
+            disabled={busy} onPress={onDismiss} style={{ minHeight: 48, justifyContent: 'center' }}>
+            <ThemedText type="small" themeColor="textSecondary">{t('dismiss')}</ThemedText>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function AlertRow({
   item,
   busy,
   onAdd,
   onDismiss,
 }: {
-  item: ReviewAlert;
+  item: ReviewEntry;
   busy: boolean;
   onAdd: () => void;
   onDismiss: () => void;
 }) {
   const theme = useTheme();
+  if (isUniversalReviewAlert(item)) return <UniversalAlertRow item={item} busy={busy} onAdd={onAdd} onDismiss={onDismiss} />;
   const family = FAMILY_COPY[item.family];
   const amount = amountLabel(item);
   const direction = t(item.direction === 'debit' ? 'reviewAlertMoneyOut' : 'reviewAlertMoneyIn');
@@ -83,7 +121,8 @@ function AlertRow({
   const bank = institutionLabel(item.institution);
 
   return (
-    <View style={[styles.alertRow, { borderTopColor: theme.cardBorder }]}>
+    <View style={[styles.alertRow, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+      <View style={styles.alertMain}>
       <View style={[styles.alertIcon, { backgroundColor: theme.backgroundSelected }]}>
         <Icon name={family.icon} size={18} color={theme.warning} />
       </View>
@@ -98,6 +137,7 @@ function AlertRow({
         <ThemedText type="meta" themeColor="textTertiary">
           {[instrument, date].filter(Boolean).join(' · ')}
         </ThemedText>
+      </View>
       </View>
       <View style={styles.rowActions}>
         <Pressable
@@ -148,8 +188,10 @@ export default function ReviewAlertsScreen() {
   const theme = useTheme();
   const toast = useToast();
   const { state, dismissReviewAlert } = useStore();
-  const [target, setTarget] = useState<ReviewAlert | null>(null);
+  const words = workflowCopy(state.language);
+  const [target, setTarget] = useState<ReviewEntry | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const listInsets = useScreenContentInsets({ hasFooter: false });
   const now = Date.now();
   const pending = useMemo(
     () => state.reviewTray.pending
@@ -158,7 +200,7 @@ export default function ReviewAlertsScreen() {
     [state.reviewTray.pending, now],
   );
 
-  const dismiss = async (item: ReviewAlert) => {
+  const dismiss = async (item: ReviewEntry) => {
     setBusyId(item.id);
     try {
       await dismissReviewAlert(item.id, 'dismissed');
@@ -170,23 +212,31 @@ export default function ReviewAlertsScreen() {
     }
   };
 
-  return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('reviewAlertsTitle')} onBack={() => router.back()} />
-        </View>
+  const reviewAlertsHeader: ScreenHeaderProps = {
+    title: t('reviewAlertsTitle'),
+    back: { label: t('back'), onPress: () => router.back() },
+  };
 
+  return (
+    <>
+      <ScreenScaffold
+        scroll={false}
+        virtualized
+        headerMode="native"
+        header={reviewAlertsHeader}>
         <FlatList
           data={pending}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[styles.content, pending.length === 0 && styles.emptyContent]}
+          contentContainerStyle={[listInsets.contentContainerStyle, pending.length === 0 && styles.emptyContent]}
+          contentInset={listInsets.contentInset}
+          scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
+          contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={
             <View style={styles.intro}>
-              <ThemedText type="default" themeColor="textSecondary">
-                {t('reviewAlertsIntro')}
-              </ThemedText>
+              <WorkflowHero title={pending.length > 0 ? words.reviewTitle : words.complete}
+                body={words.reviewBody} icon="check"
+                facts={pending.length > 0 ? [{ label: words.pending, value: String(pending.length) }] : []} />
               <Block style={styles.privacyBlock}>
                 <Icon name="lock" size={16} color={theme.textTertiary} />
                 <ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopy}>
@@ -215,42 +265,35 @@ export default function ReviewAlertsScreen() {
             />
           )}
         />
+      </ScreenScaffold>
 
-        <ConfirmSheet
-          visible={target !== null}
-          onClose={() => setTarget(null)}
-          question={t('reviewAlertDismissQuestion')}
-          body={t('reviewAlertDismissBody')}
-          confirmLabel={t('dismiss')}
-          destructive
-          onConfirm={() => {
-            if (target) void dismiss(target);
-          }}
-        />
-      </SafeAreaView>
-    </ThemedView>
+      <ConfirmSheet
+        visible={target !== null}
+        onClose={() => setTarget(null)}
+        question={t('reviewAlertDismissQuestion')}
+        body={t('reviewAlertDismissBody')}
+        confirmLabel={t('dismiss')}
+        destructive
+        onConfirm={() => {
+          if (target) void dismiss(target);
+        }}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, alignItems: 'center' },
-  safe: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
-  headerWrap: { paddingHorizontal: ScreenPadding },
-  content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
-  },
   emptyContent: { flexGrow: 1 },
   intro: { gap: Spacing.three, paddingBottom: Spacing.four },
   privacyBlock: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   privacyCopy: { flex: 1, lineHeight: 19 },
   alertRow: {
     minHeight: 112,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two + 2,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingVertical: Spacing.three,
+    gap: Spacing.three,
+    borderWidth: 1,
+    borderRadius: 20,
+    marginBottom: Spacing.three,
+    padding: Spacing.three,
   },
   alertIcon: {
     width: 36,
@@ -261,10 +304,12 @@ const styles = StyleSheet.create({
   },
   alertCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
   amount: { marginVertical: Spacing.half },
-  rowActions: { gap: Spacing.one },
+  alertMain: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
+  rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   addButton: {
-    minWidth: 64,
-    minHeight: 44,
+    flexGrow: 1,
+    minWidth: 100,
+    minHeight: 48,
     borderRadius: Radius.control,
     alignItems: 'center',
     justifyContent: 'center',
@@ -272,8 +317,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two,
   },
   dismissButton: {
-    minWidth: 64,
-    minHeight: 44,
+    flexGrow: 1,
+    minWidth: 100,
+    minHeight: 48,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.control,
     alignItems: 'center',

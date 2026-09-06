@@ -1,5 +1,5 @@
 import * as LocalAuthentication from 'expo-local-authentication';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { AppState, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
@@ -23,6 +23,13 @@ import { t } from '@/lib/i18n';
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
 type BiometricState = 'prompting' | 'failed' | 'unavailable';
+
+const PrivacyGateContext = createContext(true);
+
+/** True only when the financial UI is not hidden behind App Lock. */
+export function usePrivacyGateCleared(): boolean {
+  return useContext(PrivacyGateContext);
+}
 
 /** Short trips out of the app — a permission sheet, the share card — do not re-lock. */
 const RELOCK_GRACE_MS = 20_000;
@@ -118,9 +125,12 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [state.appLock]);
 
-  if (!lockRequired) return <>{children}</>;
+  if (!lockRequired) {
+    return <PrivacyGateContext.Provider value>{children}</PrivacyGateContext.Provider>;
+  }
 
   return (
+    <PrivacyGateContext.Provider value={false}>
     <View style={styles.container}>
       {/*
         The router's Stack stays mounted; the lock paints over it. Opacity
@@ -186,7 +196,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               onPress={tryUnlock}
               style={[
                 styles.sensor,
-                { backgroundColor: theme.backgroundSelected, borderColor: theme.cardBorder },
+                { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder },
               ]}>
               <SensorRing color={theme.primary} />
               <Icon name="fingerprint" size={38} color={theme.text} />
@@ -207,6 +217,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         )}
       </ThemedView>
     </View>
+    </PrivacyGateContext.Provider>
   );
 }
 

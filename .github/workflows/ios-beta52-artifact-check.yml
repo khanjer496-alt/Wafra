@@ -1,0 +1,103 @@
+name: Inspect Wafra iOS beta 52 artifact
+
+# Read-only inspection of the already-built IPA. No rebuild, installation,
+# message access, credential export, or publication occurs here.
+on:
+  push:
+    branches: [release/ios-shortcuts-review-20260907]
+    paths: ['.github/workflows/ios-beta52-artifact-check.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - name: Download the exact finished store artifact into runner temporary storage
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p ios-release-evidence
+          npx --yes eas-cli@22.4.0 build:view 06ce4237-ca3b-43e8-8ffc-eb4950cf1ae8 --json > "$RUNNER_TEMP/wafra-beta52-artifact.json"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { Readable } = require('node:stream');
+          const { pipeline } = require('node:stream/promises');
+          (async () => {
+            const b = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP,'wafra-beta52-artifact.json'),'utf8'));
+            if (b.id !== '06ce4237-ca3b-43e8-8ffc-eb4950cf1ae8' || b.status !== 'FINISHED' ||
+                b.platform !== 'IOS' || b.distribution !== 'STORE' || String(b.appBuildVersion) !== '52' || b.appVersion !== '1.0.0') throw new Error('Unexpected artifact identity');
+            const url = new URL(b.artifacts?.applicationArchiveUrl ?? b.artifacts?.buildUrl);
+            if (url.protocol !== 'https:' || !(url.hostname === 'expo.dev' || url.hostname.endsWith('.expo.dev') || url.hostname.endsWith('.expo.io'))) throw new Error('Unexpected EAS artifact host');
+            const response = await fetch(url, { signal:AbortSignal.timeout(120000) });
+            if (!response.ok || Number(response.headers.get('content-length') ?? 0) > 300000000) throw new Error('Artifact download failed');
+            await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(path.join(process.env.RUNNER_TEMP,'wafra-beta52.ipa'), {mode:0o600}));
+          })().catch(() => { console.error('Could not verify/download the expected EAS artifact'); process.exitCode=1; });
+          NODE
+      - name: Verify bundle identity, signature and compiled App Intent contracts
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/wafra-beta52-inspect"
+          mkdir -p "$ROOT"
+          ditto -x -k "$RUNNER_TEMP/wafra-beta52.ipa" "$ROOT"
+          APP=$(find "$ROOT/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$APP"
+          export WAFRA_INSPECT_APP="$APP"
+          python3 <<'PY'
+          import os, plistlib, pathlib, json, hashlib
+          app=pathlib.Path(os.environ['WAFRA_INSPECT_APP'])
+          info=plistlib.loads((app/'Info.plist').read_bytes())
+          assert info['CFBundleIdentifier']=='app.wafra.ios'
+          assert info['CFBundleShortVersionString']=='1.0.0'
+          assert str(info['CFBundleVersion'])=='52'
+          ipa=pathlib.Path(os.environ['RUNNER_TEMP'])/'wafra-beta52.ipa'
+          report={'buildNumber':'52','version':'1.0.0','bundleId':info['CFBundleIdentifier'],
+            'sourceCommit':'d67e71fa78c2abadb4feab8553478d128b026d20',
+            'ipaSha256':hashlib.sha256(ipa.read_bytes()).hexdigest(),
+            'scope':'Signed IPA metadata/resource inspection; not physical iPhone execution'}
+          pathlib.Path('ios-release-evidence/ipa-inspection.json').write_text(json.dumps(report,indent=2)+'\n')
+          PY
+          codesign --verify --deep --strict "$APP"
+          METADATA="$APP/Metadata.appintents/extract.actionsdata"
+          test -f "$METADATA"
+          bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$METADATA"
+          RESOURCE=$(find "$APP" -type d -name 'WafraMessageHistoryResources.bundle' -print -quit)
+          test -n "$RESOURCE"
+          bash scripts/test/native-history-store.sh --verify-history-resources "$APP" "$RESOURCE"
+          WAFRA_METADATA="$METADATA" node <<'NODE'
+          const fs = require('node:fs');
+          const actions=JSON.parse(fs.readFileSync(process.env.WAFRA_METADATA,'utf8')).actions;
+          const names=['RecordWafraCaptureSetupProofIntent','StageWafraLiveMessageIntent'];
+          for(const name of names){
+            const action=actions[name];
+            if(!action || action.openAppWhenRun !== false || action.supportedModes !== 1 || action.isAuthPolExplicit !== true) throw new Error('Missing or incorrect future-capture action: '+name);
+          }
+          if(actions.ProbeWafraAutomationInputIntent) throw new Error('Debug-only automation probe was included in a release artifact');
+          const parameters=(actions.StageWafraLiveMessageIntent.parameters||[]).map(p=>p.name);
+          if(JSON.stringify(parameters)!==JSON.stringify(['sender','body','eventId','observedAt'])) throw new Error('Future-capture parameters do not match Shortcut');
+          const file='ios-release-evidence/ipa-inspection.json';
+          const report=JSON.parse(fs.readFileSync(file,'utf8'));
+          Object.assign(report,{signatureVerified:true,historyIntentContract:'passed',historyArabicResources:'passed',
+            futureIntentIdentifiers:names,futureInputParameters:parameters,debugProbeAbsent:true});
+          fs.writeFileSync(file,JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report,null,2));
+          NODE
+      - name: Remove the temporary app archive and build response
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/wafra-beta52.ipa" "$RUNNER_TEMP/wafra-beta52-artifact.json"
+          rm -rf "$RUNNER_TEMP/wafra-beta52-inspect"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-beta52-ipa-inspection-${{ github.sha }}
+          path: ios-release-evidence/ipa-inspection.json
+          retention-days: 7

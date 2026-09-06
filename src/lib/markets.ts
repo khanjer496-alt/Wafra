@@ -259,6 +259,11 @@ const SA: MarketPack = {
 
 export const MARKETS: MarketPack[] = [AE, SA];
 
+/** Shared language and cross-border vocabulary without any country overlay. */
+export function globalCategoryKeywords(): MarketPack['keywords'] {
+  return [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS];
+}
+
 /** Read-only vocabulary lookup for already-validated statement/import rows. */
 export function keywordsForMarket(id: 'AE' | 'SA'): MarketPack['keywords'] {
   return MARKETS.find((market) => market.id === id)?.keywords ?? [];

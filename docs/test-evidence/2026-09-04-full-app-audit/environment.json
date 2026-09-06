@@ -1,0 +1,132 @@
+{
+  "project_type": "expo",
+  "project_type_details": "Expo SDK 55 app using React Native 0.83.10, React 19.2, Expo Router, local native capture/history modules, SQLCipher, and a Cloudflare Worker relay. Native iOS project exists; Android is generated through Expo prebuild. Web production export is a marketing site; QA mode exports the ledger.",
+  "is_react_native": true,
+  "is_ios": true,
+  "is_android": false,
+  "is_expo": true,
+  "is_web": true,
+  "is_flutter": false,
+  "is_native_ios": false,
+  "is_native_android": false,
+  "startup_commands": [
+    { "command": "npm start", "context": "Start Expo Metro server; default port 8081." },
+    { "command": "npm run web", "context": "Start Expo web development server." }
+  ],
+  "build_commands": [
+    { "command": "npm run ios", "platform": "ios", "context": "expo run:ios; build and run the native development app." },
+    { "command": "npm run android", "platform": "android", "context": "expo run:android; generates native Android project when absent." },
+    { "command": "npm run web:export", "platform": "web", "context": "Clear Metro cache, export static web output, finalize SEO HTML. Production origin supplied through EXPO_PUBLIC_WAFRA_SITE_URL." },
+    { "command": "npx --yes eas-cli@22.4.0 build -p ios --profile development-simulator", "platform": "ios", "context": "Cloud simulator development build when explicitly desired." }
+  ],
+  "argent_workflow": {
+    "start_dev_server": "npm start -- --dev-client --port 8081",
+    "build_ios": "npm run ios",
+    "build_android": "npm run android",
+    "notes": "Load argent-react-native-app-workflow and device-interact skills before app interaction. Prefer an already running target from list-devices. Expo Go does not cover the custom native modules or SQLCipher configuration. No devices were inspected or operated by this subagent."
+  },
+  "ios_has_podfile": true,
+  "android_has_gradle": false,
+  "configs": {
+    "metro": null,
+    "babel": null,
+    "app": "app.json",
+    "tsconfig": "tsconfig.json",
+    "server_tsconfig": "server/tsconfig.json",
+    "pubspec": null,
+    "xcode": "ios/Wafra.xcworkspace",
+    "podfile": "ios/Podfile",
+    "gradle": null,
+    "eas": "eas.json",
+    "eslint": "eslint.config.js"
+  },
+  "metro_port": 8081,
+  "env_resolution": {
+    "env_files": [],
+    "strategy": "Expo EXPO_PUBLIC environment variables plus EAS build profile environment settings and EAS environment selection.",
+    "notes": "No .env files were found by the workspace snapshot. EAS development/preview builds enable founder unlock and selected research flags; production disables them. app.json contains empty RevenueCat/legal/support extra fields, so production readiness must be checked against resolved environment and release gates rather than inferred from static config."
+  },
+  "key_packages": {
+    "expo": "~55.0.31",
+    "react-native": "0.83.10",
+    "react": "19.2.0",
+    "expo-router": "~55.0.18",
+    "react-native-reanimated": "4.2.1",
+    "react-native-worklets": "0.7.4",
+    "expo-sqlite": "~55.0.20",
+    "expo-secure-store": "~55.0.18",
+    "expo-dev-client": "~55.0.40",
+    "react-native-purchases": "^10.4.4",
+    "typescript": "~5.9.2",
+    "playwright": "^1.62.0"
+  },
+  "package_json": {
+    "name": "wafra",
+    "version": "1.0.0",
+    "scripts_summary": {
+      "development": ["start", "ios", "android", "web"],
+      "verification": ["doctor", "typecheck", "lint", "test", "test:e2e", "check:server", "check:launch", "release:check", "check"],
+      "release": ["ship:ios", "ship:android", "update:candidate", "update:production", "store:prepare", "store:upload:apple", "store:upload:google"],
+      "audits": ["report:parser-capabilities", "check:store", "check:store-assets", "check:store-pricing", "check:web-seo", "asc:subscriptions:audit"]
+    }
+  },
+  "bundler": "metro",
+  "terminal_tools": {
+    "package_manager": "npm@10.9.8",
+    "node": "22.22.3",
+    "pod_available": true,
+    "pod_version": "1.17.0",
+    "expo_cli": "Project-local CLI through npx expo; no global Expo CLI version detected.",
+    "eas_cli": "Global EAS CLI 21.7.0 is installed; project pins EAS CLI 22.4.0. Use the pinned npx version for EAS workflows."
+  },
+  "cloud_build": {
+    "eas": true,
+    "eas_profiles": ["base", "development", "development-simulator", "preview", "preview-simulator", "corpus-preview", "capture-beta", "history-beta", "ios-parity-device", "production", "production-candidate"],
+    "ci": "GitHub Actions",
+    "workflow_files": [".github/workflows/ci.yml", ".github/workflows/ios-testflight.yml", ".github/workflows/ota-update.yml", ".github/workflows/deploy-relay.yml", ".github/workflows/device-shots.yml", ".github/workflows/feedback-agent.yml", ".github/workflows/build-apk.yml"]
+  },
+  "quality_control": {
+    "linting": { "eslint": true, "eslint_config": "eslint.config.js", "run_command": "npm run lint", "fix_command": "npm run lint -- --fix" },
+    "formatting": { "prettier": false, "prettier_config": null, "run_command": null },
+    "type_checking": { "typescript": true, "strict_mode": true, "run_command": "npm run typecheck" },
+    "unit_tests": {
+      "jest": false,
+      "jest_config": null,
+      "run_command": "npm test",
+      "watch_command": null,
+      "coverage_command": null,
+      "notes": "Custom transpile-and-Node runner enforces 67 declared app suites, 3 server suites, and 2 native Swift suites on macOS. Includes parser corpus, monetary invariants, permissions, setup UX, native contracts, Kotlin regex, Worker, and release checks. Requires sqlite3 and a working Java compiler for full verification. Runner serializes shared test build output where flock or lockf is available."
+    },
+    "e2e_tests": {
+      "detox": false,
+      "maestro": true,
+      "xctest": null,
+      "flutter_integration_test": false,
+      "playwright": true,
+      "run_command": "npm run test:e2e",
+      "notes": "Web E2E runner exports with EXPO_PUBLIC_WAFRA_E2E_DEMO=1, clears isolated Metro cache, serves with scripts/e2e/serve.mjs on port 8126, and runs smoke, period, persistence, and navigation suites. Native adversarial onboarding/permissions/RTL flows are in scripts/e2e/adversarial and .maestro. Swift behavior tests exist for live capture; the project's native test scripts provide the authoritative invocation."
+    },
+    "feedback_loop_tools": {
+      "metro_hot_reload": true,
+      "flutter_hot_reload": false,
+      "react_devtools": true,
+      "flipper": false,
+      "storybook": false,
+      "notes": "Argent MCP tools are available. No custom Metro or Babel configuration was detected. React Compiler is enabled through Expo experiments."
+    },
+    "ci_gate": "Root typecheck, lint, Expo iOS prebuild for native contract fixtures, npm test, relay typecheck/tests/dry-run, plus separate Playwright job. Native iOS job is path-filtered and runs native-history-store.sh after prebuild/pods.",
+    "documentation_gaps": [
+      "scripts/e2e/README.md still describes three browser suites and a Python server; run.sh currently runs four suites with the repository server and an explicit QA environment flag.",
+      "Adversarial native README includes older Xcode 26.1 instructions while current CI explicitly requires Xcode 26.2 or newer.",
+      "CI native path filter and macOS job explicitly cover the history bridge; root macOS npm test also executes the live capture bridge. Review whether live-capture changes should trigger equivalent CI native build coverage."
+    ]
+  },
+  "additional_notes": "Repository instructions require versioned Expo SDK 55 documentation before Expo/RN code changes, preserve existing changes, and prohibit commits/pushes without explicit user authorization. This was a read-only inspection with no dependency installation, tests, builds, app launches, or device actions. Financial/parser availability is distinct from worldwide manual/storefront support; README documents UAE corpus support and local/supplemental capture paths.",
+  "needs_user_input": false,
+  "missing_information": [
+    "Currently running device and Metro instances were not inspected.",
+    "Resolved production environment values and external store readiness were not verified.",
+    "No execution evidence for the current checkout's test or build status was collected."
+  ],
+  "inspected_at": "2026-09-04T19:47:25Z"
+}

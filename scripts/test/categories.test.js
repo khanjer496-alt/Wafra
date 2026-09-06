@@ -14,7 +14,8 @@
  * suite is where it shows up.
  */
 const { guessCategory, parseSms } = require('./build/sms-parser');
-const { CATEGORIES } = require('./build/categories');
+const { CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, categorySupportsType,
+  scopedMerchantOverrideKey, readMerchantCategoryOverride } = require('./build/categories');
 const { getActiveMarket, setActiveMarket } = require('./build/markets');
 
 let pass = 0;
@@ -49,6 +50,38 @@ function ok(name, condition, detail) {
 
 /** The category a purchase SMS resolves to, read the way the store reads it. */
 const cat = (text) => guessCategory(text, 'expense');
+
+ok('Other is selectable for unknown/refund income without a new category id',
+  INCOME_CATEGORIES.some((category) => category.id === 'other' && category.type === 'income'));
+ok('Other remains an expense choice', EXPENSE_CATEGORIES.some((category) => category.id === 'other'));
+ok('direction compatibility permits Other on both sides',
+  typeof categorySupportsType === 'function' && categorySupportsType('other', 'income') &&
+    categorySupportsType('other', 'expense'));
+ok('direction compatibility keeps Salary and Shopping on their proper sides',
+  typeof categorySupportsType === 'function' && categorySupportsType('salary', 'income') &&
+    !categorySupportsType('salary', 'expense') && categorySupportsType('shopping', 'expense') &&
+    !categorySupportsType('shopping', 'income'));
+ok('unknown category ids cannot inherit the Other fallback at a validation boundary',
+  typeof categorySupportsType === 'function' && !categorySupportsType('invented', 'expense') &&
+    !categorySupportsType('salary', 'invented'));
+ok('scoped merchant keys retain trim/lower normalization and direction',
+  typeof scopedMerchantOverrideKey === 'function' &&
+    scopedMerchantOverrideKey('  ACME  ', 'income') === 'income:acme' &&
+    scopedMerchantOverrideKey('  ACME  ', 'expense') === 'expense:acme');
+ok('directional override keys can hold both decisions',
+  typeof readMerchantCategoryOverride === 'function' &&
+    readMerchantCategoryOverride({ 'income:acme': 'salary', 'expense:acme': 'shopping' }, 'ACME', 'income') === 'salary' &&
+    readMerchantCategoryOverride({ 'income:acme': 'salary', 'expense:acme': 'shopping' }, 'ACME', 'expense') === 'shopping');
+ok('legacy Other remains expense-only while scoped income Other is valid',
+  typeof readMerchantCategoryOverride === 'function' &&
+    readMerchantCategoryOverride({ acme: 'other' }, 'ACME', 'income') === undefined &&
+    readMerchantCategoryOverride({ acme: 'other' }, 'ACME', 'expense') === 'other' &&
+    readMerchantCategoryOverride({ 'income:acme': 'other' }, 'ACME', 'income') === 'other');
+ok('scoped choices beat a legacy category and invalid ids are never read as Other',
+  typeof readMerchantCategoryOverride === 'function' &&
+    readMerchantCategoryOverride({ acme: 'dining', 'expense:acme': 'shopping' }, 'ACME', 'expense') === 'shopping' &&
+    readMerchantCategoryOverride({ acme: 'invented' }, 'ACME', 'expense') === undefined &&
+    readMerchantCategoryOverride({ acme: 'salary' }, 'ACME', 'expense') === undefined);
 
 /* ── The two real descriptor shapes these merchants arrive in ───────────── */
 

@@ -1,0 +1,6 @@
+{
+  "parserVersion": 32,
+  "scope": "src, modules, assets excluding generated build directories; app/eas/package/ts/metro/babel configuration",
+  "files": 303,
+  "sha256": "ab05293d394a3d330bd3705c6ffc4ec3a6fbf9433d42a4a5b6f2e06d12a2f197"
+}

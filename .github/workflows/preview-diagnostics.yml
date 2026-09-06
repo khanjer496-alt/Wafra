@@ -1,0 +1,34 @@
+name: Inspect preview native test evidence
+on:
+  push:
+    branches: ['build/redesign-android-preview-20260907']
+    paths: ['.github/workflows/preview-diagnostics.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wafra-preview-native-interactions
+          run-id: 34058163226
+          github-token: ${{ github.token }}
+          repository: khanjer496-alt/Wafra
+          path: evidence
+      - name: Report only synthetic test results and native form labels
+        run: |
+          python3 - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          p=pathlib.Path('evidence')
+          print('RESULTS', (p/'results.json').read_text())
+          for f in ('failure.xml','latest.xml'):
+              print('HIERARCHY',f)
+              root=ET.fromstring((p/f).read_text())
+              for n in root.iter('node'):
+                  a=n.attrib
+                  if a.get('text') or a.get('content-desc'):
+                      print({k:a.get(k,'') for k in ('text','content-desc','class','clickable','enabled','bounds')})
+          PY

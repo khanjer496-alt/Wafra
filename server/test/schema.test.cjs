@@ -50,6 +50,11 @@ const { execFileSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 const schema = fs.readFileSync(path.join(root, 'schema.sql'), 'utf8');
+const migrations = fs.readdirSync(path.join(root, 'migrations'))
+  .filter((name) => name.endsWith('.sql'))
+  .sort()
+  .map((name) => fs.readFileSync(path.join(root, 'migrations', name), 'utf8'))
+  .join('\n');
 const worker = fs.readFileSync(path.join(root, 'src/index.ts'), 'utf8');
 const imports = fs.readFileSync(path.join(root, 'src/imports.ts'), 'utf8');
 const ingestRow = fs.readFileSync(path.join(root, 'src/ingest-row.ts'), 'utf8');
@@ -70,8 +75,10 @@ function ok(name, condition, detail = '') {
   }
 }
 
-execFileSync('sqlite3', [':memory:'], { input: `${schema}\nPRAGMA integrity_check;` });
-ok('schema applies cleanly to SQLite', true);
+execFileSync('sqlite3', [':memory:'], {
+  input: `${schema}\n${migrations}\nPRAGMA integrity_check;`,
+});
+ok('schema and tracked migrations apply cleanly to SQLite', true);
 ok('there is no raw-message column',
   !/\b(?:raw|body|message_text|email_body)\s+(?:TEXT|BLOB)\b/i.test(schema));
 ok('push tokens are ciphertext columns, not plaintext',
@@ -95,6 +102,19 @@ ok('Shortcut rows are explicitly distinguished from email, PDF, and CSV imports'
     /captureSource: 'email'/.test(worker) &&
     /captureSource: 'pdf'/.test(worker) &&
     /captureSource: 'csv'/.test(worker));
+ok('only the exact Messages Shortcut branch can carry server-bound automation proof',
+  /body\?\.automation === 'message'/.test(worker) &&
+    /sourceDeviceId: device\.id/.test(worker) &&
+    /generation: device\.automationGeneration/.test(worker) &&
+    /CREATE TABLE IF NOT EXISTS automation_generations/.test(schema));
+ok('automation proof generation rotates only with the foreground admin credential',
+  /url\.pathname === '\/v1\/automation-generation'/.test(worker) &&
+    /authenticate\(req, env, 'admin'\)/.test(
+      worker.slice(
+        worker.indexOf("url.pathname === '/v1/automation-generation'"),
+        worker.indexOf("url.pathname === '/v1/ingest'"),
+      ),
+    ));
 ok('replay receipts are keyed digests rather than bodies',
   /CREATE TABLE IF NOT EXISTS ingest_receipts/.test(schema) &&
     /keyedFingerprint\(device\.requestSecret, replayMaterial\)/.test(worker));

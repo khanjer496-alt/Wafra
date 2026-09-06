@@ -1,108 +1,38 @@
-/**
- * Regenerates the app icon, adaptive icon layers, splash and favicon from the
- * Wafra mark. Run with `node render-icons.mjs` from the repo root.
- *
- * The mark is the same two sub-paths as src/components/wafra-logo.tsx, so the
- * icon and the in-app logo can never drift apart.
- */
+/** Render launcher assets from the same vector geometry as the in-app mark. */
 import { chromium } from 'playwright';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const OUT = 'assets/images';
-const INK = '#16130F';
-const CHARCOAL = '#14120F';
-const MINT = '#57B894';
-const TERTIARY = '#8C857A';
-
-const MARK = (color, strokeScale = 1) => `
-<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
-  <g fill="none" stroke="${color}" stroke-width="${4.2 * strokeScale}" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M8 15 L15.5 33 L23 19 L30.5 33 L40 11.5" />
-    <path d="M34 11.5 H40 V17.5" />
-  </g>
-</svg>`;
-
-const kufi = readFileSync('assets/fonts/NotoKufiArabic-Regular.ttf').toString('base64');
-
-function page({ width, height, background, body }) {
-  return `<!doctype html><meta charset="utf-8">
-<style>
-  @font-face { font-family: 'Kufi'; src: url(data:font/ttf;base64,${kufi}) format('truetype'); }
-  html,body { margin:0; padding:0; }
-  body { width:${width}px; height:${height}px; background:${background}; display:flex;
-         flex-direction:column; align-items:center; justify-content:center; }
-</style>
-${body}`;
-}
-
-/** The mark alone, inset so the strokes never touch the edge. */
-const markBox = (size, color) =>
-  `<div style="width:${size}px;height:${size}px">${MARK(color)}</div>`;
-
-const TARGETS = [
-  {
-    file: 'icon.png',
-    width: 1024,
-    height: 1024,
-    // Square and full-bleed: iOS applies its own mask, and a pre-rounded
-    // icon shows corner artefacts under it.
-    html: page({ width: 1024, height: 1024, background: INK, body: markBox(600, MINT) }),
-    // iOS rejects an app icon that carries an alpha channel.
-    opaque: true,
-  },
-  {
-    file: 'android-icon-foreground.png',
-    width: 1024,
-    height: 1024,
-    // Adaptive icons crop hard: the mark stays inside the 66% safe circle.
-    html: page({ width: 1024, height: 1024, background: 'transparent', body: markBox(470, MINT) }),
-  },
-  {
-    file: 'android-icon-background.png',
-    width: 1024,
-    height: 1024,
-    html: page({ width: 1024, height: 1024, background: CHARCOAL, body: '' }),
-    opaque: true,
-  },
-  {
-    file: 'android-icon-monochrome.png',
-    width: 1024,
-    height: 1024,
-    // Themed icons are tinted from the alpha channel, so the colour here is
-    // only a stand-in — the shape is what ships.
-    html: page({ width: 1024, height: 1024, background: 'transparent', body: markBox(470, '#FFFFFF') }),
-  },
-  {
-    file: 'splash-icon.png',
-    width: 512,
-    height: 620,
-    // Expo scales the splash by width, so a 512-wide image rendered at
-    // imageWidth 120 puts the mark at exactly 120px.
-    html: page({
-      width: 512,
-      height: 620,
-      background: 'transparent',
-      body: `${markBox(512, MINT)}
-        <div style="font-family:Kufi;font-size:84px;line-height:1;color:${TERTIARY};margin-top:8px">وفرة</div>`,
-    }),
-  },
-  {
-    file: 'favicon.png',
-    width: 96,
-    height: 96,
-    html: page({ width: 96, height: 96, background: INK, body: markBox(60, MINT) }),
-    opaque: true,
-  },
+const source = readFileSync('src/components/wafra-logo.tsx', 'utf8');
+const paths = [...source.matchAll(/\bd="([^"]+)"/g)].map((match) => match[1]);
+if (paths.length !== 1) throw new Error('Expected one Wafra mark path');
+const theme = readFileSync('src/constants/theme.ts', 'utf8');
+const primary = theme.match(/light:\s*\{[\s\S]*?primary:\s*'([^']+)'/)?.[1];
+const darkPrimary = theme.match(/dark:\s*\{[\s\S]*?primary:\s*'([^']+)'/)?.[1];
+if (!primary || !darkPrimary) throw new Error('Missing brand colours');
+const mark = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="100%" height="100%"><path d="${paths[0]}" fill="none" stroke="${color}" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+writeFileSync(`${OUT}/wafra-mark.svg`, mark(primary));
+const targets = [
+  { file: 'icon.png', size: 1024, markSize: 720, color: '#FFFFFF', background: primary },
+  { file: 'android-icon-foreground.png', size: 1024, markSize: 580, color: '#FFFFFF' },
+  { file: 'android-icon-background.png', size: 1024, background: primary },
+  { file: 'android-icon-monochrome.png', size: 1024, markSize: 580, color: '#FFFFFF' },
+  { file: 'splash-icon.png', size: 512, markSize: 460, color: primary },
+  { file: 'splash-icon-dark.png', size: 512, markSize: 460, color: darkPrimary },
+  { file: 'favicon.png', size: 96, markSize: 68, color: '#FFFFFF', background: primary },
 ];
-
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
-for (const t of TARGETS) {
-  const p = await browser.newPage({ viewport: { width: t.width, height: t.height }, deviceScaleFactor: 1 });
-  await p.setContent(t.html);
-  await p.waitForTimeout(120);
-  const buf = await p.screenshot({ omitBackground: !t.opaque, type: 'png' });
-  writeFileSync(`${OUT}/${t.file}`, buf);
-  console.log(`${t.file}  ${t.width}x${t.height}  ${buf.length} bytes`);
-  await p.close();
+const browser = await chromium.launch();
+try {
+  for (const target of targets) {
+    const page = await browser.newPage({ viewport: { width: target.size, height: target.size }, deviceScaleFactor: 1 });
+    await page.setContent(`<style>html,body{margin:0;width:100%;height:100%;}body{display:grid;place-items:center;background:${target.background ?? 'transparent'}}</style>${target.markSize ? `<div style="width:${target.markSize}px;height:${target.markSize}px">${mark(target.color)}</div>` : ''}`);
+    const data = await page.screenshot({ type: 'png', omitBackground: !target.background });
+    // PNG colour type 2 is opaque RGB; store icons must not carry alpha.
+    if (target.file === 'icon.png' && data[25] !== 2) throw new Error('iOS icon must be RGB without alpha');
+    writeFileSync(`${OUT}/${target.file}`, data);
+    console.log(`${target.file}: ${target.size}×${target.size}`);
+    await page.close();
+  }
+} finally {
+  await browser.close();
 }
-await browser.close();

@@ -1,4 +1,6 @@
+import { normalizeArabicNumerals } from '@/lib/arabic-sms';
 import {
+  checkedMinorSum,
   formatMinorUnits,
   parseMajorToMinor,
   roundToWholeMajorMinor,
@@ -33,44 +35,35 @@ const activeMoneySpec = () => storedLedgerMoneySpec(
 ) ?? storedLedgerMoneySpec('AED', 2)!;
 
 /**
- * Formats fils as "1,234.56". Whole amounts drop the decimals: "1,234".
+ * Formats the ledger's minor units exactly: "1,234.56" for AED or
+ * "1,234.567" for KWD. Whole amounts drop decimals unless explicitly fixed.
  *
- * When the decimals are hidden the whole part is ROUNDED, not truncated.
- * Truncating showed a AED 76.99 subscription as "AED 76", and — worse — made
- * lists stop adding up: four rows each losing up to a dirham sat under a total
- * that had rounded once, so Bills printed AED 1,025/mo above rows totalling
- * 1,022. Rounding each row leaves at most half a dirham of drift per row
- * instead of a whole one, and in the common case none at all.
+ * Compatibility: legacy `decimals: false` now means optional decimals, just
+ * like omission; it never hides nonzero minor units. `true` fixes the number
+ * of decimal places to the ledger currency's exponent. The lower-level
+ * formatMinorUnits API retains its explicit whole-unit rounding option.
  */
 export function formatAmount(fils: number, opts?: { decimals?: boolean }): string {
-  return formatMinorUnits(Math.round(fils), activeMoneySpec(), opts);
+  return formatMinorUnits(
+    Math.round(fils),
+    activeMoneySpec(),
+    opts?.decimals === true ? { decimals: true } : undefined,
+  );
 }
 
 /**
- * Total of a set of amounts as a reader would add them up on screen.
+ * Total of exact displayed amounts, preserving every ledger minor unit.
  *
- * A total printed above a list has to equal that list. Summing the raw fils
- * and rounding once does not: each row is rounded on its own, so the total
- * lands up to half a dirham per row away from what the rows say. Rounding each
- * row first — the same rounding `formatAmount` will apply to it — makes the
- * column add up, which is the only property a heading like "AED 1,025/mo"
- * above four rows is actually claiming.
- *
- * For arithmetic, not display: keep using the raw fils.
+ * Rows no longer round to whole currency units, so their displayed total is
+ * the checked raw sum. The legacy name remains for existing list callers.
  */
 export function totalAsShown(values: number[]): number {
-  return values.reduce((sum, v) => sum + toWholeDirhamFils(v), 0);
+  return checkedMinorSum(values);
 }
 
 /**
- * `fils` snapped to the whole dirham it will be DISPLAYED as.
- *
- * Sum these, never the raw fils, when a figure sits above the rows it totals.
- * This is the primitive; `totalAsShown` is the reducer over it. Both exist on
- * purpose: balances.ts needs to snap one account at a time as it walks the
- * list (some accounts contribute nothing), and insights' composition needs the
- * reducer. Collapsing either into the other put the two callers back on
- * different arithmetic, which is the defect they were written to close.
+ * Explicitly round to a whole major currency unit. This legacy utility is not
+ * the display policy: formatAmount and totalAsShown preserve minor units.
  */
 export function toWholeDirhamFils(fils: number): number {
   return roundToWholeMajorMinor(fils, activeMoneySpec());
@@ -89,22 +82,27 @@ export function formatAED(fils: number, opts?: { decimals?: boolean }): string {
   return `${ledgerCurrencyDisplay()} ${formatAmount(fils, opts)}`;
 }
 
-/** Compact form for chart labels: "1.2k", "18k". */
+/**
+ * Magnitude-only chart labels; callers supply any sign. Values below 1,000
+ * retain every minor unit. Abbreviations carry ≈ only when they lose precision.
+ */
 export function formatCompactAED(fils: number): string {
-  const amount = Math.abs(fils) / (10 ** activeMoneySpec().exponent);
-  if (amount >= 1_000_000) {
-    const m = amount / 1_000_000;
-    return `${m >= 100 ? Math.round(m) : Math.round(m * 10) / 10}M`;
-  }
-  if (amount >= 1000) {
-    const k = amount / 1000;
-    return `${k >= 100 ? Math.round(k) : Math.round(k * 10) / 10}k`;
-  }
-  return String(Math.round(amount));
+  const magnitude = Math.abs(fils);
+  const scale = 10 ** activeMoneySpec().exponent;
+  if (magnitude < 1000 * scale) return formatAmount(magnitude);
+
+  const millions = magnitude >= 1_000_000 * scale;
+  const unit = (millions ? 1_000_000 : 1000) * scale;
+  const stepsPerUnit = magnitude >= 100 * unit ? 1 : 10;
+  const step = unit / stepsPerUnit;
+  const roundedSteps = Math.round(magnitude / step);
+  const approximate = roundedSteps * step !== magnitude;
+  return `${approximate ? '≈' : ''}${roundedSteps / stepsPerUnit}${millions ? 'M' : 'k'}`;
 }
 
 export function parseAmountToFils(text: string): number | null {
-  const cleaned = text.replace(/[^0-9.,]/g, '');
+  // Normalize separators before filtering: stripping ٫ would turn 12٫50 into 1250.
+  const cleaned = normalizeArabicNumerals(text).replace(/[^0-9.,]/g, '');
   return parseMajorToMinor(cleaned, activeMoneySpec());
 }
 

@@ -1,0 +1,42 @@
+name: Android repair regression checks
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/ledger.ts'
+      - 'src/lib/dashboard-projection.ts'
+      - 'src/hooks/use-history-import.ts'
+      - 'src/screens/journal-home-screen.tsx'
+      - 'src/components/transaction-row.tsx'
+      - 'src/app/(tabs)/index.tsx'
+      - 'scripts/test/repair/**'
+      - '.github/workflows/android-repair.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Behavioural regressions
+        run: |
+          set -euo pipefail
+          node --test scripts/test/repair/*.test.cjs | tee repair-tests.txt
+      - name: Synthetic transfer matching benchmark
+        run: node scripts/test/repair/benchmark.cjs > transfer-benchmark.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-repair-evidence-${{ github.sha }}
+          path: |
+            repair-tests.txt
+            transfer-benchmark.json

@@ -11,23 +11,17 @@ import Animated, {
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
-import { Motion, Radius, Spacing } from '@/constants/theme';
+import { rampColor } from '@/components/ui/data-viz';
+import { DataViz, Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { formatAED } from '@/lib/format';
 import { isRTL, t, tf } from '@/lib/i18n';
 
-/**
- * One hue at five lightnesses. Composition is a question of proportion, not
- * of identity, so the segments differ in weight rather than in colour.
- */
-const RAMP_LIGHT = ['#1F6B52', '#3D8A72', '#63A791', '#8CBFAE', '#B2D4C7'];
-const RAMP_DARK = ['#57B894', '#48A07F', '#3B826A', '#2F6754', '#264F41'];
-
-export function useRamp(): string[] {
+export function useRamp(): readonly string[] {
   const scheme = useColorScheme();
-  return scheme === 'dark' ? RAMP_DARK : RAMP_LIGHT;
+  return DataViz[scheme === 'dark' ? 'dark' : 'light'].ramp;
 }
 
 // There is deliberately no `useOutBarColor` here any more. It returned a muted
@@ -65,6 +59,8 @@ export function CompositionBar({
   height?: number;
 }) {
   const theme = useTheme();
+  const dark = useColorScheme() === 'dark';
+  const dataViz = DataViz[dark ? 'dark' : 'light'];
   const ramp = useRamp();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
@@ -101,7 +97,9 @@ export function CompositionBar({
           style={{
             flexGrow: s.value,
             flexBasis: 0,
-            backgroundColor: s.neutral ? theme.cardBorderStrong : ramp[i % ramp.length],
+            backgroundColor: s.neutral
+              ? dataViz.neutral
+              : rampColor(i % ramp.length, dark),
             // Segments are separated by a background-coloured gap, not a
             // border: a border would eat into the smallest slices. `End` and
             // not `Right`, so under RTL the gap stays on the trailing edge

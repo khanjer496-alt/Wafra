@@ -4,8 +4,10 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
+import { SectionHeader as CanonicalSectionHeader } from '@/components/ui/section-header';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { Motion, Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
@@ -62,7 +64,7 @@ export function Section({
   );
 }
 
-/** Caps header with an optional trailing figure or link. */
+/** @deprecated Import SectionHeader from ui/section-header. */
 export function SectionHeader({
   title,
   action,
@@ -74,22 +76,13 @@ export function SectionHeader({
   onAction?: () => void;
   trailing?: React.ReactNode;
 }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.sectionHeader}>
-      <ThemedText type="micro" themeColor="textTertiary">
-        {title}
-      </ThemedText>
-      {trailing}
-      {action && (
-        <Pressable accessibilityRole="button" hitSlop={8} onPress={onAction}>
-          <ThemedText type="micro" style={{ color: theme.primary }}>
-            {action}
-          </ThemedText>
-        </Pressable>
-      )}
-    </View>
-  );
+  if (action && onAction) {
+    return <CanonicalSectionHeader title={title} action={{ label: action, onPress: onAction }} />;
+  }
+  if (trailing !== undefined) {
+    return <CanonicalSectionHeader title={title} trailing={trailing} />;
+  }
+  return <CanonicalSectionHeader title={title} />;
 }
 
 /**
@@ -154,7 +147,10 @@ export function Block({
   const surface =
     tone === 'expense'
       ? { backgroundColor: theme.expenseSoftBg, borderColor: theme.expenseSoftBorder }
-      : { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder };
+      : {
+          backgroundColor: theme.backgroundElement,
+          borderColor: onPress ? theme.controlBorder : theme.cardBorder,
+        };
 
   if (!onPress) return <View style={[styles.block, surface, style]}>{children}</View>;
   return (
@@ -172,25 +168,24 @@ export function Block({
 /** Label / value table used inside every detail sheet. */
 export function LabelTable({ rows }: { rows: { label: string; value: React.ReactNode }[] }) {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   return (
-    <View>
+    <View style={[styles.detailTable, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
       {rows.map((r, i) => (
         <View
           key={r.label}
           style={[
             styles.tableRow,
+            largeText && { flexDirection: 'column', gap: 6 },
             {
-              borderTopWidth: StyleSheet.hairlineWidth,
+              borderTopWidth: i === 0 ? 0 : StyleSheet.hairlineWidth,
               borderTopColor: theme.cardBorder,
-              ...(i === rows.length - 1
-                ? { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.cardBorder }
-                : null),
             },
           ]}>
-          <ThemedText type="micro" themeColor="textTertiary" style={styles.tableLabel}>
+          <ThemedText type="meta" themeColor="textSecondary" style={[styles.tableLabel, largeText && { width: '100%' }]}>
             {r.label}
           </ThemedText>
-          <View style={styles.tableValue}>{r.value}</View>
+          <View style={[styles.tableValue, largeText && { flex: 0, width: '100%' }]}>{r.value}</View>
         </View>
       ))}
     </View>
@@ -216,7 +211,7 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
           color={theme.text}
         />
       </Pressable>
-      <ThemedText type="micro" themeColor="textTertiary">
+      <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
         {title}
       </ThemedText>
     </View>
@@ -224,13 +219,7 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
 }
 
 const styles = StyleSheet.create({
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    paddingBottom: Spacing.two,
-  },
+  detailTable: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, overflow: 'hidden' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

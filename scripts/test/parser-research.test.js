@@ -2,9 +2,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
+  buildManualParserResearchExport,
   buildParserResearchSubmission,
+  buildParserResearchSubmissionCooperatively,
+  hasManualParserResearchSamples,
   parsePastedParserMessages,
   sanitizeParserTemplate,
+  serializeManualParserResearchExport,
+  serializeManualParserResearchExportCooperatively,
 } = require('./build/parser-research.js');
 
 let pass = 0;
@@ -99,6 +104,57 @@ ok('only the dedicated report explicitly consents to named AI review',
     submission.wire.diagnostic.delivery.thirdPartyAi === true &&
     submission.wire.text === 'Sanitized parser research report.');
 
+const manualExport = typeof buildManualParserResearchExport === 'function'
+  ? buildManualParserResearchExport(submission)
+  : null;
+const manualJson = typeof serializeManualParserResearchExport === 'function' && manualExport
+  ? serializeManualParserResearchExport(manualExport)
+  : '';
+ok('the manual export says Wafra uploaded nothing and the user chooses the destination',
+  manualExport?.schema === 2 && manualExport?.kind === 'wafra-parser-report' &&
+    manualExport?.delivery?.mode === 'manual' &&
+    manualExport?.delivery?.uploadedByWafra === false &&
+    manualExport?.delivery?.destinationChosenByUser === true,
+  manualJson);
+ok('the manual AI report includes both unparsed and parsed financial templates',
+  manualExport?.counts?.checked === 6 &&
+    manualExport?.counts?.financial === 4 &&
+    manualExport?.counts?.parsedMessages === 2 &&
+    manualExport?.counts?.unparsedMessages === 2 &&
+    manualExport?.counts?.uniqueParsedTemplates === 1 &&
+    manualExport?.counts?.uniqueUnparsedTemplates === 1 &&
+    manualExport?.counts?.includedTemplates === 2 &&
+    manualExport?.samples?.unparsed?.length === 1 &&
+    manualExport?.samples?.unparsed?.[0]?.outcome === 'needs-parser-work' &&
+    manualExport?.samples?.unparsed?.[0]?.count === 2 &&
+    manualExport?.samples?.parsed?.length === 1 &&
+    manualExport?.samples?.parsed?.[0]?.outcome === 'parsed' &&
+    manualExport?.samples?.parsed?.[0]?.count === 2 &&
+    manualExport?.samples?.parsed?.[0]?.result?.kind === 'transaction' &&
+    manualExport?.samples?.parsed?.[0]?.result?.type === 'expense' &&
+    manualExport?.samples?.parsed?.[0]?.result?.category === 'groceries' &&
+    manualExport?.samples?.parsed?.[0]?.result?.categorySource === 'rule' &&
+    manualExport?.redaction === submission.wire.diagnostic.redaction &&
+    manualExport?.build?.version === '1.0.0' && manualExport?.build?.marketId === 'AE',
+  manualJson);
+ok('the manual export carries no automatic-delivery or raw-message residue',
+  manualJson.length > 0 && !manualJson.includes(secret) && !manualJson.includes('45.75') &&
+    !manualJson.includes('3644') && !manualJson.includes('04/07/2026') &&
+    !manualJson.includes('90881723004') && !manualJson.includes('1800000000000') &&
+    !/aiReviewConsent|thirdPartyAi|Anthropic|GitHub|relay|retention/i.test(manualJson),
+  manualJson);
+
+const parsedOnlySubmission = buildParserResearchSubmission([
+  { sender: 'ENBD', body, receivedAtMs: 1_800_000_000_000 },
+], {
+  version: '1.0.0', platform: 'android', language: 'en-AE', marketId: 'AE', currency: 'AED',
+});
+ok('a parsed-only inbox still produces an AI review report',
+  typeof hasManualParserResearchSamples === 'function' &&
+    hasManualParserResearchSamples(parsedOnlySubmission) === true &&
+    parsedOnlySubmission.counts.attachedTemplates === 0,
+  JSON.stringify(parsedOnlySubmission.counts));
+
 const root = path.join(__dirname, '../..');
 const source = fs.readFileSync(path.join(root, 'src/lib/parser-research-source.ts'), 'utf8');
 const transport = fs.readFileSync(path.join(root, 'src/lib/feedback-transport.ts'), 'utf8');
@@ -117,22 +173,43 @@ ok('the parser-research transport posts only the already-built wire object',
     !/submitParserResearchFeedback[\s\S]{0,4000}(deviceId|pushToken|installationId)/.test(transport));
 ok('the old full-inbox raw share control is no longer exposed in Settings',
   !/isSmsCorpusExportAvailable|shareSmsCorpus|smsCorpusExportTitle/.test(settings));
-ok('the tester sees the exact safe preview before a separate send confirmation',
-    /submission\.preview/.test(screen) && /setConfirming\(true\)/.test(screen) &&
-    /parserResearchSendBody/.test(screen) && /previewScroll/.test(screen) &&
-    /maxHeight: 180/.test(screen));
+ok('the tester previews and exports the exact local JSON file instead of sending it',
+    /serializeManualParserResearchExport/.test(screen) &&
+    /serializeManualParserResearchExportCooperatively/.test(screen) &&
+    /hasManualParserResearchSamples\(next\)/.test(screen) &&
+    !/next\.counts\.attachedTemplates === 0/.test(screen) &&
+    /shareTextFile\('wafra-parser-report\.json',\s*manualJson/.test(screen) &&
+    /mimeType:\s*'application\/json'/.test(screen) &&
+    /parserResearchExport/.test(screen) && /parserResearchReadySummary/.test(screen) &&
+    /manualJson\.slice\(previewStart, previewEnd\)/.test(screen) &&
+    /REPORT_PREVIEW_PAGE_CHARS = 2_000/.test(screen) &&
+    /parserResearchPreviewPrevious/.test(screen) && /parserResearchPreviewNext/.test(screen) &&
+    !/\{manualJson\}/.test(screen) &&
+    !/submitParserResearchFeedback|setConfirming\(true\)|<ConfirmSheet/.test(screen));
+ok('the tester can copy the exact redacted AI report without opening a share sheet',
+  /copyTextToClipboard\(manualJson\)/.test(screen) &&
+    /parserResearchCopy/.test(screen) &&
+    /parserResearchCopiedTitle/.test(screen) &&
+    /disabled=\{copying \|\| blocked\}/.test(screen));
 ok('raw pasted text is cleared as soon as the redacted report exists',
   /setPasted\(''\)/.test(screen) && !/setState\([^)]*messages/.test(screen));
-ok('preparing dismisses the keyboard so the complete preview and consent stay reachable',
-  /const prepare = async \(\) => \{\s*Keyboard\.dismiss\(\)/.test(screen) &&
+ok('an empty paste gives a visible answer and focuses the input instead of a dead button',
+  /parserResearchPasteRequired/.test(screen) && /pasteInputRef\.current\?\.focus\(\)/.test(screen) &&
+    /AccessibilityInfo\.announceForAccessibility/.test(screen) &&
+    /accessibilityLiveRegion="polite"/.test(screen) &&
+    /const canPrepare = !blocked && !preparing/.test(screen));
+const prepareSource = screen.slice(screen.indexOf('const prepare = async'));
+ok('preparing a real report dismisses the keyboard before work starts',
+  prepareSource.indexOf('Keyboard.dismiss()') >= 0 &&
+    prepareSource.indexOf('Keyboard.dismiss()') < prepareSource.indexOf('setPreparing(true)') &&
     /paddingBottom: Spacing\.six \+ 96/.test(screen));
 ok('Private Mode blocks both collection and preparation',
   /const blocked = state\.privateMode/.test(screen) &&
     /const canPrepare = !blocked/.test(screen));
-ok('Private Mode is rechecked before final send and clears a stale report',
+ok('Private Mode is rechecked before export and clears a stale report',
   /if \(!submission \|\| state\.privateMode \|\| !enabled\)/.test(screen) &&
     /if \(!blocked\) return;[\s\S]{0,160}setSubmission\(null\)/.test(screen) &&
-    /disabled=\{sending \|\| blocked\}/.test(screen));
+    /disabled=\{exporting \|\| blocked\}/.test(screen));
 ok('a production deep link cannot bypass the internal-build gate',
   /const enabled = isParserResearchBuild\(\)/.test(screen) &&
     /const blocked = state\.privateMode \|\| !enabled/.test(screen) &&
@@ -149,5 +226,140 @@ ok('research is internal/test only and production is compiled closed',
     eas.build['capture-beta'].env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '1' &&
     eas.build.production.env.EXPO_PUBLIC_WAFRA_PARSER_RESEARCH === '0');
 
-console.log(`\nparser-research: ${pass} passed, ${fail} failed`);
-if (fail) process.exit(1);
+(async () => {
+  const largeInbox = Array.from({ length: 130 }, (_, index) => ({
+    sender: 'ENBD',
+    body: index % 2 === 0
+      ? 'Your OTP is 458213. Do not share this verification code.'
+      : 'AED 45.75 spent on card ending 3644 at CARREFOUR on 04/07/2026.',
+    receivedAtMs: 0,
+  }));
+  const progress = [];
+  let timerFired = false;
+  setTimeout(() => { timerFired = true; }, 0);
+  const cooperative = await buildParserResearchSubmissionCooperatively(
+    largeInbox,
+    { version: '1.0.0', platform: 'android', language: 'en', marketId: 'AE', currency: 'AED' },
+    (value) => progress.push(value),
+  );
+  const checkingProgress = progress.filter((value) => value?.stage === 'checking');
+  ok('large parser-sample analysis yields to the UI before it completes',
+    timerFired && checkingProgress.length >= 2 &&
+      checkingProgress[0].completed > 0 &&
+      checkingProgress[0].completed < largeInbox.length &&
+      checkingProgress.at(-1).completed === largeInbox.length,
+    JSON.stringify({ timerFired, progress }));
+  ok('cooperative analysis preserves the hand-checked parser research result',
+    cooperative.counts.checked === 130 &&
+      cooperative.counts.financial === 65 &&
+      cooperative.counts.sensitiveExcluded === 65 &&
+      cooperative.counts.nonFinancialExcluded === 0 &&
+      cooperative.counts.alreadyParsedExcluded === 65 &&
+      cooperative.counts.attachedTemplates === 0,
+    JSON.stringify(cooperative.counts));
+
+  const mixedInbox = Array.from({ length: 30 }, (_, batch) => [
+    {
+      sender: 'ENBD',
+      body: `Movement of AED 23.45 sent successfully to CARREFOUR. Ref 55566677788.${'!'.repeat(batch + 1)}`,
+      receivedAtMs: 0,
+    },
+    {
+      sender: '+971501234567',
+      body: `Movement of AED 67.89 sent successfully to SOME SHOP. Ref 99900011122.${'?'.repeat(batch + 1)}`,
+      receivedAtMs: 0,
+    },
+    {
+      sender: 'ENBD',
+      body: 'AED 45.75 spent on card ending 3644 at CARREFOUR on 04/07/2026.',
+      receivedAtMs: 0,
+    },
+    {
+      sender: '+971501234567',
+      body: 'Your OTP is 458213. Do not share this verification code.',
+      receivedAtMs: 0,
+    },
+  ]).flat();
+  const mixedBuild = {
+    version: '1.0.0', platform: 'android', language: 'en', marketId: 'AE', currency: 'AED',
+  };
+  const synchronousMixed = buildParserResearchSubmission(mixedInbox, mixedBuild);
+  const cooperativeMixed = await buildParserResearchSubmissionCooperatively(mixedInbox, mixedBuild);
+  ok('cooperative scheduling does not change any preview, wire or manual-export byte',
+    cooperativeMixed.preview === synchronousMixed.preview &&
+      JSON.stringify(cooperativeMixed.wire) === JSON.stringify(synchronousMixed.wire) &&
+      serializeManualParserResearchExport(buildManualParserResearchExport(cooperativeMixed)) ===
+        serializeManualParserResearchExport(buildManualParserResearchExport(synchronousMixed)));
+
+  const diverseInbox = Array.from({ length: 180 }, (_, index) => ({
+    sender: `+97150${index}`,
+    body: `Movement of AED 23.45 sent successfully to Sample merchant. Ref 55566677788.${'!'.repeat(index + 1)}`,
+    receivedAtMs: 0,
+  }));
+  diverseInbox.push({
+    sender: 'ENBD',
+    body: 'AED 45.75 spent on card ending 3644 at CARREFOUR on 04/07/2026.',
+    receivedAtMs: 0,
+  });
+  const diverseProgress = [];
+  const diverse = await buildParserResearchSubmissionCooperatively(
+    diverseInbox,
+    mixedBuild,
+    (value) => diverseProgress.push(value),
+  );
+  const finalizingProgress = diverseProgress.filter((value) => value?.stage === 'finalizing');
+  ok('diverse-template finalization also yields and reports progress before completion',
+    diverse.counts.uniqueTemplates === 180 && diverse.counts.attachedTemplates === 40 &&
+      finalizingProgress.some((value) => value.completed > 0 && value.completed < value.total) &&
+      finalizingProgress.every((value) => value.total === 181) &&
+      finalizingProgress.at(-1)?.completed === 181,
+    JSON.stringify({ counts: diverse.counts, finalizingProgress }));
+  const diverseManual = buildManualParserResearchExport(diverse);
+  ok('the manual report keeps every unique financial template after scanning the full inbox',
+    diverseManual.samples.unparsed.length === 180 &&
+      diverseManual.samples.unparsed.every((sample) => sample.outcome === 'needs-parser-work') &&
+      diverseManual.samples.parsed.length === 1,
+    JSON.stringify({
+      unparsed: diverseManual.samples?.unparsed?.length,
+      parsed: diverseManual.samples?.parsed?.length,
+    }));
+  const serializationProgress = [];
+  let serializationTimerFired = false;
+  setTimeout(() => { serializationTimerFired = true; }, 0);
+  const cooperativeJson = typeof serializeManualParserResearchExportCooperatively === 'function'
+    ? await serializeManualParserResearchExportCooperatively(
+        diverseManual,
+        (value) => serializationProgress.push(value),
+      )
+    : '';
+  ok('the full manual report serializes cooperatively without changing a byte',
+    serializationTimerFired &&
+      cooperativeJson === serializeManualParserResearchExport(diverseManual) &&
+      serializationProgress.some((value) => value.completed > 0 && value.completed < 181) &&
+      serializationProgress.at(-1)?.completed === 181 &&
+      serializationProgress.at(-1)?.total === 181,
+    JSON.stringify({ serializationTimerFired, serializationProgress }));
+
+  let keepRunning = true;
+  let cancellation = '';
+  try {
+    await buildParserResearchSubmissionCooperatively(
+      largeInbox,
+      mixedBuild,
+      (value) => {
+        if (value?.stage === 'checking' && value.completed > 0) keepRunning = false;
+      },
+      { shouldContinue: () => keepRunning },
+    );
+  } catch (error) {
+    cancellation = error instanceof Error ? error.message : String(error);
+  }
+  ok('leaving or blocking the screen cancels raw-message analysis between slices',
+    cancellation === 'parser_research_cancelled');
+
+  console.log(`\nparser-research: ${pass} passed, ${fail} failed`);
+  if (fail) process.exit(1);
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

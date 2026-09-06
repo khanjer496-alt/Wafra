@@ -1,5 +1,15 @@
 # Wafra Capture — publishable Shortcut specification
 
+> **CURRENT STATUS — RETIRED / DO NOT USE FOR NEW SETUP**
+>
+> This document preserves the historical relay-uploading **Wafra Capture**
+> design for audit purposes. Do not build, publish, configure, or restore this
+> Shortcut for a new user. The current local-capture implementation and its
+> remaining physical-iPhone release gates are defined in
+> [`2026-08-25-ios-local-capture.md`](./superpowers/plans/2026-08-25-ios-local-capture.md).
+> Nothing below is evidence that a replacement Shortcut has been exported,
+> signed, tested on a physical iPhone, or published to iCloud.
+
 This is the source-of-truth action graph for the credential-free iCloud
 Shortcut referenced by `EXPO_PUBLIC_WAFRA_SHORTCUT_URL`. The published Shortcut
 must contain no Wafra server URL, bearer token, device identifier, bank name or
@@ -10,6 +20,8 @@ user data. Pairing supplies a versioned one-paste JSON value:
 ```
 
 ## Action graph
+
+The repository generator produces the audited 50-action version of this graph.
 
 1. Accept **Messages** and **Text** as `Shortcut Input`. The intended personal
    automation passes the whole Message object so the graph can try to extract
@@ -26,27 +38,41 @@ user data. Pairing supplies a versioned one-paste JSON value:
    This makes the one-time configuration run visibly complete without sending
    any financial or setup data.
 5. Branch on the type of `Shortcut Input` before reading Message details:
-   - For **Text**, set `text` to `Shortcut Input` and leave `sender` absent.
-   - For **Messages**, get detail **Content** as `text`; get detail **Sender**,
-     explicitly convert that result to plain **Text**, and set it as `sender`.
-     Get detail **Date** and format it as an ISO-8601 instant in UTC with
-     milliseconds (`yyyy-MM-dd'T'HH:mm:ss.SSS'Z'`) as `receivedAt`. Do not rely
-     on JSON coercion of a Contact, participant object or Date.
+   - For **Text**, explicitly convert `Shortcut Input` to Text as `text` and
+     leave `sender` absent.
+   - For **Messages**, explicitly convert the Message's **Content** to Text as
+     `text`, and explicitly convert its **Sender** to Text as `sender`. Do not
+     rely on JSON coercion of a Contact or participant object. The request from
+     this branch also gets the fixed literal discriminator
+     `automation: "message"`; the Text branch never gets it.
 6. Require non-empty `text`; stop without a request when it is empty.
-7. Generate a UUID as `eventId`.
-8. Get Contents of URL using the saved `url`:
+7. Generate one UUID-shaped `eventId`. The repository graph hashes two random
+   numbers plus Current Date, then formats the hash as a UUID; Current Date is
+   entropy for this request id only.
+8. In each branch, use Get Contents of URL with the saved `url`:
    - Method: `POST`
    - Header: `Authorization: Bearer <saved token>`
    - Header: `Content-Type: application/json`
-   - JSON body:
-     `{ "text": <text>, "sender": <sender>, "eventId": <UUID>, "receivedAt": <Message Date> }`
-   - Omit `sender` entirely when `sender` is empty. An empty string is
-     accepted and treated as absent, but a missing key is the clearer request.
-   - Omit `receivedAt` only for manual Text setup tests. A real Message
-     automation must send the Message object's Date so a delayed automation
-     and a later history import identify the same event time.
-9. Do not show, speak, copy or log the response. A `202` means a row was
-   accepted; `204` means the alert was intentionally ignored.
+   - Text body: `{ "text": <text>, "eventId": <UUID> }`
+   - Messages body:
+     `{ "text": <text>, "sender": <sender>, "eventId": <UUID>, "automation": "message" }`
+   - An empty `sender` is accepted and treated as absent. The generated graph
+     supplies the key only in the Messages branch.
+9. Close the top-level Text-or-Messages conditional, then append **Stop This
+   Shortcut** with no input as the final action. It must be outside the
+   conditional so both successful POST branches discard the HTTP response
+   instead of returning it as a response file.
+10. Do not show, speak, copy or log the response. A `202` means a row was
+    accepted; `204` means the alert was intentionally ignored.
+
+The official graph intentionally has no Message Date detail, Format Date,
+Convert Time Zone or `receivedAt` action/body field. Its only Current Date
+value is the event-id entropy above. Native inspection on iOS 26.1 found that
+`WFMessageContentItem` exposes Content, Name, Recipients and Sender, but not
+Date. The relay therefore stamps its receipt time on rows from this graph.
+`receivedAt` remains an optional, plausibility-checked wire field for older or
+alternate clients that can supply a real message timestamp; it is not part of
+the publishable 50-action graph.
 
 The published graph must contain **no Get File, Save File, Move File or Folder
 action**. The first public Wafra Capture accidentally configured Get File to
@@ -76,13 +102,29 @@ column.
 The message text is still parsed and dropped. `sender` does not change that.
 
 The setup test passes `WAFRA_CAPTURE_TEST_V1` as Shortcut Input, with no
-sender. It proves the Shortcut, relay, encryption and sync path only. The app
-must remain in “pipe ready” state until a real parsed row with
-`captureSource: "shortcut"` is durably staged by the headless iOS task.
+sender. It proves the Shortcut, relay, encryption and sync path only. When the
+user later confirms that the personal automation is ready, the app uses its
+admin credential to rotate an opaque generation for this device. A subsequent
+Messages-branch request still sends only `automation: "message"`; after
+authenticating it, the relay binds that request to its server-held generation
+and seals this marker into the parsed row:
+
+```json
+{"kind":"message","sourceDeviceId":"<authenticated device>","generation":"<current opaque generation>"}
+```
+
+The app records automation proof only after that parsed row is durably staged
+or imported and both `sourceDeviceId` and `generation` exactly match its current
+setup. Foreground recovery and the background task are equally valid consumers
+of the sealed evidence. A row captured by another trusted device cannot prove
+this iPhone, and a queued or locally staged row from an older setup generation
+cannot become fresh merely because it is processed after setup is retried.
 
 A Shortcut built against the earlier `{ "text", "eventId" }` contract keeps
-working; `sender` and `receivedAt` are optional on the wire. It is not complete
-for history/live overlap until republished with Message Date.
+capturing; `sender`, `receivedAt` and `automation` are optional on the wire.
+It cannot earn the app's stronger “automation verified” status until replaced
+with a graph that sends the Messages-only discriminator. The server, not the
+Shortcut, supplies the source-device and generation proof metadata.
 
 ## Personal automation the user creates
 

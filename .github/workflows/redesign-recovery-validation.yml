@@ -1,0 +1,231 @@
+name: Recovered redesign cross-platform validation
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-recovery-validation.yml']
+permissions:
+  contents: read
+concurrency:
+  group: redesign-recovery-validation
+  cancel-in-progress: false
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: web
+            runner: ubuntu-24.04
+          - platform: android
+            runner: ubuntu-24.04
+          - platform: ios
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Select iOS toolchain
+        if: matrix.platform == 'ios'
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+          command -v zstd || brew install zstd
+      - name: Reconstruct and verify the recovered candidate
+        id: source
+        run: |
+          set -euo pipefail
+          python3 validation/assemble-recovered-candidate.py
+          if [ '${{ matrix.platform }}' != web ]; then
+            node - <<'JS'
+          const fs=require('fs'),p='app/app.json',c=JSON.parse(fs.readFileSync(p,'utf8'));
+          fs.writeFileSync('recovery-evidence/config-before.json',JSON.stringify(c,null,2));
+          c.expo.updates={...c.expo.updates,enabled:false};
+          fs.writeFileSync(p,JSON.stringify(c,null,2));
+          fs.writeFileSync('recovery-evidence/config-after.json',JSON.stringify(c,null,2));
+          JS
+          fi
+      - name: Install locked dependencies
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          if [ '${{ matrix.platform }}' = web ]; then
+            npm --prefix server ci --no-audit --no-fund
+            npx --no-install playwright install --with-deps chromium
+            sudo apt-get install -y sqlite3
+          fi
+      - name: Generate native integration
+        working-directory: app
+        run: |
+          if [ '${{ matrix.platform }}' = android ]; then PLATFORM=android; else PLATFORM=ios; fi
+          npx --no-install expo prebuild --platform "$PLATFORM" --no-install
+      - name: Full typecheck
+        if: matrix.platform == 'web'
+        id: types
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee ../recovery-evidence/typecheck.log
+      - name: Full lint
+        if: matrix.platform == 'web'
+        id: lint
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee ../recovery-evidence/lint.log
+      - name: Every original suite and recovered interaction tests
+        if: matrix.platform == 'web'
+        id: tests
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee ../recovery-evidence/npm-test.log
+          npm --prefix server run build:check 2>&1 | tee ../recovery-evidence/worker-build.log
+      - name: Original browser end-to-end suite
+        if: matrix.platform == 'web'
+        id: e2e
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee ../recovery-evidence/e2e-original.log
+      - name: Real browser redesign navigation and screenshots
+        if: matrix.platform == 'web'
+        id: browser
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p browser-evidence
+          test -f app/dist/index.html
+          node app/scripts/e2e/serve.mjs app/dist 8126 > recovery-evidence/server.log 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for n in $(seq 1 40); do curl -fsS http://127.0.0.1:8126/ >/dev/null && break || sleep 1; done
+          node validation/redesign-browser-probe.mjs 2>&1 | tee recovery-evidence/browser.log
+          cp -R browser-evidence recovery-evidence/browser
+      - name: Compile Android release for emulator
+        if: matrix.platform == 'android'
+        id: androidbuild
+        working-directory: app/android
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx4g 2>&1 | tee ../../recovery-evidence/android-build.log
+          sha256sum app/build/outputs/apk/release/*.apk > ../../recovery-evidence/apk-sha256.txt
+      - name: Enable emulator acceleration
+        if: matrix.platform == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and launch real Android release
+        if: matrix.platform == 'android'
+        id: androidlaunch
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          script: |
+            adb install app/android/app/build/outputs/apk/release/app-release.apk
+            adb logcat -c
+            adb shell monkey -p $(node -p "require('./app/app.json').expo.android.package") -c android.intent.category.LAUNCHER 1
+            sleep 15
+            adb exec-out screencap -p > recovery-evidence/android-first-launch.png
+            adb shell uiautomator dump /sdcard/window.xml
+            adb pull /sdcard/window.xml recovery-evidence/android-first-launch.xml
+            adb logcat -d > recovery-evidence/android-logcat.txt
+            adb shell pidof $(node -p "require('./app/app.json').expo.android.package")
+            test $(grep -c 'FATAL EXCEPTION' recovery-evidence/android-logcat.txt) -eq 0
+      - name: Install iOS dependencies
+        if: matrix.platform == 'ios'
+        working-directory: app
+        run: |
+          set -o pipefail
+          npx --no-install pod-install 2>&1 | tee ../recovery-evidence/pods.log
+      - name: Run unchanged native storage acceptance tests
+        if: matrix.platform == 'ios'
+        id: native
+        continue-on-error: true
+        working-directory: app
+        run: |
+          set -o pipefail
+          bash scripts/test/native-history-store.sh 2>&1 | tee ../recovery-evidence/ios-history.log
+          bash scripts/test/native-live-capture-store.sh 2>&1 | tee ../recovery-evidence/ios-capture.log
+      - name: Build full iOS release simulator application independently
+        if: matrix.platform == 'ios'
+        id: iosbuild
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Wafra.xcworkspace -scheme Wafra -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ../ios-derived CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ../recovery-evidence/ios-build.log
+      - name: Launch real iOS release
+        if: matrix.platform == 'ios'
+        id: ioslaunch
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > recovery-evidence/simulators.json
+          UDID=$(python3 -c "import json; d=json.load(open('recovery-evidence/simulators.json'))['devices']; print(next(p['udid'] for k,v in d.items() if '.iOS-' in k for p in v if 'iPhone' in p['name']))")
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find ios-derived/Build/Products -path '*/Wafra.app' -type d | head -1)
+          BID=$(node -p "require('./app/app.json').expo.ios.bundleIdentifier")
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" "$BID" | tee recovery-evidence/ios-launch.txt
+          sleep 12
+          xcrun simctl io "$UDID" screenshot recovery-evidence/ios-first-launch.png
+      - name: Record every outcome
+        if: always()
+        run: |
+          mkdir -p recovery-evidence
+          printf '%s\n' 'platform=${{ matrix.platform }}' 'source=${{ steps.source.outcome }}' 'typecheck=${{ steps.types.outcome }}' 'lint=${{ steps.lint.outcome }}' 'tests=${{ steps.tests.outcome }}' 'original_e2e=${{ steps.e2e.outcome }}' 'browser_probe=${{ steps.browser.outcome }}' 'android_build=${{ steps.androidbuild.outcome }}' 'android_launch=${{ steps.androidlaunch.outcome }}' 'native_storage=${{ steps.native.outcome }}' 'ios_build=${{ steps.iosbuild.outcome }}' 'ios_launch=${{ steps.ioslaunch.outcome }}' > recovery-evidence/gates.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-recovery-${{ matrix.platform }}
+          path: recovery-evidence
+          retention-days: 7
+      - name: Do not mask a failed gate
+        if: always()
+        run: |
+          set -e
+          test '${{ steps.source.outcome }}' = success
+          if [ '${{ matrix.platform }}' = web ]; then
+            test '${{ steps.types.outcome }}' = success
+            test '${{ steps.lint.outcome }}' = success
+            test '${{ steps.tests.outcome }}' = success
+            test '${{ steps.e2e.outcome }}' = success
+            test '${{ steps.browser.outcome }}' = success
+          elif [ '${{ matrix.platform }}' = android ]; then
+            test '${{ steps.androidbuild.outcome }}' = success
+            test '${{ steps.androidlaunch.outcome }}' = success
+          else
+            test '${{ steps.native.outcome }}' = success
+            test '${{ steps.iosbuild.outcome }}' = success
+            test '${{ steps.ioslaunch.outcome }}' = success
+          fi

@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Icon } from '@/components/ui/icon';
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { tapped } from '@/lib/haptics';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -128,14 +128,18 @@ export function ChoiceSheet<T extends string>({
                   borderTopWidth: StyleSheet.hairlineWidth,
                   borderTopColor: theme.cardBorder,
                 },
-                pressed && !off && { transform: [{ scale: 0.985 }] },
+                !off && {
+                  backgroundColor: pressed
+                    ? theme.backgroundSelected
+                    : active ? theme.primarySoft : 'transparent',
+                },
               ]}>
               <View style={styles.text}>
                 <ThemedText type="small" style={off ? styles.labelOff : undefined}>
                   {option.label}
                 </ThemedText>
                 {option.detail && (
-                  <ThemedText type="meta" themeColor="textTertiary">
+                  <ThemedText type="meta" themeColor={active && !off ? 'textSecondary' : 'textTertiary'}>
                     {option.detail}
                   </ThemedText>
                 )}
@@ -162,6 +166,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.two,
     minHeight: 52,
+    borderRadius: Radius.control,
+    paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
   },
   text: {

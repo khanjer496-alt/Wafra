@@ -1,8 +1,9 @@
-import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Icon } from '@/components/ui/icon';
+import { ActionIconButton } from '@/components/ui/action-icon-button';
+import { Icon, type IconName } from '@/components/ui/icon';
+import { SectionHeader as CanonicalSectionHeader } from '@/components/ui/section-header';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -36,7 +37,7 @@ export function PeriodPill({ onPress }: { onPress: () => void }) {
         styles.pill,
         {
           backgroundColor: theme.backgroundElement,
-          borderColor: theme.cardBorder,
+          borderColor: theme.controlBorder,
         },
       ]}>
       <ThemedText type="micro" themeColor="textSecondary">
@@ -87,39 +88,20 @@ export function LinkPill({ label, onPress }: { label: string; onPress: () => voi
   );
 }
 
-/** A 44×44 bordered icon button — the square counterpart to the pill. */
+/** @deprecated Import ActionIconButton from ui/action-icon-button. */
 export function IconButton({
   name,
   onPress,
   label,
 }: {
-  name: React.ComponentProps<typeof Icon>['name'];
+  name: IconName;
   onPress: () => void;
   label: string;
 }) {
-  const theme = useTheme();
-  return (
-    <SpringPressable
-      onPress={() => {
-        tapped();
-        onPress();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={6}
-      style={[
-        styles.iconBtn,
-        {
-          backgroundColor: theme.backgroundElement,
-          borderColor: theme.cardBorder,
-        },
-      ]}>
-      <Icon name={name} size={17} color={theme.textSecondary} />
-    </SpringPressable>
-  );
+  return <ActionIconButton icon={name} label={label} onPress={onPress} />;
 }
 
-/** Caps section header with an optional action on the right. */
+/** @deprecated Import SectionHeader from ui/section-header. */
 export function SectionHeader({
   title,
   right,
@@ -129,31 +111,15 @@ export function SectionHeader({
   right?: string;
   onPressRight?: () => void;
 }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <ThemedText type="micro" themeColor="textTertiary" style={styles.sectionTitle}>
-        {title}
-      </ThemedText>
-      {right !== undefined &&
-        (onPressRight ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              tapped();
-              onPressRight();
-            }}
-            style={styles.sectionAction}>
-            <ThemedText type="micro" themeColor="primary">
-              {right}
-            </ThemedText>
-          </Pressable>
-        ) : (
-          <ThemedText type="micro" themeColor="textTertiary" tabular>
-            {right}
-          </ThemedText>
-        ))}
-    </View>
-  );
+  if (right !== undefined && onPressRight) {
+    return (
+      <CanonicalSectionHeader title={title} action={{ label: right, onPress: onPressRight }} />
+    );
+  }
+  if (right !== undefined) {
+    return <CanonicalSectionHeader title={title} value={right} />;
+  }
+  return <CanonicalSectionHeader title={title} />;
 }
 
 const styles = StyleSheet.create({
@@ -167,29 +133,5 @@ const styles = StyleSheet.create({
     paddingEnd: 11,
     paddingVertical: 6,
     minHeight: 44,
-  },
-  iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-    marginBottom: Spacing.two,
-  },
-  sectionTitle: {
-    flexShrink: 1,
-  },
-  sectionAction: {
-    flexShrink: 0,
-    minHeight: 44,
-    justifyContent: 'center',
-    marginVertical: -14,
   },
 });

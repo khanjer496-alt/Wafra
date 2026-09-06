@@ -1,19 +1,20 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet, type Choice } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
-import { Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
+import { Row, Section, SectionHeader } from '@/components/ui/layout';
 import { AmountField, Money } from '@/components/ui/money';
+import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { AccountTile } from '@/components/ui/tile';
-import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
@@ -41,8 +42,8 @@ type Confirmation = {
   onConfirm: () => void;
 };
 
-/** What a long press on a card row offers. `limit` is credit-cards only. */
-type CardAction = 'limit' | 'visibility' | 'delete';
+/** What card management offers after opening a row or using its shortcut. */
+type CardAction = 'visibility' | 'delete';
 
 /**
  * Every card as a row: bank, last four, and the one figure that is actually
@@ -54,6 +55,7 @@ type CardAction = 'limit' | 'visibility' | 'delete';
  */
 export default function CardsScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const router = useRouter();
   const { state, editAccount, deleteAccount } = useStore();
   const now = useMemo(() => new Date(), []);
@@ -87,6 +89,9 @@ export default function CardsScreen() {
     () => cards.filter((c) => isInactiveAccount(state, c, now)),
     [cards, state, now],
   );
+  const inactiveDisclosureLabel = `${t('inactiveCards')} ${inactiveCards.length}. ${
+    showInactive ? t('hide') : t('show')
+  }`;
   const dues = useMemo(() => openDues(state, now), [state, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
@@ -120,7 +125,7 @@ export default function CardsScreen() {
   }, [state.transactions, now, internal]);
 
   const askCreditLimit = (card: Account) => {
-    setLimitText(card.creditLimitFils ? String(Math.round(card.creditLimitFils / 100)) : '');
+    setLimitText(card.creditLimitFils ? formatAmount(card.creditLimitFils).replace(/,/g, '') : '');
     setLimitFor(card);
   };
 
@@ -130,21 +135,15 @@ export default function CardsScreen() {
     setLimitFor(null);
   };
 
-  // Only a credit card has a limit to set, so a debit card is offered two
-  // rows rather than a third that could not do anything.
   const cardActions = (card: Account): Choice<CardAction>[] => [
-    ...(card.cardType === 'credit'
-      ? [{ value: 'limit' as CardAction, label: t('setCreditLimit') }]
-      : []),
     { value: 'visibility', label: card.archived ? t('unhide') : t('hideCard') },
     { value: 'delete', label: t('deleteCardAndEntries') },
   ];
 
-  // Setting a limit and hiding happen on the spot; deleting the card and its
-  // entries asks first, exactly as the two stacked alerts did.
+  // Hiding happens on the spot; deleting the card and its entries asks first,
+  // exactly as the two stacked alerts did.
   const onCardAction = (card: Account, action: CardAction) => {
-    if (action === 'limit') askCreditLimit(card);
-    else if (action === 'visibility') editAccount(card.id, { archived: !card.archived });
+    if (action === 'visibility') editAccount(card.id, { archived: !card.archived });
     else
       setConfirmation({
         question: t('deleteCardTitle'),
@@ -153,6 +152,11 @@ export default function CardsScreen() {
         destructive: true,
         onConfirm: () => deleteAccount(card.id),
       });
+  };
+
+  const cardsHeader: ScreenHeaderProps = {
+    title: t('cardsTitle'),
+    back: { label: t('back'), onPress: () => router.back() },
   };
 
   const renderCard = (card: Account, i: number, list: Account[], inactive: boolean) => {
@@ -183,7 +187,7 @@ export default function CardsScreen() {
         style={inactive ? styles.inactiveRow : undefined}>
         <AccountTile account={card} />
         <View style={styles.rowText}>
-          <ThemedText type="small" numberOfLines={1}>
+          <ThemedText type="small" numberOfLines={largeText ? undefined : 1}>
             {card.bankName ??
               (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || t('card'))}
           </ThemedText>
@@ -214,11 +218,7 @@ export default function CardsScreen() {
               reason: on its own, "Set limit" under AED 5,353 reads as the
               limit BEING 5,353, while Wallet captions the identical figure
               "spent this month" one tap away. */}
-          <ThemedText
-            type="nano"
-            themeColor="textTertiary"
-            onPress={isCredit && limitLeft === null ? () => askCreditLimit(card) : undefined}
-            style={isCredit && limitLeft === null ? { color: theme.primary } : undefined}>
+          <ThemedText type="nano" themeColor="textTertiary">
             {outstanding !== null ? t('outstandingTitle') : t('thisMonth')}
             {limitLeft !== null
               ? ` · ${tf('creditLeft', { amount: formatAmount(limitLeft, { decimals: false }) })}`
@@ -232,16 +232,12 @@ export default function CardsScreen() {
   };
 
   return (
-    <ThemedView style={styles.root}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          <ScreenHeader title={t('cardsTitle')} onBack={() => router.back()} />
-        </View>
-
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <ThemedText type="meta" themeColor="textSecondary" style={styles.intro}>
-            {t('cardsPurpose')}
-          </ThemedText>
+    <>
+      <ScreenScaffold
+        headerMode="native"
+        header={cardsHeader}
+        contentStyle={styles.content}
+        scrollProps={{ showsVerticalScrollIndicator: false }}>
           <Section index={0}>
             {activeCards.map((c, i) => renderCard(c, i, activeCards, false))}
             {activeCards.length === 0 && (
@@ -255,27 +251,60 @@ export default function CardsScreen() {
             <Section index={1}>
               <SectionHeader
                 title={`${t('inactiveCards')} · ${inactiveCards.length}`}
-                action={showInactive ? t('hide') : t('show')}
-                onAction={() => setShowInactive(!showInactive)}
+                trailing={(
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={inactiveDisclosureLabel}
+                    accessibilityState={{ expanded: showInactive }}
+                    onPress={() => setShowInactive((current) => !current)}
+                    style={[styles.disclosureAction, Platform.OS === 'android' && styles.androidDisclosureAction]}>
+                    <ThemedText type="micro" themeColor="primary">
+                      {showInactive ? t('hide') : t('show')}
+                    </ThemedText>
+                  </Pressable>
+                )}
               />
               {showInactive && inactiveCards.map((c, i) => renderCard(c, i, inactiveCards, true))}
             </Section>
           )}
+      </ScreenScaffold>
 
-          <ThemedText type="meta" themeColor="textTertiary" style={styles.hint}>
-            {t('longPressHint')}
-          </ThemedText>
-        </ScrollView>
-      </SafeAreaView>
+      <CardDetailSheet
+        account={detail}
+        onClose={() => setDetail(null)}
+        footer={detail ? (
+          <View style={styles.detailActions}>
+            {detail.cardType === 'credit' && (
+              <Button
+                label={t('setCreditLimit')}
+                onPress={() => {
+                  setDetail(null);
+                  askCreditLimit(detail);
+                }}
+              />
+            )}
+            <Button
+              variant="outline"
+              label={t('manage')}
+              onPress={() => {
+                setDetail(null);
+                setOptionsFor(detail);
+              }}
+            />
+          </View>
+        ) : undefined}
+      />
 
-      <CardDetailSheet account={detail} onClose={() => setDetail(null)} />
-
-      <BottomSheet visible={limitFor !== null} onClose={() => setLimitFor(null)} title={t('creditLimitTitle')}>
+      <BottomSheet visible={limitFor !== null}
+        onClose={() => setLimitFor(null)}
+        title={t('creditLimitTitle')}
+        footer={(
+          <Button wrapLabel label={t('saveLimit')} onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
+        )}>
         <ThemedText type="default" themeColor="textSecondary">
           {tf('creditLimitBody', { name: limitFor?.name ?? t('card') })}
         </ThemedText>
         <AmountField label={t('totalCreditLimit')} value={limitText} onChangeText={setLimitText} fontSize={34} />
-        <Button label={t('saveLimit')} onPress={saveCreditLimit} disabled={!parseAmountToFils(limitText)} />
       </BottomSheet>
 
       {/* Outside the ScrollView: a sheet mounted inside a scrolling parent
@@ -303,30 +332,13 @@ export default function CardsScreen() {
           onConfirm={confirmation.onConfirm}
         />
       )}
-    </ThemedView>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
   content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.six,
     gap: Spacing.four + 2,
-  },
-  intro: {
-    maxWidth: 560,
   },
   rowText: {
     flex: 1,
@@ -339,7 +351,14 @@ const styles = StyleSheet.create({
   inactiveRow: {
     opacity: 0.6,
   },
-  hint: {
-    paddingTop: Spacing.two,
+  disclosureAction: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  androidDisclosureAction: { minWidth: 48, minHeight: 48 },
+  detailActions: {
+    gap: Spacing.two,
   },
 });

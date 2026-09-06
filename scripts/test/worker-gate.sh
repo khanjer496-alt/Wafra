@@ -23,9 +23,15 @@
 # run's output half-way through the other's, and the failure reads as a broken
 # checkout rather than as a collision.
 set -e
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")"
-exec 9>/tmp/wafra-test.lock
-flock 9 2>/dev/null || true
+if [ "${WAFRA_TEST_LOCKED:-}" != "1" ]; then
+  if command -v flock >/dev/null 2>&1; then
+    exec env WAFRA_TEST_LOCKED=1 flock /tmp/wafra-test.lock "$SELF" "$@"
+  elif command -v lockf >/dev/null 2>&1; then
+    exec env WAFRA_TEST_LOCKED=1 lockf -k /tmp/wafra-test.lock "$SELF" "$@"
+  fi
+fi
 
 bash build.sh
 node worker.test.js

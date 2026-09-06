@@ -114,13 +114,33 @@ const enc = new TextEncoder();
  * look like it changed nothing, and the suite would go green for the wrong
  * reason — the queue would simply always appear empty.
  */
-function makeDb(transformSchema = (sql) => sql) {
+function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
   const db = new DatabaseSync(':memory:');
   db.exec(transformSchema(fs.readFileSync(path.join(repoRoot, 'server', 'schema.sql'), 'utf8')));
+  if (applyMigrations) {
+    db.exec(fs.readFileSync(
+      path.join(repoRoot, 'server', 'migrations',
+        '2026-08-25-shortcut-ingest-retirement.sql'),
+      'utf8',
+    ));
+  }
+  // Test-only interleaving seam. A race test can stop after a real SQLite
+  // SELECT has authenticated a request or selected a queue target, mutate the
+  // same database, then resume the first request. Production code gets no
+  // hooks and no timing branches.
+  const hooks = { afterFirst: null, afterAll: null };
   const statement = (sql, params = []) => ({
     bind: (...values) => statement(sql, values),
-    first: async () => db.prepare(sql).get(...params) ?? null,
-    all: async () => ({ results: db.prepare(sql).all(...params) }),
+    first: async () => {
+      const row = db.prepare(sql).get(...params) ?? null;
+      if (hooks.afterFirst) await hooks.afterFirst(sql, row);
+      return row;
+    },
+    all: async () => {
+      const results = db.prepare(sql).all(...params);
+      if (hooks.afterAll) await hooks.afterAll(sql, results);
+      return { results };
+    },
     run: async () => {
       const result = db.prepare(sql).run(...params);
       return { success: true, meta: { changes: Number(result.changes) } };
@@ -128,17 +148,25 @@ function makeDb(transformSchema = (sql) => sql) {
   });
   return {
     handle: db,
+    hooks,
     prepare: (sql) => statement(sql),
     batch: async (statements) => {
-      const results = [];
-      for (const s of statements) results.push(await s.run());
-      return results;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const results = [];
+        for (const s of statements) results.push(await s.run());
+        db.exec('COMMIT');
+        return results;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
     },
   };
 }
 
 const ALL_TABLES = [
-  'vaults', 'devices', 'device_invites', 'queue',
+  'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
   'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
   'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
@@ -291,6 +319,34 @@ const CARD_PAYMENT_DEBIT =
   'AED 4,061.69 has been deducted from your account 095XXX11XXX01 towards payment of your Credit Card ending 8575.';
 
 (async () => {
+  // Exercise the shipping readers independently of D1 and parser behavior.
+  const readerSource = fs.readFileSync(path.join(repoRoot, 'server/src/index.ts'), 'utf8');
+  const readerSection = readerSource.slice(readerSource.indexOf('async function readBody('), readerSource.indexOf('interface Device {'));
+  const readerOutput = ts.transpileModule('const textEncoder = new TextEncoder();\n' + readerSection + '\nexport { readBody, readBytes };', {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const readers = { exports: {} };
+  Function('exports', readerOutput)(readers.exports);
+  for (const name of ['readBody', 'readBytes']) {
+    let pulls = 0, cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls > 64) controller.close();
+        else controller.enqueue(new Uint8Array(1024));
+      },
+      cancel() { cancelled = true; },
+    });
+    const request = new Request('https://relay.test/stream', { method: 'POST', body: stream, duplex: 'half' });
+    const result = await readers.exports[name](request, 2048);
+    ok(`${name}: oversized unknown-length stream is cancelled without consuming its tail`,
+      result.tooLarge && cancelled && pulls <= 4, JSON.stringify({ pulls, cancelled }));
+    const exact = await readers.exports[name](new Request('https://relay.test/stream', {
+      method: 'POST', body: 'a'.repeat(2048),
+    }), 2048);
+    ok(`${name}: exact byte limit is accepted`, !exact.tooLarge && (exact.text?.length ?? exact.bytes?.length) === 2048);
+  }
+
   /* ═══════════════════════ Crypto: seal ↔ open ═══════════════════════ */
 
   const device = deviceKeypair(webcrypto.getRandomValues(new Uint8Array(32)));
@@ -750,12 +806,29 @@ const CARD_PAYMENT_DEBIT =
     const firstTry = await call(env, 'POST', '/v1/ingest', {
       token: retried.ingestToken, body: retryBody,
     });
+    env.DB.handle.prepare(
+      `UPDATE ingest_receipts
+          SET created_at = 1, expires_at = 4102444800
+        WHERE device_id = ?`,
+    ).run(retried.deviceId);
+    const receiptBeforeRetry = env.DB.handle.prepare(
+      'SELECT created_at, expires_at FROM ingest_receipts WHERE device_id = ?',
+    ).get(retried.deviceId);
     const secondTry = await call(env, 'POST', '/v1/ingest', {
       token: retried.ingestToken, body: retryBody,
     });
+    const receiptAfterRetry = env.DB.handle.prepare(
+      'SELECT created_at, expires_at FROM ingest_receipts WHERE device_id = ?',
+    ).get(retried.deviceId);
     ok('ingest: a retried request is accepted again', firstTry.status === 202 && secondTry.status === 202);
     ok('ingest: but the retry queues nothing a second time',
       (await syncOpened(env, retried)).items.length === 1);
+    ok('ingest: a zero-insert retry does not refresh its replay receipt',
+      receiptBeforeRetry?.created_at === 1 &&
+        receiptBeforeRetry.expires_at === 4102444800 &&
+        receiptAfterRetry?.created_at === 1 &&
+        receiptAfterRetry.expires_at === 4102444800,
+      JSON.stringify({ receiptBeforeRetry, receiptAfterRetry }));
 
     // Without an eventId the body is the identity — and the sender is part of
     // that body, because two banks can send the same wording for the same
@@ -856,6 +929,285 @@ const CARD_PAYMENT_DEBIT =
     ok('rate limit: the counter keeps no IP address or message fingerprint',
       Object.keys(env.DB.handle.prepare('SELECT * FROM ingest_limits LIMIT 1').get()).join(',') ===
         'device_id,window_start,request_count');
+  }
+
+  /* ═════════════ Scoped retirement of Shortcut capture ═════════════
+   *
+   * Retirement revokes only the ingest capability already copied into an
+   * Apple Shortcut. It is deliberately not device deletion: the foreground
+   * app must retain its admin/sync/import credentials and must still drain
+   * rows that were safely queued before the cutover.
+   */
+
+  {
+    const env = { DB: makeDb(), EMAIL_DOMAIN: 'in.wafra.test' };
+    const me = await pairDevice(env);
+    const columns = env.DB.handle.prepare('PRAGMA table_info(devices)').all();
+    const hasEnabledColumn = columns.some((column) => column.name === 'shortcut_ingest_enabled');
+    ok('shortcut retirement: fresh schema has a default-enabled per-device flag',
+      hasEnabledColumn &&
+        columns.find((column) => column.name === 'shortcut_ingest_enabled')?.dflt_value === '1');
+
+    const emailResponse = await call(env, 'POST', '/v1/email-token', { token: me.adminToken });
+    const email = await emailResponse.json();
+    const invite = await call(env, 'POST', '/v1/device-invites', { token: me.adminToken });
+    const generation = await call(env, 'POST', '/v1/automation-generation', {
+      token: me.adminToken,
+    });
+    env.DB.handle.prepare(
+      `INSERT INTO push_registrations
+         (device_id, token_iv, token_ct, project_id, expires_at, updated_at, push_sent_at)
+       VALUES (?, 'iv', 'ct', '11111111-2222-4333-8444-555555555555',
+               unixepoch() + 3600, unixepoch(), 0)`,
+    ).run(me.deviceId);
+    const queued = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_PURCHASE, eventId: nextEvent() },
+    });
+    const before = Object.fromEntries([
+      'vaults', 'devices', 'device_invites', 'queue', 'push_registrations',
+      'automation_generations', 'ingest_receipts', 'ingest_limits',
+    ].map((table) => [table, count(env.DB, table)]));
+    ok('shortcut retirement: fixtures cover every preserved and cleared relay surface',
+      emailResponse.status === 201 && invite.status === 201 && generation.status === 200 &&
+        queued.status === 202 &&
+        ['vaults', 'devices', 'device_invites', 'queue', 'push_registrations',
+          'automation_generations', 'ingest_receipts', 'ingest_limits']
+          .every((table) => before[table] === 1),
+      JSON.stringify(before));
+
+    ok('shortcut retirement: the endpoint is admin-authenticated',
+      (await call(env, 'POST', '/v1/device/retire-shortcut-capture', {
+        token: me.ingestToken,
+      })).status === 401);
+    const retired = await call(env, 'POST', '/v1/device/retire-shortcut-capture', {
+      token: me.adminToken,
+    });
+    const repeated = await call(env, 'POST', '/v1/device/retire-shortcut-capture', {
+      token: me.adminToken,
+    });
+    const enabled = hasEnabledColumn
+      ? env.DB.handle.prepare(
+        'SELECT shortcut_ingest_enabled AS enabled FROM devices WHERE id = ?',
+      ).get(me.deviceId)?.enabled
+      : null;
+    ok('shortcut retirement: admin retirement is idempotent and disables only Shortcut ingest',
+      retired.status === 204 && repeated.status === 204 && enabled === 0,
+      JSON.stringify({ retired: retired.status, repeated: repeated.status, enabled }));
+    const listed = await call(env, 'GET', '/v1/devices', { token: me.adminToken });
+    const listedBody = await listed.json();
+    ok('shortcut retirement: the device remains listed through its unchanged admin scope',
+      listed.status === 200 && listedBody.devices.some((device) => device.id === me.deviceId),
+      JSON.stringify(listedBody));
+
+    const after = Object.fromEntries(Object.keys(before).map((table) => [table, count(env.DB, table)]));
+    ok('shortcut retirement: only automation proof, replay receipts and ingest limits are cleared',
+      after.vaults === before.vaults &&
+        after.devices === before.devices &&
+        after.device_invites === before.device_invites &&
+        after.queue === before.queue &&
+        after.push_registrations === before.push_registrations &&
+        after.automation_generations === 0 &&
+        after.ingest_receipts === 0 &&
+        after.ingest_limits === 0,
+      JSON.stringify({ before, after }));
+    const deviceRow = env.DB.handle.prepare(
+      'SELECT email_token_hash FROM devices WHERE id = ?',
+    ).get(me.deviceId);
+    ok('shortcut retirement: the forwarding credential remains attached to the device',
+      typeof deviceRow?.email_token_hash === 'string' && !dumpDb(env.DB).includes(email.emailToken));
+
+    const staleShortcut = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_LIMIT_CARD, eventId: nextEvent() },
+    });
+    ok('shortcut retirement: a copied Shortcut credential is refused without new relay state',
+      staleShortcut.status === 401 &&
+        count(env.DB, 'queue') === before.queue &&
+        count(env.DB, 'ingest_receipts') === 0 &&
+        count(env.DB, 'ingest_limits') === 0,
+      JSON.stringify({
+        status: staleShortcut.status,
+        queue: count(env.DB, 'queue'),
+        receipts: count(env.DB, 'ingest_receipts'),
+        limits: count(env.DB, 'ingest_limits'),
+      }));
+
+    const preRetirementRows = await drainOpened(env, me);
+    ok('shortcut retirement: a row queued before retirement remains syncable and acknowledgeable',
+      preRetirementRows.length === 1 && preRetirementRows[0].captureSource === 'shortcut' &&
+        count(env.DB, 'queue') === 0,
+      JSON.stringify(preRetirementRows));
+
+    const supplementalEmail = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken,
+      body: { text: AE_PURCHASE, eventId: nextEvent() },
+    });
+    const supplementalPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf(['ADCB Credit Card Statement', '2026-01-03 SALIK TOLL GATE 4.00 DR']),
+    });
+    const supplementalCsv = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: { 'content-type': 'text/csv' },
+      body: 'Date,Description,Debit,Credit,Currency\n01/07/2026,Taxi,20.00,,AED',
+    });
+    const supplementalRows = await drainOpened(env, me);
+    ok('shortcut retirement: email, PDF and CSV supplements remain active',
+      supplementalEmail.status === 202 && supplementalPdf.status === 202 &&
+        supplementalCsv.status === 202 &&
+        ['email', 'pdf', 'csv'].every((source) =>
+          supplementalRows.some((row) => row.captureSource === source)),
+      JSON.stringify({
+        statuses: [supplementalEmail.status, supplementalPdf.status, supplementalCsv.status],
+        sources: supplementalRows.map((row) => row.captureSource),
+      }));
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    let expectedStatuses = true;
+    for (let index = 0; index < 300; index++) {
+      const invalidOrIgnored = index % 2 === 0
+        ? {}
+        : { text: 'This is a service announcement with no amount.' };
+      const response = await call(env, 'POST', '/v1/ingest', {
+        token: me.ingestToken,
+        body: invalidOrIgnored,
+      });
+      const expected = index % 2 === 0 ? 400 : 204;
+      if (response.status !== expected) expectedStatuses = false;
+    }
+    const limit = env.DB.handle.prepare(
+      'SELECT request_count FROM ingest_limits WHERE device_id = ?',
+    ).get(me.deviceId);
+    const exhausted = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: {},
+    });
+    const exhaustedCount = env.DB.handle.prepare(
+      'SELECT request_count FROM ingest_limits WHERE device_id = ?',
+    ).get(me.deviceId)?.request_count;
+    ok('shortcut traffic limit: authenticated invalid and ignored requests consume the fixed-hour budget',
+      expectedStatuses && limit?.request_count === 300 && exhausted.status === 429 &&
+        (await exhausted.json()).error === 'rate_limited' && exhaustedCount === 301,
+      JSON.stringify({
+        expectedStatuses,
+        requestCount: limit?.request_count ?? null,
+        exhaustedStatus: exhausted.status,
+        exhaustedCount,
+      }));
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    let reachedAuth;
+    const afterAuth = new Promise((resolve) => { reachedAuth = resolve; });
+    let resumeIngest;
+    const resume = new Promise((resolve) => { resumeIngest = resolve; });
+    env.DB.hooks.afterFirst = async (sql) => {
+      if (!/d\.ingest_token_hash AS token_hash/.test(sql)) return;
+      // One-shot before waiting: the admin request below performs its own auth
+      // SELECT on the same adapter and must not deadlock on this barrier.
+      env.DB.hooks.afterFirst = null;
+      reachedAuth();
+      await resume;
+    };
+
+    const racingIngest = call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_PURCHASE, eventId: nextEvent() },
+    });
+    await afterAuth;
+    const retirement = await call(env, 'POST', '/v1/device/retire-shortcut-capture', {
+      token: me.adminToken,
+    });
+    resumeIngest();
+    const raced = await racingIngest;
+    ok('shortcut retirement race: retirement commits after auth but before the guarded traffic write',
+      retirement.status === 204);
+    ok('shortcut retirement race: the resumed request is 401 with no queue, receipt or limit write',
+      raced.status === 401 && count(env.DB, 'queue') === 0 &&
+        count(env.DB, 'ingest_receipts') === 0 && count(env.DB, 'ingest_limits') === 0,
+      JSON.stringify({
+        status: raced.status,
+        queue: count(env.DB, 'queue'),
+        receipts: count(env.DB, 'ingest_receipts'),
+        limits: count(env.DB, 'ingest_limits'),
+      }));
+  }
+
+  {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const eventId = nextEvent();
+    let selectedTarget;
+    const targetSelected = new Promise((resolve) => { selectedTarget = resolve; });
+    let resumeIngest;
+    const resume = new Promise((resolve) => { resumeIngest = resolve; });
+    env.DB.hooks.afterAll = async (sql, rows) => {
+      if (!/SELECT d\.id, d\.public_key\s+FROM devices d/.test(sql)) return;
+      env.DB.hooks.afterAll = null;
+      if (rows.length !== 1 || rows[0].id !== me.deviceId) {
+        throw new Error('queue-full race did not select the paired device');
+      }
+      selectedTarget();
+      await resume;
+    };
+    const racingIngest = call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_PURCHASE, eventId },
+    });
+    await targetSelected;
+    env.DB.handle.prepare(
+      `WITH RECURSIVE seq(n) AS (
+         VALUES (1) UNION ALL SELECT n + 1 FROM seq WHERE n < 10000
+       )
+       INSERT INTO queue (id, device_id, epk, iv, ct, created_at)
+       SELECT printf('full-%05d', n), ?, 'epk', 'iv', 'ct', unixepoch() FROM seq`,
+    ).run(me.deviceId);
+    resumeIngest();
+    const full = await racingIngest;
+    const firstError = await full.json();
+    const firstLimit = env.DB.handle.prepare(
+      'SELECT request_count FROM ingest_limits WHERE device_id = ?',
+    ).get(me.deviceId)?.request_count;
+    ok('shortcut ingest race: a post-selection queue-full rejection creates no replay receipt',
+      full.status === 429 && firstError.error === 'queue_full' &&
+        count(env.DB, 'queue') === 10000 && count(env.DB, 'ingest_receipts') === 0 &&
+        firstLimit === 1,
+      JSON.stringify({
+        status: full.status,
+        error: firstError.error,
+        queue: count(env.DB, 'queue'),
+        receipts: count(env.DB, 'ingest_receipts'),
+        requestCount: firstLimit,
+      }));
+
+    env.DB.handle.prepare("DELETE FROM queue WHERE id = 'full-10000'").run();
+    const retry = await call(env, 'POST', '/v1/ingest', {
+      token: me.ingestToken,
+      body: { text: AE_PURCHASE, eventId },
+    });
+    const retryLimit = env.DB.handle.prepare(
+      'SELECT request_count FROM ingest_limits WHERE device_id = ?',
+    ).get(me.deviceId)?.request_count;
+    const acceptedRows = env.DB.handle.prepare(
+      "SELECT COUNT(*) AS n FROM queue WHERE id NOT LIKE 'full-%'",
+    ).get()?.n;
+    ok('shortcut ingest race: freeing capacity lets the same event queue exactly once',
+      retry.status === 202 && count(env.DB, 'queue') === 10000 && acceptedRows === 1 &&
+        count(env.DB, 'ingest_receipts') === 1 && retryLimit === 2,
+      JSON.stringify({
+        status: retry.status,
+        queue: count(env.DB, 'queue'),
+        acceptedRows,
+        receipts: count(env.DB, 'ingest_receipts'),
+        requestCount: retryLimit,
+      }));
   }
 
   /* ═════════════════ Routes: /v1/sync and /v1/ack ═════════════════ */
@@ -986,14 +1338,53 @@ const CARD_PAYMENT_DEBIT =
         },
       })).status === 400);
 
+    const ownerProbe = await call(env, 'POST', '/v1/ingest', {
+      token: owner.ingestToken,
+      body: { text: RELAY_TEST_MESSAGE },
+    });
+    const ownerProbeRows = await drainOpened(env, owner);
+    const memberProbeRows = await drainOpened(env, member);
+    ok('fan-out: a setup probe is delivered only to the phone that ran it',
+      ownerProbe.status === 202 &&
+        ownerProbeRows.length === 1 && ownerProbeRows[0].relayTest === true &&
+        memberProbeRows.length === 0,
+      JSON.stringify({ owner: ownerProbeRows, member: memberProbeRows }));
+
+    const preparedRes = await call(env, 'POST', '/v1/automation-generation', {
+      token: owner.adminToken,
+    });
+    const prepared = await preparedRes.json();
+    ok('automation generation: only the foreground admin credential rotates this phone proof',
+      preparedRes.status === 200 &&
+        typeof prepared.generation === 'string' &&
+        /^[A-Za-z0-9_-]{40,128}$/.test(prepared.generation) &&
+        (await call(env, 'POST', '/v1/automation-generation', {
+          token: owner.syncToken,
+        })).status === 401 &&
+        (await call(env, 'POST', '/v1/automation-generation', {
+          token: owner.ingestToken,
+        })).status === 401,
+      JSON.stringify({ status: preparedRes.status, generation: prepared.generation }));
+
     await call(env, 'POST', '/v1/ingest', {
-      token: owner.ingestToken, body: { text: AE_PURCHASE, sender: 'ADCB' },
+      token: owner.ingestToken,
+      body: { text: AE_PURCHASE, sender: 'ADCB', automation: 'message' },
     });
     const ownerCopy = await syncOpened(env, owner);
     const memberCopy = await syncOpened(env, member);
     ok('fan-out: one message reaches both phones', ownerCopy.rows.length === 1 && memberCopy.rows.length === 1);
     ok('fan-out: the second phone opens its own copy with its own key',
       memberCopy.rows[0].amountFils === 4000 && memberCopy.rows[0].merchant === '% Arabica');
+    ok('fan-out: Message automation proof is sealed with its source device and generation',
+      ownerCopy.rows[0].captureAutomation?.kind === 'message' &&
+        ownerCopy.rows[0].captureAutomation?.sourceDeviceId === owner.deviceId &&
+        ownerCopy.rows[0].captureAutomation?.generation === prepared.generation,
+      JSON.stringify(ownerCopy.rows[0].captureAutomation));
+    ok('fan-out: another phone can identify that proof as belonging to the source phone',
+      memberCopy.rows[0].captureAutomation?.sourceDeviceId === owner.deviceId &&
+        memberCopy.rows[0].captureAutomation?.sourceDeviceId !== member.deviceId &&
+        memberCopy.rows[0].captureAutomation?.generation === prepared.generation,
+      JSON.stringify(memberCopy.rows[0].captureAutomation));
     ok('fan-out: the two copies are sealed separately, not shared',
       ownerCopy.items[0].ct !== memberCopy.items[0].ct);
     let crossOpen = false;
@@ -1001,6 +1392,40 @@ const CARD_PAYMENT_DEBIT =
     ok("fan-out: one phone cannot open the other's copy", !crossOpen);
     ok('fan-out: the message text is in neither copy and not in the database',
       !dumpDb(env.DB).includes('ARABICA'));
+
+    await call(env, 'POST', '/v1/ack', {
+      token: owner.syncToken, body: { ids: ownerCopy.items.map((item) => item.id) },
+    });
+    await call(env, 'POST', '/v1/ack', {
+      token: member.syncToken, body: { ids: memberCopy.items.map((item) => item.id) },
+    });
+    env.DB.handle.prepare(
+      `WITH RECURSIVE seq(n) AS (
+         VALUES (1) UNION ALL SELECT n + 1 FROM seq WHERE n < 10000
+       )
+       INSERT INTO queue (id, device_id, epk, iv, ct, created_at)
+       SELECT printf('member-full-%05d', n), ?, 'epk', 'iv', 'ct', unixepoch() FROM seq`,
+    ).run(member.deviceId);
+    const partialEventId = nextEvent();
+    await call(env, 'POST', '/v1/ingest', {
+      token: owner.ingestToken,
+      body: { text: AE_PURCHASE, eventId: partialEventId },
+    });
+    const ownerAfterPartial = await syncOpened(env, owner);
+    env.DB.handle.prepare("DELETE FROM queue WHERE id = 'member-full-10000'").run();
+    await call(env, 'POST', '/v1/ingest', {
+      token: owner.ingestToken,
+      body: { text: AE_PURCHASE, eventId: partialEventId },
+    });
+    const memberRecovered = env.DB.handle.prepare(
+      "SELECT COUNT(*) AS n FROM queue WHERE device_id = ? AND id NOT LIKE 'member-full-%'",
+    ).get(member.deviceId)?.n;
+    const ownerCopies = env.DB.handle.prepare(
+      'SELECT COUNT(*) AS n FROM queue WHERE device_id = ?',
+    ).get(owner.deviceId)?.n;
+    ok('fan-out: replay receipts let a previously full target recover without duplicating peers',
+      ownerAfterPartial.items.length === 1 && memberRecovered === 1 && ownerCopies === 1,
+      JSON.stringify({ memberRecovered, ownerCopies }));
 
     // ── Managing the vault ──
     const listed = await (await call(env, 'GET', '/v1/devices', { token: owner.adminToken })).json();
@@ -2241,14 +2666,36 @@ const CARD_PAYMENT_DEBIT =
         // column's own explanatory comment still sitting between the two.
         .replace(/,(\s*(?:--[^\n]*\n\s*)*\))/g, '$1');
 
-    for (const [table, column] of [['devices', 'market'], ['push_registrations', 'push_sent_at']]) {
-      const drifted = makeDb(withoutColumn(column));
+    for (const [table, column] of [
+      ['devices', 'market'],
+      ['devices', 'shortcut_ingest_enabled'],
+      ['push_registrations', 'push_sent_at'],
+    ]) {
+      const drifted = makeDb(
+        withoutColumn(column),
+        column !== 'shortcut_ingest_enabled',
+      );
       const res = await call({ DB: drifted }, 'GET', '/v1/health');
       const body = await res.json();
       ok(`health: refuses when ${table}.${column} is missing`,
         res.status === 503 && body.ok === false && body.error === 'schema_drift',
         `${res.status} ${JSON.stringify(body)}`);
     }
+    const withoutAutomationGenerations = (sql) => sql.replace(
+      /CREATE TABLE IF NOT EXISTS automation_generations \([\s\S]*?\n\);\n/,
+      '',
+    );
+    const missingAutomationGenerations = await call(
+      { DB: makeDb(withoutAutomationGenerations) },
+      'GET',
+      '/v1/health',
+    );
+    const missingAutomationBody = await missingAutomationGenerations.json();
+    ok('health: refuses when automation_generations is missing',
+      missingAutomationGenerations.status === 503 &&
+        missingAutomationBody.ok === false &&
+        missingAutomationBody.error === 'schema_drift',
+      `${missingAutomationGenerations.status} ${JSON.stringify(missingAutomationBody)}`);
     ok('routing: an unknown path is 404', (await call(env, 'GET', '/v1/nope')).status === 404);
     ok('routing: the right path with the wrong method is 404',
       (await call(env, 'GET', '/v1/pair')).status === 404);

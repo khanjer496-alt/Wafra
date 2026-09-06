@@ -1,0 +1,211 @@
+[
+  {
+    "id": "ind-en-ambiguous-dollar",
+    "removeNonPostingSafety": true,
+    "expected": {
+      "amount.value": null,
+      "amount.evidence": "ambiguous"
+    },
+    "reason": "Independent review: source explicitly says completed purchase. Ambiguous currency must not be guessed, but explicit user selection of a grounded currency alternative is legitimate. Exclude from non-posting denominator."
+  },
+  {
+    "id": "ind-en-au-decline",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: no money was debited; direction none or attempted-debit representation is defensible. Failed status and refusal remain mandatory."
+  },
+  {
+    "id": "public-au-commbank-spend",
+    "omitExpected": [
+      "merchant.value"
+    ],
+    "reason": "Independent review: dropping the terminal period in Co. is harmless normalization. Amount15 vs monthly40 remains a required assertion; merchant evidence is still visible in the full output."
+  },
+  {
+    "id": "ind-ar-kw-three-decimal",
+    "expected": {
+      "amount.value": null,
+      "amount.evidence": "ambiguous",
+      "amount.alternatives": [
+        {
+          "currency": "KWD",
+          "minorUnits": "3750",
+          "exponent": 3
+        },
+        {
+          "currency": "KWD",
+          "minorUnits": "3750000",
+          "exponent": 3
+        }
+      ],
+      "balance.value": null,
+      "balance.evidence": "ambiguous",
+      "balance.alternatives": [
+        {
+          "currency": "KWD",
+          "minorUnits": "92125",
+          "exponent": 3
+        },
+        {
+          "currency": "KWD",
+          "minorUnits": "92125000",
+          "exponent": 3
+        }
+      ]
+    },
+    "reason": "Independent review: period followed by three digits may be decimal or grouping without a documented source convention. Require both interpretations, no guessed value."
+  },
+  {
+    "id": "ind-ar-jo-statement",
+    "expected": {
+      "statementTotal.value": null,
+      "statementTotal.evidence": "ambiguous",
+      "statementTotal.alternatives": [
+        {
+          "currency": "JOD",
+          "minorUnits": "180250",
+          "exponent": 3
+        },
+        {
+          "currency": "JOD",
+          "minorUnits": "180250000",
+          "exponent": 3
+        }
+      ],
+      "minimumDue.value": null,
+      "minimumDue.evidence": "ambiguous",
+      "minimumDue.alternatives": [
+        {
+          "currency": "JOD",
+          "minorUnits": "10000",
+          "exponent": 3
+        },
+        {
+          "currency": "JOD",
+          "minorUnits": "10000000",
+          "exponent": 3
+        }
+      ]
+    },
+    "reason": "Independent review: three-digit period convention is unresolved. Still require amounts to belong to statement total/minimum fields, preserve both interpretations, and extract due date."
+  },
+  {
+    "idPrefix": "structural-KWD-",
+    "expected": {
+      "amount.value": null,
+      "amount.evidence": "ambiguous",
+      "amount.alternatives": [
+        {
+          "currency": "KWD",
+          "minorUnits": "12740",
+          "exponent": 3
+        },
+        {
+          "currency": "KWD",
+          "minorUnits": "12740000",
+          "exponent": 3
+        }
+      ],
+      "balance.value": null,
+      "balance.evidence": "ambiguous",
+      "balance.alternatives": [
+        {
+          "currency": "KWD",
+          "minorUnits": "93000",
+          "exponent": 3
+        },
+        {
+          "currency": "KWD",
+          "minorUnits": "93000000",
+          "exponent": 3
+        }
+      ]
+    },
+    "reason": "Independent review: deliberately context-free three-decimal period tokens are ambiguous. This is ambiguity preservation evidence, not automatic amount resolution coverage."
+  },
+  {
+    "id": "ind-en-gb-statement",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-en-nz-renewal-not-charge",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-en-sg-balance-only",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-fr-be-utility-bill",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-de-at-decline",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-pt-pt-renewal",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-it-it-water-bill",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-nl-be-decline",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-tr-tr-decline",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-hi-in-electricity",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-ja-jp-decline",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  },
+  {
+    "id": "ind-ja-jp-renewal",
+    "omitExpected": [
+      "direction"
+    ],
+    "reason": "Independent review: this API reports realized money direction, so none is valid for a future/declined/unpaid event. Omit attempted debit direction; exact source status, field extraction and non-posting refusal remain mandatory."
+  }
+]

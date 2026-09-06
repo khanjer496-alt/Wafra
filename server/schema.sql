@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS devices (
   -- Sync/ack has its own least-privilege token because it must be available
   -- to a locked-device background wake. Destructive management stays admin.
   ingest_token_hash TEXT NOT NULL UNIQUE,
+  -- A copied Shortcut can outlive the app and keep its ingest bearer. This
+  -- per-device switch retires that one capture surface without deleting the
+  -- device, its already-sealed queue, or the app's sync/admin capabilities.
   -- Forwarded email has its own inject-only credential because SMTP headers
   -- expose the destination address outside the app/relay TLS connection.
   email_token_hash  TEXT UNIQUE,
@@ -38,6 +41,17 @@ CREATE TABLE IF NOT EXISTS devices (
   admin_token_hash  TEXT NOT NULL UNIQUE,
   created_at  INTEGER NOT NULL,
   last_seen   INTEGER NOT NULL
+);
+
+-- A user-visible Message-automation attestation is a generation, not a clock.
+-- The app rotates this opaque value after the user confirms the automation;
+-- the ingest route seals that exact generation with later Messages rows. An
+-- old queued/staged row therefore cannot become fresh merely because the phone
+-- processes it after a new setup attempt. The value is not a credential.
+CREATE TABLE IF NOT EXISTS automation_generations (
+  device_id   TEXT PRIMARY KEY,
+  generation  TEXT NOT NULL,
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
 );
 
 -- Admin-created, one-use, ten-minute invitations. Only the token digest is
@@ -66,10 +80,11 @@ CREATE TABLE IF NOT EXISTS queue (
   epk        TEXT NOT NULL,  -- ephemeral X25519 public key, base64
   iv         TEXT NOT NULL,  -- AES-GCM nonce, base64
   -- Sealed parsed row, base64. Since the relay gained sender and timestamp
-  -- awareness this blob also carries the SMS sender id, the message's own
-  -- timestamp and the market pack it was parsed under. All of them are INSIDE
-  -- the seal: none is a column, an index or a log line, so the service still
-  -- cannot say which banks text this device or when.
+  -- awareness this blob also carries the SMS sender id, the relay-sealed event
+  -- timestamp (receipt time for the official Shortcut), and the market pack it
+  -- was parsed under. All of them are INSIDE the seal: none is a column, an
+  -- index or a log line, so the service still cannot say which banks text this
+  -- device or when.
   ct         TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
@@ -177,11 +192,10 @@ CREATE TABLE IF NOT EXISTS feedback_limits (
 );
 
 -- Upgrading a database created before these columns existed. SQLite has no
--- ADD COLUMN IF NOT EXISTS and re-running this file has to stay safe, so they
--- are commented rather than executed: the error from a second run would be the
--- expected outcome, and a migration whose expected outcome is an error is one
--- nobody can tell apart from a broken one. Run the matching commands in
--- server/README.md once, by hand, against a database that predates them.
+-- ADD COLUMN IF NOT EXISTS and re-running this file has to stay safe. The
+-- Shortcut-retirement column is therefore owned by the tracked D1 migration;
+-- the older market/push columns remain documented manual upgrades for legacy
+-- databases that predate the migration ledger.
 -- ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE';
 -- ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0;
 

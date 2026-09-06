@@ -289,8 +289,9 @@ const { scanInbox } = require('./build/auto-import.js');
 
   secureStore.__keychain.items.set('wafra.database.key.v1', '5a'.repeat(32));
   const afterKeyRotation = await scanInbox(0, {}, undefined, 'fr-FR');
-  ok('review identities are keyed to the erase-managed SQLCipher identity',
-    afterKeyRotation.reviewCandidates[0]?.sourceKey !== first.reviewCandidates[0]?.sourceKey,
+  ok('review ids are keyed to the erase-managed SQLCipher identity while native aliases stay exact',
+    afterKeyRotation.reviewCandidates[0]?.id !== first.reviewCandidates[0]?.id &&
+      afterKeyRotation.reviewCandidates[0]?.sourceKey === first.reviewCandidates[0]?.sourceKey,
     JSON.stringify({ first: first.reviewCandidates[0], rotated: afterKeyRotation.reviewCandidates[0] }));
 
   secureStore.__keychain.items.delete('wafra.database.key.v1');
@@ -346,7 +347,8 @@ const { scanInbox } = require('./build/auto-import.js');
   ];
   const ambiguousGlobal = await scanInbox(0, {}, undefined, 'en-AE');
   ok('unknown or ambiguous foreign issuers never fall through the UAE parser',
-    ambiguousGlobal.parsed.length === 0 && ambiguousGlobal.reviewCandidates.length === 0,
+    ambiguousGlobal.parsed.length === 0 && ambiguousGlobal.reviewCandidates.length === 2 &&
+      ambiguousGlobal.reviewCandidates.every((item) => item.kind === 'universal'),
     JSON.stringify(ambiguousGlobal));
 
   notificationsEnabled = true;
@@ -458,6 +460,214 @@ const { scanInbox } = require('./build/auto-import.js');
       complete: multipage.inboxHistoryComplete,
       pages: inboxReadCursors.length,
     }));
+
+  inboxReadCursors.length = 0;
+  const firstResumablePage = await scanInbox(
+    0,
+    {},
+    undefined,
+    'en-AE',
+    { maxInboxPages: 1 },
+  );
+  ok('a resumable scan returns after one bounded provider page',
+    firstResumablePage.inboxScannedCount === 1000 &&
+      firstResumablePage.inboxHistoryComplete === false &&
+      firstResumablePage.nextCursor?.beforeId === 2_002 &&
+      inboxReadCursors.length === 1,
+    JSON.stringify({
+      count: firstResumablePage.inboxScannedCount,
+      complete: firstResumablePage.inboxHistoryComplete,
+      cursor: firstResumablePage.nextCursor,
+      reads: inboxReadCursors,
+    }));
+  const secondResumablePage = await scanInbox(
+    0,
+    {},
+    undefined,
+    'en-AE',
+    { maxInboxPages: 1, cursor: firstResumablePage.nextCursor },
+  );
+  const resumableIds = new Set([
+    ...firstResumablePage.parsed,
+    ...secondResumablePage.parsed,
+  ].map((item) => item.sourceEventId));
+  ok('the next resumable page overlaps one row and still reaches history end losslessly',
+    secondResumablePage.inboxScannedCount === 2 &&
+      secondResumablePage.inboxHistoryComplete === true &&
+      secondResumablePage.nextCursor === null &&
+      resumableIds.size === 1001,
+    JSON.stringify({
+      count: secondResumablePage.inboxScannedCount,
+      complete: secondResumablePage.inboxHistoryComplete,
+      cursor: secondResumablePage.nextCursor,
+      unique: resumableIds.size,
+    }));
+
+  // The existing synthetic Chase fixture is newly discovered by a full
+  // history scan. Its old event date must not consume the review window.
+  inboxRows = [{ id: 9001, address: 'CHASE', body: chase,
+    date: NOW - 90 * 24 * 60 * 60 * 1000 }];
+  receivedRows = [];
+  notificationsEnabled = false;
+  const discoveredAt = Date.now();
+  const oldDiscovery = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('newly discovered Android history receives a full review window',
+    oldDiscovery.reviewCandidates.length === 1 &&
+      oldDiscovery.reviewCandidates[0].observedAt === inboxRows[0].date &&
+      oldDiscovery.reviewCandidates[0].expiresAt >= discoveredAt + 30 * 24 * 60 * 60 * 1000,
+    JSON.stringify(oldDiscovery.reviewCandidates));
+
+  // Reuse the universal extractor's explicitly synthetic structural probes.
+  // These are review suggestions, never evidence of a supported bank template.
+  inboxRows = [
+    { id: 9100, address: 'UNLISTED-BANK', date: NOW,
+      body: 'Card purchase CAD 24.90 at MAPLE CAFE on 2026-09-05. Available balance CAD 500.00.' },
+    { id: 9101, address: 'UNLISTED-BANK', date: NOW + 1,
+      body: 'Credit card statement. Minimum due AED 25.00. Due date 2026-09-25.' },
+    { id: 9102, address: 'UNLISTED-BANK', date: NOW + 2,
+      body: 'Credit card statement. Minimum due SAR 25.00. Due date 2026-09-25.' },
+    { id: 9103, address: 'ALEX', date: NOW + 3, body: 'I paid USD 24.90 for dinner.' },
+    { id: 9104, address: 'UNLISTED-BANK', date: NOW + 4,
+      body: 'Card purchase CAD 24.90 at LOCAL CAFE requires OTP123456.' },
+    { id: 9105, address: 'UNLISTED-BANK', date: NOW + 5,
+      body: 'Card purchase CAD 24.90 at LOCAL CAFE.' },
+    { id: 9106, address: 'UNLISTED-BANK', date: NOW + 6,
+      body: 'Card purchase AED 24,90 at LOCAL CAFE on 2026-09-05.' },
+    { id: 9107, address: 'UNLISTED-BANK', date: NOW + 7,
+      body: 'Card purchase SAR 24,90 at LOCAL CAFE on 2026-09-05.' },
+    { id: 9108, address: 'UNLISTED-BANK', date: NOW + 8,
+      body: 'Card purchase JPY 2400 at LOCAL CAFE on 2026-09-05.' },
+    { id: 9109, address: 'UNLISTED-BANK', date: NOW + 9,
+      body: 'Card purchase KWD 12٫345 at LOCAL CAFE on 2026-09-05.' },
+  ];
+  receivedRows = [];
+  notificationsEnabled = false;
+  const generic = await scanInbox(0, {}, undefined, 'en-AE');
+  const suggestions = generic.reviewCandidates.filter((item) => item.kind === 'universal');
+  ok('unregistered global alerts and UAE/Saudi statement misses reach review without automatic rows',
+    suggestions.length === 8 && generic.parsed.length === 0, JSON.stringify(generic));
+  const purchaseSuggestion = suggestions.find((item) => item.sourceKey === 'android_message_review_source_a9100');
+  ok('Android universal suggestion preserves exact source identity and native currency',
+    purchaseSuggestion?.event.amount.value?.currency === 'CAD' &&
+      purchaseSuggestion.event.amount.value.minorUnits === '2490');
+  ok('minimum-only local statements remain informational facts with an unknown total',
+    suggestions.filter((item) => item.event.family === 'statement').length === 2 &&
+      suggestions.filter((item) => item.event.family === 'statement').every((item) =>
+        item.event.amount.value === null && item.event.statementTotal.value === null));
+  ok('validated generic extraction improves AED and SAR transaction misses as review only',
+    ['AED', 'SAR'].every((currency) => suggestions.some((item) =>
+      item.event.family === 'purchase' && item.event.amount.value?.currency === currency &&
+      item.event.amount.value.minorUnits === '2490')));
+  ok('generic capture preserves zero- and three-decimal source money without a ledger conversion',
+    suggestions.some((item) => item.event.amount.value?.currency === 'JPY' &&
+      item.event.amount.value.minorUnits === '2400' && item.event.amount.value.exponent === 0) &&
+    suggestions.some((item) => item.event.amount.value?.currency === 'KWD' &&
+      item.event.amount.value.minorUnits === '12345' && item.event.amount.value.exponent === 3));
+  const undatedSuggestion = suggestions.find((item) => item.sourceKey === 'android_message_review_source_a9105');
+  ok('receipt time never fills a missing transaction date in a universal suggestion',
+    undatedSuggestion?.event.transactionDate.evidence === 'missing' &&
+      undatedSuggestion.event.transactionDate.value === null);
+  ok('universal review output never retains raw messages, sender or source spans',
+    suggestions.every((item) => !Object.hasOwn(item, 'raw') && !Object.hasOwn(item, 'sender') &&
+      !JSON.stringify(item).includes('UNLISTED-BANK') && !/"spans":\[(?!\])/.test(JSON.stringify(item))));
+
+  const registeredBody = 'AED 2,500.00 has been credited to your account from JOHN DOE.';
+  inboxRows = [{ id: 9200, address: 'FAB', date: NOW + 10, body: registeredBody }];
+  const registeredCapture = await scanInbox(0, {}, undefined, 'en-AE');
+  const registeredReview = registeredCapture.reviewCandidates[0];
+  ok('registered bank reviews also retain their exact native provider alias',
+    registeredReview?.kind !== 'universal' &&
+      registeredReview?.sourceKey === 'android_message_review_source_a9200');
+  if (registeredReview) {
+    const state = { hydrated: true, marketId: 'AE',
+      ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 },
+      accounts: [{ id: 'review-bank', kind: 'bank', name: 'Bank', openingFils: 0 }],
+      transactions: [], cardDues: [], bills: [], budgets: [], goals: [],
+      accountHints: {}, merchantOverrides: {}, lastScanTs: 0,
+      reviewTray: { schemaVersion: 1, pending: [registeredReview], tombstones: [], templateRules: [] } };
+    const promotion = require('./build/review-promotion.js').planReviewPromotion(state, {
+      reviewId: registeredReview.id, type: 'income', title: 'Confirmed transfer',
+      category: 'business', accountId: 'review-bank', date: '2026-08-11', betweenOwnAccounts: false,
+    }, 'confirmed-source', NOW + 20);
+    const confirmed = promotion.outcome === 'added' ? promotion.transaction : null;
+    ok('explicitly confirmed registered review uses the native canonical transaction identity',
+      confirmed?.smsKey === `ha9200t${registeredReview.observedAt}`);
+    if (confirmed) {
+      const reread = { ...require('./build/sms-parser.js').parseSms(registeredBody),
+        date: '2026-08-11', smsTs: NOW + 10, sender: 'FAB', channel: 'inbox', sourceEventId: 'a9200' };
+      const replay = require('./build/import-plan.js').buildImportPlan([reread], {
+        ...state, transactions: [confirmed], reviewTray: promotion.reviewTray,
+      }, NOW + 10);
+      ok('later canonical parser reread cannot duplicate a registered review confirmation',
+        replay.txCount === 0 && replay.batch.updates.length === 0);
+    }
+  }
+  const legacyIdentityFor = (body, sender, observedAt) => {
+    const key = secureStore.__keychain.items.get('wafra.database.key.v1');
+    const hash = (value) => createHash('sha256').update(value, 'utf8').digest('hex');
+    const derivedKey = hash(`wafra.alert-review-identity.v1\u0000${key}`);
+    const material = ['inbox', String(observedAt), sender.toLowerCase(),
+      body.replace(/\s+/g, ' ').trim().toLowerCase()].join('\u0000');
+    const digest = hash(`${derivedKey}\u0000${material}`);
+    return { id: `ari1_${digest}`, sourceKey: `arc1_${digest}` };
+  };
+  const legacyReview = legacyIdentityFor(registeredBody, 'FAB', NOW + 10);
+  const withBindings = await scanInbox(0, {}, undefined, 'en-AE', {
+    legacyReviewSourceKeys: [legacyReview.sourceKey],
+  });
+  const binding = withBindings.reviewSourceBindings?.[0];
+  ok('review source binding attests the exact old tuple from the same native message',
+    withBindings.reviewSourceBindings?.length === 1 && binding.legacyId === legacyReview.id &&
+      binding.legacySourceKey === legacyReview.sourceKey && binding.sourceKey === 'android_message_review_source_a9200' &&
+      binding.id === withBindings.reviewCandidates[0].id && binding.observedAt === NOW + 10 &&
+      !JSON.stringify(binding).includes(registeredBody));
+  inboxRows = [{ id: 9201, address: 'ADCB', date: NOW + 11, body: uae }];
+  const legacyParsed = legacyIdentityFor(uae, 'ADCB', NOW + 11);
+  const parsedBindingScan = await scanInbox(0, {}, undefined, 'en-AE', {
+    legacyReviewSourceKeys: [legacyParsed.sourceKey],
+  });
+  ok('newly understood inbox rows bind an old review before canonical import planning',
+    parsedBindingScan.parsed.length === 1 && parsedBindingScan.reviewCandidates.length === 0 &&
+      parsedBindingScan.reviewSourceBindings?.[0]?.legacySourceKey === legacyParsed.sourceKey &&
+      parsedBindingScan.reviewSourceBindings[0].sourceKey === 'android_message_review_source_a9201');
+  const unrelatedBindingScan = await scanInbox(0, {}, undefined, 'en-AE', {
+    legacyReviewSourceKeys: [`arc1_${'0'.repeat(64)}`],
+  });
+  ok('a requested legacy hash never becomes a provider binding without exact source agreement',
+    unrelatedBindingScan.reviewSourceBindings?.length === 0);
+  const originalDigest = expoCrypto.digestStringAsync;
+  let extraDigests = 0;
+  expoCrypto.digestStringAsync = async (...args) => { extraDigests++; return originalDigest(...args); };
+  await scanInbox(0, {}, undefined, 'en-AE');
+  expoCrypto.digestStringAsync = originalDigest;
+  ok('ordinary parsed inbox rows do not hash source when no legacy binding was requested', extraDigests === 0);
+  const bindingKey = secureStore.__keychain.items.get('wafra.database.key.v1');
+  secureStore.__keychain.items.delete('wafra.database.key.v1');
+  let bindingIdentityFailure = false;
+  try {
+    await scanInbox(0, {}, undefined, 'en-AE', { legacyReviewSourceKeys: [legacyParsed.sourceKey] });
+  } catch (error) {
+    bindingIdentityFailure = error.message === 'Encrypted review identity is unavailable';
+  }
+  secureStore.__keychain.items.set('wafra.database.key.v1', bindingKey);
+  ok('a requested parsed-source migration cannot skip failed identity access and advance a cursor', bindingIdentityFailure);
+
+
+  inboxRows = [9301, 9303].map((id) => ({ id, address: 'UNLISTED-BANK', date: NOW + 30,
+    body: 'Card purchase CAD 24.90 at LOCAL CAFE.' }));
+  const sameClock = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('distinct provider identities cannot share a review id even with identical body and clock',
+    sameClock.reviewCandidates.length === 2 &&
+      new Set(sameClock.reviewCandidates.map((item) => item.id)).size === 2);
+
+  const refusedPasteBlocks = [];
+  const pastedRows = require('./build/launch-alert-parser.js').parsePastedBankAlerts(
+    `${uae}\n\nCard purchase CAD 24.90 at LOCAL CAFE.`, {},
+    (source) => refusedPasteBlocks.push(source),
+  );
+  ok('mixed paste forwards only refused blocks without changing supported parsed rows',
+    pastedRows.length === 1 && pastedRows[0].currency === 'AED' &&
+      refusedPasteBlocks.length === 1 && refusedPasteBlocks[0] === 'Card purchase CAD 24.90 at LOCAL CAFE.');
 
   reactNative.Platform.OS = 'ios';
   const ios = await scanInbox(123, {}, undefined, 'fr-FR');

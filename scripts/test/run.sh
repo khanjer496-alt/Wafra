@@ -3,12 +3,18 @@
 # parser, corpus, invariants, Kotlin, contracts, worker and relay-client, plus
 # the Worker's own PDF/email/push suites out of server/test.
 set -e
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")"
 # The suite compiles into a single shared build/ directory, so two runs at
 # once would delete each other's output half-way through and fail for reasons
 # that have nothing to do with the code. Queue them instead.
-exec 9>/tmp/wafra-test.lock
-flock 9 2>/dev/null || true
+if [ "${WAFRA_TEST_LOCKED:-}" != "1" ]; then
+  if command -v flock >/dev/null 2>&1; then
+    exec env WAFRA_TEST_LOCKED=1 flock /tmp/wafra-test.lock "$SELF" "$@"
+  elif command -v lockf >/dev/null 2>&1; then
+    exec env WAFRA_TEST_LOCKED=1 lockf -k /tmp/wafra-test.lock "$SELF" "$@"
+  fi
+fi
 # kotlin-regex.test.js needs a working javac, and skips itself (printing
 # "0 passed") when it cannot find one — which reads exactly like the suite
 # passing. Two traps here, both of which hid those 15 assertions on macOS:
@@ -44,6 +50,16 @@ fi
 # `npm run check:server` needs the same build to run the behavioural Worker
 # suite; see the header there.
 bash build.sh
+node ../universal-test/run.cjs
+node ../universal-evidence/nonposting-regressions.test.cjs
+node ../universal-evidence/money-regressions.test.cjs
+node ../universal-evidence/evaluator.test.cjs
+node ../universal-evidence-round2/run.cjs
+
+# Run the parser timing invariant before the cold Xcode builds below saturate
+# every core and heat the machine. It remains declared in SUITES for the exact
+# on-disk/count gate, and the loop skips only this already-completed suite.
+node invariants.test.js
 
 # The protected iPhone history bridge is Foundation-only. Exercise the actual
 # Swift store whenever this gate runs on macOS; Linux CI has a separate Xcode
@@ -51,7 +67,9 @@ bash build.sh
 NATIVE_SUITES=0
 if [ "$(uname -s)" = "Darwin" ]; then
   bash native-history-store.sh
-  NATIVE_SUITES=1
+  NATIVE_SUITES=$((NATIVE_SUITES + 1))
+  bash native-live-capture-store.sh
+  NATIVE_SUITES=$((NATIVE_SUITES + 1))
 fi
 
 # The Worker's own suites: the PDF/email statement parser and the encrypted push
@@ -90,24 +108,42 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=51
-SUITES=(parser bank-corpus unit worker relay invariants import-plan arabic instant-alert \
+EXPECTED_SUITES=71
+SUITES=(parser bank-corpus invariants unit worker relay import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
         trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
 SUITES+=(historical-import)
+SUITES+=(history-import)
+SUITES+=(launch-performance)
+SUITES+=(screen-section-contract)
+SUITES+=(parser-capabilities)
+SUITES+=(accessibility-layout)
+SUITES+=(ui-foundation-contract)
+SUITES+=(ui-polish-contract)
 SUITES+=(alert-market-packs)
 SUITES+=(alert-institution-grammars)
 SUITES+=(alert-market-detection)
 SUITES+=(alert-review-tray)
 SUITES+=(unparsed-launch-alert)
 SUITES+=(review-promotion)
-SUITES+=(alert-ai-suggestion)
+SUITES+=(review-source-bindings)
+SUITES+=(provider-source-identity)
+SUITES+=(home-presentation)
+SUITES+=(money-display)
+SUITES+=(merchant-logos)
 SUITES+=(launch-review-rollout)
 SUITES+=(android-review-capture)
 SUITES+=(ledger-money)
 SUITES+=(review-alerts-ui)
 SUITES+=(release-readiness)
 SUITES+=(ios-capture-setup)
+SUITES+=(e2e-export-cache)
+SUITES+=(ios-history-native-contract)
+SUITES+=(ios-history-shortcut-artifact)
+SUITES+=(ios-local-capture-shortcut-artifact)
+SUITES+=(ios-shortcut-artifact)
+SUITES+=(ios-shortcuts-config)
+SUITES+=(ios-setup-ux)
 SUITES+=(dashboard-projection)
 SUITES+=(cash-flow)
 SUITES+=(sms-corpus)
@@ -120,6 +156,8 @@ SUITES+=(global-alert-adversarial)
 SUITES+=(store-package)
 SUITES+=(store-pricing)
 SUITES+=(system-language)
+SUITES+=(web-seo)
+SUITES+=(share-text-file)
 
 missing=""
 for t in "${SUITES[@]}"; do
@@ -142,7 +180,12 @@ if [ "${#SUITES[@]}" -ne "$EXPECTED_SUITES" ]; then
 fi
 
 for t in "${SUITES[@]}"; do
+  [ "$t" = "invariants" ] && continue
   node "$t.test.js"
 done
+
+# Execute new interaction regressions in addition to every original gate.
+node --test repair/*.test.cjs workflows/*.test.cjs
+node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."

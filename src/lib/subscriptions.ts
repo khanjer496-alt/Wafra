@@ -132,14 +132,43 @@ const KNOWN_SUBSCRIPTION_MERCHANTS =
 const daysBetween = daysBetweenISO;
 const addDays = shiftISO;
 
+/** Calendar renewals preserve their billing day instead of drifting by 30/365 days. */
+function nextRenewalISO(charges: Transaction[], window: CadenceWindow): string {
+  const last = charges[charges.length - 1].date;
+  if (window.cadence !== 'monthly' && window.cadence !== 'yearly') {
+    return addDays(last, window.typicalDays);
+  }
+  const [year, month, day] = last.split('-').map(Number);
+  let billingDay = day;
+  const monthLength = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day === monthLength) {
+    // A January 31 renewal can post February 28. Retain the recent day that
+    // was clamped so March returns to 31, without changing an ordinary day 28.
+    // An annual leap-day anchor must survive all three intervening years.
+    const recent = window.cadence === 'yearly'
+      ? charges.filter((charge) => Number(charge.date.slice(5, 7)) === month)
+      : charges.slice(-3);
+    billingDay = Math.max(day, ...recent.map((charge) => Number(charge.date.slice(8, 10))));
+  }
+  const target = new Date(Date.UTC(
+    year + (window.cadence === 'yearly' ? 1 : 0),
+    month - 1 + (window.cadence === 'monthly' ? 1 : 0),
+    1,
+  ));
+  const targetLastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(billingDay, targetLastDay));
+  return target.toISOString().slice(0, 10);
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
 }
 
 /**
- * Categories where a recurring charge can plausibly BE a subscription service.
- * A recurring supplier invoice or school fee is a commitment, not a Netflix.
+ * Software-service charges can corroborate subscription cadence. Shopping,
+ * entertainment and health also contain ordinary visits and purchases, so
+ * those categories require a named subscription provider instead.
  *
  * `software` is here because it had to be: every AI assistant, domain renewal
  * and design tool used to be categorised `entertainment`, and moving them to
@@ -153,10 +182,7 @@ function median(values: number[]): number {
  * listing it beside Netflix invites exactly that.
  */
 const SUBSCRIPTION_CATEGORIES = new Set<CategoryId>([
-  'entertainment',
   'software',
-  'shopping',
-  'health',
 ]);
 
 /**
@@ -423,7 +449,7 @@ export function detectSubscriptions(
       avgAmountFils: avg,
       lastAmountFils: last.amountFils,
       lastChargedISO: last.date,
-      nextExpectedISO: addDays(last.date, window.typicalDays),
+      nextExpectedISO: nextRenewalISO(cadenceCharges, window),
       chargeCount: cadenceCharges.length,
       paymentHistory: registeredReceipt,
       priceIncreased:

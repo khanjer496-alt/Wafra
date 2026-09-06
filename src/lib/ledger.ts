@@ -1,177 +1,132 @@
 import type { Account, Transaction } from '@/lib/types';
 
-/**
- * What counts as money moving, asked once.
- *
- * This existed in at least four different spellings across analytics.ts,
- * insights.ts, bills.ts, subscriptions.ts, wallet.tsx and three sheets:
- *
- *   t.type !== 'expense' || t.isTransfer
- *   t.isTransfer                              (no type check at all)
- *   !t.isTransfer && inPeriod(...)
- *   t.isTransfer && t.type === 'income'
- *
- * They agreed by luck, not by construction, and one of them silently didn't:
- * archiving an account removed its balance from Wallet and its history from
- * net worth, but its spending went on counting in Home's Out, in Flow's
- * categories and against budgets. Hiding a card half-hid it.
- *
- * Every screen that adds money up now asks these functions instead.
- */
-
-/** Accounts whose rows still count. Pass this to the predicates below. */
+/** Account visibility is applied to totals, never to transfer identity. */
 export function liveAccountIds(accounts: Account[]): Set<string> {
-  return new Set(accounts.filter((a) => !a.archived).map((a) => a.id));
+  return new Set(accounts.filter((account) => !account.archived).map((account) => account.id));
 }
 
-/**
- * A transfer is the app moving money between the user's own pockets — a card
- * payment, a savings sweep. Real, and already counted once as the purchase it
- * settles, so counting it again would double the month.
- */
-export function isTransfer(t: Transaction): boolean {
-  return t.isTransfer === true;
+export function isTransfer(transaction: Transaction): boolean {
+  return transaction.isTransfer === true;
 }
 
-/**
- * Does this row belong in a spending or income total?
- *
- * `live` is optional so callers working from a bare transaction list (tests,
- * the importer) still get the transfer rule. Every screen with the accounts
- * to hand should pass it, or a hidden account keeps spending your money.
- */
 export function countsInTotals(
-  t: Transaction,
+  transaction: Transaction,
   live?: Set<string>,
   internal?: Set<string>,
 ): boolean {
-  if (isTransfer(t)) return false;
-  if (live && !live.has(t.accountId)) return false;
-  // Both halves of a move between your own accounts. See internalTransferIds.
-  if (internal?.has(t.id)) return false;
+  if (isTransfer(transaction)) return false;
+  if (live && !live.has(transaction.accountId)) return false;
+  if (internal?.has(transaction.id)) return false;
   return true;
 }
 
-/** Spending: an expense that is not a transfer, on an account still in play. */
-export function isSpending(t: Transaction, live?: Set<string>, internal?: Set<string>): boolean {
-  return t.type === 'expense' && countsInTotals(t, live, internal);
+export function isSpending(
+  transaction: Transaction, live?: Set<string>, internal?: Set<string>,
+): boolean {
+  return transaction.type === 'expense' && countsInTotals(transaction, live, internal);
 }
 
-/** Income: money arriving from outside, not shuffled between own accounts. */
-export function isIncome(t: Transaction, live?: Set<string>, internal?: Set<string>): boolean {
-  return t.type === 'income' && countsInTotals(t, live, internal);
+export function isIncome(
+  transaction: Transaction, live?: Set<string>, internal?: Set<string>,
+): boolean {
+  return transaction.type === 'income' && countsInTotals(transaction, live, internal);
+}
+
+/** A payment arriving ON a card still counts towards settling its statement. */
+export function isInboundTransfer(transaction: Transaction): boolean {
+  return isTransfer(transaction) && transaction.type === 'income';
+}
+
+interface TimedTransfer {
+  transaction: Transaction;
+  at: number;
+  /** Original position preserves the old stable-sort tie-break. */
+  order: number;
+}
+
+const TRANSFER_WINDOW_MS = 3 * 86_400_000;
+const OUTGOING_TRANSFER = /^(?:outgoing|bank|own account|self|savings) transfer$/i;
+const INCOMING_TRANSFER = /^(?:(?:incoming|bank|own account|self) transfer|inward remittance)$/i;
+
+function lowerBound(candidates: readonly TimedTransfer[], at: number): number {
+  let low = 0;
+  let high = candidates.length;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (candidates[middle].at < at) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 /**
- * The money-in leg of a transfer — a payment landing ON a card.
+ * Pair only evidenced, equal-amount transfers between different owned accounts.
  *
- * The mirror image of the rule above, and the one thing that must NOT be
- * filtered out as "just a transfer": card settlement depends on finding it.
- */
-export function isInboundTransfer(t: Transaction): boolean {
-  return isTransfer(t) && t.type === 'income';
-}
-
-/**
- * Money you moved between your own accounts, matched by its two halves.
+ * Preserve the shipping rules: income order, closest timestamp within three
+ * days (inclusive), original outgoing order for equal distances, and at most
+ * one match per outgoing ID. Salaries and ordinary purchases cannot pair.
+ * Archived accounts remain eligible: hiding an account cannot create income.
  *
- * A bank sends one message for each side of an internal transfer: AED 19,000
- * leaves •0002 and AED 19,000 arrives in •0004. Neither message says the
- * other exists, and the arriving one reads exactly like being paid — so it
- * was counted as income, and the same 19,000 the user already had appeared as
- * money earned. Their June "In" carried 24,000 of their own savings.
- *
- * The wording cannot settle this; only the pairing can. An amount that leaves
- * one of your accounts and arrives in another within a few days is one
- * movement told twice.
- *
- * Deliberately strict, because a wrong pair hides real income:
- *  - the exact same amount to the fils
- *  - two DIFFERENT accounts, both the user's own
- *  - within three days, for a transfer that clears overnight
- *  - each row pairs once, so three 500s do not all cancel one
- *
- * "Both the user's own" means EVERY account, hidden ones included. Closing an
- * old account, moving the balance to the new one and then hiding the old one
- * is the ordinary path here, and while this function narrowed itself to the
- * live set that last step un-paired the move: the leaving leg vanished with
- * its account and the arriving leg — which the bank words exactly like being
- * paid, and which carries no transfer flag of its own — went back to reading
- * as income. Toggling "Hide from lists" on the source account took Home's In
- * from AED 25,000 to AED 44,000 and net worth from AED 24,485 to AED 43,800,
- * money the user had merely walked from one pocket to another.
- *
- * Hiding an account is a display decision. It must not change what a movement
- * WAS. The live filter is a separate rule and already applied separately, by
- * `countsInTotals` above, after the pairing has been established.
+ * Previously each incoming transfer filtered and sorted its entire amount
+ * bucket, repeatedly parsing the same dates. Index each bucket by time once,
+ * then inspect only its three-day window. No transaction is mutated, no match
+ * is persisted, and no cross-ledger cache can become stale after edits/erase.
  */
 export function internalTransferIds(
   transactions: Transaction[],
   accounts: Set<string> | Account[],
 ): Set<string> {
-  // Callers hold `liveAccountIds(...)` for the predicates above and naturally
-  // passed it here too, which is how the narrowing got in. Take `Account[]`
-  // and there is nothing to get wrong; take the legacy Set and widen it to
-  // every account the rows themselves name, which comes to the same thing —
-  // deleting an account deletes its transactions (store.tsx, 'deleteAccount'),
-  // so a stored row always belongs to an account that still exists.
   const accountIds = Array.isArray(accounts)
-    ? new Set(accounts.map((a) => a.id))
-    : new Set(transactions.map((t) => t.accountId));
-
+    ? new Set(accounts.map((account) => account.id))
+    : new Set(transactions.map((transaction) => transaction.accountId));
+  const outgoing = new Map<number, TimedTransfer[]>();
   const paired = new Set<string>();
-  const outgoing = new Map<number, Transaction[]>();
-  for (const t of transactions) {
-    if (
-      t.type !== 'expense' ||
-      !accountIds.has(t.accountId) ||
-      // Amount + date is correlation, not proof. The old matcher admitted
-      // every purchase here, so an AED 500 grocery run could cancel an AED
-      // 500 client payment on another account. Require the parser's transfer
-      // flag, or one of the narrow structural titles stored by older builds.
-      !(
-        t.isTransfer === true ||
-        /^(?:outgoing|bank|own account|self|savings) transfer$/i.test(t.title.trim())
-      )
-    ) continue;
-    const list = outgoing.get(t.amountFils);
-    if (list) list.push(t);
-    else outgoing.set(t.amountFils, [t]);
+
+  for (let order = 0; order < transactions.length; order += 1) {
+    const transaction = transactions[order];
+    if (transaction.type !== 'expense' || !accountIds.has(transaction.accountId) ||
+      !(transaction.isTransfer === true || OUTGOING_TRANSFER.test(transaction.title.trim()))) {
+      continue;
+    }
+    const at = transaction.ts ?? Date.parse(`${transaction.date}T12:00:00Z`);
+    // Non-finite timestamps could never pass the old absolute-distance guard.
+    if (!Number.isFinite(at)) continue;
+    const entry = { transaction, at, order };
+    const bucket = outgoing.get(transaction.amountFils);
+    if (bucket) bucket.push(entry);
+    else outgoing.set(transaction.amountFils, [entry]);
+  }
+  for (const bucket of outgoing.values()) {
+    bucket.sort((a, b) => a.at - b.at || a.order - b.order);
   }
 
-  const DAY = 86400000;
-  for (const t of transactions) {
-    if (
-      t.type !== 'income' ||
-      t.isTransfer ||
-      !accountIds.has(t.accountId) ||
-      t.category === 'salary' ||
-      // A salary, refund or client invoice can coincidentally equal a sweep.
-      // Only an arrival the bank itself described as a transfer is eligible.
-      !/^(?:(?:incoming|bank|own account|self) transfer|inward remittance)$/i.test(
-        t.title.trim(),
-      )
-    ) continue;
-    const candidates = outgoing.get(t.amountFils);
+  for (const transaction of transactions) {
+    if (transaction.type !== 'income' || transaction.isTransfer ||
+      !accountIds.has(transaction.accountId) || transaction.category === 'salary' ||
+      !INCOMING_TRANSFER.test(transaction.title.trim())) continue;
+    const candidates = outgoing.get(transaction.amountFils);
     if (!candidates) continue;
-    const arrived = t.ts ?? Date.parse(`${t.date}T12:00:00Z`);
-    const match = candidates
-      .filter(
-        (o) =>
-          !paired.has(o.id) &&
-          o.accountId !== t.accountId &&
-          Math.abs((o.ts ?? Date.parse(`${o.date}T12:00:00Z`)) - arrived) <= 3 * DAY,
-      )
-      // Repeated equal transfers are common. Pair the nearest alert, not the
-      // first row in whatever display sort happened to reach this function.
-      .sort(
-        (a, b) =>
-          Math.abs((a.ts ?? Date.parse(`${a.date}T12:00:00Z`)) - arrived) -
-          Math.abs((b.ts ?? Date.parse(`${b.date}T12:00:00Z`)) - arrived),
-      )[0];
-    if (!match) continue;
-    paired.add(match.id);
-    paired.add(t.id);
+    const arrived = transaction.ts ?? Date.parse(`${transaction.date}T12:00:00Z`);
+    if (!Number.isFinite(arrived)) continue;
+
+    let closest: TimedTransfer | undefined;
+    let distance = Number.POSITIVE_INFINITY;
+    for (let i = lowerBound(candidates, arrived - TRANSFER_WINDOW_MS);
+      i < candidates.length && candidates[i].at <= arrived + TRANSFER_WINDOW_MS; i += 1) {
+      const candidate = candidates[i];
+      if (paired.has(candidate.transaction.id) ||
+        candidate.transaction.accountId === transaction.accountId) continue;
+      const delta = Math.abs(candidate.at - arrived);
+      if (delta < distance || (delta === distance && candidate.order < (closest?.order ?? Infinity))) {
+        closest = candidate;
+        distance = delta;
+      }
+      // Equal timestamps are already ordered by original position.
+      if (distance === 0) break;
+    }
+    if (!closest) continue;
+    paired.add(closest.transaction.id);
+    paired.add(transaction.id);
   }
   return paired;
 }

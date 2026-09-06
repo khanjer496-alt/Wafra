@@ -77,9 +77,9 @@ const DEVICES = {
 /** Tab surfaces, reached by clicking the tab bar. */
 const TABS = [
   ['home', 'Home'],
-  ['flow', 'Flow'],
+  ['flow', 'Spending'],
   ['bills', 'Bills'],
-  ['wallet', 'Wallet'],
+  ['wallet', 'Accounts'],
 ];
 
 /**
@@ -111,10 +111,10 @@ const PUSHED = [
  */
 const STORE_SURFACES = [
   { kind: 'tab', name: 'home', label: 'Home' },
-  { kind: 'tab', name: 'flow', label: 'Flow' },
+  { kind: 'tab', name: 'flow', label: 'Spending' },
   { kind: 'push', name: 'stats', path: '/stats' },
   { kind: 'tab', name: 'bills', label: 'Bills' },
-  { kind: 'tab', name: 'wallet', label: 'Wallet' },
+  { kind: 'tab', name: 'wallet', label: 'Accounts' },
   { kind: 'push', name: 'transactions', path: '/transactions' },
 ];
 

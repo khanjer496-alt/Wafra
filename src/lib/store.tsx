@@ -18,9 +18,11 @@ import {
   repairCardPaymentAccounts,
   repairDuplicateStatements,
 } from '@/lib/accounts';
-import { setMonthStartDay as applyMonthStartDay } from '@/lib/format';
-import { setThemePreference as applyThemePreference } from '@/lib/theme-preference';
-import { detectLanguage, setLanguage } from '@/lib/i18n';
+import { cleanupGeneratedExports } from '@/lib/share-text';
+import { isValidBackupState } from '@/lib/backup-validation';
+import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
+import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
+import { detectLanguage, getLanguage, setLanguage } from '@/lib/i18n';
 import {
   resolveUiLanguage,
   type LanguagePreference,
@@ -28,6 +30,9 @@ import {
 import {
   canSelectMarket,
   detectMarketId,
+  getActiveMarket,
+  pinnedLedgerCurrencyCode,
+  ledgerCurrencyExponent,
   marketCurrencyCode,
   setActiveMarket,
   setLedgerCurrency,
@@ -44,15 +49,17 @@ import { applyHealPatch, healPatch } from '@/lib/heal';
 import {
   guessCategory,
   normalizeServiceName,
-  overrideFitsDirection,
   parseSms,
 } from '@/lib/sms-parser';
 import { internalTransferIds } from '@/lib/ledger';
+import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
+import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
   createLedgerPersistence,
   LedgerResetError,
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
+import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import {
   planReviewPromotion,
@@ -64,7 +71,8 @@ import {
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   resolveReviewAlert as resolveAlertReviewItem,
-  type ReviewAlert,
+  type ReviewEntry,
+  isUniversalReviewAlert,
   type ReviewTombstone,
 } from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
@@ -72,29 +80,47 @@ import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
 import {
   applyMaterializedImportBatch,
+  assertImportBatchMoney,
   materializeImportBatch,
   type MaterializedImportBatch,
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnostics';
 import { overrideAppliesTo } from '@/lib/uncategorised';
+import {
+  createHistoryImportProgress,
+  normalizeHistoryImportProgress,
+  type HistoryImportProgress,
+} from '@/lib/history-import';
 import type { FxUpdate } from '@/lib/fx';
 import {
   buildDeferredOnboardingPlan,
   mergeDeferredOnboardingPlan,
+  onboardingIncomeBasis,
 } from '@/lib/onboarding';
 
-import type {
-  ImportBatchInput,
-  Account,
-  AppState,
-  Bill,
-  Budget,
-  CardDue,
-  CategoryId,
-  Goal,
-  OnboardingPlanPreferences,
-  Transaction,
+import {
+  isLocalCaptureQualificationCandidate,
+  mergeIosCaptureWarningState,
+  mergeLocalCaptureQualifications,
+  normalizeIosCaptureWarningState,
+  normalizeLocalCaptureQualifications,
+  type Account,
+  type AppState,
+  type Bill,
+  type Budget,
+  type CardDue,
+  type CategoryId,
+  type Goal,
+  type ImportBatchInput,
+  type IosCaptureWarningState,
+  type LocalCaptureDeclineQualificationMapping,
+  type LocalCaptureQualificationCandidate,
+  type LocalCaptureQualificationReceipt,
+  type LocalCaptureReviewQualificationCandidate,
+  type OnboardingPlanPreferences,
+  type Transaction,
+  type TransactionType,
 } from '@/lib/types';
 
 export type { ImportBatchInput } from '@/lib/types';
@@ -137,6 +163,8 @@ const EMPTY_STATE: AppState = {
   hydrated: false,
   ledgerMoney: null,
   reviewTray: emptyAlertReviewTray(),
+  localCaptureQualifications: [],
+  iosCaptureWarning: null,
   accounts: [],
   transactions: [],
   budgets: [],
@@ -149,6 +177,7 @@ const EMPTY_STATE: AppState = {
   accountHints: {},
   notSubscriptions: [],
   lastScanTs: 0,
+  historyImport: null,
   onboarded: false,
   userName: 'there',
   appLock: false,
@@ -231,6 +260,11 @@ export function migratePersistedState(
 ): Partial<Omit<AppState, 'hydrated'>> {
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
+  parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
+    parsed.localCaptureQualifications,
+    Date.now(),
+  );
+  parsed.iosCaptureWarning = normalizeIosCaptureWarningState(parsed.iosCaptureWarning);
   // A merchant rule is keyed on the TITLE, and the parser renames titles.
   //
   // `normalizeServiceName` is how one shop stops arriving under six spellings,
@@ -342,15 +376,18 @@ export function migratePersistedState(
     // AT ALL; agreement decides what it moves.
     const claims = new Map<string, { categories: Set<CategoryId>; evidenced: boolean }>();
     for (const [key, category] of Object.entries(parsed.merchantOverrides)) {
-      const canonical = normalizeServiceName(key);
+      const scope = key.match(/^(income|expense):/)?.[1] as TransactionType | undefined;
+      const merchantKey = scope ? key.slice(scope.length + 1) : key;
+      const canonical = normalizeServiceName(merchantKey);
       if (!canonical) continue;
-      const canonicalKey = canonical.trim().toLowerCase();
+      const canonicalMerchant = canonical.trim().toLowerCase();
+      const canonicalKey = scope ? scopedMerchantOverrideKey(canonicalMerchant, scope) : canonicalMerchant;
       if (canonicalKey === key) continue;
       // An answer the user gave under the canonical name themselves is the
       // most recent thing they said about it, and outranks any re-key.
       if (parsed.merchantOverrides[canonicalKey] !== undefined) continue;
 
-      const under = rows.filter((t) => titleOf(t) === key);
+      const under = rows.filter((t) => titleOf(t) === merchantKey && (!scope || t.type === scope));
       const evidenced =
         // The user has written this name, so it is theirs however it
         // canonicalises. Not evidence — and it still votes, because refusing
@@ -360,9 +397,9 @@ export function migratePersistedState(
           rows.some(
             (t) =>
               parserOwned(t) &&
-              titleOf(t) === canonicalKey &&
+              titleOf(t) === canonicalMerchant && (!scope || t.type === scope) &&
               typeof t.raw === 'string' &&
-              t.raw.toLowerCase().includes(key),
+              t.raw.toLowerCase().includes(merchantKey),
           ));
 
       const claim = claims.get(canonicalKey);
@@ -470,6 +507,7 @@ export function migratePersistedState(
       ) {
         return t;
       }
+      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
       const category = guessCategory(
         t.title,
         t.type,
@@ -492,7 +530,8 @@ export function migratePersistedState(
       ) {
         return t;
       }
-      const guessed = guessCategory(t.title, t.type, parsed.merchantOverrides, t.title);
+      if (readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) return t;
+      const guessed = guessCategory(t.title, t.type, undefined, t.title);
       return guessed !== 'other' ? { ...t, category: guessed } : t;
     });
 
@@ -554,10 +593,22 @@ export function migratePersistedState(
   return parsed;
 }
 
+function captureMarketContext(): () => void {
+  const market = getActiveMarket().id;
+  const currency = pinnedLedgerCurrencyCode();
+  const exponent = ledgerCurrencyExponent();
+  return () => {
+    setLedgerCurrency(null);
+    setActiveMarket(market);
+    setLedgerCurrency(currency, exponent);
+  };
+}
+
 /** Validate and migrate an imported backup before it reaches the reducer. */
 export function parseBackupForRestore(
   json: string,
 ): Partial<Omit<AppState, 'hydrated'>> | null {
+  const restoreMarket = captureMarketContext();
   try {
     const parsed = JSON.parse(json) as { app?: unknown; version?: unknown; data?: unknown };
     if (
@@ -566,13 +617,15 @@ export function parseBackupForRestore(
       typeof parsed.data !== 'object' ||
       parsed.data === null ||
       !('transactions' in parsed.data) ||
-      !Array.isArray(parsed.data.transactions)
+      !isValidBackupState(parsed.data)
     ) {
       return null;
     }
     return migratePersistedState(parsed.data as Partial<Omit<AppState, 'hydrated'>>);
   } catch {
     return null;
+  } finally {
+    restoreMarket();
   }
 }
 
@@ -581,7 +634,10 @@ type Action =
   | { type: 'addTransaction'; transaction: Transaction }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
   | { type: 'deleteTransaction'; id: string }
-  | ({ type: 'importBatch' } & MaterializedImportBatch)
+  | ({
+      type: 'importBatch';
+      localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+    } & MaterializedImportBatch)
   | { type: 'undoBatch'; ids: string[] }
   | { type: 'upsertBudget'; budget: Budget }
   | { type: 'deleteBudget'; category: Budget['category'] }
@@ -595,7 +651,7 @@ type Action =
   | { type: 'markBillPaid'; id: string; month: string; transaction: Transaction }
   | { type: 'upsertCardDue'; due: CardDue }
   | { type: 'payCardDue'; id: string; amountFils: number; transaction: Transaction | null; settledAt: string | null }
-  | { type: 'setMerchantOverride'; merchant: string; category: CategoryId; applyToExisting: boolean }
+  | { type: 'setMerchantOverride'; merchant: string; category: CategoryId; applyToExisting: boolean; direction?: TransactionType }
   | { type: 'setNotSubscription'; merchant: string; dismissed: boolean }
   | { type: 'reassignAccountHint'; last4: string; accountId: string }
   | { type: 'addGoal'; goal: Goal }
@@ -610,6 +666,9 @@ type Action =
   | { type: 'setAppLock'; enabled: boolean }
   | { type: 'setPrivateMode'; enabled: boolean }
   | { type: 'setCaptureOptOut'; enabled: boolean }
+  | { type: 'recordIosCaptureWarning'; warning: IosCaptureWarningState }
+  | { type: 'clearIosCaptureWarning'; expectedWarningId: string | null }
+  | { type: 'setHistoryImport'; progress: HistoryImportProgress }
   | { type: 'setDailySummary'; enabled: boolean }
   | { type: 'applyFxUpdates'; updates: FxUpdate[] }
   | { type: 'setMonthStartDay'; day: number }
@@ -619,7 +678,12 @@ type Action =
   | { type: 'setMarket'; id: string }
   | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
   | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
-  | { type: 'setReviewTray'; reviewTray: AppState['reviewTray'] }
+  | {
+      type: 'setReviewTray';
+      reviewTray: AppState['reviewTray'];
+      sourceKeyUpdates?: { id: string; smsKey: string }[];
+      localCaptureQualifications?: LocalCaptureQualificationReceipt[];
+    }
   | {
       type: 'promoteReviewAlert';
       transaction: Transaction;
@@ -662,7 +726,19 @@ function syncLedgerCurrency(next: AppState): AppState {
 }
 
 function reducer(state: AppState, action: Action): AppState {
-  return syncLedgerCurrency(reduceState(state, action));
+  const restoreMarket = captureMarketContext();
+  const month = getMonthStartDay();
+  const theme = getThemePreference();
+  const language = getLanguage();
+  try {
+    return syncLedgerCurrency(reduceState(state, action));
+  } catch (error) {
+    restoreMarket();
+    applyMonthStartDay(month);
+    applyThemePreference(theme);
+    setLanguage(language);
+    throw error;
+  }
 }
 
 function reduceState(state: AppState, action: Action): AppState {
@@ -672,6 +748,11 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      next.historyImport = normalizeHistoryImportProgress(next.historyImport);
+      next.localCaptureQualifications = normalizeLocalCaptureQualifications(
+        next.localCaptureQualifications,
+        Date.now(),
+      );
       // Month grouping is computed all over the app; sync the global before
       // anything renders against the hydrated state.
       applyMonthStartDay(next.monthStartDay || 1);
@@ -735,8 +816,28 @@ function reduceState(state: AppState, action: Action): AppState {
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
     case 'setReviewTray':
-      return { ...state, reviewTray: action.reviewTray };
+      return {
+        ...state,
+        reviewTray: action.reviewTray,
+        ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
+          const update = action.sourceKeyUpdates!.find((candidate) => candidate.id === transaction.id);
+          return update ? { ...transaction, smsKey: update.smsKey } : transaction;
+        }) } : {}),
+        ...(action.localCaptureQualifications
+          ? { localCaptureQualifications: action.localCaptureQualifications }
+          : {}),
+      };
+    case 'recordIosCaptureWarning':
+      return { ...state, iosCaptureWarning: action.warning };
+    case 'clearIosCaptureWarning':
+      return state.iosCaptureWarning?.nativeWarningId === action.expectedWarningId
+        ? { ...state, iosCaptureWarning: null }
+        : state;
     case 'promoteReviewAlert':
+      assertImportBatchMoney(state, {
+        importMoney: action.ledgerMoney, transactions: [action.transaction],
+        newAccounts: [], newDues: [], newBills: [], snapshots: {}, updates: [],
+      });
       return {
         ...state,
         ledgerMoney: action.ledgerMoney,
@@ -800,7 +901,10 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'deleteTransaction':
       return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
     case 'importBatch': {
-      return applyMaterializedImportBatch(state, action);
+      const imported = applyMaterializedImportBatch(state, action);
+      return action.localCaptureQualifications
+        ? { ...imported, localCaptureQualifications: action.localCaptureQualifications }
+        : imported;
     }
     case 'undoBatch': {
       const ids = new Set(action.ids);
@@ -875,39 +979,15 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'setMerchantOverride': {
       const key = action.merchant.trim().toLowerCase();
-      const merchantOverrides = { ...state.merchantOverrides, [key]: action.category };
-      // `overrideAppliesTo` is expense-only, and an income category cannot
-      // decide an expense row — so an income rule moves nothing, and saying so
-      // here is what stops it moving everything. Correcting a credit to Salary
-      // and tapping "yes, update all" wrote `salary` onto every EXPENSE row
-      // carrying that merchant: the mirror of the crossing `overrideFitsDirection`
-      // was added to stop, on the one path that writes rather than reads.
-      // `sameMerchantCount` in entry-detail-sheet.tsx makes the same check, so
-      // the number on the button and the rows this moves stay the same set.
-      const reaches = overrideFitsDirection(action.category, 'expense');
-      const transactions =
-        action.applyToExisting && reaches
-        ? state.transactions.map((t) =>
-            // `overrideAppliesTo` is the ONE definition of this rule's blast
-            // radius. The screen that offers the tap prints a count computed
-            // from the same predicate, so the number the user reads and the
-            // rows this line rewrites cannot drift apart. A bare key match
-            // here — which is what this was — reverted hand-filed rows and
-            // stamped expense categories onto income refunds, neither of
-            // which was in the count printed on the button.
-            //
-            // `userEdited` is NOT set. It is immutable by the contract stated
-            // on migratePersistedState, and a merchant rule is a default
-            // rather than a per-row answer, so it must not masquerade as one:
-            // pinning here would launder hundreds of rows the user never
-            // opened into "hand-corrected" and hide them from every
-            // measurement that counts on the distinction. Nothing is lost by
-            // not pinning — the rule itself lives in `merchantOverrides`,
-            // which both `guessCategory` and `parseSms` take as an input, so
-            // a re-parse re-derives this category instead of undoing it.
-            overrideAppliesTo(t, key) ? { ...t, category: action.category } : t,
-          )
-        : state.transactions;
+      const direction = action.direction ?? getCategory(action.category).type;
+      if (!key || !categorySupportsType(action.category, direction)) return state;
+      const ruleKey = scopedMerchantOverrideKey(key, direction);
+      const merchantOverrides = { ...state.merchantOverrides, [ruleKey]: action.category };
+      // The UI count and the mutation use the same direction-aware predicate.
+      // Saving a future rule leaves existing classifications untouched.
+      const transactions = action.applyToExisting ? state.transactions.map((transaction) =>
+        overrideAppliesTo(transaction, key, direction)
+          ? { ...transaction, category: action.category } : transaction) : state.transactions;
       return { ...state, merchantOverrides, transactions };
     }
     case 'setNotSubscription': {
@@ -964,6 +1044,8 @@ function reduceState(state: AppState, action: Action): AppState {
       };
     case 'setCaptureOptOut':
       return { ...state, captureOptOut: action.enabled };
+    case 'setHistoryImport':
+      return { ...state, historyImport: action.progress };
     case 'applyFxUpdates': {
       const updates = new Map(action.updates.map((update) => [update.id, update]));
       if (updates.size === 0) return state;
@@ -991,7 +1073,11 @@ function reduceState(state: AppState, action: Action): AppState {
         // entries the user just deleted.
         captureOptOut: state.captureOptOut,
         // Founder access belongs to this installation, not to ledger data.
+        pro: state.pro,
         founderPro: state.founderPro,
+        // Erasing a ledger must not mint another local trial on the next
+        // hydrate or discard the original absolute entitlement deadline.
+        trialStartTs: state.trialStartTs,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1011,6 +1097,10 @@ export type { TxHealUpdate } from '@/lib/types';
 
 interface StoreValue {
   state: AppState;
+  /** Latest reducer snapshot, including dispatches React has not rendered yet. */
+  getStateSnapshot: () => AppState;
+  /** Invalidates in-flight work when restore/erase replaces the whole ledger. */
+  getStateGeneration: () => number;
   /**
    * Non-null when persistence has failed in this process.
    *
@@ -1052,8 +1142,15 @@ interface StoreValue {
    * Bulk import. `durable` resolves only after SQLCipher has committed the
    * rows; relay callers must await it before acknowledging the server queue.
    */
-  importBatch: (input: ImportBatchInput) => ImportReceipt;
-  stageReviewAlerts: (items: ReviewAlert[]) => { admitted: number; durable: Promise<void> };
+  importBatch: (
+    input: ImportBatchInput,
+    qualifications?: readonly LocalCaptureDeclineQualificationMapping[],
+  ) => ImportReceipt;
+  stageReviewAlerts: (
+    items: ReviewEntry[],
+    qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+    sourceBindings?: readonly ReviewSourceBinding[],
+  ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
   dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
@@ -1076,7 +1173,7 @@ interface StoreValue {
   markBillPaid: (id: string, month: string, transaction: Omit<Transaction, 'id'>) => void;
   upsertCardDue: (due: Omit<CardDue, 'id'>) => void;
   payCardDue: (id: string, amountFils: number, transaction: Omit<Transaction, 'id'> | null, settled: boolean) => void;
-  setMerchantOverride: (merchant: string, category: CategoryId, applyToExisting: boolean) => void;
+  setMerchantOverride: (merchant: string, category: CategoryId, applyToExisting: boolean, direction?: TransactionType) => void;
   setNotSubscription: (merchant: string, dismissed: boolean) => void;
   reassignAccountHint: (last4: string, accountId: string) => void;
   addGoal: (g: Omit<Goal, 'id'>) => void;
@@ -1086,6 +1183,12 @@ interface StoreValue {
   setAppLock: (enabled: boolean) => void;
   setPrivateMode: (enabled: boolean) => Promise<void>;
   setCaptureOptOut: (enabled: boolean) => Promise<void>;
+  recordIosCaptureWarning: (input: IosCaptureWarningState) => { durable: Promise<void> };
+  clearIosCaptureWarning: (
+    expectedWarningId: string | null,
+  ) => { cleared: boolean; durable: Promise<void> };
+  setHistoryImportProgress: (progress: HistoryImportProgress) => Promise<void>;
+  beginHistoryImport: () => Promise<void>;
   setDailySummary: (enabled: boolean) => void;
   applyFxUpdates: (updates: FxUpdate[]) => void;
   setMonthStartDay: (day: number) => void;
@@ -1106,7 +1209,101 @@ const StoreContext = createContext<StoreValue | null>(null);
 
 export interface ImportReceipt {
   ids: string[];
+  qualificationIds: string[];
   durable: Promise<void>;
+}
+
+function reviewQualificationMap(
+  items: readonly ReviewEntry[],
+  qualifications: readonly LocalCaptureReviewQualificationCandidate[] | undefined,
+): Map<string, LocalCaptureQualificationCandidate & { kind: 'review' }> {
+  if (!qualifications || qualifications.length === 0) return new Map();
+  if (items.some(isUniversalReviewAlert)) {
+    throw new Error('Generic review cannot qualify known-bank automation');
+  }
+  if (qualifications.length !== items.length) {
+    throw new Error('Local capture review qualification mapping is invalid');
+  }
+  const itemIds = new Set(items.map((item) => item.id));
+  const reviewIds = new Set<string>();
+  const qualificationIds = new Set<string>();
+  const mapped = new Map<string, LocalCaptureQualificationCandidate & { kind: 'review' }>();
+  for (const entry of qualifications) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) ||
+      JSON.stringify(Object.keys(entry).sort()) !== JSON.stringify(['qualification', 'reviewId']) ||
+      typeof entry.reviewId !== 'string' || !itemIds.has(entry.reviewId) ||
+      reviewIds.has(entry.reviewId) ||
+      !isLocalCaptureQualificationCandidate(entry.qualification) ||
+      entry.qualification.kind !== 'review' ||
+      qualificationIds.has(entry.qualification.id)) {
+      throw new Error('Local capture review qualification mapping is invalid');
+    }
+    reviewIds.add(entry.reviewId);
+    qualificationIds.add(entry.qualification.id);
+    mapped.set(entry.reviewId, entry.qualification);
+  }
+  if (reviewIds.size !== itemIds.size) {
+    throw new Error('Local capture review qualification mapping is invalid');
+  }
+  return mapped;
+}
+
+function attestDeclineQualifications(
+  state: AppState,
+  batch: MaterializedImportBatch,
+  postImportState: AppState,
+  mappings: readonly LocalCaptureDeclineQualificationMapping[],
+): LocalCaptureQualificationCandidate[] {
+  const qualificationIds = new Set<string>();
+  const removedTransactionIds = new Set<string>();
+  const candidates: LocalCaptureQualificationCandidate[] = [];
+  for (const mapping of mappings) {
+    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping) ||
+      JSON.stringify(Object.keys(mapping).sort()) !==
+        JSON.stringify(['qualification', 'removedTransactionId']) ||
+      !isLocalCaptureQualificationCandidate(mapping.qualification) ||
+      mapping.qualification.kind !== 'decline' ||
+      typeof mapping.removedTransactionId !== 'string' ||
+      mapping.removedTransactionId.length === 0 ||
+      qualificationIds.has(mapping.qualification.id) ||
+      removedTransactionIds.has(mapping.removedTransactionId)) {
+      throw new Error('Local capture decline qualification mapping is invalid');
+    }
+    const matchingRows = state.transactions.filter(
+      (transaction) => transaction.id === mapping.removedTransactionId,
+    );
+    const matchingUpdates = batch.updates.filter(
+      (update) => update.id === mapping.removedTransactionId,
+    );
+    if (matchingRows.length !== 1 || matchingUpdates.length !== 1 ||
+      matchingUpdates[0].remove !== true || postImportState.transactions.some(
+        (transaction) => transaction.id === mapping.removedTransactionId,
+      )) {
+      throw new Error('Local capture decline qualification mapping is not admitted');
+    }
+    qualificationIds.add(mapping.qualification.id);
+    removedTransactionIds.add(mapping.removedTransactionId);
+    candidates.push(mapping.qualification);
+  }
+  return candidates;
+}
+
+function persistedQualificationIds(
+  receipts: readonly LocalCaptureQualificationReceipt[] | undefined,
+  candidates: readonly LocalCaptureQualificationCandidate[],
+): string[] {
+  if (candidates.length === 0) return [];
+  const byId = new Map((receipts ?? []).map((receipt) => [receipt.id, receipt]));
+  const ids: string[] = [];
+  for (const candidate of candidates) {
+    const receipt = byId.get(candidate.id);
+    if (!receipt || receipt.kind !== candidate.kind ||
+      receipt.observedAt !== candidate.observedAt) {
+      throw new Error('Local capture qualification was not persisted');
+    }
+    ids.push(receipt.id);
+  }
+  return ids;
 }
 
 /**
@@ -1227,13 +1424,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const authoritativeState = useRef(EMPTY_STATE);
   const authoritativeRevision = useRef(0);
+  const stateGeneration = useRef(0);
   const dispatch = useCallback((action: Action): AppState => {
     const next = reducer(authoritativeState.current, action);
+    if (
+      action.type === 'hydrate' ||
+      action.type === 'restore' ||
+      action.type === 'loadDemo' ||
+      action.type === 'clearAll'
+    ) {
+      stateGeneration.current += 1;
+    }
     authoritativeState.current = next;
     authoritativeRevision.current += 1;
     setState(next);
     return next;
   }, []);
+  const getStateSnapshot = useCallback(() => authoritativeState.current, []);
+  const getStateGeneration = useCallback(() => stateGeneration.current, []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storageFailure, setStorageFailure] = useState<StorageFailure | null>(null);
   const [storageRecoveryState, setStorageRecoveryState] = useState<StorageRecoveryState>(null);
@@ -1257,6 +1465,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * is still running, or an unmount, must not let the older attempt dispatch.
    */
   const hydrationRun = useRef(0);
+
+  useEffect(() => {
+    const cleanup = () => { void cleanupGeneratedExports().catch(() => {}); };
+    cleanup();
+    const subscription = RNAppState.addEventListener('change', (status) => {
+      if (status === 'active') cleanup();
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Keep the native RTL flag in sync with the chosen language (takes effect
   // on the next app start — a React Native constraint).
@@ -1294,6 +1511,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const hydrate = useCallback(async (): Promise<boolean> => {
     const run = ++hydrationRun.current;
+    markLaunchPhase('ledger-load-start');
     try {
       const loaded = await persistence.load();
       if (hydrationRun.current !== run) return false;
@@ -1314,6 +1532,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setStorageFailure(null);
       setStorageRecoveryState(null);
       dispatch({ type: 'hydrate', state: next });
+      markLaunchPhase('ledger-load-complete');
       return true;
     } catch (error) {
       if (hydrationRun.current !== run) return false;
@@ -1340,6 +1559,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ? current
         : 'preserved');
       dispatch({ type: 'hydrate', state: { onboarded: false } });
+      markLaunchPhase('ledger-load-complete');
       return false;
     }
   }, [dispatch, persistence]);
@@ -1421,7 +1641,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const plan = buildDeferredOnboardingPlan(
       pending,
       state.ledgerMoney?.currency,
-      state.onboardingCurrencyEvidence,
+      onboardingIncomeBasis(state.transactions),
       state.monthStartDay,
       state.language === 'ar' ? 'ar' : 'en',
     );
@@ -1436,8 +1656,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     state.language,
     state.ledgerMoney?.currency,
     state.monthStartDay,
-    state.onboardingCurrencyEvidence,
     state.onboardingPlan,
+    state.transactions,
   ]);
 
   // A debounce that loses the last write when the app is swiped away is a data
@@ -1472,17 +1692,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteTransaction', id });
   }, [dispatch]);
 
-  const importBatch = useCallback((input: ImportBatchInput): ImportReceipt => {
+  const importBatch = useCallback((
+    input: ImportBatchInput,
+    qualifications: readonly LocalCaptureDeclineQualificationMapping[] = [],
+  ): ImportReceipt => {
     if (!authoritativeState.current.hydrated) {
       return {
         ids: [],
+        qualificationIds: [],
         durable: Promise.reject(new Error('Ledger persistence is blocked')),
       };
     }
     const base = authoritativeState.current;
+    try {
+      assertImportBatchMoney(base, input);
+    } catch (error) {
+      return { ids: [], qualificationIds: [], durable: Promise.reject(error) };
+    }
+    const materialized = materializeImportBatch(input, base, makeId);
+    const postImportState = applyMaterializedImportBatch(base, materialized);
+    const qualificationCandidates = attestDeclineQualifications(
+      base,
+      materialized,
+      postImportState,
+      qualifications,
+    );
+    const localCaptureQualifications = qualificationCandidates.length > 0
+      ? mergeLocalCaptureQualifications(
+          base.localCaptureQualifications,
+          qualificationCandidates,
+          Date.now(),
+        )
+      : undefined;
+    const qualificationIds = persistedQualificationIds(
+      localCaptureQualifications,
+      qualificationCandidates,
+    );
     const action: Action = {
       type: 'importBatch',
-      ...materializeImportBatch(input, base, makeId),
+      ...materialized,
+      ...(localCaptureQualifications ? { localCaptureQualifications } : {}),
     };
     // React dispatch is intentionally not treated as persistence. Compute the
     // exact next snapshot from the same action and enqueue its encrypted write
@@ -1498,7 +1747,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted ledger write failed');
     });
-    return { ids: action.transactions.map((t) => t.id), durable };
+    return {
+      ids: action.transactions.map((t) => t.id),
+      qualificationIds,
+      durable,
+    };
   }, [dispatch, persist]);
 
   const ensureDurable = useCallback(async () => {
@@ -1510,28 +1763,61 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!written) throw new Error('Encrypted ledger write failed');
   }, [persist]);
 
-  const stageReviewAlerts = useCallback((items: ReviewAlert[]) => {
-    if (!authoritativeState.current.hydrated || items.length === 0) {
-      return { admitted: 0, durable: ensureDurable() };
+  const stageReviewAlerts = useCallback((
+    items: ReviewEntry[],
+    qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
+    sourceBindings?: readonly ReviewSourceBinding[],
+  ) => {
+    if (!authoritativeState.current.hydrated || (items.length === 0 && !sourceBindings?.length)) {
+      return { admitted: 0, qualificationIds: [], durable: ensureDurable() };
     }
-    let reviewTray = authoritativeState.current.reviewTray;
-    let admitted = 0;
+    const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
+    const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
+    let reviewTray = rebound.reviewTray;
+    let admitted = 0;
+    const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
     for (const item of items) {
       const result = admitPreparedReviewAlert(reviewTray, item, now);
       reviewTray = result.state;
-      if (result.outcome === 'admitted') admitted += 1;
+      if (result.outcome === 'admitted') {
+        admitted += 1;
+        const qualification = qualificationByReviewId.get(item.id);
+        if (qualification) admittedQualifications.push(qualification);
+      }
     }
-    if (admitted === 0) return { admitted, durable: ensureDurable() };
+    if (admitted === 0 && !rebound.changed) {
+      return { admitted, qualificationIds: [], durable: ensureDurable() };
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const next = dispatch({ type: 'setReviewTray', reviewTray });
+    const localCaptureQualifications = admittedQualifications.length > 0
+      ? mergeLocalCaptureQualifications(
+          authoritativeState.current.localCaptureQualifications,
+          admittedQualifications,
+          now,
+        )
+      : undefined;
+    const qualificationIds = persistedQualificationIds(
+      localCaptureQualifications,
+      admittedQualifications,
+    );
+    const next = dispatch({
+      type: 'setReviewTray',
+      reviewTray,
+      ...(rebound.transactionKeyUpdates.length ? { sourceKeyUpdates: rebound.transactionKeyUpdates } : {}),
+      ...(localCaptureQualifications ? { localCaptureQualifications } : {}),
+    });
     const durable = persist(next).then((written) => {
       if (!written) throw new Error('Encrypted review-tray write failed');
     });
-    return { admitted, durable };
+    return {
+      admitted,
+      qualificationIds,
+      durable,
+    };
   }, [dispatch, ensureDurable, persist]);
 
   const dismissReviewAlert = useCallback(async (
@@ -1643,8 +1929,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setMerchantOverride = useCallback(
-    (merchant: string, category: CategoryId, applyToExisting: boolean) => {
-      dispatch({ type: 'setMerchantOverride', merchant, category, applyToExisting });
+    (merchant: string, category: CategoryId, applyToExisting: boolean, direction?: TransactionType) => {
+      dispatch({ type: 'setMerchantOverride', merchant, category, applyToExisting, direction });
     },
     [dispatch],
   );
@@ -1692,6 +1978,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [dispatch, persist]);
 
   const setCaptureOptOut = useCallback(async (enabled: boolean) => {
+    if (enabled) {
+      const { setIosCaptureEnabled } = await import('@/lib/capture');
+      await setIosCaptureEnabled(false);
+    }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -1700,6 +1990,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const written = await persist(next);
     if (!written) throw new Error('Capture preference could not be saved');
   }, [dispatch, persist]);
+
+  const recordIosCaptureWarning = useCallback((input: IosCaptureWarningState) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const warning = mergeIosCaptureWarningState(
+      authoritativeState.current.iosCaptureWarning,
+      input,
+    );
+    const next = dispatch({ type: 'recordIosCaptureWarning', warning });
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('iOS capture warning could not be saved');
+    });
+    return { durable };
+  }, [dispatch, persist]);
+
+  const clearIosCaptureWarning = useCallback((expectedWarningId: string | null) => {
+    const current = authoritativeState.current.iosCaptureWarning;
+    if (!current || current.nativeWarningId !== expectedWarningId) {
+      return { cleared: false, durable: Promise.resolve() };
+    }
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'clearIosCaptureWarning', expectedWarningId });
+    const durable = persist(next).then((written) => {
+      if (!written) throw new Error('iOS capture warning recovery could not be saved');
+    });
+    return { cleared: true, durable };
+  }, [dispatch, persist]);
+
+  const setHistoryImportProgress = useCallback(async (progress: HistoryImportProgress) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = dispatch({ type: 'setHistoryImport', progress });
+    const written = await persist(next);
+    if (!written) throw new Error('History import progress could not be saved');
+  }, [dispatch, persist]);
+
+  const beginHistoryImport = useCallback(async () => {
+    const existing = normalizeHistoryImportProgress(
+      authoritativeState.current.historyImport,
+    );
+    const progress = existing && existing.status !== 'complete'
+      ? { ...existing, status: 'paused' as const, updatedAt: Date.now(), error: null }
+      : createHistoryImportProgress(Date.now());
+    await setHistoryImportProgress(progress);
+  }, [setHistoryImportProgress]);
 
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {
     dispatch({ type: 'applyFxUpdates', updates });
@@ -1769,22 +2111,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       founderPro: state.founderPro,
       trialStartTs: state.trialStartTs,
       reviewTray: state.reviewTray,
+      captureOptOut: state.captureOptOut,
+      localCaptureQualifications: state.localCaptureQualifications,
+      iosCaptureWarning: state.iosCaptureWarning,
     };
-    dispatch({ type: 'restore', state: safeState });
-    return true;
-  }, [dispatch, state.founderPro, state.pro, state.reviewTray, state.trialStartTs]);
+    try {
+      dispatch({ type: 'restore', state: safeState });
+      return true;
+    } catch {
+      // Rejected normalization leaves both the ledger and process preferences intact.
+      return false;
+    }
+  }, [
+    dispatch,
+    state.captureOptOut,
+    state.founderPro,
+    state.iosCaptureWarning,
+    state.localCaptureQualifications,
+    state.pro,
+    state.reviewTray,
+    state.trialStartTs,
+  ]);
 
   const loadDemoData = useCallback(() => {
     dispatch({
       type: 'loadDemo',
       state: {
         ...demoState(),
+        pro: authoritativeState.current.pro,
         founderPro: authoritativeState.current.founderPro,
+        trialStartTs: authoritativeState.current.trialStartTs,
       },
     });
   }, [dispatch]);
 
-  const clearAll = useCallback(async (afterErase?: () => Promise<void>) => {
+  const clearAll = useCallback(async (captureCleanup?: () => Promise<void>) => {
+    const afterErase = async () => {
+      await captureCleanup?.();
+      await cleanupGeneratedExports({ eraseAll: true });
+    };
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -1817,7 +2182,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // data still exists when its encryption key is already gone. Keep the
         // intentional blank state and report only the failed initialization.
         let cleanupError: unknown = null;
-        if (afterErase) {
+        {
           try {
             await afterErase();
           } catch (error) {
@@ -1844,7 +2209,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       throw new ClearAllError('erase', original);
     }
 
-    if (afterErase) {
+    {
       try {
         await afterErase();
       } catch (error) {
@@ -1868,6 +2233,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       state,
+      getStateSnapshot,
+      getStateGeneration,
       storageFailure,
       storageRecoveryState,
       hydrationFailed,
@@ -1905,6 +2272,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      recordIosCaptureWarning,
+      clearIosCaptureWarning,
+      setHistoryImportProgress,
+      beginHistoryImport,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,
@@ -1920,6 +2291,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      getStateSnapshot,
+      getStateGeneration,
       storageFailure,
       storageRecoveryState,
       hydrationFailed,
@@ -1957,6 +2330,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setDailySummary,
       setPrivateMode,
       setCaptureOptOut,
+      recordIosCaptureWarning,
+      clearIosCaptureWarning,
+      setHistoryImportProgress,
+      beginHistoryImport,
       applyFxUpdates,
       setMonthStartDay,
       setThemePreference,

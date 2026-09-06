@@ -124,7 +124,7 @@ const tapTab = async (page, label) => {
 const paintedText = (page) => page.evaluate(() => {
   const out = [];
   const seen = new Set();
-  for (const el of document.querySelectorAll('div,span')) {
+  for (const el of document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')) {
     if (el.children.length) continue;
     const s = (el.textContent || '').trim();
     if (!s) continue;
@@ -190,61 +190,6 @@ const money = (s) => {
   return m === '' || m === '-' ? NaN : Number(m);
 };
 
-/**
- * Flow's composition tiles: the ramp step each row is tinted with, and the
- * ink of the glyph drawn on it. `onRampColor` picks the ink by luminance, so
- * the pair is only correct if it clears the 3:1 a graphical object needs —
- * a 26px tile is not text and does not get the 4.5:1 bar.
- */
-/**
- * The composition rows on Flow.
- *
- * These used to be 26x26 tiles with a category glyph on a colour ramp, and this
- * helper looked for exactly that. The row is an 8px swatch now — theme.ts says
- * category identity comes from the WORD, not from a hue, so the tile restated
- * what the label already said. Nothing was wrong with the app when this started
- * failing; the selector was describing a design that no longer ships, and it
- * failed by finding NOTHING, which reads as "the rows sum to 0" rather than as
- * "I could not see the rows". Match the swatch, and keep the money invariant
- * the assertion actually exists for.
- */
-const compTiles = (page) => page.evaluate(() => {
-  const parse = (c) => {
-    const m = c.trim().startsWith('#')
-      ? [1, 3, 5].map((i) => parseInt(c.trim().slice(i, i + 2), 16))
-      : (c.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
-    return m.length === 3 && m.every((n) => Number.isFinite(n)) ? m : null;
-  };
-  const lum = (rgb) => {
-    const f = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
-    return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
-  };
-  const out = [];
-  const pageBg = parse(getComputedStyle(document.body).backgroundColor) || [20, 18, 15];
-  for (const el of document.querySelectorAll('div')) {
-    if (el.childElementCount) continue;
-    const r = el.getBoundingClientRect();
-    if (Math.round(r.width) !== 8 || Math.round(r.height) !== 8) continue;
-    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    if (!(top && (el.contains(top) || top.contains(el)))) continue;
-    // A solid swatch has no ink of its own, so what has to stay legible is its
-    // EDGE against the page. The fill deliberately matches this row's segment in
-    // the bar, and the ramp's tail steps sit at 2.0-2.8:1 — they cannot be
-    // lifted without collapsing the ramp — so the border is what makes the
-    // swatch visible, and the border is what this measures.
-    const cs = getComputedStyle(el);
-    const bg = parse(cs.borderTopColor) ?? parse(cs.backgroundColor);
-    const ink = pageBg;
-    if (!bg || !ink) continue;
-    const a = lum(bg), b = lum(ink);
-    out.push({
-      label: (el.parentElement?.textContent || '').trim().slice(0, 24),
-      contrast: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100,
-    });
-  }
-  return out;
-});
-
 /** The scheme the app is actually painting in, read off the page fill. */
 const paintedScheme = (page) => page.evaluate(() => {
   let n = document.elementFromPoint(6, 300), bg = '';
@@ -273,32 +218,30 @@ await page.waitForTimeout(2200);
 
 // ── Home ──────────────────────────────────────────────────────────────
 ok('home hero states the net result', !!(await visibleText(page, /Net after spending/i)));
-ok('home splits income and spending', !!(await visibleText(page, /^SPENT$/i)));
-ok('home lists what leaves next', !!(await visibleText(page, /LEAVING IN \d+ DAYS/i)));
+ok('home splits income and spending', await page.locator('[data-testid="reference-month-cards"]').getByText('Spending',{exact:true}).count() === 1);
+ok('home lists upcoming obligations', !!(await visibleText(page, /^(Upcoming|Coming up)$/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 
-// "Leaving in N days" prints one total over three rows and a remainder. The
-// total covers the whole list, so the column only reconciles if the rows plus
-// the "+N more" figure come back to it — the bug this replaced showed AED
-// 70,976 over rows adding to 15,785 with nothing to say where the rest was.
+// The journal Home no longer invents one aggregate for unlike obligations.
+// Every visible payment row states its own date and exact amount. Read those
+// rows from the accessibility contract and verify that the same amount is
+// painted in the row, catching clipping or mismatched money without coupling
+// the check to the retired card composition.
 {
-  const t = await paintedText(page);
-  const head = t.find((x) => /leaving in \d+ days/i.test(x.t));
-  if (!head) {
-    ok('home: leaving-soon total equals its rows', false);
-  } else {
-    const total = money(t.find((x) => Math.abs(x.y - head.y) < 8 && /^AED/.test(x.t))?.t ?? '');
-    // Between this heading and the next section. Only bare figures count: the
-    // dates beside them ("25 Jul · 1 day late") are not money.
-    const next = t.find((x) => x.y > head.y + 20 && /recent activity/i.test(x.t));
-    const limit = next ? next.y : Infinity;
-    const figures = t
-      .filter((x) => x.y > head.y + 12 && x.y < limit && /^[\d,]+$/.test(x.t))
-      .map((x) => money(x.t));
-    const sum = figures.reduce((a, b) => a + b, 0);
-    ok(`home: leaving-soon total equals its rows plus the remainder (${total} vs ${sum})`,
-      Number.isFinite(total) && total === sum);
-  }
+  const payments = await page.evaluate(() => {
+    const section = document.querySelector('[data-testid="journal-payments"]');
+    if (!section) return [];
+    return [...section.querySelectorAll('[role="button"][aria-label$=" AED"]')].map((node) => ({
+      label: node.getAttribute('aria-label') || '',
+      text: (node.textContent || '').replace(/\s+/g, ''),
+    }));
+  });
+  const sound = payments.every(({ label, text }) => {
+    const match = label.match(/, ([\d,]+(?:\.\d{1,2})?) AED$/);
+    return !!match && text.includes(match[1].replace(/\s+/g, ''));
+  });
+  ok(`home: every upcoming payment keeps its date and exact amount (${payments.length} rows)`,
+    payments.length > 0 && sound);
 }
 
 // Entry detail sheet.
@@ -308,39 +251,22 @@ ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 // rolls and the top six rows shift — a suite failure that says nothing about
 // the app. Read the first row and its account off the screen instead.
 const firstEntry = await page.evaluate(() => {
-  const heads = [...document.querySelectorAll('*')].filter(
-    (n) => n.children.length === 0 && /^recent activity$/i.test((n.textContent || '').trim()),
+  const section = document.querySelector('[data-testid="journal-activity"]');
+  const row = [...(section?.querySelectorAll('[role="button"][aria-label]') ?? [])].find(
+    (node) => /, (?:plus|minus) [\d,.]+ AED$/i.test(node.getAttribute('aria-label') || ''),
   );
-  if (!heads.length) return null;
-  const y = heads[0].getBoundingClientRect().bottom;
-  const leaves = [...document.querySelectorAll('*')]
-    .filter((n) => n.children.length === 0 && (n.textContent || '').trim())
-    .map((n) => ({ t: n.textContent.trim(), r: n.getBoundingClientRect() }))
-    .filter((x) => x.r.top > y && x.r.width > 0)
-    .sort((a, b) => a.r.top - b.r.top || a.r.left - b.r.left);
-  const meta = leaves.find((x) => / · /.test(x.t));
-  if (!meta) return null;
-  // A row's title sits directly above its "Category · Account" meta line IN
-  // THE SAME COLUMN. The column part is not decoration: when a merchant has
-  // no logo the icon tile shows its initials as text ("en" for ENOC Fuel),
-  // and that tile sits lower than the title, so "the leaf directly above the
-  // meta line" returned the monogram. The suite then tapped a two-letter
-  // string that matched eight elements, opened nothing, and died looking for
-  // EDIT ENTRY — a failure that said nothing about the app.
-  const title = leaves
-    .filter((x) => x.r.top < meta.r.top && Math.abs(x.r.left - meta.r.left) < 4)
-    .pop();
-  if (!title) return null;
-  // "Category · Account" and "Category · Account · 14:32" both exist — the
-  // account is always the second field, never the last one.
-  return { title: title.t, account: meta.t.split(' · ')[1] };
+  if (!row) return null;
+  const label = row.getAttribute('aria-label') || '';
+  const parts = label.split(', ');
+  return { label, title: parts[0] || '', account: parts[2] || '' };
 });
-ok('home lists an entry to open', !!firstEntry?.title);
-await tapText(page, firstEntry.title, 1200);
-ok('entry sheet opens on a row', !!(await visibleText(page, /ENTRY DETAIL/i)));
+ok('home lists an entry to open', !!firstEntry?.title && !!firstEntry?.label);
+if (!firstEntry) throw new Error('Home rendered no accessible journal transaction row');
+await tapLabel(page, firstEntry.label, 1200);
+ok('entry sheet opens on a row', !!(await visibleText(page, /TRANSACTION DETAILS/i)));
 ok(`entry sheet names the account (${firstEntry.account})`,
   !!(await visibleText(page, firstEntry.account)));
-await tapText(page, 'EDIT ENTRY', 1000);
+await tapText(page, 'Edit transaction', 1000);
 ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)));
 
 /**
@@ -375,162 +301,73 @@ ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)
   await tapText(page, /^SAVE CHANGES$/i, 1600).catch(() => {});
   await page.waitForTimeout(600);
   await tapText(page, firstEntry.title, 1200).catch(() => {});
-  await tapText(page, 'EDIT ENTRY', 1100).catch(() => {});
+  await tapText(page, 'Edit transaction', 1100).catch(() => {});
   const after = await amountValue();
   ok(`editing only the category leaves the amount alone (${before} → ${after})`, !!before && before === after);
 }
 await tapLabel(page, 'Close', 900);
 
 // ── Flow ──────────────────────────────────────────────────────────────
-await tapTab(page, 'Flow');
-ok('flow titles the screen', !!(await visibleText(page, /^Flow$/)));
-ok('flow shows limits', !!(await visibleText(page, /^LIMITS$/i)));
-/**
- * The "Total spent AED X" heading and the composition list beneath it are the same
- * quantity: the list covers 100% of the total, tail pooled into "N more". So
- * the heading has to be totalled the way the rows are SHOWN — rounding once
- * over rows that each round themselves is how three categories of AED 10.50
- * came to read 11 · 11 · 11 under a heading of 32.
- */
+await tapTab(page, 'Spending');
+ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));
+// Read the labelled figure before scrolling down to its composition rows.
+// The amount itself is an accessible Money group rather than one leaf text
+// node, so resolve it inside the same summary cell as the label instead of
+// depending on how React Native Web happens to split currency and digits.
+const flowTotalHeading = await page.getByTestId('spending-categories')
+  .locator('[aria-label^="AED "]').first().getAttribute('aria-label');
+// Categories own budgets now. Keep exact money and drill-down checks.
+ok('Spending shows category limits with their spending', !!(await visibleText(page,/Categories with limits/i)));
 {
-  const tiles = await compTiles(page);
-  const t = await paintedText(page);
-  // "Total spent AED 11,375 · …" is one paragraph; the figure is its first AED run,
-  // and it sits above the composition bar.
-  const heading = t.find((x) => /^AED [\d,]+$/.test(x.t) && x.y < 110);
-  const rows = t.filter((x) => /^[\d,]+$/.test(x.t));
-  // A row's figure is the right-most plain number on the tile's own line.
-  const perTile = (await page.evaluate(() => {
-    const ys = [];
-    for (const el of document.querySelectorAll('div')) {
-      if (el.childElementCount) continue;
-      const r = el.getBoundingClientRect();
-      if (Math.round(r.width) === 8 && Math.round(r.height) === 8) ys.push(Math.round(r.y));
-    }
-    return ys;
-  })).map((y) => {
-    const on = rows.filter((x) => Math.abs(x.y - y) < 20);
-    return on.length ? money(on[on.length - 1].t) : NaN;
-  });
-  const sum = perTile.reduce((a, b) => a + b, 0);
-  ok(`flow: the Total spent heading equals the category rows (${heading?.t} vs ${sum})`,
-    !!heading && perTile.length > 0 && perTile.every(Number.isFinite) && money(heading.t) === sum);
-
-  // The glyph on a ramp tile is a graphical object: 3:1 or it is decoration.
-  // `onRampColor` flips the ink by luminance, and the threshold has to land
-  // where the two inks actually cross over, not where they look like they do.
-  const worst = tiles.reduce((m, x) => (x.contrast < m.contrast ? x : m), tiles[0] ?? { contrast: 0, label: 'none' });
-  ok(`flow: every category swatch is visible against the page (worst ${worst.contrast}:1 on "${worst.label}")`,
-    tiles.length > 0 && tiles.every((x) => x.contrast >= 3));
-}
-
-ok('flow shows the six-month pair chart', !!(await visibleText(page, /INCOME VS SPENT · 6 MONTHS/i)));
-
-// Bring the chart body itself into view. Finding the section heading is not
-// enough on a phone viewport: the header can sit just above the floating tab
-// bar while every month/value remains below it, and `paintedText` correctly
-// reports only pixels that are actually visible.
-await visibleText(page, /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i);
-
-/**
- * A bar you cannot read a number off is a shape, not a figure. Six columns,
- * two figures each, an average in the header — and nothing truncated: `nano`
- * at column width used to cut "13.5k" down to "1…".
- */
-{
-  const t = await paintedText(page);
-  const months = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$/i;
-  const cols = t.filter((x) => months.test(x.t)).sort((a, b) => a.x - b.x);
-  // The pair is stacked above its column; the month sits under the bars.
-  const above = (x) => cols.length && x.y < cols[0].y && x.y > cols[0].y - 200;
-  const values = t.filter((x) => /^[\d.]+[kM]?$/.test(x.t) && above(x));
-  // A month with no ledger at all writes one em dash, not two zeros: two
-  // 2%-floor stubs labelled "0 0" claim a month of perfect balance, which is
-  // a different statement from "nothing was recorded".
-  const dashes = t.filter((x) => x.t.trim() === '—' && above(x));
-  ok(`flow: every column is accounted for — ${values.length / 2} with figures, ${dashes.length} empty, over ${cols.length} columns`,
-    cols.length === 6 && values.length % 2 === 0 && values.length / 2 + dashes.length === cols.length);
-  ok('flow: no chart figure is truncated', values.length > 0 && values.every((x) => !x.clipped));
-  const header = t.find((x) => /avg$/i.test(x.t));
-  ok(`flow: the chart header states the average (${header?.t})`, !!header && /^[+−-]/.test(header.t));
-}
-
-/**
- * A composition row opens the entries behind it, and the list it opens has to
- * total the figure that was tapped. An all-time drill-down from a row read in
- * one month would show a set that cannot add up to it.
- *
- * Read off the row ELEMENT, not off screen coordinates: every screen stays
- * mounted, so Home's "Spent 12,465" sits at the same y as a Flow row and a
- * coordinate scan picks it up first.
- */
-{
-  const row = await page.evaluate(() => {
-    const el = [...document.querySelectorAll('[aria-label$="see entries"]')].find(
-      (n) => n.getBoundingClientRect().width > 0,
-    );
-    if (!el) return null;
-    const figures = [...el.querySelectorAll('*')]
-      .filter((n) => n.children.length === 0 && /^[\d,]+$/.test((n.textContent || '').trim()))
-      .map((n) => n.textContent.trim());
-    return { label: el.getAttribute('aria-label'), figure: figures[figures.length - 1] };
-  });
-  ok('flow: the composition offers a category to open', !!row?.figure);
-  if (row?.figure) {
-    await tapLabel(page, row.label, 1800);
-    ok(`flow: a category row opens Activity (${row.label})`,
-      !!(await visibleText(page, /transactions? ·/i)));
-    const total = await page.evaluate(() => {
-      const el = [...document.querySelectorAll('*')].find(
-        (n) => n.children.length === 0 && /^[+−-]\s?AED/.test((n.textContent || '').trim())
-          && n.getBoundingClientRect().width > 0,
-      );
-      return el ? el.textContent.trim() : null;
-    });
-    const want = Number(row.figure.replace(/,/g, ''));
-    const got = total ? Number(total.replace(/[^\d]/g, '')) : NaN;
-    ok(`flow: and that list totals what the row said (row ${want}, list ${got})`,
-      Number.isFinite(got) && got === want);
-    await tapLabel(page, 'Back', 1400);
-    await tapTab(page, 'Flow');
+  const rows=await page.locator('[data-testid="spending-categories"] [role="button"][aria-label]').evaluateAll(nodes=>nodes
+    .map(n=>({label:n.getAttribute('aria-label'),text:n.textContent}))
+    .filter(n=>/\. AED /.test(n.label)));
+  const amounts=rows.map(n=>money(n.label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]||''));
+  ok(`Spending category rows reconcile to exact total (${rows.length} rows)`,rows.length>=5 && amounts.every(Number.isFinite) &&
+    Math.round(amounts.reduce((a,b)=>a+b,0)*100)===Math.round(money(flowTotalHeading)*100));
+  const row=rows[0];ok('Spending offers a category to inspect',!!row);
+  if(row){
+    const want=money(row.label.match(/\. (AED [\d,]+(?:\.\d+)?)/)?.[1]||'');
+    await tapLabel(page,row.label);await tapText(page,'View activity',1500);
+    ok('Category detail opens a scoped expense ledger', /category=/.test(page.url())&&/type=expense/.test(page.url()));
+    const total=await page.evaluate(()=>[...document.querySelectorAll('div,span')].filter(n=>n.childElementCount===0&&n.getBoundingClientRect().width>0)
+      .map(n=>(n.textContent||'').trim()).find(x=>/^[+−-]\s?AED/.test(x))||'');
+    ok('Category ledger total equals the category amount',Math.round(Math.abs(money(total))*100)===Math.round(want*100));
+    await tapLabel(page,'Back',1200);await tapTab(page,'Spending');
   }
 }
-
-// Limit editor sheet. The same category name also appears in the composition
-// list above, which deep-links to Activity — target the limit row by label.
-// Use a category that has current-period activity. A zero-spend category has
-// no merchants to list, so asking it to prove "where it went" tested a state
-// the sheet correctly does not render.
-await tapLabel(page, 'Transport limit', 1300);
-ok('limit sheet opens', !!(await visibleText(page, /MONTHLY LIMIT/i)));
-ok('limit sheet lists where it went', !!(await visibleText(page, /WHERE IT WENT/i)));
-await tapLabel(page, 'Close', 900);
+await tapText(page,'Trends',800);
+ok('Trends owns six-month cashflow',!!(await visibleText(page,/Income & spending/i)));
+const months=await page.locator('[data-testid="spending-trends"] [role="button"][aria-label]').evaluateAll(nodes=>nodes
+  .map(n=>({label:n.getAttribute('aria-label'),selected:n.getAttribute('aria-selected'),text:n.textContent}))
+  .filter(n=>/Income:.*Spending:|No recorded activity/.test(n.label)));
+ok('All six months expose readable cashflow or no-data',months.length===6);
+ok('Exactly one month is selected',months.filter(m=>m.selected==='true').length===1);
+ok('Trends includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
+await tapText(page,'Categories',700);
+await tapLabel(page,/^Transport\. AED /,800);
+await tapText(page,'Edit limits',800);
+ok('Category limit editor remains reachable',!!(await visibleText(page,/MONTHLY LIMIT/i)));
+ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i)));
+// Opening the limit editor already closes the category detail sheet.
+await tapLabel(page,'Close',500);
 
 // ── Bills ─────────────────────────────────────────────────────────────
 await tapTab(page, 'Bills');
-ok('bills segments subs, cards and fixed', !!(await visibleText(page, /Subs \d/i)));
-await tapText(page, /Cards \d/i, 1000);
-ok('bills cards segment renders', !!(await visibleText(page, /Pay by|No card payments due/i)));
-await tapText(page, /Fixed \d/i, 1000);
-ok('bills fixed segment renders',
-  !!(await visibleText(page, /Utilities & fixed bills|No utilities yet|Loans/i)));
-
-// The shipped UAE demo now deliberately includes stable subscription, card
-// due, utility and other-recurring histories. Exercise that public first-run
-// state directly instead of mutating private persistence internals here.
-await tapText(page, /Subs \d/i, 900);
-
-// The natural-language monthly heading sits directly above the rows it totals.
-{
-  const t = await paintedText(page);
-  const head = t.find((x) => /\/(?:mo| month)$/.test(x.t));
-  const rows = t.filter((x) => /^AED [\d,]+$/.test(x.t) && head && x.y > head.y + 12).map((x) => money(x.t));
-  const sum = rows.reduce((a, b) => a + b, 0);
-  ok(`bills: the monthly total equals the subscription rows (${head?.t} vs ${sum})`,
-    !!head && rows.length > 0 && money(head.t) === sum);
-  ok('bills: no recurring row label is ellipsised',
-    t.filter((x) => x.clipped).length === 0);
-}
+ok('Bills has Upcoming and All views',!!(await visibleText(page,'Upcoming'))&&!!(await visibleText(page,'All')));
+const agenda=page.locator('[data-testid="payment-agenda"]');
+await agenda.waitFor({state:'visible'});
+ok('Agenda states that recording a payment does not move money',/Recording a payment does not move money/.test(await agenda.innerText()));
+await tapText(page,'All',600);
+const rows=await agenda.locator('[role="button"][aria-label]').evaluateAll(nodes=>nodes.map(n=>({label:n.getAttribute('aria-label'),text:n.textContent})));
+ok('Chronological agenda contains named obligations',rows.length>0 && rows.every(n=>/AED [\d,]+/.test(n.label)));
+ok('Agenda amounts are exactly visible in their own rows',rows.every(n=>{
+ const amount=n.label.match(/AED ([\d,]+(?:\.\d+)?)/)?.[1];
+ return amount && n.text.replace(/\s/g,'').includes(amount);
+}));
+// Monthly-equivalent headings and three buckets are intentionally retired.
+// Verify estimates are identified and preserve the actual charge-history sum below.
+ok('Predicted recurring charges remain identified as estimates',rows.some(n=>/Estimated/.test(n.label)));
 
 // The subscription sheet prints "Total paid" above a scrollable history. Sum
 // the complete scroll region, not only the rows currently inside the viewport:
@@ -541,27 +378,12 @@ await tapText(page, /^Netflix$/, 1400);
   const label = t.find((x) => /^total paid$/i.test(x.t));
   const total = label && t.find((x) => x.y > label.y && x.y < label.y + 40 && /^AED/.test(x.t));
   const chargeTexts = await page.evaluate(() => {
-    const history = [...document.querySelectorAll('div,span')].find((node) => {
-      if (node.children.length || !/^history$/i.test((node.textContent || '').trim())) return false;
-      const box = node.getBoundingClientRect();
-      return box.width > 0 && box.height > 0;
-    });
-    if (!history) return [];
-
-    let block = history.parentElement;
-    while (block) {
-      const scroller = [...block.querySelectorAll('div')].find(
-        (node) => node.scrollHeight > node.clientHeight + 4,
-      );
-      if (scroller) {
-        return [...scroller.querySelectorAll('div,span')]
-          .filter((node) => node.children.length === 0)
-          .map((node) => (node.textContent || '').trim())
-          .filter((text) => /^AED [\d,]+$/.test(text));
-      }
-      block = block.parentElement;
-    }
-    return [];
+    const scroller = document.querySelector('[data-testid="subscription-history-scroll"]');
+    if (!scroller) return [];
+    return [...scroller.querySelectorAll('div,span')]
+      .filter((node) => node.children.length === 0)
+      .map((node) => (node.textContent || '').trim())
+      .filter((text) => /^AED [\d,]+$/.test(text));
   });
   const charges = chargeTexts.map((text) => money(text));
   const sum = charges.reduce((a, b) => a + b, 0);
@@ -570,33 +392,10 @@ await tapText(page, /^Netflix$/, 1400);
 }
 await tapLabel(page, 'Close', 900);
 
-await tapText(page, /Fixed \d/i, 1200);
-{
-  const t = await paintedText(page);
-  const other = t.find((x) => /^other repeat payments$/i.test(x.t));
-  const utilities = t.find((x) => /^utilities & fixed bills$/i.test(x.t));
-  ok('bills fixed: "Other repeat payments" has its own section', !!other);
-  ok('bills fixed: utilities are a separate block from it',
-    !!other && !!utilities && other.y !== utilities.y);
-  // A travel charge under a utilities heading reads as a bug even when the
-  // recurrence is real: it must sit below the "other" heading, not the
-  // utilities one.
-  // Was Booking.com, which is not in this segment any more and should never have
-  // been: the old demo generated three FX rows a month on a fixed day, and the
-  // detector read them as a "183.58/mo, cancellable" commitment. The seed no
-  // longer manufactures that, so the assertion now uses a repeat that is really
-  // recurring — a Salik toll top-up, which is a genuine non-bill charge.
-  const otherPayment = t.find((x) => /Salik/i.test(x.t));
-  ok('bills fixed: a non-bill repeat is filed under "other", not utilities',
-    !!otherPayment && !!other && otherPayment.y > other.y);
-  ok('bills fixed: no recurring row label is ellipsised',
-    t.filter((x) => x.clipped).length === 0);
-}
-
 // ── Wallet ────────────────────────────────────────────────────────────
-await tapTab(page, 'Wallet');
+await tapTab(page, 'Accounts');
 ok('wallet shows the available-balance snapshot', !!(await visibleText(page, /AVAILABLE ACROSS ACCOUNTS/i)));
-ok('wallet groups accounts and cards as money sources', !!(await visibleText(page, /MONEY SOURCES/i)));
+ok('Accounts separates bank and credit accounts', !!(await visibleText(page, /^Bank accounts$/i)) && !!(await visibleText(page, /^Credit cards$/i)));
 ok('wallet lists goals', !!(await visibleText(page, /SAVINGS GOALS/i)));
 
 // ── Activity ──────────────────────────────────────────────────────────
@@ -608,11 +407,16 @@ await tapLabel(page, 'Back', 1200);
 
 // ── Settings ──────────────────────────────────────────────────────────
 await tapLabel(page, 'Settings', 1400);
-ok('settings leads with Pro', !!(await visibleText(page, 'Wafra Pro')));
-ok('settings shows the trial state', !!(await visibleText(page, /Free trial · \d day/)));
-ok('settings summarizes the current state', !!(await visibleText(page, 'Current state')));
-ok('settings keeps feedback easy to find', !!(await visibleText(page, 'Send feedback')));
-ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
+{
+ const panels=await Promise.all(['Preferences','Imports','Privacy & data','Help'].map(x=>visibleText(page,x)));
+ ok('Settings exposes all four task panels',panels.every(Boolean));
+}
+await tapText(page,'Help',500);
+ok('Help keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Free trial · \d day/)));
+ok('Help keeps feedback reachable',!!(await visibleText(page,'Send feedback')));
+await tapText(page,'Privacy & data',500);
+ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
+await tapText(page,'Preferences',500);
 
 /**
  * Appearance. The context is `colorScheme: 'dark'`, so picking Light has to
@@ -629,7 +433,7 @@ ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
     const seen = [await paintedScheme(page)];
     await tapLabel(page, 'Back', 1300);
     seen.push(await paintedScheme(page));
-    for (const t of ['Flow', 'Bills', 'Wallet']) {
+    for (const t of ['Spending', 'Bills', 'Accounts']) {
       await tapTab(page, t);
       seen.push(await paintedScheme(page));
     }
@@ -648,6 +452,7 @@ ok('settings groups privacy', !!(await visibleText(page, 'App lock')));
 }
 
 // ── Import ────────────────────────────────────────────────────────────
+await tapText(page,'Imports',500);
 await tapText(page, 'Improve accuracy', 1200);
 ok('accuracy screen opens', !!(await visibleText(page, /reads clean|could not be fully read/)));
 await tapLabel(page, 'Back', 1200);
@@ -655,7 +460,7 @@ await tapLabel(page, 'Back', 1200);
 // Reached in-app from Wallet: a cold load of an exported route hits the
 // known expo-router hydration bailout (see scripts/e2e/README.md).
 await tapLabel(page, 'Back', 1200);
-await tapTab(page, 'Wallet');
+await tapTab(page, 'Accounts');
 await tapText(page, /Paste a bank message|Inbox scanned/, 1600);
 ok('import page loads', !!(await visibleText(page, 'PARSE PASTED TEXT')));
 await tapText(page, 'TRY SAMPLE', 1200);
@@ -675,7 +480,15 @@ ok('import offers to file the plan', !!fileBtn);
 await tapLabel(page, 'Back', 1200);
 await tapTab(page, 'Home');
 await tapLabel(page, 'Settings', 1400);
+await page.setViewportSize({ width: 402, height: 874 });
+await tapText(page,'Help',500);
 await tapText(page, 'Wafra Pro', 1400);
+{
+  const hits = await overlappingText(page, 'Wafra Pro');
+  ok(`paywall: purchase controls do not overlap plan content at 402×874 (${hits.length} collisions)`,
+    hits.length === 0);
+  if (hits.length) console.log(hits.slice(0, 4));
+}
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
 ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial · \d day/)));
 
@@ -686,6 +499,7 @@ ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial �
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 await tapLabel(page, 'Settings', 1400);
+await tapText(page,'Help',500);
 const about = await visibleText(page, 'Know where it goes');
 if (about) await about.scrollIntoViewIfNeeded();
 await page.waitForTimeout(400);
@@ -710,7 +524,15 @@ await page.evaluate(() => {
 });
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
-ok('expired trial pauses tracking on home', !!(await visibleText(page, 'Trial ended · tracking paused')));
+// Web correctly says phone capture is unsupported instead of pretending to be
+// Android/iOS. Verify expiry on the actual cross-platform entitlement surface.
+await tapLabel(page, 'Settings', 1200);
+await tapText(page,'Help',500);
+await tapText(page, 'Wafra Pro', 1200);
+ok('expired trial shows the paused-capture paywall', !!(await visibleText(
+  page,
+  'Automatic bank-alert capture is paused. Your ledger and manual entries still work.',
+)));
 
 ok('no page errors', errors.length === 0);
 if (errors.length) console.log(errors.slice(0, 3));

@@ -22,6 +22,17 @@
 
 /** Arabic-Indic ٠١٢٣٤٥٦٧٨٩ and the Persian variant ۰۱۲۳۴۵۶۷۸۹. */
 const ARABIC_DIGITS = /[٠-٩۰-۹]/g;
+
+/** Normalize numeral glyphs only; shared by typed amounts and Arabic alerts. */
+export function normalizeArabicNumerals(text: string): string {
+  return text
+    .replace(ARABIC_DIGITS, (digit) => {
+      const code = digit.charCodeAt(0);
+      return String(code >= 0x06f0 ? code - 0x06f0 : code - 0x0660);
+    })
+    .replace(/٫/g, '.')
+    .replace(/٬/g, ',');
+}
 /** Harakat (fatha, damma, sukun …) and tatweel — decoration, never meaning. */
 const DIACRITICS = /[ً-ْـٰ]/g;
 /** The Arabic block, digits and punctuation included. */
@@ -156,17 +167,7 @@ const CURRENCY_WORDS: [RegExp, string][] = [
 export function arabicToEnglish(text: string): string {
   if (!hasArabic(text)) return text;
 
-  let out = text
-    .replace(DIACRITICS, '')
-    // Arabic-Indic numerals, digit by digit. Without this every amount, card
-    // number and date in a fully-Arabic message is invisible.
-    .replace(ARABIC_DIGITS, (d) => {
-      const c = d.charCodeAt(0);
-      return String(c >= 0x06f0 ? c - 0x06f0 : c - 0x0660);
-    })
-    // Arabic decimal and thousands separators.
-    .replace(/٫/g, '.')
-    .replace(/٬/g, ',');
+  let out = normalizeArabicNumerals(text.replace(DIACRITICS, ''));
 
   for (const [re, to] of CURRENCY_WORDS) out = out.replace(re, to);
   for (const [re, to] of REWRITES) out = out.replace(re, to);

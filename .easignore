@@ -31,6 +31,8 @@ yarn-error.*
 .DS_Store
 *.pem
 .env*.local
+/.asc/config.json
+/.asc/reports/
 .coord/
 *.tsbuildinfo
 app-example/
@@ -44,6 +46,24 @@ scripts/test/build/
 # Parallel-agent scratch worktrees
 .claude/worktrees/
 
+# Local development assistants, editor state, and MCP configuration are not
+# application build inputs and must never be uploaded to EAS.
+/.agents/
+/.argent/
+/.claude/
+/.codex/
+/.cursor/
+/.gemini/
+/.vscode/
+/.mcp.json
+/skills-lock.json
+/.variate/
+
+# Product and release documentation is not needed by the native build.
+/docs/
+
 # Local screenshots, packages, and generated application builds
 artifacts/
 builds/
+/--output
+/modules/*/android/build/

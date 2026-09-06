@@ -1,0 +1,146 @@
+name: Isolated redesign native validation
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-native-validation.yml']
+permissions:
+  contents: read
+concurrency:
+  group: redesign-native-validation
+  cancel-in-progress: false
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            runner: ubuntu-24.04
+          - platform: ios
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-java@v4
+        if: matrix.platform == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Select Xcode and compression tooling
+        if: matrix.platform == 'ios'
+        run: |
+          set -euo pipefail
+          BEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version
+          command -v zstd || brew install zstd
+      - name: Reconstruct the same checksum-verified candidate
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, textwrap
+          source = pathlib.Path('.github/workflows/redesign-browser-validation.yml').read_text()
+          body = source.split("python3 - <<'PY'\n", 1)[1].split('\n          PY', 1)[0]
+          exec(compile(textwrap.dedent(body), '<verified-candidate-reconstruction>', 'exec'))
+          PY
+          mkdir -p native-evidence
+          cp browser-evidence/source-manifest.json native-evidence/source-manifest.json
+          # Native validation copies are deliberately offline-update builds.
+          # No production signing credentials, publishing or deployment steps.
+          node - <<'JS'
+          const fs = require('fs');
+          const p = 'app/app.json';
+          const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+          fs.writeFileSync('native-evidence/config-before.json', JSON.stringify(c, null, 2));
+          c.expo.updates = {...c.expo.updates, enabled: false};
+          fs.writeFileSync(p, JSON.stringify(c, null, 2));
+          fs.writeFileSync('native-evidence/config-after.json', JSON.stringify(c, null, 2));
+          JS
+      - name: Install exact dependencies
+        working-directory: app
+        run: npm ci --no-audit --no-fund
+      - name: Generate native project
+        working-directory: app
+        run: |
+          set -o pipefail
+          npx --no-install expo prebuild --platform ${{ matrix.platform }} --no-install 2>&1 | tee ../native-evidence/prebuild.log
+      - name: Compile Android release variant for emulator
+        if: matrix.platform == 'android'
+        working-directory: app/android
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon --max-workers=2 -Dorg.gradle.jvmargs=-Xmx4g 2>&1 | tee ../../native-evidence/android-build.log
+          sha256sum app/build/outputs/apk/release/*.apk > ../../native-evidence/apk-sha256.txt
+      - name: Enable emulator acceleration
+        if: matrix.platform == 'android'
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch actual Android release build
+        if: matrix.platform == 'android'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          script: |
+            adb install app/android/app/build/outputs/apk/release/app-release.apk
+            adb logcat -c
+            adb shell monkey -p $(node -p "require('./app/app.json').expo.android.package") -c android.intent.category.LAUNCHER 1
+            sleep 15
+            adb exec-out screencap -p > native-evidence/android-first-launch.png
+            adb shell uiautomator dump /sdcard/window.xml
+            adb pull /sdcard/window.xml native-evidence/android-first-launch.xml
+            adb logcat -d > native-evidence/android-logcat.txt
+            adb shell pidof $(node -p "require('./app/app.json').expo.android.package")
+            test $(grep -c 'FATAL EXCEPTION' native-evidence/android-logcat.txt) -eq 0
+      - name: Install CocoaPods
+        if: matrix.platform == 'ios'
+        working-directory: app
+        run: |
+          set -o pipefail
+          npx --no-install pod-install 2>&1 | tee ../native-evidence/pods.log
+      - name: Build and verify actual iOS history and live-capture modules
+        if: matrix.platform == 'ios'
+        working-directory: app
+        run: |
+          set -o pipefail
+          bash scripts/test/native-history-store.sh 2>&1 | tee ../native-evidence/ios-history.log
+          bash scripts/test/native-live-capture-store.sh 2>&1 | tee ../native-evidence/ios-capture.log
+      - name: Build the complete iOS simulator application
+        if: matrix.platform == 'ios'
+        working-directory: app
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/Wafra.xcworkspace -scheme Wafra -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath ../native-derived CODE_SIGNING_ALLOWED=NO build 2>&1 | tee ../native-evidence/ios-build.log
+      - name: Record result
+        if: always()
+        run: |
+          mkdir -p native-evidence
+          printf '%s\n' 'commit=${{ github.sha }}' 'platform=${{ matrix.platform }}' 'job_status=${{ job.status }}' 'candidate_config=updates_disabled_only_for_validation' > native-evidence/status.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-native-${{ matrix.platform }}-evidence
+          path: native-evidence
+          retention-days: 7

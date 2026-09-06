@@ -213,7 +213,18 @@ ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
 
   ok('net worth: the headline figure is stated', /NET WORTH\s+AED/.test(nw));
   ok('net worth: the total equals the counted parts',
-    /NET WORTH AED 71,421\.00/.test(flat), flat.slice(0, 200));
+    /NET WORTH AED 71,421\.40/.test(flat), flat.slice(0, 200));
+  const { setLedgerCurrency } = require('./build/markets');
+  for (const [currency, exponent, expected] of [['KWD', 3, '0.001'], ['JPY', 0, '1']]) {
+    setLedgerCurrency(currency, exponent);
+    const diagnostic = cardDiagnostics({
+      accounts: [A({ id: 'precision', kind: 'bank', openingFils: 1 })],
+      transactions: [], cardDues: [],
+    });
+    ok(`${currency} diagnostics preserve currency and exact minor units`,
+      diagnostic.includes(`NET WORTH  ${currency} ${expected}`));
+  }
+  setLedgerCurrency(null);
   ok('net worth: a quoted balance is counted, and says who quoted it',
     /\+35,848\.02 Liv Debit Card ·8783 \(balance quoted by the bank\)/.test(flat));
   ok('net worth: a credit card subtracts its outstanding',
@@ -235,6 +246,40 @@ ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
   }).replace(/\s+/g, ' ');
   ok('net worth: a shared last four where only one side counts is not flagged',
     /·8783/.test(oneCounts) && !/MORE THAN ONE OF THESE IS COUNTED/.test(oneCounts));
+}
+
+
+
+// CSV is a financial artifact: test its currency scale and field round trip.
+{
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ts = require('typescript');
+  const filename = path.join(__dirname, '../../src/lib/ledger-export.ts');
+  let buildLedgerCsv;
+  if (fs.existsSync(filename)) {
+    const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText;
+    const loaded = { exports: {} };
+    Function('module', 'exports', compiled)(loaded, loaded.exports);
+    buildLedgerCsv = loaded.exports.buildLedgerCsv;
+  }
+  for (const [currency, exponent, amount, expected] of [
+    ['KWD', 3, 1000, '1.000'], ['JPY', 0, 1000, '1000'], ['SAR', 2, 1000, '10.00'],
+    ['USD', 2, Number.MAX_SAFE_INTEGER, '90071992547409.91'],
+  ]) {
+    const csv = buildLedgerCsv?.([{ ...rows[0], amountFils: amount }], accounts,
+      { schemaVersion: 2, currency, exponent });
+    ok(`CSV exports ${currency} with exact stored exponent`,
+      typeof csv === 'string' && csv.startsWith('date,type,amount,currency,') &&
+      csv.includes(`,${expected},${currency},`));
+  }
+  const csv = buildLedgerCsv?.([{ ...rows[0], title: 'Food, "tea"\nmeal' }],
+    [{ ...accounts[0], name: 'My "travel", card\nA' }],
+    { schemaVersion: 2, currency: 'AED', exponent: 2 });
+  ok('CSV quotes embedded commas, quotes, and newlines in titles and accounts',
+    csv?.includes('"Food, ""tea""\nmeal"') && csv?.includes('"My ""travel"", card\nA"'));
 }
 
 if (!process.exitCode) console.log(`${passed} report tests passed`);
