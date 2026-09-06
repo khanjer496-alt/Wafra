@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createPrivateKey, sign } from 'node:crypto';
 
-// Owner-authorized TestFlight distribution only. Never submit an App Store
-// version, change legal declarations, expire old builds, or expose credentials.
+// Owner-authorized TestFlight distribution only. No App Store version submission,
+// legal declaration changes, expired builds, new groups, or credential export.
 const APP = '6799171482';
 const BUNDLE = 'app.wafra.ios';
 const GROUP = 'c0ee30af-8b26-408c-8ebf-aaa5530fcac7';
@@ -34,8 +34,11 @@ async function request(path, method = 'GET', body) {
   });
   if (!response.ok) {
     const err = new Error('apple-request-failed'); err.httpStatus = response.status;
+    err.operation = `${method} ${path.split('?')[0]}`;
     const data = await response.json().catch(() => ({}));
     err.codes = (data.errors ?? []).map((entry) => entry.code).filter((code) => typeof code === 'string');
+    // These are release-request diagnostics, not authentication headers or API payloads.
+    err.details = (data.errors ?? []).map((entry) => ({ title: entry.title, detail: entry.detail }));
     throw err;
   }
   return response.status === 204 ? null : response.json();
@@ -52,8 +55,14 @@ async function readBuild() {
   if (!matches.length) return null;
   const build = matches[0];
   const ref = build.relationships?.buildBetaDetail?.data;
-  const detail = ref ? included.get(`${ref.type}:${ref.id}`) : null;
-  return { build, detail };
+  return { build, detail: ref ? included.get(`${ref.type}:${ref.id}`) : null };
+}
+async function inPublicGroup(buildId) {
+  // Apple documents this group->builds route. The inverse GET
+  // builds/{id}/betaGroups is not a supported listing endpoint.
+  const result = await request(`betaGroups/${GROUP}/relationships/builds?limit=200`);
+  if (result.links?.next) throw new Error('unexpected-public-group-pagination');
+  return result.data.some((entry) => entry.type === 'builds' && entry.id === buildId);
 }
 const notes = `Wafra iOS beta refresh.\n\nPlease test the revised Home and transaction layout, reporting periods, imports, duplicate handling and app responsiveness.\n\nFuture bank SMS: use the Wafra Local Capture Shortcut with a personal Message automation for the bank senders you select. Choose Run Immediately. Wafra keeps the captured message locally and processes the queue when the app opens; setup confirmation is not proof that a real bank alert was captured.\n\nHistory: the included Wafra History Import Shortcut checks two bounded 1,500-message halves and requires their GUID boundaries to overlap. It is intended for up to 2,999 retained messages, not unlimited inbox access. Keep the phone unlocked and Shortcuts open. Larger date-window history experiments are not included.\n\nPlease verify captured amounts/accounts and report missed or duplicated alerts through in-app feedback. Real locked-phone delivery, force-quit/reboot behavior and large-inbox speed still need tester verification. Do not erase existing data to troubleshoot this beta.`;
 try {
@@ -70,13 +79,12 @@ try {
       expired: found.build.attributes.expired, beta: found.detail?.attributes ?? null } : null;
     save();
     if (found?.build.attributes.processingState === 'VALID') break;
-    if (found?.build.attributes.processingState === 'INVALID' || found?.build.attributes.processingState === 'FAILED') throw new Error('apple-processing-failed');
+    if (['INVALID', 'FAILED'].includes(found?.build.attributes.processingState)) throw new Error('apple-processing-failed');
     if (!publish || attempt === 45) break;
     await wait(20000);
   }
-  if (!found || found.build.attributes.processingState !== 'VALID') {
-    report.outcome = 'waiting-for-apple-processing';
-  } else if (found.build.attributes.expired) throw new Error('build-expired');
+  if (!found || found.build.attributes.processingState !== 'VALID') report.outcome = 'waiting-for-apple-processing';
+  else if (found.build.attributes.expired) throw new Error('build-expired');
   else if (!publish) report.outcome = 'inspected-only';
   else {
     const id = found.build.id;
@@ -90,10 +98,8 @@ try {
     } else await request('betaBuildLocalizations', 'POST', {
       data: { type: 'betaBuildLocalizations', attributes: { locale: 'en-US', whatsNew: notes }, relationships: { build: { data: { type: 'builds', id } } } },
     });
-    report.actions.push('set-accurate-test-notes'); save();
-    const currentGroups = await request(`builds/${id}/betaGroups?limit=200`);
-    if (currentGroups.links?.next) throw new Error('unexpected-group-pagination');
-    if (!currentGroups.data.some((entry) => entry.id === GROUP)) {
+    report.actions.push('test-notes-verified'); save();
+    if (!(await inPublicGroup(id))) {
       await request(`betaGroups/${GROUP}/relationships/builds`, 'POST', { data: [{ type: 'builds', id }] });
       report.actions.push('associated-existing-public-Beta-group'); save();
     }
@@ -110,17 +116,23 @@ try {
         data: { type: 'betaAppReviewSubmissions', relationships: { build: { data: { type: 'builds', id } } } },
       });
       report.actions.push('submitted-for-Beta-App-Review'); save();
+    } else if (external === 'READY_FOR_BETA_TESTING') {
+      await request('buildBetaNotifications', 'POST', {
+        data: { type: 'buildBetaNotifications', relationships: { build: { data: { type: 'builds', id } } } },
+      });
+      report.actions.push('notified-TestFlight-testers'); save();
     }
     const final = await readBuild();
-    const finalGroups = await request(`builds/${id}/betaGroups?limit=200`);
     report.finalExternalState = final.detail?.attributes.externalBuildState ?? null;
-    report.inPublicGroup = finalGroups.data.some((entry) => entry.id === GROUP);
+    report.inPublicGroup = await inPublicGroup(id);
     report.outcome = report.inPublicGroup && report.finalExternalState === 'IN_BETA_TESTING'
       ? 'public-beta-testing' : 'associated-awaiting-apple-or-release-state';
   }
 } catch (error) {
   report.outcome = 'blocked'; report.failure = error.message;
   if (error.httpStatus) report.httpStatus = error.httpStatus;
+  if (error.operation) report.operation = error.operation;
   if (error.codes) report.appleErrorCodes = error.codes;
+  if (error.details) report.appleErrorDetails = error.details;
   process.exitCode = 1;
 } finally { save(); console.log(JSON.stringify(report, null, 2)); }
