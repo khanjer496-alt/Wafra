@@ -11,100 +11,6 @@ permissions:
   contents: read
   pull-requests: read
 jobs:
-  # BEGIN ONE-TIME SOURCE TRANSFER
-  apply-reviewed-edits:
-    if: github.ref == 'refs/heads/work/ledger-light-restore'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: write
-      actions: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      CI: '1'
-      EXPO_NO_TELEMETRY: '1'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: '22.22.3', cache: npm}
-      - name: Apply reviewed plaintext edits to the current checkout
-        run: |
-          python3 - <<'PY'
-          import base64,hashlib,json,os,pathlib,subprocess
-          root=pathlib.Path.cwd();tmp=pathlib.Path(os.environ['RUNNER_TEMP']);paths=[];manifest={}
-          pairs=[
-            ('337ecabfd3fe7809ff4b37eaac712952b4c2c97d','47756f237205c6347f794ccddac66b1fef66b6bea4d79a9816e44d7edfaffc17'),
-            ('fd32fae49bd3036882a39c05ee1fb4b49fc30438','077635c7cf8054eb1fd2884f45cf3db64db42d1ae019cfb3b5c77d25bb7a3155'),
-            ('e9b4e8dba7db9df9a17f2dcb4f48a8b1a1d2d850','704aa585fa20995492bfcb8687d56c3b802762d4f37504bc74b0401398f9d93f'),
-            ('288ea9645e10eb8119060e50588d3ddd5613bf7d','6e3363c5280fa59f1d8d81e31acaf2f9bd208dd50139738dee744a4a994054da'),
-            ('d9bf3d89f0dcc33daa5b0c830ad90eeb32a80b37','5a7a4a05b5eaf084ba81637aa1985b786f34e4841607c5a6484450398f24b8d7'),
-            ('2e8a39d2d155606ddff569be250ba0050ad13952','484e27920222f5bf9f278f28d0f26c51ede2027beeea7b2fe97f2907b6618e7d'),
-            ('629654f7e7e886d438d3ee888f03b3e8c3e6d096','128474d13b329d8d4ff4c7e4c8abe4bfde6289c000596f3ce02f7953bf14be23')]
-          digest=lambda b:hashlib.sha256(b).hexdigest()
-          for sha,expected in pairs:
-            result=json.loads(subprocess.check_output(['gh','api','repos/khanjer496-alt/Wafra/git/blobs/'+sha]))
-            raw=base64.b64decode(result['content'])
-            actual=digest(raw)
-            print('TRANSFER',sha,'bytes',len(raw),'expected',expected,'actual',actual,flush=True)
-            assert actual==expected,'Transport checksum mismatch: '+sha
-            for change in json.loads(raw):
-              path=change['path'];p=root/path
-              assert not pathlib.PurePosixPath(path).is_absolute() and '..' not in pathlib.PurePosixPath(path).parts
-              assert path=='app.json' or path=='assets/images/wafra-mark.svg' or path.startswith(('src/','scripts/test/','scripts/e2e/','docs/')) or path=='scripts/render-icons.mjs'
-              old=p.read_bytes() if p.exists() else None
-              assert (digest(old) if old is not None else None)==change['before'],path+' changed; refusing overwrite'
-              lines=old.decode().splitlines(keepends=True) if old is not None else []
-              for h in reversed(change['hunks']):
-                assert 0<=h['at']<=len(lines) and 0<=h['delete']<=len(lines)-h['at']
-                lines[h['at']:h['at']+h['delete']]=h['text'].splitlines(keepends=True)
-              new=''.join(lines).encode();assert digest(new)==change['after'],path+' output checksum mismatch'
-              p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(new)
-              if path not in paths:paths.append(path)
-              manifest[path]=change['after']
-          assert len(paths)==34
-          (tmp/'reviewed-paths.json').write_text(json.dumps(paths))
-          (tmp/'reviewed-manifest.json').write_text(json.dumps(manifest,indent=2))
-          print('All reviewed files written to normal paths with before/after checksums.')
-          PY
-      - name: Install locked dependencies and browser for icons
-        run: |
-          npm ci --no-audit --no-fund
-          npm --prefix server ci --no-audit --no-fund
-          npx --no-install playwright install --with-deps chromium
-          sudo apt-get install -y sqlite3
-          npx --no-install expo prebuild --platform ios --no-install
-      - name: Verify types, lint, full tests and original-logo assets
-        run: |
-          set -euo pipefail
-          npm run typecheck
-          npm run lint
-          npm test
-          node scripts/render-icons.mjs
-          git diff --check
-      - name: Commit normal source and remove this temporary transfer job
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,json,os,pathlib,subprocess
-          tmp=pathlib.Path(os.environ['RUNNER_TEMP']);paths=json.loads((tmp/'reviewed-paths.json').read_text())
-          for p,expected in json.loads((tmp/'reviewed-manifest.json').read_text()).items():
-            assert hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()==expected,p
-          paths += ['assets/images/'+name+'.png' for name in ['icon','android-icon-background','android-icon-foreground','android-icon-monochrome','splash-icon','splash-icon-dark','favicon']]
-          p=pathlib.Path('.github/workflows/ci.yml');s=p.read_text();a=s.index('  # BEGIN ONE-TIME SOURCE TRANSFER');b=s.index('  # END ONE-TIME SOURCE TRANSFER')+len('  # END ONE-TIME SOURCE TRANSFER\n');p.write_text(s[:a]+s[b:]);paths.append(str(p))
-          subprocess.run(['git','add','--',*paths],check=True)
-          subprocess.run(['git','diff','--cached','--check'],check=True)
-          PY
-          test "$(git ls-remote origin refs/heads/work/ledger-light-restore | cut -f1)" = "$GITHUB_SHA"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Restore Ledger & Light and isolate responsive SMS import status'
-          git push origin HEAD:refs/heads/work/ledger-light-restore
-          SOURCE=$(git rev-parse HEAD)
-          echo "Source commit: $SOURCE" >> "$GITHUB_STEP_SUMMARY"
-          gh workflow run build-apk.yml --repo khanjer496-alt/Wafra --ref work/ledger-light-restore -f preview=true -f publish_preview=true -f expected_commit="$SOURCE" -f architecture=arm64 -f bundle=false -f corpus=false
-          gh workflow run ci.yml --repo khanjer496-alt/Wafra --ref work/ledger-light-restore
-  # END ONE-TIME SOURCE TRANSFER
-
   native-paths:
     runs-on: ubuntu-latest
     outputs:
@@ -134,6 +40,7 @@ jobs:
     env: {PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1}
     steps:
       - uses: actions/checkout@v4
+        with: {persist-credentials: false}
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
@@ -172,6 +79,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with: {persist-credentials: false}
       - name: Select Xcode 26.2 or newer
         run: |
           set -euo pipefail
@@ -201,6 +109,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with: {persist-credentials: false}
       - uses: actions/setup-node@v4
         with: {node-version: 22.22.3, cache: npm}
       - name: Install dependencies
@@ -209,7 +118,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: End-to-end
         run: npm run test:e2e
-      - name: Capture restored-design browser evidence independently
+      - name: Capture browser evidence independently
         if: always()
         env: {EXPO_PUBLIC_WAFRA_E2E_DEMO: '1'}
         run: |
@@ -223,3 +132,20 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: {name: ledger-light-browser-evidence, path: artifacts/e2e-redesign/, retention-days: 7}
+  requested-preview:
+    needs: check
+    if: github.ref == 'refs/heads/work/ledger-light-restore' && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Restore Ledger & Light source')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch the explicitly requested preview from the validated source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run build-apk.yml --repo "$REPO" --ref work/ledger-light-restore -f preview=true -f publish_preview=true -f expected_commit="$SOURCE" -f architecture=arm64 -f bundle=false -f corpus=false
