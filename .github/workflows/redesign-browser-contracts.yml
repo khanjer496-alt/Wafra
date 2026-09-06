@@ -1,0 +1,79 @@
+name: Recovered browser contract audit
+on:
+  push:
+    branches: ['validation/redesign-environment-20260906']
+    paths: ['.github/workflows/redesign-browser-contracts.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+      EXPO_PUBLIC_WAFRA_E2E_DEMO: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/checkout@v4
+        with:
+          ref: bcdf4f8b2d244801c3fb291454abaa293082dcd3
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Restore candidate and apply browser-label migration
+        run: |
+          python3 validation/assemble-recovered-candidate.py
+          cp app/scripts/e2e/e2e-smoke.mjs recovery-evidence/original-smoke.mjs
+          python3 validation/migrate-browser-smoke.py app
+          cp app/scripts/e2e/e2e-smoke.mjs recovery-evidence/migrated-smoke.mjs
+          node --check app/scripts/e2e/e2e-smoke.mjs
+      - name: Install exact dependencies and browser
+        working-directory: app
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+      - name: Build real Expo web application
+        working-directory: app
+        run: |
+          set -o pipefail
+          npx --no-install expo export --platform web --clear 2>&1 | tee ../recovery-evidence/export.log
+      - name: Run all four browser suites independently
+        run: |
+          node app/scripts/e2e/serve.mjs app/dist 8126 > recovery-evidence/server.log 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for n in $(seq 1 40); do curl -fsS http://127.0.0.1:8126/ >/dev/null && break || sleep 1; done
+          export BASE=http://127.0.0.1:8126
+          python3 - <<'PY'
+          import subprocess,json,pathlib
+          root=pathlib.Path.cwd();out=root/'recovery-evidence';results=[]
+          for name in ['smoke','period','navigation','universal-review']:
+            with (out/f'e2e-{name}.log').open('w') as log:
+              try:
+                p=subprocess.run(['node',f'scripts/e2e/e2e-{name}.mjs'],cwd='app',stdout=log,stderr=subprocess.STDOUT,timeout=360)
+                code=p.returncode
+              except subprocess.TimeoutExpired: code=124
+            results.append({'suite':name,'exit_code':code})
+            (out/'browser-gates.json').write_text(json.dumps(results,indent=2))
+            print(name,code,flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-browser-contract-audit
+          path: recovery-evidence
+          retention-days: 7
+      - name: Fail unless every suite passed
+        run: |
+          python3 - <<'PY'
+          import json
+          rows=json.load(open('recovery-evidence/browser-gates.json'))
+          assert len(rows)==4 and all(r['exit_code']==0 for r in rows),rows
+          PY
