@@ -4,6 +4,7 @@ on:
     branches: [work/ios-guided-onboarding]
     paths:
       - 'scripts/changes/apply-capture-receipts.py'
+      - 'scripts/changes/align-capture-contracts.py'
       - '.github/workflows/ios-capture-receipts-apply.yml'
 permissions:
   contents: read
@@ -21,21 +22,7 @@ jobs:
           node-version: 22.22.3
           cache: npm
       - run: python3 scripts/changes/apply-capture-receipts.py
-      - name: Align the real fixture build and old timestamp source contract
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import hashlib
-          edits = [
-            ('scripts/test/build.sh', 'af07c140a8d67992fdf9c201024a3320bc00af7f', 'ios-bank-senders.generated ios-bank-senders local-message-record ios-local-capture; do', 'ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture; do'),
-            ('scripts/test/contracts.test.js', '12d48435511e6e1de1469ffb9b355ae45b122eae', r'/firstCapturedAt !== null/.test(setupWorkflow)', r'/isCaptureTimestamp\(status\.firstCapturedAt\)/.test(setupWorkflow)'),
-          ]
-          for name, sha, before, after in edits:
-            p = Path(name); data = p.read_bytes(); text = data.decode()
-            assert hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest() == sha
-            assert text.count(before) == 1
-            p.write_text(text.replace(before, after))
-          PY
+      - run: python3 scripts/changes/align-capture-contracts.py
       - run: npm ci
       - run: npm --prefix server ci
       - run: npx expo prebuild --platform ios --no-install
@@ -107,22 +94,10 @@ jobs:
           test "$GITHUB_REF_NAME" = 'work/ios-guided-onboarding'
           test "$(git ls-remote origin refs/heads/work/ios-guided-onboarding | cut -f1)" = "$GITHUB_SHA"
           python3 scripts/changes/apply-capture-receipts.py
-          python3 <<'PY'
-          from pathlib import Path
-          import hashlib
-          edits = [
-            ('scripts/test/build.sh', 'af07c140a8d67992fdf9c201024a3320bc00af7f', 'ios-bank-senders.generated ios-bank-senders local-message-record ios-local-capture; do', 'ios-bank-senders.generated ios-bank-senders local-message-record ios-capture-health ios-local-capture; do'),
-            ('scripts/test/contracts.test.js', '12d48435511e6e1de1469ffb9b355ae45b122eae', r'/firstCapturedAt !== null/.test(setupWorkflow)', r'/isCaptureTimestamp\(status\.firstCapturedAt\)/.test(setupWorkflow)'),
-          ]
-          for name, sha, before, after in edits:
-            p = Path(name); data = p.read_bytes(); text = data.decode()
-            assert hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest() == sha
-            assert text.count(before) == 1
-            p.write_text(text.replace(before, after))
-          PY
+          python3 scripts/changes/align-capture-contracts.py
           git diff --check
           git add modules/wafra-live-capture/ios/Tests/WafraLiveCaptureBridgeBehaviorTests.swift modules/wafra-live-capture/ios/Tests/WafraLiveCaptureStoreStub.swift modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift modules/wafra-live-capture/src/WafraLiveCapture.types.ts scripts/test/build.sh scripts/test/contracts.test.js scripts/test/ios-capture-setup.test.js scripts/test/ios-setup-ux.test.js src/app/ios-setup.tsx src/components/ios-message-setup/setup-journey.tsx src/hooks/use-auto-import.ts src/lib/ios-capture-setup.ts src/lib/ios-local-capture.ts
-          git rm scripts/changes/apply-capture-receipts.py .github/workflows/ios-capture-receipts-apply.yml .github/workflows/ios-guided-source-evidence.yml
+          git rm scripts/changes/apply-capture-receipts.py scripts/changes/align-capture-contracts.py .github/workflows/ios-capture-receipts-apply.yml .github/workflows/ios-guided-source-evidence.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(ios): persist capture receipts and show honest queue status during setup'
