@@ -598,6 +598,7 @@ export default function IosSetupScreen() {
                 futureReadiness={setup.readiness}
                 automationConfirmed={progress.futureAutomationConfirmed}
                 detectedBanks={detectedBanks}
+                captureHealth={setup.captureHealth}
               />
               <ChecklistRow
                 step={1}

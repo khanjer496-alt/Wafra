@@ -17,6 +17,8 @@ private struct WafraLiveCaptureStatusRecord: Record {
   @Field var setupProofVersion: Int?
   @Field var setupProofAt: Double?
   @Field var firstCapturedAt: Double?
+  @Field var lastReceivedAt: Double?
+  @Field var lastHandledAt: Double?
 }
 
 private func bridgeLimit(_ limit: Double) throws -> Int {
@@ -122,6 +124,8 @@ public class WafraLiveCaptureModule: Module {
       record.setupProofVersion = status.setupProofVersion
       record.setupProofAt = try epochMilliseconds(status.setupProofAt)
       record.firstCapturedAt = try epochMilliseconds(status.firstCapturedAt)
+      record.lastReceivedAt = try epochMilliseconds(status.lastReceivedAt)
+      record.lastHandledAt = try epochMilliseconds(status.lastHandledAt)
       return record
     }
 

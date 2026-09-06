@@ -52,7 +52,8 @@ const execute = (relative, dependencies = {}) => {
     '__dirname',
     output,
   )(
-    (request) => dependencies[request] ?? {},
+    (request) => dependencies[request] ??
+      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') : {}),
     loaded,
     loaded.exports,
     filename,

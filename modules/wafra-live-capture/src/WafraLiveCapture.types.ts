@@ -8,6 +8,10 @@ export interface WafraLiveCaptureStatus {
   setupProofVersion: number | null;
   setupProofAt: number | null;
   firstCapturedAt: number | null;
+  /** Optional on older binaries. Milliseconds of durable native queue activity. */
+  lastReceivedAt?: number | null;
+  /** Includes duplicates and non-financial messages, NOT last transaction time. */
+  lastHandledAt?: number | null;
 }
 
 export interface WafraLiveCaptureNativeModule {

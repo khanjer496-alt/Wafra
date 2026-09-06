@@ -139,6 +139,11 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("status converts first-captured seconds to milliseconds without swapping",
       recordField(status, "firstCapturedAt", as: Double.self) == 987_500)
 
+    check("status converts last received receipt from seconds to milliseconds",
+      recordField(status, "lastReceivedAt", as: Double.self) == 1_234_500)
+    check("status converts last handled receipt from seconds to milliseconds",
+      recordField(status, "lastHandledAt", as: Double.self) == 1_244_750)
+
     let automationInputProbeAt = try invoke("getAutomationInputProbeAt", as: Double.self)
     check("automation-input probe time converts seconds to milliseconds exactly",
       automationInputProbeAt == 246_750)

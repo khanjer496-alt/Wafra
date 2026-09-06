@@ -883,7 +883,7 @@ function ktSources(dir) {
   ok('local setup has no relay proof, test-limit, or captured-merchant state',
     !/(?:captured \|\| captureOn|iosTestLimit|refresh-proof|relay)/.test(
       `${setup}\n${setupWorkflow}`) &&
-      /firstCapturedAt !== null/.test(setupWorkflow) &&
+      /isCaptureTimestamp\(status\.firstCapturedAt\)/.test(setupWorkflow) &&
       /setupProofVersion === 1/.test(setupWorkflow));
   ok('callbacks and foreground returns refresh native status without forging proof',
     /AppState\.addEventListener\('change'/.test(setup) &&

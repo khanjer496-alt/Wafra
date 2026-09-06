@@ -52,6 +52,7 @@ import {
   getSharedIosLocalCaptureCoordinator,
 } from '@/lib/ios-local-capture';
 import { useStore } from '@/lib/store';
+import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import type { AppState, IosCaptureWarningState } from '@/lib/types';
 import type {
   WafraLiveCaptureNativeModule,
@@ -193,7 +194,7 @@ export function resolveIosCaptureSurfaceState({
   if (!enabled) return 'off';
   if (retirementPending) return 'migration-retry';
   if (setupProofVersion !== 1) return 'needs-automation';
-  if (firstCapturedAt !== null) return 'first-alert-captured';
+  if (isCaptureTimestamp(firstCapturedAt)) return 'first-alert-captured';
   return 'waiting-for-alert';
 }
 
@@ -641,7 +642,7 @@ export function useAutoImport(
         pending: nativeStatus?.pending ?? 0,
         dropped: Math.max(nativeStatus?.dropped ?? 0, warning?.dropped ?? 0),
         corrupt: Boolean(nativeStatus?.corrupt || warning?.corrupt),
-        retirementPending: nativeStatus?.firstCapturedAt !== null &&
+        retirementPending: isCaptureTimestamp(nativeStatus?.firstCapturedAt) &&
           isLegacyShortcutCaptureActive(cfg),
       }));
       return;

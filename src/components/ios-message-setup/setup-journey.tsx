@@ -1,4 +1,6 @@
 import React from 'react';
+import { IosCaptureHealthPanel } from './capture-health';
+import type { IosCaptureHealth } from '@/lib/ios-capture-health';
 import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
@@ -12,11 +14,12 @@ export interface IosSetupJourneyProps {
   futureReadiness: IosSetupReadiness;
   automationConfirmed: boolean;
   detectedBanks: readonly string[];
+  captureHealth?: IosCaptureHealth | null;
 }
 
 /** Explanation/evidence, never a bank picker or a source of completion flags. */
 export function IosSetupJourney({ language, historyStatus, futureReadiness,
-  automationConfirmed, detectedBanks }: IosSetupJourneyProps) {
+  automationConfirmed, detectedBanks, captureHealth }: IosSetupJourneyProps) {
   const copy = iosSetupJourneyCopy(language);
   const configured = futureSetupConfigured(futureReadiness, automationConfirmed);
   const futureDetail = futureReadiness === 'first-alert-captured' ? copy.received
@@ -41,6 +44,7 @@ export function IosSetupJourney({ language, historyStatus, futureReadiness,
         {futureReadiness === 'shortcut-proven' &&
           <ThemedText type="meta" themeColor="textSecondary">{copy.proofHelp}</ThemedText>}
       </View>
+      <IosCaptureHealthPanel health={captureHealth ?? null} language={language} />
     </View>
   );
 }
