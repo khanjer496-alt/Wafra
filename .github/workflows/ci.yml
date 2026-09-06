@@ -38,7 +38,8 @@ jobs:
             ('e9b4e8dba7db9df9a17f2dcb4f48a8b1a1d2d850','704aa585fa20995492bfcb8687d56c3b802762d4f37504bc74b0401398f9d93f'),
             ('288ea9645e10eb8119060e50588d3ddd5613bf7d','6e3363c5280fa59f1d8d81e31acaf2f9bd208dd50139738dee744a4a994054da'),
             ('d9bf3d89f0dcc33daa5b0c830ad90eeb32a80b37','5a7a4a05b5eaf084ba81637aa1985b786f34e4841607c5a6484450398f24b8d7'),
-            ('2e8a39d2d155606ddff569be250ba0050ad13952','484e27920222f5bf9f278f28d0f26c51ede2027beeea7b2fe97f2907b6618e7d')]
+            ('2e8a39d2d155606ddff569be250ba0050ad13952','484e27920222f5bf9f278f28d0f26c51ede2027beeea7b2fe97f2907b6618e7d'),
+            ('629654f7e7e886d438d3ee888f03b3e8c3e6d096','128474d13b329d8d4ff4c7e4c8abe4bfde6289c000596f3ce02f7953bf14be23')]
           digest=lambda b:hashlib.sha256(b).hexdigest()
           for sha,expected in pairs:
             result=json.loads(subprocess.check_output(['gh','api','repos/khanjer496-alt/Wafra/git/blobs/'+sha]))
