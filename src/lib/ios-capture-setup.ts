@@ -156,7 +156,11 @@ export const resolveIosFutureSetupStep = (
   },
   readiness: IosSetupReadiness,
 ): IosFutureSetupStep => {
-  if (readiness !== 'not-added') return 'ready';
+  // Running the no-input Shortcut proves the local action, not the personal
+  // Message automation. Keep its instructions until the user confirms them.
+  if (readiness !== 'not-added') {
+    return progress.futureAutomationConfirmed ? 'ready' : 'create-automation';
+  }
   if (!progress.futureShortcutConfirmed) {
     return progress.futureStatus === 'not-started' || progress.futureStatus === 'skipped'
       ? 'add-shortcut'

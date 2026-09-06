@@ -30,6 +30,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         }
       },
     };
+    // These recovery scenarios deliberately restore the Future section. New
+    // installations use History first, covered in the journey regression suite.
+    react.useMemo = (factory, deps) => react.useCallback(factory, deps)();
     const defaults = {
       version: 1, activeSection: 'future', futureShortcutConfirmed: false,
       futureAutomationConfirmed: false, futureStatus: 'not-started',
@@ -85,6 +88,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     });
     const router = { replace: (route) => routes.push(route), push: (route) => routes.push(route), back() {}, canGoBack: () => true, setParams() {} };
     const store = {
+      state: { accounts: [], transactions: [], language: 'en' },
       ensureDurable: async () => {},
       setOnboarded() { onboarded = true; },
       async setCaptureOptOut(value) {
@@ -121,6 +125,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
       '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
       '@/hooks/use-theme': { useTheme: () => ({}) },
+      '@/hooks/use-language': { useLanguage: () => 'en' },
+      '@/components/ios-message-setup/setup-journey': { IosSetupJourney: 'IosSetupJourney' },
+      '@/lib/ios-setup-journey': execute('src/lib/ios-setup-journey.ts'),
       '@/lib/i18n': execute('src/lib/i18n.ts'),
       '@/lib/ios-capture-setup': { ...controller, createIosCaptureSetup: (options) => controller.createIosCaptureSetup({
         ...options, dependencies: { shortcutUrl: 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef' },
@@ -245,16 +252,16 @@ module.exports = async ({ execute, ok, eq, translated }) => {
 
   const disabled = await makeScreen({ progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true, futureStatus: 'complete' } });
   eq('iOS recovery: disabled native capture cannot leave a completed Future row',
-    disabled.all().find((node) => node.type === 'ChecklistRow').props.status, 'in-progress');
+    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'in-progress');
   disabled.nativeStatus.enabled = true;
   disabled.nativeStatus.setupProofVersion = 1;
   await disabled.foreground();
   eq('iOS recovery: harmless native proof restores readiness after enable',
-    disabled.all().find((node) => node.type === 'ChecklistRow').props.status, 'complete');
+    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'complete');
   disabled.failStatus();
   await disabled.foreground();
   eq('iOS recovery: a failed native refresh cannot keep advertising readiness',
-    disabled.all().find((node) => node.type === 'ChecklistRow').props.status, 'in-progress');
+    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'in-progress');
   const directHistory = await makeScreen({ params: { section: 'history' } });
   eq('iOS setup: a Settings history link opens the requested section without starting onboarding',
     [directHistory.saved().activeSection, directHistory.urls.length, directHistory.saved().returnToOnboarding], ['history', 0, false]);
@@ -267,7 +274,17 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS setup: explicit start records installation before handing off to Apple',
     [installAndRun.saved().historyShortcutConfirmed, installAndRun.urls.filter((url) => url.startsWith('shortcuts://x-callback-url/')).length], [true, 1]);
 
-  const ready = await makeScreen();
+  const proofOnly = await makeScreen({ progress: { historyStatus: 'complete' } });
+  proofOnly.nativeStatus.enabled = true;
+  proofOnly.nativeStatus.setupProofVersion = 1;
+  await proofOnly.foreground();
+  eq('iOS setup: local proof cannot bypass user automation confirmation',
+    [!!proofOnly.button('iosMessageContinue'), proofOnly.saved().futureStatus, proofOnly.onboarded()],
+    [false, 'not-started', false]);
+  ok('iOS setup: local proof keeps the automation confirmation action reachable',
+    !!proofOnly.button('iosLocalAutomationAdded'));
+
+  const ready = await makeScreen({ progress: { futureAutomationConfirmed: true } });
   ready.nativeStatus.enabled = true;
   ready.nativeStatus.setupProofVersion = 1;
   await ready.foreground();
@@ -287,7 +304,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS setup: previously skipped history does not satisfy required setup',
     await skippedHistory.press('iosMessageContinue'), false);
 
-  const bothReady = await makeScreen({ progress: { historyStatus: 'complete' } });
+  const bothReady = await makeScreen({ progress: { historyStatus: 'complete', futureAutomationConfirmed: true } });
   bothReady.nativeStatus.enabled = true;
   bothReady.nativeStatus.setupProofVersion = 1;
   await bothReady.foreground();
