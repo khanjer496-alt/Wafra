@@ -1,43 +1,85 @@
 /**
- * Wafra: clear records, useful status, a readable daily agenda.
- * Forest and warm neutral surfaces carry the approved reference;
- * income, expense and warning colours retain their financial meaning.
+ * Wafra — Ledger & Light. Restored from Claude's 934e5cb design rules.
+ * Limestone paper and warm charcoal; restrained green for action/selection.
+ * Group with space and 1px dividers, not decorative cards or gradients.
+ * A card earns its border only when wholly tappable or dismissible.
+ * Meaningful income, clay expense and warning colours; glyph-led categories.
+ * Control borders and text-grade warning aliases retain later accessibility fixes.
  */
 
 import '@/global.css';
 
 import { Platform } from 'react-native';
 
-// Approved reference palette; global theme selection stays consistent across tabs.
+// Original palette, with explicit control/inverse roles required by current screens.
 export const Colors = {
   light: {
-    text: '#10211E', textSecondary: '#566761', textTertiary: '#62716C',
-    background: '#FAFAF7', backgroundElement: '#FFFFFF', backgroundSelected: '#EBF0EC',
-    card: '#FFFFFF', cardBorder: '#E4E9E3', cardBorderStrong: '#C0CCC4',
-    controlBorder: '#71847A', controlBorderHigh: '#425F50',
-    inverseSurface: '#072E28', inverseText: '#F6FBF7', scrim: 'rgba(1, 22, 18, 0.44)',
-    primary: '#106B50', primarySoft: '#E7F2EA', primaryBorder: '#C5DECE', onPrimary: '#FFFFFF',
-    income: '#14734F', expense: '#B6384D', warning: '#8B5E11',
-    incomeGraphic: '#14734F', expenseGraphic: '#D34B5E', warningGraphic: '#B77921',
-    track: '#E6ECE7', expenseSoftBg: '#FFF0EF', expenseSoftBorder: '#EDD1CD',
-    gold: '#89662C', goldSoft: '#F2E9DA',
+    text: '#16130F',
+    textSecondary: '#57524A',
+    textTertiary: '#6B6559',
+    background: '#F4F1EA',
+    backgroundElement: '#FBF9F4',
+    backgroundSelected: '#EDEAE1',
+    card: '#FBF9F4',
+    cardBorder: '#E3DED2',
+    cardBorderStrong: '#D3CCBD',
+    controlBorder: '#81796B',
+    controlBorderHigh: '#57524A',
+    inverseSurface: '#16130F',
+    inverseText: '#F2EFE8',
+    scrim: 'rgba(22, 19, 15, 0.48)',
+    primary: '#1F6B52',
+    primarySoft: '#E4EDE8',
+    primaryBorder: '#C3D8CD',
+    onPrimary: '#F7FBF8',
+    income: '#1E7355',
+    expense: '#A3402D',
+    warning: '#7E5F14',
+    incomeGraphic: '#2E8A63',
+    expenseGraphic: '#B4503C',
+    warningGraphic: '#A07B2A',
+    track: '#E3DED2',
+    expenseSoftBg: '#FBF3F0',
+    expenseSoftBorder: '#E7D3CD',
+    gold: '#7E5F14',
+    goldSoft: '#F1E9D8',
   },
   dark: {
-    text: '#F5F8F5', textSecondary: '#B7CFC5', textTertiary: '#9FBFB2',
-    background: '#032521', backgroundElement: '#133630', backgroundSelected: '#22463D',
-    card: '#133630', cardBorder: '#2B4940', cardBorderStrong: '#456457',
-    controlBorder: '#789A88', controlBorderHigh: '#B1D3BF',
-    inverseSurface: '#F6F8F2', inverseText: '#082820', scrim: 'rgba(0, 15, 12, 0.60)',
-    primary: '#86D6B2', primarySoft: '#183E31', primaryBorder: '#355C46', onPrimary: '#062B20',
-    income: '#80DDB3', expense: '#FF9CA8', warning: '#E2BF78',
-    incomeGraphic: '#80DDB3', expenseGraphic: '#FF9CA8', warningGraphic: '#E2BF78',
-    track: '#2A473B', expenseSoftBg: '#3E282E', expenseSoftBorder: '#73434B',
-    gold: '#D7C397', goldSoft: '#3C3625',
+    text: '#F2EFE8',
+    textSecondary: '#A9A29A',
+    textTertiary: '#9B948A',
+    background: '#14120F',
+    backgroundElement: '#1C1A16',
+    backgroundSelected: '#232019',
+    card: '#1C1A16',
+    cardBorder: '#3B362E',
+    cardBorderStrong: '#4A443A',
+    controlBorder: '#81796B',
+    controlBorderHigh: '#A9A29A',
+    inverseSurface: '#F2EFE8',
+    inverseText: '#16130F',
+    scrim: 'rgba(20, 18, 15, 0.64)',
+    primary: '#57B894',
+    primarySoft: '#1E3A31',
+    primaryBorder: '#3B362E',
+    onPrimary: '#0F2C23',
+    income: '#6BC79E',
+    expense: '#E0836B',
+    warning: '#D9AE62',
+    incomeGraphic: '#6BC79E',
+    expenseGraphic: '#E0836B',
+    warningGraphic: '#D9AE62',
+    track: '#3B362E',
+    expenseSoftBg: '#2A1D18',
+    expenseSoftBorder: '#4A322A',
+    gold: '#D9AE62',
+    goldSoft: '#332A18',
   },
 };
+
 export const DataViz = {
-  light: { ramp: ['#106B50', '#3C8C6D', '#6DA68B', '#A1C5AF', '#CFDFD1'], neutral: '#E6ECE7', axis: '#62716C', expenseSoft: '#B3747A' },
-  dark: { ramp: ['#86D6B2', '#66BDA0', '#4B9F82', '#337C62', '#225540'], neutral: '#2A473B', axis: '#9FBFB2', expenseSoft: '#C88791' },
+  light: { ramp: ['#1F6B52', '#488269', '#779E89', '#A7BFAC', '#C8D8C9'], neutral: '#E3DED2', axis: '#6B6559', expenseSoft: '#B4503C' },
+  dark: { ramp: ['#57B894', '#479A7B', '#377D63', '#29634D', '#1E4839'], neutral: '#3B362E', axis: '#9B948A', expenseSoft: '#E0836B' },
 } as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
@@ -47,7 +89,7 @@ export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
  *
  * React Native applies no synthetic weights on Android — a `fontWeight` on a
  * custom family is silently dropped — so every weight has to be its own
- * family name. Geist carries Latin reading and money; Plex carries Arabic; Mono is reserved for code/editing.
+ * family name. Geist carries reading, Geist Mono carries figures, and Noto Kufi carries Arabic.
  */
 export const Fonts = {
   sans: 'Geist-Regular',
@@ -56,8 +98,8 @@ export const Fonts = {
   mono: 'GeistMono-Regular',
   monoMedium: 'GeistMono-Medium',
   monoSemi: 'GeistMono-SemiBold',
-  arabic: 'IBMPlexSansArabic',
-  arabicBold: 'IBMPlexSansArabic-SmBld',
+  arabic: 'NotoKufiArabic-Regular',
+  arabicBold: 'NotoKufiArabic-Bold',
 } as const;
 
 // The .ttf files themselves are required in `src/app/_layout.tsx`, not here:

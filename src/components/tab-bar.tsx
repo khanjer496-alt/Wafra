@@ -1,21 +1,12 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import React, { useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
-import Animated, {
-  ReduceMotion,
-  interpolate,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import React from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
 import { t, type Lang, type StringKey } from '@/lib/i18n';
 import { useStore } from '@/lib/store';
@@ -35,89 +26,17 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
-const TAB_SPRING = {
-  damping: 18,
-  stiffness: 330,
-  mass: 0.7,
-  overshootClamping: true,
-  reduceMotion: ReduceMotion.System,
-} as const;
-
-const AnimatedTabButton = ({
-  focused,
-  icon,
-  label,
-  onPress,
-}: {
-  focused: boolean;
-  icon: IconName;
-  label: string;
-  onPress: () => void;
+const LedgerTabButton = ({ focused, icon, label, onPress }: {
+  focused: boolean; icon: IconName; label: string; onPress: () => void;
 }) => {
   const theme = useTheme();
-  const reducedMotion = useReducedMotion();
-  const focus = useSharedValue(focused ? 1 : 0);
-
-  useEffect(() => {
-    const next = focused ? 1 : 0;
-    focus.value = reducedMotion ? next : withSpring(next, TAB_SPRING);
-  }, [focus, focused, reducedMotion]);
-
-  const pillStyle = useAnimatedStyle(() => ({
-    opacity: focus.value,
-    transform: [
-      { scaleX: interpolate(focus.value, [0, 1], [0.55, 1]) },
-      { scaleY: interpolate(focus.value, [0, 1], [0.8, 1]) },
-    ],
-  }));
-  const iconStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: interpolate(focus.value, [0, 1], [0, -2]) },
-      { scale: interpolate(focus.value, [0, 1], [1, 1.08]) },
-    ],
-  }));
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(focus.value, [0, 1], [0.72, 1]),
-    transform: [{ translateY: interpolate(focus.value, [0, 1], [0, -1]) }],
-  }));
-
-  return (
-    <SpringPressable
-      role="tab"
-      aria-selected={focused}
-      accessibilityRole="tab"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: focused }}
-      opacityTo={0.8}
-      scaleTo={0.92}
-      style={styles.tab}
-      onPress={onPress}>
-      <View style={styles.iconStage}>
-        <Animated.View
-          style={[
-            styles.activePill,
-            { backgroundColor: theme.primarySoft },
-            pillStyle,
-          ]}
-        />
-        <Animated.View style={iconStyle}>
-          <Icon
-            name={icon}
-            size={21}
-            color={focused ? theme.primary : theme.textTertiary}
-            strokeWidth={focused ? 2.1 : 1.8}
-          />
-        </Animated.View>
-      </View>
-      <Animated.View style={labelStyle}>
-        <ThemedText
-          type="meta"
-          style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>
-          {label}
-        </ThemedText>
-      </Animated.View>
-    </SpringPressable>
-  );
+  return <Pressable role="tab" aria-selected={focused} accessibilityRole="tab"
+    accessibilityLabel={label} accessibilityState={{ selected: focused }} onPress={onPress}
+    android_ripple={{ color: theme.backgroundSelected, borderless: false }}
+    style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}>
+    <Icon name={icon} size={21} color={focused ? theme.primary : theme.textTertiary} strokeWidth={focused ? 2.1 : 1.8} />
+    <ThemedText type="meta" style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>{label}</ThemedText>
+  </Pressable>;
 };
 
 /** Four durable destinations. Manual cash entry belongs in the ledger, not in
@@ -147,7 +66,7 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
     const index = state.routes.findIndex((r) => r.key === route.key);
     const focused = state.index === index;
     return (
-      <AnimatedTabButton
+      <LedgerTabButton
         key={route.key}
         focused={focused}
         icon={TAB_ICONS[route.name]}
@@ -178,7 +97,7 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
       }}
       style={[
         styles.wrap,
-        { backgroundColor: theme.backgroundElement, borderTopColor: theme.cardBorder },
+        { backgroundColor: theme.background, borderTopColor: theme.cardBorder },
       ]}>
       <View role="tablist" style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
         {routes.map(renderTab)}
@@ -211,19 +130,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 3,
     paddingVertical: 5,
-  },
-  iconStage: {
-    width: 46,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  activePill: {
-    position: 'absolute',
-    top: -3,
-    width: 42,
-    height: 32,
-    borderRadius: 12,
   },
   tabLabel: {
     fontSize: 12,

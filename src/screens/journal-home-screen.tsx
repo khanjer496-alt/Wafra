@@ -1,3 +1,4 @@
+import { HistoryReadingStatus } from '@/components/history-reading-status';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -187,28 +188,16 @@ export default function JournalHomeScreen() {
           onSpending={() => router.push('/flow')} />
 
         {/* Blocking states stay visible, but a healthy connection is not a banner. */}
-        {history && <View style={[styles.importNotice, { borderStartColor: history.status === 'failed' ? theme.warning : theme.primary }]}>
-          <View style={styles.grow} accessibilityLiveRegion="polite">
-            <ThemedText type="smallBold">{history.status === 'failed' ? words.attention
-              : history.status === 'paused' ? words.paused : words.progress}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{history.status === 'failed'
-              ? t(history.error === 'inbox-access' ? 'historyImportAccessBody' : 'historyImportSavedBody')
-              : tf('historyImportLiveProgress', { scanned: history.scanned, found: history.found })}</ThemedText>
-          </View>
-          {history.status !== 'running' && <Pressable onPress={retryHistory} accessibilityRole="button" style={styles.smallAction}>
-            <ThemedText type="smallBold" style={{ color: theme.primary }}>{history.error === 'inbox-access'
-              ? t('openPhoneSettings') : words.resume}</ThemedText>
-          </Pressable>}
-        </View>}
+        {history && <HistoryReadingStatus progress={history} onResume={retryHistory} />}
 
         {payments.length > 0 && <View style={styles.section} testID="journal-payments">
           <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.upcoming}</ThemedText>
             <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}>
               <Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
-          <View style={[styles.cardGroup, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>{(paymentsExpanded ? payments : payments.slice(0, 3)).map((item) => <Pressable key={item.id} accessibilityRole="button"
+          <View style={[styles.cardGroup, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>{(paymentsExpanded ? payments : payments.slice(0, 3)).map((item) => <Pressable key={item.id} accessibilityRole="button"
             accessibilityLabel={`${item.title}, ${shortDate(item.dateISO)}, ${formatAmount(item.amountFils)} ${ledgerCurrencyCode()}`}
             onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
-            <View style={[styles.paymentDate, { borderColor: theme.cardBorder, backgroundColor: theme.primarySoft }]}>
+            <View style={[styles.paymentDate, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
               <Icon name={item.kind === 'card' ? 'wallet' : 'receipt'} size={20} color={theme.primary} />
             </View>
             <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText>
@@ -229,7 +218,7 @@ export default function JournalHomeScreen() {
               <ThemedText type="meta">{t('allActivity')}</ThemedText>
             </Pressable>
           </View>
-          <View style={[styles.cardGroup, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>{dashboard.activityRows.map((transaction, index) => <React.Fragment key={transaction.id}>
+          <View style={[styles.cardGroup, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>{dashboard.activityRows.map((transaction, index) => <React.Fragment key={transaction.id}>
             {(index === 0 || transaction.date !== dashboard.activityRows[index - 1].date) &&
               <View style={styles.dateLabel}><View style={[styles.dateDot, { backgroundColor: theme.textTertiary }]} />
                 <ThemedText type="meta" themeColor="textSecondary">{shortDate(transaction.date)}</ThemedText>
@@ -284,7 +273,7 @@ const styles = StyleSheet.create({
   sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 2 },
   sectionTitle: { fontSize: 17, lineHeight: 24 },
   smallAction: { minHeight: 48, minWidth: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  cardGroup: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, overflow: 'hidden' },
+  cardGroup: { borderTopWidth: 1, borderBottomWidth: 1, },
   dateLabel: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingTop: 12, paddingBottom: 0 },
   dateDot: { height: 4, width: 4, borderRadius: 2 },
   dateRule: { height: StyleSheet.hairlineWidth, flex: 1 },
