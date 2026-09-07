@@ -1,0 +1,150 @@
+name: Transaction UI final verification
+on:
+  push:
+    branches: [fix/transaction-ui-20260908]
+    paths: [.github/workflows/transaction-ui-final-check.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - name: Apply reviewed edits to this current-main-based checkout
+        id: source
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          test "$(git remote get-url origin)" = https://github.com/khanjer496-alt/Wafra
+          mkdir -p transaction-ui-evidence
+          python3 - <<'PY'
+          import pathlib,subprocess,yaml
+          # Reuse the exact source-edit command already exercised in run
+          # 34158702806, on this same branch. No old checkout or encoded source.
+          workflow=yaml.safe_load(pathlib.Path('.github/workflows/transaction-ui-fix-check.yml').read_text())
+          step=next(s for s in workflow['jobs']['verify']['steps'] if s.get('id')=='source')
+          subprocess.run(['bash','-euo','pipefail','-c',step['run']],check=True)
+          p=pathlib.Path('src/app/transactions.tsx');s=p.read_text()
+          def replace(a,b):
+            global s
+            assert s.count(a)==1,a
+            s=s.replace(a,b)
+          replace('  TextInput,\n  View,','  TextInput,\n  View,\n  useWindowDimensions,')
+          replace('  const largeText = useLargeTextLayout();', '  const largeText = useLargeTextLayout();\n  const { width, fontScale } = useWindowDimensions();\n  // Give the search field the full width before its placeholder gets clipped.\n  const narrowSearch = width / Math.max(fontScale, 1) < 360;')
+          replace('<View style={[styles.searchToolbar, largeText && styles.searchToolbarLarge]}>','<View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>')
+          replace('style={largeText ? styles.searchFieldLarge : styles.searchField}', 'style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}')
+          replace("                    accessibilityHint={tr('searchMerchants')}\n",'')
+          replace('                    styles.filterBtn,\n','                    styles.filterBtn,\n                    (largeText || narrowSearch) && styles.filterBtnStacked,\n')
+          replace('  filterBtn: {\n',"  filterBtnStacked: { alignSelf: 'flex-end' },\n  filterBtn: {\n")
+          p.write_text(s)
+          # The legacy contract required the long string as the VISIBLE label.
+          # Require the new short label AND retain the original accessible one.
+          before=r"/<TextField[\s\S]*?label=\{tr\('searchMerchants'\)\}/"
+          after=r"/<TextField[\s\S]*?label=\{tr\('transactionSearchLabel'\)\}[\s\S]*?accessibilityLabel=\{tr\('searchMerchants'\)\}/"
+          edited=[]
+          for p in pathlib.Path('scripts/test').glob('*.js'):
+            s=p.read_text()
+            if before in s:
+              assert s.count(before)==1
+              p.write_text(s.replace(before,after));edited.append(str(p))
+          assert len(edited)==1,edited
+          pathlib.Path('transaction-ui-evidence/retargeted-contract.txt').write_text('\n'.join(edited))
+          print('Retained search naming requirement in:',edited)
+          p=pathlib.Path('scripts/test/repair/transaction-ui-regression.test.cjs')
+          with p.open('a') as f:
+            f.write("\ntest('narrow screens give search full width without reducing the font size', () => {\n  const h = transactions({ width: 320 });\n  const toolbar = walk(h.tree).find(n => n.props?.testID === 'transaction-search-toolbar');\n  assert.equal(style(toolbar).flexDirection, 'column');\n  const input = walk(toolbar).find(n => n.type === 'TextInput');\n  assert.equal(style(input).fontSize, 17);\n  const filter = labelled(toolbar, h.deps['@/lib/i18n'].t('filtersButton'));\n  assert.equal(style(filter).alignSelf, 'flex-end');\n});\n")
+          PY
+          git diff --check
+          git diff -- src scripts/test > transaction-ui-evidence/source.diff
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          sudo apt-get install -y sqlite3
+          npx --no-install expo prebuild --platform ios --no-install
+      - name: Execute every source gate without skipping old requirements
+        id: tests
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          import subprocess,pathlib,json
+          out=pathlib.Path('transaction-ui-evidence');rows=[]
+          checks=[('design',['node','scripts/check-design-baseline.mjs']),('focused',['node','--test','scripts/test/repair/transaction-ui-regression.test.cjs']),('typecheck',['npm','run','typecheck']),('lint',['npm','run','lint']),('full',['npm','test'])]
+          for name,cmd in checks:
+            with (out/(name+'.log')).open('w') as log:r=subprocess.run(cmd,stdout=log,stderr=subprocess.STDOUT)
+            rows.append({'name':name,'exitCode':r.returncode});print(name,r.returncode,flush=True)
+            lines=(out/(name+'.log')).read_text().splitlines()
+            if r.returncode:
+              for i,line in enumerate(lines):
+                if 'AssertionError' in line or '.test.js:' in line or 'not ok ' in line:print('\n'.join(lines[max(0,i-2):i+5]),flush=True)
+            else:print('\n'.join(lines[-15:]),flush=True)
+          (out/'test-results.json').write_text(json.dumps(rows,indent=2))
+          assert all(r['exitCode']==0 for r in rows),rows
+          PY
+      - name: Verify painted screens and reachable actions in Chromium
+        id: browser
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npx --no-install playwright install --with-deps chromium
+          EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx --no-install expo export --platform web > transaction-ui-evidence/export.log 2>&1
+          node scripts/e2e/serve.mjs dist 8126 > transaction-ui-evidence/server.log 2>&1 &
+          SERVER=$!;trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for n in $(seq 1 40); do curl -fsS http://127.0.0.1:8126/ >/dev/null && break || sleep 1; done
+          node scripts/e2e/e2e-transaction-ui.mjs 2>&1 | tee transaction-ui-evidence/browser.log
+      - name: Publish only completed source and test corrections on this branch
+        if: steps.tests.outcome == 'success' && steps.browser.outcome == 'success'
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/fix/transaction-ui-20260908 | cut -f1)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          import pathlib,subprocess,json
+          allowed={'src/app/transactions.tsx','src/components/entry-detail-sheet.tsx','src/components/ui/bottom-sheet.tsx','src/components/ui/merchant-logo-assets.ts','src/lib/i18n.ts','scripts/test/repair/transaction-ui-regression.test.cjs'}
+          allowed.update(pathlib.Path('transaction-ui-evidence/retargeted-contract.txt').read_text().splitlines())
+          actual=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines());assert actual==allowed,actual
+          out=pathlib.Path('docs/test-evidence/2026-09-08-transaction-ui.md');out.parent.mkdir(parents=True,exist_ok=True)
+          out.write_text('''# Transaction UI correction
+
+          Based on main 01c9ddda17d79558930457fecdd3f6357739aa55. No financial, parser, import, encryption, branding, dependency or release-configuration change.
+
+          - Entry details place Edit/Delete and Save/Cancel in the existing fixed sheet footer. Labels wrap and large-text actions stack. Delete still needs confirmation; invalid amounts cannot save.
+          - Search has a short visible label and placeholder, retains its accessible name, and expands to full width on narrow/scaled layouts. Opening a row/filter dismisses the search keyboard.
+          - Count/period, labelled net total, and exclusion explanations no longer compete for one horizontal row. Amount calculations and filters are unchanged.
+          - Noon One is an explicit display-only logo alias. Unknown composite merchant names remain unknown.
+          - Source no longer presents transaction.date as a filing timestamp. A separate Transaction date row uses the existing full date/time formatter.
+
+          Validation: original regression cases failed before edits. Corrected focused component checks, approved design guard, typecheck, lint, and full npm test passed. Real Expo/Chromium tests passed at 360x780, 390x844, 320x568 and 390x420. They hit-test both actions, check fixed footer position after scrolling, open editing and cancel it, verify placeholder fit, and check date labels. The short viewport is NOT a native keyboard test.
+
+          Physical Android/iOS rendering, actual system-keyboard and navigation-bar geometry, and a data-retaining installed-app upgrade remain unverified for this change. No APK, TestFlight, OTA or website publication was performed. Native storage and all financial safeguards remain unchanged. Add these ordinary source files to the combined release rather than rebuilding an older branch.
+          '''.replace('\n          ','\n'))
+          subprocess.run(['git','add','--',*sorted(allowed),str(out)],check=True)
+          PY
+          git diff --cached --check
+          git diff --cached --stat
+          git config user.name 'Wafra UI verification'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Fix transaction sheet actions, narrow search, summary layout and date labels'
+          git push origin HEAD:refs/heads/fix/transaction-ui-20260908
+          git rev-parse HEAD > transaction-ui-evidence/published-source.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-transaction-ui-final-evidence
+          path: transaction-ui-evidence/
+          retention-days: 14
+      - name: Require actual successful outcomes
+        if: always()
+        run: |
+          test '${{ steps.tests.outcome }}' = success
+          test '${{ steps.browser.outcome }}' = success
