@@ -144,12 +144,18 @@ export default function BillsScreen() {
     return tf('scheduleInManyDays', { days });
   };
 
-  const dues = useMemo(() => openDues(state, now), [state, now]);
+  // Card projections read accounts, transactions and statements, not the
+  // frequently changing import-progress or review-status fields.
+  const dues = useMemo(() => openDues(state, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, state.cardDues, now]);
   const selectedDue = useMemo(
     () => dues.find(({ due }) => due.id === selectedDueId) ?? null,
     [dues, selectedDueId],
   );
-  const paidCards = useMemo(() => recentlySettledDues(state, now), [state, now]);
+  const paidCards = useMemo(() => recentlySettledDues(state, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = useMemo(
     () => internalTransferIds(state.transactions, liveAccounts),
@@ -208,6 +214,8 @@ export default function BillsScreen() {
     });
     for (const { bill, status, dueISO, daysLeft } of rows) items.push({
       id: `bill-${bill.id}`, title: bill.title, category: bill.category, kind: 'bill', dateISO: dueISO,
+      group: subs.some((sub) => sub.title.trim().toLowerCase() === bill.title.trim().toLowerCase())
+        ? 'subscriptions' : undefined,
       daysLeft, amountFils: bill.amountFils, estimated: false, paid: status === 'paid',
       accountName: bill.accountId ? accountNames.get(bill.accountId) : undefined,
     });
@@ -218,6 +226,7 @@ export default function BillsScreen() {
       const charge = recurringChargePresentation(sub);
       items.push({ id: `sub-${sub.title.trim().toLowerCase()}`, title: sub.title, category: sub.category,
         kind: 'recurring', dateISO: sub.nextExpectedISO, daysLeft: daysUntilNext(sub, now),
+        group: sub.group === 'subscription' ? 'subscriptions' : undefined,
         amountFils: charge.amountFils, estimated: true, paid: false });
     }
     return items;

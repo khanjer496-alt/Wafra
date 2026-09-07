@@ -3,14 +3,14 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { harness, walk, text } = require('./journal-harness.cjs');
 
-test('new composition puts the net summary and dated activity before healthy capture controls', () => {
+test('Home puts one spending summary and dated activity before capture controls', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   assert.ok(section('journal-summary') < section('journal-activity'));
   assert.ok(section('journal-activity') < section('journal-import-controls'));
-  assert.equal(nodes.find((node) => node.type === 'Money').props.fils, 941300);
-  assert.match(text(h.tree), /not your bank balance/);
+  assert.equal(nodes.find((node) => node.type === 'Money').props.fils, 508700);
+  assert.match(text(h.tree), /View spending breakdown/);
   assert.match(text(h.tree), /6 Sept/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
@@ -20,13 +20,13 @@ test('settings and explicit manual entry remain working visible quick actions', 
   nodes.find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Settings').props.onPress();
   assert.deepEqual(h.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction'], ['route', '/settings']]);
 });
-test('activity search and complete bills/account routes remain reachable', () => {
+test('activity search and full bills remain reachable without duplicate Accounts shortcuts', () => {
   const h = harness();
   for (const node of walk(h.tree)) {
-    if (node.type === 'Pressable' && ['See all', 'Your accounts'].includes(text(node.props.children).trim())) node.props.onPress();
+    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || node.props.accessibilityLabel === 'View all payments')) node.props.onPress();
   }
   assert.ok(h.events.some((e) => e[1] === '/transactions'));
-  assert.ok(h.events.some((e) => e[1] === '/wallet'));
+  assert.ok(h.events.some((e) => e[1] === '/bills'));
 });
 test('failed history exposes resume rather than pretending capture completed', async () => {
   const h = harness({ history: { status: 'failed', scanned: 1000, found: 120, error: 'page-failed' } });
@@ -82,31 +82,30 @@ test('Arabic and larger text render the same controls without English journal he
 test('reference composition places actionable upcoming payments before recent activity', () => {
   const nodes = walk(harness().tree);
   const at = (id) => nodes.findIndex((node) => node.props.testID === id);
-  assert.ok(at('journal-summary') < at('reference-quick-actions'));
-  assert.ok(at('reference-quick-actions') < at('reference-month-cards'));
-  assert.ok(at('reference-month-cards') < at('journal-payments'));
+  assert.ok(at('journal-summary') < at('journal-payments'));
+  assert.equal(at('reference-quick-actions'), -1);
+  assert.equal(at('reference-month-cards'), -1);
   assert.ok(at('journal-payments') < at('journal-activity'));
 });
-test('known balances retain the shared reliable-balance semantics; no fabricated trend', () => {
+test('known balances never replace spending or add another summary on Home', () => {
   const h = harness({ knownBalance: 3870000 });
-  assert.equal(walk(h.tree).find((node) => node.type === 'Money').props.fils, 3870000);
-  assert.match(text(h.tree), /Recorded balances/);
-  assert.match(text(h.tree), /not a live bank connection/);
-  assert.match(text(h.tree), /not your bank balance/);
+  assert.equal(walk(h.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.doesNotMatch(text(h.tree), /Recorded balances|Net after spending/);
   assert.doesNotMatch(text(h.tree), /6%|on track|safe to spend/i);
 });
-test('a genuinely known zero balance stays zero, while an unknown balance falls back to clearly labelled net', () => {
+test('zero and unknown account balances do not change the Home spending figure', () => {
   const zero = harness({ knownBalance: 0 });
-  assert.equal(walk(zero.tree).find((node) => node.type === 'Money').props.fils, 0);
-  assert.match(text(zero.tree), /Recorded balances/);
+  assert.equal(walk(zero.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.doesNotMatch(text(zero.tree), /Recorded balances/);
   const unknown = harness();
-  assert.equal(walk(unknown.tree).find((node) => node.type === 'Money').props.fils, 941300);
+  assert.equal(walk(unknown.tree).find((node) => node.type === 'Money').props.fils, 508700);
   assert.doesNotMatch(text(unknown.tree), /Recorded balances/);
 });
-test('history quick action preserves platform-specific entry points without starting capture', () => {
+test('Home does not duplicate import shortcuts; explicit capture control remains accessible', () => {
   for (const platform of ['android', 'ios']) {
     const h = harness({ platform });
-    walk(h.tree).find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Import').props.onPress();
-    assert.deepEqual(h.events, [['route', platform === 'ios' ? '/ios-setup' : '/import-sms']]);
+    assert.ok(walk(h.tree).some((n) => n.type === 'Pressable' && n.props.accessibilityLabel?.startsWith('Bank alerts.')));
+    assert.equal(walk(h.tree).filter((n) => n.props.testID === 'reference-quick-actions').length, 0);
+    assert.deepEqual(h.events, []);
   }
 });

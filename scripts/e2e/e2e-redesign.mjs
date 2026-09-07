@@ -45,7 +45,9 @@ async function noPageOverflow() {
 
 await check('Home renders the implemented reference layout', async () => {
   await go('/'); await exists('reference-home-summary');
-  await exists('reference-quick-actions'); await exists('reference-month-cards');
+  await exists('home-spending-total'); await exists('home-income-summary');
+  assert.equal(await page.getByTestId('reference-quick-actions').count(), 0);
+  assert.equal(await page.getByText('Recorded balances', { exact: true }).count(), 0);
   await screenshot('home-dark');
 });
 await check('Four bottom tabs are present and actionable', async () => {
@@ -59,6 +61,20 @@ await check('Categories, Activity and Trends stay inside Spending', async () => 
   await page.getByRole('tab', { name: 'Activity', exact: true }).click(); await exists('spending-activity');
   await page.getByRole('tab', { name: 'Trends', exact: true }).click(); await exists('spending-trends');
   await page.getByRole('tab', { name: 'Categories', exact: true }).click(); await exists('spending-categories');
+});
+await check('Every spending category shows its share of total spending', async () => {
+  await go('/flow');
+  const shares = page.locator('[data-testid^="spending-share-"]');
+  assert.ok(await shares.count() > 0);
+  for (const share of await shares.all()) {
+    assert.match(await share.innerText(), /(?:<)?\d+(?:\.\d+)?%\s+of spending/);
+  }
+});
+await check('Bills separates subscriptions from utilities and telecom', async () => {
+  await go('/bills');
+  await exists('bills-subscriptions'); await exists('bills-utilities');
+  assert.match(await page.getByTestId('bills-subscriptions').innerText(), /Subscriptions/);
+  assert.match(await page.getByTestId('bills-utilities').innerText(), /Utilities & telecom/);
 });
 await check('Spending search responds to input and recovers', async () => {
   await go('/flow?view=activity'); await exists('spending-activity');
@@ -100,7 +116,7 @@ for (const path of ['/settings','/feedback','/import-sms','/ios-setup','/review-
 }
 for (const width of [320,430]) {
   await page.setViewportSize({ width, height: 900 });
-  for (const path of ['/flow?view=trends','/bills','/wallet','/settings']) {
+  for (const path of ['/','/flow','/flow?view=trends','/bills','/wallet','/settings']) {
     await check(`${width}px route ${path}`, async () => { await go(path); await noPageOverflow(); });
   }
 }

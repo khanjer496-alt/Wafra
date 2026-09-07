@@ -13,7 +13,7 @@ interface MerchantAvatarProps {
   size?: number;
 }
 
-/** Official bundled artwork. Unknown merchants keep their category glyph. */
+/** Bundled merchant artwork. Unknown merchants keep their category glyph. */
 export function MerchantAvatar({ title, category, size = 34 }: MerchantAvatarProps) {
   const logo = merchantLogoFor(title);
   if (!logo) return <CategoryAvatar category={category} size={size} />;
@@ -32,6 +32,8 @@ function LogoTile({ logo, category, size }: {
 
   return (
     <View
+      testID={`merchant-logo-${logo.id}`}
+      pointerEvents="none"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={[
@@ -41,9 +43,12 @@ function LogoTile({ logo, category, size }: {
       <Image
         source={logo.source}
         contentFit="contain"
+        cachePolicy="memory-disk"
+        recyclingKey={logo.id}
+        transition={0}
         accessible={false}
         onError={() => setFailed(true)}
-        style={{ width: size - 8, height: size - 8 }}
+        style={{ width: Math.max(1, size - 8), height: Math.max(1, size - 8) }}
       />
     </View>
   );

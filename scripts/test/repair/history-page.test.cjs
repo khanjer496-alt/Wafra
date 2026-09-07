@@ -27,14 +27,15 @@ function harness(options = {}) {
   };
   const native = { Platform: { OS: 'android' }, AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) } };
   const hook = load(path.resolve(__dirname, '../../../src/hooks/use-history-import.ts'), {
-    react: { useMemo: (factory) => factory(), useRef: (value) => ({ current: value }), useEffect() {} },
+    react: { useMemo: (factory) => factory(), useCallback: (fn) => fn, useEffect() {} },
     'react-native': native,
     '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
     '@/lib/auto-import': {
       isSmsInboxAccessError: () => false, scanInbox: async () => page,
       buildImportPlan: () => { events.push('plan'); return { batch: { transactions: [] } }; },
     },
-    '@/lib/history-import': { createHistoryImportCoordinator: (value) => { dependencies = value; return { run() {} }; } },
+    '@/lib/history-import': { subscribeHistoryImportRequest: () => () => {}, createHistoryImportCoordinator: (value) => { dependencies = value; return { run() {} }; } },
+    '@/lib/android-history-background': { historyBackground: { canContinue: () => allowed, run: (job) => job(), cancel() {} } },
     '@/lib/purchases': { isProActive: () => true },
     '@/lib/launch-performance': { markLaunchPhase: () => events.push('mark') },
     '@/lib/store': { useStore: () => store },

@@ -6,6 +6,12 @@ plugins {
 group = 'expo.modules.smsreader'
 version = '0.1.0'
 
+dependencies {
+  // Expo's core dependency does not expose the Headless JS service API to
+  // this module. React Native's root plugin supplies the app's exact version.
+  implementation 'com.facebook.react:react-android'
+}
+
 def smsCorpusExportEnabled = System.getenv('WAFRA_SMS_CORPUS_EXPORT') == '1'
 
 android {

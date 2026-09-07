@@ -89,6 +89,7 @@ import { recordStorageFailure, type StorageFailure } from '@/lib/storage-diagnos
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import {
   createHistoryImportProgress,
+  requestHistoryImportRun,
   normalizeHistoryImportProgress,
   type HistoryImportProgress,
 } from '@/lib/history-import';
@@ -2041,6 +2042,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ? { ...existing, status: 'paused' as const, updatedAt: Date.now(), error: null }
       : createHistoryImportProgress(Date.now());
     await setHistoryImportProgress(progress);
+    requestHistoryImportRun();
   }, [setHistoryImportProgress]);
 
   const applyFxUpdates = useCallback((updates: FxUpdate[]) => {

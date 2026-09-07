@@ -12,7 +12,6 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { ReferenceHomeSummary } from '@/components/reference-home-summary';
-import { netWorthBreakdown } from '@/lib/balances';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
@@ -73,7 +72,6 @@ export default function JournalHomeScreen() {
   const [now, setNow] = useState(() => new Date());
   const [refreshing, setRefreshing] = useState(false);
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [paymentsExpanded, setPaymentsExpanded] = useState(false);
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
@@ -160,10 +158,6 @@ export default function JournalHomeScreen() {
           : status === 'migration-retry' ? 'captureIosMigrationRetry'
             : status === 'needs-automation' ? 'captureIosNeedsAutomation' : 'captureIosOff');
   const healthy = status === 'waiting-for-alert' || status === 'first-alert-captured';
-  const balances = useMemo(() => netWorthBreakdown({ accounts: state.accounts, transactions: state.transactions }),
-    [state.accounts, state.transactions]);
-  const balanceAccounts = state.accounts.filter((account) => !account.archived && account.cardType !== 'credit');
-  const knownBalances = balanceAccounts.filter((account) => balances.balanceByAccountId[account.id] !== null).length;
   const greeting = language === 'ar'
     ? now.getHours() < 12 ? 'صباح الخير' : 'مساء الخير'
     : now.getHours() < 12 ? 'Good morning' : now.getHours() < 18 ? 'Good afternoon' : 'Good evening';
@@ -177,12 +171,9 @@ export default function JournalHomeScreen() {
       </View> : <>
         <ReferenceHomeSummary theme={theme} language={language} largeText={largeText}
           greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
-          balanceFils={knownBalances > 0 ? balances.balanceFils : null}
-          balanceCoverage={tf('balanceCoverage', { known: knownBalances, total: balanceAccounts.length })}
-          incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils} netFils={dashboard.hero.netFils}
+          incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
           onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
-          onImport={() => router.push(Platform.OS === 'ios' ? '/ios-setup' : '/import-sms')}
-          onAccounts={() => router.push('/wallet')} onSettings={() => router.push('/settings')}
+          onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')} />
 
@@ -205,7 +196,7 @@ export default function JournalHomeScreen() {
           <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.upcoming}</ThemedText>
             <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}>
               <Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
-          <View style={[styles.cardGroup, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>{(paymentsExpanded ? payments : payments.slice(0, 3)).map((item) => <Pressable key={item.id} accessibilityRole="button"
+          <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{payments.slice(0, 2).map((item) => <Pressable key={item.id} accessibilityRole="button"
             accessibilityLabel={`${item.title}, ${shortDate(item.dateISO)}, ${formatAmount(item.amountFils)} ${ledgerCurrencyCode()}`}
             onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
             <View style={[styles.paymentDate, { borderColor: theme.cardBorder, backgroundColor: theme.primarySoft }]}>
@@ -216,7 +207,7 @@ export default function JournalHomeScreen() {
                 {daysPhrase(item.daysLeft)}</ThemedText></View>
             <ThemedText type="smallBold" tabular style={styles.paymentAmount}>{formatAmount(item.amountFils)}</ThemedText>
           </Pressable>)}</View>
-          {payments.length > 3 && !paymentsExpanded && <Pressable onPress={() => setPaymentsExpanded(true)} accessibilityRole="button" style={styles.inlineAction}>
+          {payments.length > 2 && <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" style={styles.inlineAction}>
             <ThemedText type="meta">{words.more} ({payments.length})</ThemedText><Icon name="chevron-right" size={15} color={theme.text} />
           </Pressable>}
         </View>}
@@ -229,7 +220,7 @@ export default function JournalHomeScreen() {
               <ThemedText type="meta">{t('allActivity')}</ThemedText>
             </Pressable>
           </View>
-          <View style={[styles.cardGroup, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>{dashboard.activityRows.map((transaction, index) => <React.Fragment key={transaction.id}>
+          <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map((transaction, index) => <React.Fragment key={transaction.id}>
             {(index === 0 || transaction.date !== dashboard.activityRows[index - 1].date) &&
               <View style={styles.dateLabel}><View style={[styles.dateDot, { backgroundColor: theme.textTertiary }]} />
                 <ThemedText type="meta" themeColor="textSecondary">{shortDate(transaction.date)}</ThemedText>
@@ -263,9 +254,6 @@ export default function JournalHomeScreen() {
             <ThemedText type="meta">{tf('unreadFormatCount', { count: dashboard.unreadFormats.count,
               s: dashboard.unreadFormats.count === 1 ? '' : 's' })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable> : null}
-          <Pressable onPress={() => router.push('/wallet')} accessibilityRole="button" style={styles.footerAction}>
-            <ThemedText type="meta" themeColor="textSecondary">{words.accounts}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
         </View>
       </>}
     </ScreenScaffold>
@@ -277,14 +265,14 @@ export default function JournalHomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { gap: 12 },
+  screen: { gap: 24 },
   loading: { gap: 20, paddingTop: 20 },
   grow: { flex: 1, minWidth: 0 },
   section: { paddingTop: 2, paddingBottom: 0 },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 2 },
   sectionTitle: { fontSize: 17, lineHeight: 24 },
   smallAction: { minHeight: 48, minWidth: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  cardGroup: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, overflow: 'hidden' },
+  cardGroup: { borderTopWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
   dateLabel: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingTop: 12, paddingBottom: 0 },
   dateDot: { height: 4, width: 4, borderRadius: 2 },
   dateRule: { height: StyleSheet.hairlineWidth, flex: 1 },

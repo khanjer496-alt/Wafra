@@ -161,7 +161,12 @@ export default function WalletScreen() {
    * The useful fact here is the latest balance the banks actually reported;
    * card debt remains beside its statements and payment state below.
    */
-  const balances = useMemo(() => netWorthBreakdown(state), [state]);
+  const balances = useMemo(
+    () => netWorthBreakdown(state),
+    // The shared balance calculator reads only accounts and transactions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions],
+  );
   const balanceAccountCoverage = useMemo(() => {
     const accounts = state.accounts.filter(
       (account) => !account.archived && account.cardType !== 'credit',
@@ -178,8 +183,14 @@ export default function WalletScreen() {
           known: balanceAccountCoverage.known,
           total: balanceAccountCoverage.total,
         });
-  const dues = useMemo(() => openDues(state, now), [state, now]);
-  const reissues = useMemo(() => reissueSuggestions(state, now), [state, now]);
+  // cards.ts reads these three immutable arrays. Import progress, settings and
+  // review status do not change statements or justify another ledger scan.
+  const dues = useMemo(() => openDues(state, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, state.cardDues, now]);
+  const reissues = useMemo(() => reissueSuggestions(state, now),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, state.cardDues, now]);
   // Totalled AS SHOWN, because this figure is printed directly above the
   // rows it covers. Summing the exact fils and rounding once gives a heading
   // that can differ from its own list by a dirham — the same defect that put
@@ -194,11 +205,14 @@ export default function WalletScreen() {
   const [showInactive, setShowInactive] = useState(false);
   const activeSources = useMemo(
     () => state.accounts.filter((account) => !isInactiveAccount(state, account, now)),
-    [state, now],
+    // Activity depends on account snapshots and transaction dates only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, now],
   );
   const inactiveAccounts = useMemo(
     () => state.accounts.filter((a) => isInactiveAccount(state, a, now)),
-    [state, now],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, now],
   );
   const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
     showInactive ? t('hide') : t('show')
@@ -216,7 +230,9 @@ export default function WalletScreen() {
   );
   const cashOut = useMemo(
     () => summarizeCashOutflow(state, monthKey(now), { live: liveAccounts, internal }),
-    [state, now, liveAccounts, internal],
+    // Include the setting that changes the global reporting-month boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.accounts, state.transactions, state.cardDues, state.monthStartDay, now, liveAccounts, internal],
   );
   /**
    * Both halves of a move between the user's own accounts are excluded, as
@@ -252,7 +268,9 @@ export default function WalletScreen() {
     const freshness = due ? `${language === 'ar' ? 'الاستحقاق' : 'Due'} ${shortDate(due.due.dueDate)}`
       : account.snapshotTs ? `${language === 'ar' ? 'آخر تحديث' : 'Updated'} ${shortDate(toISODate(new Date(account.snapshotTs)))}` : '';
     return { account, figureFils, caption, freshness };
-  }), [activeSources, state, now, dues, language]);
+  // Captions also follow language; unrelated store metadata must not rescan rows.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [activeSources, state.accounts, state.transactions, state.cardDues, now, dues, language]);
 
   const saveAccount = () => {
     if (!name.trim()) return;

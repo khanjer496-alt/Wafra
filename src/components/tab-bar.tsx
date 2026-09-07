@@ -15,10 +15,10 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { SpringPressable } from '@/components/ui/spring-pressable';
 import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { tapped } from '@/lib/haptics';
-import { t, type Lang, type StringKey } from '@/lib/i18n';
-import { useStore } from '@/lib/store';
+import { t, type StringKey } from '@/lib/i18n';
 import { useTheme } from '@/hooks/use-theme';
 
 const TAB_ICONS: Record<string, IconName> = {
@@ -127,19 +127,9 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { measuredHeight, setMeasuredHeight } = useTabBarMetrics();
-  /**
-   * The language, read off the store and passed into every `t()` below.
-   *
-   * Two things had to be true and only one was. React-navigation re-renders a
-   * tab bar when the NAVIGATION state changes and nothing else, so the bar had
-   * to subscribe to the store — and `t()` reading a module-level variable is
-   * invisible to React Compiler's memoisation, so the label had to take the
-   * language as an argument. With only the first, switching to Arabic in
-   * Settings and pressing Back left five English labels under four Arabic
-   * screens until the user happened to change tabs.
-   */
-  const { state: store } = useStore();
-  const lang: Lang = store.language === 'ar' ? 'ar' : 'en';
+  // Language remains reactive and explicit to t(), without subscribing the
+  // navigation controls to every transaction and history-progress update.
+  const lang = useLanguage();
 
   const routes = state.routes.filter((r) => TAB_ICONS[r.name]);
 

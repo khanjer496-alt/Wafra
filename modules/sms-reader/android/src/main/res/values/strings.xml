@@ -10,6 +10,10 @@
   waiting to happen.
 -->
 <resources>
+  <string name="wafra_history_channel">History import</string>
+  <string name="wafra_history_title">Reading your bank alert history</string>
+  <string name="wafra_history_body">You can use other apps. Your progress is saved on this phone.</string>
+  <string name="wafra_history_pause">Pause</string>
   <string name="wafra_alert_title">%1$s spent</string>
   <string name="wafra_alert_title_named">%1$s · %2$s</string>
   <string name="wafra_alert_title_credit">%1$s received</string>

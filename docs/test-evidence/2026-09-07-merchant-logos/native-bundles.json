@@ -1,0 +1,18 @@
+{
+  "baseCommit": "c13fd461073e8139a1dfd79fef5cd039ffbc85d2",
+  "results": [
+    {
+      "platform": "ios",
+      "passed": true,
+      "bundledMerchantLogos": 34,
+      "bundle": "_expo/static/js/ios/entry-ca23a8d72394c5ab798a15530ccc65fd.hbc"
+    },
+    {
+      "platform": "android",
+      "passed": true,
+      "bundledMerchantLogos": 34,
+      "bundle": "_expo/static/js/android/entry-dc9dd58dc8125f2752f6c39fbb4d257e.hbc"
+    }
+  ],
+  "onDeviceTested": false
+}

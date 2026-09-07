@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
+import { Platform } from 'react-native';
 
 import { WafraTabBar } from '@/components/tab-bar';
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
@@ -51,7 +52,10 @@ export default function TabsLayout() {
     <TabBarMetricsProvider>
       <CaptureOwner />
       <Tabs
-        screenOptions={{ headerShown: false }}
+        // Detaching native views alone does not stop hidden React consumers
+        // processing each import update. Keep their state, but suspend hidden
+        // Android renders. CaptureOwner above remains live outside the tabs.
+        screenOptions={{ headerShown: false, freezeOnBlur: Platform.OS === 'android' }}
         tabBar={(props) => <WafraTabBar {...props} />}>
         <Tabs.Screen name="index" />
         <Tabs.Screen name="flow" />

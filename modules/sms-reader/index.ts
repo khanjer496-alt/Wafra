@@ -15,6 +15,10 @@ export interface InboxSms extends RawSms {
 export type CorpusSms = InboxSms;
 
 interface SmsReaderModule {
+  /** Optional on older binaries. Starts only while the activity is foregrounded. */
+  startHistoryImport?(sessionId: string): Promise<boolean>;
+  isHistoryImportRunning?(sessionId: string): boolean;
+  stopHistoryImport?(sessionId: string): Promise<void>;
   /** Newest-first page after the exclusive (date,id) cursor, up to max. */
   getInboxSms(
     sinceMs: number,

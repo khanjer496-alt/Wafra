@@ -16,6 +16,7 @@ module.exports = defineConfig([
     // .gitignore does not help — eslint walks the filesystem, not the index.
     ignores: [
       "dist/*",
+      "builds/**",
       "scripts/test/build/*",
       "android/*",
       "ios/*",

@@ -4,6 +4,10 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.Telephony
+import android.os.Handler
+import android.os.Looper
+import com.facebook.react.common.LifecycleState
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.exception.CodedException
@@ -25,6 +29,25 @@ private class SmsInboxAccessException(
 class SmsReaderModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SmsReader")
+
+    AsyncFunction("startHistoryImport") { id: String, promise: Promise ->
+      Handler(Looper.getMainLooper()).post {
+        val context = appContext.reactContext
+        if (context == null || context.lifecycleState != LifecycleState.RESUMED ||
+          context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+          promise.resolve(false)
+        } else {
+          SmsHistoryImportService.start(context, id) { promise.resolve(it) }
+        }
+      }
+    }
+    Function("isHistoryImportRunning") { id: String -> SmsHistoryImportService.isRunning(id) }
+    AsyncFunction("stopHistoryImport") { id: String, promise: Promise ->
+      Handler(Looper.getMainLooper()).post {
+        appContext.reactContext?.let { SmsHistoryImportService.stop(it, id) }
+        promise.resolve()
+      }
+    }
 
     // Older releases buffered full delivery bodies in ordinary preferences.
     // The receiver no longer writes them; purge that archive on every module

@@ -8,7 +8,7 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button, Chip, Toggle } from '@/components/ui/controls';
 import { Block, LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
-import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
@@ -174,7 +174,7 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
   return (
     <BottomSheet visible onClose={onClose} title={editing ? t('editEntry') : t('entryDetail')}>
       <View style={styles.head}>
-        <CategoryAvatar category={transaction.category} size={64} />
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
         <View style={styles.headText}>
           <ThemedText type="heading" style={{ textAlign: 'center' }}>
             {transaction.title}

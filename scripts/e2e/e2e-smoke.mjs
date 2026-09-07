@@ -218,7 +218,7 @@ await page.waitForTimeout(2200);
 
 // ── Home ──────────────────────────────────────────────────────────────
 ok('home hero states the net result', !!(await visibleText(page, /Net after spending/i)));
-ok('home splits income and spending', await page.locator('[data-testid="reference-month-cards"]').getByText('Spending',{exact:true}).count() === 1);
+ok('home splits income and spending', await page.getByTestId('home-spending-total').count() === 1 && await page.getByTestId('home-income-summary').count() === 1);
 ok('home lists upcoming obligations', !!(await visibleText(page, /^(Upcoming|Coming up)$/i)));
 ok('home links to all activity', !!(await visibleText(page, /ALL ACTIVITY/i)));
 

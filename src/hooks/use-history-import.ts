@@ -1,6 +1,7 @@
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { AppState as RNAppState, Platform } from 'react-native';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
+import { historyBackground } from '@/lib/android-history-background';
 
 import {
   buildImportPlan,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/auto-import';
 import {
   createHistoryImportCoordinator,
+  subscribeHistoryImportRequest,
   type HistoryImportCursor,
   type HistoryImportPage,
 } from '@/lib/history-import';
@@ -21,8 +23,9 @@ type HistoryScanPage = ScanResult & HistoryImportPage;
 
 /**
  * Owns Android's resumable first-history read at the tab-shell level.
- * Provider pages and their cursors are durably committed together. A return
- * to the foreground resumes at that boundary, never by replaying all history.
+ * Provider pages and their cursors are durably committed together. A bounded
+ * foreground service keeps this same coordinator alive when the app backgrounds.
+ * Older binaries and process death still resume at the last saved boundary.
  */
 export function useHistoryImport(): void {
   const {
@@ -34,8 +37,12 @@ export function useHistoryImport(): void {
     setHistoryImportProgress,
     setMarket,
   } = useStore();
-  const stateRef = useRef(state);
-  stateRef.current = state;
+  const canStart = useCallback(() => {
+    const current = getStateSnapshot();
+    return Platform.OS === 'android' && current.hydrated && current.onboarded &&
+      !current.captureOptOut && isProActive(current) &&
+      (current.historyImport?.status === 'paused' || current.historyImport?.status === 'running');
+  }, [getStateSnapshot]);
 
   const coordinator = useMemo(() => createHistoryImportCoordinator<HistoryScanPage>({
     getProgress: () => getStateSnapshot().historyImport,
@@ -43,7 +50,7 @@ export function useHistoryImport(): void {
     shouldContinue: () => {
       const current = getStateSnapshot();
       return Platform.OS === 'android' &&
-        RNAppState.currentState === 'active' &&
+        historyBackground.canContinue() &&
         current.hydrated &&
         current.onboarded &&
         !current.captureOptOut &&
@@ -116,23 +123,30 @@ export function useHistoryImport(): void {
 
   const runnable = state.historyImport?.status === 'paused' ||
     state.historyImport?.status === 'running';
+  const run = useCallback(() => historyBackground.run(() => coordinator.run(), canStart), [canStart, coordinator]);
 
   useEffect(() => {
     if (!runnable || Platform.OS !== 'android') return;
-    void coordinator.run().catch(() => {
+    void run().catch(() => {
       // The coordinator has persisted a body-free failure. Home and Settings
       // own recovery; a failed cursor must not be marked complete to unblock UI.
     });
-  }, [coordinator, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
+  }, [run, runnable, state.captureOptOut, state.hydrated, state.onboarded]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const unsubscribe = subscribeHistoryImportRequest(() => { void run().catch(() => {}); });
+    return () => { unsubscribe(); historyBackground.cancel(); };
+  }, [run]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const subscription = RNAppState.addEventListener('change', (next) => {
       if (next !== 'active') return;
-      const progress = stateRef.current.historyImport;
+      const progress = getStateSnapshot().historyImport;
       if (progress?.status !== 'paused' && progress?.status !== 'running') return;
-      void coordinator.run().catch(() => {});
+      void run().catch(() => {});
     });
     return () => subscription.remove();
-  }, [coordinator]);
+  }, [getStateSnapshot, run]);
 }

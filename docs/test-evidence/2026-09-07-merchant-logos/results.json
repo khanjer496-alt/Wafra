@@ -1,0 +1,62 @@
+{
+  "results": [
+    {
+      "name": "Home light: bundled logos decode",
+      "passed": true
+    },
+    {
+      "name": "Activity light: real logos replace category icons",
+      "passed": true
+    },
+    {
+      "name": "Detail light: same identity as its transaction row",
+      "passed": true
+    },
+    {
+      "name": "Trends light: top merchants have logos",
+      "passed": true
+    },
+    {
+      "name": "Bills light: payment agenda has logos",
+      "passed": true
+    },
+    {
+      "name": "Offline light: previously displayed logos remain available",
+      "passed": true
+    },
+    {
+      "name": "Home dark: bundled logos decode",
+      "passed": true
+    },
+    {
+      "name": "Activity dark: real logos replace category icons",
+      "passed": true
+    },
+    {
+      "name": "Detail dark: same identity as its transaction row",
+      "passed": true
+    },
+    {
+      "name": "Trends dark: top merchants have logos",
+      "passed": true
+    },
+    {
+      "name": "Bills dark: payment agenda has logos",
+      "passed": true
+    },
+    {
+      "name": "Offline dark: previously displayed logos remain available",
+      "passed": true
+    },
+    {
+      "name": "No external image requests",
+      "passed": true
+    },
+    {
+      "name": "No JavaScript page errors",
+      "passed": true
+    }
+  ],
+  "externalImages": [],
+  "errors": []
+}

@@ -2,6 +2,22 @@
 import type { MonthSummary } from '@/lib/insights';
 import type { Budget, CategoryId } from '@/lib/types';
 
+/** The denominator is the whole selected period, never the filtered category list. */
+export function spendingShare(spentFils: number, totalFils: number): number {
+  if (!Number.isFinite(spentFils) || !Number.isFinite(totalFils) || spentFils <= 0 || totalFils <= 0) return 0;
+  return Math.min(1, spentFils / totalFils);
+}
+
+export function spendingShareLabel(share: number, language: string): string {
+  const value = Number.isFinite(share) ? Math.min(1, Math.max(0, share)) : 0;
+  const format = new Intl.NumberFormat(language === 'ar' ? 'ar-AE' : 'en', {
+    style: 'percent', maximumFractionDigits: 1,
+  });
+  return value > 0 && value < 0.001
+    ? `${language === 'ar' ? 'أقل من ' : '<'}${format.format(0.001)}`
+    : format.format(value);
+}
+
 export interface SpendingCategoryRow {
   category: CategoryId;
   spentFils: number;
@@ -39,11 +55,14 @@ export function limitedCategorySummary(rows: readonly SpendingCategoryRow[]) {
 }
 
 export type AgendaSection = 'overdue' | 'expected-earlier' | 'soon' | 'later' | 'paid';
+export type PaymentGroup = 'subscriptions' | 'utilities' | 'cards' | 'loans' | 'other';
 export interface PaymentAgendaItem {
   id: string;
   title: string;
   category: CategoryId;
   kind: 'card' | 'bill' | 'recurring';
+  /** Subscription identity comes from detection, not an entertainment/software guess. */
+  group?: PaymentGroup;
   dateISO: string;
   daysLeft: number;
   amountFils: number;
@@ -51,6 +70,21 @@ export interface PaymentAgendaItem {
   paid: boolean;
   /** Exact account supplied by the source; omit rather than guess. */
   accountName?: string;
+}
+
+export function paymentGroupFor(item: Pick<PaymentAgendaItem, 'kind' | 'category' | 'group'>): PaymentGroup {
+  if (item.kind === 'card') return 'cards';
+  if (item.group) return item.group;
+  if (item.category === 'utilities' || item.category === 'telecom') return 'utilities';
+  return item.category === 'loan' ? 'loans' : 'other';
+}
+
+/** Separate what a payment is before showing when it is due. */
+export function groupPaymentKinds(items: readonly PaymentAgendaItem[], includePaid: boolean) {
+  const order: PaymentGroup[] = ['subscriptions', 'utilities', 'cards', 'loans', 'other'];
+  return order.map((key) => ({ key,
+    sections: groupPaymentAgenda(items.filter((item) => paymentGroupFor(item) === key), includePaid),
+  })).filter((group) => group.sections.length > 0 || group.key === 'subscriptions' || group.key === 'utilities');
 }
 export function groupPaymentAgenda(items: readonly PaymentAgendaItem[], includePaid: boolean) {
   const order: AgendaSection[] = ['overdue', 'expected-earlier', 'soon', 'later', 'paid'];

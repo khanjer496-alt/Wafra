@@ -12,7 +12,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED } from '@/lib/format';
-import { limitedCategorySummary, type SpendingCategoryRow } from '@/lib/reference-presentation';
+import { limitedCategorySummary, spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import type { CategoryId } from '@/lib/types';
 
 export type CategoryFilter = 'all' | 'limited' | 'unlimited';
@@ -41,25 +41,17 @@ export function SpendingOverview(p: Props) {
   const health = (ratio: number | null) => ratio !== null && ratio > 1 ? theme.expenseGraphic
     : ratio !== null && ratio >= 0.85 ? theme.warningGraphic : theme.primary;
   return <View style={styles.root} testID="spending-categories">
-    <View style={[styles.overview, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+    <View style={styles.overview}>
       <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod} style={styles.period}>
         <ThemedText type="smallBold">{w.spent}</ThemedText>
         <View style={styles.periodRight}><ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
           <Icon name="chevron-down" size={15} color={theme.textSecondary} /></View>
       </Pressable>
       <Money fils={p.totalFils} type="amount" />
-      {limited.count > 0 ? <View style={styles.budgetSummary} testID="limited-category-summary">
-        <ThemedText type="meta" themeColor="textSecondary">{w.limited} · {limited.count}</ThemedText>
-        <View style={[styles.summaryLine, large && styles.stack]}>
-          <ThemedText type="small" tabular>{formatAED(limited.spentFils)} {w.of} {formatAED(limited.limitFils)}</ThemedText>
-          <ThemedText type="meta" tabular themeColor={limited.ratio! > 1 ? 'expense' : 'textSecondary'}>
-            {Math.round(limited.ratio! * 100)}% {w.used}</ThemedText>
-        </View>
-        <ProgressBar ratio={limited.ratio!} color={health(limited.ratio)} height={7} />
-      </View> : <ThemedText type="meta" themeColor="textSecondary">
-        {p.monthScoped ? w.noLimit : w.monthlyOnly}</ThemedText>}
+      <ThemedText type="meta" themeColor="textSecondary">{w.shareNote}</ThemedText>
     </View>
 
+    <ThemedText type="heading">{w.breakdown}</ThemedText>
     {p.monthScoped && <View style={styles.filters} accessibilityLabel={w.categories}>
       {([{ key: 'all', label: w.all }, { key: 'limited', label: w.withLimits }, { key: 'unlimited', label: w.noLimits }] as const)
         .map(({ key, label }) => <Pressable key={key} accessibilityRole="button" accessibilityLabel={label}
@@ -70,8 +62,11 @@ export function SpendingOverview(p: Props) {
     </View>}
 
     <View style={styles.categories}>
-      {rows.map((row) => <Pressable key={row.category} accessibilityRole="button"
-        accessibilityLabel={`${categoryLabel(row.category, language)}. ${formatAED(row.spentFils)}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${formatAED(row.limitFils)}`}`}
+      {rows.map((row) => {
+        const share = spendingShare(row.spentFils, p.totalFils);
+        const shareLabel = spendingShareLabel(share, language);
+        return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
+        accessibilityLabel={`${categoryLabel(row.category, language)}. ${formatAED(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${w.withLimits}: ${formatAED(row.limitFils)}`}`}
         onPress={() => p.onCategory(row.category)}
         style={({ pressed }) => [styles.category, { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
         <CategoryAvatar category={row.category} size={44} />
@@ -80,34 +75,47 @@ export function SpendingOverview(p: Props) {
             <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(row.category, language)}</ThemedText>
             <Money fils={row.spentFils} type="smallBold" />
           </View>
-          {row.limitFils !== null ? <>
-            <ProgressBar ratio={row.ratio!} color={health(row.ratio)} height={5} />
+          <View style={styles.categoryBottom}>
+            <ThemedText type="meta" tabular style={{ color: theme.primary }} testID={`spending-share-${row.category}`}>
+              {shareLabel} {w.share}</ThemedText>
+            <Icon name="chevron-right" size={14} color={theme.textTertiary} />
+          </View>
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+            <ProgressBar ratio={share} color={theme.primary} height={4} />
+          </View>
+          {row.limitFils !== null && <>
             <View style={[styles.categoryBottom, large && styles.stack]}>
               <ThemedText type="meta" themeColor={row.remainingFils! < 0 ? 'expense' : 'textSecondary'} style={styles.caption}>
                 {formatAED(Math.abs(row.remainingFils!))} {row.remainingFils! < 0 ? w.over : w.left}</ThemedText>
               <ThemedText type="meta" tabular themeColor="textTertiary" style={styles.caption}>
-                {Math.round(row.ratio! * 100)}%</ThemedText>
+                {Math.round(row.ratio! * 100)}% {w.budgetUsed}</ThemedText>
             </View>
-          </> : <View style={styles.categoryBottom}>
-            <ThemedText type="meta" themeColor="textTertiary">{p.monthScoped ? w.noLimit : w.details}</ThemedText>
-            <Icon name="chevron-right" size={14} color={theme.textTertiary} />
-          </View>}
+          </>}
         </View>
-      </Pressable>)}
+      </Pressable>; })}
       {rows.length === 0 && <View style={[styles.empty, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
         <Icon name="chart" size={28} color={theme.primary} />
         <ThemedText type="smallBold">{p.rows.length === 0 ? w.empty : w.emptyFilter}</ThemedText>
         {p.rows.length === 0 && <ThemedText type="meta" themeColor="textSecondary">{w.emptyBody}</ThemedText>}
       </View>}
     </View>
+    {limited.count > 0 && <View style={[styles.budgetSummary, { backgroundColor: theme.card, borderColor: theme.cardBorder }]} testID="limited-category-summary">
+      <ThemedText type="smallBold">{w.limited} · {limited.count}</ThemedText>
+      <View style={[styles.summaryLine, large && styles.stack]}>
+        <ThemedText type="meta" tabular>{formatAED(limited.spentFils)} {w.of} {formatAED(limited.limitFils)}</ThemedText>
+        <ThemedText type="meta" tabular themeColor={limited.ratio! > 1 ? 'expense' : 'textSecondary'}>
+          {Math.round(limited.ratio! * 100)}% {w.used}</ThemedText>
+      </View>
+      <ProgressBar ratio={limited.ratio!} color={health(limited.ratio)} height={5} />
+    </View>}
     {p.monthScoped && <Button label={w.newLimit} variant="outline" icon="plus" onPress={p.onNewLimit} />}
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 16 }, overview: { borderWidth: 1, borderRadius: 20, padding: 18, gap: 12 },
+  root: { gap: 18 }, overview: { paddingVertical: 12, gap: 12 },
   period: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, flexWrap: 'wrap' },
   periodRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  budgetSummary: { gap: 8 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
+  budgetSummary: { gap: 10, padding: 16, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 24, justifyContent: 'center' },
   categories: { gap: 4 }, category: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 2, borderRadius: 12 },
   categoryContent: { flex: 1, minWidth: 0, gap: 7 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },

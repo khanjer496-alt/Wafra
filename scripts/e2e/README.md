@@ -7,7 +7,18 @@
     node scripts/e2e/e2e-period.mjs     # period selector correctness across screens
     node scripts/e2e/e2e-navigation.mjs # presses every pressable on every screen
 
-`bash scripts/e2e/run.sh` does the export, the serve and all three.
+`bash scripts/e2e/run.sh` exports the seeded demo, serves it, and runs every suite
+listed in that script, including persistence, review, redesign and merchant logos.
+
+## Merchant-logo regression suite
+
+`node scripts/e2e/e2e-merchant-logos.mjs` checks Home, Spending Activity/Trends,
+transaction details and the payment agenda in light and dark modes. It verifies
+that the actual bundled images decode, the detail sheet has the same merchant
+identity as its row, and no external image host is requested. It also revisits
+previously displayed images after switching the browser context offline.
+Only synthetic demo data is used. `BASE` selects the local export server and
+`LOGO_EVIDENCE` overrides the default `artifacts/e2e-merchant-logos` evidence path.
 
 ## Why the navigation suite exists
 

@@ -1,4 +1,4 @@
-import { Linking, PermissionsAndroid, Platform } from 'react-native';
+import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
@@ -72,8 +72,12 @@ const createParseYieldState = (): ParseYieldState => ({ startedAt: Date.now(), p
 function parseYieldDue(state: ParseYieldState, hasMore: boolean): boolean {
   state.parsed += 1;
   if (!hasMore) return false;
-  const withinCount = state.parsed < MAX_PARSE_SLICE_SIZE;
-  const withinTime = Date.now() - state.startedAt < PARSE_TIME_BUDGET_MS;
+  // With a headless execution lease there is no visible frame to render.
+  // Reduce timer/bridge turns off-screen, but immediately restore the 8ms
+  // interactive budget when the user returns. Parsing and order do not change.
+  const background = RNAppState?.currentState === 'background';
+  const withinCount = state.parsed < (background ? MAX_PARSE_SLICE_SIZE * 4 : MAX_PARSE_SLICE_SIZE);
+  const withinTime = Date.now() - state.startedAt < (background ? PARSE_TIME_BUDGET_MS * 4 : PARSE_TIME_BUDGET_MS);
   return !withinCount || !withinTime;
 }
 

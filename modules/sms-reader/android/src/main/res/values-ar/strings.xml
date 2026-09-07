@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+  <string name="wafra_history_channel">استيراد السجل</string>
+  <string name="wafra_history_title">قراءة سجل تنبيهات البنك</string>
+  <string name="wafra_history_body">يمكنك استخدام تطبيقات أخرى. يُحفظ تقدمك على هذا الهاتف.</string>
+  <string name="wafra_history_pause">إيقاف مؤقت</string>
   <string name="wafra_alert_title">صُرف %1$s</string>
   <string name="wafra_alert_title_named">%1$s · %2$s</string>
   <string name="wafra_alert_title_credit">وصل %1$s</string>

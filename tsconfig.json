@@ -19,6 +19,7 @@
   ],
   "exclude": [
     "server",
+    "builds",
     "scripts/test/build"
   ]
 }

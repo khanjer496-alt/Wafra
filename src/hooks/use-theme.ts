@@ -3,6 +3,8 @@
  * https://docs.expo.dev/guides/color-schemes/
  */
 
+import { useMemo } from 'react';
+
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useIncreasedContrast } from '@/hooks/use-increased-contrast';
@@ -13,8 +15,9 @@ export function useTheme() {
   const increasedContrast = useIncreasedContrast();
   const palette = Colors[theme];
 
-  return {
+  // A stable palette lets memoized screen children skip unrelated renders.
+  return useMemo(() => ({
     ...palette,
     controlBorder: increasedContrast ? palette.controlBorderHigh : palette.controlBorder,
-  };
+  }), [palette, increasedContrast]);
 }

@@ -2,6 +2,17 @@
 export type HistoryImportStatus = 'paused' | 'running' | 'failed' | 'complete';
 export type HistoryImportError = 'page-failed' | 'inbox-access';
 
+// Explicit Resume must also work when the persisted status is already paused.
+// This source-free signal carries neither progress nor ledger data.
+const requestListeners = new Set<() => void>();
+export function subscribeHistoryImportRequest(listener: () => void): () => void {
+  requestListeners.add(listener);
+  return () => { requestListeners.delete(listener); };
+}
+export function requestHistoryImportRun(): void {
+  for (const listener of requestListeners) listener();
+}
+
 export interface HistoryImportCursor {
   beforeDateMs: number;
   beforeId: number;
