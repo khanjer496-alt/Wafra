@@ -489,9 +489,11 @@ await goesTo('Settings feedback', () => settingsPanel('Help'), 'Send feedback', 
 /* ── 3. Search, manual entry, cancellation and filter clearing ────────── */
 {
   await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/);
-  const search = page.getByPlaceholder('Search merchants or categories', { exact: true }).last();
+  const search = page.getByPlaceholder('Merchant or category', { exact: true }).last();
   await search.waitFor({ state: 'visible' });
   ok('Transactions exposes its real merchant search field', await search.isEditable());
+  ok('Transactions search preserves its complete accessible name',
+    await search.getAttribute('aria-label') === 'Search merchants or categories');
   const added = await tapKey(page, 'Add transaction', 5000);
   await page.waitForTimeout(500);
   ok('Add transaction opens the form', added === true && /^\/add-transaction/.test(await url(page)));
