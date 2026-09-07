@@ -1,0 +1,94 @@
+name: Read-only Wafra TestFlight status
+on:
+  push:
+    branches: ['check/ios-testflight-status-20260907']
+    paths: ['.github/workflows/ios-testflight-status.yml']
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+      - name: Read Apple build and public group status without changing distribution
+        env:
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createPrivateKey, sign } from 'node:crypto';
+          import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+          const APP='6799171482', BUNDLE='app.wafra.ios', GROUP='c0ee30af-8b26-408c-8ebf-aaa5530fcac7';
+          const report={checkedAt:new Date().toISOString(),appId:APP,mode:'read-only',appleWrites:0};
+          let stage='credentials';
+          try {
+            const raw=process.env.EXPO_ASC_API_KEY_P8, kid=process.env.EXPO_ASC_KEY_ID, iss=process.env.EXPO_ASC_ISSUER_ID;
+            if(!raw || !kid || !iss) throw new Error('credentials-missing');
+            const key=createPrivateKey(raw.includes('BEGIN PRIVATE KEY')?raw:Buffer.from(raw.replace(/\s/g,''),'base64').toString('utf8'));
+            const b64=o=>Buffer.from(JSON.stringify(o)).toString('base64url');
+            async function read(path) {
+              const url=new URL(path,'https://api.appstoreconnect.apple.com/v1/');
+              if(url.origin!=='https://api.appstoreconnect.apple.com' || !url.pathname.startsWith('/v1/')) throw new Error('unexpected-API-location');
+              const now=Math.floor(Date.now()/1000);
+              const head=b64({alg:'ES256',kid,typ:'JWT'})+'.'+b64({iss,iat:now,exp:now+600,aud:'appstoreconnect-v1'});
+              const jwt=head+'.'+sign('sha256',Buffer.from(head),{key,dsaEncoding:'ieee-p1363'}).toString('base64url');
+              const response=await fetch(url,{method:'GET',headers:{Authorization:'Bearer '+jwt},signal:AbortSignal.timeout(30000)});
+              if(!response.ok) {report.httpStatus=response.status;throw new Error('apple-read-failed');}
+              return response.json();
+            }
+            stage='app-identity';
+            const app=await read(`apps/${APP}?fields[apps]=bundleId,name`);
+            if(app.data.attributes.bundleId!==BUNDLE) throw new Error('app-identity-mismatch');
+            report.appName=app.data.attributes.name;report.bundleId=BUNDLE;
+            stage='public-group';
+            const g=(await read(`betaGroups/${GROUP}?include=app`)).data;
+            if(g.relationships?.app?.data?.id!==APP || g.attributes.isInternalGroup) throw new Error('public-group-identity-mismatch');
+            report.publicGroup={name:g.attributes.name,publicLink:g.attributes.publicLink,enabled:g.attributes.publicLinkEnabled,limitEnabled:g.attributes.publicLinkLimitEnabled,limit:g.attributes.publicLinkLimit};
+            const memberIds=new Set();
+            let next=`betaGroups/${GROUP}/relationships/builds?limit=200`,pages=0;
+            while(next) {
+              if(++pages>20) throw new Error('group-pagination-budget');
+              const page=await read(next);
+              for(const b of page.data)if(b.type==='builds')memberIds.add(b.id);
+              next=page.links?.next;
+            }
+            stage='builds';
+            const data=await read(`builds?filter[app]=${APP}&sort=-uploadedDate&limit=100&include=preReleaseVersion,buildBetaDetail`);
+            const included=new Map((data.included??[]).map(v=>[v.type+':'+v.id,v]));
+            const related=(b,name)=>{const ref=b.relationships?.[name]?.data;return ref?included.get(ref.type+':'+ref.id)?.attributes:null;};
+            const builds=data.data.map(b=>{
+              const version=related(b,'preReleaseVersion'),beta=related(b,'buildBetaDetail');
+              return {id:b.id,version:version?.version,platform:version?.platform,buildNumber:b.attributes.version,uploadedDate:b.attributes.uploadedDate,expirationDate:b.attributes.expirationDate,processingState:b.attributes.processingState,expired:b.attributes.expired,internalState:beta?.internalBuildState,externalState:beta?.externalBuildState,inPublicGroup:memberIds.has(b.id)};
+            });
+            report.recentBuilds=builds.slice(0,15);
+            report.latestUploaded=builds.find(b=>b.platform==='IOS')??null;
+            report.latestPublic=builds.find(b=>b.platform==='IOS'&&b.inPublicGroup&&!b.expired&&b.processingState==='VALID'&&b.externalState==='IN_BETA_TESTING')??null;
+            report.publicLinkEnabled=!!g.attributes.publicLinkEnabled;
+            report.buildListingHasMore=!!data.links?.next;
+            if(report.latestPublic){
+              stage='test-notes';
+              const notes=await read(`builds/${report.latestPublic.id}/betaBuildLocalizations?limit=50`);
+              report.latestPublicTestNotes=notes.data.filter(n=>n.attributes.locale==='en-US').map(n=>({locale:n.attributes.locale,whatsNew:n.attributes.whatsNew}));
+            }
+            report.outcome=report.latestPublic&&report.publicLinkEnabled?'public-beta-available':'no-public-beta-confirmed';
+          } catch(error) {
+            report.outcome='check-failed';report.failedStage=stage;
+            report.error=['credentials-missing','app-identity-mismatch','public-group-identity-mismatch','apple-read-failed','unexpected-API-location','group-pagination-budget'].includes(error.message)?error.message:'request-or-configuration-error';
+            process.exitCode=1;
+          } finally {
+            mkdirSync('ios-status-evidence',{recursive:true});
+            writeFileSync('ios-status-evidence/status.json',JSON.stringify(report,null,2)+'\n');
+            console.log(JSON.stringify(report,null,2));
+            if(process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,'## Read-only Wafra TestFlight status\n\n```json\n'+JSON.stringify(report,null,2)+'\n```\n');
+          }
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-testflight-live-status
+          path: ios-status-evidence/
+          retention-days: 7
