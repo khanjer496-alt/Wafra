@@ -1,0 +1,224 @@
+name: Transaction UI fix verification
+on:
+  push:
+    branches: [fix/transaction-ui-20260908]
+    paths: [.github/workflows/transaction-ui-fix-check.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - name: Check isolated checkout and install locked dependencies
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = fix/transaction-ui-20260908
+          test -z "$(git status --porcelain)"
+          test "$(git remote get-url origin)" = https://github.com/khanjer496-alt/Wafra
+          mkdir -p transaction-ui-evidence
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          sudo apt-get install -y sqlite3
+      - name: Prove the reported regressions fail before source edits
+        run: |
+          set +e
+          node --test scripts/test/repair/transaction-ui-regression.test.cjs > transaction-ui-evidence/regression-before.log 2>&1
+          STATUS=$?
+          test "$STATUS" -ne 0
+          grep -q 'ERR_ASSERTION' transaction-ui-evidence/regression-before.log
+      - name: Apply narrowly checked source corrections
+        id: source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          expected={
+            'src/app/transactions.tsx':'796baaf351960f3c766dd91d81fe105d69079ba0',
+            'src/components/entry-detail-sheet.tsx':'c8d82d73efc83d602dfa5f43d63862f73511d8d8',
+            'src/components/ui/bottom-sheet.tsx':'e94f0675d7108ee353765c66c8bb1bd687d67c10',
+            'src/components/ui/merchant-logo-assets.ts':'32cf32860879ef19ad75e6dd99ae15d5ca2d942e',
+            'src/lib/i18n.ts':'a56a3e008a89daf549ea71901a83bcc8480cd43c',
+          }
+          for path,want in expected.items():
+            assert subprocess.check_output(['git','hash-object',path],text=True).strip()==want,path+' changed; do not overwrite'
+          def edit(path,before,after):
+            p=Path(path);s=p.read_text();assert s.count(before)==1,(path,before[:70]);p.write_text(s.replace(before,after))
+          f='src/lib/i18n.ts'
+          edit(f,'const S = {\n',"""const S = {
+            // Transaction list and details: concise visible labels, complete semantics.
+            transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
+            transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
+            transactionNetTotal: { en: 'Net total', ar: 'صافي المجموع' },
+            transactionDateLabel: { en: 'Transaction date', ar: 'تاريخ العملية' },
+          """)
+          f='src/components/ui/merchant-logo-assets.ts'
+          edit(f,"['Noon', 'Noon.com', 'Noon Food'", "['Noon', 'Noon.com', 'Noon One', 'Noon Food'")
+          f='src/app/transactions.tsx'
+          edit(f,'  Platform,\n','  Keyboard,\n  Platform,\n')
+          edit(f,'const openEntry = useCallback((tx: Transaction) => setEditing(tx), []);', 'const openEntry = useCallback((tx: Transaction) => {\n    Keyboard.dismiss();\n    setEditing(tx);\n  }, []);')
+          edit(f,"label={tr('searchMerchants')}\n                    value={query}","label={tr('transactionSearchLabel')}\n                    accessibilityLabel={tr('searchMerchants')}\n                    accessibilityHint={tr('searchMerchants')}\n                    value={query}")
+          edit(f,"placeholder={tr('searchMerchants')}","placeholder={tr('transactionSearchPlaceholder')}\n                    onSubmitEditing={() => Keyboard.dismiss()}")
+          edit(f,'onPress={() => setSheetVisible(true)}','onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}')
+          edit(f,'<View style={styles.summaryRow}>','<View testID="transactions-summary" style={styles.summaryRow}>')
+          p=Path(f);s=p.read_text()
+          start=s.index('            {/* Takes the space that is left, and no more.')
+          end=s.index('            <ThemedText type="small"',start)
+          s=s[:start]+'            {/* Full-width metadata; money and exclusions have their own lines. */}\n'+s[end:]
+          start=s.index('              {excluded.transfers > 0',start)
+          end=s.index('\n            </ThemedText>',start)
+          exclusions=s[start:end]
+          s=s[:start]+s[end:]
+          start=s.index('            <View style={styles.summaryRight}>')
+          amountstart=s.index('              <ThemedText',start)
+          amountend=s.index('\n              {activeFilterCount > 0',amountstart)
+          original=s[amountstart:amountend]
+          replacement='''              <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
+                          <ThemedText type="small" themeColor="textSecondary">{tr('transactionNetTotal')}</ThemedText>
+          '''+original+'''
+                        </View>'''
+          s=s[:amountstart]+replacement+s[amountend:]
+          marker='''            </View>
+                        </View>
+                      </View>
+                    )}'''
+          # Work on the existing JSX indentation, not financial computations.
+          marker='            </View>\n              </View>\n            </View>\n          )}'
+          assert s.count(marker)==1
+          # Explanations stay visible on their own full-width line, not in a
+          # narrow metadata column beside a nonshrinking amount.
+          exclusions=exclusions.replace('` · ${trf(\'transfersExcluded\'', '`'+'${trf(\'transfersExcluded\'')
+          exclusions=exclusions.replace('` · ${trf(\'hiddenAccountsExcluded\'', "`${excluded.transfers > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded'")
+          addition='''            </View>
+                        {(excluded.transfers > 0 || excluded.hidden > 0) && (
+                          <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
+          '''+exclusions+'''
+                          </ThemedText>
+                        )}
+                        </View>
+                      </View>
+                    )}'''
+          # Preserve the original indentation level after substitution.
+          addition=addition.replace('                        ', '              ').replace('                      ', '            ').replace('                    )}', '          )}')
+          s=s.replace(marker,addition)
+          s=s.replace('<View style={styles.sectionHeader}>','<View style={[styles.sectionHeader, largeText && styles.sectionHeaderLarge]}>')
+          p.write_text(s)
+          edit(f,"  summaryRow: {\n    flexDirection: 'row',\n    alignItems: 'center',\n    justifyContent: 'space-between',\n    gap: Spacing.two,\n  },", "  summaryRow: {\n    flexDirection: 'column',\n    alignItems: 'stretch',\n    gap: Spacing.two,\n  },\n  summaryValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minWidth: 0, flexShrink: 1 },\n  summaryValueLarge: { flexDirection: 'column', alignItems: 'flex-start' },")
+          edit(f,"    // The figure is the point of the row; it never gives up space.\n    flexShrink: 0,", "    flexWrap: 'wrap',\n    justifyContent: 'space-between',\n    minWidth: 0,")
+          edit(f,"  sectionHeader: {\n    flexDirection: 'row',", "  sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },\n  sectionHeader: {\n    flexWrap: 'wrap',\n    gap: Spacing.two,\n    flexDirection: 'row',")
+          f='src/components/entry-detail-sheet.tsx'
+          p=Path(f);s=p.read_text()
+          save='''          <View style={styles.actions}>
+                      <Button inline label={t('saveChanges')} onPress={save} disabled={!canSave} />
+                      <Button inline variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
+                    </View>'''
+          save='\n'.join(line[10:] if line.startswith('                    ') else line for line in save.split('\n'))
+          # Select complete, exact action blocks from their current source.
+          a=s.index('          <View style={styles.actions}>');b=s.index('          </View>',a)+len('          </View>')
+          save=s[a:b];assert "t('saveChanges')" in save and "t('cancel')" in save
+          s=s[:a]+s[b:]
+          a=s.index('          <View style={styles.actions}>');b=s.index('          </View>',a)+len('          </View>')
+          read=s[a:b];assert "t('editEntry')" in read and 'setConfirmingDelete(true)' in read
+          s=s[:a]+s[b:]
+          for name,block in [('save',save),('read',read)]:
+            block=block.replace('<View style={styles.actions}>','<View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>')
+            block=block.replace('<Button inline','<Button inline={!largeText} wrapLabel').replace('              inline\n','              inline={!largeText}\n              wrapLabel\n')
+            if name=='save':save=block
+            else:read=block
+          before="    <BottomSheet visible onClose={onClose} title={editing ? t('editEntry') : t('entryDetail')}>"
+          after="    <BottomSheet\n      visible\n      testID=\"entry-detail-sheet\"\n      onClose={onClose}\n      title={editing ? t('editEntry') : t('entryDetail')}\n      footer={editing ? (\n"+save+'\n      ) : (\n'+read+'\n      )}>'
+          assert s.count(before)==1;s=s.replace(before,after)
+          before="""                  <ThemedText type="small">
+                              {sourceLabel}
+                              {transaction.source === 'sms' ? ` · ${tf('filedOn', { date: shortDate(transaction.date) })}` : ''}
+                            </ThemedText>"""
+          # Replace just the mislabelled Source value and add the actual date.
+          a=s.index('                value: (\n                  <ThemedText type="small">\n                    {sourceLabel}')
+          b=s.index('\n              ...(transaction.originalCurrency',a)
+          s=s[:a]+'''                value: <ThemedText type="small">{sourceLabel}</ThemedText>,
+                        },
+                        {
+                          label: t('transactionDateLabel'),
+                          value: <ThemedText type="small">{stamp}</ThemedText>,
+                        },'''.replace('                        ', '              ').replace('                          ', '                ')+s[b:]
+          s=s.replace('  actions: {\n',"  actionsLarge: { flexDirection: 'column' },\n  actions: {\n    flexShrink: 0,\n")
+          p.write_text(s)
+          f='src/components/ui/bottom-sheet.tsx'
+          edit(f,'<ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">','<ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header" style={styles.title}>')
+          edit(f,'<View style={[styles.footer, { paddingBottom: bottomClearance }]}>{footer}</View>', '<View testID={testID ? `${testID}-footer` : undefined} style={[styles.footer, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>{footer}</View>')
+          edit(f,'  dragRegion: {\n','  title: { flex: 1, minWidth: 0 },\n  dragRegion: {\n    flexShrink: 0,\n')
+          edit(f,'  header: {\n','  header: {\n    gap: Spacing.two,\n')
+          edit(f,'  close: {\n','  close: {\n    flexShrink: 0,\n')
+          edit(f,'  footer: {\n', '  footer: {\n    flexShrink: 0,\n    borderTopWidth: StyleSheet.hairlineWidth,\n')
+          print('Applied five presentation-only source changes. Parser, totals, imports, storage, branding and dependencies untouched.')
+          PY
+          git diff --check
+          git diff -- src > transaction-ui-evidence/source.diff
+      - name: Focused regressions, typecheck, lint and full app/server tests
+        id: tests
+        continue-on-error: true
+        run: |
+          npx --no-install expo prebuild --platform ios --no-install
+          python3 - <<'PY'
+          import subprocess,pathlib,json
+          out=pathlib.Path('transaction-ui-evidence');results=[]
+          checks=[('focused',['node','--test','scripts/test/repair/transaction-ui-regression.test.cjs']),('typecheck',['npm','run','typecheck']),('lint',['npm','run','lint']),('full',['npm','test'])]
+          for name,cmd in checks:
+            with (out/(name+'.log')).open('w') as log:result=subprocess.run(cmd,stdout=log,stderr=subprocess.STDOUT)
+            results.append({'name':name,'exitCode':result.returncode})
+            print(name,result.returncode,flush=True)
+            if result.returncode:print('\n'.join((out/(name+'.log')).read_text().splitlines()[-60:]),flush=True)
+          (out/'test-results.json').write_text(json.dumps(results,indent=2))
+          assert all(r['exitCode']==0 for r in results),results
+          PY
+      - name: Real Expo browser layout and pinned-action checks
+        id: browser
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npx --no-install playwright install --with-deps chromium
+          EXPO_PUBLIC_WAFRA_E2E_DEMO=1 npx --no-install expo export --platform web > transaction-ui-evidence/export.log 2>&1
+          node scripts/e2e/serve.mjs dist 8126 > transaction-ui-evidence/server.log 2>&1 &
+          SERVER=$!;trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for n in $(seq 1 40); do curl -fsS http://127.0.0.1:8126/ >/dev/null && break || sleep 1; done
+          node scripts/e2e/e2e-transaction-ui.mjs 2>&1 | tee transaction-ui-evidence/browser.log
+      - name: Commit only tested ordinary source files to the fix branch
+        if: steps.tests.outcome == 'success' && steps.browser.outcome == 'success'
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/fix/transaction-ui-20260908 | cut -f1)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          import subprocess
+          allowed={'src/app/transactions.tsx','src/components/entry-detail-sheet.tsx','src/components/ui/bottom-sheet.tsx','src/components/ui/merchant-logo-assets.ts','src/lib/i18n.ts'}
+          actual=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines());assert actual==allowed,actual
+          PY
+          git config user.name 'Wafra UI verification'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- src/app/transactions.tsx src/components/entry-detail-sheet.tsx src/components/ui/bottom-sheet.tsx src/components/ui/merchant-logo-assets.ts src/lib/i18n.ts
+          git commit -m 'Fix transaction action reachability, search summary layout and date semantics'
+          git push origin HEAD:refs/heads/fix/transaction-ui-20260908
+          git rev-parse HEAD > transaction-ui-evidence/published-source.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-transaction-ui-fix-evidence
+          path: transaction-ui-evidence/
+          retention-days: 14
+      - name: Preserve failing test outcomes
+        if: always()
+        run: |
+          test '${{ steps.source.outcome }}' = success
+          test '${{ steps.tests.outcome }}' = success
+          test '${{ steps.browser.outcome }}' = success
