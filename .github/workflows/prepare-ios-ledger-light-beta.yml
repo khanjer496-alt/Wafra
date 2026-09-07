@@ -1,5 +1,4 @@
 name: Prepare updated iOS beta
-
 # Owner-requested integration only; no Apple upload or main modification.
 on:
   push:
@@ -27,7 +26,7 @@ jobs:
         with:
           node-version: '22.22.3'
           cache: npm
-      - name: Integrate exact reviewed sources without overwriting a working tree
+      - name: Integrate reviewed main, branding and iOS sources without overwrites
         run: |
           set -euo pipefail
           mkdir -p evidence
@@ -36,18 +35,18 @@ jobs:
           git config user.name 'Wafra release preparation'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin main restore/ledger-light-20260907 work/ios-guided-onboarding
-          test "$(git rev-parse origin/main)" = 3d390633a72d665f74e6b27e6f13f2176087431a
+          test "$(git rev-parse origin/main)" = c13fd461073e8139a1dfd79fef5cd039ffbc85d2
           test "$(git rev-parse origin/restore/ledger-light-20260907)" = fc3bf248bc4e8a844a527e35119c73c2f26c1163
           test "$(git rev-parse origin/work/ios-guided-onboarding)" = fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc
-          git merge-tree --write-tree "$GITHUB_SHA" fc3bf248bc4e8a844a527e35119c73c2f26c1163 > evidence/merge-restoration.txt
-          TREE=$(head -1 evidence/merge-restoration.txt)
-          FIRST=$(printf '%s\n' 'Integrate reviewed Ledger & Light and persistence fix' | git commit-tree "$TREE" -p "$GITHUB_SHA" -p fc3bf248bc4e8a844a527e35119c73c2f26c1163)
-          git merge-tree --write-tree "$FIRST" fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc > evidence/merge-ios.txt
-          TREE=$(head -1 evidence/merge-ios.txt)
-          CANDIDATE=$(printf '%s\n' 'Integrate history-first iOS setup and native capture receipts for requested beta' | git commit-tree "$TREE" -p "$FIRST" -p fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc)
+          CANDIDATE="$GITHUB_SHA"
+          for SOURCE in c13fd461073e8139a1dfd79fef5cd039ffbc85d2 fc3bf248bc4e8a844a527e35119c73c2f26c1163 fb15f98a30a8d0c25faa9ccd3424fe2d5aa12abc; do
+            git merge-tree --write-tree "$CANDIDATE" "$SOURCE" > "evidence/merge-$SOURCE.txt"
+            TREE=$(head -1 "evidence/merge-$SOURCE.txt")
+            CANDIDATE=$(printf '%s\n' "Integrate reviewed source $SOURCE for requested iOS beta" | git commit-tree "$TREE" -p "$CANDIDATE" -p "$SOURCE")
+          done
           git worktree add --detach ../wafra-ios-candidate "$CANDIDATE"
           printf '%s\n' "$CANDIDATE" > evidence/candidate-before-integration-fix.txt
-      - name: Resolve duplicate imports and expose existing history-beta profile
+      - name: Apply reviewed integration fixes and expose the existing beta build profile
         working-directory: ../wafra-ios-candidate
         run: |
           python3 - <<'PY'
@@ -58,6 +57,14 @@ jobs:
             ('scripts/test/ios-setup-recovery.helpers.js', "      '@/hooks/use-language': { useLanguage: () => 'en' },\n")]:
             p=Path(filename);s=p.read_text();assert s.count(line)==2,filename
             p.write_text(s.replace(line,'',1))
+          p=Path('scripts/test/workflows/workflow-harness.cjs');s=p.read_text()
+          before="   h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');"
+          after="\n".join([
+            "   d['./ios-capture-health']=h.local('@/lib/ios-capture-health','src/lib/ios-capture-health.ts');",
+            "   h.local('@/lib/ios-setup-journey','src/lib/ios-setup-journey.ts');",
+            "   d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');",
+            "   h.local('@/components/ios-message-setup/setup-journey');",before])
+          assert s.count(before)==1;p.write_text(s.replace(before,after))
           p=Path('.github/workflows/ios-testflight.yml')
           assert subprocess.check_output(['git','hash-object',str(p)],text=True).strip()=='d996b573b01bc51ca693385bc298640e4915f2f7'
           s=p.read_text()
@@ -92,8 +99,7 @@ jobs:
 
           '''
           addition='\n'.join(line[10:] if line.startswith('          ') else line for line in addition.splitlines())+'\n'
-          s=s.replace(anchor,addition+anchor)
-          p.write_text(s)
+          s=s.replace(anchor,addition+anchor);p.write_text(s)
           PY
           git diff --check
           git diff > "$GITHUB_WORKSPACE/evidence/integration-fix.diff"
@@ -104,7 +110,7 @@ jobs:
           npm --prefix server ci --no-audit --no-fund
           sudo apt-get install -y sqlite3
           npx --no-install expo prebuild --platform ios --no-install
-      - name: Typecheck, lint and all application/server regression suites
+      - name: Typecheck, lint and every application/server regression suite
         working-directory: ../wafra-ios-candidate
         run: |
           set -euo pipefail
@@ -124,10 +130,10 @@ jobs:
           python3 - <<'PY'
           import subprocess
           actual=set(subprocess.check_output(['git','diff','--name-only'],text=True).splitlines())
-          assert actual=={'src/app/ios-setup.tsx','scripts/test/ios-setup-recovery.helpers.js','.github/workflows/ios-testflight.yml'},actual
+          assert actual=={'src/app/ios-setup.tsx','scripts/test/ios-setup-recovery.helpers.js','scripts/test/workflows/workflow-harness.cjs','.github/workflows/ios-testflight.yml'},actual
           PY
-          git add -- src/app/ios-setup.tsx scripts/test/ios-setup-recovery.helpers.js .github/workflows/ios-testflight.yml
-          git commit -m 'Resolve merged setup imports and support feature beta in canonical iOS build workflow'
+          git add -- src/app/ios-setup.tsx scripts/test/ios-setup-recovery.helpers.js scripts/test/workflows/workflow-harness.cjs .github/workflows/ios-testflight.yml
+          git commit -m 'Resolve integrated setup imports and support feature beta in canonical iOS build workflow'
           CANDIDATE=$(git rev-parse HEAD)
           git diff --stat origin/main HEAD > "$GITHUB_WORKSPACE/evidence/changes.txt"
           git archive --format=tar.gz HEAD > "$GITHUB_WORKSPACE/evidence/source.tar.gz"
