@@ -452,9 +452,12 @@ await resetPreferences();
     const reached = await tapKey(page, label, 5000);
     await page.waitForTimeout(500);
     const at = new URL(page.url());
-    ok(`trends merchant opens filtered spending: ${label}`, reached === true &&
-      at.pathname === '/transactions' && at.searchParams.get('type') === 'expense' &&
-      label.startsWith(at.searchParams.get('merchant') + ','));
+    await page.getByTestId('merchant-total-spent').waitFor({ state: 'visible' });
+    const shown = await page.getByTestId('merchant-total-spent').innerText();
+    const expected = label.match(/, (AED [\d,]+(?:\.\d+)?),/)?.[1];
+    ok(`trends merchant opens its matching spending summary: ${label}`, reached === true &&
+      at.pathname === '/merchant' && label.startsWith(at.searchParams.get('name') + ',') &&
+      !!expected && Math.round(money(shown) * 100) === Math.round(money(expected) * 100));
   }
 }
 {

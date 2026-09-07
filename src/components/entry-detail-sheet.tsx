@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -26,6 +27,7 @@ interface EntryDetailSheetProps {
   /** The entry to show, or null to keep the sheet closed. */
   transaction: Transaction | null;
   onClose: () => void;
+  showMerchantLink?: boolean;
 }
 
 /**
@@ -35,7 +37,7 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true }: EntryDetailSheetProps) {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const { state, editTransaction, deleteTransaction, setMerchantOverride } = useStore();
@@ -196,6 +198,9 @@ export function EntryDetailSheet({ transaction, onClose }: EntryDetailSheetProps
           style={styles.headAmount}
         />
       </View>
+
+      {!editing && showMerchantLink && !transaction.isTransfer && transaction.title.trim() &&
+        <MerchantSpendingLink merchant={transaction.title} onClose={onClose} />}
 
       {editing ? (
         <>

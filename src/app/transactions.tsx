@@ -145,7 +145,9 @@ export default function TransactionsScreen() {
     type:
       typeParam === 'income' || typeParam === 'expense'
         ? typeParam
-        : deepCategories.length > 0 || merchantParam
+        // A merchant profile can explicitly request both spending and credits.
+        // Legacy category/merchant links remain spending-only unless requested.
+        : typeParam === 'all' ? null : deepCategories.length > 0 || merchantParam
           ? 'expense'
           : null,
   }));

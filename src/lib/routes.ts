@@ -35,6 +35,8 @@ export const APP_ROUTES = [
   // Pushed screens
   '/stats',
   '/transactions',
+  '/merchants',
+  '/merchant',
   '/cards',
   '/settings',
   '/accuracy',

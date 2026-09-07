@@ -61,13 +61,13 @@ try {
     await check(`Activity ${mode}: real logos replace category icons`, () => decoded(activity));
     const tile = activity.locator(selector).first();
     const identity = await tile.getAttribute('data-testid');
-    const row = tile.locator('xpath=..');
+    const row = tile.locator('xpath=ancestor::*[@data-testid="merchant-transaction-row"]').getByTestId('transaction-details-link');
     const merchant = (await row.getAttribute('aria-label')).split(', ')[0];
     const search = page.getByRole('textbox', { name: 'Search spending', exact: true });
     await search.fill(merchant);
     await activity.getByTestId(identity).first().waitFor({ state: 'visible' });
     await page.screenshot({ path: path.join(out, `activity-${mode}.png`) });
-    await activity.getByTestId(identity).first().locator('xpath=..').click();
+    await activity.getByTestId(identity).first().locator('xpath=ancestor::*[@data-testid="merchant-transaction-row"]').getByTestId('transaction-details-link').click();
     const dialog = page.locator('[role="dialog"]:visible').last();
     await dialog.waitFor({ state: 'visible' });
     await check(`Detail ${mode}: same identity as its transaction row`, async () => {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
@@ -10,12 +11,15 @@ import { clockTime, formatAmount } from '@/lib/format';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
+import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
 
 interface TransactionRowProps {
   transaction: Transaction;
   account?: Account;
   onPress?: (transaction: Transaction) => void;
   internal?: boolean;
+  /** Merchant previews can keep their rows dedicated to transaction details. */
+  merchantLinks?: boolean;
 }
 
 /**
@@ -23,7 +27,8 @@ interface TransactionRowProps {
  * identity have their own hierarchy rather than one long metadata sentence.
  * Larger text stacks the amount; financial values are never ellipsized.
  */
-function TransactionRowInner({ transaction, account, onPress, internal }: TransactionRowProps) {
+function TransactionRowInner({ transaction, account, onPress, internal, merchantLinks = true }: TransactionRowProps) {
+  const router = useRouter();
   const theme = useTheme();
   const language = useLanguage();
   const largeText = useLargeTextLayout();
@@ -38,6 +43,41 @@ function TransactionRowInner({ transaction, account, onPress, internal }: Transa
   const label = [transaction.title, where, account?.name, clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');
+
+  // Two sibling targets, not a link nested inside a button: the merchant
+  // identity opens its summary; the exact amount and Details keep the original
+  // transaction action. No ledger scan or store subscription belongs in a row.
+  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer) {
+    const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
+    const merchantLabel = merchantWords.merchantDetails;
+    return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">
+      <Pressable accessibilityRole="button" accessibilityLabel={`${merchantLabel}: ${transaction.title}`}
+        testID="transaction-merchant-link"
+        onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}`)}
+        android_ripple={{ color: theme.backgroundSelected }}
+        style={({ pressed }) => [styles.merchantTarget, largeText && styles.merchantTargetLarge,
+          pressed && { backgroundColor: theme.backgroundSelected }]}>
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={40} />
+        <View style={styles.content}>
+          <ThemedText type="smallBold">{transaction.title}</ThemedText>
+          <View style={styles.details}>
+            <ThemedText type="meta" themeColor="textSecondary" style={styles.category}>{where}</ThemedText>
+            {clock ? <ThemedText type="meta" themeColor="textTertiary" tabular>{clock}</ThemedText> : null}
+          </View>
+          {account ? <ThemedText type="meta" themeColor="textTertiary">{account.name}</ThemedText> : null}
+        </View>
+      </Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={label} testID="transaction-details-link"
+        onPress={() => onPress(transaction)} android_ripple={{ color: theme.backgroundSelected }}
+        style={({ pressed }) => [styles.entryTarget, largeText && styles.entryTargetLarge,
+          pressed && { backgroundColor: theme.backgroundSelected }]}>
+        <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
+          {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
+        </ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary">{merchantWords.entryDetails}</ThemedText>
+      </Pressable>
+    </View>;
+  }
 
   return <Pressable accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={label}
     onPress={onPress ? () => onPress(transaction) : undefined}
@@ -73,4 +113,12 @@ const styles = StyleSheet.create({
   amount: { flexShrink: 1 },
   details: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
   category: { flexShrink: 1 },
+  splitRow: { flexWrap: 'wrap', alignItems: 'flex-start' },
+  splitRowLarge: { flexDirection: 'column' },
+  merchantTarget: { flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    flexGrow: 1, flexShrink: 1, flexBasis: 160, minWidth: 0, minHeight: 48 },
+  merchantTargetLarge: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
+  entryTarget: { minHeight: 48, minWidth: 72, maxWidth: '100%', flexShrink: 1,
+    alignItems: 'flex-end', justifyContent: 'center', paddingStart: 8, gap: 4 },
+  entryTargetLarge: { alignSelf: 'flex-end' },
 });

@@ -9,7 +9,7 @@ function createHarness(options = {}) {
   class Clock extends Date { constructor(...args){ super(...(args.length?args:['2026-09-06T12:00:00Z'])); } static now(){return Date.parse('2026-09-06T12:00:00Z');} }
   const events=[]; const lang=options.language??'en'; const theme=themes.Colors[options.theme??'light'];
   let hookIndex=0;
-  const react = { memo: f=>f, isValidElement: n=>!!n?.props, Fragment:'Fragment', useMemo:f=>f(), useCallback:f=>f,
+  const react = { memo: f=>f, isValidElement: n=>!!n?.props, Fragment:'Fragment', useMemo:f=>f(), useCallback:f=>f, useDeferredValue:v=>v,
     useRef:v=>({current:v}), useEffect(){}, useId:()=>`id-${hookIndex++}`, forwardRef:f=>p=>f(p,null),
     useState: initial => { const i=hookIndex++; return [Object.hasOwn(options.states??{},i) ? options.states[i] : typeof initial==='function'?initial():initial,
       value=>events.push(['state',i,value])]; },
@@ -86,7 +86,11 @@ function createHarness(options = {}) {
   deps['react-native-svg']={__esModule:true,default:'svg',Circle:'circle',Line:'line',Path:'path',Rect:'rect',Defs:'defs',LinearGradient:'linearGradient',Stop:'stop'};
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
+  local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
+  local('@/lib/ledger-money','src/lib/ledger-money.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
+  local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
+  local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
     recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
@@ -101,6 +105,7 @@ function createHarness(options = {}) {
     unreadFormats:{count:0,shouldPrompt:false},uncategorised:{shouldPrompt:false,summary:{merchants:[]}},
     upcoming:{items:state.bills.map(b=>({id:b.id,title:b.title,kind:'bill',amountFils:b.amountFils,daysLeft:b.dueDay-6,dateISO:`2026-09-0${b.dueDay}`,billId:b.id}))}})};
   local('@/components/themed-text');local('@/components/ui/icon');local('@/components/ui/money');local('@/components/ui/category-avatar');
+  local('@/components/merchant-spending-link');
   deps['@/components/ui/merchant-avatar']={MerchantAvatar:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
   deps['@/components/ui/tile']={AccountTile:({account,size=32})=>jsx('AccountIcon',{account,size}),CategoryTile:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
   deps['@/components/ui/action-icon-button']={ActionIconButton:p=>jsx('Pressable',{...p,children:deps['@/components/ui/icon'].Icon({name:p.icon,size:20,color:theme.text})})};

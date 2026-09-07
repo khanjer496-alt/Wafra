@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { TransactionRow } from '@/components/transaction-row';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { SpendingOverview, spendingCopy, type CategoryFilter } from '@/components/spending/spending-overview';
@@ -30,6 +31,7 @@ import { usePeriod } from '@/lib/period-context';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
+import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
 
 type ViewMode = 'categories' | 'activity' | 'trends';
@@ -99,6 +101,7 @@ export default function FlowScreen() {
       <SegmentedControl value={view} onChange={setView} label={t('tabFlow')} segments={[
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />
+      <MerchantSpendingLink />
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
         onPeriod={() => setPeriodOpen(true)} onCategory={setCategory} onNewLimit={() => setLimitFor('new')} />}
@@ -116,7 +119,7 @@ export default function FlowScreen() {
         <Button label={periodLabel(period)} variant="ghost" icon="calendar" onPress={() => setPeriodOpen(true)} />
         <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
           onMonth={(key) => setPeriod({ mode: 'month', key })}
-          onMerchant={(merchant) => router.push(`/transactions?type=expense&merchant=${encodeURIComponent(merchant)}`)}
+          onMerchant={(merchant) => router.push(merchantSpendingHref(merchant))}
           onCategory={setCategory} />
       </>}
     </ScreenScaffold>

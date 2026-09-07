@@ -57,7 +57,7 @@ test('Home renders at most five recent transactions without losing the full acti
     activityRows: Array.from({ length: 20 }, (_, i) => ({ ...h.state.transactions[0], id: `fixture-${i}`, title: `Fixture ${i}` })),
   });
   const activity = nodeById(h.render('home'), 'journal-activity');
-  assert.equal(walk(activity).filter(n => n.props?.onPress && n.props?.accessibilityLabel?.includes('Fixture')).length, 5);
+  assert.equal(walk(activity).filter(n => n.props?.testID === 'transaction-details-link' && n.props?.onPress && n.props?.accessibilityLabel?.includes('Fixture')).length, 5);
   const all = walk(activity).find(n => n.props?.onPress && text(n).includes(h.deps['@/lib/i18n'].t('allActivity')));
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });

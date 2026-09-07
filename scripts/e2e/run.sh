@@ -41,6 +41,8 @@ done
 curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; exit 1; }
 
 node scripts/e2e/e2e-home-cashflow.mjs
+node scripts/e2e/e2e-merchant-spending.mjs
+node scripts/e2e/e2e-merchant-entrypoints.mjs
 node scripts/e2e/e2e-smoke.mjs
 node scripts/e2e/e2e-period.mjs
 node scripts/e2e/e2e-persist.mjs
