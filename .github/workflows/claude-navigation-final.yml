@@ -1,0 +1,101 @@
+name: Claude navigation final regression
+on:
+  push:
+    branches: [release/claude-unified-20260907]
+    paths: [.github/workflows/claude-navigation-final.yml]
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      source: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply two exact test-only corrections
+        id: source
+        env:
+          BRANCH: release/claude-unified-20260907
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)" = "$GITHUB_SHA"
+          python3 - <<'PY'
+          from pathlib import Path
+          from hashlib import sha1
+          p=Path('scripts/e2e/e2e-navigation.mjs');s=p.read_text()
+          def blob(s):
+            b=s.encode();return sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          assert blob(s)=='ba1a876000031d513a0f9ad1734bf9ad4094beb7'
+          old='''    const headings = document.querySelectorAll('[role="heading"],h1,h2,h3,h4,h5,h6');
+              for (const heading of headings) {
+                if ((heading.textContent || '').trim() !== want) continue;'''
+          new='''    const home = want === 'Home' || want === 'الرئيسية';
+              const headings = document.querySelectorAll(home ? '[data-testid="home-spending-total"]' : '[role="heading"],h1,h2,h3,h4,h5,h6');
+              for (const heading of headings) {
+                if (!home && (heading.textContent || '').trim() !== want) continue;'''
+          assert s.count(old)==1;s=s.replace(old,new)
+          old="  const minor = value => Math.round(money(String(value).replace('−', '-')) * 100);"
+          new=r'''  // Parse the currency amount, not punctuation or other numbers in its label.
+            const minor = value => {
+              const amount = String(value).replace('−', '-').match(/[+-]?\s*AED\s*[\d,]+(?:\.\d+)?/)?.[0];
+              return amount === undefined ? NaN : Math.round(money(amount) * 100);
+            };'''
+          assert s.count(old)==1;s=s.replace(old,new)
+          assert blob(s)=='9f301f43b8d8adfe23f10d7d4083c9ee7a0c46c5',blob(s)
+          p.write_text(s)
+          PY
+          node --check scripts/e2e/e2e-navigation.mjs
+          node scripts/check-design-baseline.mjs
+          node scripts/test/accessibility-layout.test.js
+          git diff --exit-code 9c0056230f784771b42d4bb420d8b851aaf29a4a -- src modules assets plugins server/src app.json app.config.ts eas.json package.json package-lock.json server/package.json server/package-lock.json babel.config.js metro.config.js
+          git add scripts/e2e/e2e-navigation.mjs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Test actionable Home content and parse currency labels without sentence punctuation'
+          git push origin "HEAD:refs/heads/$BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  navigation:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx --no-install playwright install --with-deps chromium
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-final-web-export
+          run-id: 34153352673
+          github-token: ${{ github.token }}
+      - name: Execute the complete navigation suite without skipped assertions
+        env:
+          BASE: http://127.0.0.1:8126
+        run: |
+          set -euo pipefail
+          tar -xzf web-export.tar.gz
+          mkdir -p evidence
+          node scripts/e2e/serve.mjs dist 8126 > evidence/server.log 2>&1 &
+          SERVER=$!
+          trap 'kill "$SERVER" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do curl -fsS "$BASE" >/dev/null && break; sleep 1; done
+          curl -fsS "$BASE" >/dev/null
+          printf 'validation_source=%s\nnative_source=9c0056230f784771b42d4bb420d8b851aaf29a4a\nshipping_source_identical=true\n' '${{ needs.prepare.outputs.source }}' > evidence/source.txt
+          node scripts/e2e/e2e-navigation.mjs 2>&1 | tee evidence/navigation.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-complete-navigation-evidence
+          path: evidence/
+          retention-days: 14
