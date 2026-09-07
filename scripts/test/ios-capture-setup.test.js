@@ -162,7 +162,9 @@ const executeFile = (filename, requireModule) => {
   }).outputText;
   const loaded = { exports: {} };
   Function('require', 'module', 'exports', '__filename', '__dirname', output)(
-    requireModule, loaded, loaded.exports, filename, path.dirname(filename),
+    (id) => id === './ios-capture-health' || id === '@/lib/ios-capture-health'
+      ? execute('src/lib/ios-capture-health.ts', requireModule) : requireModule(id),
+    loaded, loaded.exports, filename, path.dirname(filename),
   );
   return loaded.exports;
 };
@@ -256,7 +258,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'modules/wafra-live-capture/expo-module.config.json',
     );
 
-    const normalizedTypes = types.replace(/\s+/g, ' ').trim();
+    const normalizedTypes = types.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
     const exactStatus = `export interface WafraLiveCaptureStatus {
       enabled: boolean;
       entitled: boolean;
@@ -267,6 +269,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       setupProofVersion: number | null;
       setupProofAt: number | null;
       firstCapturedAt: number | null;
+      lastReceivedAt?: number | null;
+      lastHandledAt?: number | null;
     }`.replace(/\s+/g, ' ').trim();
     const exactNativeModule = `export interface WafraLiveCaptureNativeModule {
       setLocalCaptureEntitlementLease(expiresAtMs: number | null, lifetime: boolean): Promise<boolean>;
@@ -4045,6 +4049,7 @@ struct WafraBankSenderRegistryTests {
       readiness: 'not-added',
       opening: false,
       failure: null,
+      captureHealth: null,
     });
     ok('setup controller: unsupported platforms never resolve a native module',
       harness.statusReads() === 0);

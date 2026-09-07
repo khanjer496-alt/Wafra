@@ -5,12 +5,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const OUT = 'assets/images';
 const source = readFileSync('src/components/wafra-logo.tsx', 'utf8');
 const paths = [...source.matchAll(/\bd="([^"]+)"/g)].map((match) => match[1]);
-if (paths.length !== 1) throw new Error('Expected one Wafra mark path');
+if (paths.length !== 2) throw new Error('Expected original two-path W-arrow mark');
 const theme = readFileSync('src/constants/theme.ts', 'utf8');
 const primary = theme.match(/light:\s*\{[\s\S]*?primary:\s*'([^']+)'/)?.[1];
 const darkPrimary = theme.match(/dark:\s*\{[\s\S]*?primary:\s*'([^']+)'/)?.[1];
 if (!primary || !darkPrimary) throw new Error('Missing brand colours');
-const mark = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="100%" height="100%"><path d="${paths[0]}" fill="none" stroke="${color}" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const mark = (color) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="100%" height="100%">${paths.map(path => `<path d="${path}" fill="none" stroke="${color}" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>`).join('')}</svg>`;
 writeFileSync(`${OUT}/wafra-mark.svg`, mark(primary));
 const targets = [
   { file: 'icon.png', size: 1024, markSize: 720, color: '#FFFFFF', background: primary },
@@ -21,7 +21,7 @@ const targets = [
   { file: 'splash-icon-dark.png', size: 512, markSize: 460, color: darkPrimary },
   { file: 'favicon.png', size: 96, markSize: 68, color: '#FFFFFF', background: primary },
 ];
-const browser = await chromium.launch();
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 try {
   for (const target of targets) {
     const page = await browser.newPage({ viewport: { width: target.size, height: target.size }, deviceScaleFactor: 1 });

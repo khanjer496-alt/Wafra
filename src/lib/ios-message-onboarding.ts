@@ -41,7 +41,7 @@ export type IosMessageSetupStorage = IosHistorySetupStorage;
 
 const DEFAULT_PROGRESS: IosMessageSetupProgress = {
   version: 1,
-  activeSection: 'future',
+  activeSection: 'history',
   futureShortcutConfirmed: false,
   futureAutomationConfirmed: false,
   futureStatus: 'not-started',

@@ -1,0 +1,96 @@
+name: Ledger & Light recovery build
+
+# Explicitly requested import-performance update, scoped to this reviewed
+# branch and this helper. The canonical build-apk.yml compiles the APK.
+# No release, OTA, deployment, main push, inbox upload or phone access.
+on:
+  push:
+    branches: [restore/ledger-light-20260907]
+    paths: [.github/workflows/ledger-light-recovery.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Archive the exact committed source for offline verification
+        run: |
+          mkdir -p "$RUNNER_TEMP/recovery-source"
+          git rev-parse HEAD > "$RUNNER_TEMP/recovery-source/commit.txt"
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/recovery-source/source.tar.gz"
+          cd "$RUNNER_TEMP/recovery-source"
+          sha256sum source.tar.gz > SHA256SUMS
+      - name: Install locked dependencies and generate the integration required by existing tests
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm --prefix server ci --no-audit --no-fund
+          sudo apt-get install -y sqlite3
+          npx --no-install expo prebuild --platform ios --no-install
+          git diff --exit-code
+      - name: Verify full application and server source before requesting a build
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee "$RUNNER_TEMP/recovery-source/typecheck.log"
+          npm run lint 2>&1 | tee "$RUNNER_TEMP/recovery-source/lint.log"
+          npm test 2>&1 | tee "$RUNNER_TEMP/recovery-source/npm-test.log"
+      - name: Reproduce the old write amplification and measure the actual fix
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin 05f9f7ab12e79bd1fe1a7dd938ca472750452594
+          git show 05f9f7ab12e79bd1fe1a7dd938ca472750452594:src/lib/ledger-persistence.ts > "$RUNNER_TEMP/history-before.ts"
+          set +e
+          WAFRA_HISTORY_PERSISTENCE_SOURCE="$RUNNER_TEMP/history-before.ts" node --test scripts/test/repair/history-storage-performance.test.cjs > "$RUNNER_TEMP/recovery-source/history-before.log" 2>&1
+          BEFORE_STATUS=$?
+          set -e
+          test "$BEFORE_STATUS" -ne 0
+          grep -q '^# fail 6$' "$RUNNER_TEMP/recovery-source/history-before.log"
+          node --test scripts/test/repair/history-storage-performance.test.cjs > "$RUNNER_TEMP/recovery-source/history-after.log"
+          node scripts/test/repair/history-storage-benchmark.cjs --baseline "$RUNNER_TEMP/history-before.ts" > "$RUNNER_TEMP/recovery-source/history-benchmark.json"
+          git diff --exit-code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-ledger-light-current-source
+          path: ${{ runner.temp }}/recovery-source/
+          retention-days: 7
+  build-request:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Request the existing canonical Android build from the exact verified revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_REF: ${{ github.ref_name }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$BUILD_REF" = 'restore/ledger-light-20260907'
+          ACTUAL_SHA=$(gh api "repos/$GH_REPO/git/ref/heads/$BUILD_REF" --jq .object.sha)
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          gh workflow run build-apk.yml --ref "$BUILD_REF" -f architecture=arm64 -f corpus=false -f bundle=false
+          echo 'Requested ARM64 import-performance APK after exact-source tests. This does not install, deploy or publish the app.' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,30 @@
+name: Guided iOS journey regressions
+on:
+  pull_request:
+    paths:
+      - 'src/app/ios-setup.tsx'
+      - 'src/lib/ios-setup-journey.ts'
+      - 'src/lib/ios-history-traversal.ts'
+      - 'src/lib/ios-message-onboarding.ts'
+      - 'src/lib/ios-capture-setup.ts'
+      - 'src/lib/ios-capture-health.ts'
+      - 'src/lib/ios-local-capture.ts'
+      - 'src/hooks/use-auto-import.ts'
+      - 'src/components/ios-message-setup/**'
+      - 'scripts/test/ios-journey/**'
+      - '.github/workflows/ios-guided-trial.yml'
+permissions:
+  contents: read
+jobs:
+  journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: node scripts/test/ios-setup-ux.test.js
+      - run: node --test scripts/test/ios-journey/*.test.cjs

@@ -21,13 +21,13 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
   return <View style={styles.root} testID="payment-agenda">
     {groups.map((group) => <View key={group.key} style={styles.section}>
       <ThemedText type="heading" themeColor={group.key === 'overdue' ? 'expense' : 'text'}>{w[group.key]}</ThemedText>
-      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-        {group.items.map((item, index) => {
+      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
+        {group.items.map((item) => {
           const date = item.paid ? `${item.kind === 'card' ? w.paidStatement : w.recorded} ${shortDate(item.dateISO)}`
             : item.daysLeft === 0 ? w.today : item.daysLeft === 1 ? w.tomorrow : shortDate(item.dateISO);
           return <Pressable key={item.id} accessibilityRole="button"
             accessibilityLabel={`${item.title}. ${date}. ${item.estimated ? w.estimate : ''} ${formatAED(item.amountFils)}`}
-            onPress={() => onOpen(item)} style={({ pressed }) => [styles.row, index > 0 && styles.rule,
+            onPress={() => onOpen(item)} style={({ pressed }) => [styles.row, styles.rule,
               { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
             <MerchantAvatar title={item.title} category={item.category} size={38} />
             <View style={styles.content}>
@@ -37,7 +37,7 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
               </View>
               <View style={styles.metaRow}>
                 <ThemedText type="meta" themeColor="textSecondary">{date}</ThemedText>
-                {item.estimated && <View style={[styles.badge, { backgroundColor: theme.goldSoft }]}>
+                {item.estimated && <View style={[styles.badge, { backgroundColor: 'transparent' }]}>
                   <ThemedText type="meta" style={{ color: theme.gold, fontSize: 12, lineHeight: 18 }}>{w.estimate}</ThemedText>
                 </View>}
                 {item.paid && <Icon name="check" size={15} color={theme.income} />}
@@ -48,25 +48,25 @@ export function PaymentAgenda({ items, includePaid, onOpen }: {
         })}
       </View>
     </View>)}
-    {groups.length === 0 && <View style={[styles.empty, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+    {groups.length === 0 && <View style={[styles.empty, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
       <Icon name="calendar" size={32} color={theme.primary} />
       <ThemedText type="heading">{w.empty}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{w.emptyBody}</ThemedText>
     </View>}
-    <View style={[styles.notice, { backgroundColor: theme.primarySoft }]}>
-      <View style={[styles.noticeIcon, { backgroundColor: theme.card }]}><Icon name="calendar" size={22} color={theme.primary} /></View>
+    <View style={[styles.notice, { backgroundColor: 'transparent' }]}>
+      <View style={[styles.noticeIcon, { backgroundColor: 'transparent' }]}><Icon name="calendar" size={22} color={theme.primary} /></View>
       <View style={styles.grow}><ThemedText type="smallBold">{w.note}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">{w.noteBody}</ThemedText></View>
     </View>
   </View>;
 }
 const styles = StyleSheet.create({
-  root: { gap: 24 }, section: { gap: 12 }, group: { paddingHorizontal: 14, borderWidth: 1, borderRadius: 18, overflow: 'hidden' },
+  root: { gap: 24 }, section: { gap: 12 }, group: { overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 80, paddingVertical: 16 }, rule: { borderTopWidth: StyleSheet.hairlineWidth },
   content: { flex: 1, minWidth: 0, gap: 5 }, top: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   grow: { flex: 1, minWidth: 0, gap: 4 }, metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   badge: { paddingHorizontal: 6, borderRadius: 6 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
-  notice: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, padding: 16 },
+  notice: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16 },
   noticeIcon: { width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center' },
-  empty: { padding: 24, borderRadius: 18, borderWidth: 1, gap: 12 },
+  empty: { paddingVertical: 24, gap: 12 },
 });

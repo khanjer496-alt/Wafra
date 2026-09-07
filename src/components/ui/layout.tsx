@@ -170,7 +170,7 @@ export function LabelTable({ rows }: { rows: { label: string; value: React.React
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   return (
-    <View style={[styles.detailTable, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+    <View style={[styles.detailTable, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       {rows.map((r, i) => (
         <View
           key={r.label}
@@ -219,7 +219,7 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
 }
 
 const styles = StyleSheet.create({
-  detailTable: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, overflow: 'hidden' },
+  detailTable: { borderTopWidth: 1, borderBottomWidth: 1 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

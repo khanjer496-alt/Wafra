@@ -48,10 +48,11 @@ on:
         options:
           - production
           - production-candidate
+          - history-beta
           - preview
         default: production
       submit:
-        description: 'Also send the finished store-signed build to TestFlight. Supported by production and production-candidate; preview is ad-hoc only.'
+        description: 'Also send the finished store-signed build to TestFlight. Supported by production, production-candidate and history-beta; preview is ad-hoc only.'
         type: boolean
         default: false
       wait:
@@ -188,7 +189,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
             --github-summary "$GITHUB_STEP_SUMMARY"
           )
-          if [ "$PROFILE" = "preview" ]; then
+          if [ "$PROFILE" = "preview" ] || [ "$PROFILE" = "history-beta" ]; then
             node "${args[@]}"
           else
             printf -v check_command '%q ' node "${args[@]}"
@@ -496,7 +497,7 @@ jobs:
           SLUG: ${{ steps.config.outputs.slug }}
         run: |
           set -o pipefail
-          args=(build --platform ios --profile "$PROFILE" --non-interactive --json)
+          args=(build --platform ios --profile "$PROFILE" --non-interactive --freeze-credentials --json)
 
           if [ "$WAIT" = "true" ]; then args+=(--wait); else args+=(--no-wait); fi
 
@@ -800,6 +801,26 @@ jobs:
             echo "are also inert until a RevenueCat Apple key exists."
             echo "Manual entry, import, and the whole ledger work normally."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record exact completed beta build
+        if: always() && inputs.profile == 'history-beta' && inputs.submit_build_id == ''
+        run: |
+          mkdir -p ios-build-evidence
+          node <<'NODE'
+          const fs=require('fs');
+          let raw; try {raw=JSON.parse(fs.readFileSync('build.json','utf8'));} catch {raw=[];}
+          const list=Array.isArray(raw)?raw:[raw];
+          const builds=list.map(b=>({id:b.id,status:b.status,platform:b.platform,distribution:b.distribution,version:b.appVersion,buildNumber:b.appBuildVersion,gitCommitHash:b.gitCommitHash??null}));
+          const report={sourceCommit:process.env.GITHUB_SHA,profile:'history-beta',builds};
+          fs.writeFileSync('ios-build-evidence/build.json',JSON.stringify(report,null,2));
+          console.log(JSON.stringify(report,null,2));
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.profile == 'history-beta' && inputs.submit_build_id == ''
+        with:
+          name: wafra-ios-build-report
+          path: ios-build-evidence/
+          retention-days: 14
 
       # The key is in RUNNER_TEMP, which GitHub clears anyway, but a private
       # key on disk for no reason is a habit worth not having.

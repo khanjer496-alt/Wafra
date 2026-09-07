@@ -1,0 +1,29 @@
+name: iOS capture queue receipt regressions
+on:
+  pull_request:
+    paths:
+      - 'modules/wafra-live-capture/**'
+      - 'scripts/test/native-live-capture-receipts.*'
+      - '.github/workflows/ios-capture-health.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ios-capture-queue-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  queue:
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the actual queue with synthetic data on a disposable iOS simulator
+        run: |
+          set -euo pipefail
+          mkdir -p receipt-evidence
+          bash scripts/test/native-live-capture-receipts.sh | tee receipt-evidence/native-store.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-capture-queue-${{ github.sha }}
+          path: receipt-evidence/
+          retention-days: 7

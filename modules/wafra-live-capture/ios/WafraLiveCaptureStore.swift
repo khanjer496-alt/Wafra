@@ -25,6 +25,9 @@ public struct WafraLiveCaptureStatus: Codable {
   public let setupProofVersion: Int?
   public let setupProofAt: TimeInterval?
   public let firstCapturedAt: TimeInterval?
+  /// Wall-clock receipts, not transaction timestamps or proof of complete coverage.
+  public let lastReceivedAt: TimeInterval?
+  public let lastHandledAt: TimeInterval?
 }
 
 public final class WafraLiveCaptureStore {
@@ -93,12 +96,15 @@ public final class WafraLiveCaptureStore {
     var setupProofAt: TimeInterval?
     var automationInputProbeAt: TimeInterval?
     var firstCapturedAt: TimeInterval?
+    var lastReceivedAt: TimeInterval?
+    var lastHandledAt: TimeInterval?
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
       case localEntitlementLifetime, localEntitlementExpiresAt
       case storeEntitlementLifetime, storeEntitlementExpiresAt, storeEntitlementVerifiedAt
       case setupProofVersion, setupProofAt, automationInputProbeAt, firstCapturedAt
+      case lastReceivedAt, lastHandledAt
     }
 
     init() {}
@@ -145,6 +151,12 @@ public final class WafraLiveCaptureStore {
         forKey: .automationInputProbeAt
       )
       firstCapturedAt = try values.decodeIfPresent(TimeInterval.self, forKey: .firstCapturedAt)
+      // Additive diagnostics must never invalidate an older financial queue.
+      // Missing or malformed receipt fields are unknown, not corruption of events.
+      lastReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastReceivedAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      lastHandledAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastHandledAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
     }
 
     var recordBytes: Int {
@@ -253,6 +265,9 @@ public final class WafraLiveCaptureStore {
         observedAt: serializedDate.timeIntervalSince1970,
         bytes: data.count
       )
+      // Publish receipt and queued event in the same durable manifest write.
+      // Duplicate/replayed, invalid, disabled and capacity-refused calls never advance it.
+      manifest.lastReceivedAt = max(manifest.lastReceivedAt ?? 0, receiptTime.timeIntervalSince1970)
       do {
         try writeManifest(manifest, in: root)
       } catch {
@@ -444,6 +459,11 @@ public final class WafraLiveCaptureStore {
         if prunedAcknowledgements > 0 { try writeManifest(manifest, in: root) }
         return
       }
+      // This means the queue was handled, not necessarily that money was recorded:
+      // acknowledgements also include duplicates and non-financial messages.
+      if !verified.isEmpty {
+        manifest.lastHandledAt = max(manifest.lastHandledAt ?? 0, acknowledgementDate.timeIntervalSince1970)
+      }
       try writeManifest(manifest, in: root)
       for id in removed where !verified.contains(where: { $0.id == id }) {
         try? FileManager.default.removeItem(at: recordURL(id: id, in: root))
@@ -473,7 +493,9 @@ public final class WafraLiveCaptureStore {
         warningId: manifest.warningId,
         setupProofVersion: manifest.setupProofVersion,
         setupProofAt: manifest.setupProofAt,
-        firstCapturedAt: manifest.firstCapturedAt
+        firstCapturedAt: manifest.firstCapturedAt,
+        lastReceivedAt: manifest.lastReceivedAt,
+        lastHandledAt: manifest.lastHandledAt
       )
     }
   }

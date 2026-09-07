@@ -1107,7 +1107,7 @@ export default function SettingsScreen() {
             { value: 'imports', label: words.capture, icon: 'mail' },
             { value: 'privacy', label: words.privacy, icon: 'lock' },
             { value: 'help', label: words.help, icon: 'tools' }]} />
-        {panel === 'help' && (<Section index={0} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'help' && (<Section index={0} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <Block onPress={() => router.push('/pro')}>
             <View style={[styles.proRow, largeText && styles.proRowLarge]}>
               <Icon name="diamond" size={19} color={theme.warning} />
@@ -1133,7 +1133,7 @@ export default function SettingsScreen() {
           </Block>
         </Section>)}
 
-        {panel === 'preferences' && (<Section index={1} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'preferences' && (<Section index={1} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsMoneyHeader')} />
           {hasGlobalLedger ? (
             <Row last>
@@ -1155,7 +1155,7 @@ export default function SettingsScreen() {
           )}
         </Section>)}
 
-        {panel === 'imports' && (<Section index={2} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'imports' && (<Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsImportsHeader')} />
           {Platform.OS === 'ios' && linkRow(
             t('iosSetupTitle'),
@@ -1255,7 +1255,7 @@ export default function SettingsScreen() {
             )}
         </Section>)}
 
-        {panel === 'imports' && (<Section index={3} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'imports' && (<Section index={3} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsNotificationsHeader')} />
           {switchRow(
             t('dailySummarySetting'),
@@ -1292,7 +1292,7 @@ export default function SettingsScreen() {
             )}
         </Section>)}
 
-        {panel === 'preferences' && (<Section index={4} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'preferences' && (<Section index={4} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('settingsAppearanceLanguageHeader')} />
           <Block>
             <SegmentedControl
@@ -1320,7 +1320,7 @@ export default function SettingsScreen() {
           })}
         </Section>)}
 
-        {panel === 'privacy' && (<Section index={5} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'privacy' && (<Section index={5} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('privacyHeader')} />
           {switchRow(
             t('privateMode'),
@@ -1340,7 +1340,7 @@ export default function SettingsScreen() {
           )}
         </Section>)}
 
-        {panel === 'privacy' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'privacy' && (<Section index={6} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('dataHeader')} />
           {linkRow(
             t('reviewAlertsTitle'),
@@ -1384,7 +1384,7 @@ export default function SettingsScreen() {
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true })}
         </Section>)}
 
-        {panel === 'help' && (<Section index={7} style={[styles.settingsPanel, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        {panel === 'help' && (<Section index={7} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
           <SectionHeader title={t('supportHeader')} />
           {linkRow(
             t('sendFeedback'),
@@ -1487,7 +1487,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  settingsPanel: { borderRadius: 20, borderWidth: 1, padding: Spacing.three, gap: Spacing.two },
+  settingsPanel: { borderTopWidth: 1, paddingVertical: Spacing.three, gap: Spacing.two },
   content: {
     gap: Spacing.four + 2,
   },

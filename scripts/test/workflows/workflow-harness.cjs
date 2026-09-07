@@ -78,6 +78,10 @@ function createWorkflowHarness(options={}) {
   if(screen==='ios-setup'){
    // Actual state/step logic, with unavailable native resources and service I/O.
    d['@/lib/ios-local-capture-protocol']={IOS_LOCAL_CAPTURE_SHORTCUT_URL:null,iosLocalCaptureTestUrl:()=>null,normalizeIosLocalCaptureShortcutUrl:()=>null};
+   d['./ios-capture-health']=h.local('@/lib/ios-capture-health','src/lib/ios-capture-health.ts');
+   h.local('@/lib/ios-setup-journey','src/lib/ios-setup-journey.ts');
+   d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
+   h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');
    Object.assign(d['@/lib/ios-history-setup'],{historyShortcutInstallUrl:()=>null,iosSupportsMessageHistory:()=>true});
    for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);

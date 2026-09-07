@@ -8,7 +8,7 @@ export type Segment<T extends string> = { value: T; label: string; accessibility
 export type SegmentedControlProps<T extends string> = {
   segments: Segment<T>[]; value: T; onChange: (value: T) => void; label: string;
 };
-/** One rounded control shared by tabs-within-a-tab and all form selectors. */
+/** One compact control shared by tabs-within-a-tab and all form selectors. */
 export function SegmentedControl<T extends string>({ segments, value, onChange, label }: SegmentedControlProps<T>) {
   const theme = useTheme();
   const large = useLargeTextLayout();
@@ -26,8 +26,8 @@ export function SegmentedControl<T extends string>({ segments, value, onChange, 
   </View>;
 }
 const styles = StyleSheet.create({
-  stack: { flexDirection: 'column', borderRadius: 18 },
-  track: { flexDirection: 'row', padding: 4, borderRadius: 28, gap: 4 },
-  segment: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 8, borderRadius: 24 },
+  stack: { flexDirection: 'column', borderRadius: 12 },
+  track: { flexDirection: 'row', padding: 4, borderRadius: 12, gap: 4 },
+  segment: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8, paddingVertical: 8, borderRadius: 10 },
   label: { textAlign: 'center', flexShrink: 1 },
 });

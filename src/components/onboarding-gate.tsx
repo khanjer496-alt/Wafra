@@ -590,7 +590,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   label={t('onboardStartNow')}
                   onPress={() => { setPersonalizing(false); setStep('capture'); }}
                   labelColor={night.onPrimary}
-                  style={{ backgroundColor: '#F6FBF7' }}
+                  style={{ backgroundColor: night.primary }}
                 />
                 <Button
                   variant="outline"

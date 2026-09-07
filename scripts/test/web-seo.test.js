@@ -21,6 +21,32 @@ const finalizer = path.join(root, 'scripts/finalize-web-seo.mjs');
 const output = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-web-seo-'));
 const landing = fs.readFileSync(path.join(root, 'src/marketing/home.web.tsx'), 'utf8');
 const content = fs.readFileSync(path.join(root, 'src/marketing/content.ts'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'src/marketing/home.module.css'), 'utf8');
+const mark = fs.readFileSync(path.join(root, 'src/marketing/wafra-mark.web.tsx'), 'utf8');
+
+ok(
+  'the landing uses the original Claude Ledger & Light palette and typography',
+  ['#F4F1EA', '#14120F', '#1F6B52', 'GeistMono', 'NotoKufiArabic'].every((token) => css.includes(token)) &&
+    /font-family: Geist/.test(css) && !/#2855D9|#F6F8FC|#FAFAF7|#072E28|#106B50/i.test(`${css}\n${landing}`),
+);
+ok(
+  'the previous headline, supporting line and three feature stories are preserved',
+  landing.includes('Know your spending.<br />Plan what comes next.') &&
+    landing.includes('Spending, budgets and bills in one private ledger. No bank login needed.') &&
+    ['See what you spent', 'See what is coming', 'Catch drift early'].every((text) => content.includes(text)) &&
+    !landing.includes('A little clarity.'),
+);
+ok(
+  'the website, favicon and social card use the original two-stroke W-arrow',
+  ['M8 15 L15.5 33 L23 19 L30.5 33 L40 11.5', 'M34 11.5 H40 V17.5'].every((d) =>
+    [mark, fs.readFileSync(path.join(root, 'public/wafra-icon.svg'), 'utf8'),
+      fs.readFileSync(path.join(root, 'public/wafra-social.svg'), 'utf8')].every((svg) => svg.includes(d))) &&
+    !landing.includes("@/components/wafra-logo"),
+);
+ok(
+  'product previews disclose sample data and prioritize the home image',
+  landing.includes('App previews · sample data') && landing.includes('fetchPriority="high"'),
+);
 
 ok(
   'the landing page teaches iPhone capture only from selected bank senders',
