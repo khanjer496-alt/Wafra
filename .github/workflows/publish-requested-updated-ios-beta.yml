@@ -1,0 +1,116 @@
+name: Publish requested updated iOS beta
+
+# Explicitly owner-authorized release of the already built updated application.
+# Never creates a duplicate paid build, changes main, or changes the public URL.
+on:
+  push:
+    branches: [release/ios-ledger-light-beta]
+    paths: [.github/workflows/publish-requested-updated-ios-beta.yml]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: wafra-requested-ios-beta53-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CI: '1'
+      WAFRA_BETA_VERSION: '1.0.0'
+      WAFRA_BETA_BUILD_NUMBER: '53'
+      WAFRA_BETA_SOURCE_SHA: '80f91f447f93cb2d308027258df5fe69e46b4d26'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 80f91f447f93cb2d308027258df5fe69e46b4d26
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+      - uses: actions/download-artifact@v4
+        with:
+          name: wafra-updated-ios-store-inspection
+          run-id: 34142236183
+          github-token: ${{ github.token }}
+          path: verified-store
+      - name: Verify exact previously inspected signed build
+        run: |
+          set -euo pipefail
+          node --check scripts/release/ios-public-beta-publish.mjs
+          node <<'JS'
+          const fs=require('fs');const r=JSON.parse(fs.readFileSync('verified-store/ipa-inspection.json','utf8'));
+          const assert=(c,m)=>{if(!c)throw Error(m)};
+          assert(r.id==='d8b40434-8eb7-4a49-9220-385145dec4ea'&&r.source===process.env.WAFRA_BETA_SOURCE_SHA,'Wrong build provenance');
+          assert(r.version==='1.0.0'&&r.buildNumber==='53'&&r.bundleId==='app.wafra.ios'&&r.platform==='IOS'&&r.distribution==='STORE'&&r.status==='FINISHED','Wrong application identity');
+          assert(r.signatureVerified&&r.ipaSHA256==='58cdc2ad1bbb33c53f8a7967b7b01fec260cd77a207f38ffd98d2062bac6e83c','Unverified signature/artifact');
+          assert(Object.values(r.compiledChecks).every(v=>v===true)&&r.historyIntentContract==='passed'&&r.futureIntentContract==='passed'&&r.historyArabicResources==='passed'&&r.debugProbeAbsent,'Compiled acceptance checks failed');
+          console.log('Exact signed update 1.0.0 (53), restored design and updated iOS setup verified.');
+          JS
+      - name: Read actual Apple build status before requesting upload
+        env:
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          node scripts/release/ios-public-beta-publish.mjs
+          cp ios-release-evidence/public-beta.json ios-release-evidence/before-upload.json
+      - name: Submit only this existing build through the canonical workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if node -e 'const r=require("./ios-release-evidence/before-upload.json");process.exit(r.build ? 0 : 1)'; then
+            echo 'Apple already has build 53; no duplicate upload requested.'
+          else
+            test "$GITHUB_RUN_ATTEMPT" = 1
+            gh workflow run ios-testflight.yml --repo khanjer496-alt/Wafra --ref release/ios-ledger-light-beta -f profile=history-beta -f submit_build_id=d8b40434-8eb7-4a49-9220-385145dec4ea
+            printf '%s\n' 'Canonical submission requested for EAS d8b40434-8eb7-4a49-9220-385145dec4ea / iOS 1.0.0 (53).' > ios-release-evidence/submission-request.txt
+          fi
+      - name: Verify landing page retains the existing public TestFlight link
+        run: |
+          node <<'JS'
+          const fs=require('fs');
+          (async()=>{
+            const url='https://wafra-app-azg.pages.dev/';const link='https://testflight.apple.com/join/jbwzCgZ6';
+            const response=await fetch(url,{signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error('Landing HTTP '+response.status);
+            const html=await response.text();const links=[...html.matchAll(/href=["']([^"']+)["']/g)].map(m=>m[1].replace(/&amp;/g,'&'));
+            if(!links.includes(link))throw Error('Landing does not expose the expected public TestFlight URL');
+            const beta=await fetch(link,{signal:AbortSignal.timeout(30000)});if(!beta.ok)throw Error('Public TestFlight HTTP '+beta.status);
+            const report={checkedAt:new Date().toISOString(),landing:url,landingStatus:response.status,publicLink:link,publicLinkStatus:beta.status,matchingLinks:links.filter(l=>l===link).length,landingChanged:false};
+            fs.writeFileSync('ios-release-evidence/landing-link.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+          })().catch(e=>{console.error(e.message);process.exitCode=1});
+          JS
+      - name: Require successful native startup and data-retaining restart before public distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,subprocess,time
+          endpoint='repos/khanjer496-alt/Wafra/actions/runs/34141989284'
+          for attempt in range(60):
+              run=json.loads(subprocess.check_output(['gh','api',endpoint]))
+              assert run['head_sha']=='b7b8b5ccbe80957edb122011026bc0f2219cba8a','Native verification source changed'
+              report={k:run[k] for k in ['id','head_sha','status','conclusion','html_url']}
+              pathlib.Path('ios-release-evidence/native-gate.json').write_text(json.dumps(report,indent=2))
+              if run['status']=='completed':
+                  assert run['conclusion']=='success','Native acceptance failed: public distribution has not been performed'
+                  print('Native startup, creation and data-retaining restart accepted.');break
+              if attempt==59:raise RuntimeError('Native acceptance has not finished; public distribution not performed')
+              print('Native acceptance:',run['status'],flush=True);time.sleep(20)
+          PY
+      - name: Associate processed update with existing public Beta group
+        env:
+          EXPO_ASC_API_KEY_P8: ${{ secrets.EXPO_ASC_API_KEY_P8 }}
+          EXPO_ASC_KEY_ID: ${{ secrets.EXPO_ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.EXPO_ASC_ISSUER_ID }}
+        run: |
+          node scripts/release/ios-public-beta-publish.mjs --publish
+          node -e 'const r=require("./ios-release-evidence/public-beta.json");if(r.outcome==="waiting-for-apple-processing")throw Error("Apple processing still pending; no public release confirmed")'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-updated-ios-public-release
+          path: ios-release-evidence/
+          retention-days: 14
