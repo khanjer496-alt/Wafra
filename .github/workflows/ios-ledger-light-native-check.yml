@@ -60,7 +60,11 @@ jobs:
         id: capture
         run: |
           set -euo pipefail
-          bash scripts/test/native-live-capture-bridge.sh 2>&1 | tee ios-native-evidence/capture-bridge.log
+          TESTDIR=$(mktemp -d "$RUNNER_TEMP/wafra-bridge.XXXXXX")
+          trap 'rm -rf "$TESTDIR"' EXIT
+          swiftc -parse-as-library -emit-module -emit-object -module-name ExpoModulesCore -emit-module-path "$TESTDIR/ExpoModulesCore.swiftmodule" modules/wafra-live-capture/ios/Tests/ExpoModulesCoreStub.swift -o "$TESTDIR/ExpoModulesCore.o"
+          swiftc -I "$TESTDIR" "$TESTDIR/ExpoModulesCore.o" modules/wafra-live-capture/ios/Tests/WafraLiveCaptureStoreStub.swift modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift modules/wafra-live-capture/ios/Tests/WafraLiveCaptureBridgeBehaviorTests.swift -o "$TESTDIR/bridge-tests"
+          "$TESTDIR/bridge-tests" 2>&1 | tee ios-native-evidence/capture-bridge.log
           bash scripts/test/native-live-capture-receipts.sh 2>&1 | tee ios-native-evidence/capture-receipts.log
       - name: Generate simulator project and verify encryption build configuration
         run: |
@@ -68,7 +72,7 @@ jobs:
           node <<'JS'
           const fs=require('fs');const app=JSON.parse(fs.readFileSync('app.json','utf8'));
           if(app.expo.ios.bundleIdentifier!=='app.wafra.ios')throw Error('Wrong app');
-          // Simulator evidence must execute the embedded candidate, never an OTA.
+          // This simulator executes its embedded candidate, never an OTA.
           // The store artifact is built separately from the unchanged config.
           app.expo.updates.enabled=false;fs.writeFileSync('app.json',JSON.stringify(app,null,2)+'\n');
           JS
