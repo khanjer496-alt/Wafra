@@ -1,0 +1,149 @@
+name: Updated iOS native acceptance
+on:
+  push:
+    branches: [release/ios-ledger-light-beta]
+    paths: [.github/workflows/ios-ledger-light-native-check.yml]
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_NO_DOTENV: '1'
+      EXPO_PUBLIC_WAFRA_E2E_DEMO: '0'
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1'
+      EXPO_PUBLIC_WAFRA_PARSER_RESEARCH: '0'
+      EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT: '0'
+      WAFRA_SMS_CORPUS_EXPORT: '0'
+      EXPO_PUBLIC_WAFRA_RELAY_URL: 'https://wafra-relay.khanjer496.workers.dev'
+      EXPO_PUBLIC_WAFRA_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/96f93402213144e8885db33f48fc6168'
+      EXPO_PUBLIC_WAFRA_HISTORY_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/2869584d40ed454691cf3f916cbee158'
+      MAESTRO_CLI_NO_ANALYTICS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Verify exact application source and select installed Xcode
+        run: |
+          set -euo pipefail
+          mkdir -p ios-native-evidence
+          git diff --exit-code 80f91f447f93cb2d308027258df5fe69e46b4d26 HEAD -- src modules assets app.json eas.json package.json package-lock.json server scripts
+          printf '%s\n' 'storeBuildSource=80f91f447f93cb2d308027258df5fe69e46b4d26' "verificationCommit=$GITHUB_SHA" > ios-native-evidence/source.txt
+          BEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$BEST/Contents/Developer"
+          xcodebuild -version | tee ios-native-evidence/xcode.txt
+          uname -m | tee ios-native-evidence/architecture.txt
+      - name: Install locked dependencies and pinned Maestro
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          curl --fail --location --retry 3 'https://github.com/mobile-dev-inc/Maestro/releases/download/cli-2.10.0/maestro.zip' -o "$RUNNER_TEMP/maestro.zip"
+          echo '29b675e10cc12080e445e9bfb2e2b4e4dfb9c0f2e30d5884120d258b5e1cd991  '"$RUNNER_TEMP/maestro.zip" | shasum -a 256 -c -
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP/maestro-cli"
+          MAESTRO=$(find "$RUNNER_TEMP/maestro-cli" -path '*/bin/maestro' -type f | head -1)
+          test -n "$MAESTRO"
+          chmod +x "$MAESTRO"
+          dirname "$MAESTRO" >> "$GITHUB_PATH"
+      - name: Native capture bridge and real iOS queue receipts
+        id: capture
+        run: |
+          set -euo pipefail
+          bash scripts/test/native-live-capture-bridge.sh 2>&1 | tee ios-native-evidence/capture-bridge.log
+          bash scripts/test/native-live-capture-receipts.sh 2>&1 | tee ios-native-evidence/capture-receipts.log
+      - name: Generate simulator project and verify encryption build configuration
+        run: |
+          set -euo pipefail
+          node <<'JS'
+          const fs=require('fs');const app=JSON.parse(fs.readFileSync('app.json','utf8'));
+          if(app.expo.ios.bundleIdentifier!=='app.wafra.ios')throw Error('Wrong app');
+          // Simulator evidence must execute the embedded candidate, never an OTA.
+          // The store artifact is built separately from the unchanged config.
+          app.expo.updates.enabled=false;fs.writeFileSync('app.json',JSON.stringify(app,null,2)+'\n');
+          JS
+          npx --no-install expo prebuild --platform ios --no-install
+          node -e 'const p=require("./ios/Podfile.properties.json");if(p["expo.sqlite.useSQLCipher"]!=="true")throw Error("SQLCipher disabled");console.log("SQLCipher prebuild guard passed")' | tee ios-native-evidence/encryption.txt
+          npx --no-install pod-install 2>&1 | tee ios-native-evidence/pods.log
+          git diff -- app.json > ios-native-evidence/simulator-only-config.diff
+      - name: Build ad-hoc-signed release simulator application
+        id: build
+        run: |
+          set -euo pipefail
+          xcodebuild -workspace ios/Wafra.xcworkspace -scheme Wafra -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/wafra-ios-derived" CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=UV7YN4GQ66 build > ios-native-evidence/build.log 2>&1 || { tail -120 ios-native-evidence/build.log; exit 1; }
+          APP=$(find "$RUNNER_TEMP/wafra-ios-derived/Build/Products" -maxdepth 2 -name 'Wafra.app' -type d | head -1)
+          test -n "$APP"
+          codesign --verify --deep --strict "$APP"
+          codesign -d --entitlements :- "$APP" > ios-native-evidence/simulator-entitlements.plist 2>ios-native-evidence/signature.txt
+          echo "WAFRA_SIM_APP=$APP" >> "$GITHUB_ENV"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Wafra-Simulator.app.zip"
+      - name: Verify compiled Shortcut identifiers and Arabic resources
+        id: intents
+        run: |
+          set -euo pipefail
+          bash scripts/test/native-history-store.sh --verify-app-intents-metadata "$WAFRA_SIM_APP/Metadata.appintents/extract.actionsdata" 2>&1 | tee ios-native-evidence/history-intent-contract.log
+          RESOURCE=$(find "$WAFRA_SIM_APP" -type d -name 'WafraMessageHistoryResources.bundle' -print -quit)
+          test -n "$RESOURCE"
+          bash scripts/test/native-history-store.sh --verify-history-resources "$WAFRA_SIM_APP" "$RESOURCE" 2>&1 | tee ios-native-evidence/history-resources.log
+      - name: Boot a fresh iOS simulator and launch the embedded release
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes --json > ios-native-evidence/runtimes.json
+          RUNTIME=$(python3 - <<'PY'
+          import json
+          rows=[r for r in json.load(open('ios-native-evidence/runtimes.json'))['runtimes'] if r.get('isAvailable') and '.iOS-' in r['identifier'] and int(r['version'].split('.')[0])>=26]
+          assert rows,'iOS 26+ simulator required for the published history Shortcut'
+          print(max(rows,key=lambda r:tuple(int(v) for v in r['version'].split('.')))['identifier'])
+          PY
+          )
+          UDID=$(xcrun simctl create WafraUpdatedBetaAcceptance com.apple.CoreSimulator.SimDeviceType.iPhone-16 "$RUNTIME")
+          echo "WAFRA_SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100
+          xcrun simctl install "$UDID" "$WAFRA_SIM_APP"
+          xcrun simctl launch "$UDID" app.wafra.ios | tee ios-native-evidence/launch.txt
+          sleep 12
+          xcrun simctl io "$UDID" screenshot ios-native-evidence/first-launch.png
+      - name: Strict onboarding, account creation and data-retaining restart
+        id: interaction
+        run: |
+          set -o pipefail
+          maestro --device "$WAFRA_SIM_UDID" test --debug-output ios-native-evidence/maestro -e SHOT_PREFIX=ios-native-evidence/native .maestro/ios-ledger-light-release.yaml 2>&1 | tee ios-native-evidence/interactions.log
+      - name: Capture final native diagnostics
+        if: always() && env.WAFRA_SIM_UDID != ''
+        run: |
+          xcrun simctl io "$WAFRA_SIM_UDID" screenshot ios-native-evidence/final-screen.png || true
+          xcrun simctl spawn "$WAFRA_SIM_UDID" log show --last 10m --style compact --predicate 'process == "Wafra"' > ios-native-evidence/app-log.txt 2>&1 || true
+      - name: Record outcomes without confusing compilation and startup
+        if: always()
+        run: |
+          mkdir -p ios-native-evidence
+          printf '%s\n' 'source=80f91f447f93cb2d308027258df5fe69e46b4d26' 'capture=${{ steps.capture.outcome }}' 'build=${{ steps.build.outcome }}' 'intents=${{ steps.intents.outcome }}' 'interaction=${{ steps.interaction.outcome }}' 'Scope=disposable simulator and synthetic entries only; not physical bank SMS or locked-device testing' > ios-native-evidence/outcomes.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wafra-updated-ios-native-evidence
+          path: ios-native-evidence/
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: steps.build.outcome == 'success'
+        with:
+          name: wafra-updated-ios-simulator-binary
+          path: ${{ runner.temp }}/Wafra-Simulator.app.zip
+          retention-days: 7
+      - name: Delete only this disposable simulator
+        if: always() && env.WAFRA_SIM_UDID != ''
+        run: |
+          xcrun simctl shutdown "$WAFRA_SIM_UDID" || true
+          xcrun simctl delete "$WAFRA_SIM_UDID" || true
