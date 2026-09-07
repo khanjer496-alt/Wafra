@@ -7,6 +7,11 @@
  */
 export const Platform: { OS: 'ios' | 'android' | 'web' } = { OS: 'ios' };
 
+// Scheduling tests can switch lifecycle state without replacing scanner logic.
+export const AppState: { currentState: 'active' | 'background' | 'inactive' | null } = {
+  currentState: 'active',
+};
+
 export const Linking = {
   async openSettings(): Promise<void> {},
 };

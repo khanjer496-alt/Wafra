@@ -7,6 +7,7 @@ import android.provider.Telephony
 import android.os.Handler
 import android.os.Looper
 import com.facebook.react.common.LifecycleState
+import com.facebook.react.bridge.ReactContext
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -32,7 +33,7 @@ class SmsReaderModule : Module() {
 
     AsyncFunction("startHistoryImport") { id: String, promise: Promise ->
       Handler(Looper.getMainLooper()).post {
-        val context = appContext.reactContext
+        val context = appContext.reactContext as? ReactContext
         if (context == null || context.lifecycleState != LifecycleState.RESUMED ||
           context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
           promise.resolve(false)
