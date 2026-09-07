@@ -41,6 +41,7 @@ jobs:
               - 'scripts/test/run.sh'
               - 'scripts/test/ios-history-native-contract.test.js'
               - 'scripts/test/native-history-store.*'
+              - 'scripts/test/native-history-protection-probe.swift'
 
   check:
     runs-on: ubuntu-latest
@@ -100,15 +101,17 @@ jobs:
   native-ios:
     needs: native-paths
     if: needs.native-paths.outputs.ios == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
+    # The older macOS 15 filesystem did not retain `.complete` protection
+    # metadata, causing the unmodified iOS store contracts to fail at setup.
+    runs-on: macos-26
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode 26.2 or newer
+      - name: Select stable Xcode 26.2 or newer
         run: |
           set -euo pipefail
-          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          BEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
           test -n "$BEST"
           sudo xcode-select -s "$BEST/Contents/Developer"
           VER=$(xcodebuild -version | head -1 | awk '{print $2}')
@@ -118,6 +121,15 @@ jobs:
             echo "::error::Expo SDK 55 requires Xcode 26.2+; selected $VER"
             exit 1
           fi
+
+      - name: Verify real host file-protection support before the full build
+        run: |
+          set -euo pipefail
+          swiftc -warnings-as-errors -parse-as-library \
+            modules/wafra-message-history/ios/WafraMessageHistoryStore.swift \
+            scripts/test/native-history-protection-probe.swift \
+            -o "$RUNNER_TEMP/wafra-protection-probe"
+          "$RUNNER_TEMP/wafra-protection-probe"
 
       - uses: actions/setup-node@v4
         with:
@@ -133,7 +145,7 @@ jobs:
       - name: Install CocoaPods dependencies
         run: npx pod-install
 
-      - name: Build and verify the protected history bridge and extracted App Intent metadata
+      - name: Verify host storage contracts and built iOS App Intent metadata
         run: |
           bash scripts/test/native-history-store.sh
           bash scripts/test/native-live-capture-store.sh

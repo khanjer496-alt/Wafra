@@ -54,14 +54,15 @@ export function Money({
   prefix = true,
   style,
 }: MoneyProps) {
+  const amount = `${signGlyph(fils, sign)}${formatAmount(Math.abs(fils), { decimals })}`;
+  const label = `${prefix ? `${ledgerCurrencyDisplay()} ` : ''}${amount}`;
   return (
-    <View style={[styles.inline, style]}>
+    <View accessible accessibilityRole="text" accessibilityLabel={label} style={[styles.inline, style]}>
       {prefix && (
         <CurrencyPrefix />
       )}
       <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
-        {signGlyph(fils, sign)}
-        {formatAmount(Math.abs(fils), { decimals })}
+        {amount}
       </ThemedText>
     </View>
   );

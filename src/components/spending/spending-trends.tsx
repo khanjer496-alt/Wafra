@@ -56,6 +56,7 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="meta" themeColor="textSecondary">{w.sixMonths} · {p.months[0] ? monthLabel(p.months[0].key, true) : ''} — {p.months.at(-1) ? monthLabel(p.months.at(-1)!.key, true) : ''}</ThemedText>
       <View style={styles.chart}>
         {p.months.map((month) => <Pressable key={month.key} accessibilityRole="button"
+          aria-selected={month.key === p.selectedKey}
           accessibilityState={{ selected: month.key === p.selectedKey }}
           accessibilityLabel={monthDescription(month)}
           onPress={() => p.onMonth(month.key)} style={styles.column}>
@@ -78,6 +79,7 @@ export function SpendingTrends(p: Props) {
       {!showAllTrendLabels && <View style={styles.monthDetails} testID="cashflow-month-details">
         {p.months.map((month) => <Pressable key={month.key} testID={`cashflow-detail-${month.key}`}
           accessibilityRole="button" accessibilityLabel={monthDescription(month)}
+          aria-selected={month.key === p.selectedKey}
           accessibilityState={{ selected: month.key === p.selectedKey }}
           onPress={() => p.onMonth(month.key)}
           style={[styles.monthDetail, { borderColor: theme.cardBorder }]}>
