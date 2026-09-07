@@ -71,12 +71,14 @@ check(
 );
 const imageCount = (index.match(/<img\b/g) ?? []).length;
 const accessibleImageCount = (index.match(/<img\b[^>]*\balt="[^"]+"/g) ?? []).length;
-check('two static product images with alt text', imageCount === 2 && accessibleImageCount === 2);
-check('static product image URLs', index.includes('src="/wafra-app-home.png"') && index.includes('src="/wafra-app-bills.png"'));
+check('five static product previews with alt text', imageCount === 5 && accessibleImageCount === 5);
+check('static product image URLs', ['/wafra-app-home.png', '/wafra-app-bills.png', '/wafra-app-spending.png', '/wafra-app-bills-light.png']
+  .every((image) => index.includes(`src="${image}"`) && fs.existsSync(path.join(outputDir, image))));
+const apkUrl = index.match(/href="(https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk)"/)?.[1];
 check(
   'public beta download links',
   index.includes('https://testflight.apple.com/join/jbwzCgZ6') &&
-    index.includes('https://github.com/khanjer496-alt/Wafra/releases/download/android-test-9ea4cd8/Wafra-android-9ea4cd8.apk') &&
+    Boolean(apkUrl) && (!process.env.EXPECTED_APK_URL || apkUrl === process.env.EXPECTED_APK_URL) &&
     index.includes('Download APK'),
 );
 check(

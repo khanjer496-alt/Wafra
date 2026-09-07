@@ -34,6 +34,14 @@ try {
     assert.equal(await page.locator('article').count(), 3);
     assert.equal((await page.locator('h1').innerText()).replace(/\s+/g, ' '), 'Know your spending. Plan what comes next.');
 
+    // Lazy app-tour screenshots load only as they approach the viewport.
+    // Exercise that behavior, then return to the hero for layout evidence.
+    for (const image of await page.locator('img').all()) {
+      await image.scrollIntoViewIfNeeded();
+      await image.evaluate((img) => img.decode());
+    }
+    await page.locator('main').evaluate((el) => { el.scrollTop = 0; });
+
     const metrics = await page.evaluate(() => {
       const main = document.querySelector('main');
       const width = innerWidth;
@@ -59,12 +67,12 @@ try {
     assert.ok(metrics.mono, 'Geist Mono must load for ledger labels');
     assert.ok(metrics.arabic, 'Noto Kufi Arabic must load for the Arabic wordmark');
     assert.equal(metrics.background, 'rgb(244, 241, 234)');
-    assert.equal(metrics.images.length, 2);
+    assert.equal(metrics.images.length, 5);
     assert.ok(metrics.images.every((img) => img.loaded && img.alt.length > 20));
 
     if (out) await page.screenshot({ path: path.join(out, `landing-${width}.png`) });
     if (out && [390, 1440].includes(width)) {
-      for (const id of ['how-it-works', 'privacy', 'questions']) {
+      for (const id of ['inside-wafra', 'how-it-works', 'privacy', 'questions']) {
         await page.locator(`#${id}`).evaluate((el) => el.scrollIntoView({ block: 'start' }));
         await page.screenshot({ path: path.join(out, `landing-${width}-${id}.png`) });
       }
@@ -82,7 +90,16 @@ try {
       await page.keyboard.press('Enter');
     }
     assert.equal(await page.locator('a[href="https://testflight.apple.com/join/jbwzCgZ6"]').count(), 1);
-    assert.equal(await page.locator('a[href="https://github.com/khanjer496-alt/Wafra/releases/download/android-test-9ea4cd8/Wafra-android-9ea4cd8.apk"]').count(), 1);
+    const android = page.getByRole('link', { name: 'Download the Wafra Android test APK', exact: true });
+    const apkUrl = await android.getAttribute('href');
+    assert.match(apkUrl, /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk$/);
+    if (process.env.EXPECTED_APK_URL) assert.equal(apkUrl, process.env.EXPECTED_APK_URL);
+    const tour = page.locator('#inside-wafra');
+    assert.equal(await tour.getByRole('heading', { name: 'Home', exact: true }).count(), 1);
+    assert.equal(await tour.getByRole('heading', { name: 'Spending', exact: true }).count(), 1);
+    assert.equal(await tour.getByRole('heading', { name: 'Bills', exact: true }).count(), 1);
+    assert.match(await tour.innerText(), /category’s share of total spending/);
+    assert.match(await tour.innerText(), /Subscriptions and utilities in separate sections/);
     results.push({ width, pass: true, ...metrics });
     console.log(`PASS ${width}px: layout, fonts, app previews, navigation, keyboard FAQs, downloads; no page JavaScript`);
   }

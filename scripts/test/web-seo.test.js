@@ -47,6 +47,14 @@ ok(
   'product previews disclose sample data and prioritize the home image',
   landing.includes('App previews · sample data') && landing.includes('fetchPriority="high"'),
 );
+ok(
+  'the app tour shows the redesigned Home, category percentages and separate bill sections',
+  landing.includes('id="inside-wafra"') && landing.includes('/wafra-app-spending.png') &&
+    landing.includes('/wafra-app-bills-light.png') &&
+    landing.includes('category’s share of total spending') &&
+    landing.includes('Subscriptions and utilities in separate sections') &&
+    !landing.includes('showing recorded balances'),
+);
 
 ok(
   'the landing page teaches iPhone capture only from selected bank senders',

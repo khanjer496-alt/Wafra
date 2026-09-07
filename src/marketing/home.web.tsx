@@ -57,6 +57,7 @@ export default function MarketingHome() {
           </a>
           <div className={styles.navLinks}>
             <a href="#how-it-works">How it works</a>
+            <a href="#inside-wafra">Inside the app</a>
             <a href="#privacy">Privacy</a>
             <a href="#questions">Questions</a>
           </div>
@@ -104,7 +105,7 @@ export default function MarketingHome() {
               <img
                 src="/wafra-app-bills.png"
                 decoding="async"
-                alt="Wafra Bills in Ledger and Light dark mode, showing upcoming bills and recurring charges with sample data"
+                alt="Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
                 width={390}
                 height={844}
               />
@@ -113,7 +114,7 @@ export default function MarketingHome() {
               <img
                 src="/wafra-app-home.png"
                 fetchPriority="high"
-                alt="Wafra Home in Ledger and Light, showing recorded balances, spending, income and upcoming bills with sample data"
+                alt="Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
                 width={390}
                 height={844}
               />
@@ -122,6 +123,28 @@ export default function MarketingHome() {
             <figcaption className={styles.previewCaption}>App previews · sample data</figcaption>
           </figure>
         </header>
+
+        <section className={styles.appTour} id="inside-wafra" aria-labelledby="app-tour-title">
+          <div className={styles.tourIntro}>
+            <p className={styles.kicker}>A closer look</p>
+            <h2 id="app-tour-title">Less clutter. More clarity.</h2>
+            <p>Three focused views for your everyday money. Actual app screens with sample data.</p>
+          </div>
+          <div className={styles.screenGrid}>
+            <figure className={styles.screenPreview}>
+              <figcaption><h3>Home</h3><p>Your spending first. Income, the next payments and recent activity, without a wall of cards.</p></figcaption>
+              <img src="/wafra-app-home.png" alt="Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data" width={390} height={844} loading="lazy" decoding="async" />
+            </figure>
+            <figure className={styles.screenPreview}>
+              <figcaption><h3>Spending</h3><p>See each category’s share of total spending. Budget usage is labelled separately.</p></figcaption>
+              <img src="/wafra-app-spending.png" alt="Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data" width={390} height={844} loading="lazy" decoding="async" />
+            </figure>
+            <figure className={styles.screenPreview}>
+              <figcaption><h3>Bills</h3><p>Subscriptions and utilities in separate sections. Dates and estimated charges stay visible.</p></figcaption>
+              <img src="/wafra-app-bills-light.png" alt="Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data" width={390} height={844} loading="lazy" decoding="async" />
+            </figure>
+          </div>
+        </section>
 
         <section className={styles.features} id="how-it-works">
           <div className={styles.sectionIntro}>
