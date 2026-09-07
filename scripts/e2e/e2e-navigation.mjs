@@ -80,8 +80,10 @@ async function tapKey(page, key, timeout = 4000) {
 }
 
 const tapTab = async (page, name) => {
-  const tapped = await tapKey(page, name, 8000);
-  if (tapped !== true) throw new Error(`Could not hit-test tab: ${name}`);
+  // Home now has a visible "Spending" label as well as the navigation tab.
+  // Click the actionable tab, not an arbitrary matching text node. Playwright
+  // verifies visibility, hit-testing and enabled state before clicking.
+  await page.getByRole('tab', { name, exact: true }).click({ timeout: 8000 });
   await page.waitForFunction((want) => {
     for (const tab of document.querySelectorAll('[role="tab"]')) {
       const label = tab.getAttribute('aria-label') ?? (tab.textContent || '').trim();
